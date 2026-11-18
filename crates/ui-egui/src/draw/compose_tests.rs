@@ -869,20 +869,21 @@ fn the_lines_stand_as_the_frame_draws_them() {
 }
 
 #[test]
-fn the_floating_panel_is_520_by_560_three_clear_of_the_corner_and_folds_to_its_head() {
+fn the_floating_panel_is_520_by_560_where_its_frames_put_it_and_folds_to_its_head() {
     let mut harness = composing(egui::Theme::Dark);
     harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
     harness.run();
     let screen = harness.ctx.content_rect();
     let close = rect_of(&harness, Role::Button, "Close; the draft is kept");
-    // Close stands 20 in from the panel's right edge and 12 under its top.
-    assert!((close.right() - (screen.right() - 3.0 - 20.0)).abs() < 0.5, "{close:?} in {screen:?}");
-    assert!((close.top() - (screen.bottom() - 3.0 - 560.0 + 12.0)).abs() < 0.5, "{close:?} in {screen:?}");
+    // The frames put the panel 16 in from the window's right edge and 16 over its foot (15 clear of the middle area,
+    // inside the window's 1 px line); Close stands 20 in from the panel's right edge and 12 under its top.
+    assert!((close.right() - (screen.right() - 16.0 - 20.0)).abs() < 0.5, "{close:?} in {screen:?}");
+    assert!((close.top() - (screen.bottom() - 16.0 - 560.0 + 12.0)).abs() < 0.5, "{close:?} in {screen:?}");
     assert!(harness.query_by_role_and_label(Role::MultilineTextInput, "Message text").is_some(), "the whole composer");
     harness.get_by_role_and_label(Role::Button, "Fold the draft New message").click();
     harness.run();
     let folded = rect_of(&harness, Role::Button, "Close; the draft is kept");
-    assert!((folded.top() - (screen.bottom() - 3.0 - 56.0 + 12.0)).abs() < 0.5, "one line: {folded:?}");
+    assert!((folded.top() - (screen.bottom() - 16.0 - 56.0 + 12.0)).abs() < 0.5, "one line: {folded:?}");
     assert!(harness.query_by_role_and_label(Role::MultilineTextInput, "Message text").is_none());
     assert!(harness.state().composer().unwrap().folded());
     harness.get_by_role_and_label(Role::Button, "Open the draft New message").click();

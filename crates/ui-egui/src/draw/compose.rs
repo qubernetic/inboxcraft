@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The composer, as the design's frames draw it: docked in the reader's place, or the floating panel of 520 × 560 at
-//! the bottom right, 3 px clear of the window's border, while the list and the reader have the window; the panel folds
-//! to its head.
+//! the bottom right, 16 in from the window's corner as its frames put it, while the list and the reader have the
+//! window; the panel folds to its head.
 //!
 //! The head holds the title ("New message", or the subject) in `heading`, when the draft was last kept in `mono_s`,
 //! and Close, which keeps the draft (the floating panel has "Back to the reader's place" before it, and its title folds
@@ -49,6 +49,11 @@ pub(super) const FLOATING: Vec2 = vec2(520.0, 560.0);
 
 /// How far a float keeps from the window's border, in points.
 const CLEAR: f32 = 3.0;
+
+/// How far the floating panel stands in from the window's right edge and over its foot, in points: its frames put it
+/// 15 clear of the middle area, which stands inside the window's 1 px line (`screen/composer-floating/*`: 904,297 in a
+/// window of 1 440 × 900 whose middle is 1..1439 × 46..872, over the status line the window does not have yet).
+const FLOATING_IN: f32 = 16.0;
 
 /// The width of the From menu, in points (its frame).
 const FROM_MENU: f32 = 360.0;
@@ -853,14 +858,14 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     asked
 }
 
-/// The floating panel at the bottom right of `screen`, 3 px clear of its border: the whole composer, or folded its
-/// head only. What was asked for.
+/// The floating panel at the bottom right of `screen`, [`FLOATING_IN`] in from its corner: the whole composer, or
+/// folded its head only. What was asked for.
 pub(super) fn floating(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &mut Composer, screen: Rect) -> Vec<Asked> {
     let s = &theme.spacing;
-    let room = vec2((screen.width() - CLEAR * 2.0).max(1.0), (screen.height() - CLEAR * 2.0).max(1.0));
+    let room = vec2((screen.width() - FLOATING_IN - CLEAR).max(1.0), (screen.height() - FLOATING_IN - CLEAR).max(1.0));
     let folded_height = s.s3 * 2.0 + control_side(theme);
     let size = vec2(FLOATING.x.min(room.x), if composer.folded() { folded_height } else { FLOATING.y }.min(room.y));
-    let corner = screen.right_bottom() - vec2(CLEAR, CLEAR);
+    let corner = screen.right_bottom() - vec2(FLOATING_IN, FLOATING_IN);
     let rect = Rect::from_min_size(corner - size, size);
     Area::new(Id::unique("compose-floating"))
         .order(Order::Middle)
