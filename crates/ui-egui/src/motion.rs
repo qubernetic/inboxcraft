@@ -100,6 +100,12 @@ pub fn fade(ctx: &Context, id: Id, on: bool, seconds: f32) -> f32 {
     ctx.animate_bool_with_time_and_easing(id, on, seconds, easing::linear)
 }
 
+/// [`toggle`] on `easing`: a transition on a curve of its own (the calendar's ground on CSS's `ease`).
+pub fn fade_eased(ctx: &Context, id: Id, on: bool, seconds: f32, easing: fn(f32) -> f32) -> f32 {
+    let seconds = duration(ctx, seconds);
+    ctx.animate_bool_with_time_and_easing(id, on, seconds, easing)
+}
+
 /// How far `id` has appeared over `seconds` since the first frame it was shown in, eased, 0 to 1; something that
 /// missed a frame appears again. A repaint is asked for until it has.
 pub fn appear(ctx: &Context, id: Id, seconds: f32) -> f32 {

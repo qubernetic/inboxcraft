@@ -340,7 +340,8 @@ pub(super) fn block(
     }
     response.widget_info(|| WidgetInfo::selected(egui::accesskit::Role::Button, true, picked, event.spoken()));
     if ui.is_rect_visible(rect) {
-        let ground = crate::motion::fade(ui.ctx(), response.id.with("ground"), picked || response.hovered(), theme.motion.fast);
+        let ground =
+            crate::motion::fade_eased(ui.ctx(), response.id.with("ground"), picked || response.hovered(), theme.motion.fast, glide::css_ease);
         let lit = Lit { focus: response.has_focus(), ground };
         paint_block(ui, theme, bar_colour(theme, calendar, event.calendar), rect, lit, picked, kind, words);
     }

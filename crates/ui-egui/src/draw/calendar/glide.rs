@@ -3,7 +3,8 @@
 
 //! The calendar's motion, as the design's presentation moves an event: a timed event whose time changed in place (an
 //! edit saved, an Undo) glides from where it stood to its new cell over `medium` (300 ms) on the one curve,
-//! `cubic-bezier(.2, .7, .2, 1)`; a block's ground fades to `stage` and back over `fast` (125 ms), linearly. Each
+//! `cubic-bezier(.2, .7, .2, 1)`, its top alone as the design's `top` transition (its height is the new one at once);
+//! a block's ground fades to `stage` and back over `fast` (125 ms) on CSS's `ease`, as a transition without a curve. Each
 //! asks for repaints only while it runs, and with motion reduced or off the event is at once where it goes. A change
 //! of view or of the days shown moves nothing (M12: no motion for another view or range).
 
@@ -18,8 +19,20 @@ const MEDIUM: f32 = 0.3;
 /// time. A local helper until the motion module has one of its own.
 #[must_use]
 pub(super) fn ease(t: f32) -> f32 {
+    bezier(t, (0.2, 0.7, 0.2, 1.0))
+}
+
+/// CSS's `ease`, `cubic-bezier(.25, .1, .25, 1)`: the curve of a transition that names none, as the design's fade of
+/// an event's ground (`background var(--fast)`) does.
+#[must_use]
+pub(super) fn css_ease(t: f32) -> f32 {
+    bezier(t, (0.25, 0.1, 0.25, 1.0))
+}
+
+/// The cubic Bézier from (0, 0) to (1, 1) through `(x1, y1, x2, y2)` at `t`, as CSS's `cubic-bezier` (x1 and x2
+/// between 0 and 1).
+fn bezier(t: f32, (x1, y1, x2, y2): (f32, f32, f32, f32)) -> f32 {
     let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 1.0 };
-    let (x1, y1, x2, y2) = (0.2_f32, 0.7_f32, 0.2_f32, 1.0_f32);
     let bezier = |s: f32, a: f32, b: f32| 3.0 * (1.0 - s) * (1.0 - s) * s * a + 3.0 * (1.0 - s) * s * s * b + s * s * s;
     // x grows with s on this curve: halving finds the s whose x is t, in a fixed count of steps.
     let (mut low, mut high) = (0.0_f32, 1.0_f32);
@@ -45,18 +58,16 @@ struct Glide {
 }
 
 impl Glide {
-    /// Where it stands at `now`: its cell once landed, else on its way (the caller puts it on whole pixels).
+    /// Where it stands at `now`: its cell once landed, else on its way (the caller puts it on whole pixels). Only the
+    /// top glides, as the design's `top` transition; the height is the new one at once.
     fn at(&self, now: f64) -> Rect {
         // A share of a fraction of a second: the cast loses nothing that shows.
         let share = ease((((now - self.since) / f64::from(MEDIUM)) as f32).clamp(0.0, 1.0));
-        if share >= 1.0 || self.from == self.to {
+        if share >= 1.0 || self.from.top() == self.to.top() {
             return self.to;
         }
-        let lerp = |a: f32, b: f32| a + (b - a) * share;
-        Rect::from_min_max(
-            pos2(lerp(self.from.left(), self.to.left()), lerp(self.from.top(), self.to.top())),
-            pos2(lerp(self.from.right(), self.to.right()), lerp(self.from.bottom(), self.to.bottom())),
-        )
+        let top = self.from.top() + (self.to.top() - self.from.top()) * share;
+        Rect::from_min_size(pos2(self.to.left(), top), self.to.size())
     }
 }
 

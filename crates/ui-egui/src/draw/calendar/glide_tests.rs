@@ -5,7 +5,7 @@
 
 use egui::{Context, RawInput, Rect, pos2, vec2};
 
-use super::{ease, glide};
+use super::{css_ease, ease, glide};
 use crate::calendar::{Day, EventRow, Moment};
 
 fn event(repeat: Option<&str>) -> EventRow {
@@ -85,4 +85,40 @@ fn a_repeating_event_and_reduced_motion_never_glide() {
     crate::motion::set_reduced(&ctx, true);
     frame(&ctx, &event(None), before, 0.0);
     assert_eq!(frame(&ctx, &event(None), after, 0.016).0, after);
+}
+
+#[test]
+fn the_ground_s_curve_is_css_s_ease() {
+    // cubic-bezier(.25, .1, .25, 1): a slow start, most of the way by the middle.
+    assert!(css_ease(0.0).abs() < 1e-3 && (css_ease(1.0) - 1.0).abs() < 1e-3);
+    assert!((css_ease(0.5) - 0.8024).abs() < 2e-3, "{}", css_ease(0.5));
+    assert!((css_ease(0.1) - 0.0951).abs() < 2e-3, "{}", css_ease(0.1));
+    // The block's fade runs on it: at half of `fast` the ground is that far.
+    let ctx = Context::default();
+    let id = egui::Id::unique("ground");
+    let at = |time: f64, on: bool| {
+        let mut value = 0.0;
+        let mut output = ctx
+            .run_ui(RawInput { time: Some(time), ..RawInput::default() }, |ui| value = crate::motion::fade_eased(ui.ctx(), id, on, 0.125, css_ease));
+        output.textures_delta.clear();
+        value
+    };
+    assert!(at(0.0, false).abs() < 1e-3);
+    at(0.0, true);
+    let half = at(0.0625, true);
+    assert!((half - css_ease(0.5)).abs() < 0.05, "half way through: {half}");
+}
+
+#[test]
+fn a_glide_moves_the_top_and_the_height_is_at_once_the_new_one() {
+    let ctx = Context::default();
+    let before = Rect::from_min_size(pos2(56.0, 96.0), vec2(127.0, 49.0));
+    let after = Rect::from_min_size(pos2(56.0, 144.0), vec2(127.0, 97.0));
+    frame(&ctx, &event(None), before, 0.0);
+    frame(&ctx, &event(None), before, 0.016);
+    frame(&ctx, &event(None), after, 0.032);
+    let (half, _) = frame(&ctx, &event(None), after, 0.032 + 0.1);
+    assert!(half.top() > before.top() && half.top() < after.top(), "the top glides: {half:?}");
+    assert!((half.height() - after.height()).abs() < 1e-3, "the height is the new one at once, as the design's top transition: {half:?}");
+    assert_eq!(half.x_range(), after.x_range());
 }
