@@ -568,6 +568,35 @@ fn a_held_invitation_offers_no_answer_and_has_one_primary() {
     }
 }
 
+/// A held sender's message let in from the reader by Accept and reply: the keyboard is in the reply that opens, so typing
+/// goes to it and Esc acts on it as on any composer's text (the text lets the keyboard go, the reply stays).
+#[test]
+fn accept_and_reply_puts_the_keyboard_in_the_reply() {
+    let organiser = "ORGANIZER;CN=Stranger:mailto:stranger@example.org\r\nATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:mira@example.org\r\n";
+    let calendar = Some(("REQUEST", organiser));
+    let mut harness = sending(from_whom(("Stranger", "stranger@example.org"), SCREENER, 952, "Invitation: Stranger's party", calendar, None, 600));
+    harness.state_mut().mailbox_mut().run("screener.mode", &json!({ "mode": "before" })).unwrap();
+    harness.state_mut().mailbox_mut().open(crate::mailbox::Place::Folder(SCREENER));
+    harness.run();
+    open(&mut harness, "Invitation: Stranger's party");
+    for _ in 0..4 {
+        harness.run();
+    }
+    harness.get_by_role_and_label(Role::Button, "Accept and reply").click();
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert!(harness.state().composer().is_some_and(|composer| !composer.floating()), "the reply in the reader's place");
+    assert!(harness.ctx.memory(|memory| memory.has_focus(super::compose::text_id())), "the reply's text has the keyboard");
+    harness.event(egui::Event::Text("Thanks, see you there".to_owned()));
+    harness.run();
+    assert!(harness.state().composer().is_some_and(|composer| composer.text().contains("Thanks, see you there")), "typed into the reply");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(!harness.ctx.memory(|memory| memory.has_focus(super::compose::text_id())), "Esc lets the text go");
+    assert!(harness.state().composer().is_some_and(|composer| !composer.floating()), "and the reply stays");
+}
+
 /// A held sender's invitation, let in from the reader by Accept and reply: back from the composer (closed, the draft
 /// kept), its card offers the answers at once, Going the one primary, without opening the message again.
 #[test]
