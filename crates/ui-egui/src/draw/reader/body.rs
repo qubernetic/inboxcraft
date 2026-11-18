@@ -395,7 +395,8 @@ fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segmen
 }
 
 /// The attachments, side by side as far as they fit, 8 apart, each as wide as what it holds ([`attachment`]): Enter
-/// or `save` saves it, and the box then says where it went, or why not with `try again`. Opening a file is not built yet: the strip ends with the `coming soon` tag once.
+/// or `save` saves it, and the box then says where it went, or why not with `try again`. Opening a file is not built
+/// yet: the strip ends with the `coming soon` tag once.
 pub(super) fn files(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, id: u64, files: &[File], drawn: &mut Drawn) {
     if files.is_empty() {
         return;
