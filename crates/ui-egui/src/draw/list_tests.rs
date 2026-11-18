@@ -2457,3 +2457,24 @@ fn a_rows_menu_never_lingers_away_from_its_row() {
     harness.run();
     assert!(!open(&harness), "the menu of a message gone closes");
 }
+
+#[test]
+fn esc_that_closes_a_menu_in_the_reader_only_closes_it() {
+    let mut harness = beside_the_reader();
+    let open = harness.state().mailbox().selected();
+    // The reader's More menu, opened with the pointer: the reader has the keyboard.
+    harness.get_by_role_and_label(Role::Button, "More").click();
+    harness.run();
+    assert!(egui::Popup::is_any_open(&harness.ctx), "More is open");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(!egui::Popup::is_any_open(&harness.ctx), "Esc closes it");
+    assert!(!selected_focused(&harness), "and leaves the focus where it was, not on the list's row");
+    harness.key_press(Key::J);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), open, "the reader keeps the keyboard: J rests");
+    // A second Esc gives the keyboard back to the list.
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(selected_focused(&harness), "Esc in the reader: back on the list's row");
+}

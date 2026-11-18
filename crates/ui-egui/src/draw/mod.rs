@@ -1400,7 +1400,9 @@ impl InboxApp {
         if left_full {
             self.reader.set_full_width(false);
         }
-        let back_to_list = escape && !left_settings && !left_full && self.back_to_list(ui.ctx());
+        // Esc that closes a menu or a picker in the reader closes only that: the keyboard stays the reader's.
+        let closed_popup = escape && egui::Popup::is_any_open(ui.ctx());
+        let back_to_list = escape && !left_settings && !left_full && !closed_popup && self.back_to_list(ui.ctx());
         // The window's ground first, under the error banner too; then the place for the panes, then everything else.
         // The panes touch; a hairline divides them.
         let corner = self.window_corner(ui.ctx());
