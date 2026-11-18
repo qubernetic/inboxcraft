@@ -729,3 +729,41 @@ fn every_line_of_text_stands_on_the_whole_pixel_nearest_the_designs_baseline() {
     let (got, _) = baselines(f.caption, 1.0);
     assert!(got.iter().all(|(baseline, top)| baseline - top == 13.0), "the caption's baseline 13 under its top: {got:?}");
 }
+
+/// The text shapes `shapes` hold, nested ones included, and the rows they paint.
+fn text_rows(shapes: &[egui::epaint::ClippedShape]) -> (usize, usize) {
+    fn walk(shape: &Shape, found: &mut (usize, usize)) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            Shape::Text(text) => {
+                found.0 += 1;
+                found.1 += text.galley.rows.len();
+            }
+            _ => {}
+        }
+    }
+    let mut found = (0, 0);
+    shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+    found
+}
+
+#[test]
+fn a_wrapped_run_paints_only_the_rows_in_sight() {
+    // An open quote of thousands of lines was copied and laid out row by row every frame, in sight or not.
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let line = "The quoted words of a long message, wrapped onto many rows in a narrow box.\n";
+    let text = line.repeat(4_000);
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(vec2(400.0, 300.0)).with_context_setup(crate::theme::install_fonts).build_ui(move |ui| {
+            let galley = crate::component::wrapped(ui, &text, theme.fonts.body, theme.palette.ink, 360.0, usize::MAX, egui::Align::LEFT);
+            assert!(galley.rows.len() > 4_000, "{} rows", galley.rows.len());
+            // The rows from 2 000 points above the clip to far below it: only those over the clip are painted.
+            let painter = ui.painter().with_clip_rect(egui::Rect::from_min_size(pos2(0.0, 100.0), vec2(400.0, 110.0)));
+            super::rows_at(&painter, pos2(20.0, -2_000.0), 360.0, galley, theme.palette.ink);
+        });
+    harness.run();
+    let (shapes, rows) = text_rows(&harness.output().shapes);
+    // 110 points of 22-point rows: five, and one more for each edge the clip cuts through.
+    assert!((5..=7).contains(&shapes), "{shapes} text shapes painted");
+    assert_eq!(rows, shapes, "one row each");
+}
