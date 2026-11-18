@@ -410,3 +410,15 @@ fn tab_to_a_control_below_the_page_s_view_scrolls_the_page_to_it() {
     }
     assert!(seen.iter().any(|label| label == "Own / System"), "Tab reaches the window frame: {seen:?}");
 }
+
+#[test]
+fn motion_s_full_carries_the_coming_soon_mark() {
+    let harness = opened();
+    let full = harness.get_by_label("Full for Motion");
+    assert!(full.accesskit_node().is_disabled(), "Full cannot be chosen yet");
+    let full = full.rect();
+    let marks: Vec<egui::Rect> = harness.query_all_by_label("coming soon").map(|tag| tag.rect()).collect();
+    let mark = marks.iter().find(|mark| (mark.center().y - full.center().y).abs() <= 1.0);
+    let mark = mark.unwrap_or_else(|| panic!("no coming-soon mark beside Full {full:?}: {marks:?}"));
+    assert!(mark.right() <= full.left() && full.left() - mark.right() <= 12.0, "the mark {mark:?} stands just before Full {full:?}");
+}

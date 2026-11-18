@@ -403,9 +403,13 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool, vi
             said.to_owned()
         };
         settings_row(ui, theme, tr!("Motion"), Some(&motion_help), |ui| {
+            // Full, the first option, is planned: the coming-soon mark stands just before it (the row's control room
+            // runs right to left).
+            ui.spacing_mut().item_spacing.x = theme.spacing.s2;
             if let Some(chosen) = segmented_but(ui, theme, &levels, level, Some(tr!("Motion")), &[MotionLevel::Full]) {
                 asked = Some(Asked::ReduceMotion(chosen == MotionLevel::Off));
             }
+            crate::component::soon::soon_tag(ui, theme);
         });
         let now = TextScale::from_percent(current.text_scale).unwrap_or_default();
         settings_row(ui, theme, tr!("Text size"), Some(tr!("90 % to 130 %. Rows and bars follow the type.")), |ui| {
