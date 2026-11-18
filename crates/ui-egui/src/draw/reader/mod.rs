@@ -424,7 +424,7 @@ pub(super) fn wiped(ctx: &egui::Context, open: u64) -> (f32, f32) {
     if shown < 1.0 {
         ctx.request_repaint();
     }
-    (shown, ease(shown))
+    (shown, crate::motion::ease(shown))
 }
 
 /// How much of the scan line shows `t` of the wipe's time in (0 to 1).
@@ -436,30 +436,5 @@ pub(super) fn scan(t: f32) -> f32 {
         return 1.0;
     }
     // The last tenth of the time fades it out, on the design's curve over that tenth.
-    1.0 - ease((t - SCAN_GONE) / (1.0 - SCAN_GONE))
-}
-
-/// The design's one curve, `cubic-bezier(.2, .7, .2, 1)`, at `t` of the way (0 to 1): a quick start and a soft landing.
-/// The bezier's x is found by halving, a fixed number of steps.
-pub(super) fn ease(t: f32) -> f32 {
-    if !t.is_finite() || t >= 1.0 {
-        return 1.0;
-    }
-    if t <= 0.0 {
-        return 0.0;
-    }
-    let bezier = |a: f32, b: f32, s: f32| {
-        let r = 1.0 - s;
-        3.0 * r * r * s * a + 3.0 * r * s * s * b + s * s * s
-    };
-    let (mut low, mut high) = (0.0_f32, 1.0_f32);
-    for _ in 0..24 {
-        let middle = (low + high) / 2.0;
-        if bezier(0.2, 0.2, middle) < t {
-            low = middle;
-        } else {
-            high = middle;
-        }
-    }
-    bezier(0.7, 1.0, (low + high) / 2.0)
+    1.0 - crate::motion::ease((t - SCAN_GONE) / (1.0 - SCAN_GONE))
 }

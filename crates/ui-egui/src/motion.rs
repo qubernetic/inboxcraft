@@ -133,10 +133,13 @@ pub fn elapsed(ctx: &Context, id: Id, seconds: f32) -> f32 {
 }
 
 /// The design's one curve, `cubic-bezier(.2, .7, .2, 1)`: how far a movement has come at `share` of its time (0 to
-/// 1; below 0 or not a number counts as 0, above 1 as 1). The curve's time is found by halving its interval a fixed
-/// number of times (its x rises from 0 to 1), so it always ends.
+/// 1; below 0 counts as 0, above 1 as 1, and not a number as 1, the end of the movement). The curve's time is found by
+/// halving its interval a fixed number of times (its x rises from 0 to 1), so it always ends.
 #[must_use]
 pub fn ease(share: f32) -> f32 {
+    if share.is_nan() {
+        return 1.0;
+    }
     cubic_bezier([0.2, 0.7, 0.2, 1.0], share)
 }
 

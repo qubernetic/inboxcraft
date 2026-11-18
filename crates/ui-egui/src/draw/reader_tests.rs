@@ -1144,7 +1144,7 @@ fn a_key_or_a_press_during_the_wipe_takes_it_to_its_end() {
 
 #[test]
 fn the_wipe_runs_on_the_design_s_curve() {
-    let ease = super::reader::ease;
+    let ease = crate::motion::ease;
     assert_eq!((ease(0.0), ease(1.0)), (0.0, 1.0));
     assert!(ease(0.5) > 0.8, "a quick start: {}", ease(0.5));
     let mut last = 0.0;

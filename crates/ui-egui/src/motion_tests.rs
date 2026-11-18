@@ -201,7 +201,7 @@ fn the_design_curve_runs_from_0_to_1_as_cubic_bezier_2_7_2_1() {
         assert!(at >= last && (0.0..=1.0).contains(&at), "{step}: {at}");
         last = at;
     }
-    assert_eq!((ease(-1.0), ease(2.0), ease(f32::NAN), ease(f32::INFINITY)), (0.0, 1.0, 0.0, 1.0));
+    assert_eq!((ease(-1.0), ease(2.0), ease(f32::NAN), ease(f32::INFINITY)), (0.0, 1.0, 1.0, 1.0));
 }
 
 #[test]
