@@ -188,10 +188,9 @@ enum MotionLevel {
 }
 
 /// The inbox views in the order Appearance offers them, each with the name the design gives it: Grouped opens every
-/// group (today's one list under headings), Smart shows the first rows of each (today's cards), List is one list by
-/// time. The one place that names them.
+/// group, Smart shows the first rows of each, List is one list by time. The one place that names them.
 pub(super) fn inbox_views() -> [(InboxView, &'static str); 3] {
-    [(InboxView::List, tr!("Grouped")), (InboxView::Cards, tr!("Smart")), (InboxView::Simple, tr!("List"))]
+    [(InboxView::Grouped, tr!("Grouped")), (InboxView::Smart, tr!("Smart")), (InboxView::List, tr!("List"))]
 }
 
 /// The icon of a section in the list.

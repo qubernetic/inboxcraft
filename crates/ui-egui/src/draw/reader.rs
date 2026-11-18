@@ -100,6 +100,8 @@ pub(super) enum Asked {
     Presets,
     /// Something asked on the invitation card of a message.
     Invite(u64, super::invite::Ask),
+    /// Back to the list (one pane).
+    Back,
 }
 
 /// What the reader drew: what was asked for, and the status of the link under the pointer.
@@ -169,7 +171,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         }
         paint::rule(ui, p.line);
         if row.group.is_some()
-            && let Some(act) = super::list::group_menu(ui, theme, row.group, &row.address)
+            && let Some(act) = super::list::group_menu(ui, theme, row.group, &row.address, false)
         {
             drawn.asked.push(Asked::Act(row.id, act));
         }
@@ -321,6 +323,33 @@ fn states(mailbox: &Mailbox, id: u64) -> Vec<(String, String)> {
     chips
 }
 
+/// "Back to the list", the design's first tool of the reader when the window holds one pane: the arrow left, the action
+/// [`keymap::BACK`]; a press asks for [`Asked::Back`]. Its id is kept for [`take_back_id`]. Whether it was drawn.
+pub(super) fn back_to_list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, drawn: &mut Drawn) -> bool {
+    if !super::one_pane(ui.ctx()) {
+        return false;
+    }
+    let response = IconButton::new(IconId::Back, tr!("Back to the list")).action(keymap::BACK).show(ui, theme, keymap);
+    ui.data_mut(|data| data.insert_temp(back_kept_id(), response.id));
+    if response.clicked() {
+        drawn.asked.push(Asked::Back);
+    }
+    true
+}
+
+/// Where the id of the "Back to the list" drawn in this pass is kept.
+fn back_kept_id() -> egui::Id {
+    egui::Id::unique("reader-back")
+}
+
+/// Takes the id of the "Back to the list" the reader drew since the last take: where the focus goes when a message is
+/// opened into the one pane.
+pub(super) fn take_back_id(ctx: &egui::Context) -> Option<egui::Id> {
+    let id = ctx.data(|data| data.get_temp::<egui::Id>(back_kept_id()));
+    ctx.data_mut(|data| data.remove::<egui::Id>(back_kept_id()));
+    id
+}
+
 /// The toolbar of mail actions, then the subject under it with who wrote in the thread.
 fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
@@ -332,6 +361,10 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
         Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(margin(s.s1)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = s.s1;
+                // The design's tools stand 8 apart after it, with no divider.
+                if back_to_list(ui, theme, keymap, drawn) {
+                    ui.add_space(s.s2 - s.s1);
+                }
                 let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
                     let button = IconButton::new(icon, name);
                     let button = match (act, open) {
@@ -1150,6 +1183,13 @@ fn sender_header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox,
     super::frame::beside(ui, theme, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = s.s3;
+            // In one pane a pointer needs a way back to the list here too, centred on the avatar.
+            if super::one_pane(ui.ctx()) {
+                let tool = crate::component::control_side(theme);
+                let (room, _) = ui.allocate_exact_size(vec2(tool, side), Sense::hover());
+                let at = Rect::from_center_size(room.center(), vec2(tool, tool));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| back_to_list(ui, theme, keymap, drawn));
+            }
             crate::component::avatar::avatar(ui, theme, &row.sender, &row.address, side);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // A reader that fills the window has no list beside it to go back to.
@@ -1184,7 +1224,7 @@ fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id:
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = s.s1;
             crate::component::label(ui, theme.fonts.label, tr!("Into"), p.muted);
-            for kind in GroupKind::ALL {
+            for kind in GroupKind::SHOWN {
                 if pill(ui, theme, kind.text(), into == Some(kind)).clicked() {
                     into = if into == Some(kind) { None } else { Some(kind) };
                     ui.data_mut(|data| data.insert_temp(chosen_id, into));

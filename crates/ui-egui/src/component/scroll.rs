@@ -2,15 +2,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The scroll bar: a strip 12 px wide beside what scrolls, never over it, so a thumb never covers a row or its focus
-//! edge. At rest it shows only a 4 px `muted` thumb in its middle; under the pointer the strip takes the `stage` fill
+//! edge. The mail list is the one exception ([`show_viewport_over`]): its rows keep the design's 440 whether they
+//! scroll or not, so its bar lies over their right edge, and a focus edge the thumb passes is painted over the thumb. At rest it shows only a 4 px `muted` thumb in its middle; under the pointer the strip takes the `stage` fill
 //! and the thumb grows to 8 px, 2 from each side; while dragged the thumb is `ink`. Square, no fade, no movement of
 //! its own: the presentation gives it none.
 //!
 //! egui keeps the scrolling and the bar's pointer ([`style`] makes it paint nothing of its own); [`show`] and
-//! [`show_rows`] show an area and paint its bar as the sheet has it ([`bar`]). [`show_over`], whose bar stands over the
-//! content, keeps the pointer itself: only its thumb takes a press.
-
-use std::ops::Range;
+//! [`show_viewport`] show an area and paint its bar as the sheet has it ([`bar`]). [`show_over`], whose bar stands over
+//! the content, keeps the pointer itself: only its thumb takes a press.
 
 use egui::scroll_area::ScrollAreaOutput;
 use egui::style::{ScrollFadeStyle, ScrollStyle};
@@ -213,18 +212,106 @@ pub fn show_thin<R>(
     output
 }
 
-/// Shows `area` in `ui` as `rows` rows `height` high, `add` drawing the rows in sight, and paints its bar.
-pub fn show_rows<R>(
-    ui: &mut Ui,
-    theme: &Theme,
-    area: ScrollArea,
-    height: f32,
-    rows: usize,
-    add: impl FnOnce(&mut Ui, Range<usize>) -> R,
-) -> ScrollAreaOutput<R> {
-    let output = area.show_rows(ui, height, rows, add);
+/// Shows `area` in `ui` with `add` drawing what of the content meets the viewport it is given (the content's part in
+/// sight, from the content's top), and paints its bar: the list that builds only the lines in sight.
+pub fn show_viewport<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui, Rect) -> R) -> ScrollAreaOutput<R> {
+    let output = area.show_viewport(ui, add);
     bar(ui, theme, &output);
     output
+}
+
+/// [`show_viewport`] with the bar over the content's right edge, not beside it: the content keeps the area's whole
+/// width whether it scrolls or not (the mail list's 440 rows). egui shows no bar of its own here: only the thumb takes
+/// the pointer, so a press in the strip beside it reaches the row under it ([`over_bar`]). A row's focus edge the
+/// thumb passes is painted again over the thumb ([`super::row::Row::finish`]), so the thumb never covers it.
+pub fn show_viewport_over<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui, Rect) -> R) -> ScrollAreaOutput<R> {
+    super::row::forget_focus_edge(ui.ctx());
+    let held = ui.scope_id().with("scroll-over-held");
+    let mut area = area.scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+    // A thumb held: the content goes where the pointer puts the grab point, in this frame.
+    if let Some(offset) = ui.data(|data| data.get_temp::<Held>(held)).and_then(|grip| grip.offset(ui.ctx())) {
+        area = area.vertical_scroll_offset(offset);
+    }
+    let output = area.show_viewport(ui, add);
+    let grip = over_bar(ui, theme, &output, ui.data(|data| data.get_temp::<Held>(held)));
+    ui.data_mut(|data| match grip {
+        Some(grip) => {
+            data.insert_temp(held, grip);
+        }
+        None => data.remove::<Held>(held),
+    });
+    super::row::repaint_focus_edge(ui, theme, output.inner_rect);
+    output
+}
+
+/// The thumb of a [`show_viewport_over`] bar while it is held: its id, how far below its top it was taken, and the
+/// bar it moves on (where its travel begins, how far it travels, the content's whole scroll).
+#[derive(Debug, Clone, Copy)]
+struct Held {
+    thumb: egui::Id,
+    grab: f32,
+    top: f32,
+    travel: f32,
+    most: f32,
+}
+
+impl Held {
+    /// The offset that puts the grab point under the pointer, while the thumb is still dragged: past an end the
+    /// content stays at that end, and the thumb waits there for the pointer to come back to its grab point.
+    fn offset(self, ctx: &egui::Context) -> Option<f32> {
+        let dragged = ctx.read_response(self.thumb).is_some_and(|response| response.dragged());
+        let at = ctx.pointer_interact_pos()?;
+        if !dragged || self.travel <= 0.0 || self.most <= 0.0 {
+            return None;
+        }
+        let share = (at.y - self.grab - self.top) / self.travel;
+        share.is_finite().then(|| share.clamp(0.0, 1.0) * self.most)
+    }
+}
+
+/// The bar of [`show_viewport_over`], over the content's right 12: the thumb alone senses the pointer, registered
+/// after the content so it wins over a row there, and a drag on it moves the content as egui's bar does, the point
+/// it was taken by staying under the pointer ([`Held`]); the strip shows its hover while the pointer is over it.
+/// Nothing when the content fits. The thumb held, `was` while it was already held.
+fn over_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, was: Option<Held>) -> Option<Held> {
+    let inner = output.inner_rect;
+    let (length, content) = (inner.height(), output.content_size.y);
+    if !(content > length && length > 0.0 && content.is_finite()) {
+        return None;
+    }
+    let strip = Rect::from_x_y_ranges(Rangef::new(inner.right() - theme.sizes.scrollbar, inner.right()), inner.y_range());
+    let size = (length / content * length).max(ui.spacing().scroll.handle_min_length).min(length);
+    let (most, travel) = (content - length, length - size);
+    let offset = output.state.clamped_offset().y;
+    let share = (offset / most).clamp(0.0, 1.0);
+    let top = strip.top() + share * travel;
+    let thumb = Rect::from_x_y_ranges(strip.x_range(), Rangef::new(top, top + size));
+    #[cfg(test)]
+    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("over-thumb-rect"), thumb));
+    let response = ui.interact(thumb, output.id.with("over-thumb"), egui::Sense::drag());
+    let held = (response.dragged() || response.is_pointer_button_down_on()).then(|| {
+        // Taken where the press began; kept while held, as the bar moves under it.
+        let grab = was
+            .filter(|was| was.thumb == response.id)
+            .map_or_else(|| response.interact_pointer_pos().map_or(0.0, |at| (at.y - top).clamp(0.0, size)), |was| was.grab);
+        Held { thumb: response.id, grab, top: strip.top(), travel, most }
+    });
+    let over_strip = ui.ctx().pointer_hover_pos().is_some_and(|at| strip.contains(at));
+    let bar = if response.dragged() || response.is_pointer_button_down_on() {
+        Bar::Dragging
+    } else if response.hovered() || over_strip {
+        Bar::Hover
+    } else {
+        Bar::Rest
+    };
+    paint(ui.painter(), theme, strip, Rangef::new(top, top + size), bar);
+    held
+}
+
+/// The thumb of the last [`show_viewport_over`] bar drawn, as it was laid out.
+#[cfg(test)]
+pub(crate) fn over_thumb(ctx: &egui::Context) -> Option<Rect> {
+    ctx.data(|data| data.get_temp::<Rect>(egui::Id::unique("over-thumb-rect")))
 }
 
 #[cfg(test)]

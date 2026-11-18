@@ -32,7 +32,7 @@ fn clock() -> Box<FakeClock> {
 fn app() -> InboxApp {
     let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
-    app.mailbox_mut().set_inbox_view(InboxView::Simple);
+    app.mailbox_mut().set_inbox_view(InboxView::List);
     app
 }
 
@@ -130,12 +130,12 @@ fn the_park_pill_shows_while_mail_is_parked_and_opens_the_pile() {
     assert_eq!(harness.state().mailbox().place(), Place::Later(Pile::Parked));
     assert_eq!(harness.state().mailbox().title(), "Later");
     assert_eq!(toggled(&harness, "Parked (1)"), Some(Toggled::True));
-    assert_eq!(toggled(&harness, "Pins (0)"), Some(Toggled::False));
+    assert_eq!(toggled(&harness, "Pins"), Some(Toggled::False));
     harness.get_by_label_contains("Allotment rota for November");
-    harness.get_by_role_and_label(Role::Button, "Snoozed (0)").click();
+    harness.get_by_role_and_label(Role::Button, "Snoozed").click();
     settle(&mut harness);
     assert_eq!(harness.state().mailbox().place(), Place::Later(Pile::Snoozed));
-    harness.get_by_label("Snoozed mail waits here until its time comes.");
+    harness.get_by_label("Nothing is snoozed.");
 }
 
 #[test]
@@ -144,14 +144,14 @@ fn the_rail_s_later_runs_as_an_action_too() {
     harness.state_mut().run_action(&egui::Context::default(), keymap::LATER);
     settle(&mut harness);
     assert_eq!(harness.state().mailbox().place(), Place::Later(Pile::Pins));
-    harness.get_by_label("Pinned mail stays here, wherever it is filed.");
-    harness.get_by_role_and_label(Role::Button, "Parked (0)").click();
+    harness.get_by_label("Nothing is pinned.");
+    harness.get_by_role_and_label(Role::Button, "Parked").click();
     settle(&mut harness);
     harness.state_mut().run_action(&egui::Context::default(), keymap::LATER);
     assert_eq!(harness.state().mailbox().place(), Place::Later(Pile::Parked), "Later again stays on the pile shown");
-    harness.get_by_role_and_label(Role::Button, "Parked (0)").click();
+    harness.get_by_role_and_label(Role::Button, "Parked").click();
     settle(&mut harness);
-    harness.get_by_label("Parked mail waits here, out of the inbox, without a time.");
+    harness.get_by_label("Nothing is parked.");
 }
 
 #[test]
@@ -204,7 +204,7 @@ fn a_snoozed_message_shows_its_time_and_comes_back_on_request() {
     app.mailbox_mut().forget_undo();
     let mut harness = harness_of(app);
     harness.get_by_label("Snoozed until Saturday 7 November, 09:00");
-    harness.get_by_label_contains("Allotment rota for November, Sat 09:00");
+    harness.get_by_label_contains("Allotment rota for November, back Sat 09:00");
     harness.get_by_role_and_label(Role::Button, "More").click();
     settle(&mut harness);
     harness.get_by_label("Bring back now").click();
@@ -287,11 +287,14 @@ fn sent_mail_gets_a_reminder_through_the_same_picker() {
 #[test]
 fn done_all_on_a_group_card_files_the_group() {
     let mut app = app();
-    app.mailbox_mut().set_inbox_view(InboxView::Cards);
+    app.mailbox_mut().set_inbox_view(InboxView::Smart);
     let updates: Vec<u64> = app.mailbox().messages().iter().filter(|row| row.group == Some(GroupKind::Updates)).map(|row| row.id).collect();
+    let unread = u64::try_from(app.mailbox().messages().iter().filter(|row| updates.contains(&row.id) && !row.seen).count()).unwrap();
     let mut harness = harness_of(app);
-    // People's card comes first, Updates' second.
-    let done_all = harness.query_all_by_role_and_label(Role::Button, "Done all").nth(1).unwrap();
+    // "done all" shows on the head the pointer is over.
+    harness.get_by_label(&crate::component::group_head::spoken("Notifications", unread)).hover();
+    harness.run();
+    let done_all = harness.query_all_by_role_and_label(Role::Button, "done all").next().unwrap();
     done_all.click();
     settle(&mut harness);
     let app = harness.state();
@@ -327,4 +330,57 @@ fn the_snooze_key_opens_the_picker_over_the_open_message_only() {
     harness.key_press(egui::Key::Escape);
     settle(&mut harness);
     assert!(harness.query_by_label("Snooze until").is_none(), "Escape closes it");
+}
+
+#[test]
+fn a_snoozed_row_of_later_brings_its_message_back_from_its_link() {
+    let mut app = app();
+    let rota = id_of(&app, ROTA);
+    app.mailbox_mut().act(rota, Act::Snooze(Timestamp::from_unix(NOW + 2 * 86_400, 0).unwrap()));
+    app.mailbox_mut().open(Place::Later(Pile::Snoozed));
+    app.mailbox_mut().forget_undo();
+    let mut harness = harness_of(app);
+    assert!(harness.query_by_label("bring back now").is_none(), "only on a hovered or keyed row");
+    harness.get_by_label_contains("Allotment rota for November, back Sat 09:00").hover();
+    harness.run();
+    harness.get_by_label("bring back now").click();
+    settle(&mut harness);
+    let app = harness.state();
+    assert_eq!(app.mailbox().undoable().map(|undo| undo.text.as_str()), Some("Back in the inbox"));
+    assert!(app.mailbox().messages().is_empty(), "the snoozed pile is empty again");
+}
+
+/// The colour the first text drawn with `wanted` as its words is painted in, if any.
+fn drawn_in(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<egui::Color32> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<egui::Color32> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text() == wanted => {
+                Some(text.galley.job.sections.first().map_or(text.fallback_color, |section| section.format.color))
+            }
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn a_snoozed_message_listed_as_a_mail_row_shows_the_clock_and_when_it_comes_back() {
+    let mut app = app();
+    let rota = id_of(&app, ROTA);
+    let account = app.mailbox().messages().iter().find(|row| row.id == rota).map(|row| row.account).unwrap();
+    app.mailbox_mut().act(rota, Act::Snooze(Timestamp::from_unix(NOW + 2 * 86_400, 0).unwrap()));
+    // The snoozed folder itself lists its mail as mail rows.
+    let snoozed = app.mailbox().folders_of(account).iter().find(|folder| folder.role == Some(FolderRole::Snoozed)).map(|folder| folder.id).unwrap();
+    app.mailbox_mut().open(Place::Folder(snoozed));
+    app.mailbox_mut().forget_undo();
+    let mut harness = harness_of(app);
+    harness.run();
+    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    assert!(harness.query_all_by_label_contains(ROTA).count() >= 1, "the row is listed");
+    assert_eq!(drawn_in(&harness, "back Sat 09:00"), Some(theme.palette.warn), "the sheet's snoozed time, in warn");
+    // A screen reader hears what the row shows: when it comes back, not when it came.
+    harness.get_by_label_contains(&format!("{ROTA}, back Sat 09:00"));
+    let clock = crate::iconset::glyph(crate::iconset::IconId::Snooze).to_string();
+    assert_eq!(drawn_in(&harness, &clock), Some(theme.palette.warn), "the snoozed mark, in warn");
 }

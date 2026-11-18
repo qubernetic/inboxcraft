@@ -134,7 +134,7 @@ impl Scene {
     /// The inbox view it sets; `None` keeps the default.
     fn view(self) -> Option<InboxView> {
         match self {
-            Self::ListRest | Self::ListScroll => Some(InboxView::List),
+            Self::ListRest | Self::ListScroll => Some(InboxView::Grouped),
             Self::DefaultRest | Self::ReaderHtml | Self::Compose { .. } | Self::CalendarWeek | Self::CalendarCrowd(_) | Self::Settings { .. } => None,
         }
     }

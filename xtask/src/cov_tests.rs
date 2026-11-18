@@ -68,7 +68,7 @@ fn workspace(floors: &str) -> tempfile::TempDir {
 fn cov_context(root: &Path, lcov: Option<&'static str>, passes: bool) -> (Context, Rc<RefCell<Vec<String>>>) {
     let calls = Rc::new(RefCell::new(Vec::new()));
     let runner = FakeLlvmCov { calls: Rc::clone(&calls), lcov, passes };
-    let ctx = Context { root: root.to_path_buf(), cargo: OsString::from("cargo"), runner: Box::new(runner), lcov: None };
+    let ctx = Context { root: root.to_path_buf(), cargo: OsString::from("cargo"), runner: Box::new(runner), lcov: None, shots: None };
     (ctx, calls)
 }
 
@@ -355,6 +355,6 @@ fn the_io_error_of_a_spawn_reaches_the_caller() {
         }
     }
     let dir = workspace(FLOORS);
-    let mut ctx = Context { root: dir.path().to_path_buf(), cargo: OsString::from("cargo"), runner: Box::new(Gone), lcov: None };
+    let mut ctx = Context { root: dir.path().to_path_buf(), cargo: OsString::from("cargo"), runner: Box::new(Gone), lcov: None, shots: None };
     assert!(matches!(gate(&mut ctx, true, &mut Vec::new()), Err(Error::Spawn { .. })));
 }

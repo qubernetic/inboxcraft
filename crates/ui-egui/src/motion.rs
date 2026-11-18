@@ -22,8 +22,8 @@ pub struct Motion {
     pub fast: f32,
     /// A tooltip appearing.
     pub tooltip: f32,
-    /// A row sliding out of the list when it is done.
-    pub row_slide: f32,
+    /// The `row_collapse` token: the gap of a row that left the list (Done, Snooze) closing.
+    pub row_collapse: f32,
     /// A card or a popup opening and closing.
     pub card: f32,
     /// A toast rising from the bottom edge.
@@ -34,12 +34,12 @@ impl Motion {
     /// Every token.
     #[must_use]
     pub const fn all(&self) -> [f32; 6] {
-        [self.hover_fade, self.fast, self.tooltip, self.row_slide, self.card, self.toast]
+        [self.hover_fade, self.fast, self.tooltip, self.row_collapse, self.card, self.toast]
     }
 }
 
 /// The motion tokens.
-pub const MOTION: Motion = Motion { hover_fade: 0.12, fast: 0.125, tooltip: 0.1, row_slide: 0.18, card: 0.16, toast: 0.2 };
+pub const MOTION: Motion = Motion { hover_fade: 0.12, fast: 0.125, tooltip: 0.1, row_collapse: 0.18, card: 0.16, toast: 0.2 };
 
 /// No token is longer than this.
 pub const LONGEST: f32 = 0.25;
@@ -109,6 +109,12 @@ pub fn fade_eased(ctx: &Context, id: Id, on: bool, seconds: f32, easing: fn(f32)
 /// How far `id` has appeared over `seconds` since the first frame it was shown in, eased, 0 to 1; something that
 /// missed a frame appears again. A repaint is asked for until it has.
 pub fn appear(ctx: &Context, id: Id, seconds: f32) -> f32 {
+    easing::cubic_out(elapsed(ctx, id, seconds))
+}
+
+/// The share of `seconds` gone since the first frame `id` was shown in, at an even pace, 0 to 1; something that missed
+/// a frame starts again. A repaint is asked for until it is 1; with reduced motion it is 1 at once.
+pub fn elapsed(ctx: &Context, id: Id, seconds: f32) -> f32 {
     let now = ctx.input(|input| input.time);
     let pass = ctx.cumulative_pass_nr();
     let key = id.with("appear");
@@ -129,39 +135,46 @@ pub fn appear(ctx: &Context, id: Id, seconds: f32) -> f32 {
     if shown < 1.0 {
         ctx.request_repaint();
     }
-    easing::cubic_out(shown)
+    shown
 }
 
-/// The design's one curve, `cubic-bezier(.2, .7, .2, 1)`, at `t` (0 to 1): the share of the way at that share of the
-/// time; a `t` that is not a number is the end (1).
+/// The design's one curve, `cubic-bezier(.2, .7, .2, 1)`: how far a movement has come at `share` of its time (0 to
+/// 1; below 0 counts as 0, above 1 or not a number as 1, the end of the movement). The curve's time is found by
+/// halving its interval a fixed number of times (its x rises from 0 to 1), so it always ends.
 #[must_use]
-pub fn ease(t: f32) -> f32 {
-    bezier(t, (0.2, 0.7, 0.2, 1.0))
+pub fn ease(share: f32) -> f32 {
+    cubic_bezier([0.2, 0.7, 0.2, 1.0], share)
 }
 
-/// CSS's `ease`, `cubic-bezier(.25, .1, .25, 1)`: the curve of a transition that names none, as the design's fade of
-/// an event's ground (`background var(--fast)`) does.
+/// CSS's `ease`, `cubic-bezier(.25, .1, .25, 1)`, the curve of a transition that names none: the presentation fades a
+/// leaving row's opacity on it beside its height on [`ease`]. Ends and nonsense as [`ease`].
 #[must_use]
-pub fn css_ease(t: f32) -> f32 {
-    bezier(t, (0.25, 0.1, 0.25, 1.0))
+pub fn css_ease(share: f32) -> f32 {
+    cubic_bezier([0.25, 0.1, 0.25, 1.0], share)
 }
 
-/// The cubic Bézier from (0, 0) to (1, 1) through `(x1, y1, x2, y2)` at `t`, as CSS's `cubic-bezier` (x1 and x2
-/// between 0 and 1).
-fn bezier(t: f32, (x1, y1, x2, y2): (f32, f32, f32, f32)) -> f32 {
-    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 1.0 };
-    let bezier = |s: f32, a: f32, b: f32| 3.0 * (1.0 - s) * (1.0 - s) * s * a + 3.0 * (1.0 - s) * s * s * b + s * s * s;
-    // x grows with s on this curve: halving finds the s whose x is t, in a fixed count of steps.
-    let (mut low, mut high) = (0.0_f32, 1.0_f32);
-    for _ in 0..24 {
+/// The curve `cubic-bezier(x1, y1, x2, y2)` (x1 and x2 within 0 to 1) at `share` of its time.
+fn cubic_bezier([x1, y1, x2, y2]: [f64; 4], share: f32) -> f32 {
+    let share = if share.is_nan() { 1.0 } else { f64::from(share.clamp(0.0, 1.0)) };
+    // The ends exactly: a movement starts where it was and lands where it goes.
+    if share <= 0.0 {
+        return 0.0;
+    }
+    if share >= 1.0 {
+        return 1.0;
+    }
+    let bezier = |p1: f64, p2: f64, t: f64| 3.0 * (1.0 - t) * (1.0 - t) * t * p1 + 3.0 * (1.0 - t) * t * t * p2 + t * t * t;
+    let (mut low, mut high) = (0.0_f64, 1.0_f64);
+    for _ in 0..48 {
         let middle = (low + high) / 2.0;
-        if bezier(middle, x1, x2) < t {
+        if bezier(x1, x2, middle) < share {
             low = middle;
         } else {
             high = middle;
         }
     }
-    bezier((low + high) / 2.0, y1, y2)
+    // A share of 0 to 1: the cast loses nothing that shows.
+    (bezier(y1, y2, (low + high) / 2.0) as f32).clamp(0.0, 1.0)
 }
 
 /// One turn of the caret's blink, in seconds (the `caret` token, 1 000 ms): on for the first half, off for the second.

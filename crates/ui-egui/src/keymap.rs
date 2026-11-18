@@ -76,6 +76,18 @@ pub const DARK: &str = "ui.mode.dark";
 /// Show what the system shows (`ui.theme.set`).
 pub const SYSTEM_MODE: &str = "ui.mode.system";
 
+/// Back to the list: in one pane the list takes the open message's place again, its keyed row focused.
+pub const BACK: &str = "ui.reader.back";
+
+/// Show the inbox grouped: every group open.
+pub const VIEW_GROUPED: &str = "ui.view.grouped";
+
+/// Show the inbox smart: the first three rows of each group.
+pub const VIEW_SMART: &str = "ui.view.smart";
+
+/// Show the inbox as one list by time.
+pub const VIEW_LIST: &str = "ui.view.list";
+
 /// Turn reduced motion on or off (`ui.motion.set`).
 pub const MOTION: &str = "ui.motion.toggle";
 
@@ -146,6 +158,43 @@ pub fn scope(id: &str) -> Scope {
     }
 }
 
+/// Move the list's focused row a page down: by the rows in sight.
+pub const PAGE_DOWN: &str = "ui.list.page_down";
+
+/// Move the list's focused row a page up.
+pub const PAGE_UP: &str = "ui.list.page_up";
+
+/// Move the list's focused row to the first row.
+pub const FIRST: &str = "ui.list.first";
+
+/// Move the list's focused row to the last row.
+pub const LAST: &str = "ui.list.last";
+
+/// Move the list's keyed row one down: the next message.
+pub const NEXT: &str = "ui.list.next";
+
+/// Move the list's keyed row one up: the message before.
+pub const PREVIOUS: &str = "ui.list.previous";
+
+/// The next message by the arrow: [`NEXT`]'s second key.
+pub const DOWN: &str = "ui.list.down";
+
+/// The message before by the arrow: [`PREVIOUS`]'s second key.
+pub const UP: &str = "ui.list.up";
+
+/// Open the list's keyed message and hand the keyboard to the reader; `Esc` there gives it back to the list.
+pub const OPEN: &str = "ui.list.open";
+
+/// Open the group menu of the list's keyed row.
+pub const MENU: &str = "ui.list.menu";
+
+/// The group menu by the keyboard's Menu key: [`MENU`]'s second key.
+pub const MENU_KEY: &str = "ui.list.menu_key";
+
+/// The actions of the list's keys: they run only while the list has the keyboard (a row was pressed or keyed last
+/// and nothing else has the focus, or a row has it), and rest otherwise, in a text field as in the reader.
+pub const LIST_KEYS: [&str; 11] = [NEXT, PREVIOUS, DOWN, UP, PAGE_DOWN, PAGE_UP, FIRST, LAST, OPEN, MENU, MENU_KEY];
+
 /// The longest key text read, in bytes; `Command+Shift+Alt+ArrowRight` takes 28.
 pub const MAX_TEXT: usize = 64;
 
@@ -186,14 +235,29 @@ pub fn actions() -> Vec<Action> {
         action(READ, tr!("Mark read or unread"), IconId::MarkRead),
         action(FLAG, tr!("Flag or take the flag off"), IconId::Flag),
         action(DELETE, tr!("Delete"), IconId::Delete),
+        action(NEXT, tr!("The next message of the list"), IconId::Caret),
+        action(PREVIOUS, tr!("The message before in the list"), IconId::Caret),
+        action(DOWN, tr!("The next message of the list (the arrow)"), IconId::Caret),
+        action(UP, tr!("The message before in the list (the arrow)"), IconId::Caret),
+        action(OPEN, tr!("Open the list's message and read it"), IconId::Mail),
+        action(MENU, tr!("The group menu of the list's message"), IconId::More),
+        action(MENU_KEY, tr!("The group menu of the list's message (the Menu key)"), IconId::More),
+        action(PAGE_DOWN, tr!("A page down the list"), IconId::Caret),
+        action(PAGE_UP, tr!("A page up the list"), IconId::Caret),
+        action(FIRST, tr!("The first message of the list"), IconId::Caret),
+        action(LAST, tr!("The last message of the list"), IconId::Caret),
         action(UNDO, tr!("Undo"), IconId::Back),
         action(FULL_WIDTH, tr!("Reader full width"), IconId::Mail),
+        action(BACK, tr!("Back to the list"), IconId::Back),
         action(SETTINGS, tr!("Settings"), IconId::Settings),
         action(SHORTCUTS, tr!("Shortcuts"), IconId::Keyboard),
         action(LIGHT, tr!("Light mode"), IconId::Palette),
         action(DARK, tr!("Dark mode"), IconId::Palette),
         action(SYSTEM_MODE, tr!("Mode of the system"), IconId::Palette),
         action(MOTION, tr!("Reduce motion on or off"), IconId::Palette),
+        action(VIEW_GROUPED, tr!("Inbox view: Grouped"), IconId::Inbox),
+        action(VIEW_SMART, tr!("Inbox view: Smart"), IconId::Inbox),
+        action(VIEW_LIST, tr!("Inbox view: List"), IconId::Inbox),
     ]
 }
 
@@ -299,6 +363,17 @@ impl Default for Keymap {
         keymap.bind(CALENDAR_DOWN, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowDown));
         keymap.bind(CALENDAR_OPEN, KeyboardShortcut::new(Modifiers::NONE, Key::Enter));
         keymap.bind(CALENDAR_CLOSE, KeyboardShortcut::new(Modifiers::NONE, Key::Escape));
+        keymap.bind(NEXT, KeyboardShortcut::new(Modifiers::NONE, Key::J));
+        keymap.bind(PREVIOUS, KeyboardShortcut::new(Modifiers::NONE, Key::K));
+        keymap.bind(DOWN, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowDown));
+        keymap.bind(UP, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowUp));
+        keymap.bind(OPEN, KeyboardShortcut::new(Modifiers::NONE, Key::Enter));
+        keymap.bind(MENU, KeyboardShortcut::new(Modifiers::SHIFT, Key::F10));
+        keymap.bind(MENU_KEY, KeyboardShortcut::new(Modifiers::NONE, Key::Menu));
+        keymap.bind(PAGE_DOWN, KeyboardShortcut::new(Modifiers::NONE, Key::PageDown));
+        keymap.bind(PAGE_UP, KeyboardShortcut::new(Modifiers::NONE, Key::PageUp));
+        keymap.bind(FIRST, KeyboardShortcut::new(Modifiers::NONE, Key::Home));
+        keymap.bind(LAST, KeyboardShortcut::new(Modifiers::NONE, Key::End));
         keymap
     }
 }

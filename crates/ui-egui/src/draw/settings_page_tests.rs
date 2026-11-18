@@ -109,7 +109,7 @@ fn inbox_view_is_set_on_appearance_and_not_on_triage() {
     assert!(view.rect().top() > size.rect().bottom() - 1.0, "Layout follows Look");
     let x = |label: &str| harness.get_by_role_and_label(Role::RadioButton, label).rect().center().x;
     assert!(x("Grouped") < x("Smart") && x("Smart") < x("List"));
-    for (label, view) in [("Grouped", InboxView::List), ("List", InboxView::Simple), ("Smart", InboxView::Cards)] {
+    for (label, view) in [("Grouped", InboxView::Grouped), ("List", InboxView::List), ("Smart", InboxView::Smart)] {
         harness.get_by_role_and_label(Role::RadioButton, label).click();
         harness.run();
         assert_eq!(harness.state().mailbox().inbox_view(), view, "{label}");

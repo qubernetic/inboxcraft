@@ -234,7 +234,7 @@ fn a_shot_that_names_something_wrong_is_refused() {
         (r#"{"out": "x.png", "mode": "light", "size": [0, 100]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "size": [100000, 100]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "size": [100, -5]}"#, "pixels a side"),
-        (r#"{"out": "x.png", "mode": "light", "view": "tiles"}"#, "view \"tiles\" is not cards, list or simple"),
+        (r#"{"out": "x.png", "mode": "light", "view": "tiles"}"#, "view \"tiles\" is not grouped, smart or list"),
     ] {
         let error = shoot(&shot(json)).unwrap_err().to_string();
         assert!(error.contains(says), "{json}: {error}");
@@ -479,11 +479,14 @@ fn a_shot_shows_new_senders_the_triage_page_the_inbox_views_and_the_screening_ac
     let window = shoot(&line("")).unwrap();
     let senders = shoot(&line(r#", "open": {"role": "senders"}"#)).unwrap();
     let triage = shoot(&line(r#", "triage": true"#)).unwrap();
+    let grouped = shoot(&line(r#", "view": "grouped""#)).unwrap();
     let listed = shoot(&line(r#", "view": "list""#)).unwrap();
-    let simple = shoot(&line(r#", "view": "simple""#)).unwrap();
-    let cards = shoot(&line(r#", "view": "cards""#)).unwrap();
-    assert_eq!(window, cards, "cards when left out");
-    for (name, picture) in [("senders", &senders), ("triage", &triage), ("list", &listed), ("simple", &simple)] {
+    let smart = shoot(&line(r#", "view": "smart""#)).unwrap();
+    assert_eq!(window, smart, "smart when left out");
+    // The earlier ids of the cards and the simple list are read as Smart and List.
+    assert_eq!(shoot(&line(r#", "view": "cards""#)).unwrap(), smart);
+    assert_eq!(shoot(&line(r#", "view": "simple""#)).unwrap(), listed);
+    for (name, picture) in [("senders", &senders), ("triage", &triage), ("grouped", &grouped), ("list", &listed)] {
         assert_ne!(&window, picture, "{name}");
     }
     let held = |act: &str| shoot(&line(&format!(r#", "open": {{"role": "senders"}}, "select": "Winter swim at the harbour steps"{act}"#))).unwrap();
@@ -857,6 +860,19 @@ fn the_blocks_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
     }
     for extra in [r#""select": "logo""#, r#""icons": true"#, r#""components": true"#] {
         let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "blocks": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}
+
+#[test]
+fn the_lists_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "lists": true}}"#))).unwrap();
+        let size = crate::component::gallery_lists::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""blocks": true"#, r#""components": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "lists": true, {extra}}}"#))).unwrap_err();
         assert!(error.to_string().contains("x.png:"), "{error}");
     }
 }
