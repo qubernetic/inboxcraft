@@ -188,6 +188,16 @@ fn the_arrow_moves_the_list_one_row_once() {
     harness.key_press(Key::ArrowUp);
     harness.run();
     assert_eq!(harness.state().mailbox().selected(), order.get(at + 2).copied(), "up: one row back");
+    // A row pressed, the keyboard the list's with no row focused: one row on too.
+    let mut harness = window(1440.0);
+    harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
+    harness.run();
+    let pressed = harness.state().mailbox().selected().unwrap();
+    let order = super::list::order(&harness.ctx);
+    let at = order.iter().position(|id| *id == pressed).unwrap();
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), order.get(at + 1).copied(), "from a pressed row: one row on, not two");
 }
 
 /// The sheet open on the add-account form with its IMAP security list open: a list float over the sheet.
