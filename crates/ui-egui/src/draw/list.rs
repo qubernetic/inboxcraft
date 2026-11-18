@@ -504,8 +504,12 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow)
     acted
 }
 
-/// The id of the hover action group of message `id`'s row: its n-th action (Snooze is the fourth, index 3) is
-/// `actions_id(id).with(n)`, what a picker opened from an action anchors to.
+/// Where Snooze stands among a row's hover actions ([`actions`]): its id is `actions_id(id).with(SNOOZE_ACTION)`.
+#[cfg_attr(not(test), expect(dead_code, reason = "the Snooze picker of the fields branch anchors to it after the merge"))]
+pub(crate) const SNOOZE_ACTION: usize = 3;
+
+/// The id of the hover action group of message `id`'s row: its n-th action is `actions_id(id).with(n)` (Snooze's
+/// [`SNOOZE_ACTION`]), what a picker opened from an action anchors to.
 #[cfg_attr(not(test), expect(dead_code, reason = "the Snooze picker of the fields branch anchors to it after the merge"))]
 pub(crate) fn actions_id(id: u64) -> Id {
     crate::component::mail_row::actions_id(row_id(id))

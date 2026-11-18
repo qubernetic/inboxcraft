@@ -273,7 +273,7 @@ fn a_row_that_leaves_acts_at_once_and_its_gap_closes_as_the_motion_level_says() 
     assert_eq!(tops.last().copied(), Some(below - 56.0), "the gap closed: {tops:?}");
     harness.run_steps(2);
     assert!(harness.state().mailbox().left_row().is_none(), "let go once closed");
-    let rising = rising.unwrap_or(egui::Rect::NOTHING);
+    let rising = rising.expect("the toast shows while the row closes");
     harness.run_steps(20);
     let risen = harness.get_by_role_and_label(Role::Button, "Undo").rect();
     assert!(rising.top() > risen.top(), "the toast rose from {rising:?} to {risen:?}");
@@ -1840,7 +1840,7 @@ fn the_hover_actions_of_a_row_are_found_by_their_message() {
     harness.run();
     let snooze = harness.get_by_role_and_label(Role::Button, "Snooze").rect();
     // The fourth action, Snooze: what a picker anchors to.
-    let found = harness.ctx.read_response(super::list::actions_id(rota).with(3_usize)).map(|response| response.rect);
+    let found = harness.ctx.read_response(super::list::actions_id(rota).with(super::list::SNOOZE_ACTION)).map(|response| response.rect);
     assert_eq!(found, Some(snooze));
 }
 
