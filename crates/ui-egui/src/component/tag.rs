@@ -49,6 +49,11 @@ pub(crate) fn coming_soon(ui: &mut Ui, theme: &Theme, text: &str) -> Response {
     draw(ui, theme, text, theme.palette.muted, theme.palette.muted, true)
 }
 
+/// How wide a tag of `text` is drawn.
+pub(crate) fn width(ui: &Ui, theme: &Theme, text: &str) -> f32 {
+    super::cut(ui, text, theme.fonts.mono_s, theme.palette.muted, WIDEST).size().x.ceil().min(WIDEST) + PAD * 2.0
+}
+
 /// A tag with `text` in `ink`, its edge in `edge`, dashed or not.
 fn draw(ui: &mut Ui, theme: &Theme, text: &str, edge: Color32, ink: Color32, dashed: bool) -> Response {
     let galley = super::cut(ui, text, theme.fonts.mono_s, ink, WIDEST);

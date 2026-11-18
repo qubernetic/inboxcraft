@@ -411,7 +411,11 @@ pub(super) fn files(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, files:
                 drawn.asked.push(Asked::Save(id, file.index));
             }
         }
-        soon_tag(ui, theme);
+        // The tag once after the last box, only where it fits beside it: never on a line of its own (the board
+        // carries it too).
+        if ui.available_size_before_wrap().x >= crate::component::tag::width(ui, theme, tr!("coming soon")) + STRIP_GAP {
+            soon_tag(ui, theme);
+        }
     });
 }
 

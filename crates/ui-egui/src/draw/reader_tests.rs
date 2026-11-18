@@ -1135,3 +1135,46 @@ fn more_and_move_hang_with_their_right_edge_on_their_button_s_right_edge() {
         assert!((item.left() - 1.0 - (opener.right() - width)).abs() <= 0.5, "{button}: {width} wide: {item:?} {opener:?}");
     }
 }
+
+/// The app with `subject` open in a window `width` wide, its text at `scale`.
+fn opened_at(fetch: &Recorder, subject: &str, width: f32, scale: crate::theme::TextScale) -> Harness<'static, InboxApp> {
+    let mut app = app_with(fetch);
+    let id = app.mailbox().messages().iter().find(|row| row.subject == subject).unwrap().id;
+    app.mailbox_mut().select(Some(id));
+    app.set_text_scale(scale);
+    let mut harness = Harness::builder()
+        .with_size(vec2(width, 800.0))
+        .with_theme(egui::Theme::Dark)
+        .with_max_steps(12)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    settle(&mut harness);
+    harness
+}
+
+#[test]
+fn the_attachments_coming_soon_tag_never_takes_a_line_of_its_own() {
+    for scale in [crate::theme::TextScale::default(), crate::theme::TextScale::ALL[4]] {
+        for width in [1024.0, 1100.0, 1180.0, 1280.0, 1440.0] {
+            let fetch = Recorder::default();
+            let harness = opened_at(&fetch, "Draft logo for the bakery", width, scale);
+            let boxes: Vec<egui::Rect> = harness
+                .query_all_by_role(Role::Button)
+                .filter(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("sketch-")))
+                .map(|node| node.rect())
+                .collect();
+            let Some(last) = boxes.iter().max_by(|a, b| a.top().total_cmp(&b.top()).then(a.left().total_cmp(&b.left()))) else { continue };
+            let first = boxes.iter().map(|rect| rect.top()).fold(f32::INFINITY, f32::min);
+            let tags: Vec<egui::Rect> =
+                harness.query_all_by_label("coming soon").map(|node| node.rect()).filter(|rect| rect.top() >= first - 1.0).collect();
+            if width == 1440.0 && scale == crate::theme::TextScale::default() {
+                assert_eq!(tags.len(), 1, "a wide reader shows the tag once beside the boxes");
+            }
+            for tag in tags {
+                assert!(
+                    (tag.center().y - last.center().y).abs() <= 1.0 && tag.left() > last.right(),
+                    "{scale:?} {width}: the tag stands beside the last box: {tag:?} {last:?}"
+                );
+            }
+        }
+    }
+}
