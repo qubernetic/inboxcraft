@@ -291,13 +291,14 @@ pub(super) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
 }
 
 /// The tags of the open message: its group in the accent, its state (until when it is snoozed, when its reminder is due,
-/// that it came back) and its account, each with what a screen reader hears.
-fn tags(mailbox: &Mailbox, id: u64) -> Vec<(String, String, TagKind)> {
+/// that it came back) and its account, each with what a screen reader hears and its place in the queue for room: the
+/// state first, then the group, then the account.
+fn tags(mailbox: &Mailbox, id: u64) -> Vec<(String, String, TagKind, u8)> {
     let mut tags = Vec::new();
     let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return tags };
     // Held mail is in no group until its sender is let in: it is a new sender's.
     if mailbox.held(id) {
-        tags.push((tr!("New sender").to_owned(), tr!("New sender").to_owned(), TagKind::Accent));
+        tags.push((tr!("New sender").to_owned(), tr!("New sender").to_owned(), TagKind::Accent, 1));
     } else {
         let group = mailbox
             .groups()
@@ -305,18 +306,18 @@ fn tags(mailbox: &Mailbox, id: u64) -> Vec<(String, String, TagKind)> {
             .find(|group| group.messages.contains(&id))
             .map(|group| group.name)
             .or_else(|| row.group.map(|kind| kind.text().to_owned()));
-        tags.extend(group.map(|group| (group.clone(), group, TagKind::Accent)));
+        tags.extend(group.map(|group| (group.clone(), group, TagKind::Accent, 1)));
     }
     for (shown, spoken) in states(mailbox, id) {
         let kind = if shown == tr!("Returned") { TagKind::Warn } else { TagKind::Default };
-        tags.push((shown, spoken, kind));
+        tags.push((shown, spoken, kind, 0));
     }
     tags.extend(
         mailbox
             .accounts()
             .iter()
             .find(|account| account.id == row.account)
-            .map(|account| (account.label.clone(), account.label.clone(), TagKind::Default)),
+            .map(|account| (account.label.clone(), account.label.clone(), TagKind::Default, 2)),
     );
     tags
 }
@@ -385,15 +386,33 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
         let mut child = ui.new_child(UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)));
         child.set_clip_rect(place.intersect(ui.clip_rect()));
         child.spacing_mut().item_spacing.x = TOOL_GAP;
+        let tags = open.map(|id| tags(mailbox, id)).unwrap_or_default();
+        let measured: Vec<(String, f32)> = tags
+            .iter()
+            .map(|(text, ..)| {
+                let words = crate::component::spoken(text);
+                let wide = tag_width(&child, theme, &words);
+                (words, wide)
+            })
+            .collect();
+        // A tag that does not fit whole is left out, never cut at the side; the state takes the room first, then the
+        // group, then the account. They stand in their order.
+        let mut kept = vec![false; tags.len()];
         let mut left = place.width();
-        for (text, spoken, kind) in open.map(|id| tags(mailbox, id)).unwrap_or_default() {
-            // A tag that does not fit whole is left out, never cut at the side.
-            let words = crate::component::spoken(&text);
-            let wide = tag_width(&child, theme, &words);
-            if wide > left {
+        for rank in 0..=2_u8 {
+            for (index, ((.., at), (_, wide))) in tags.iter().zip(&measured).enumerate() {
+                if *at == rank && *wide <= left {
+                    left -= wide + TOOL_GAP;
+                    if let Some(keep) = kept.get_mut(index) {
+                        *keep = true;
+                    }
+                }
+            }
+        }
+        for (((_, spoken, kind, _), (words, _)), keep) in tags.into_iter().zip(measured).zip(kept) {
+            if !keep {
                 continue;
             }
-            left -= wide + TOOL_GAP;
             let drawn_tag = tag(&mut child, theme, &words, kind);
             drawn_tag.widget_info(|| WidgetInfo::labeled(Spoken::Label, true, crate::component::spoken(&spoken)));
         }
