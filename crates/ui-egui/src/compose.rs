@@ -191,15 +191,6 @@ impl Suggestion {
     }
 }
 
-/// The typed text a line keeps: what it refused (`kept`), then what was typed after the last separator (`rest`).
-fn join_kept(kept: String, rest: &str) -> String {
-    match (kept.is_empty(), rest.is_empty()) {
-        (true, _) => rest.to_owned(),
-        (false, true) => kept,
-        (false, false) => format!("{kept}, {rest}"),
-    }
-}
-
 fn shape(command: &'static str, detail: &str) -> UiError {
     UiError::Answer { command, detail: detail.to_owned() }
 }
@@ -627,13 +618,17 @@ impl Composer {
         self.changed = true;
         let typed = self.typing(line).to_owned();
         if let Some(at) = typed.rfind(SEPARATORS) {
-            let (done, rest) = typed.split_at(at);
-            let rest = rest.get(1..).unwrap_or_default().trim_start().to_owned();
+            // Through the last separator, which stays with what the line refuses; what follows is typed on.
+            let (done, rest) = typed.split_at(at.saturating_add(1).min(typed.len()));
+            let before = self.chips(line).len();
             let kept = self.add(line, done);
             if let Some(field) = self.typing_mut(line) {
-                *field = join_kept(kept, &rest);
+                *field = if kept.is_empty() { rest.trim_start().to_owned() } else { kept + rest };
             }
-            self.save(mailbox)?;
+            // A chip made is checked by the engine at once; refused text alone is kept at the frame's end.
+            if self.chips(line).len() != before {
+                self.save(mailbox)?;
+            }
         }
         self.suggest(mailbox, line)
     }
@@ -706,32 +701,47 @@ impl Composer {
 
     /// Adds the recipients in `typed` to `line`, split at the separators: each once across the lines. What the line
     /// cannot take (past its [`MAX_RECIPIENTS`], or an address past [`MAX_RECIPIENT_BYTES`]) is never cut or dropped:
-    /// it is given back as it was written, one after another with `, `, for the line's typed text, and the line says
-    /// why ([`Composer::refusal`]).
+    /// it is given back exactly as it was typed (its separators, the spaces, a quoted name's comma), what was taken
+    /// left out, for the line's typed text, and the line says why ([`Composer::refusal`]). What comes back is part of
+    /// `typed`, so it is never longer.
     fn add(&mut self, line: Line, typed: &str) -> String {
         let mut held: BTreeSet<String> = Line::ALL.iter().flat_map(|line| self.chips(*line)).map(|chip| split(&chip.text).1.to_lowercase()).collect();
-        let mut kept: Vec<&str> = Vec::new();
         let Some(chips) = self.lines.get_mut(line.index()) else { return typed.to_owned() };
-        for part in typed.split(SEPARATORS).map(str::trim).filter(|part| !part.is_empty()) {
-            let text = part.chars().filter(|c| !c.is_control()).collect::<String>();
-            if text.len() > MAX_RECIPIENT_BYTES {
-                kept.push(part);
-                continue;
+        // Each part with the separator after it: `(start, end of the part, end of its separator)`.
+        let mut spans = Vec::new();
+        let mut start = 0;
+        for (at, c) in typed.char_indices() {
+            if SEPARATORS.contains(&c) {
+                let through = at.saturating_add(c.len_utf8());
+                spans.push((start, at, through));
+                start = through;
             }
-            let address = split(&text).1.to_lowercase();
-            if held.contains(&address) {
-                continue;
-            }
-            if chips.len() >= MAX_RECIPIENTS {
-                kept.push(part);
-                continue;
-            }
-            held.insert(address);
-            // Checked by the engine once kept; until then it counts as not an address.
-            chips.push(Chip { text, ok: false });
-            self.changed = true;
         }
-        kept.join(", ")
+        spans.push((start, typed.len(), typed.len()));
+        let mut kept = String::new();
+        let mut keeping = false;
+        for (from, to, through) in spans {
+            let whole = typed.get(from..through).unwrap_or_default();
+            let part = typed.get(from..to).unwrap_or_default().trim();
+            if part.is_empty() {
+                // Separators after a part kept stay with it.
+                if keeping {
+                    kept.push_str(whole);
+                }
+                continue;
+            }
+            let text = part.chars().filter(|c| !c.is_control()).collect::<String>();
+            let address = split(&text).1.to_lowercase();
+            keeping = text.len() > MAX_RECIPIENT_BYTES || (!held.contains(&address) && chips.len() >= MAX_RECIPIENTS);
+            if keeping {
+                kept.push_str(whole);
+            } else if held.insert(address) {
+                // Checked by the engine once kept; until then it counts as not an address.
+                chips.push(Chip { text, ok: false });
+                self.changed = true;
+            }
+        }
+        kept.trim_start().to_owned()
     }
 
     /// What a line would refuse of `typed` (it stays typed): addresses past [`MAX_RECIPIENT_BYTES`], and those no line

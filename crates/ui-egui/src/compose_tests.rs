@@ -518,7 +518,7 @@ fn addresses_past_a_line_s_500_stay_typed_and_the_line_says_how_many() {
     assert_eq!(composer.refusal(Line::To), None);
     type_in(&mut composer, &mut mailbox, Line::To, "q1@example.org, q2@example.org; q3@example.org,");
     assert_eq!(composer.chips(Line::To).len(), MAX_RECIPIENTS, "the chips made stay");
-    assert_eq!(composer.typing(Line::To), "q1@example.org, q2@example.org, q3@example.org", "nothing typed is dropped");
+    assert_eq!(composer.typing(Line::To), "q1@example.org, q2@example.org; q3@example.org,", "kept exactly as typed");
     assert_eq!(composer.refusal(Line::To).as_deref(), Some("3 addresses not added: a line holds at most 500."));
     assert!(!composer.sendable(), "no send while typed addresses wait");
     assert_eq!(composer.problem(), composer.refusal(Line::To));
@@ -526,11 +526,11 @@ fn addresses_past_a_line_s_500_stay_typed_and_the_line_says_how_many() {
     composer.remove(&mut mailbox, Line::To, 0).unwrap();
     composer.take(&mut mailbox, Line::To).unwrap();
     assert_eq!(texts(&composer, Line::To).last().copied(), Some("q1@example.org"));
-    assert_eq!(composer.typing(Line::To), "q2@example.org, q3@example.org");
+    assert_eq!(composer.typing(Line::To), "q2@example.org; q3@example.org,");
     assert_eq!(composer.refusal(Line::To).as_deref(), Some("2 addresses not added: a line holds at most 500."));
     // Closing keeps them typed too.
     composer.close(&mut mailbox).unwrap();
-    assert_eq!(composer.typing(Line::To), "q2@example.org, q3@example.org");
+    assert_eq!(composer.typing(Line::To), "q2@example.org; q3@example.org,");
 }
 
 #[test]
@@ -541,10 +541,10 @@ fn an_address_past_998_bytes_stays_typed_whole_and_the_line_says_so() {
     for long in [format!("{}@example.org", "a".repeat(1_200)), format!("{}@example.org", "ő".repeat(600))] {
         type_in(&mut composer, &mut mailbox, Line::Cc, &format!("{long}, ok@example.org,"));
         assert_eq!(texts(&composer, Line::Cc), ["ok@example.org"], "the one that fits is taken");
-        assert_eq!(composer.typing(Line::Cc), long, "the long one stays whole");
+        assert_eq!(composer.typing(Line::Cc), format!("{long},"), "the long one stays whole, with its comma");
         assert_eq!(composer.refusal(Line::Cc).as_deref(), Some("An address is too long: it holds at most 998 bytes, and it was not added."));
         composer.close(&mut mailbox).unwrap();
-        assert_eq!(composer.typing(Line::Cc), long, "closing keeps it typed");
+        assert_eq!(composer.typing(Line::Cc), format!("{long},"), "closing keeps it typed");
         assert!(!composer.sendable());
         // Deleted by the person: the line says nothing more.
         composer.typing_mut(Line::Cc).unwrap().clear();
@@ -570,4 +570,26 @@ fn a_fill_that_would_pass_the_subject_s_998_bytes_is_refused_and_loses_nothing()
     composer.fill(&mut mailbox).unwrap();
     assert_eq!(composer.subject(), "At ten");
     assert_eq!(composer.fill_refused(), None);
+}
+
+#[test]
+fn refused_text_stays_exactly_as_typed_and_a_keystroke_after_it_keeps_its_separator() {
+    let mut mailbox = mailbox();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    let many: Vec<String> = (0..MAX_RECIPIENTS).map(|n| format!("p{n}@example.org")).collect();
+    type_in(&mut composer, &mut mailbox, Line::To, &format!("{},", many.join(",")));
+    // A quoted name with a comma and the person's own separators, then a keystroke after the last comma.
+    let refused = "\"Doe, Jane\" <jane@example.org> ;q2@example.org,";
+    type_in(&mut composer, &mut mailbox, Line::To, refused);
+    assert_eq!(composer.typing(Line::To), refused);
+    let more = format!("{refused}x");
+    type_in(&mut composer, &mut mailbox, Line::To, &more);
+    assert_eq!(composer.typing(Line::To), more, "the separator before the keystroke stays");
+    type_in(&mut composer, &mut mailbox, Line::To, &format!("{more}y,"));
+    assert_eq!(composer.typing(Line::To), format!("{more}y,"));
+    // At the field's 4 096 characters: kept as it is, never longer.
+    let full: String = std::iter::repeat_n("r@example.org,", 4096 / 14).collect::<String>() + &"s".repeat(4096 % 14);
+    assert_eq!(full.chars().count(), 4096);
+    type_in(&mut composer, &mut mailbox, Line::To, &full);
+    assert_eq!(composer.typing(Line::To), full);
 }
