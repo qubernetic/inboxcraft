@@ -223,8 +223,9 @@ pub struct Composer {
     templates: Vec<String>,
     /// The time picked to send it at; `None` sends it now, after the hold.
     later: Option<Timestamp>,
-    /// Why the last fill of a blank was refused: it would make the subject or the text longer than the engine keeps.
-    fill_refused: Option<String>,
+    /// Why the last fill of a blank was refused (it would make the subject or the text longer than the engine keeps),
+    /// and the text it refused: said while that text stands.
+    fill_refused: Option<(String, String)>,
 }
 
 /// What a line refused of what was typed in it, which stays in its typed text as it was written.
@@ -464,7 +465,9 @@ impl Composer {
         let refused = self.assess(line, self.typing(line));
         if refused.too_long {
             Some(tr!("An address is too long: it holds at most {size} bytes, and it was not added.", size = MAX_RECIPIENT_BYTES))
-        } else if refused.over > 0 {
+        } else if refused.over == 1 {
+            Some(tr!("1 address not added: a line holds at most {most}.", most = MAX_RECIPIENTS))
+        } else if refused.over > 1 {
             Some(tr!("{count} addresses not added: a line holds at most {most}.", count = refused.over, most = MAX_RECIPIENTS))
         } else {
             None
@@ -519,7 +522,7 @@ impl Composer {
     /// Why the last fill was refused, as the blank's field says it under itself.
     #[must_use]
     pub fn fill_refused(&self) -> Option<&str> {
-        self.fill_refused.as_deref()
+        self.fill_refused.as_ref().filter(|(_, filling)| *filling == self.filling).map(|(said, _)| said.as_str())
     }
 
     /// Puts what is typed for the first blank in its mark's place, in the subject and the text, and keeps the draft;
@@ -544,7 +547,7 @@ impl Composer {
         } else {
             None
         };
-        self.fill_refused = refused.map(crate::component::field::Cap::sentence);
+        self.fill_refused = refused.map(|cap| (cap.sentence(), self.filling.clone()));
         if self.fill_refused.is_some() {
             return Ok(());
         }
@@ -748,7 +751,11 @@ impl Composer {
     /// holds yet while this one holds [`MAX_RECIPIENTS`]. Worked out from the text each time, so it holds after the
     /// draft is opened again, and it changes as soon as a chip goes or the text is edited.
     fn assess(&self, line: Line, typed: &str) -> Refused {
-        let full = self.chips(line).len() >= MAX_RECIPIENTS;
+        // Room for so many more: the addresses typed past it are the ones not added. Asked every frame the line is
+        // drawn, so the chips are looked at only when more parts are typed than there is room for.
+        let room = MAX_RECIPIENTS.saturating_sub(self.chips(line).len());
+        let parts = typed.split(SEPARATORS).filter(|part| !part.trim().is_empty()).count();
+        let full = parts > room;
         let held: BTreeSet<String> = if full {
             Line::ALL.iter().flat_map(|line| self.chips(*line)).map(|chip| split(&chip.text).1.to_lowercase()).collect()
         } else {
@@ -756,6 +763,7 @@ impl Composer {
         };
         let mut counted = BTreeSet::new();
         let mut refused = Refused::default();
+        let mut new = 0_usize;
         for part in typed.split(SEPARATORS).map(str::trim).filter(|part| !part.is_empty()) {
             let text = part.chars().filter(|c| !c.is_control()).collect::<String>();
             if text.len() > MAX_RECIPIENT_BYTES {
@@ -763,10 +771,11 @@ impl Composer {
             } else if full {
                 let address = split(&text).1.to_lowercase();
                 if !held.contains(&address) && counted.insert(address) {
-                    refused.over = refused.over.saturating_add(1);
+                    new = new.saturating_add(1);
                 }
             }
         }
+        refused.over = new.saturating_sub(room);
         refused
     }
 

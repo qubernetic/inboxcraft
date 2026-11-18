@@ -593,3 +593,36 @@ fn refused_text_stays_exactly_as_typed_and_a_keystroke_after_it_keeps_its_separa
     type_in(&mut composer, &mut mailbox, Line::To, &full);
     assert_eq!(composer.typing(Line::To), full);
 }
+
+#[test]
+fn a_line_s_refusal_follows_its_chips_and_its_text_at_once() {
+    let mut mailbox = mailbox();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    let many: Vec<String> = (0..MAX_RECIPIENTS).map(|n| format!("p{n}@example.org")).collect();
+    type_in(&mut composer, &mut mailbox, Line::To, &format!("{},", many.join(",")));
+    type_in(&mut composer, &mut mailbox, Line::To, "q1@example.org,");
+    assert_eq!(composer.refusal(Line::To).as_deref(), Some("1 address not added: a line holds at most 500."));
+    type_in(&mut composer, &mut mailbox, Line::To, "q1@example.org, q2@example.org, q3@example.org,");
+    // A chip taken off makes room for one: said at once, before the text is taken again.
+    composer.remove(&mut mailbox, Line::To, 0).unwrap();
+    assert_eq!(composer.refusal(Line::To).as_deref(), Some("2 addresses not added: a line holds at most 500."));
+    // An address edited down under 998 bytes is no longer too long.
+    let long = format!("{}@example.org", "a".repeat(1_000));
+    type_in(&mut composer, &mut mailbox, Line::Cc, &format!("{long},"));
+    assert!(composer.refusal(Line::Cc).is_some());
+    format!("{}@example.org,", "a".repeat(10)).clone_into(composer.typing_mut(Line::Cc).unwrap());
+    assert_eq!(composer.refusal(Line::Cc), None, "said no more once the text is edited down");
+}
+
+#[test]
+fn the_blank_s_too_long_line_goes_once_its_text_changes() {
+    let mut mailbox = mailbox();
+    template(&mut mailbox, "Plot", "At {?time}", "We meet at {?time}.");
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    composer.use_template(&mut mailbox, "Plot").unwrap();
+    "ő".repeat(500).clone_into(composer.filling_mut());
+    composer.fill(&mut mailbox).unwrap();
+    assert!(composer.fill_refused().is_some());
+    composer.filling_mut().pop();
+    assert_eq!(composer.fill_refused(), None, "the text changed: nothing to say until the next fill");
+}
