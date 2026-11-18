@@ -3,7 +3,8 @@
 
 //! The command palette: whether it is open, the text typed into it and the row picked, and which actions match the
 //! text. It lists every action of the window ([`keymap::actions`]) by name; typing narrows the list, the arrow keys
-//! move the pick and Enter runs it. The text comes from the keyboard and is cut at [`MAX_CHARS`] characters.
+//! move the pick and Enter runs it; an action of another screen (the calendar's arrows on the mail) is not listed. The
+//! text comes from the keyboard and is cut at [`MAX_CHARS`] characters.
 
 use crate::keymap::{self, Action};
 
@@ -11,11 +12,19 @@ use crate::keymap::{self, Action};
 pub const MAX_CHARS: usize = 64;
 
 /// The command palette.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Palette {
     open: bool,
     query: String,
     picked: usize,
+    /// The screen it opens over: an action of another screen ([`keymap::Scope`]) is not listed.
+    screen: keymap::Scope,
+}
+
+impl Default for Palette {
+    fn default() -> Self {
+        Self { open: false, query: String::new(), picked: 0, screen: keymap::Scope::Window }
+    }
 }
 
 impl Palette {
@@ -76,10 +85,15 @@ impl Palette {
         };
     }
 
-    /// The actions that match the text typed.
+    /// Lists the actions of `screen` and the window's (the window's own scope lists every action).
+    pub fn set_screen(&mut self, screen: keymap::Scope) {
+        self.screen = screen;
+    }
+
+    /// The actions that match the text typed, of the window and of the screen it opens over.
     #[must_use]
     pub fn matches(&self) -> Vec<Action> {
-        matching(&self.query)
+        matching(&self.query).into_iter().filter(|action| keymap::scope(action.id).meets(self.screen)).collect()
     }
 
     /// The action picked, if a row is.

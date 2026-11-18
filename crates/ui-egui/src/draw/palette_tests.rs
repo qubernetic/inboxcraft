@@ -51,7 +51,10 @@ fn command_k_opens_the_palette_over_every_action_with_its_key() {
         harness.get_by_role_and_label(Role::Dialog, "Command palette");
         assert!(harness.get_by_role_and_label(Role::TextInput, "Command").accesskit_node().is_focused(), "the field has the focus");
         let rows = harness.query_all_by_role(Role::MenuItem).count();
-        assert_eq!(rows, keymap::actions().len(), "every action is listed");
+        // Every action of the window and of the mail screen it opens over; the calendar's own keys are not.
+        let listed = keymap::actions().iter().filter(|action| keymap::scope(action.id).meets(keymap::Scope::Mail)).count();
+        assert_eq!(listed, keymap::actions().len() - keymap::CALENDAR_KEYS.len());
+        assert_eq!(rows, listed, "every action of the mail screen is listed");
         harness.get_by_label("↑↓ to move · Enter to run · Esc to close");
         harness.check_accessibility();
     }
@@ -60,7 +63,8 @@ fn command_k_opens_the_palette_over_every_action_with_its_key() {
 #[test]
 fn typing_narrows_the_list_and_enter_runs_the_first() {
     let mut harness = opened(egui::Theme::Light);
-    type_in(&mut harness, "show the calendar");
+    // On the mail screen the calendar's own keys are not listed: "calendar" finds only Show the calendar.
+    type_in(&mut harness, "calendar");
     assert_eq!(harness.query_all_by_role(Role::MenuItem).count(), 1);
     harness.key_press(Key::Enter);
     harness.run();

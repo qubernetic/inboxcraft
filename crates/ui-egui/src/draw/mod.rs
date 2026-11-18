@@ -1445,6 +1445,7 @@ impl InboxApp {
             changed = self.settings_sheet(ui.ctx(), &theme);
         }
         let palette = if self.palette.is_open() {
+            self.palette.set_screen(if self.screen == Screen::Calendar { keymap::Scope::Calendar } else { keymap::Scope::Mail });
             let runnable: Vec<&str> =
                 keymap::actions().into_iter().map(|action| action.id).filter(|id| self.can_run(id) && !soon::blocked(ui.ctx(), id)).collect();
             palette::show(ui.ctx(), &theme, &self.keymap, &mut self.palette, &runnable)

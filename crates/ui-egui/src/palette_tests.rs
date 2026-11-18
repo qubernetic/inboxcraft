@@ -64,3 +64,15 @@ fn hostile_text_is_cut_and_matches_nothing() {
         assert!(palette.matches().is_empty(), "{text:?}");
     }
 }
+
+#[test]
+fn a_screen_s_own_actions_are_listed_on_that_screen_alone() {
+    let mut palette = super::Palette::default();
+    let calendar_keys = |palette: &super::Palette| palette.matches().iter().filter(|action| keymap::CALENDAR_KEYS.contains(&action.id)).count();
+    palette.set_screen(keymap::Scope::Mail);
+    palette.set_query("calendar");
+    assert_eq!(palette.matches().iter().map(|action| action.id).collect::<Vec<_>>(), vec![keymap::CALENDAR], "on the mail");
+    palette.set_screen(keymap::Scope::Calendar);
+    assert_eq!(calendar_keys(&palette), keymap::CALENDAR_KEYS.len(), "on the calendar its six keys are listed");
+    assert!(palette.matches().iter().any(|action| action.id == keymap::CALENDAR));
+}
