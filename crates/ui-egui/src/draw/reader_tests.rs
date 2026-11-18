@@ -2103,10 +2103,6 @@ fn the_reader_s_banners_and_cards_keep_inside_a_narrow_window() {
         let left = harness.get_by_label("You have won a lighthouse").rect().left() - 1.0;
         keeps_inside(&harness, left, width, &at("pictures"));
         let banner = harness.get_by_label_contains("Pictures: ").rect();
-        eprintln!(
-            "DBG banner {banner:?} buttons {:?}",
-            harness.query_all_by_role(Role::Button).filter_map(|n| n.accesskit_node().label()).collect::<Vec<_>>()
-        );
         assert!(banner.right() <= width + 0.5 && banner.left() >= left, "{banner:?}: {}", at("pictures"));
         // The held sender's card.
         let mut app = app_with(&fetch);
