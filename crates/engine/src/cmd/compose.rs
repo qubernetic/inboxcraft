@@ -38,7 +38,7 @@ pub(crate) const MAX_RECIPIENT_BYTES: usize = 998;
 
 /// The most characters kept of what is typed in one recipient line and not a recipient: the line's field holds no
 /// more.
-pub(crate) const MAX_TYPED_CHARS: usize = 4096;
+pub(crate) use inboxcraft_model::MAX_TYPED_CHARS;
 
 pub(crate) use crate::draft::{MAX_SUBJECT_BYTES, MAX_TEXT_BYTES};
 
