@@ -109,6 +109,31 @@ fn without_calendars_the_screen_says_there_are_none_yet() {
 }
 
 #[test]
+fn without_calendars_the_words_stand_on_the_whole_card_where_the_frame_has_them() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let p = crate::theme::Palette::of(if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light });
+        let store = Memory::new(StoreConfig::default());
+        let app = InboxApp::new(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()));
+        let mut harness = build(app, theme);
+        press(&mut harness, "Calendar");
+        let block = harness.get_by_role_and_label(Role::Label, "No calendars yet.").rect();
+        // The frame: the calendar's card over the whole body in `surface`, no box of its own round the words; the
+        // block 440 wide in its middle, 304 under its top and 336 over its bottom (room for a button 32 high).
+        let card = flat_rects(&harness)
+            .into_iter()
+            .filter(|(rect, fill)| *fill == p.surface && rect.contains_rect(block))
+            .map(|(rect, _)| rect)
+            .max_by(|a, b| a.area().total_cmp(&b.area()))
+            .unwrap();
+        assert!(card.width() > 900.0, "the card is the screen's, not a box round the words: {card:?}");
+        assert_eq!(block.width(), 440.0, "{block:?}");
+        assert!((block.center().x - card.center().x).abs() <= 0.5, "{block:?} in {card:?}");
+        let (over, under) = (block.top() - card.top(), card.bottom() - block.bottom());
+        assert!((under - over - 32.0).abs() <= 1.0, "over {over}, under {under}");
+    }
+}
+
+#[test]
 fn command_2_shows_the_calendar_and_leaves_the_settings_sheet() {
     let mut harness = harness(egui::Theme::Light);
     harness.state_mut().open_settings();

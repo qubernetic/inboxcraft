@@ -129,10 +129,22 @@ pub(super) fn fixed(theme: &Theme, points: f32) -> f32 {
     Theme::size(theme, points)
 }
 
-/// The calendar card's content while there is no calendar: what will show here.
-pub(super) fn empty(ui: &mut Ui, theme: &Theme) {
+/// Under the empty state the design keeps the room of its "Open accounts" button, in points (a secondary button).
+const EMPTY_ACTION: f32 = 32.0;
+
+/// The calendar screen while there is no calendar: the calendar's card, as with calendars, and in its middle what will
+/// show here, where the design places it (over the room of a button the app has no command for yet).
+pub(super) fn empty(ui: &mut Ui, theme: &Theme, layers: &mut Panes) {
     let about = tr!("The calendars of your accounts show here, by day, week, month and agenda, once an account has a CalDAV address.");
-    crate::component::empty::empty_state(ui, theme, tr!("Calendar · no calendars"), tr!("No calendars yet."), about);
+    CentralPanel::no_frame().frame(Frame::NONE).show(ui, |ui| {
+        layers.card(ui, Margin::ZERO, |ui| {
+            let all = ui.max_rect();
+            let words = Rect::from_min_max(all.min, pos2(all.right(), (all.bottom() - fixed(theme, EMPTY_ACTION)).max(all.top())));
+            ui.scope_builder(UiBuilder::new().max_rect(words).id_salt("calendar-empty"), |ui| {
+                crate::component::empty::empty_state(ui, theme, tr!("Calendar · no calendars"), tr!("No calendars yet."), about);
+            });
+        });
+    });
 }
 
 /// The calendar screen with its calendars: the view and the side panel; what was pressed. While `over` the palette or

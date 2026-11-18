@@ -52,7 +52,7 @@ pub use list::rows_built;
 
 use std::sync::Arc;
 
-use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, Ui, UiBuilder, pos2};
+use egui::{CentralPanel, Frame, Key, Margin, Panel, Rect, Ui, pos2};
 use inboxcraft_engine::appearance::{Appearance, Motion, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
@@ -84,9 +84,6 @@ const LIST_WIDTH: f32 = 380.0;
 
 /// The default width of the folder pane, in points.
 pub(super) const FOLDER_PANE: f32 = 240.0;
-
-/// The widest the card of the window with no account gets, in points.
-const WELCOME_WIDTH: f32 = 640.0;
 
 /// How long the toast after an act shows, in seconds; its Undo works until then.
 pub const TOAST_SECONDS: f64 = 6.0;
@@ -213,25 +210,6 @@ fn around(left: f32, right: f32, gap: f32) -> Frame {
     // Distances are a few points; the clamp keeps the casts inside i8.
     let side = |points: f32| points.clamp(0.0, 100.0) as i8;
     Frame::new().inner_margin(Margin { left: side(left), right: side(right), top: side(gap), bottom: side(gap) })
-}
-
-/// One card in the middle of the window, as tall as what `add` draws in it; what `add` gave.
-fn middle_card<R>(ui: &mut Ui, theme: &Theme, layers: &mut Panes, mut add: impl FnMut(&mut Ui) -> R) -> R {
-    let s = theme.spacing;
-    CentralPanel::no_frame()
-        .frame(around(s.s2, s.s2, s.s2))
-        .show(ui, |ui| {
-            let room = ui.max_rect();
-            let pad = s.s6 * 2.0;
-            let width = WELCOME_WIDTH.min(room.width());
-            let inside = Rect::from_min_size(room.min, egui::vec2((width - 2.0 * pad).max(1.0), room.height()));
-            let mut sizing = ui.new_child(UiBuilder::new().max_rect(inside).layout(Layout::top_down(Align::Center)).sizing_pass().invisible());
-            add(&mut sizing);
-            let height = (sizing.min_rect().height() + 2.0 * pad).min(room.height());
-            let card = Rect::from_center_size(room.center(), egui::vec2(width, height));
-            ui.scope_builder(UiBuilder::new().max_rect(card).layout(Layout::top_down(Align::Center)), |ui| layers.card(ui, margin(pad), add)).inner
-        })
-        .inner
 }
 
 impl InboxApp {
@@ -1740,10 +1718,10 @@ impl InboxApp {
         onboard::welcome(ui, theme, &self.keymap, layers, self.can_add)
     }
 
-    /// The calendar screen: its empty state on one card in the middle until there are calendars; what was pressed.
+    /// The calendar screen: its empty state on the calendar's card until there are calendars; what was pressed.
     fn calendar_screen(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes) -> Vec<calendar::Asked> {
         if self.calendar.is_empty() {
-            middle_card(ui, theme, layers, |ui| calendar::empty(ui, theme));
+            calendar::empty(ui, theme, layers);
             return Vec::new();
         }
         // The palette and the settings sheet lie over the screen's floats: they have the keys.
