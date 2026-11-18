@@ -2754,3 +2754,29 @@ fn in_one_pane_enter_opens_into_the_reader_and_esc_goes_back_to_the_row_it_left(
     let reader = super::reader_rect(&harness.ctx).unwrap();
     assert!(focused_rect(&harness).is_some_and(|focus| reader.contains_rect(focus)), "the focus in the reader");
 }
+
+#[test]
+fn in_one_pane_the_docked_composer_swaps_with_the_list_and_keeps_what_is_written() {
+    let mut harness = wide(900.0);
+    harness.state_mut().compose();
+    harness.run();
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::compose::text_id()));
+    harness.run();
+    harness.event(egui::Event::Text("Dear Odile".to_owned()));
+    harness.run();
+    assert_eq!(harness.state().composer().map(crate::compose::Composer::text), Some("Dear Odile"));
+    assert_eq!(rows(&harness), 0, "the composer stands in the list's place");
+    // Esc: the list comes back; nothing written is lost.
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(rows(&harness) > 0, "Esc brings the list back");
+    assert_eq!(harness.state().composer().map(crate::compose::Composer::text), Some("Dear Odile"), "what was written is kept");
+    // New message brings the composer back as it was.
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::COMPOSE);
+    harness.run();
+    harness.run();
+    assert_eq!(rows(&harness), 0, "the composer is back in the list's place");
+    assert_eq!(harness.state().composer().map(crate::compose::Composer::text), Some("Dear Odile"));
+}
