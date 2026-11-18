@@ -6,7 +6,8 @@
 //! `minus`); 44 in, line one has whom it goes to in `body`, the account bar, and where it stands in `mono_s` at the right
 //! in the mark's colour; line two the subject in `caption` and `muted`. The secondary buttons stand 12 right of the
 //! text, 8 apart, 16 in from the right: Undo while the send is held, Edit for a scheduled one, Send again and Edit for a
-//! refused one. A held send draws its hold as a 2 px `cyan_edge` bar along the row's foot, as long as the share left;
+//! refused one. A held send draws its hold as a `cyan_edge` bar along the row's foot, as long as the share left, 2 px
+//! high with the row's line drawn over its lower pixel row, as the design draws it;
 //! a refused one has the server's reply under the rest, `caption` in `minus`.
 
 use egui::{Color32, Id, Rect, Role, Ui, UiBuilder, WidgetInfo, pos2, vec2};
@@ -115,7 +116,9 @@ pub fn height(standing: Standing) -> f32 {
 pub fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &OutboxRow<'_>, shown: Option<Shown>) -> Option<usize> {
     let p = &theme.palette;
     let f = &theme.fonts;
-    let drawn = row_with(ui, theme, row.id, height(row.standing), RowGround::Surface, false, row.last, shown);
+    let mut drawn = row_with(ui, theme, row.id, height(row.standing), RowGround::Surface, false, row.last, shown);
+    // The focus edge stays above the hold's bar (the sheet's 2,2 436 × 50), on every row of the outbox alike.
+    drawn.foot = BAR;
     let spoken = row.spoken;
     drawn.response.widget_info(|| WidgetInfo::labeled(Role::ListItem, true, spoken));
     let rect = drawn.rect;
@@ -167,7 +170,9 @@ pub fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &OutboxRow<'
     if let Standing::Countdown { share } = row.standing {
         let wide = (rect.width() * share.clamp(0.0, 1.0)).round();
         if wide > 0.0 {
-            ui.painter().rect_filled(Rect::from_min_size(pos2(rect.left(), rect.bottom() - BAR), vec2(wide, BAR)), 0.0, p.cyan_edge);
+            // Its foot's last pixel row is the row's line, which the design draws over the bar.
+            let line = if row.last { 0.0 } else { 1.0 };
+            ui.painter().rect_filled(Rect::from_min_size(pos2(rect.left(), rect.bottom() - BAR), vec2(wide, BAR - line)), 0.0, p.cyan_edge);
         }
     }
     drawn.finish(ui, theme);

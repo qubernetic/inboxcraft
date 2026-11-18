@@ -35,6 +35,9 @@ pub struct Row {
     pub hovered: bool,
     /// It has the keyboard focus.
     pub focused: bool,
+    /// How high the foot of the row is that its focus edge stays above, in points: its line (1), or what a row draws
+    /// along its foot over the line (the outbox row's hold, 2; the sheet's focus edge of 436 × 50).
+    pub foot: f32,
 }
 
 /// The ground a row stands on, which decides its hover fill.
@@ -73,7 +76,7 @@ pub(crate) fn row_with(ui: &mut Ui, theme: &Theme, id: Id, height: f32, ground: 
     let focused = shown.map_or_else(|| response.has_focus(), |shown| shown == Shown::Focus);
     // The fade is kept for a row in sight only: one out of sight neither paints nor asks for frames.
     if !ui.is_rect_visible(rect) {
-        return Row { rect, response, hovered, focused };
+        return Row { rect, response, hovered, focused, foot: 1.0 };
     }
     let (rest, lit) = match ground {
         RowGround::Surface => (p.surface, p.stage),
@@ -95,21 +98,23 @@ pub(crate) fn row_with(ui: &mut Ui, theme: &Theme, id: Id, height: f32, ground: 
         let y = rect.bottom() - 1.0;
         paint::hairline(painter, pos2(rect.left(), y), pos2(rect.right() - 1.0, y), p.panel_line);
     }
-    Row { rect, response, hovered, focused }
+    Row { rect, response, hovered, focused, foot: 1.0 }
 }
 
 /// The least height, in points, a row needs for its focus edge: 2 clear, the 1 px line, 2 clear, and the row's line.
 const RING_ROOM: f32 = 6.0;
 
 impl Row {
-    /// Paints the row's focus edge when it has the focus: 2 px inside the row above its line (the sheet's 2,2 436 × 51
-    /// on a row of 440 × 56), over everything the caller drew in the row. Call it once, after the row's content.
+    /// Paints the row's focus edge when it has the focus: 2 px inside the row above its foot (the sheet's 2,2 436 × 51
+    /// on a row of 440 × 56 over its line), over everything the caller drew in the row. Call it once, after the row's
+    /// content.
     pub fn finish(&self, ui: &Ui, theme: &Theme) {
         let rect = self.rect;
-        if !self.focused || rect.height() < RING_ROOM || rect.width() < RING_ROOM || !ui.is_rect_visible(rect) {
+        let foot = if self.foot.is_finite() { self.foot.clamp(0.0, rect.height().max(0.0)) } else { 1.0 };
+        if !self.focused || rect.height() < RING_ROOM - 1.0 + foot || rect.width() < RING_ROOM || !ui.is_rect_visible(rect) {
             return;
         }
-        let above = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - 1.0));
+        let above = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - foot));
         paint::focus_ring(ui.painter(), theme, above, Ring::Inside);
     }
 }

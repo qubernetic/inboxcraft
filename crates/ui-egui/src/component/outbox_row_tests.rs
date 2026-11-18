@@ -83,7 +83,8 @@ fn an_outbox_row_looks_as_its_sheet_says_in_every_state() {
                 assert_eq!((reply.0.min - o, reply.2, reply.4), (vec2(44.0, 49.0), p.minus, f.caption.size), "{at}");
             }
             // A held send draws the share of its hold left along its foot.
-            let bar = Rect::from_min_size(o + vec2(0.0, 54.0), vec2(352.0, 2.0));
+            // 2 high, its lower pixel row under the row's line, as the design draws its line over the bar.
+            let bar = Rect::from_min_size(o + vec2(0.0, 54.0), vec2(352.0, 1.0));
             let barred = paint.rects().any(|shape| matches!(shape.look, Look::Rect { fill, stroke: None, .. } if fill == p.cyan_edge) && shape.rect == bar);
             assert_eq!(barred, matches!(state.standing, Standing::Countdown { .. }), "{at}");
             let ring: Vec<Rect> = paint
@@ -95,7 +96,8 @@ fn an_outbox_row_looks_as_its_sheet_says_in_every_state() {
                     _ => None,
                 })
                 .collect();
-            let inside = Rect::from_min_max(o + vec2(2.0, 2.0), pos2(rect.right() - 2.0, rect.bottom() - 3.0));
+            // The sheet's 2,2 436 × 50: above the hold's bar.
+            let inside = Rect::from_min_max(o + vec2(2.0, 2.0), pos2(rect.right() - 2.0, rect.bottom() - 4.0));
             assert_eq!(ring, if state.shown == Shown::Focus { vec![inside] } else { vec![] }, "{at}");
             assert_eq!(found.radius, 0.0, "{at}");
         }
