@@ -423,10 +423,18 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, valu
     // The label and the bar at the right end, then the name, the address and the caret from the left.
     let label = cut(ui, &account.label, theme.fonts.mono_s, p.muted, label_most);
     let label_left = value.right() - paint::run_box(label.size().x);
-    paint::run_at(painter, pos2(label_left, mid - label.size().y / 2.0), label, p.muted);
     let bar = Rect::from_min_size(pos2(label_left - s.s2 + 2.0 - 3.0, (mid - 6.0).round()), vec2(3.0, 12.0));
-    painter.rect_filled(bar, 0.0, theme.account_colour(u64::try_from(account.index).unwrap_or(0)));
-    let room = (bar.left() - s.s2 - value.left()).max(1.0);
+    // The account's tag gives way before it would stand over the sender: the sender keeps its whole name, or 80.
+    let sender_least = galley(ui, &sender, theme.fonts.body, p.ink).size().x.ceil().min(s.s10 * 2.0);
+    let tagged = bar.left() - s.s2 - value.left() >= sender_least;
+    let end = if tagged {
+        paint::run_at(painter, pos2(label_left, mid - label.size().y / 2.0), label, p.muted);
+        painter.rect_filled(bar, 0.0, theme.account_colour(u64::try_from(account.index).unwrap_or(0)));
+        bar.left()
+    } else {
+        value.right()
+    };
+    let room = (end - s.s2 - value.left()).max(1.0);
     let name_most = from_name_most(value.width(), floating).min(room);
     let name_text = cut(ui, &sender, theme.fonts.body, p.ink, name_most);
     let name_width = name_text.size().x;
@@ -435,13 +443,16 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, valu
     x += paint::run_box(name_width) + s.s1 + 2.0;
     if !account.name.is_empty() {
         let address = tr!("<{address}>", address = account.address);
-        let most = (bar.left() - s.s2 - FROM_CARET - s.s1 - 2.0 - x).max(1.0);
-        let address = cut(ui, &address, theme.fonts.body, p.ink, most);
-        let width = address.size().x;
-        paint::run_at(painter, pos2(x, mid - address.size().y / 2.0), address, p.ink);
-        x += paint::run_box(width) + s.s1 + 2.0;
+        let most = end - s.s2 - FROM_CARET - s.s1 - 2.0 - x;
+        let address = cut(ui, &address, theme.fonts.body, p.ink, most.max(1.0));
+        // Not even its ellipsis fits: the address is left to the line's name for the screen reader.
+        if address.size().x <= most {
+            let width = address.size().x;
+            paint::run_at(painter, pos2(x, mid - address.size().y / 2.0), address, p.ink);
+            x += paint::run_box(width) + s.s1 + 2.0;
+        }
     }
-    if x + FROM_CARET <= bar.left() {
+    if x + FROM_CARET <= end {
         let mark = Rect::from_min_size(pos2(x, mid - FROM_CARET / 2.0), vec2(FROM_CARET, FROM_CARET));
         crate::iconset::paint(painter, mark, IconId::Caret, p.muted);
     }
@@ -737,8 +748,12 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     let kept = composer.saved().map(|at| tr!("draft kept {time}", time = typed_time::short(at, mailbox.now(), mailbox.offset())));
     let kept = kept.map(|kept| galley(ui, &kept, theme.fonts.mono_s, p.muted));
     let kept_width = kept.as_ref().map_or(0.0, |kept| paint::run_box(kept.size().x) + s.s2);
+    // When the draft was kept gives way before the title would be left less than 80.
+    let (kept, kept_width) = if right - s.s2 - kept_width - rect.left() >= s.s10 * 2.0 { (kept, kept_width) } else { (None, 0.0) };
     let title_rect = Rect::from_min_max(rect.min, pos2((right - s.s2 - kept_width).max(rect.left() + 1.0), rect.bottom()));
     let words = cut(ui, &title, theme.fonts.heading, p.ink, title_rect.width());
+    // Too narrow even for its ellipsis, the title is left to its name for the screen reader.
+    let words = (words.size().x <= title_rect.width()).then_some(words);
     if floating {
         let response = ui.interact(title_rect, Id::unique("compose-fold"), Sense::click());
         let spoken = if composer.folded() { tr!("Open the draft {title}", title = title) } else { tr!("Fold the draft {title}", title = title) };
@@ -756,7 +771,9 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
         let response = ui.interact(title_rect, Id::unique("compose-title"), Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &title));
     }
-    paint::run_at(ui.painter(), pos2(title_rect.left(), title_rect.center().y - words.size().y / 2.0), words, p.ink);
+    if let Some(words) = words {
+        paint::run_at(ui.painter(), pos2(title_rect.left(), title_rect.center().y - words.size().y / 2.0), words, p.ink);
+    }
     if let Some(kept) = kept {
         let top = title_rect.center().y - kept.size().y / 2.0;
         paint::run_at(ui.painter(), pos2(title_rect.right() + s.s2, top), kept, p.muted);
