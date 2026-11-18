@@ -346,6 +346,37 @@ pub(super) fn body<R>(ui: &mut Ui, theme: &Theme, salt: &str, add: impl FnOnce(&
     given
 }
 
+/// Draws `add`, one row of a page that has a row for every account, only where it is near enough to be seen: within a
+/// view's height above or below what the page shows, so `Tab` still reaches the next row, which the page then scrolls
+/// to. Elsewhere the row takes the height it last had and lays nothing out: a page with hundreds of accounts builds the
+/// rows in sight only. The first time a row is drawn it is laid out wherever it is.
+pub(super) fn culled(ui: &mut Ui, id: Id, add: impl FnOnce(&mut Ui)) {
+    let width = ui.available_width();
+    let top = ui.cursor().top();
+    let known = ui.ctx().data(|data| data.get_temp::<f32>(id));
+    if let Some(height) = known {
+        let clip = ui.clip_rect();
+        let near = clip.expand2(vec2(0.0, clip.height()));
+        let row = Rect::from_min_size(pos2(ui.max_rect().left(), top), vec2(width, height));
+        if !near.intersects(row) {
+            ui.allocate_space(vec2(width, height));
+            return;
+        }
+    }
+    add(ui);
+    let height = (ui.cursor().top() - top).max(0.0);
+    if known != Some(height) {
+        ui.ctx().data_mut(|data| data.insert_temp(id, height));
+    }
+    // The keyboard just came to a control of this row: the page scrolls to it.
+    let row = Rect::from_min_size(pos2(ui.max_rect().left(), top), vec2(width, height));
+    let ctx = ui.ctx().clone();
+    let arrived = ctx.memory(|memory| memory.focused().filter(|focused| !memory.had_focus_last_frame(*focused)));
+    if let Some(control) = arrived.and_then(|focused| ctx.read_response(focused)).filter(|control| row.contains_rect(control.rect)) {
+        ui.scroll_to_rect(control.rect, None);
+    }
+}
+
 /// The Appearance page: Look, then Layout.
 fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool, view: InboxView) -> Option<Asked> {
     let mut asked = None;
@@ -698,24 +729,27 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
             });
         }
         for pair in mailbox.accounts().chunks(2) {
-            ui.add_space(INSET);
-            inset(ui, |ui| {
-                let column = ((ui.available_width() - SIGNATURE_GAP) / 2.0).floor().max(1.0);
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = SIGNATURE_GAP;
-                    for account in pair {
-                        ui.allocate_ui_with_layout(vec2(column, 0.0), Layout::top_down(Align::Min), |ui| {
-                            ui.set_width(column);
-                            ui.spacing_mut().item_spacing.y = 0.0;
-                            if let Some(pressed) = signature(ui, theme, keymap, settings, account) {
-                                asked = Some(pressed);
-                            }
-                        });
-                    }
+            let first = pair.first().map_or(0, |account| account.id);
+            culled(ui, Id::unique("settings-signatures").with(first), |ui| {
+                ui.add_space(INSET);
+                inset(ui, |ui| {
+                    let column = ((ui.available_width() - SIGNATURE_GAP) / 2.0).floor().max(1.0);
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = SIGNATURE_GAP;
+                        for account in pair {
+                            ui.allocate_ui_with_layout(vec2(column, 0.0), Layout::top_down(Align::Min), |ui| {
+                                ui.set_width(column);
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                if let Some(pressed) = signature(ui, theme, keymap, settings, account) {
+                                    asked = Some(pressed);
+                                }
+                            });
+                        }
+                    });
                 });
+                ui.add_space(INSET);
+                rule(ui, theme);
             });
-            ui.add_space(INSET);
-            rule(ui, theme);
         }
         group(ui, theme, "C", tr!("Templates and scheduled"), None);
         settings_row_soon_with(ui, theme, tr!("Templates"), tr!("Texts you write often, kept on their account, with a page to manage them."), |ui| {
@@ -767,11 +801,13 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
             group(ui, theme, "C", tr!("Grouped inbox"), Some(note));
         }
         for account in mailbox.accounts() {
-            let name = tr!("Group the inbox of {account}", account = account.label);
-            settings_row(ui, theme, &name, Some(&account.address), |ui| {
-                if switch(ui, theme, &name, account.grouped).clicked() {
-                    asked = Some(Asked::Grouped(account.id, !account.grouped));
-                }
+            culled(ui, Id::unique("settings-grouped").with(account.id), |ui| {
+                let name = tr!("Group the inbox of {account}", account = account.label);
+                settings_row(ui, theme, &name, Some(&account.address), |ui| {
+                    if switch(ui, theme, &name, account.grouped).clicked() {
+                        asked = Some(Asked::Grouped(account.id, !account.grouped));
+                    }
+                });
             });
         }
     });
@@ -800,11 +836,13 @@ fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Setti
         }
         let levels = Level::ALL.map(|level| (level, level_name(level), f.button));
         for account in mailbox.accounts() {
-            let title = tr!("{account} · {address}", account = account.label, address = account.address);
-            settings_row(ui, theme, &title, None, |ui| {
-                if let Some(level) = segmented_for(ui, theme, &levels, mailbox.notify_level(account.id), Some(&account.label)) {
-                    asked = Some(Asked::Level(account.id, level));
-                }
+            culled(ui, Id::unique("settings-level").with(account.id), |ui| {
+                let title = tr!("{account} · {address}", account = account.label, address = account.address);
+                settings_row(ui, theme, &title, None, |ui| {
+                    if let Some(level) = segmented_for(ui, theme, &levels, mailbox.notify_level(account.id), Some(&account.label)) {
+                        asked = Some(Asked::Level(account.id, level));
+                    }
+                });
             });
         }
         group(ui, theme, "B", tr!("What else notifies"), None);

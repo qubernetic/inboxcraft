@@ -359,3 +359,34 @@ fn a_window_too_small_for_the_sheet_draws_it_without_a_fault() {
         }
     }
 }
+
+#[test]
+fn a_page_with_many_accounts_lays_out_the_rows_in_sight_and_tab_still_reaches_every_one() {
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    for n in 0..40 {
+        let account = serde_json::json!({
+            "address": format!("many{n}@example.org"),
+            "imap": { "host": "imap.example.org", "security": "tls" },
+        });
+        app.mailbox_mut().run("account.add", &account).unwrap();
+    }
+    app.mailbox_mut().refresh();
+    let accounts = app.mailbox().accounts().len();
+    let mut harness = Harness::builder().with_size(vec2(1200.0, 900.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.state_mut().settings_mut().open_at(Section::Sending);
+    harness.run();
+    let built = harness.query_all_by_role(Role::MultilineTextInput).count();
+    assert!(built < accounts / 2, "{built} of {accounts} signature fields laid out");
+    // Tab goes from field to field, the page scrolling along, and reaches the last account's.
+    let last = format!("Signature of {}", harness.state().mailbox().accounts().last().unwrap().label);
+    let mut reached = false;
+    for _ in 0..(accounts * 3) {
+        harness.key_press(Key::Tab);
+        harness.run();
+        if focused(&harness).is_some_and(|(label, _)| label == last) {
+            reached = true;
+            break;
+        }
+    }
+    assert!(reached, "Tab reaches {last}");
+}

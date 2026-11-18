@@ -30,7 +30,7 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
         let note = tr!("A calendar comes from its account's CalDAV address. Which of them the calendar shows is chosen in its side panel.");
         group(ui, theme, "B", tr!("Calendars"), Some(note));
         for account in mailbox.accounts() {
-            calendars(ui, theme, keymap, account);
+            super::culled(ui, egui::Id::unique("settings-calendars").with(account.id), |ui| calendars(ui, theme, keymap, account));
         }
         group(ui, theme, "C", tr!("Week"), None);
         settings_row(ui, theme, tr!("Week starts on"), Some(tr!("Fixed: it cannot be changed yet.")), |ui| {
