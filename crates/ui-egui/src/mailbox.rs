@@ -2004,7 +2004,8 @@ impl Mailbox {
     pub fn spoken(&self, row: &MessageRow) -> String {
         let subject = if row.subject.is_empty() { tr!("(no subject)") } else { row.subject.as_str() };
         let mut parts = vec![row.sender.clone(), subject.to_owned()];
-        let date = self.row_date(row);
+        // A snoozed message says when it comes back, as its row shows it, not when it came.
+        let date = self.back_at(row).map_or_else(|| self.row_date(row), |when| tr!("back {when}", when = when));
         if !date.is_empty() {
             parts.push(date);
         }

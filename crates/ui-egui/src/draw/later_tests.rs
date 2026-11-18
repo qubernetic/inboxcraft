@@ -204,7 +204,7 @@ fn a_snoozed_message_shows_its_time_and_comes_back_on_request() {
     app.mailbox_mut().forget_undo();
     let mut harness = harness_of(app);
     harness.get_by_label("Snoozed until Saturday 7 November, 09:00");
-    harness.get_by_label_contains("Allotment rota for November, Sat 09:00");
+    harness.get_by_label_contains("Allotment rota for November, back Sat 09:00");
     harness.get_by_role_and_label(Role::Button, "More").click();
     settle(&mut harness);
     harness.get_by_label("Bring back now").click();
@@ -341,7 +341,7 @@ fn a_snoozed_row_of_later_brings_its_message_back_from_its_link() {
     app.mailbox_mut().forget_undo();
     let mut harness = harness_of(app);
     assert!(harness.query_by_label("bring back now").is_none(), "only on a hovered or keyed row");
-    harness.get_by_label_contains("Allotment rota for November, Sat 09:00").hover();
+    harness.get_by_label_contains("Allotment rota for November, back Sat 09:00").hover();
     harness.run();
     harness.get_by_label("bring back now").click();
     settle(&mut harness);
@@ -379,6 +379,8 @@ fn a_snoozed_message_listed_as_a_mail_row_shows_the_clock_and_when_it_comes_back
     let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
     assert!(harness.query_all_by_label_contains(ROTA).count() >= 1, "the row is listed");
     assert_eq!(drawn_in(&harness, "back Sat 09:00"), Some(theme.palette.warn), "the sheet's snoozed time, in warn");
+    // A screen reader hears what the row shows: when it comes back, not when it came.
+    harness.get_by_label_contains(&format!("{ROTA}, back Sat 09:00"));
     let clock = crate::iconset::glyph(crate::iconset::IconId::Snooze).to_string();
     assert_eq!(drawn_in(&harness, &clock), Some(theme.palette.warn), "the snoozed mark, in warn");
 }
