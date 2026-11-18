@@ -205,12 +205,17 @@ fn new_event_or_edit_of_another_event_keeps_the_typing() {
     harness.state_mut().calendar_mut().0.edit_picked();
     harness.run();
     assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "Edit of another event keeps the typing");
-    // Without typing, New event and Edit open at once.
+    // Without typing, New event and Edit open at once: the typing erased after the warning holds nothing to keep.
+    harness.state_mut().calendar_mut().0.editor_mut().unwrap().form_mut().summary.clear();
+    harness.state_mut().calendar_mut().0.edit_picked();
+    harness.run();
+    assert!(harness.state().calendar().editor().is_some_and(|editor| editor.id().is_some()), "Edit replaces an editor with nothing typed");
+    assert!(!warns(&harness), "and opens without a word");
     harness.state_mut().calendar_mut().0.close_editor();
     harness.state_mut().calendar_mut().0.new_event();
     harness.state_mut().calendar_mut().0.edit_picked();
     harness.run();
-    assert!(harness.state().calendar().editor().is_some_and(|editor| editor.id().is_some()), "Edit replaces an editor with nothing typed");
+    assert!(harness.state().calendar().editor().is_some_and(|editor| editor.id().is_some()), "Edit replaces a New event with nothing typed");
 }
 
 #[test]
@@ -226,7 +231,9 @@ fn changing_the_view_or_the_day_keeps_the_typing() {
     harness.run();
     assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "a press on the toolbar keeps the typing");
     assert!(warns(&harness));
-    // From outside (an alert, a script): the view and the day change, the editor and its typing stay.
+    assert_eq!(harness.state().calendar().view(), View::Week, "and the view stays");
+    // From outside (an alert, a script): the view and the day change, the editor and its typing stay, and the new
+    // view's toolbar is out of reach as well.
     let (calendar, mailbox) = harness.state_mut().calendar_mut();
     calendar.set_view(mailbox, View::Month);
     calendar.step(mailbox, true);
@@ -234,6 +241,11 @@ fn changing_the_view_or_the_day_keeps_the_typing() {
     harness.run();
     assert_eq!(harness.state().calendar().view(), View::Month);
     assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "a change of view or day keeps the typing");
+    let (focus, next) = (harness.state().calendar().focus(), harness.get_by_role_and_label(Role::Button, "Next month").rect().center());
+    press_at(&mut harness, next.x, next.y);
+    harness.run();
+    assert_eq!(harness.state().calendar().focus(), focus, "a press on the month's Next month reaches nothing");
+    assert_eq!(summary(&harness).as_deref(), Some("Kiln"));
 }
 
 #[test]
@@ -243,6 +255,22 @@ fn cancel_throws_the_typing_away_at_once() {
     harness.get_by_role_and_label(Role::Button, "Cancel").click();
     harness.run();
     assert!(summary(&harness).is_none());
+    // After a press outside's warning and after Esc's: the press and the Esc kept it, Cancel alone throws it away,
+    // with no second word.
+    for esc in [false, true] {
+        typed(&mut harness, "Kiln");
+        if esc {
+            harness.key_press(Key::Escape);
+        } else {
+            press_at(&mut harness, 1300.0, 700.0);
+        }
+        harness.run();
+        assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "the {} kept the typing", if esc { "Esc" } else { "press" });
+        assert!(warns(&harness));
+        harness.get_by_role_and_label(Role::Button, "Cancel").click();
+        harness.run();
+        assert!(summary(&harness).is_none(), "Cancel throws it away at once");
+    }
 }
 
 /// Twelve more events at 09:00 on Thursday 5 November, past what the week shows side by side: a "+N more" link.
