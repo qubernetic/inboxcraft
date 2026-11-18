@@ -30,15 +30,17 @@
 //! Going, Maybe and No, or the answer given with a way to change it. When the text only says what the card says, the
 //! card alone stands for the message, without the text or Reply.
 //!
-//! A message the screener holds opens as a preview that decides nothing: its sender stands where the toolbar and the
-//! subject are (avatar, name, address, first mail, messages waiting), then a card asks "Let <sender> in?", with the
-//! groups to let them into, Accept, Accept and open, and Block; the message follows without Reply. A sent message a
+//! A message the screener holds opens as a preview that decides nothing: its tags (New sender and the account) and
+//! More, then a card asks "Let <sender> in?" with their address, first mail and messages waiting, the groups to let
+//! them into, Accept, Accept and reply, and Block (see `held`); the subject, the facts and the message follow, without
+//! Reply. A sent message a
 //! delivery report says did not get through opens under a banner that says so, with the reason the report gave.
 //!
 //! Drawing only reads the [`Reader`]; what the person asks for comes back as [`Asked`] and is applied after the frame.
 
 mod body;
 mod head;
+mod held;
 mod thread;
 
 use std::collections::HashMap;
@@ -58,7 +60,6 @@ use body::bounced;
 #[cfg(test)]
 pub(super) use body::{blocks, column_widths};
 pub(super) use head::{more_menu, move_menu, picker_id, picker_popup};
-use head::{screening, sender_header};
 use thread::{answers, folded, message};
 
 /// The room left and right of the reader's parts, in points.
@@ -186,16 +187,10 @@ pub(super) fn show(
     }
     let held = reader.open_id().filter(|id| mailbox.held(*id));
     let side = margin(SIDE).left;
-    let head = match held {
-        Some(_) => Frame::new().inner_margin(margin(theme.spacing.s4)),
-        None => Frame::new().inner_margin(Margin { left: side, right: side, top: margin(HEAD_TOP).top, bottom: 0 }),
-    };
-    egui::Panel::top("reader-toolbar").show_separator_line(false).frame(head).show(ui, |ui| match held {
-        Some(id) => sender_header(ui, theme, keymap, mailbox, reader, id, &mut drawn),
-        None => {
-            ui.spacing_mut().item_spacing.y = HEAD_GAP;
-            head::head(ui, theme, keymap, mailbox, reader, &mut drawn);
-        }
+    let head = Frame::new().inner_margin(Margin { left: side, right: side, top: margin(HEAD_TOP).top, bottom: 0 });
+    egui::Panel::top("reader-toolbar").show_separator_line(false).frame(head).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = HEAD_GAP;
+        head::head(ui, theme, keymap, mailbox, reader, &mut drawn);
     });
     // The answers at the foot, under a `panel_line`, for the open message (not for a preview of held mail). Their room
     // is kept first and they are drawn after the message, so Tab goes from the head through the message to them.
@@ -228,9 +223,6 @@ pub(super) fn show(
                 if let Some(notice) = reader.notice() {
                     body::notice(ui, theme, keymap, notice, reader.notice_failed(), &mut drawn);
                     ui.add_space(theme.spacing.s4);
-                }
-                if let Some(id) = held {
-                    screening(ui, theme, keymap, mailbox, id, &mut drawn);
                 }
                 if let Some(reason) =
                     reader.open_id().and_then(|id| mailbox.messages().iter().find(|row| row.id == id)).and_then(|row| row.bounced.as_deref())

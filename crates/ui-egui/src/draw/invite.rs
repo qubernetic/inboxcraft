@@ -16,9 +16,8 @@
 //! of the event is the organiser's data, shown flat and never acted on; the buttons are the owner's own commands
 //! (`invite.answer` sends mail and is the owner's to press).
 
-use egui::{Frame, RichText, Shape, Stroke, StrokeKind, Ui};
+use egui::{RichText, Ui};
 
-use super::margin;
 use super::reader::{Asked, Drawn};
 use crate::component::invite_card::{CardAsked, CardEvent, CardState, Said, invite_card, invite_card_with};
 use crate::invite::{Invite, Method, Rsvp};
@@ -36,21 +35,6 @@ pub(crate) enum Ask {
     Change,
     /// Take the cancelled event out of the calendar.
     Remove,
-}
-
-/// A card across `ui`'s width with `add` drawn inside, on the `surface` in a 1 px `cyan_edge`: it asks the owner
-/// something.
-pub(super) fn asking<R>(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui) -> R) -> R {
-    let p = &theme.palette;
-    let slot = ui.painter().add(Shape::Noop);
-    let inner = Frame::new().inner_margin(margin(theme.spacing.s4)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        add(ui)
-    });
-    let rect = inner.response.rect;
-    let shapes = vec![Shape::rect_filled(rect, 0.0, p.surface), Shape::rect_stroke(rect, 0.0, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside)];
-    ui.painter().set(slot, Shape::Vec(shapes));
-    inner.inner
 }
 
 /// The most guests' answers a card of replies lists one by one.

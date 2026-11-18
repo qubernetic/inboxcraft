@@ -3,7 +3,7 @@
 
 //! The thread: folded messages, the header of an unfolded one, one unfolded message and the answers under it.
 
-use egui::{Frame, Margin, RichText, Ui, pos2};
+use egui::{Frame, Margin, Ui, pos2};
 use inboxcraft_html::Block;
 
 use crate::component::button::TextButton;
@@ -256,10 +256,6 @@ pub(super) fn message(
     }
     let parts = |ui: &mut Ui, textures: &mut Textures, drawn: &mut Drawn| {
         banner(ui, theme, keymap, reader, opened, drawn);
-        if held && bare {
-            let subject = if opened.header.subject.is_empty() { tr!("(no subject)") } else { opened.header.subject.as_str() };
-            ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.heading.id()).color(theme.palette.ink)).wrap());
-        }
         if let Some(invite) = &opened.invite {
             crate::draw::invite::card(ui, theme, keymap, reader, invite, drawn);
         }

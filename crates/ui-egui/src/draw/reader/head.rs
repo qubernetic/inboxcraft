@@ -4,13 +4,12 @@
 //! The reader's head: the toolbar of mail actions with its menus and the time picker, the subject and who wrote,
 //! and what stands in their place over a message the screener holds.
 
-use egui::{Align, Id, Layout, Rect, RichText, Role as Spoken, Sense, Ui, UiBuilder, WidgetInfo, vec2};
+use egui::{Align, Id, Layout, Rect, Role as Spoken, Sense, Ui, UiBuilder, WidgetInfo, vec2};
 use inboxcraft_model::Role;
 
-use crate::component::button::{self, IconButton, TextButton};
+use crate::component::button::IconButton;
 use crate::component::content_bar::{BarKind, ContentBar, View, content_bar};
 use crate::component::facts::{Facts, facts_of};
-use crate::component::pill::pill;
 use crate::component::popup;
 use crate::component::tag::{TagKind, tag};
 use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
@@ -19,7 +18,7 @@ use crate::component::why_line::why_line;
 use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, After, GroupKind, Mailbox};
+use crate::mailbox::{Act, After, Mailbox};
 use crate::reader::{Content, Header, Opened, Person, Reader};
 use crate::theme::Theme;
 use crate::tr;
@@ -257,6 +256,10 @@ pub(super) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let open = reader.open_id();
     let opened = open.and_then(|id| reader.opened(id));
     crate::draw::frame::beside(ui, theme, |ui| tools(ui, theme, keymap, mailbox, reader, drawn));
+    // A message the screener holds asks first whether to let its sender in; the rest is a preview.
+    if let Some(id) = open.filter(|id| mailbox.held(*id)) {
+        super::held::let_in(ui, theme, keymap, mailbox, id, drawn);
+    }
     subject(ui, theme, keymap, opened, drawn);
     let count = reader.thread().len();
     match opened {
@@ -286,8 +289,10 @@ pub(super) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
 fn tags(mailbox: &Mailbox, id: u64) -> Vec<(String, String, TagKind)> {
     let mut tags = Vec::new();
     let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return tags };
-    // Held mail is in no group until its sender is let in.
-    if !mailbox.held(id) {
+    // Held mail is in no group until its sender is let in: it is a new sender's.
+    if mailbox.held(id) {
+        tags.push((tr!("New sender").to_owned(), tr!("New sender").to_owned(), TagKind::Accent));
+    } else {
         let group = mailbox
             .groups()
             .into_iter()
@@ -325,9 +330,12 @@ const TAG_WIDEST: f32 = 240.0;
 fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let side = crate::component::control_side(theme);
     let open = reader.open_id();
+    // A held message's preview decides nothing: More alone stands at the right.
+    let held = open.is_some_and(|id| mailbox.held(id));
     let width = ui.available_width();
     let line = |count: f32| count * side + (count - 1.0).max(0.0) * TOOL_GAP;
-    if line(ACTS) > width {
+    let shown = if held { 1.0 } else { ACTS };
+    if !held && line(ACTS) > width {
         let mut per = 1.0_f32;
         while per < ACTS && line(per + 1.0) <= width {
             per += 1.0;
@@ -359,7 +367,7 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
     }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = TOOL_GAP;
-        let room = (ui.available_width() - line(ACTS) - TOOL_GAP).max(0.0);
+        let room = (ui.available_width() - line(shown) - TOOL_GAP).max(0.0);
         let (_, place) = ui.allocate_space(vec2(room, side));
         let mut child = ui.new_child(UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)));
         child.set_clip_rect(place.intersect(ui.clip_rect()));
@@ -373,10 +381,14 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
                 continue;
             }
             left -= wide + TOOL_GAP;
-            let shown = tag(&mut child, theme, &words, kind);
-            shown.widget_info(|| WidgetInfo::labeled(Spoken::Label, true, crate::component::spoken(&spoken)));
+            let drawn_tag = tag(&mut child, theme, &words, kind);
+            drawn_tag.widget_info(|| WidgetInfo::labeled(Spoken::Label, true, crate::component::spoken(&spoken)));
         }
-        acts(ui, theme, keymap, mailbox, reader, drawn);
+        if held {
+            act(ui, theme, keymap, mailbox, reader, drawn, ACT_COUNT - 1);
+        } else {
+            acts(ui, theme, keymap, mailbox, reader, drawn);
+        }
     });
 }
 
@@ -528,105 +540,4 @@ fn holds(reader: &Reader, opened: &Opened) -> Option<(BarKind, String)> {
         }
         Content::Loading | Content::NotKept | Content::TooLarge | Content::Unreadable => None,
     }
-}
-
-/// Whether the pointer is over the `height` of `ui` to come.
-pub(super) fn pointer_near(ui: &Ui, height: f32) -> bool {
-    ui.rect_contains_pointer(Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), height)))
-}
-
-/// A link that is there for the keyboard and a screen reader all the time and shows when the pointer is `near` or it
-/// has the focus.
-pub(super) fn quiet(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, salt: (&str, u64), near: bool) -> egui::Response {
-    let focus = Id::unique("reader-quiet").with(salt);
-    let focused = ui.data(|data| data.get_temp::<bool>(focus)).unwrap_or(false);
-    let inner = ui.scope(|ui| {
-        if !near && !focused {
-            ui.multiply_opacity(0.0);
-        }
-        button::link(ui, theme, keymap, name)
-    });
-    let has_focus = inner.inner.has_focus();
-    ui.data_mut(|data| data.insert_temp(focus, has_focus));
-    inner.inner
-}
-
-/// What stands in place of the toolbar and the subject over a message the screener holds: the sender, their address,
-/// when their first mail came and how many wait. Details is quiet until the pointer is near.
-pub(super) fn sender_header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, id: u64, drawn: &mut Drawn) {
-    let p = &theme.palette;
-    let f = &theme.fonts;
-    let s = &theme.spacing;
-    let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return };
-    let theirs = || mailbox.messages().iter().filter(|other| other.address == row.address);
-    let first = theirs().filter_map(|other| other.date).min();
-    let waiting = mailbox.waiting().iter().find(|waiting| waiting.address == row.address).map_or(0, |waiting| waiting.messages.len());
-    let count = waiting.max(theirs().count());
-    let mut parts = vec![row.address.clone()];
-    if let Some(first) = first {
-        parts.push(tr!("first mail {when}", when = mailbox.short_date(first)));
-    }
-    parts.push(if count == 1 { tr!("1 message waiting").to_owned() } else { tr!("{count} messages waiting", count = count) });
-    let side = f.strong.line + f.caption.line;
-    let near = pointer_near(ui, side);
-    crate::draw::frame::beside(ui, theme, |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s3;
-            crate::component::avatar::avatar(ui, theme, &row.sender, &row.address, side);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                // A reader that fills the window has no list beside it to go back to.
-                if reader.full_width() && IconButton::new(IconId::Close, tr!("Leave full width")).show(ui, theme, keymap).clicked() {
-                    drawn.asked.push(Asked::FullWidth(false));
-                }
-                if quiet(ui, theme, keymap, tr!("Details"), ("details", id), near).clicked() {
-                    drawn.asked.push(Asked::Details(id));
-                }
-                ui.with_layout(Layout::top_down(Align::Min), |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    ui.add(egui::Label::new(RichText::new(&row.sender).font(f.strong.id()).color(p.ink)).truncate());
-                    ui.add(egui::Label::new(RichText::new(parts.join(" · ")).font(f.caption.id()).color(p.muted)).truncate());
-                });
-            });
-        });
-    });
-}
-
-/// The card over a message the screener holds: "Let <sender> in?", the groups to let them into (none chosen at first),
-/// Accept, Accept and open, and Block, with what Block does; then a line that says the message is only a preview.
-pub(super) fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id: u64, drawn: &mut Drawn) {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return };
-    let chosen_id = egui::Id::unique("screen-into").with(id);
-    let mut into = ui.data(|data| data.get_temp::<Option<GroupKind>>(chosen_id)).flatten();
-    crate::draw::invite::asking(ui, theme, |ui| {
-        ui.spacing_mut().item_spacing.y = s.s3;
-        let title = tr!("Let {sender} in?", sender = row.sender);
-        ui.add(egui::Label::new(RichText::new(title).font(theme.fonts.heading.id()).color(p.ink)).wrap());
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s1;
-            crate::component::label(ui, theme.fonts.label, tr!("Into"), p.muted);
-            for kind in GroupKind::ALL {
-                if pill(ui, theme, kind.text(), into == Some(kind)).clicked() {
-                    into = if into == Some(kind) { None } else { Some(kind) };
-                    ui.data_mut(|data| data.insert_temp(chosen_id, into));
-                }
-            }
-        });
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s2;
-            if TextButton::new(tr!("Accept")).primary().icon(IconId::Done).show(ui, theme, keymap).clicked() {
-                drawn.asked.push(Asked::Act(id, Act::Accept { group: into, open: false }));
-            }
-            if TextButton::new(tr!("Accept and open")).secondary().show(ui, theme, keymap).clicked() {
-                drawn.asked.push(Asked::Act(id, Act::Accept { group: into, open: true }));
-            }
-            if TextButton::new(tr!("Block")).danger().icon(IconId::Failed).show(ui, theme, keymap).clicked() {
-                drawn.asked.push(Asked::Act(id, Act::Block));
-            }
-        });
-        let note = tr!("Blocked mail never loads remote content and never notifies.");
-        ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(p.muted)).wrap());
-    });
-    ui.label(RichText::new(tr!("Preview · nothing is accepted yet")).font(theme.fonts.caption.id()).color(p.muted));
 }
