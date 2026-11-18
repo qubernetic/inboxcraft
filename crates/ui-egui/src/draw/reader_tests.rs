@@ -2171,6 +2171,22 @@ fn keeps_inside(harness: &Harness<'static, InboxApp>, left: f32, width: f32, at:
     }
 }
 
+/// The left and right of the let-in card round `question`: the `cyan_edge` stroke painted round it.
+fn card_edges(harness: &Harness<'static, InboxApp>, question: egui::Rect) -> (f32, f32) {
+    let edge = *crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance())).palette;
+    let mut found = None;
+    fn walk(shape: &egui::Shape, colour: egui::Color32, question: egui::Rect, found: &mut Option<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, colour, question, found)),
+            egui::Shape::Rect(rect) if rect.stroke.color == colour && rect.rect.contains_rect(question) => *found = Some(rect.rect),
+            _ => {}
+        }
+    }
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, edge.cyan_edge, question, &mut found));
+    let card = found.unwrap_or_else(|| panic!("no card round {question:?}"));
+    (card.left(), card.right())
+}
+
 #[test]
 fn the_reader_s_banners_and_cards_keep_inside_a_narrow_window() {
     for (width, percent) in [(1024.0, 100), (1024.0, 130), (1100.0, 100), (1100.0, 130)] {
@@ -2198,12 +2214,17 @@ fn the_reader_s_banners_and_cards_keep_inside_a_narrow_window() {
         settle(&mut held);
         let question = held.get_by_label("Let Harbour Swim Club in?").rect();
         keeps_inside(&held, question.left() - 20.0, width, &at("held"));
+        // The card's inner room: its left pad is where the question starts, and its right one mirrors it.
+        let card = card_edges(&held, question);
+        let inner = (card.0 + 16.0, card.1 - 16.0);
+        assert!((question.left() - inner.0).abs() <= 0.5, "the question stands at the card's pad: {question:?} {card:?}");
         for name in ["Accept", "Accept and reply", "Block"] {
             let rect = held.get_by_role_and_label(Role::Button, name).rect();
-            // The lists' 441 leave the reader 279 at 1024: at 130 % "Accept and reply" is wider than the card's room, and
-            // keeps its words whole on a line of its own, into the card's inner edge and never past the window.
-            let room = if (width, percent) == (1024.0, 130) { width - 20.0 } else { width - 40.0 };
-            assert!(rect.left() >= question.left() - 0.5 && rect.right() <= room + 0.5, "{name} at {rect:?}: {}", at("held"));
+            assert!(
+                rect.left() >= inner.0 - 0.5 && rect.right() <= inner.1 + 0.5,
+                "{name} at {rect:?} leaves the card's inner room {inner:?}: {}",
+                at("held")
+            );
         }
         // A note in the text's place.
         harness.state_mut().reader_mut().0.set_notice("Subject copied".to_owned());

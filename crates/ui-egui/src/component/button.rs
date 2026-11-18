@@ -187,13 +187,14 @@ pub struct TextButton<'a> {
     arrow: bool,
     key: bool,
     shown: Option<Shown>,
+    widest: Option<f32>,
 }
 
 impl<'a> TextButton<'a> {
     /// A plain button called `name`.
     #[must_use]
     pub fn new(name: &'a str) -> Self {
-        Self { name, icon: None, tone: Tone::Plain, action: None, note: None, enabled: true, arrow: false, key: false, shown: None }
+        Self { name, icon: None, tone: Tone::Plain, action: None, note: None, enabled: true, arrow: false, key: false, shown: None, widest: None }
     }
 
     /// The primary button: on the cyan fill.
@@ -282,6 +283,14 @@ impl<'a> TextButton<'a> {
         self
     }
 
+    /// At most `widest` points wide, its label cut with one `…` where the whole would not fit (its name is still heard
+    /// whole): a button in a room narrower than its words never runs past the room.
+    #[must_use]
+    pub fn within(mut self, widest: f32) -> Self {
+        self.widest = Some(widest);
+        self
+    }
+
     /// How wide it is drawn in `ui`, in points: what a row of buttons measures before it places them.
     #[must_use]
     pub fn width(&self, ui: &Ui, theme: &Theme, keymap: &Keymap) -> f32 {
@@ -296,16 +305,26 @@ impl<'a> TextButton<'a> {
         let key = action.filter(|_| self.key).and_then(|action| keymap.chip(ui.ctx(), action));
         let font = theme.fonts.button;
         // Laid out before the state is known: the colour is the painter's, given when it is painted.
-        let label = super::cut(ui, self.name, font, Color32::PLACEHOLDER, LABEL_WIDEST);
         let arrow = self.arrow.then(|| super::galley(ui, "→", font, Color32::PLACEHOLDER));
-        // A label cut at its widest takes all of it, as the design's does.
-        let label_width = if label.elided { LABEL_WIDEST } else { label.size().x.ceil() };
         let chip_state = match (enabled, self.tone) {
             (false, _) => ChipState::Disabled,
             (true, Tone::Primary) => ChipState::OnCyan,
             (true, _) => ChipState::Default,
         };
         let chip = key.map(|key| Chip::new(ui, theme, &key, chip_state));
+        // The label's room: its widest, or what `within` leaves it beside the other parts and the pads.
+        let others =
+            [self.icon.map(|_| theme.icon_side()), arrow.as_ref().map(|arrow| arrow.size().x.ceil()), chip.as_ref().map(|chip| chip.size().x)];
+        let beside = others.iter().flatten().map(|wide| wide + GAP).sum::<f32>();
+        let room = self
+            .widest
+            .filter(|widest| widest.is_finite())
+            .map_or(LABEL_WIDEST, |widest| LABEL_WIDEST.min(widest - beside - PAD * 2.0))
+            .floor()
+            .max(1.0);
+        let label = super::cut(ui, self.name, font, Color32::PLACEHOLDER, room);
+        // A label cut at its widest takes all of it, as the design's does.
+        let label_width = if label.elided { room } else { label.size().x.ceil() };
         let parts = [
             self.icon.map(|_| theme.icon_side()),
             Some(label_width),

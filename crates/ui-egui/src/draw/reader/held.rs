@@ -98,8 +98,14 @@ pub(super) fn let_in(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
             Some(kind) => tr!("Accept into {group}", group = kind.text()),
             None => tr!("Accept").to_owned(),
         };
-        let choices =
-            || vec![TextButton::new(&accept).primary(), TextButton::new(tr!("Accept and reply")).secondary(), TextButton::new(tr!("Block")).danger()];
+        // Each at most the card's inner width: a label wider than the card is cut inside its button, never past the card.
+        let choices = || {
+            vec![
+                TextButton::new(&accept).primary().within(room),
+                TextButton::new(tr!("Accept and reply")).secondary().within(room),
+                TextButton::new(tr!("Block")).danger().within(room),
+            ]
+        };
         let placed = button_lines(ui, theme, keymap, &choices(), room, CHOICE_GAP);
         let (_, place) = ui.allocate_space(vec2(room.max(1.0), placed.height));
         match show_lines(ui, theme, keymap, choices(), &placed, place, CHOICE_GAP) {
