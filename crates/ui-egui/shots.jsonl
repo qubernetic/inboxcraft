@@ -194,3 +194,5 @@
 {"out": "docs/images/one-pane-900-reader-dark.png", "mode": "dark", "size": [900, 700], "select": "Allotment rota for November"}
 {"out": "docs/images/one-pane-900-composer-light.png", "mode": "light", "size": [900, 700], "compose": "written"}
 {"out": "docs/images/one-pane-900-composer-dark.png", "mode": "dark", "size": [900, 700], "compose": "written"}
+{"out": "docs/images/one-pane-900-held-light.png", "mode": "light", "size": [900, 700], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/one-pane-900-held-dark.png", "mode": "dark", "size": [900, 700], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
