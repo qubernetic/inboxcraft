@@ -356,3 +356,24 @@ fn hostile_events_never_panic_and_their_text_stays_in_its_cell() {
         }
     }
 }
+
+#[test]
+fn a_key_shared_with_another_screen_s_action_works_on_each_screen() {
+    // ArrowDown is also the key of an action of the mail screen's list: the calendar keeps it, the mail keeps its own.
+    let mut harness = window(1.0, 100, View::Week);
+    let down = egui::KeyboardShortcut::new(egui::Modifiers::NONE, Key::ArrowDown);
+    harness.state_mut().keymap_mut().bind("ui.list.down", down);
+    assert_eq!(harness.state().keymap().shortcut(keymap::CALENDAR_DOWN), Some(down));
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert!(harness.state().calendar().picked().is_some(), "on the calendar ArrowDown picks an event");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Num1);
+    harness.run();
+    // The keyboard was on the calendar's event, gone with its screen.
+    harness.ctx.memory_mut(|memory| memory.focused().map(|focused| memory.surrender_focus(focused)));
+    harness.run();
+    let before = harness.state().mailbox().selected();
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert_ne!(harness.state().mailbox().selected(), before, "on the mail ArrowDown moves the list");
+}
