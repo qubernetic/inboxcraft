@@ -1488,9 +1488,13 @@ impl InboxApp {
                 })
             };
             (header, listed) = if self.reader.open_id().is_some() || docked {
+                // The composer in the reader's place keeps its least width (and the card's 8 beside it): in a narrow
+                // window the list gives way to it.
+                let widest = if docked { (ui.available_width() - compose::least_width(ui, &theme) - s.s2).max(1.0) } else { f32::INFINITY };
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
+                    .max_size(widest)
                     .show_separator_line(false)
                     .frame(around(left, half, gap))
                     .show(ui, |ui| list(ui, &mut layers))

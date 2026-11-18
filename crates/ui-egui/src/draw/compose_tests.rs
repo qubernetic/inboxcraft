@@ -1552,3 +1552,53 @@ fn attaching_a_file_coming_soon_is_drawn_in_muted_as_its_frame() {
         assert_eq!(icon_colours(&harness, crate::iconset::IconId::Attach), vec![muted]);
     }
 }
+
+/// The sample mail that can send, the composer open in the reader's place of a window `width` wide, text at `percent`,
+/// a recipient typed so Send can be pressed.
+fn composing_at(width: f32, percent: u16) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::new(sending_mailbox());
+    app.set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+    let mut harness = Harness::builder().with_size(vec2(width, 800.0)).with_max_steps(12).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    type_into(&mut harness, "To", "odile@example.org,");
+    harness.run();
+    harness
+}
+
+#[test]
+fn at_every_width_the_foot_s_controls_stand_apart_inside_the_composer_and_a_press_on_send_sends() {
+    for percent in [100, 130] {
+        for width in [720.0, 800.0, 830.0, 1024.0, 1100.0] {
+            let mut harness = composing_at(width, percent);
+            let composer = super::compose::drawn_rect(&harness.ctx).unwrap();
+            let send = rect_of(&harness, Role::Button, "Send");
+            let foot = |rect: &egui::Rect| (rect.center().y - send.center().y).abs() < 8.0;
+            let drawn: Vec<(&str, egui::Rect)> = ["Send", "Send later", "Templates", "Discard the draft", "Attach a file"]
+                .into_iter()
+                .filter_map(|label| harness.query_by_label(label).map(|node| (label, node.rect())))
+                .filter(|(_, rect)| foot(rect))
+                .collect();
+            assert!(drawn.iter().any(|(label, _)| *label == "Send later"), "{percent} {width}: the caret is drawn");
+            for (at, (label, rect)) in drawn.iter().enumerate() {
+                assert!(composer.contains_rect(*rect), "{percent} {width}: {label} {rect:?} outside the composer {composer:?}");
+                for (other, beside) in drawn.iter().skip(at + 1) {
+                    assert!(!rect.shrink(0.5).intersects(beside.shrink(0.5)), "{percent} {width}: {label} {rect:?} over {other} {beside:?}");
+                }
+            }
+            // A press anywhere on Send sends; it never throws the draft away.
+            for x in [send.left() + 1.0, send.center().x, send.right() - 1.0] {
+                let mut harness = composing_at(width, percent);
+                let at = egui::pos2(x, send.center().y);
+                for pressed in [true, false] {
+                    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+                    harness.run();
+                }
+                assert_ne!(harness.state().notice(), Some("Draft discarded"), "{percent} {width}: a press at {x} on {send:?}");
+                assert!(harness.state().composer().is_none(), "{percent} {width}: a press at {x} on {send:?} sent");
+            }
+            harness.run();
+        }
+    }
+}

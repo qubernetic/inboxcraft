@@ -173,6 +173,12 @@ fn drawn_id() -> Id {
 }
 
 /// Keeps where the composer is drawn in this pass, for [`has_keys`].
+/// The rect the composer was drawn in, in the last pass (for the tests).
+#[cfg(test)]
+pub(super) fn drawn_rect(ctx: &egui::Context) -> Option<Rect> {
+    ctx.data(|data| data.get_temp::<Drawn>(drawn_id())).map(|drawn| drawn.rect)
+}
+
 fn mark_drawn(ui: &Ui, rect: Rect) {
     let drawn = Drawn { layer: ui.layer_id(), rect, pass: ui.ctx().cumulative_pass_nr() };
     ui.ctx().data_mut(|data| data.insert_temp(drawn_id(), drawn));
@@ -583,9 +589,19 @@ fn send_label(mailbox: &Mailbox, composer: &Composer) -> (String, Option<String>
     }
 }
 
+/// The narrowest the composer gets in the reader's place, in points: its 40 beside, and in its foot Send with its
+/// shortest words, the caret of send later and Discard, 8 apart. The list beside it gives way to it.
+pub(super) fn least_width(ui: &Ui, theme: &Theme) -> f32 {
+    let s = &theme.spacing;
+    let words = galley(ui, tr!("Send"), theme.fonts.button, theme.palette.ink).size().x.ceil();
+    s.s10 * 2.0 + words + s.s3 * 2.0 + (s.s2 + control_side(theme)) * 2.0
+}
+
 /// The foot in `rect`: Send with its key, the caret of send later, why Send waits; Templates and Discard at the right
 /// end, attaching a file before them coming soon. Made in the order the keyboard walks it: Send, send later, Templates,
-/// Discard.
+/// Discard. Send and its caret are always drawn, Send's words cut to the room; as the room runs out the rest gives way
+/// in this order: attaching a file and its tag, Send's key chip (the key still sends), Templates, Discard. What gives
+/// way is not drawn and not reached by Tab: nothing stands over Send or outside `rect`.
 fn foot(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &Composer, rect: Rect, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     let s = &theme.spacing;
@@ -593,14 +609,21 @@ fn foot(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     let mut row = ui.new_child(UiBuilder::new().max_rect(rect).layout(Layout::left_to_right(Align::Center)));
     row.spacing_mut().item_spacing.x = s.s2;
     let (label, problem, waits) = send_label(mailbox, composer);
-    // Waiting, Send is the disabled button of its frames, without its key. In a pane too narrow for Send with its key,
-    // the caret, Templates and Discard on one line, the key's chip gives way (the key still sends).
+    // Waiting, Send is the disabled button of its frames, without its key.
     let chip = keymap
         .chip(ui.ctx(), keymap::SEND)
         .map_or(0.0, |key| crate::component::key::Chip::new(ui, theme, &key, crate::component::key::ChipState::OnCyan).size().x + s.s2);
-    let send_width = cut(ui, &label, theme.fonts.button, p.ink, SEND_WIDEST).size().x.ceil() + s.s3 * 2.0 + chip;
-    let fits = send_width + (s.s2 + side) * 3.0 + s.s2 <= rect.width();
-    let send = TextButton::new(&label).primary().action(keymap::SEND).key(problem.is_none() && fits);
+    let one = s.s2 + side;
+    // Send's words take the room beside the caret, never more than a text button's 240.
+    let widest = SEND_WIDEST.min((rect.width() - s.s3 * 2.0 - one).max(1.0));
+    let words = cut(ui, &label, theme.fonts.button, p.ink, widest);
+    let words = if words.elided { widest } else { words.size().x.ceil() };
+    // What is left beside Send and its caret; a width that is not a number leaves nothing.
+    let spare = rect.width() - (words + s.s3 * 2.0 + one);
+    let discards = spare >= one;
+    let templated = spare >= one * 2.0;
+    let keyed = templated && spare >= one * 2.0 + chip;
+    let send = TextButton::new(&label).primary().action(keymap::SEND).widest(widest).key(problem.is_none() && keyed);
     match &problem {
         Some(problem) => {
             send.unavailable(problem).show(&mut row, theme, keymap);
@@ -614,34 +637,57 @@ fn foot(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     later(&mut row, theme, keymap, mailbox, composer, asked);
     // Templates and Discard at the right end, then what comes soon before them; the reason fills what is between.
     let discard = Rect::from_min_size(pos2(rect.right() - side, rect.center().y - side / 2.0), vec2(side, side));
-    let template = discard.translate(vec2(-(side + s.s2), 0.0));
-    let attach = template.translate(vec2(-(side + s.s2), 0.0));
+    let template = discard.translate(vec2(-one, 0.0));
+    let attach = template.translate(vec2(-one, 0.0));
+    let end = if templated {
+        template.left()
+    } else if discards {
+        discard.left()
+    } else {
+        rect.right()
+    };
     let reason_left = row.cursor().left();
     if let Some(problem) = problem {
         let tag_room = s.s10 * 2.0 + s.s2;
-        let reason = Rect::from_min_max(pos2(reason_left, rect.top()), pos2((attach.left() - tag_room).max(reason_left + 1.0), rect.bottom()));
+        let right = if keyed { attach.left() - tag_room } else { end - s.s2 };
+        let reason = Rect::from_min_max(pos2(reason_left, rect.top()), pos2(right.max(reason_left), rect.bottom()));
         let colour = if waits { p.muted } else { p.minus };
         let mut x = reason.left() + s.s1;
         let mid = reason.center().y;
-        let painter = row.painter();
         if !waits {
-            let mark = theme.boxes().icon;
-            crate::iconset::paint_glyph(painter, Rect::from_min_size(pos2(x, mid - mark / 2.0), vec2(mark, mark)), WARNING, p.minus);
             // The frames' gap of 6 between the warning and the words.
-            x += mark + s.s1 + 2.0;
+            x += theme.boxes().icon + s.s1 + 2.0;
         }
-        let text = cut(&row, &problem, theme.fonts.body, colour, (reason.right() - x).max(1.0));
-        let response = row.interact(reason, Id::unique("compose-why"), Sense::hover());
-        response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &problem));
-        paint::run_at(row.painter(), pos2(x, mid - text.size().y / 2.0), text, colour);
+        // Too narrow for a few letters, the reason is left to Send's tooltip.
+        if reason.right() - x >= s.s4 {
+            let painter = row.painter();
+            if !waits {
+                let mark = theme.boxes().icon;
+                let at = pos2(reason.left() + s.s1, mid - mark / 2.0);
+                crate::iconset::paint_glyph(painter, Rect::from_min_size(at, vec2(mark, mark)), WARNING, p.minus);
+            }
+            let text = cut(&row, &problem, theme.fonts.body, colour, reason.right() - x);
+            let response = row.interact(reason, Id::unique("compose-why"), Sense::hover());
+            response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &problem));
+            paint::run_at(row.painter(), pos2(x, mid - text.size().y / 2.0), text, colour);
+        }
     }
-    ui.scope_builder(UiBuilder::new().max_rect(template), |ui| templates(ui, theme, keymap, composer, asked));
-    if ui
-        .scope_builder(UiBuilder::new().max_rect(discard), |ui| IconButton::new(IconId::Delete, tr!("Discard the draft")).show(ui, theme, keymap))
-        .inner
-        .clicked()
+    if templated {
+        ui.scope_builder(UiBuilder::new().max_rect(template), |ui| templates(ui, theme, keymap, composer, asked));
+    } else {
+        // Its menu goes with it.
+        popup::set_open(ui.ctx(), templates_menu(), false);
+    }
+    if discards
+        && ui
+            .scope_builder(UiBuilder::new().max_rect(discard), |ui| IconButton::new(IconId::Delete, tr!("Discard the draft")).show(ui, theme, keymap))
+            .inner
+            .clicked()
     {
         asked.push(Asked::Discard);
+    }
+    if !keyed {
+        return;
     }
     // Coming soon: attaching a file, its tag before it, between the caret (8 clear of it) and Templates. In a narrow
     // pane the tag gives way, then the button: nothing is drawn through Send or its caret.

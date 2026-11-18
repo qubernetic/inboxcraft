@@ -178,13 +178,25 @@ pub struct TextButton<'a> {
     arrow: bool,
     key: bool,
     shown: Option<Shown>,
+    widest: f32,
 }
 
 impl<'a> TextButton<'a> {
     /// A plain button called `name`.
     #[must_use]
     pub fn new(name: &'a str) -> Self {
-        Self { name, icon: None, tone: Tone::Plain, action: None, note: None, enabled: true, arrow: false, key: false, shown: None }
+        Self {
+            name,
+            icon: None,
+            tone: Tone::Plain,
+            action: None,
+            note: None,
+            enabled: true,
+            arrow: false,
+            key: false,
+            shown: None,
+            widest: LABEL_WIDEST,
+        }
     }
 
     /// The primary button: on the cyan fill.
@@ -245,6 +257,16 @@ impl<'a> TextButton<'a> {
         self
     }
 
+    /// The widest its label gets before it ends with an ellipsis, in points: at most the 240 of every text button, at
+    /// least 1 (a value that is not a number keeps the 240).
+    #[must_use]
+    pub fn widest(mut self, points: f32) -> Self {
+        if points.is_finite() {
+            self.widest = points.clamp(1.0, LABEL_WIDEST);
+        }
+        self
+    }
+
     /// The action it runs, whose key its tooltip shows.
     #[must_use]
     pub fn action(mut self, action: &'a str) -> Self {
@@ -286,10 +308,10 @@ impl<'a> TextButton<'a> {
         let key = action.filter(|_| self.key).and_then(|action| keymap.chip(ui.ctx(), action));
         let font = theme.fonts.button;
         // Laid out before the state is known: the colour is the painter's, given when it is painted.
-        let label = super::cut(ui, self.name, font, Color32::PLACEHOLDER, LABEL_WIDEST);
+        let label = super::cut(ui, self.name, font, Color32::PLACEHOLDER, self.widest);
         let arrow = self.arrow.then(|| super::galley(ui, "→", font, Color32::PLACEHOLDER));
         // A label cut at its widest takes all of it, as the design's does.
-        let label_width = if label.elided { LABEL_WIDEST } else { label.size().x.ceil() };
+        let label_width = if label.elided { self.widest } else { label.size().x.ceil() };
         let icon_side = theme.icon_side();
         let chip_state = match (enabled, self.tone) {
             (false, _) => ChipState::Disabled,
