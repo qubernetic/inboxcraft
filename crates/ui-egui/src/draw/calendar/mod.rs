@@ -89,8 +89,8 @@ pub(super) enum Asked {
     Save,
     /// The editor's Cancel: what was typed is thrown away.
     Cancel,
-    /// Esc or a press outside the editor: it closes when nothing was typed, else it asks once more.
-    Leave,
+    /// Esc or a press outside the editor: it closes when nothing was typed, else it says how to keep the typing.
+    Leave(crate::component::popup::Leave),
 }
 
 /// The calendar's fixed heights and widths at the text scale (each through [`Theme::size`], as the design's 130 %
@@ -477,9 +477,10 @@ fn stroke(painter: &egui::Painter, rect: Rect, line: f32, colour: Color32) {
 }
 
 /// The event editor over the screen while it is open, hanging from New event; what was pressed in it.
-pub(super) fn editor(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, calendar: &mut Calendar) -> Vec<Asked> {
+/// While `quiet` another surface lies over it and has the keys.
+pub(super) fn editor(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, calendar: &mut Calendar, quiet: bool) -> Vec<Asked> {
     let anchor = ctx.data(|data| data.get_temp::<Rect>(new_event_id()));
-    calendar.editor_mut().map(|editor| editor::show(ctx, theme, keymap, editor, anchor)).unwrap_or_default()
+    calendar.editor_mut().map(|editor| editor::show(ctx, theme, keymap, editor, anchor, quiet)).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -488,3 +489,7 @@ mod tests;
 #[cfg(test)]
 #[path = "grid_screen_tests.rs"]
 mod grid_screen_tests;
+
+#[cfg(test)]
+#[path = "leave_tests.rs"]
+mod leave_tests;

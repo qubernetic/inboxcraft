@@ -762,6 +762,9 @@ impl Calendar {
     /// Opens the editor on a new event on the day the view is on, in the first calendar shown (the first of all when
     /// every one is hidden). Without a calendar nothing opens.
     pub fn new_event(&mut self) {
+        if self.keeps_typing() {
+            return;
+        }
         let Some(first) = self.calendars.iter().find(|row| self.is_shown(row.id)).or_else(|| self.calendars.first()) else { return };
         let choices = self.calendars.iter().map(|row| (row.id, row.name.clone())).collect();
         self.editor = Some(Editor::new_event(first.id, self.focus(), choices));
@@ -769,6 +772,9 @@ impl Calendar {
 
     /// Opens the editor on the picked event; nothing opens without one.
     pub fn edit_picked(&mut self) {
+        if self.keeps_typing() {
+            return;
+        }
         if let Some(event) = self.picked() {
             self.editor = Some(Editor::edit(event));
         }
@@ -779,12 +785,24 @@ impl Calendar {
         self.editor = None;
     }
 
-    /// Esc or a press outside the editor: it closes when nothing was typed, or when it already asked once; else it
-    /// stays open and says that once more throws the typing away. What was typed is never lost without a word.
-    pub fn leave_editor(&mut self) {
+    /// Esc (`escape`) or a press outside the editor. With nothing typed it closes. With typing, the typing is thrown
+    /// away only by an act that says so: a second Esc with nothing changed since the editor said so; a press outside
+    /// never closes it, however often, and says how to keep or throw away the typing.
+    pub fn leave_editor(&mut self, escape: bool) {
         match self.editor.as_mut() {
-            Some(editor) if editor.edited() && !editor.warned() => editor.warn(),
+            Some(editor) if editor.edited() && !(escape && editor.warned()) => editor.warn(),
             _ => self.editor = None,
+        }
+    }
+
+    /// Whether an open editor holds typing that another editor would replace: it then stays, and says so.
+    fn keeps_typing(&mut self) -> bool {
+        match self.editor.as_mut() {
+            Some(editor) if editor.edited() => {
+                editor.warn();
+                true
+            }
+            _ => false,
         }
     }
 
@@ -823,7 +841,10 @@ impl Calendar {
         match mailbox.event_act("event.delete", &json!({ "id": id }), tr!("Event deleted")) {
             Ok(_) => {
                 self.picked = None;
-                self.editor = None;
+                // What was typed in the editor stays; an editor with nothing typed goes with the event.
+                if !self.editor.as_ref().is_some_and(Editor::edited) {
+                    self.editor = None;
+                }
                 self.refresh(mailbox);
             }
             Err(error) => mailbox.fail(error),

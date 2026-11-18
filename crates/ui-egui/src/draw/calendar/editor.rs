@@ -7,7 +7,8 @@
 //! series (coming soon), the calendar of a new event as a select, the guests' addresses, and for an edit of an event
 //! with guests the question whether to tell them; then why the last save was refused, and Cancel and Save. The fields
 //! are the project's field components with their input caps. Esc or a press outside comes back as [`Asked::Leave`]:
-//! the editor closes when nothing was typed, else it says once that a second Esc throws the typing away.
+//! the editor closes when nothing was typed; else it stays and says how to keep or throw away the typing (Save; Cancel
+//! or a second Esc), and a press outside never closes it.
 
 use egui::{Context, Id, Rect, Response, Ui, pos2, vec2};
 
@@ -44,22 +45,23 @@ fn float_id() -> Id {
     Id::unique("event-editor")
 }
 
-/// The editor hanging from `new_event` (New event's rect, if it was drawn); what was pressed in it.
-pub(in crate::draw) fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, editor: &mut Editor, new_event: Option<Rect>) -> Vec<Asked> {
+/// The editor hanging from `new_event` (New event's rect, if it was drawn); what was pressed in it. While `quiet`
+/// another surface lies over it (the palette, the settings sheet) and has the keys and the pointer.
+pub(in crate::draw) fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, editor: &mut Editor, new_event: Option<Rect>, quiet: bool) -> Vec<Asked> {
     let screen = ctx.content_rect();
     let button = new_event.unwrap_or_else(|| Rect::from_min_size(pos2(screen.right() - 16.0, screen.top() + 48.0), vec2(0.0, 0.0)));
     // Its right edge on New event's: the float hangs from a place as wide as it, ending where the button ends.
     let anchor = Rect::from_min_max(pos2(button.right() - WIDTH, button.top()), button.max);
     let float = Float { id: float_id(), anchor, width: WIDTH, returns_to: Id::NULL };
     let mut asked = Vec::new();
-    let shown = popup::float(ctx, theme, &float, |ui| {
+    let shown = popup::held(ctx, theme, &float, quiet, |ui| {
         egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 16, top: 12, bottom: 16 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, ROWS);
             form(ui, theme, keymap, editor, &mut asked);
         });
     });
-    if shown.is_none() {
-        asked.push(Asked::Leave);
+    if let Some((_, Some(leave))) = shown {
+        asked.push(Asked::Leave(leave));
     }
     asked
 }

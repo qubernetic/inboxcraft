@@ -151,10 +151,40 @@ fn sane(width: f32) -> f32 {
     if width.is_finite() { width.clamp(32.0, 2048.0) } else { 240.0 }
 }
 
+/// How a person asked a [`held`] float to close.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Leave {
+    /// `Esc`.
+    Escape,
+    /// A press outside it.
+    Beside,
+}
+
+/// Whether a float closes itself on `Esc` and a press outside it, or its caller decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// It closes itself.
+    Closes,
+    /// The caller decides; while `quiet` another surface lies over it and has the keys and the pointer.
+    Held { quiet: bool },
+}
+
 /// Shows `float` with `add` drawing its rows, as the module says; what `add` gave, or `None` once `Esc` or a press
 /// outside it closed it (the caller then forgets it is open). The first frame it shows, the keyboard leaves the
 /// control it opened from: the first `Tab` lands on its first row.
 pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+    shown(ctx, theme, float, Mode::Closes, add).map(|(inner, _)| inner)
+}
+
+/// A float that holds what a person typed (the event editor): `Esc` and a press outside it close nothing, they come
+/// back as [`Leave`] and the caller decides. It closes when the caller stops drawing it, and the caller gives the
+/// keyboard back. While `quiet` another surface lies over it (the palette, the settings sheet): it takes neither key
+/// nor press, and is not modal, so that surface has them. What `add` gave (always there), and how it was asked to close.
+pub fn held<R>(ctx: &Context, theme: &Theme, float: &Float, quiet: bool, add: impl FnOnce(&mut Ui) -> R) -> Option<(R, Option<Leave>)> {
+    shown(ctx, theme, float, Mode::Held { quiet }, add)
+}
+
+fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl FnOnce(&mut Ui) -> R) -> Option<(R, Option<Leave>)> {
     let key = float.id.with("float-kept");
     let pass = ctx.cumulative_pass_nr();
     let now = ctx.input(|input| input.time);
@@ -167,13 +197,24 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
     // Only the float on top answers Esc and a press outside it: one opened from it closes first.
     let mine = LayerId::new(Order::Foreground, float.id);
     let on_top = ctx.memory(|memory| memory.top_modal_layer()).is_none_or(|top| top == mine);
-    if !opening && on_top {
+    let quiet = mode == Mode::Held { quiet: true };
+    let mut leave = None;
+    if !opening && on_top && !quiet {
         let rect = kept.map(|kept| kept.rect);
         let (escaped, beside) = ctx.input_mut(|input| {
             let beside = input.pointer.any_pressed() && input.pointer.interact_pos().is_some_and(|at| rect.is_some_and(|rect| !rect.contains(at)));
             (input.consume_key(Modifiers::NONE, Key::Escape), beside)
         });
-        if escaped || beside {
+        if mode != Mode::Closes {
+            // Held: the caller decides, and the float stays as it is (no second unfolding).
+            leave = if escaped {
+                Some(Leave::Escape)
+            } else if beside {
+                Some(Leave::Beside)
+            } else {
+                None
+            };
+        } else if escaped || beside {
             ctx.data_mut(|data| data.remove::<Kept>(key));
             if beside {
                 // The press that closed it may come up on the control it opened from: that is not a press to open it.
@@ -199,10 +240,12 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
     if let Some(parent) = parent.filter(|parent| *parent != mine) {
         ctx.memory_mut(|memory| memory.areas_mut().set_sublayer(parent, mine));
     }
-    // Only the float takes the keyboard and the pointer while it is open: Tab goes round its rows.
-    ctx.memory_mut(|memory| memory.set_modal_layer(mine));
-    // Drawn after the float it may be opened from, it stands over it: a float opened from another is on top.
-    ctx.move_to_top(mine);
+    if !quiet {
+        // Only the float takes the keyboard and the pointer while it is open: Tab goes round its rows.
+        ctx.memory_mut(|memory| memory.set_modal_layer(mine));
+        // Drawn after the float it may be opened from, it stands over it: a float opened from another is on top.
+        ctx.move_to_top(mine);
+    }
     let shown = Area::new(float.id).order(Order::Foreground).pivot(Align2::LEFT_TOP).fixed_pos(at).fade_in(false).show(ctx, |ui| {
         // The float whose rows are drawn now: one opened from them stands over it.
         ctx.data_mut(|data| data.insert_temp(showing_id(), mine));
@@ -241,7 +284,7 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
             ctx.memory_mut(|memory| memory.request_focus(*to));
         }
     }
-    Some(inner)
+    Some((inner, leave))
 }
 
 /// Draws a float `width` points wide into `ui` with `add` drawing its rows, 1 px in from its edge.

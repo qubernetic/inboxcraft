@@ -25,6 +25,11 @@ pub const MAX_FIELD: usize = 1000;
 /// The longest guest list typed, in characters.
 pub const MAX_GUESTS_TEXT: usize = 8000;
 
+/// What the editor says when Esc or a press outside would lose what was typed: every way on from there.
+fn warning() -> &'static str {
+    tr!("What you typed is not saved. Save keeps it; Cancel, or Esc again, throws it away.")
+}
+
 /// A repeat preset in words, on its pill: `Never`, `Weekly`; `Custom` for a repeat the presets do not name.
 #[must_use]
 pub fn repeat_text(id: &str) -> &'static str {
@@ -78,8 +83,9 @@ pub struct Editor {
     problem: Option<String>,
     /// The list of choices open in the form, when one is.
     menu: Option<Menu>,
-    /// Whether Esc or a press outside already asked once to throw away what was typed.
-    warned: bool,
+    /// The form and the guests' answer as they were when Esc asked whether to throw the typing away: a second Esc with
+    /// nothing changed since throws it away; any change asks again.
+    warned: Option<(Form, bool)>,
 }
 
 /// A list of choices of the form that opens over it.
@@ -107,7 +113,7 @@ impl Editor {
             repeat: REPEATS[0].to_owned(),
             guests: String::new(),
         };
-        Self { id: None, was: form.clone(), form, choices, notify: false, problem: None, menu: None, warned: false }
+        Self { id: None, was: form.clone(), form, choices, notify: false, problem: None, menu: None, warned: None }
     }
 
     /// The occurrence `event` to edit: its times as the screen shows them.
@@ -126,7 +132,7 @@ impl Editor {
             repeat: event.repeat.clone().unwrap_or_else(|| REPEATS[0].to_owned()),
             guests: addresses.join(", "),
         };
-        Self { id: Some(event.id), was: form.clone(), form, choices: Vec::new(), notify: false, problem: None, menu: None, warned: false }
+        Self { id: Some(event.id), was: form.clone(), form, choices: Vec::new(), notify: false, problem: None, menu: None, warned: None }
     }
 
     /// The list of choices open in the form, when one is.
@@ -213,7 +219,7 @@ impl Editor {
     /// Why the last save was refused.
     #[must_use]
     pub fn problem(&self) -> Option<&str> {
-        self.problem.as_deref()
+        if self.warned() { Some(warning()) } else { self.problem.as_deref() }
     }
 
     /// Whether anything was typed or changed since the editor opened.
@@ -222,16 +228,18 @@ impl Editor {
         self.form != self.was
     }
 
-    /// Whether Esc or a press outside already asked once to throw away what was typed.
+    /// Whether the editor said that what was typed is not saved, and nothing changed since: a second Esc now throws
+    /// the typing away.
     #[must_use]
     pub fn warned(&self) -> bool {
-        self.warned
+        self.warned.as_ref().is_some_and(|(form, notify)| *form == self.form && *notify == self.notify)
     }
 
-    /// Esc or a press outside with something typed: the editor stays open and says that once more throws it away.
+    /// Esc or a press outside with something typed: the editor stays open and says how to keep or throw away the
+    /// typing. The warning holds until the form changes.
     pub(crate) fn warn(&mut self) {
-        self.warned = true;
-        self.problem = Some(tr!("What you typed is not saved. Esc again throws it away; Save keeps it.").to_owned());
+        self.warned = Some((self.form.clone(), self.notify));
+        self.problem = None;
     }
 
     /// The save was refused for `why`: the editor stays open and says so.

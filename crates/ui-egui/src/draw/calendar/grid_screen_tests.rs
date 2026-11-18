@@ -254,7 +254,7 @@ fn escape_in_the_editor_never_throws_typing_away_without_a_word() {
     harness.run();
     let editor = harness.state().calendar().editor();
     assert!(editor.is_some_and(|editor| editor.form().summary == "Kiln"), "the first Esc keeps the typing");
-    harness.get_by_label("What you typed is not saved. Esc again throws it away; Save keeps it.");
+    harness.get_by_label("What you typed is not saved. Save keeps it; Cancel, or Esc again, throws it away.");
     harness.key_press(Key::Escape);
     harness.run();
     assert!(harness.state().calendar().editor().is_none(), "the second Esc closes it");

@@ -619,7 +619,7 @@ impl InboxApp {
                 calendar::Asked::Delete => calendar.delete_picked(mailbox),
                 calendar::Asked::Save => calendar.save(mailbox),
                 calendar::Asked::Cancel => calendar.close_editor(),
-                calendar::Asked::Leave => calendar.leave_editor(),
+                calendar::Asked::Leave(leave) => calendar.leave_editor(leave == crate::component::popup::Leave::Escape),
                 calendar::Asked::More(day) => calendar.set_more(day),
                 calendar::Asked::PickDay(day) => calendar.pick_day(Some(day)),
             }
@@ -1433,7 +1433,7 @@ impl InboxApp {
         }
         layers.finish(ui.painter(), &theme);
         if self.screen == Screen::Calendar {
-            on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar));
+            on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, false));
         }
         if setting {
             changed = self.settings_sheet(ui.ctx(), &theme);
