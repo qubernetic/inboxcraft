@@ -213,4 +213,23 @@ fn a_keymap_kept_before_the_calendar_s_keys_still_loads() {
     }
     // Kept and read back, the defaults with their shared keys stay as they were.
     assert_eq!(Keymap::from_value(&Keymap::default().to_value()), Keymap::default());
+    // A window action kept on what is now a calendar key: the scopes meet, so the window's action keeps the key the
+    // owner gave it and the calendar's action loses its default; the other calendar keys keep theirs.
+    let (down, enter) = (KeyboardShortcut::new(Modifiers::NONE, Key::ArrowDown), KeyboardShortcut::new(Modifiers::NONE, Key::Enter));
+    let read = Keymap::from_value(&serde_json::json!({ "keys": { FIND: "ArrowDown", DONE: "Enter" } }));
+    assert_eq!((read.shortcut(FIND), read.shortcut(DONE)), (Some(down), Some(enter)));
+    assert_eq!(read.shortcut(super::CALENDAR_DOWN), None, "one key runs one action where the window's and the calendar's meet");
+    assert_eq!(read.shortcut(super::CALENDAR_OPEN), None);
+    assert_eq!(read.shortcut(super::CALENDAR_UP), Keymap::default().shortcut(super::CALENDAR_UP));
+    // Whatever is kept, after loading no two actions whose scopes meet share a key.
+    let every: serde_json::Map<String, serde_json::Value> = actions().into_iter().map(|action| (action.id.to_owned(), "ArrowDown".into())).collect();
+    for kept in [before, serde_json::json!({ "keys": { FIND: "ArrowDown", DONE: "Enter" } }), serde_json::json!({ "keys": every })] {
+        let read = Keymap::from_value(&kept);
+        for a in actions() {
+            for b in actions() {
+                let shared = a.id != b.id && read.shortcut(a.id).is_some() && read.shortcut(a.id) == read.shortcut(b.id);
+                assert!(!(shared && super::scope(a.id).meets(super::scope(b.id))), "{} and {} share a key in scopes that meet", a.id, b.id);
+            }
+        }
+    }
 }
