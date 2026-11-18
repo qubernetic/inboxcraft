@@ -136,6 +136,30 @@ fn the_agenda_s_rows_run_the_view_s_whole_width_under_the_scroll_bar() {
 }
 
 #[test]
+fn the_hours_draw_every_day_line_the_last_under_the_scroll_bar() {
+    let p = Palette::of(Mode::Dark);
+    for (view, days) in [(View::Week, 7), (View::Day, 1)] {
+        let harness = window(view);
+        // Down the hours: the gutter's line and one after each day, the last (the frame's x 940) too.
+        let mut lefts: Vec<f32> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                // What is in sight: the part of the line inside its clip.
+                egui::Shape::Rect(rect) if rect.fill == p.panel_line => Some(rect.rect.intersect(clipped.clip_rect)),
+                _ => None,
+            })
+            .filter(|rect| rect.width() > 0.0 && rect.width() <= 1.0 && rect.height() > 300.0)
+            .map(|rect| rect.left())
+            .collect();
+        lefts.sort_by(f32::total_cmp);
+        lefts.dedup();
+        assert_eq!(lefts.len(), days + 1, "{view:?}: {lefts:?}");
+    }
+}
+
+#[test]
 fn the_day_s_float_counts_its_events_with_the_number_alone() {
     let mut harness = window(View::Month);
     let thursday = Day::new(2026, 11, 5).unwrap();

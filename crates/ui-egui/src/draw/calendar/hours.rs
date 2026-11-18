@@ -117,7 +117,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
             scroll = scroll.vertical_scroll_offset(f32::from(earliest) * z.hour);
             ui.ctx().data_mut(|data| data.insert_temp(scrolled, true));
         }
-        crate::component::scroll::show(ui, theme, scroll, |ui| {
+        crate::component::scroll::show_over(ui, theme, scroll, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             let (content, _) = ui.allocate_exact_size(vec2(rect.width(), z.hour * 24.0 + line), Sense::hover());
             let top = content.top();
