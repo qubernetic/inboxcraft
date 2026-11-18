@@ -1550,6 +1550,23 @@ fn tab_onto_rows_shows_their_messages_unread_and_enter_or_a_press_reads_them() {
     harness.run();
     assert_eq!(harness.state().mailbox().selected(), Some(first_unread));
     assert!(seen(&harness, first_unread), "J reads the row it moves to");
+    // And the row a key leaves, which only took the focus, stays unread: the focus never read it.
+    let left = order[order.len() - 1];
+    harness.state_mut().mailbox_mut().start(left, crate::mailbox::Act::Unread);
+    harness.run();
+    assert!(!seen(&harness, left), "marked unread again");
+    let above = order[order.iter().position(|id| *id == left).unwrap() - 1];
+    let subject = label(&harness, left);
+    harness.query_all_by_label_contains(&subject).next().unwrap().focus();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().reader().open_id(), Some(left));
+    assert!(!seen(&harness, left), "focus alone left it unread");
+    harness.key_press(Key::K);
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), Some(above));
+    assert!(!seen(&harness, left), "K moved on: the row it left is still unread");
 }
 
 /// The row of the selected message has the keyboard's focus.
@@ -2432,19 +2449,34 @@ fn a_rows_menu_never_lingers_away_from_its_row() {
     harness.run();
     assert!(row_rect(&harness, keyed).is_none(), "the row is no longer built");
     assert!(!open(&harness), "its menu closed with it");
+    // Another row pressed while the first is away, then the first scrolls back: its menu's end gives the focus to
+    // nothing, and the reader keeps the row pressed.
+    let order = super::list::order(&harness.ctx);
+    let other = *order.iter().find(|id| in_sight(&harness, **id)).unwrap();
+    harness.get_by_label(&row_label(&harness, other)).click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), Some(other));
     wheel(&mut harness, -8000.0);
     harness.run();
-    assert!(row_rect(&harness, keyed).is_some(), "the row is back");
+    harness.run();
+    assert!(row_rect(&harness, keyed).is_some(), "the first row is back");
     assert!(!open(&harness), "and its menu does not come back");
-    // Asked for while the keyed row is out of sight: nothing opens, then or when the row comes back.
-    wheel(&mut harness, 4000.0);
-    harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
+    assert_eq!(harness.state().mailbox().selected(), Some(other), "the menu's end changed nothing the reader shows");
+    assert_eq!(harness.state().reader().open_id(), Some(other));
+    // Asked for a message gone from the list: nothing opens, then or when it comes back.
+    let rows_before: Vec<crate::mailbox::MessageRow> = harness.state().mailbox().messages().to_vec();
+    let gone = keyed;
+    let rest: Vec<crate::mailbox::MessageRow> = rows_before.iter().filter(|row| row.id != gone).cloned().collect();
+    harness.state_mut().mailbox_mut().set_rows(rest);
+    harness.run();
+    super::list::ask_menu(&harness.ctx, gone);
     harness.run();
     harness.run();
     assert!(!open(&harness), "no row took the ask");
-    wheel(&mut harness, -8000.0);
+    harness.state_mut().mailbox_mut().set_rows(rows_before);
     harness.run();
-    assert!(row_rect(&harness, keyed).is_some());
+    harness.run();
+    assert!(row_rect(&harness, gone).is_some(), "its row is back");
     assert!(!open(&harness), "the ask did not linger until the row came back");
     // Open, then the message goes: the menu closes.
     harness.state_mut().mailbox_mut().select_keyed(keyed);
@@ -2458,6 +2490,32 @@ fn a_rows_menu_never_lingers_away_from_its_row() {
     harness.run();
     harness.run();
     assert!(!open(&harness), "the menu of a message gone closes");
+}
+
+/// What a screen reader says for message `id`'s row.
+fn row_label(harness: &Harness<'static, InboxApp>, id: u64) -> String {
+    let mailbox = harness.state().mailbox();
+    mailbox.messages().iter().find(|row| row.id == id).map(|row| mailbox.spoken(row)).unwrap()
+}
+
+#[test]
+fn shift_f10_on_a_keyed_row_out_of_sight_brings_it_into_sight_and_opens_its_menu() {
+    let mut harness = ten_thousand(InboxView::List);
+    harness.key_press(Key::J);
+    harness.run();
+    let keyed = harness.state().mailbox().selected().unwrap();
+    wheel(&mut harness, 4000.0);
+    harness.run();
+    assert!(!in_sight(&harness, keyed), "scrolled away");
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
+    harness.run();
+    harness.run();
+    assert!(in_sight(&harness, keyed), "the row comes into sight");
+    assert!(egui::Popup::is_any_open(&harness.ctx), "and its menu opens at it");
+    let row = row_rect(&harness, keyed).unwrap();
+    let first = harness.get_by_role_and_label(Role::MenuItemRadio, "People").rect();
+    assert!(first.top() >= row.bottom() - 1.0, "under the row: {first:?} {row:?}");
+    assert_eq!(harness.state().mailbox().selected(), Some(keyed), "the keyed row stays the keyed one");
 }
 
 #[test]

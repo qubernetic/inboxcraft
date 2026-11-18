@@ -425,7 +425,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     keep_arrows(ui, response);
     let mut acted = drawn.acted.and_then(|index| act(message, index));
     if message.group.is_some() {
-        acted = acted.or(menu(ui, theme, response, message));
+        acted = acted.or(menu(ui, theme, response, message, selected));
     }
     Drawn { clicked: response.clicked(), acted, focused: response.has_focus(), gained: response.gained_focus() }
 }
@@ -551,41 +551,60 @@ fn menu_asked_id() -> Id {
     Id::unique("list-menu-asked")
 }
 
-/// Asks for the group menu of message `id`'s row (`Shift F10`, the Menu key): its row opens it when drawn.
+/// Asks for the group menu of message `id`'s row (`Shift F10`, the Menu key): the list brings the row into sight
+/// and the row opens it when drawn.
 pub(super) fn ask_menu(ctx: &egui::Context, id: u64) {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data_mut(|data| data.insert_temp(menu_asked_id(), (id, pass)));
+    ctx.data_mut(|data| {
+        data.insert_temp(menu_asked_id(), (id, pass));
+        data.insert_temp(bring_id(), id);
+    });
+}
+
+/// Where the row the list must bring into sight in its next pass is kept (a menu asked for a row out of sight).
+fn bring_id() -> Id {
+    Id::unique("list-bring-into-sight")
+}
+
+/// Where the menu the keyboard opened is kept: the message whose row asked for it, and the popup.
+fn by_keys_id() -> Id {
+    Id::unique("list-menu-by-keys")
 }
 
 /// Settles the rows' menus after a pass: an ask ([`ask_menu`]) no row took in a whole pass is dropped (its row was not
-/// drawn: out of sight, or its message gone), so it never opens later, away from the moment it was asked for. A menu
-/// already open whose row is not drawn in a pass is closed by egui, as every popup not shown.
+/// drawn: its message gone), so it never opens later, away from the moment it was asked for; a menu the keyboard
+/// opened that is no longer open has ended, whatever closed it (a menu whose row is not drawn is closed by egui, as
+/// every popup not shown), so it gives the focus back to nothing later.
 pub(super) fn settle_menus(ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
     if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_asked_id())).is_some_and(|(_, at)| at < pass) {
         ctx.data_mut(|data| data.remove::<(u64, u64)>(menu_asked_id()));
     }
+    if ctx.data(|data| data.get_temp::<(u64, Id)>(by_keys_id())).is_some_and(|(_, popup)| !Popup::is_id_open(ctx, popup)) {
+        ctx.data_mut(|data| data.remove::<(u64, Id)>(by_keys_id()));
+    }
 }
 
 /// The group menu of `message`'s row `response`: by a right click at the pointer, or asked for by the keyboard
-/// ([`ask_menu`]) under the row, its first choice focused, the focus back on the row once it closes. The act chosen.
-fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow) -> Option<Act> {
+/// ([`ask_menu`]) under the row, its first choice focused. A menu the keyboard opened gives the focus back to its row
+/// when it closes, only while that row is still the `keyed` one and in sight: a menu closing never changes the message
+/// the reader shows. The act chosen.
+fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow, keyed: bool) -> Option<Act> {
     let ctx = ui.ctx().clone();
     let popup_id = Popup::default_response_id(response);
-    let by_keys_id = popup_id.with("by-keys");
     let first_id = popup_id.with("focus-first");
     if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_asked_id())).is_some_and(|(id, _)| id == message.id) {
         ctx.data_mut(|data| {
             data.remove::<(u64, u64)>(menu_asked_id());
-            data.insert_temp(by_keys_id, true);
+            data.insert_temp(by_keys_id(), (message.id, popup_id));
             data.insert_temp(first_id, true);
         });
         Popup::open_id(&ctx, popup_id);
     }
     if response.secondary_clicked() {
-        ctx.data_mut(|data| data.remove::<bool>(by_keys_id));
+        ctx.data_mut(|data| data.remove::<(u64, Id)>(by_keys_id()));
     }
-    let by_keys = ctx.data(|data| data.get_temp::<bool>(by_keys_id)).unwrap_or(false);
+    let by_keys = ctx.data(|data| data.get_temp::<(u64, Id)>(by_keys_id())).is_some_and(|(id, popup)| id == message.id && popup == popup_id);
     let first = ctx.data_mut(|data| data.remove_temp::<bool>(first_id)).unwrap_or(false);
     let mut popup = Popup::context_menu(response).frame(Frame::NONE);
     if by_keys {
@@ -602,8 +621,11 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow)
         });
     });
     if by_keys && !Popup::is_id_open(&ctx, popup_id) {
-        ctx.data_mut(|data| data.remove::<bool>(by_keys_id));
-        response.request_focus();
+        ctx.data_mut(|data| data.remove::<(u64, Id)>(by_keys_id()));
+        let in_sight = ui.clip_rect().contains_rect(response.rect);
+        if keyed && in_sight {
+            response.request_focus();
+        }
     }
     acted
 }
@@ -1309,7 +1331,9 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
         }
     }
     let keyed = mailbox.selected().filter(|_| mailbox.keyed());
-    let moved = keyed.filter(|keyed| kept.as_ref().is_none_or(|kept| kept.keyed != Some(*keyed)));
+    // A row a menu was asked for comes into sight as a newly keyed one does.
+    let bring = ui.data_mut(|data| data.remove_temp::<u64>(bring_id()));
+    let moved = keyed.filter(|keyed| kept.as_ref().is_none_or(|kept| kept.keyed != Some(*keyed))).or(bring);
     let mut scroll_to = None;
     if let Some((top, bottom)) = moved.and_then(|id| listing.find(id)).and_then(|index| listing.span(index)) {
         match &kept {
