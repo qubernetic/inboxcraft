@@ -260,11 +260,7 @@ pub fn top(ui: &mut Ui, theme: &Theme, line: Rect, top: &Top<'_>, end: Option<f3
     // `right`: where the next part from the right ends; after the parts, a gap left of the leftmost of them.
     let mut right = line.right();
     if let Some((time, ink)) = top.time {
-        let galley = super::galley(ui, time, f.mono_s, ink);
-        let wide = paint::run_box(galley.size().x);
-        right -= wide;
-        paint::run_at(&painter, pos2(right, middle(f.mono_s.line)), galley, ink);
-        right -= GAP;
+        right = paint::run_right(&painter, right, middle(f.mono_s.line), super::galley(ui, time, f.mono_s, ink), ink) - GAP;
     }
     if let Some(end) = end {
         right = right.min(end);

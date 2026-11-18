@@ -143,9 +143,7 @@ pub fn later_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &LaterRow<'_>
         at.left()
     } else {
         let galley = super::galley(ui, row.when, f.mono_s, when_ink);
-        let x = right - paint::run_box(galley.size().x);
-        paint::run_at(ui.painter(), pos2(x, two + ((low - f.mono_s.line) / 2.0).round()), galley, when_ink);
-        x
+        paint::run_right(ui.painter(), right, two + ((low - f.mono_s.line) / 2.0).round(), galley, when_ink)
     };
     let words = if row.unread { p.ink } else { p.muted };
     let subject = super::fitted(ui, row.subject, f.caption, words, (end - WHEN_GAP - left).max(0.0));

@@ -92,8 +92,7 @@ pub fn group_head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, head: &GroupHead<
     // The count, or "nothing to read".
     let count = if head.unread == 0 { crate::tr!("nothing to read").to_owned() } else { head.unread.to_string() };
     let galley = super::galley(ui, &count, f.mono_s, p.muted);
-    right -= paint::run_box(galley.size().x);
-    paint::run_at(ui.painter(), pos2(right, top + ((line - f.mono_s.line) / 2.0).round()), galley, p.muted);
+    right = paint::run_right(ui.painter(), right, top + ((line - f.mono_s.line) / 2.0).round(), galley, p.muted);
     let mut pressed = Pressed::default();
     let links = [(head.link, false), (head.hover_link.filter(|_| lit), true)];
     for (words, hover) in links {

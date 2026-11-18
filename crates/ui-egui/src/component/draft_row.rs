@@ -100,13 +100,10 @@ pub fn draft_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &DraftRow<'_>
         }
         right -= total;
     } else {
-        let galley = super::galley(ui, row.when, f.mono_s, p.muted);
-        right -= paint::run_box(galley.size().x);
-        paint::run_at(ui.painter(), pos2(right, at(f.mono_s.line)), galley, p.muted);
+        right = paint::run_right(ui.painter(), right, at(f.mono_s.line), super::galley(ui, row.when, f.mono_s, p.muted), p.muted);
     }
     let to = super::fitted(ui, row.to, f.caption, p.muted, TO_WIDEST);
-    right -= GAP + paint::run_box(to.size().x);
-    paint::run_at(ui.painter(), pos2(right, at(f.caption.line)), to, p.muted);
+    right = paint::run_right(ui.painter(), right - GAP, at(f.caption.line), to, p.muted);
     let left = rect.left() + PAD + side + GAP;
     let (words, ink) = match row.subject {
         Some(subject) => (subject, p.ink),
