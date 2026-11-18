@@ -21,6 +21,12 @@
 //! stores one, for the worker's next sign-in. The old password is never read: the [`Keychain`] has no way to. A changed server
 //! or user name, or a new password, runs the owner's check, and the form says first where the sign-in goes.
 //!
+//! What the owner typed in the add form is kept on every way out and back but Cancel: Back, Esc, another page or the
+//! window's welcome keep it ([`Onboarding::close`]), and the form opens with it again; only the password is dropped
+//! on the way out. Detect fills a server row or the user name only where the owner typed nothing, or kept what Detect
+//! put there before. A field whose text is wrong says so under itself ([`Slot`]): a port or a CalDAV address as it is
+//! typed, a missing address, password or IMAP server when the form is sent.
+//!
 //! The password lives in a [`Secret`]: no `Display`, a `Debug` that hides it, and its bytes overwritten when it is
 //! cleared or dropped. It never goes into a command's parameters, an answer, an error or the store.
 
@@ -392,11 +398,36 @@ pub struct Form {
     pub ispdb: bool,
 }
 
+/// A field of the form that can be wrong: its error stands under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Slot {
+    /// The address.
+    Address,
+    /// The password.
+    Password,
+    /// The IMAP server.
+    Host,
+    /// The IMAP port.
+    Port,
+    /// The outgoing server's port.
+    SmtpPort,
+    /// The CalDAV address.
+    Caldav,
+}
+
 /// The servers a form names, as the commands read them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Servers {
     imap: Value,
     submission: Option<Value>,
+}
+
+/// The port typed as `text`: `None` for none (the usual one), else a number from 1 to 65535 or the error.
+fn port_typed(text: &str) -> Result<Option<u16>, String> {
+    match text.trim() {
+        "" => Ok(None),
+        text => text.parse::<u16>().ok().filter(|port| *port > 0).map(Some).ok_or_else(|| tr!("The port is a number from 1 to 65535.").to_owned()),
+    }
 }
 
 /// `{host, port, security}` of a server the form names, `None` for an empty host; the usual port when none was typed.
@@ -406,10 +437,7 @@ fn server(host: &str, port: &str, security: Option<Security>, usual: fn(Security
         return Ok(None);
     }
     let security = security.unwrap_or(Security::Tls);
-    let port = match port.trim() {
-        "" => usual(security),
-        text => text.parse::<u16>().ok().filter(|port| *port > 0).ok_or_else(|| tr!("The port is a number from 1 to 65535.").to_owned())?,
-    };
+    let port = port_typed(port)?.unwrap_or_else(|| usual(security));
     Ok(Some(json!({ "host": host, "port": port, "security": security.param() })))
 }
 
@@ -428,7 +456,42 @@ fn where_to(server: &Value) -> String {
 }
 
 impl Form {
+    /// What is wrong in what was typed, field by field, as it is typed: a port that is no port, a CalDAV address the
+    /// app does not take. A field left empty is not wrong here.
+    #[must_use]
+    pub fn typed_faults(&self) -> Vec<(Slot, String)> {
+        let mut faults = Vec::new();
+        for (slot, text) in [(Slot::Port, &self.port), (Slot::SmtpPort, &self.smtp_port)] {
+            if let Err(error) = port_typed(text) {
+                faults.push((slot, error));
+            }
+        }
+        if !Account::takes_caldav(&self.caldav) {
+            faults.push((Slot::Caldav, tr!("The CalDAV address starts with https:// and holds no user name.").to_owned()));
+        }
+        faults
+    }
+
+    /// The first thing that keeps the form from being sent, and the field it stands under: what is missing (the
+    /// address and the password only when `adding`), then what is wrong.
+    #[must_use]
+    pub fn fault(&self, adding: bool) -> Option<(Slot, String)> {
+        if adding && self.address.trim().is_empty() {
+            return Some((Slot::Address, tr!("Enter the address.").to_owned()));
+        }
+        if adding && self.password.is_empty() {
+            return Some((Slot::Password, tr!("Enter the password.").to_owned()));
+        }
+        if self.host.trim().is_empty() {
+            return Some((Slot::Host, tr!("Enter the IMAP server, or use Detect.").to_owned()));
+        }
+        self.typed_faults().into_iter().next()
+    }
+
     fn servers(&self) -> Result<Servers, String> {
+        if let Some((_, error)) = self.fault(false) {
+            return Err(error);
+        }
         let imap = server(&self.host, &self.port, self.security, Security::imap_port)?
             .ok_or_else(|| tr!("Enter the IMAP server, or use Detect.").to_owned())?;
         let submission = server(&self.smtp_host, &self.smtp_port, self.smtp_security, Security::submission_port)?;
@@ -444,13 +507,10 @@ impl Form {
     ///
     /// What is missing or wrong, in words for the owner.
     pub fn params(&self) -> Result<Value, String> {
+        if let Some((_, error)) = self.fault(true) {
+            return Err(error);
+        }
         let address = self.address.trim();
-        if address.is_empty() {
-            return Err(tr!("Enter the address.").to_owned());
-        }
-        if self.password.is_empty() {
-            return Err(tr!("Enter the password.").to_owned());
-        }
         let Servers { imap, submission } = self.servers()?;
         Ok(json!({
             "address": address,
@@ -609,15 +669,57 @@ pub struct Found {
     pub failed: Vec<String>,
 }
 
+/// What Detect last put into the form, to tell it from what the owner typed: a server row as host, port and encryption,
+/// and the user name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Detected {
+    imap: Option<(String, String, Option<Security>)>,
+    submission: Option<(String, String, Option<Security>)>,
+    username: Option<String>,
+}
+
+/// The add form as the owner left it, kept while onboarding is closed or on an account's form: the form, what Detect
+/// found and put into it. The password is never kept.
+#[derive(Debug, Default)]
+struct Kept {
+    form: Form,
+    found: Option<Found>,
+    detected: Detected,
+}
+
+/// Puts Detect's `row` (host, port, encryption) into a server row of the form, unless the owner typed into it: the row
+/// is empty, or holds what Detect put there `before`. Whether it did.
+fn fill(
+    form: (&mut String, &mut String, &mut Option<Security>),
+    before: Option<&(String, String, Option<Security>)>,
+    row: &(String, String, Option<Security>),
+) -> bool {
+    let (host, port, security) = form;
+    let untouched = host.trim().is_empty() && port.trim().is_empty() && security.is_none();
+    let as_left = before.is_some_and(|(was_host, was_port, was_security)| was_host == host && was_port == port && was_security == security);
+    if !untouched && !as_left {
+        return false;
+    }
+    host.clone_from(&row.0);
+    port.clone_from(&row.1);
+    *security = row.2;
+    true
+}
+
 /// Onboarding's state.
 pub struct Onboarding {
     stage: Stage,
     form: Form,
     detecting: bool,
     found: Option<Found>,
+    detected: Detected,
+    /// The add form as the owner left it, while another form or none is open.
+    kept: Option<Kept>,
     steps: Vec<StepRow>,
     running: bool,
     error: Option<String>,
+    /// The field [`Self::error`] stands under, when it is one field's.
+    slot: Option<Slot>,
     keychain: Arc<dyn Keychain>,
     /// The accounts whose password this window put into the credential store and has not removed yet.
     stored: BTreeSet<u64>,
@@ -648,9 +750,12 @@ impl Onboarding {
             form: Form::default(),
             detecting: false,
             found: None,
+            detected: Detected::default(),
+            kept: None,
             steps: Vec::new(),
             running: false,
             error: None,
+            slot: None,
             keychain,
             stored: BTreeSet::new(),
             detect,
@@ -658,29 +763,56 @@ impl Onboarding {
         }
     }
 
-    /// Opens an empty form.
+    /// Opens the add form: as the owner left it on the way out ([`Self::close`]), else empty. Open already, it stays
+    /// as it is.
     pub fn open(&mut self) {
-        self.form = Form::default();
-        self.found = None;
+        if self.stage == Stage::Form {
+            return;
+        }
+        let Kept { form, found, detected } = self.kept.take().unwrap_or_default();
+        self.form = form;
+        self.found = found;
+        self.detected = detected;
         self.error = None;
+        self.slot = None;
         self.steps.clear();
         self.held = None;
         self.stage = Stage::Form;
     }
 
-    /// Closes onboarding; a password typed and not used is forgotten. An added account stays, and an edited one
-    /// stays as it was unless it was saved.
+    /// Closes onboarding; a password typed and not used is forgotten. The add form is kept as the owner left it, for
+    /// [`Self::open`]; an added account stays, and an edited one stays as it was unless it was saved.
     pub fn close(&mut self) {
         self.form.password.clear();
+        self.keep();
         self.detecting = false;
         self.held = None;
         self.stage = Stage::Closed;
     }
 
+    /// Closes onboarding as [`Self::close`] does, and drops what the add form held: the owner's Cancel.
+    pub fn cancel(&mut self) {
+        self.close();
+        self.kept = None;
+    }
+
+    /// Keeps the add form as the owner left it while another form or none is open, its password forgotten: only from
+    /// the add form itself.
+    fn keep(&mut self) {
+        if self.stage != Stage::Form {
+            return;
+        }
+        self.form.password.clear();
+        let form = std::mem::take(&mut self.form);
+        self.kept = Some(Kept { form, found: self.found.take(), detected: std::mem::take(&mut self.detected) });
+    }
+
     /// Opens the form of the account `id` with everything `account.list` shows of it. The password is not among
     /// it: the field starts empty, and an empty field keeps the stored one.
     pub fn edit(&mut self, mailbox: &mut Mailbox, id: u64) {
+        self.keep();
         self.error = None;
+        self.slot = None;
         let answer = match mailbox.run("account.list", &json!({})) {
             Ok(answer) => answer,
             Err(error) => {
@@ -799,6 +931,12 @@ impl Onboarding {
             return;
         }
         let recheck = (changes.caldav || password) && !changes.sign_in;
+        self.slot = None;
+        if let Some((slot, error)) = self.form.fault(false) {
+            self.error = Some(error);
+            self.slot = Some(slot);
+            return;
+        }
         let (dry, params) = match (self.form.update_params(id, true, recheck), self.form.update_params(id, false, recheck)) {
             (Ok(dry), Ok(params)) => (dry, params),
             (Err(error), _) | (_, Err(error)) => {
@@ -900,6 +1038,20 @@ impl Onboarding {
         self.error.as_deref()
     }
 
+    /// The field [`Self::error`] stands under, when it is one field's; `None` for an error of the whole page.
+    #[must_use]
+    pub fn error_slot(&self) -> Option<Slot> {
+        self.slot.filter(|_| self.error.is_some())
+    }
+
+    /// The owner changed the field `slot`: the error under it goes, until the form is sent again.
+    pub fn edited(&mut self, slot: Slot) {
+        if self.error_slot() == Some(slot) {
+            self.error = None;
+            self.slot = None;
+        }
+    }
+
     /// How the check stands.
     #[must_use]
     pub fn outcome(&self) -> Outcome {
@@ -917,28 +1069,40 @@ impl Onboarding {
         let address = self.form.address.trim().to_owned();
         if address.is_empty() {
             self.error = Some(tr!("Enter the address, then Detect.").to_owned());
+            self.slot = Some(Slot::Address);
             return;
         }
         self.error = None;
+        self.slot = None;
         self.detecting = true;
         self.detect.start(&address, self.form.ispdb);
     }
 
-    /// Takes Detect's answer when it came: its first IMAP server fills the form. Whether anything changed.
+    /// Takes Detect's answer when it came: its first IMAP and outgoing server fill their rows of the form, and its user
+    /// name the user name, each only where the owner typed nothing or kept what Detect put there before. Whether
+    /// anything changed.
     pub fn poll(&mut self) -> bool {
         let Some(proposal) = self.detect.finished() else { return false };
         self.detecting = false;
+        let form = &mut self.form;
+        let detected = &mut self.detected;
         let source = proposal.imap.first().map(|best| {
-            self.form.host = shown(&best.host);
-            self.form.port = best.port.to_string();
-            self.form.security = Some(best.security);
-            self.form.username = shown(&best.username);
+            let row = (shown(&best.host), best.port.to_string(), Some(best.security));
+            if fill((&mut form.host, &mut form.port, &mut form.security), detected.imap.as_ref(), &row) {
+                detected.imap = Some(row);
+            }
+            let username = shown(&best.username);
+            if form.username.trim().is_empty() || detected.username.as_deref() == Some(form.username.as_str()) {
+                form.username.clone_from(&username);
+                detected.username = Some(username);
+            }
             best.source
         });
         let outgoing = proposal.submission.first().map(|best| {
-            self.form.smtp_host = shown(&best.host);
-            self.form.smtp_port = best.port.to_string();
-            self.form.smtp_security = Some(best.security);
+            let row = (shown(&best.host), best.port.to_string(), Some(best.security));
+            if fill((&mut form.smtp_host, &mut form.smtp_port, &mut form.smtp_security), detected.submission.as_ref(), &row) {
+                detected.submission = Some(row);
+            }
             (shown(&best.host), best.source)
         });
         let clean = |lines: Vec<String>| lines.iter().map(|line| shown(line)).collect();
@@ -949,6 +1113,12 @@ impl Onboarding {
     /// Adds the account in the form through `mailbox` and keeps its password in the credential store; the check
     /// `account.add` started shows next. The password is forgotten here either way it ends.
     pub fn add(&mut self, mailbox: &mut Mailbox) {
+        self.slot = None;
+        if let Some((slot, error)) = self.form.fault(true) {
+            self.error = Some(error);
+            self.slot = Some(slot);
+            return;
+        }
         let params = match self.form.params() {
             Ok(params) => params,
             Err(error) => {
@@ -981,6 +1151,9 @@ impl Onboarding {
         }
         self.stored.insert(id);
         self.error = None;
+        // What the form held is an account now: the next add form starts empty.
+        self.kept = None;
+        self.detected = Detected::default();
         // Checked by the form, so this answers an error only when the store fails; the check goes on without it.
         if let Some(url) = optional(&self.form.caldav)
             && let Err(error) = mailbox.run("calendar.server", &json!({ "account": id, "url": url }))
@@ -1027,6 +1200,7 @@ impl Onboarding {
     /// be typed again. An account that was edited is not removed: its form opens again as it now stands.
     pub fn change(&mut self, mailbox: &mut Mailbox) {
         let Stage::Checking(id) = self.stage else { return };
+        self.slot = None;
         if self.held.is_some() {
             self.edit(mailbox, id);
             return;
