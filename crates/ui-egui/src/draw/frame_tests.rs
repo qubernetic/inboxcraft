@@ -362,3 +362,19 @@ fn tab_in_the_settings_sheet_stays_in_it_in_the_app_s_own_frame() {
         assert!(controls, "{frame:?}: without a sheet, Tab reaches Minimise");
     }
 }
+
+/// The strip and the top row's band move the window by the pointer only: a Tab walk round the whole window never
+/// lands on them, an unnamed stop that does nothing.
+#[test]
+fn the_handles_that_move_the_window_are_no_tab_stops() {
+    for (frame, handle) in [(WindowFrame::Strip, "window-strip"), (WindowFrame::TopRow, "window-top-band")] {
+        let mut harness = harness(true, frame);
+        assert!(harness.ctx.read_response(egui::Id::unique(handle)).is_some(), "{frame:?}: the handle is drawn");
+        for step in 0..200 {
+            harness.key_press(egui::Key::Tab);
+            harness.step();
+            harness.step();
+            assert_ne!(harness.ctx.memory(|memory| memory.focused()), Some(egui::Id::unique(handle)), "{frame:?}: Tab {step} lands on the handle");
+        }
+    }
+}

@@ -154,7 +154,8 @@ pub(super) fn strip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, title: &str, co
     ui.painter().rect_filled(rect, top_right_corner(corner), p.surface);
     let width = 1.0 / ui.ctx().pixels_per_point();
     ui.painter().hline(rect.x_range(), rect.bottom() - width / 2.0, Stroke::new(width, p.line));
-    let handle = ui.interact(rect, Id::unique("window-strip"), Sense::click_and_drag());
+    // Pressed, dragged and double-pressed by the pointer only: a handle that moves the window is no Tab stop.
+    let handle = ui.interact(rect, Id::unique("window-strip"), Sense::CLICK | Sense::DRAG);
     moves_the_window(ui.ctx(), &handle);
     let galley = ui.painter().layout_no_wrap(title.to_owned(), theme.fonts.caption.id(), p.muted);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.muted);
@@ -204,7 +205,8 @@ pub(super) fn top_row_begins(ui: &mut Ui, on: bool) {
     }
     let free = ui.available_rect_before_wrap();
     let band = Rect::from_min_max(free.min, pos2(free.right(), free.top() + BAND));
-    let handle = ui.interact(band, Id::unique("window-top-band"), Sense::click_and_drag());
+    // By the pointer only, as the strip: no Tab stop.
+    let handle = ui.interact(band, Id::unique("window-top-band"), Sense::CLICK | Sense::DRAG);
     moves_the_window(ui.ctx(), &handle);
 }
 
