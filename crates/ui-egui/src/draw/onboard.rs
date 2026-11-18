@@ -671,10 +671,12 @@ pub(super) fn printed(steps: &[StepRow], running: bool) -> Vec<(&StepRow, check_
 /// the certificate's issuer.
 fn step(ui: &mut Ui, theme: &Theme, (at_line, row): (usize, &StepRow), state: check_step::StepState) {
     let ran = !matches!(row.state, StepState::Skipped | StepState::NotSet | StepState::NotBuilt | StepState::Held);
+    // A skipped step's line still names where it would have gone, as the frames have it.
+    let named = ran || row.state == StepState::Skipped;
     let mut detail = checks(row).to_owned();
     if let Some(issuer) = row.issuer.as_ref().filter(|_| ran) {
         detail = format!("{detail} · {}", tr!("issued by {issuer}", issuer = issuer));
-    } else if let Some(server) = row.server.as_ref().filter(|_| ran) {
+    } else if let Some(server) = row.server.as_ref().filter(|_| named) {
         detail = format!("{detail} · {server}");
     }
     let note = match state {

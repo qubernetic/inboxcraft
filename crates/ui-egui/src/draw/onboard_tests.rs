@@ -1009,6 +1009,32 @@ fn a_failed_check_says_what_to_try_in_an_error_banner_of_its_own_words() {
     }
 }
 
+/// A skipped step's line names where it would have gone, as `account-failed/*` has it ("sign-in ·
+/// smtp.example.org:465"); a step with no server (not set, not built) names none.
+#[test]
+fn a_skipped_step_names_its_server_on_its_line() {
+    let row = |id: &str, state, server: Option<&str>| crate::onboard::StepRow {
+        id: id.to_owned(),
+        state,
+        server: server.map(str::to_owned),
+        issuer: None,
+        message: None,
+    };
+    let steps = vec![
+        row("imap_login", StepState::Failed, Some("imap.example.org:993")),
+        row("smtp_login", StepState::Skipped, Some("smtp.example.org:465")),
+        row("caldav_discovery", StepState::NotSet, Some("dav.example.org")),
+    ];
+    let mut harness = form_open(egui::Theme::Dark, FakeWorkers::passing());
+    harness.state_mut().onboarding_mut().0.show_check(1, steps, false);
+    harness.run();
+    harness.run();
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let texts = texts_in(harness.output(), sheet);
+    assert!(texts.iter().any(|text| text == "sign-in · smtp.example.org:465"), "{texts:?}");
+    assert!(texts.iter().any(|text| text == "calendars"), "{texts:?}");
+}
+
 /// The page in `scene`: `welcome`, `form`, `error` (a port typed wrong), `detected`, `running` (the check at its third
 /// step), `failed` or `passed`.
 fn scene(name: &str, theme: egui::Theme) -> Harness<'static, InboxApp> {
