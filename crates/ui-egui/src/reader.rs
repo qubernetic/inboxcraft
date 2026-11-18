@@ -694,6 +694,15 @@ impl Reader {
         }
     }
 
+    /// How many pictures are asked for, here and failed: it changes whenever one comes, fails or is forgotten, so a
+    /// message laid out with the pictures as they were is laid out again.
+    #[must_use]
+    pub fn pictures_state(&self) -> (usize, usize, usize) {
+        let ready = self.pictures.values().filter(|state| matches!(state, PictureState::Ready(_))).count();
+        let failed = self.pictures.values().filter(|state| matches!(state, PictureState::Failed(_))).count();
+        (self.pictures.len(), ready, failed)
+    }
+
     /// Whether the quotes of message `id` show.
     #[must_use]
     pub fn shows_quotes(&self, id: u64) -> bool {

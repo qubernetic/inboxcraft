@@ -37,6 +37,7 @@
 //! Drawing only reads the [`Reader`]; what the person asks for comes back as [`Asked`] and is applied after the frame.
 
 mod body;
+mod fitted;
 mod head;
 mod thread;
 

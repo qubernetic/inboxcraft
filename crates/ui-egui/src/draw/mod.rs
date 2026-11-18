@@ -2015,6 +2015,9 @@ mod palette_tests;
 #[path = "pane_tests.rs"]
 mod pane_tests;
 #[cfg(test)]
+#[path = "reader_html_tests.rs"]
+mod reader_html_tests;
+#[cfg(test)]
 #[path = "reader_tests.rs"]
 mod reader_tests;
 #[cfg(test)]
