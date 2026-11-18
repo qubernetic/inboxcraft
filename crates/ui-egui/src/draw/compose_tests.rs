@@ -1439,3 +1439,26 @@ fn many_templates_in_a_short_window_stay_in_it() {
     assert!(shown.iter().all(|row| row.top() >= screen.top() + 3.0 - 0.5), "the menu keeps 3 clear of the window's top: {shown:?}");
     assert!(shown.len() < rows.len(), "the rows past the room scroll: {} of {}", shown.len(), rows.len());
 }
+
+/// The send-later picker's rect as it was last drawn.
+fn later_picker(harness: &Harness<'static, InboxApp>) -> egui::Rect {
+    harness.ctx.memory(|memory| memory.area_rect(super::compose::later_popup())).unwrap()
+}
+
+#[test]
+fn the_send_later_picker_stands_over_the_foot_4_above_its_caret() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        let mut harness = composing(theme);
+        harness.get_by_role_and_label(Role::Button, "Send later").click();
+        harness.run();
+        let caret = rect_of(&harness, Role::Button, "Send later");
+        let picker = later_picker(&harness);
+        // Its frame: 320 wide, its left on the caret's, its bottom 4 over the foot's buttons; nothing of it over the foot.
+        assert!((picker.width() - 320.0).abs() < 0.5, "{picker:?}");
+        assert!((picker.left() - caret.left()).abs() < 0.5, "{picker:?} over {caret:?}");
+        assert!((picker.bottom() - (caret.top() - 4.0)).abs() < 0.5, "{picker:?} over {caret:?}");
+        // It stays there frame after frame.
+        harness.run();
+        assert_eq!(later_picker(&harness), picker);
+    }
+}

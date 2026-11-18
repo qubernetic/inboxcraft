@@ -198,6 +198,15 @@ fn later_id() -> Id {
     Id::unique("compose-later")
 }
 
+/// The id the send-later picker's height is kept under, with the pass it was drawn in.
+fn later_height_id() -> Id {
+    Id::unique("compose-later-height")
+}
+
+/// How far the send-later picker stands over its caret, in points (its frame), as far as a float hangs under its
+/// anchor.
+const LATER_DROP: f32 = 4.0;
+
 /// The id of the From line's menu of the accounts.
 pub(super) fn from_menu() -> Id {
     Id::unique("compose-from-menu")
@@ -230,7 +239,18 @@ fn later(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compose
     if !popup::is_open(&ctx, later_popup()) {
         return;
     }
-    let float = popup::Float { id: later_popup(), anchor: response.rect, width: time_picker::WIDTH, returns_to: response.id };
+    // It stands over the foot, its left on the caret's and its bottom 4 over it (its frame): its height is the one it
+    // was drawn with in the last pass, measured in a first pass of the frame it opens in, so it never jumps.
+    let pass = ctx.cumulative_pass_nr();
+    let kept = ctx.data(|data| data.get_temp::<(f32, u64)>(later_height_id())).filter(|(_, drawn)| drawn.saturating_add(1) >= pass);
+    if kept.is_none() {
+        ctx.request_discard("the send-later picker over its caret measures its height first");
+    }
+    let height = kept.map_or(0.0, |(height, _)| height);
+    // The float hangs 4 under its anchor: the anchor stands 8 over the caret and the picker's height more.
+    let top = response.rect.top() - LATER_DROP - height - LATER_DROP;
+    let anchor = Rect::from_min_size(pos2(response.rect.left(), top), Vec2::ZERO);
+    let float = popup::Float { id: later_popup(), anchor, width: time_picker::WIDTH, returns_to: response.id };
     let shown = popup::float(&ctx, theme, &float, |ui| {
         let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
         let note = tr!("It goes while InboxCraft or its tray runs; a time missed sends at the next start, and says so.");
@@ -241,6 +261,9 @@ fn later(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compose
         ui.data_mut(|data| data.insert_temp(later_id(), state));
         picked
     });
+    if let Some(drawn) = ctx.memory(|memory| memory.area_rect(later_popup())).filter(|_| shown.is_some()) {
+        ctx.data_mut(|data| data.insert_temp(later_height_id(), (drawn.height(), pass)));
+    }
     let close = |asked: &mut Vec<Asked>, later: Option<Option<inboxcraft_time::Timestamp>>| {
         if let Some(later) = later {
             asked.push(Asked::Later(later));
