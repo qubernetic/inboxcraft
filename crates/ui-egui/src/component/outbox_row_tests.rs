@@ -151,15 +151,28 @@ fn an_outbox_row_is_the_scaled_height_at_130_percent() {
 #[test]
 fn a_cut_recipient_keeps_its_whole_room() {
     // The board's refused row: "to" cut in its box of 120 (44..164), the bar 8 after the box (172), a spacer of 2 and a
-    // gap before where it stands.
+    // gap before where it stands; at 130 % the same relation: the bar's right, a gap, the spacer and a gap, then where it
+    // stands.
     let state = send_states().into_iter().find(|state| state.standing == Standing::Refused).unwrap();
-    for mode in [Mode::Dark, Mode::Light] {
-        let theme = Theme::new(mode, TextScale::default());
+    for (mode, scale) in [Mode::Dark, Mode::Light].into_iter().flat_map(|mode| [(mode, TextScale::default()), (mode, TextScale::ALL[4])]) {
+        let theme = Theme::new(mode, scale);
         let harness = harness(theme, state);
         let name = send_spoken(&state);
         let o = harness.get_by_label(&name).rect().min;
         let paint = painted(&harness, &name);
         let bar = paint.rects().find(|shape| shape.rect.size() == vec2(3.0, 12.0)).map(|shape| shape.rect);
-        assert_eq!(bar.map(|bar| bar.left() - o.x), Some(172.0), "{mode:?}");
+        let bar = bar.unwrap_or_else(|| panic!("{mode:?} {scale:?}: the bar"));
+        let standing = paint
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.look {
+                Look::Text { text, .. } if text == state.words => Some(shape.rect),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{mode:?} {scale:?}: where it stands"));
+        assert_eq!(bar.right() + 8.0 + 2.0 + 8.0, standing.left(), "{mode:?} {scale:?}: {bar:?} {standing:?}");
+        if scale == TextScale::default() {
+            assert_eq!(bar.left() - o.x, 172.0, "{mode:?}");
+        }
     }
 }
