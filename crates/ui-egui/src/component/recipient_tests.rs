@@ -234,7 +234,7 @@ fn a_recipient_field_looks_as_its_sheet_says_in_every_state() {
                     assert_eq!((typed.rect.min, typed.colour), (rect.min + vec2(45.0, 7.0), p.ink), "{at}");
                     assert_eq!(
                         block,
-                        Some(Rect::from_min_size(pos2((typed.rect.right() + 2.0).round(), rect.top() + 10.0), vec2(7.0, 16.0))),
+                        Some(Rect::from_min_size(pos2(typed.rect.left() + typed.rect.width().ceil() + 2.0, rect.top() + 10.0), vec2(7.0, 16.0))),
                         "{at}"
                     );
                 }

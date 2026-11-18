@@ -637,8 +637,9 @@ fn paint_caret(ui: &Ui, theme: &Theme, id: Id, output: &TextEditOutput, clip: Re
     let at = output.galley.pos_from_cursor(cursor);
     let column = output.galley.layout_from_cursor(cursor).column;
     let size = caret_size(theme);
-    let gap = if column > egui::text::CharIndex(0) { theme.spacing.s1 / 2.0 } else { 0.0 };
-    let min = output.galley_pos + vec2(at.left() + gap, at.top() + (at.height() - size.y) / 2.0);
+    // After text, 2 past the box the design gives the text before the caret: its width rounded up to a whole point.
+    let (left, gap) = if column > egui::text::CharIndex(0) { (at.left().ceil(), theme.spacing.s1 / 2.0) } else { (at.left(), 0.0) };
+    let min = output.galley_pos + vec2(left + gap, at.top() + (at.height() - size.y) / 2.0);
     let ppp = ui.ctx().pixels_per_point();
     let snap = |value: f32| (value * ppp).round() / ppp;
     let block = Rect::from_min_size(pos2(snap(min.x), snap(min.y)), size);

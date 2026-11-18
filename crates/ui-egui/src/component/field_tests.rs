@@ -212,10 +212,11 @@ fn a_text_field_looks_as_its_sheet_says_in_every_state() {
             let text = one(&harness, shown);
             assert_eq!(text.rect.min, rect.min + vec2(13.0, 7.0), "{at} {text:?}");
             assert_eq!((text.colour, text.family.as_str(), text.size, text.row), (colour, "Proportional", 14.0, 22.0), "{at}");
-            // The focus: the caret 2 after the text, 3 down in its row.
+            // The focus: the caret 2 after the text's box (its width rounded up, as the design sizes a text box), 3 down
+            // in its row.
             let block = caret(&paint, p.cyan_edge);
             if state == State::Focus {
-                let left = (text.rect.right() + 2.0).round();
+                let left = text.rect.left() + text.rect.width().ceil() + 2.0;
                 assert_eq!(block, Some(Rect::from_min_size(pos2(left, rect.top() + 10.0), vec2(7.0, 16.0))), "{at}");
             } else {
                 assert_eq!(block, None, "{at}");
