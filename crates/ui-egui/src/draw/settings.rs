@@ -639,7 +639,8 @@ fn key_control(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, wai
     asked
 }
 
-/// One action of the Shortcuts page: its name, and its key at the right end; a hairline under it.
+/// One action of the Shortcuts page: its name, and its key at the right end; a hairline under it, or, while it waits
+/// for a key, a `cyan_edge` box round the whole row.
 fn key_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, waits: bool) -> Option<Asked> {
     let height = Theme::size(theme, KEY_ROW).max(theme.fonts.body.line).ceil();
     let width = ui.available_width();
@@ -652,8 +653,13 @@ fn key_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, waits: 
     let room = (right.min_rect().left() - inner.left() - 12.0).max(1.0);
     let name = crate::component::cut(ui, action.name, theme.fonts.body, theme.palette.ink, room);
     ui.painter().galley(pos2(inner.left(), (rect.center().y - name.size().y / 2.0).round()), name, theme.palette.ink);
-    let y = rect.bottom() - 1.0;
-    paint::hairline(ui.painter(), pos2(rect.left(), y), pos2(rect.right() - 1.0, y), theme.palette.panel_line);
+    if waits {
+        // The row waiting for a key is a box with a 1 px `cyan_edge` round it, as `settings-shortcuts/capture` has it.
+        paint::outline(ui.painter(), rect, theme.palette.cyan_edge);
+    } else {
+        let y = rect.bottom() - 1.0;
+        paint::hairline(ui.painter(), pos2(rect.left(), y), pos2(rect.right() - 1.0, y), theme.palette.panel_line);
+    }
     asked
 }
 

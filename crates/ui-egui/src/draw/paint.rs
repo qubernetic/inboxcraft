@@ -373,10 +373,15 @@ pub(crate) fn float(painter: &Painter, theme: &Theme, rect: Rect, edge: FloatEdg
 /// painter's scale, as a [`float`]'s.
 pub(crate) fn boxed(painter: &Painter, rect: Rect, fill: Color32, edge: Color32) {
     let ppp = painter.pixels_per_point();
+    painter.rect_filled(snapped(rect, ppp), 0.0, fill);
+    outline(painter, rect, edge);
+}
+
+/// A 1 px `edge` inside `rect`, no fill: a pane's band on each side, on whole physical pixels at the painter's scale.
+pub(crate) fn outline(painter: &Painter, rect: Rect, edge: Color32) {
+    let ppp = painter.pixels_per_point();
     let whole = snapped(rect, ppp);
-    let mut shapes = vec![Shape::rect_filled(whole, 0.0, fill)];
-    shapes.extend([Side::Left, Side::Top, Side::Right, Side::Bottom].map(|side| edge_shape(whole, side, edge, ppp)));
-    painter.extend(shapes);
+    painter.extend([Side::Left, Side::Top, Side::Right, Side::Bottom].map(|side| edge_shape(whole, side, edge, ppp)));
 }
 
 /// The inside of a [`float`] over `rect` at `ppp`: its fill less the edge's band on every side, on whole pixels.

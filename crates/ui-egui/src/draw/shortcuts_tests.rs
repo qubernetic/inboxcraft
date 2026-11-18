@@ -343,3 +343,40 @@ fn the_page_lists_fold_and_the_calendar_s_keys_and_moves_a_key_only_where_scopes
     assert_eq!(harness.state().keymap().shortcut("ui.list.down"), Some(j));
     assert!(harness.state().settings().keys_note().is_some_and(|note| note.contains("Calendar: pick to the left")));
 }
+
+/// The `colour` filled rects painted this frame inside `within`.
+fn fills_in(output: &egui::FullOutput, colour: egui::Color32, within: egui::Rect) -> Vec<egui::Rect> {
+    fn walk(shape: &egui::Shape, colour: egui::Color32, within: egui::Rect, found: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, colour, within, found)),
+            egui::Shape::Rect(rect) if rect.fill == colour && within.contains_rect(rect.rect) => found.push(rect.rect),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, colour, within, &mut found);
+    }
+    found
+}
+
+#[test]
+fn the_row_waiting_for_a_key_is_a_box_720_by_36_with_a_1_px_cyan_edge() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = on_shortcuts(theme);
+        press_chip(&mut harness, "Show sent mail has no key");
+        let chip = harness.get_by_label("Show sent mail: press a key, or Escape to keep the old one").rect();
+        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        // `settings-shortcuts/capture`: the whole row, the column's 720 by its 36, the chip 8 under its top and 16 in
+        // from its right end.
+        let left = sheet.left() + 1.0 + 232.0 + 1.0 + 40.0;
+        let row = egui::Rect::from_min_size(egui::pos2(left, chip.top() - 8.0), vec2(720.0, 36.0));
+        assert_eq!(chip.right(), row.right() - 16.0, "{theme:?}: {chip:?} in {row:?}");
+        let mode = if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light };
+        let cyan = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette.cyan_edge;
+        let bands: Vec<_> = fills_in(harness.output(), cyan, row).into_iter().filter(|band| band.width() == 1.0 || band.height() == 1.0).collect();
+        assert_eq!(bands.len(), 4, "{theme:?}: four sides: {bands:?}");
+        let around = bands.iter().fold(egui::Rect::NOTHING, |all, band| all.union(*band));
+        assert_eq!(around, row, "{theme:?}: the edge round the whole row");
+    }
+}
