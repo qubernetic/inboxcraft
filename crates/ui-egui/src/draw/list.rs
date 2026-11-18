@@ -1776,10 +1776,11 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
                 tr!("NEW SENDERS · {count} FIRST-TIME SENDERS", count = count)
             };
             crate::component::label::section_label(ui, theme, "[ 01 ]", &word, false);
-            ui.label(RichText::new(tr!("Who gets in?")).font(f.display.id()).color(p.ink));
+            // On their styles' lines (48, 26), so the cards stand where the design puts them under the title.
+            ui.label(f.display.rich(tr!("Who gets in?")).color(p.ink));
             let about =
                 tr!("Nobody new reaches the inbox before you say so. If you keep a sender out, their mail goes to Blocked, never to the inbox.");
-            ui.add(egui::Label::new(RichText::new(about).font(f.read.id()).color(p.muted)).wrap());
+            ui.add(egui::Label::new(f.read.rich(about).color(p.muted)).wrap());
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.spacing.s3;
                 crate::component::label(ui, f.label, tr!("Screener"), p.muted);
@@ -1933,8 +1934,9 @@ fn sender_card(
     let inner = ui.push_id(id, |ui| {
         ui.set_max_width(wide);
         let slot = ui.painter().add(egui::Shape::Noop);
-        let shown = Frame::new().inner_margin(Margin { left: 20, right: 20, top: 16, bottom: 16 }).show(ui, |ui| {
-            ui.set_width((wide - 40.0).max(0.0));
+        // The design's 20 and 16 inside the card's 1 px edge.
+        let shown = Frame::new().inner_margin(Margin { left: 21, right: 21, top: 17, bottom: 17 }).show(ui, |ui| {
+            ui.set_width((wide - 42.0).max(0.0));
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 16.0;
                 let side = crate::component::avatar::AvatarSize::L.side(theme);
@@ -1947,7 +1949,7 @@ fn sender_card(
                         ui.spacing_mut().item_spacing.y = 4.0;
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 10.0;
-                            ui.add(egui::Label::new(RichText::new(&message.sender).font(f.strong.id()).color(p.ink)).truncate());
+                            ui.add(egui::Label::new(f.strong.rich(&message.sender).color(p.ink)).truncate());
                             if mailbox.accounts().len() > 1 {
                                 let index = mailbox.account(message.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0));
                                 let _ = crate::component::account_bar(ui, theme, index);
@@ -1960,7 +1962,7 @@ fn sender_card(
                             // The subject opens the message as a preview in the reader, which asks the same and more; on a
                             // card answered and leaving it is plain text.
                             let sense = if live { Sense::click() } else { Sense::hover() };
-                            let opened = ui.add(egui::Label::new(RichText::new(subject).font(f.body.id()).color(p.ink)).truncate().sense(sense));
+                            let opened = ui.add(egui::Label::new(f.body.rich(subject).color(p.ink)).truncate().sense(sense));
                             if live {
                                 let spoken = mailbox.spoken(message);
                                 opened.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Link, true, &spoken));
@@ -1974,7 +1976,7 @@ fn sender_card(
                             ui.label(theme.fonts.mono_s.rich(&mailbox.row_date(message)).color(p.muted));
                         });
                         if !message.preview.trim().is_empty() {
-                            ui.add(egui::Label::new(RichText::new(&message.preview).font(f.caption.id()).color(p.muted)).truncate());
+                            ui.add(egui::Label::new(f.caption.rich(&message.preview).color(p.muted)).truncate());
                         }
                         if current {
                             why_line(ui, theme, &tr!("first mail from this address  ·  held back since {when}", when = mailbox.row_date(message)));
@@ -2001,7 +2003,9 @@ fn sender_card(
                         ui.horizontal(|ui| answers(ui, false));
                     });
                 } else {
-                    let answers_wide = 180.0;
+                    // The two answers as wide as they are drawn (the button's label and its 12 each side), 8 apart.
+                    let answer = |name: &str| crate::component::galley(ui, name, f.button, egui::Color32::PLACEHOLDER).size().x.ceil() + s.s3 * 2.0;
+                    let answers_wide = answer(tr!("Let in")) + s.s2 + answer(tr!("Keep out"));
                     ui.allocate_ui(vec2((ui.available_width() - answers_wide - 16.0).max(1.0), 0.0), |ui| text(ui));
                     ui.with_layout(Layout::right_to_left(Align::Min), |ui| answers(ui, true));
                 }
@@ -2029,6 +2033,8 @@ fn why_line(ui: &mut Ui, theme: &Theme, text: &str) {
     let slot = ui.painter().add(egui::Shape::Noop);
     let shown = Frame::new().inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 8 }).show(ui, |ui| {
         ui.set_width(ui.available_width());
+        // One line of 16 between the 8s: 32 high, as the design's why-line.
+        ui.spacing_mut().interact_size.y = f.label.line.max(f.mono_s.line);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
             crate::component::label(ui, f.label, tr!("WHY HERE"), p.cyan_text);

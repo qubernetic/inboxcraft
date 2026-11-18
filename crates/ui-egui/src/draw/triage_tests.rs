@@ -529,3 +529,68 @@ fn a_row_s_context_menu_keeps_tab_inside_and_esc_gives_the_row_the_keyboard() {
     assert_eq!(harness.state().mailbox().selected(), None, "the row the menu was on is not selected");
     assert_eq!(harness.state().reader().open_id(), None, "nor opened");
 }
+
+/// The rectangles painted in the last frame with an edge.
+fn edged(harness: &Harness<'static, InboxApp>) -> Vec<egui::Rect> {
+    fn leaves(shape: &egui::Shape, found: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| leaves(shape, found)),
+            egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => found.push(rect.rect),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| leaves(&clipped.shape, &mut found));
+    found
+}
+
+#[test]
+fn the_new_senders_cards_are_the_design_files() {
+    // At 1440: cards 900 × 140 (the current one, with its why-line) and 900 × 104; the avatar at +21,+17, the 1 px
+    // edge counted; name, subject and preview on lines of 22, 22 and 18, 4 apart; the why-line 32 high and 620 wide;
+    // the cards 166 under the title's box, which is 48 high.
+    let mut harness = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_context_setup(install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app());
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Review").click();
+    harness.run();
+    harness.run();
+    let mut cards: Vec<egui::Rect> = edged(&harness).into_iter().filter(|rect| rect.width() == 900.0).collect();
+    cards.sort_by(|a, b| a.top().total_cmp(&b.top()));
+    let sizes: Vec<_> = cards.iter().map(|rect| rect.size()).collect();
+    assert_eq!(sizes, [vec2(900.0, 140.0), vec2(900.0, 104.0)], "{cards:?}");
+    let card = cards[0];
+    let title = harness.get_by_label("Who gets in?").rect();
+    assert_eq!((title.height(), card.top() - title.top()), (48.0, 166.0), "{title:?}");
+    let at =
+        |name: &str| harness.query_all_by_label(name).map(|node| node.rect()).find(|rect| card.contains_rect(*rect)).map(|rect| rect.min - card.min);
+    let line = |name: &str| {
+        harness
+            .query_all_by_label(name)
+            .map(|node| node.rect())
+            .find(|rect| card.contains_rect(*rect))
+            .map(|rect| (rect.min - card.min, rect.height()))
+    };
+    assert_eq!(line("Harbour Swim Club"), Some((vec2(77.0, 17.0), 22.0)), "the name");
+    assert_eq!(
+        line("Join us on Sunday morning for the first winter swim. Towels and hot tea on the quay afterwards.").map(|(at, high)| (at.y, high)),
+        Some((69.0, 18.0)),
+        "the preview"
+    );
+    let subject = harness
+        .query_all_by_role(Role::Link)
+        .map(|node| node.rect())
+        .find(|rect| card.contains_rect(*rect))
+        .map(|rect| (rect.min - card.min, rect.height()));
+    assert_eq!(subject, Some((vec2(77.0, 43.0), 22.0)), "the subject");
+    let why = edged(&harness).into_iter().find(|rect| card.contains_rect(*rect) && rect.height() < 40.0 && rect.width() > 300.0);
+    assert_eq!(why.map(|rect| (rect.min - card.min, rect.size())), Some((vec2(77.0, 91.0), vec2(620.0, 32.0))), "the why-line");
+    assert_eq!(at("Let in").map(|at| at.y), Some(17.0), "the answers on the first line's top");
+    let avatar = harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+        egui::Shape::Rect(rect) if rect.rect.size() == vec2(40.0, 40.0) && card.contains_rect(rect.rect) => Some(rect.rect.min - card.min),
+        _ => None,
+    });
+    assert_eq!(avatar, Some(vec2(21.0, 17.0)), "the avatar");
+}
