@@ -4,7 +4,7 @@
 //! `sync.status`: the state, the progress and the last sync, kept from the workers' events, and every hostile event
 //! dropped or bounded.
 
-use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, Event, EventKind};
+use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, Event, EventKind, FolderId, JobId, JobKind};
 use inboxcraft_store::{Batch, Change, Memory, Storage, StoreConfig};
 use serde_json::{Value, json};
 
@@ -269,4 +269,18 @@ fn a_server_out_of_reach_reads_offline() {
         connection(&mut session, 1, ConnectionState::Offline);
         assert_eq!(state(&mut session), "offline", "{kind:?}");
     }
+}
+
+#[test]
+fn a_body_fetch_that_failed_does_not_make_the_account_failing() {
+    let mut session = super::act_tests::session();
+    current(&mut session);
+    session.run("mail.read", &json!({ "id": 1 })).unwrap();
+    let fetch = session.take_jobs().into_iter().find(|job| matches!(job.kind, JobKind::FetchBody { .. })).unwrap();
+    let gone = EventKind::Failed { kind: ErrorKind::MessageGone, folder: Some(FolderId::new(1)) };
+    assert_eq!(session.apply(&Event::new(AccountId::new(1), Some(fetch.id), gone.clone())).unwrap(), Applied::Changed);
+    assert_eq!(status(&mut session), json!({ "state": "synced", "done": 0, "of": 0, "last_synced": "2026-11-04T09:00:00Z", "failing_accounts": 0 }));
+    // Another job's failure still counts.
+    session.apply(&Event::new(AccountId::new(1), Some(JobId::new(999)), gone)).unwrap();
+    assert_eq!(status(&mut session)["failing_accounts"], 1);
 }

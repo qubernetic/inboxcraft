@@ -136,9 +136,10 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
         }
         EventKind::SyncFinished { at } => crate::cmd::sync_finished(&mut plan.state, account, *at, context.now()),
         EventKind::Failed { kind, folder } => {
-            plan.state.accounts.entry(account).or_default().failure = Some((*kind, *folder));
-            if let Some(job) = event.job {
-                plan.state.fetching.remove(&job);
+            // A body fetch that failed is the message's, which the reader shows; it says nothing of the account.
+            let fetch = event.job.and_then(|job| plan.state.fetching.remove(&job));
+            if fetch.is_none() {
+                plan.state.accounts.entry(account).or_default().failure = Some((*kind, *folder));
             }
             write::failed(store, &mut plan, account, event.job)?;
             true
