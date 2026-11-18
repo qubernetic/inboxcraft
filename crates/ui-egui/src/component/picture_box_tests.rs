@@ -120,3 +120,24 @@ fn any_size_from_a_tag_stands_in_the_room() {
         }
     }
 }
+
+/// A failed picture narrower than the room keeps every word inside its box, and `try again` stands inside it; in a box
+/// too narrow for the link whole, the link is not offered.
+#[test]
+fn a_narrow_failed_picture_keeps_its_parts_inside_the_box() {
+    let look = PictureLook::Failed("no connection");
+    for (size, link) in [((140, 200), true), ((60, 200), false)] {
+        let harness = boxed(look, KILN, Some(size), 684.0);
+        let rect = harness.get_by_label(&spoken(look, KILN, Some(size))).rect();
+        for (text_rect, text, _) in texts(&harness) {
+            assert!(rect.expand(0.5).contains_rect(text_rect), "{size:?}: {text:?} at {text_rect:?} paints outside the box {rect:?}");
+        }
+        match harness.query_by_label("try again") {
+            Some(node) => {
+                assert!(link, "{size:?}: a link too wide for the box is offered");
+                assert!(rect.contains_rect(node.rect()), "{size:?}: try again at {:?} outside the box {rect:?}", node.rect());
+            }
+            None => assert!(!link, "{size:?}: try again is missing"),
+        }
+    }
+}

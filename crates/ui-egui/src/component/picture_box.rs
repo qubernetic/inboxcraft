@@ -10,10 +10,12 @@
 //!   "Remote picture not loaded" in `mono_s` and `muted`, the picture's text in `caption` and `ink`, and its size;
 //! - loading: a `line` edge, the progress line "loading picture" and the picture's text in `muted`;
 //! - not shown (a kind the app does not draw): a `line` edge, the icon, why, and the picture's text;
-//! - failed: a `minus` edge, the broken-picture icon and why in `minus`, the picture's text, and `try again`.
+//! - failed: a `minus` edge, the broken-picture icon and why in `minus`, the picture's text, and `try again` where it
+//!   fits whole in the box.
 //!
-//! The picture's text is the sender's data: plain words on one line, cut between grapheme clusters with one ellipsis,
-//! heard whole. A box smaller than what it says (a one-pixel picture) shows only its edge: nothing paints past it. The
+//! Every part is fitted to the box, not to the room around it. The picture's text is the sender's data: plain words
+//! on one line, cut between grapheme clusters with one ellipsis, heard whole. A box smaller than what it says (a
+//! one-pixel picture) shows only its edge: nothing paints past it. The
 //! box asks for nothing to load: only `try again` does, on the owner's press. Nothing moves but the progress line's
 //! mark.
 
@@ -126,7 +128,9 @@ pub(crate) fn picture_box_with(
     let p = &theme.palette;
     let f = &theme.fonts;
     let room = ui.available_width().max(1.0).floor();
-    let inner = (room - PAD * 2.0).max(1.0);
+    // Its parts are fitted to the box, which may be narrower than the room: nothing paints past its sides.
+    let width = size.map_or(room, |size| shown_size(size, room).x);
+    let inner = (width - PAD * 2.0).max(1.0);
     let alt_ink = if look == PictureLook::Loading { p.muted } else { p.ink };
     let alt_galley = (!alt.trim().is_empty()).then(|| super::fitted(ui, alt, f.caption, alt_ink, inner));
     let (edge, mark, why_ink) = match look {
@@ -141,6 +145,8 @@ pub(crate) fn picture_box_with(
         _ => None,
     };
     let link_high = theme.boxes().row_link;
+    // `try again` stands only where it fits whole: a link that cannot be seen is not offered.
+    let retry = matches!(look, PictureLook::Failed(_)) && super::galley(ui, tr!("try again"), f.mono_s, p.cyan_text).size().x.ceil() <= inner;
     // What the box says, top to bottom: each part's height.
     let mut parts: Vec<f32> = Vec::new();
     if mark.is_some() {
@@ -158,7 +164,7 @@ pub(crate) fn picture_box_with(
     if size_galley.is_some() {
         parts.push(f.mono_s.line);
     }
-    if matches!(look, PictureLook::Failed(_)) {
+    if retry {
         parts.push(link_high);
     }
     let content = parts.iter().sum::<f32>() + GAP * parts.len().saturating_sub(1) as f32;
@@ -205,7 +211,7 @@ pub(crate) fn picture_box_with(
         top += line + GAP;
     }
     let mut asked = None;
-    if matches!(look, PictureLook::Failed(_)) {
+    if retry {
         let spot = Rect::from_min_size(pos2(rect.left() + PAD, top), vec2(inner, link_high));
         let mut child = ui.new_child(UiBuilder::new().max_rect(spot).layout(egui::Layout::top_down(egui::Align::Center)));
         child.set_clip_rect(rect.intersect(ui.clip_rect()));
