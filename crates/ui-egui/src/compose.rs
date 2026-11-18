@@ -232,8 +232,6 @@ pub struct Composer {
     templates: Vec<String>,
     /// The time picked to send it at; `None` sends it now, after the hold.
     later: Option<Timestamp>,
-    /// What each line refused of what was typed in it, the last time it took chips: it stays typed.
-    refused: [Refused; 3],
     /// Why the last fill of a blank was refused: it would make the subject or the text longer than the engine keeps.
     fill_refused: Option<String>,
 }
@@ -320,7 +318,6 @@ impl Composer {
             filling: String::new(),
             templates: Vec::new(),
             later: None,
-            refused: [Refused::default(); 3],
             fill_refused: None,
         };
         composer.take_answer(answer);
@@ -343,6 +340,13 @@ impl Composer {
                         Some(Chip { text: text.to_owned(), ok: chip.get("ok").and_then(Value::as_bool) == Some(true) })
                     })
                     .collect();
+            }
+        }
+        if let Some(typed) = answer.get("typed").and_then(Value::as_array) {
+            for (line, text) in Line::ALL.iter().zip(typed) {
+                if let (Some(field), Some(text)) = (self.typing.get_mut(line.index()), text.as_str()) {
+                    text.clone_into(field);
+                }
             }
         }
         if let Some(subject) = answer.get("subject").and_then(Value::as_str) {
@@ -466,10 +470,7 @@ impl Composer {
     /// [`MAX_RECIPIENTS`], an address past [`MAX_RECIPIENT_BYTES`]. They stay typed; none once the typed text is gone.
     #[must_use]
     pub fn refusal(&self, line: Line) -> Option<String> {
-        let refused = self.refused.get(line.index()).copied().unwrap_or_default();
-        if self.typing(line).trim().is_empty() {
-            return None;
-        }
+        let refused = self.assess(line, self.typing(line));
         if refused.too_long {
             Some(tr!("An address is too long: it holds at most {size} bytes, and it was not added.", size = MAX_RECIPIENT_BYTES))
         } else if refused.over > 0 {
@@ -622,6 +623,8 @@ impl Composer {
     ///
     /// A command's refusal; the typed text stays.
     pub fn typed(&mut self, mailbox: &mut Mailbox, line: Line) -> Result<(), UiError> {
+        // Kept with the draft at the end of the frame, as a change of the subject or the text is.
+        self.changed = true;
         let typed = self.typing(line).to_owned();
         if let Some(at) = typed.rfind(SEPARATORS) {
             let (done, rest) = typed.split_at(at);
@@ -707,13 +710,11 @@ impl Composer {
     /// why ([`Composer::refusal`]).
     fn add(&mut self, line: Line, typed: &str) -> String {
         let mut held: BTreeSet<String> = Line::ALL.iter().flat_map(|line| self.chips(*line)).map(|chip| split(&chip.text).1.to_lowercase()).collect();
-        let mut refused = Refused::default();
         let mut kept: Vec<&str> = Vec::new();
         let Some(chips) = self.lines.get_mut(line.index()) else { return typed.to_owned() };
         for part in typed.split(SEPARATORS).map(str::trim).filter(|part| !part.is_empty()) {
             let text = part.chars().filter(|c| !c.is_control()).collect::<String>();
             if text.len() > MAX_RECIPIENT_BYTES {
-                refused.too_long = true;
                 kept.push(part);
                 continue;
             }
@@ -722,7 +723,6 @@ impl Composer {
                 continue;
             }
             if chips.len() >= MAX_RECIPIENTS {
-                refused.over = refused.over.saturating_add(1);
                 kept.push(part);
                 continue;
             }
@@ -731,10 +731,33 @@ impl Composer {
             chips.push(Chip { text, ok: false });
             self.changed = true;
         }
-        if let Some(slot) = self.refused.get_mut(line.index()) {
-            *slot = refused;
-        }
         kept.join(", ")
+    }
+
+    /// What a line would refuse of `typed` (it stays typed): addresses past [`MAX_RECIPIENT_BYTES`], and those no line
+    /// holds yet while this one holds [`MAX_RECIPIENTS`]. Worked out from the text each time, so it holds after the
+    /// draft is opened again, and it changes as soon as a chip goes or the text is edited.
+    fn assess(&self, line: Line, typed: &str) -> Refused {
+        let full = self.chips(line).len() >= MAX_RECIPIENTS;
+        let held: BTreeSet<String> = if full {
+            Line::ALL.iter().flat_map(|line| self.chips(*line)).map(|chip| split(&chip.text).1.to_lowercase()).collect()
+        } else {
+            BTreeSet::new()
+        };
+        let mut counted = BTreeSet::new();
+        let mut refused = Refused::default();
+        for part in typed.split(SEPARATORS).map(str::trim).filter(|part| !part.is_empty()) {
+            let text = part.chars().filter(|c| !c.is_control()).collect::<String>();
+            if text.len() > MAX_RECIPIENT_BYTES {
+                refused.too_long = true;
+            } else if full {
+                let address = split(&text).1.to_lowercase();
+                if !held.contains(&address) && counted.insert(address) {
+                    refused.over = refused.over.saturating_add(1);
+                }
+            }
+        }
+        refused
     }
 
     /// Looks up the people whose name or address holds what is typed in `line`.
@@ -783,6 +806,8 @@ impl Composer {
             "to": list(Line::To),
             "cc": list(Line::Cc),
             "bcc": list(Line::Bcc),
+            // What is typed and not a recipient: kept with the draft, so closing or a kill loses none of it.
+            "typed": self.typing,
             "subject": self.subject,
             "text": self.text,
         });

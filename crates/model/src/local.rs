@@ -37,6 +37,10 @@ pub struct Draft {
     /// `Bcc`, as typed; only ever in the envelope.
     #[serde(default)]
     pub bcc: Vec<String>,
+    /// What is typed in the To, Cc and Bcc lines and not (yet) a recipient: an address being typed, or what a line
+    /// could not take (past its most, or too long). Kept so that closing or a kill loses none of it; never sent.
+    #[serde(default)]
+    pub typed: [String; 3],
     /// The subject.
     #[serde(default)]
     pub subject: String,
@@ -98,6 +102,7 @@ impl Draft {
             to: Vec::new(),
             cc: Vec::new(),
             bcc: Vec::new(),
+            typed: [String::new(), String::new(), String::new()],
             subject: String::new(),
             text: String::new(),
             answers: None,
@@ -120,6 +125,7 @@ impl fmt::Debug for Draft {
             .field("account", &self.account)
             .field("saved", &self.saved)
             .field("recipients", &(self.to.len(), self.cc.len(), self.bcc.len()))
+            .field("typed_bytes", &self.typed.each_ref().map(String::len))
             .field("subject_chars", &self.subject.chars().count())
             .field("text_bytes", &self.text.len())
             .field("answers", &self.answers)

@@ -319,3 +319,21 @@ fn a_signature_the_owner_changed_stays_when_the_account_changes() {
     let answer = session.run("compose.update", &json!({ "id": id, "account": 2 })).unwrap();
     assert_eq!(answer["text"], json!("Hi,\n\n-- \nAnna, on holiday"));
 }
+
+#[test]
+fn what_is_typed_in_a_recipient_line_is_kept_never_sent_and_held_to_its_field_s_size() {
+    let (mut session, _clock) = session();
+    let id = draft_id(&session.run("compose.new", &json!({})).unwrap());
+    let typed = json!(["q1@example.org, q2@example.org;", "", "\"Doe, Jane\" <jane@example.org>"]);
+    let answer = session.run("compose.update", &json!({ "id": id, "typed": typed })).unwrap();
+    assert_eq!(answer["typed"], typed);
+    assert_eq!(answer["to"], json!([]), "typed text is no recipient");
+    assert_eq!(answer["blocks"], json!(["no_recipient"]));
+    let kept = session.store().draft(DraftId::new(id)).unwrap().unwrap();
+    assert_eq!(kept.typed[2], "\"Doe, Jane\" <jane@example.org>");
+    assert_eq!(session.run("compose.show", &json!({ "id": id })).unwrap()["typed"], typed);
+    for bad in [json!(["a", "b", "c", "d"]), json!(["x".repeat(4097)])] {
+        assert!(session.run("compose.update", &json!({ "id": id, "typed": bad })).is_err());
+    }
+    assert!(session.run("compose.update", &json!({ "id": id, "typed": ["ő".repeat(4096)] })).is_ok(), "4 096 characters fit");
+}

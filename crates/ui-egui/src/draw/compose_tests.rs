@@ -440,3 +440,53 @@ fn a_recipient_line_says_what_it_refused_and_keeps_it_typed() {
     let said = "An address is too long: it holds at most 998 bytes, and it was not added.";
     assert_eq!(harness.query_all_by_label(said).count(), 2);
 }
+
+/// Types `text` into `line` of the open composer and hands it to the composer as the field does.
+fn typed_into(harness: &mut Harness<'static, InboxApp>, line: Line, text: &str) {
+    let (composer, mailbox) = harness.state_mut().composer_mut();
+    let composer = composer.unwrap();
+    text.clone_into(composer.typing_mut(line).unwrap());
+    composer.typed(mailbox, line).unwrap();
+}
+
+fn typing_of(harness: &Harness<'static, InboxApp>, line: Line) -> String {
+    harness.state().composer().map(|composer| composer.typing(line).to_owned()).unwrap_or_default()
+}
+
+#[test]
+fn refused_recipients_survive_close_reopen_answer_and_a_quit() {
+    let mut harness = composing(egui::Theme::Light);
+    let many: Vec<String> = (0..500).map(|n| format!("p{n}@example.org")).collect();
+    typed_into(&mut harness, Line::To, &format!("{},", many.join(",")));
+    typed_into(&mut harness, Line::To, "q1@example.org, q2@example.org; q3@example.org,");
+    let long = format!("{}@example.org", "ő".repeat(600));
+    typed_into(&mut harness, Line::Cc, &format!("{long},"));
+    harness.run();
+    let draft = harness.state().composer().unwrap().draft();
+    let refused_to = typing_of(&harness, Line::To);
+    let refused_cc = typing_of(&harness, Line::Cc);
+    assert!(refused_to.contains("q3@example.org") && refused_cc.contains(&long));
+    // A quit keeps what the store keeps: the draft holds the typed text at once.
+    let shown = kept(&mut harness, draft);
+    assert_eq!(shown["typed"][0].as_str(), Some(refused_to.as_str()), "the draft keeps the typed text");
+    assert_eq!(shown["typed"][1].as_str(), Some(refused_cc.as_str()));
+    // Close, then open it again: both lines hold their typed text and say why.
+    harness.state_mut().close_composer();
+    harness.run();
+    assert!(harness.state().composer().is_none());
+    harness.state_mut().reopen(draft);
+    harness.run();
+    assert_eq!(typing_of(&harness, Line::To), refused_to);
+    assert_eq!(typing_of(&harness, Line::Cc), refused_cc);
+    let composer = harness.state().composer().unwrap();
+    assert!(composer.refusal(Line::To).is_some_and(|said| said.starts_with("3 addresses")), "{:?}", composer.refusal(Line::To));
+    assert!(composer.refusal(Line::Cc).is_some(), "the long address is said again");
+    assert!(!composer.sendable());
+    // An answer started meanwhile closes this one: it keeps them too.
+    assert!(harness.state_mut().answer(1, crate::compose::Answer::Reply));
+    harness.run();
+    let shown = kept(&mut harness, draft);
+    assert_eq!(shown["typed"][0].as_str(), Some(refused_to.as_str()));
+    // Nothing of the typed text is a recipient.
+    assert!(shown["to"].as_array().unwrap().iter().all(|chip| !chip["text"].as_str().unwrap_or_default().starts_with('q')));
+}
