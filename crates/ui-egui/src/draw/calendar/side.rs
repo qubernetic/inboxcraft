@@ -149,7 +149,8 @@ fn mini_month(ui: &mut Ui, theme: &Theme, mini: &Mini, asked: &mut Vec<Asked>) {
     run_at(ui.painter(), pos2(head.left(), snap(head.center().y - theme.fonts.label.line / 2.0, ppp)), text, p.ink);
     let response = ui.interact(head, ui.scope_id().with(("mini-name", mini.board)), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, &name));
-    for (forward, sign, spoken, x) in [(false, "‹", tr!("Month before"), head.right() - 32.0), (true, "›", tr!("Month after"), head.right() - 12.0)]
+    // Each sign's 8-wide box as the sheet places it (+168 and +188 in a head 196 wide), in the middle of a 16-wide spot.
+    for (forward, sign, spoken, x) in [(false, "‹", tr!("Month before"), head.right() - 28.0), (true, "›", tr!("Month after"), head.right() - 8.0)]
     {
         let spot = Rect::from_min_size(pos2(x - 4.0, head.top() + 4.0), vec2(16.0, 20.0));
         let response = ui.interact(spot, ui.scope_id().with(("mini-step", forward, mini.board)), Sense::click());

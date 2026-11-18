@@ -129,3 +129,21 @@ fn the_side_panel_s_content_stands_16_in_and_the_mini_month_is_220_wide() {
     assert_eq!(mini.width(), 220.0, "{mini:?}");
     assert_eq!(mini.top(), edge.top() + 16.0, "{mini:?}");
 }
+
+#[test]
+fn the_mini_month_s_arrows_stand_where_the_sheet_draws_them() {
+    let p = Palette::of(Mode::Dark);
+    let harness = window(View::Week);
+    let mini = rects(&harness)
+        .into_iter()
+        .find(|(rect, fill)| *fill == p.surface && rect.left() > 1100.0 && rect.width() == 220.0)
+        .map(|(rect, _)| rect)
+        .unwrap();
+    // The sheet: the head 12 in, "‹" an 8-wide box at +168 and "›" at +188, so their middles at +184 and +204.
+    let found = texts(&harness);
+    for (sign, middle) in [("‹", 184.0), ("›", 204.0)] {
+        let (x, wide, _) = found.iter().find(|(_, _, text)| text == sign).unwrap();
+        let at = x + wide / 2.0 - mini.left();
+        assert!((at - middle).abs() <= 0.5, "{sign} stands at +{at}, the sheet's +{middle}");
+    }
+}
