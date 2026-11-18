@@ -235,11 +235,21 @@ into the horizon in time; an alert whose time came stays for the tick. A fired a
 entry.
 
 `schedule.presets` (`safe`) answers the presets still ahead: later today (three hours
-on, rounded to the nearest half hour of the wall clock, while still today), this evening (20:00) and tomorrow
-morning (08:00). They are in the computer's wall-clock time, from the `inboxcraft_time::Offsets` the front end
+on, rounded to the nearest half hour of the wall clock, while still today), this evening (20:00), tomorrow
+morning (08:00), this weekend (the coming Saturday at 09:00; from 09:00 on a Saturday, and on a Sunday, the next
+Saturday) and next week (09:00 on the first day of the next week, by the week rule below). Snooze, follow-up and
+send later take the same preset ids. They are in the computer's wall-clock time, from the `inboxcraft_time::Offsets` the front end
 hands over with `Session::set_offsets` (UTC until then); a wall-clock time the clock skips in spring lands after the
 change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries and `schedule.cancel`
 (`owner`) takes one off.
+
+Weeks are counted by the owner's week rule (`inboxcraft_time::WeekRule`): the first day of the week (Monday by
+default) and the year's first week, the first one with four days in the year (ISO 8601 with Monday, the default)
+or the one that holds 1 January. `WeekRule::week` gives a date's week: its first day, its number and the week-year
+it is counted in; a week that starts before year 0 has none. `week.settings` (`safe`) shows the rule and the week
+of today on the owner's wall clock, `week.set` (`owner`) changes it; the front end keeps it
+(`engine::week::to_value`) and hands it back at the start (`Session::set_week_rule`), and a kept value it cannot
+read falls back to the default part by part. "Next week" counts by it.
 
 The calendars in the engine (`engine::calendar`, `cmd/calendar.rs`) keep each event as the iCalendar text the server
 sent and read it with `ical` whenever it is shown, so nothing of it is lost on the way back. The start, and
