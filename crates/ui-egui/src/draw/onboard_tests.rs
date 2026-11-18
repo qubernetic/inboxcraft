@@ -951,6 +951,64 @@ fn hostile_text_never_panics_and_nothing_is_cut_silently() {
     );
 }
 
+/// The plain words under a failed check, `account-failed/*`: an error banner of InboxCraft's own sentence for the step
+/// that failed, never the server's reply; the server's name in it made fit for one line and cut.
+#[test]
+fn a_failed_check_says_what_to_try_in_an_error_banner_of_its_own_words() {
+    let reply = "refused: [AUTHENTICATIONFAILED] Invalid credentials.\r\nX-Secret: hunter2\u{0}";
+    let row = |id: &str, state, server: &str, message: Option<&str>| crate::onboard::StepRow {
+        id: id.to_owned(),
+        state,
+        server: Some(server.to_owned()),
+        issuer: None,
+        message: message.map(str::to_owned),
+    };
+    let sign_in = "Check the user name and the password. Some providers want a password made for mail programs in place of the account's own.";
+    let long = format!("{}.example.org", "h".repeat(3000));
+    let cases = [
+        (
+            vec![row("dns", StepState::Passed, "imap.example.org", None), row("imap_login", StepState::Failed, "imap.example.org:993", Some(reply))],
+            sign_in.to_owned(),
+        ),
+        (
+            vec![row("dns", StepState::Failed, &format!("{long}:993"), Some(reply))],
+            format!(
+                "No server answers to the name {}. Check the spelling of the server, or let Detect propose it. Nothing was sent to anyone.",
+                "h".repeat(253)
+            ),
+        ),
+    ];
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        for (steps, said) in &cases {
+            let mut harness = form_open(theme, FakeWorkers::passing());
+            harness.state_mut().onboarding_mut().0.show_check(1, steps.clone(), false);
+            harness.run();
+            harness.run();
+            assert!(harness.query_by_label("What failed and what to try, in plain words.").is_none(), "{theme:?}: no coming-soon box");
+            let shown: Vec<String> = harness
+                .query_all_by_label_contains("No server answers")
+                .chain(harness.query_all_by_label_contains("Check the user name"))
+                .filter_map(|node| node.accesskit_node().label())
+                .collect();
+            let wanted =
+                if said.starts_with("No server") { said.replacen(&"h".repeat(253), &format!("{}…", "h".repeat(253)), 1) } else { said.clone() };
+            // An error banner reads "Error: " before its words.
+            assert!(
+                shown.iter().any(|label| *label == format!("Error: {wanted}")),
+                "{theme:?}: {:?}",
+                shown.iter().map(|label| label.chars().take(90).collect::<String>()).collect::<Vec<_>>()
+            );
+            for label in &shown {
+                assert!(
+                    !label.contains("AUTHENTICATIONFAILED") && !label.contains("hunter2") && !label.chars().any(char::is_control),
+                    "{theme:?}: ours only"
+                );
+                assert!(label.chars().count() <= 500, "{theme:?}: capped");
+            }
+        }
+    }
+}
+
 /// The page in `scene`: `welcome`, `form`, `error` (a port typed wrong), `detected`, `running` (the check at its third
 /// step), `failed` or `passed`.
 fn scene(name: &str, theme: egui::Theme) -> Harness<'static, InboxApp> {

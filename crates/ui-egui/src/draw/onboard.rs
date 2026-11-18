@@ -15,7 +15,8 @@
 //! terminal box; the sentence over the box says how it ended, with the failing step's sentence whole.
 //!
 //! An account already there gets the same fields, its address read-only, with a new password instead of the password.
-//! Coming soon: signing in at the provider (OAuth), and the plain-words box under a failed check.
+//! Under a failed check an error banner says what failed and what to try, in InboxCraft's own words for the step.
+//! Coming soon: signing in at the provider (OAuth).
 
 use std::sync::Arc;
 
@@ -733,21 +734,55 @@ fn outcome_line(ui: &mut Ui, theme: &Theme, onboarding: &Onboarding, width: f32)
     }
 }
 
-/// The plain-words box under a failed check, coming soon: dashed and `muted`, its tag at its right.
-fn plain_words_soon(ui: &mut Ui, theme: &Theme, width: f32) {
-    let s = &theme.spacing;
-    soon(ui, theme, |ui| {
-        Frame::new().inner_margin(component::margin(s.s3, s.s2)).show(ui, |ui| {
-            ui.set_width(width - 2.0 * s.s3);
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = GAP;
-                soon_tag(ui, theme);
-                words(ui, tr!("What failed and what to try, in plain words."), theme.fonts.caption, theme.palette.muted, ui.available_width());
-            });
-        });
-        let rect = ui.min_rect();
-        paint::dashed(&component::solid(ui), rect, theme.palette.muted);
-    });
+/// The most characters of a server's name the plain words under a failed check carry: a DNS name's longest.
+const PLAIN_HOST: usize = 253;
+
+/// The server `row` reached, without its port, as the plain words name it: already made fit for one line when it was
+/// read ([`crate::mailbox::shown`]), cut to [`PLAIN_HOST`] characters with one ellipsis.
+fn plain_host(row: &StepRow) -> String {
+    let server = row.server.as_deref().unwrap_or_default();
+    let host =
+        server.rsplit_once(':').filter(|(_, port)| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit())).map_or(server, |(host, _)| host);
+    let host = crate::mailbox::shown(host);
+    if host.chars().count() > PLAIN_HOST { format!("{}…", host.chars().take(PLAIN_HOST).collect::<String>()) } else { host }
+}
+
+/// What failed and what to try, in InboxCraft's own words for the step that failed, as `account-failed/*` has them;
+/// never the server's reply, which the line over the steps carries. `None` for a step with no words of its own.
+fn plain_words(row: &StepRow) -> Option<String> {
+    let host = plain_host(row);
+    let words = match row.id.as_str() {
+        "dns" => tr!(
+            "No server answers to the name {host}. Check the spelling of the server, or let Detect propose it. Nothing was sent to anyone.",
+            host = host
+        ),
+        "tcp" => tr!("{host} exists but does not answer on that port. Check the port: IMAP over TLS is usually 993. No password was sent.", host = host),
+        "tls" => tr!(
+            "Encrypt or refuse: InboxCraft signs in only over TLS or STARTTLS, and no encryption came about with {host}, so the password was not sent. There is no setting that sends it in the clear.",
+            host = host
+        ),
+        "certificate" => tr!(
+            "The server could not prove that it is {host}. The sign-in was not tried and the password was not sent, and there is no way to go on with this certificate. Check the server's name; if it is right, the provider has to put its certificate right.",
+            host = host
+        ),
+        "imap_login" => tr!("Check the user name and the password. Some providers want a password made for mail programs in place of the account's own.").to_owned(),
+        "smtp_login" => tr!(
+            "Reading mail works; sending does not. The outgoing server refused the same user name and password. Check the outgoing server and its port; some providers use another user name there."
+        )
+        .to_owned(),
+        "caldav_discovery" => {
+            tr!("Mail works. No calendars were found at the CalDAV address. Check the address, or empty the field to keep the account without calendars.").to_owned()
+        }
+        _ => return None,
+    };
+    Some(words)
+}
+
+/// The plain words under a failed check, as an error banner: for the step that failed, when it has words of its own.
+fn plain_words_banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &Onboarding) {
+    if let Some(words) = onboarding.steps().iter().find(|row| row.state == StepState::Failed).and_then(plain_words) {
+        banner(ui, theme, keymap, BannerKind::Error, &words, &[]);
+    }
 }
 
 fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onboarding: &Onboarding, account: u64) -> Option<Asked> {
@@ -785,7 +820,7 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
                 }
             }
             Outcome::Failed => {
-                plain_words_soon(ui, theme, width);
+                plain_words_banner(ui, theme, keymap, onboarding);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = GAP;
                     if TextButton::new(tr!("Check again")).primary().show(ui, theme, keymap).clicked() {
