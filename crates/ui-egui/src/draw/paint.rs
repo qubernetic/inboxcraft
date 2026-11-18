@@ -379,14 +379,15 @@ fn hairline_shape(a: Pos2, b: Pos2, colour: Color32, ppp: f32) -> Shape {
     Shape::line_segment([pos2(snap(a.x), snap(a.y)), pos2(snap(b.x), snap(b.y))], Stroke::new(pixels / ppp, colour))
 }
 
-/// The shape of a pane's edge from `a` to `b`, level or upright, at `ppp`: a [`hairline`]'s pixels across, and along
-/// from the pixel boundary nearest `a` to the one nearest `b`, so an edge ends at the pane's corner and never a pixel
-/// past it. A filled band, not a line: egui puts the ends of a level or upright line on pixel centres, half a pixel
-/// past a corner.
+/// The shape of a pane's edge from `a` to `b`, level or upright, at `ppp`: a [`hairline`]'s pixels across, from the
+/// pixel `a` falls in, and along over every pixel from `a` to `b` (the pixel boundary at or before `a` to the one at or
+/// after `b`), so an edge ends at the pane's corner and never a pixel past it, and two edges meet at a corner that is
+/// not on a pixel boundary too (an odd point at 1.5). A filled band, not a line: egui puts the ends of a level or
+/// upright line on pixel centres, half a pixel past a corner.
 fn edge_shape(a: Pos2, b: Pos2, colour: Color32, ppp: f32) -> Shape {
     let (ppp, pixels) = line_pixels(ppp);
     let across = |at: f32| ((at * ppp).floor() / ppp, ((at * ppp).floor() + pixels) / ppp);
-    let along = |from: f32, to: f32| ((from * ppp).round() / ppp, (to * ppp).round() / ppp);
+    let along = |from: f32, to: f32| ((from * ppp).floor() / ppp, (to * ppp).ceil() / ppp);
     let band = if (a.y - b.y).abs() < f32::EPSILON {
         let ((left, right), (top, bottom)) = (along(a.x, b.x), across(a.y));
         Rect::from_min_max(pos2(left, top), pos2(right, bottom))
