@@ -890,3 +890,16 @@ fn a_pointer_or_a_click_off_any_window_is_refused_by_name() {
         }
     }
 }
+
+#[test]
+fn the_screens_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "screens": true}}"#))).unwrap();
+        let size = crate::component::gallery_screens::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""fields": true"#, r#""blocks": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "screens": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}

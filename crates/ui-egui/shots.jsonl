@@ -60,6 +60,9 @@
 # and the time picker, on a page of their own.
 {"out": "docs/images/components-fields-light.png", "mode": "light", "fields": true}
 {"out": "docs/images/components-fields-dark.png", "mode": "dark", "fields": true}
+# The screens' own sets (#238): the file on a draft, coming soon.
+{"out": "docs/images/components-screens-light.png", "mode": "light", "screens": true}
+{"out": "docs/images/components-screens-dark.png", "mode": "dark", "screens": true}
 # The shared rows and blocks (#235): row, hover actions, banner, empty state, progress, settings row, check step,
 # facts, on a page of their own.
 {"out": "docs/images/components-blocks-light.png", "mode": "light", "blocks": true}
@@ -121,6 +124,8 @@
 {"out": "docs/images/compose-suggest-dark.png", "mode": "dark", "size": [1400, 860], "compose": "suggest"}
 {"out": "docs/images/compose-floating-light.png", "mode": "light", "size": [1400, 860], "compose": "floating"}
 {"out": "docs/images/compose-floating-dark.png", "mode": "dark", "size": [1400, 860], "compose": "floating"}
+{"out": "docs/images/compose-folded-light.png", "mode": "light", "size": [1400, 860], "compose": "folded"}
+{"out": "docs/images/compose-folded-dark.png", "mode": "dark", "size": [1400, 860], "compose": "folded"}
 # Reply and templates (E2.4, E2.5): a reply to Odile's rota with a line written over the quote; a template whose
 # blank is still to fill in, Send blocked until it is.
 {"out": "docs/images/compose-reply-light.png", "mode": "light", "size": [1400, 860], "compose": "reply"}
