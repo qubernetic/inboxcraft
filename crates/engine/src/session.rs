@@ -321,8 +321,13 @@ pub(crate) struct AccountState {
     pub(crate) connection: Option<ConnectionState>,
     /// Whether the server, at the last sign-in, removes only the messages named (UID EXPUNGE); `false` until it said.
     pub(crate) uid_expunge: bool,
-    /// The last failure, until the account is online again.
+    /// The last failure, until the account is online again or a sync round of it ends with every folder synced.
     pub(crate) failure: Option<(ErrorKind, Option<FolderId>)>,
+    /// The sync round as the worker last told it: folder syncs done (never above `of`) and of; `None` before the
+    /// first and after a round that ended with every folder synced.
+    pub(crate) progress: Option<(u32, u32)>,
+    /// When the account's last sync round ended with every folder synced, as its worker told.
+    pub(crate) synced: Option<Timestamp>,
     /// The last account check, running or done.
     pub(crate) check: Option<Check>,
     /// The account's settings or password changed: the next check that signs in starts the sync again, as the

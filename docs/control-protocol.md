@@ -99,6 +99,9 @@ that is:
 - the appearance (`ui.*.set`) and, in the sample mailbox, `sample.mail.set`;
 - snooze, park and pin, as they land.
 
+`sync.status` reads how syncing stands in the app, from what its workers told: `synced`, `syncing`, `offline` or
+`failing`, the folder syncs done of all, the last sync and the number of failing accounts.
+
 Everything a client sends is hostile. `cargo +nightly fuzz run control_lines` runs the fuzz target on both lines.
 
 ## What it does not do

@@ -130,6 +130,11 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
             plan.state.accounts.entry(account).or_default().uid_expunge = *uid_expunge;
             true
         }
+        EventKind::SyncProgress { done, of } => {
+            crate::cmd::sync_progress(&mut plan.state, account, *done, *of);
+            true
+        }
+        EventKind::SyncFinished { at } => crate::cmd::sync_finished(&mut plan.state, account, *at, context.now()),
         EventKind::Failed { kind, folder } => {
             plan.state.accounts.entry(account).or_default().failure = Some((*kind, *folder));
             if let Some(job) = event.job {

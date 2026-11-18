@@ -9,6 +9,7 @@
 
 use std::fmt;
 
+use inboxcraft_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -304,6 +305,21 @@ pub enum EventKind {
     },
     /// What a [`crate::JobKind::Calendar`] job found or did.
     Calendar(CalendarReport),
+    /// How far the account's sync round has come: `done` of its `of` folder syncs. Told when a round starts and as
+    /// each of its folders ends; the engine takes `done` above `of` as `of`.
+    SyncProgress {
+        /// The folder syncs of the round that ended, synced or failed.
+        done: u32,
+        /// The folder syncs of the round.
+        of: u32,
+    },
+    /// A sync round ended with every folder of it synced, or the watched folder was synced again: the account was
+    /// current at `at`.
+    SyncFinished {
+        /// When it ended, by the worker's clock.
+        #[serde(with = "crate::local::required")]
+        at: Timestamp,
+    },
     /// A job or the connection failed.
     Failed {
         /// Why.
@@ -325,6 +341,8 @@ impl EventKind {
             | Self::FolderCreated { .. }
             | Self::Sent { .. }
             | Self::SendFailed { .. }
+            | Self::SyncProgress { .. }
+            | Self::SyncFinished { .. }
             | Self::Calendar(_) => None,
             Self::MessagesAdded { folder, .. }
             | Self::MessagesChanged { folder, .. }
