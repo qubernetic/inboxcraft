@@ -1169,11 +1169,30 @@ fn one_press_names_every_missing_field_and_a_row_says_both_its_errors() {
 #[test]
 fn rows_without_an_error_stand_12_apart() {
     let harness = form_open(egui::Theme::Dark, FakeWorkers::passing());
-    let imap = harness.get_by_label("IMAP server").rect();
-    let smtp = harness.get_by_label("Outgoing server (SMTP), to send").rect();
-    let caldav = harness.get_by_label("CalDAV address, for calendars").rect();
-    // In the sheet's 720 column the SMTP host's caption takes a second line of 16 (a gaps line says so).
-    assert_eq!((smtp.top() - imap.top(), caldav.top() - smtp.top()), (72.0 + 16.0, 72.0), "a 60-high row and 12 between");
+    let rect = |label: &str, nth: usize| harness.get_all_by_label(label).nth(nth).unwrap().rect();
+    // The form's rows by their fields, top to bottom; the second "Port" is the outgoing server's.
+    let rows = [
+        vec![rect("Name for the account", 0), rect("Name on sent mail", 0)],
+        vec![rect("User name", 0), rect("Password", 0)],
+        vec![rect("IMAP server", 0), rect("Port", 0), rect("IMAP security", 0)],
+        vec![rect("Outgoing server (SMTP), to send", 0), rect("Port", 1), rect("Outgoing security", 0)],
+        vec![rect("CalDAV address, for calendars", 0)],
+    ];
+    // A one-line caption stands 24 over its field's box (16 high, then 8): a row's top is that of its highest box less
+    // 24, its foot that of its lowest box, and 12 lie between one row's foot and the next row's top.
+    for pair in rows.windows(2) {
+        let foot = pair[0].iter().map(|at| at.bottom()).fold(f32::MIN, f32::max);
+        let top = pair[1].iter().map(|at| at.top()).fold(f32::MAX, f32::min) - 24.0;
+        assert_eq!(top - foot, 12.0, "12 between {:?} and {:?}", pair[0], pair[1]);
+    }
+    // The one caption that wraps: in the sheet's 720 column the outgoing server's caption takes a second line of 16
+    // (the gaps line "The add-account page lies in the settings sheet's 720 column" in changes/238.md), so its box
+    // stands 16 under the boxes beside it, and its row's foot with it. Its caption's top is the row's, 12 under the
+    // IMAP row's foot, as the loop checks.
+    let imap = rect("IMAP server", 0);
+    let smtp = rect("Outgoing server (SMTP), to send", 0);
+    assert_eq!(smtp.top() - imap.top(), 72.0 + 16.0, "a 60-high row, 12 between, and the second caption line");
+    assert_eq!(smtp.top() - rect("Outgoing security", 0).top(), 16.0, "only the wrapped caption's box stands lower");
 }
 
 #[test]
