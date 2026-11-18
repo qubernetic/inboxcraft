@@ -145,7 +145,7 @@ impl Surfaces {
 
     /// Whether the window's `action` may run with these surfaces in front, as its key (`keymap`'s, with a modifier or
     /// without) is pressed. Not while the palette or a capture holds the keys; under the sheet only the sheet's and the
-    /// window's own ([`SHEET_KEYS`]); a key without a modifier, and Undo, not under a quiet surface ([`Surfaces::quiet`]);
+    /// window's own ([`SHEET_KEYS`]); under the event editor only what comes over it ([`EDITOR_KEYS`]); a key without a modifier, and Undo, not under a quiet surface ([`Surfaces::quiet`]);
     /// the list's keys only while it has them ([`Surfaces::list_has_keyboard`]). The acts on a row and the calendar's
     /// keys are not the window's: the list and the calendar take those.
     pub(crate) fn allows(&self, action: &str, keymap: &Keymap) -> bool {
@@ -156,6 +156,9 @@ impl Surfaces {
             return false;
         }
         if self.has(Surface::Sheet) && !SHEET_KEYS.contains(&action) {
+            return false;
+        }
+        if self.has(Surface::Editor) && !EDITOR_KEYS.contains(&action) {
             return false;
         }
         if keymap::LIST_KEYS.contains(&action) {
@@ -196,6 +199,11 @@ const SHEET_KEYS: [&str; 13] = [
     keymap::FIND,
     keymap::FULL_WIDTH,
 ];
+
+/// The keys that run under the event editor: what comes over it (the palette, the settings, Shortcuts) and the look
+/// of the window. Nothing opens, shows or acts on what lies under it, nor leaves the calendar while it is open.
+const EDITOR_KEYS: [&str; 7] =
+    [keymap::PALETTE, keymap::SETTINGS, keymap::SHORTCUTS, keymap::LIGHT, keymap::DARK, keymap::SYSTEM_MODE, keymap::MOTION];
 
 #[cfg(test)]
 #[path = "surface_tests.rs"]

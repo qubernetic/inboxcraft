@@ -190,6 +190,10 @@ const COMPOSER: [&str; 21] = [
     "ui.view.list",
 ];
 
+/// What runs under the event editor: what comes over it and the look.
+const EDITOR: [&str; 7] =
+    ["ui.palette.open", "ui.settings.open", "ui.shortcuts.open", "ui.mode.light", "ui.mode.dark", "ui.mode.system", "ui.motion.toggle"];
+
 /// What ran: `(stacking, its facts, without a modifier, with Command)`, each a set of lists.
 type Row = (&'static str, Facts, &'static [&'static [&'static str]], &'static [&'static [&'static str]]);
 
@@ -200,7 +204,9 @@ fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
         ("palette", Facts { palette: true, ..MAIL }, &[], &[]),
         ("capture", Facts { capture: true, sheet: true, ..MAIL }, &[], &[]),
         ("sheet", Facts { sheet: true, ..MAIL }, &[], &[&SHEET]),
-        ("editor", Facts { editor: true, ..CALENDAR }, &[&WINDOW], &[&WINDOW]),
+        // Before #254's fix every window key ran under the editor (`WINDOW`, also with a modifier): New message
+        // opened under it. Now only what comes over it.
+        ("editor", Facts { editor: true, ..CALENDAR }, &[&EDITOR], &[&EDITOR]),
         ("composer", Facts { composer: true, ..MAIL }, &[], &[&COMPOSER]),
         ("full_width", Facts { full_width: true, ..MAIL }, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("one_pane_reader", Facts { one_pane_reader: true, ..MAIL }, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
@@ -252,4 +258,61 @@ fn the_list_has_the_keys_only_on_the_mail_with_nothing_over_it_and_shown() {
     ] {
         assert!(!of(facts).list_has_keyboard(), "{name}");
     }
+}
+
+// The window under the palette and the event editor: a key with a modifier runs nothing that opens or changes what
+// lies under them.
+
+fn clock() -> Box<inboxcraft_time::FakeClock> {
+    Box::new(inboxcraft_time::FakeClock::new(inboxcraft_time::Timestamp::from_unix(1_793_869_200, 0).unwrap()))
+}
+
+/// The sample window, `setup` done first, New message bound to Ctrl N.
+fn window(setup: impl FnOnce(&mut crate::InboxApp)) -> egui_kittest::Harness<'static, crate::InboxApp> {
+    let mut app = crate::InboxApp::new(crate::mailbox::Mailbox::new(crate::sample::session(clock()).unwrap(), clock()));
+    app.keymap_mut().bind(keymap::COMPOSE, KeyboardShortcut::new(Modifiers::COMMAND, Key::N));
+    setup(&mut app);
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .with_max_steps(12)
+        .build_ui_state(|ui, app: &mut crate::InboxApp| app.ui(ui), app);
+    harness.run();
+    harness
+}
+
+#[test]
+fn under_the_palette_a_key_with_a_modifier_runs_nothing() {
+    let mut harness = window(|_| {});
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    assert!(harness.state().palette().is_open());
+    for key in [Key::N, Key::Comma, Key::F] {
+        harness.key_press_modifiers(Modifiers::COMMAND, key);
+        harness.run();
+        assert!(harness.state().composer().is_none(), "{key:?}: no new message under the palette");
+        assert!(!harness.state().settings().is_open(), "{key:?}: no settings under the palette");
+        assert!(harness.state().palette().is_open(), "{key:?}: the palette stays");
+    }
+}
+
+#[test]
+fn under_the_event_editor_a_key_with_a_modifier_runs_only_what_comes_over_it() {
+    let mut harness = window(|app| {
+        app.show_calendar();
+        app.calendar_mut().0.new_event();
+    });
+    assert!(harness.state().calendar().editor().is_some(), "the editor is open");
+    // New message and Find would open or show something under it.
+    for key in [Key::N, Key::F] {
+        harness.key_press_modifiers(Modifiers::COMMAND, key);
+        harness.run();
+        assert!(harness.state().composer().is_none(), "{key:?}: no new message under the editor");
+        assert_eq!(harness.state().screen(), crate::Screen::Calendar, "{key:?}: the calendar stays");
+        assert!(harness.state().calendar().editor().is_some(), "{key:?}: the editor stays");
+    }
+    // The settings come over it.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    assert!(harness.state().settings().is_open(), "the settings come over the editor");
+    assert!(harness.state().calendar().editor().is_some(), "the editor stays under them");
 }
