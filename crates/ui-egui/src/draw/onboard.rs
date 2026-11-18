@@ -750,9 +750,12 @@ fn plain_host(row: &StepRow) -> String {
 }
 
 /// What failed and what to try, in InboxCraft's own words for the step that failed, as `account-failed/*` has them;
-/// never the server's reply, which the line over the steps carries. `None` for a step with no words of its own.
-fn plain_words(row: &StepRow) -> Option<String> {
+/// never the server's reply, which the line over the steps carries. A sign-in or the calendars name a cause (a refused
+/// password, no calendars) only when the check reported that kind of failure; otherwise their words are neutral.
+/// `None` for a step with no words of its own.
+pub(super) fn plain_words(row: &StepRow) -> Option<String> {
     let host = plain_host(row);
+    let refused = row.kind.as_deref() == Some("login_refused");
     let words = match row.id.as_str() {
         "dns" => tr!(
             "No server answers to the name {host}. Check the spelling of the server, or let Detect propose it. Nothing was sent to anyone.",
@@ -767,13 +770,25 @@ fn plain_words(row: &StepRow) -> Option<String> {
             "The server could not prove that it is {host}. The sign-in was not tried and the password was not sent, and there is no way to go on with this certificate. Check the server's name; if it is right, the provider has to put its certificate right.",
             host = host
         ),
-        "imap_login" => tr!("Check the user name and the password. Some providers want a password made for mail programs in place of the account's own.").to_owned(),
+        // A sign-in names its cause only when the check reported it: the SMTP sign-in and the calendars take their
+        // connection, encryption and certificate in the same step, and those fail there too.
+        "imap_login" if refused => {
+            tr!("Check the user name and the password. Some providers want a password made for mail programs in place of the account's own.").to_owned()
+        }
+        "imap_login" => tr!("Could not sign in to {host}. Check the server, its port and the user name, then try again.", host = host),
+        "smtp_login" if refused => tr!(
+            "Reading mail works; sending does not. The outgoing server {host} refused the same user name and password. Check the outgoing server and its port; some providers use another user name there.",
+            host = host
+        ),
         "smtp_login" => tr!(
-            "Reading mail works; sending does not. The outgoing server refused the same user name and password. Check the outgoing server and its port; some providers use another user name there."
-        )
-        .to_owned(),
-        "caldav_discovery" => {
+            "Reading mail works; sending does not. Could not sign in to the outgoing server {host}. Check its address, its port and the user name.",
+            host = host
+        ),
+        "caldav_discovery" if row.kind.as_deref() == Some("no_calendar_server") => {
             tr!("Mail works. No calendars were found at the CalDAV address. Check the address, or empty the field to keep the account without calendars.").to_owned()
+        }
+        "caldav_discovery" => {
+            tr!("Mail works. The calendars could not be reached at the CalDAV address. Check the address, or empty the field to keep the account without calendars.").to_owned()
         }
         _ => return None,
     };

@@ -806,7 +806,7 @@ fn the_check_shows_steps_up_to_the_running_one() {
 
 #[test]
 fn printed_steps_end_at_the_one_under_way_and_a_check_that_ended_shows_all() {
-    let row = |id: &str, state| crate::onboard::StepRow { id: id.to_owned(), state, server: None, issuer: None, message: None };
+    let row = |id: &str, state| crate::onboard::StepRow { id: id.to_owned(), state, server: None, issuer: None, message: None, kind: None };
     let steps = [row("dns", StepState::Passed), row("tcp", StepState::Pending), row("tls", StepState::Pending)];
     let running = super::onboard::printed(&steps, true);
     assert_eq!(
@@ -931,6 +931,7 @@ fn hostile_text_never_panics_and_nothing_is_cut_silently() {
         server: Some(format!("{}:993", "h".repeat(3000))),
         issuer: Some("\u{202e}Example\u{0} CA".repeat(100)),
         message: message.map(str::to_owned),
+        kind: None,
     };
     let steps = vec![row("dns", StepState::Passed, None), row("certificate", StepState::Passed, None), row("tcp", StepState::Failed, Some(&long))];
     // On a page of its own: the form's scroll would keep the top of the check out of sight.
@@ -962,6 +963,7 @@ fn a_failed_check_says_what_to_try_in_an_error_banner_of_its_own_words() {
         server: Some(server.to_owned()),
         issuer: None,
         message: message.map(str::to_owned),
+        kind: (id == "imap_login").then(|| "login_refused".to_owned()),
     };
     let sign_in = "Check the user name and the password. Some providers want a password made for mail programs in place of the account's own.";
     let long = format!("{}.example.org", "h".repeat(3000));
@@ -1019,6 +1021,7 @@ fn a_skipped_step_names_its_server_on_its_line() {
         server: server.map(str::to_owned),
         issuer: None,
         message: None,
+        kind: None,
     };
     let steps = vec![
         row("imap_login", StepState::Failed, Some("imap.example.org:993")),
@@ -1553,10 +1556,39 @@ fn two_steps_of_the_same_id_each_say_where_they_went() {
         server: Some(server.to_owned()),
         issuer: None,
         message: None,
+        kind: None,
     };
     harness.state_mut().onboarding_mut().0.show_check(1, vec![row("a.example.org:993"), row("b.example.org:993")], false);
     harness.run();
     harness.run();
     harness.get_by_label("a.example.org:993");
     harness.get_by_label("b.example.org:993");
+}
+
+/// A sign-in or calendar step names a cause only when the check reported that kind: a connection, encryption or
+/// certificate failure in the same step never reads as a refused password or as no calendars.
+#[test]
+fn a_failed_sign_in_or_calendar_step_names_only_the_cause_the_check_reported() {
+    let row = |id: &str, kind: Option<&str>| crate::onboard::StepRow {
+        id: id.to_owned(),
+        state: StepState::Failed,
+        server: Some("mail.example.org:465".to_owned()),
+        issuer: None,
+        message: None,
+        kind: kind.map(str::to_owned),
+    };
+    let words = |id: &str, kind: Option<&str>| super::onboard::plain_words(&row(id, kind)).unwrap();
+    let elsewhere = [Some("connection_refused"), Some("timed_out"), Some("tls"), Some("certificate_expired"), Some("certificate_wrong_host"), None];
+    for (id, cause, named) in [
+        ("imap_login", "login_refused", "Check the user name and the password."),
+        ("smtp_login", "login_refused", "refused the same user name and password"),
+        ("caldav_discovery", "no_calendar_server", "No calendars were found"),
+    ] {
+        assert!(words(id, Some(cause)).contains(named), "{id}: {cause} names it");
+        for kind in elsewhere {
+            let said = words(id, kind);
+            assert!(!said.contains(named) && !said.contains("refused") && !said.contains("No calendars"), "{id} {kind:?}: {said}");
+        }
+    }
+    assert!(words("smtp_login", Some("tls")).contains("mail.example.org"), "the outgoing server named");
 }

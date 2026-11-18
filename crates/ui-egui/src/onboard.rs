@@ -614,6 +614,9 @@ pub struct StepRow {
     pub issuer: Option<String>,
     /// Why it failed or did not run, in English from the engine.
     pub message: Option<String>,
+    /// What kind of failure the check reported (`login_refused`), as the engine names it; `None` when it reported
+    /// none.
+    pub kind: Option<String>,
 }
 
 impl StepRow {
@@ -648,7 +651,7 @@ fn step_row(value: &Value) -> StepRow {
         Some(port) => format!("{host}:{port}"),
         None => host,
     });
-    StepRow { id: text("step").unwrap_or_default(), state, server, issuer: text("issuer"), message: text("message") }
+    StepRow { id: text("step").unwrap_or_default(), state, server, issuer: text("issuer"), message: text("message"), kind: text("kind") }
 }
 
 /// Where the owner is.
