@@ -106,3 +106,21 @@ fn the_fold_is_as_high_as_the_scaled_size_at_130_percent() {
     let harness = harness(theme, false, Shown::Rest);
     assert_eq!(harness.get_by_label(&spoken(14, false)).rect().height(), theme.size(28.0));
 }
+
+#[test]
+fn an_open_quote_s_words_reach_a_screen_reader_whole() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let harness = harness(theme, true, Shown::Rest);
+    harness.get_by_label(SAID);
+    harness.get_by_label(QUOTED);
+    let folded = super::super::tests::staged(
+        theme,
+        |p| p.surface,
+        vec2(608.0, 200.0),
+        |ui, theme| {
+            ui.set_width(560.0);
+            quote_fold(ui, theme, 14, false, Some(SAID), QUOTED);
+        },
+    );
+    assert!(folded.query_by_label(QUOTED).is_none(), "a folded quote says only how long it is");
+}

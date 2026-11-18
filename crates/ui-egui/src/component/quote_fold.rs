@@ -88,17 +88,27 @@ pub(crate) fn quote_fold_with(
         let line = super::cut(ui, &format!(" {}", words(lines, open)), f.mono_s, ink, room - caret_width(f.mono_s));
         paint::run_at(painter, pos2(left + caret_width(f.mono_s), (middle - line.size().y / 2.0).round()), line, ink);
         let mut top = head.bottom();
-        if let Some(said) = said {
+        if let Some(said) = said.clone() {
             let high = said.size().y;
             paint::rows_at(painter, pos2(left, top), room, said, p.muted);
             top += high;
         }
-        if let Some(quoted) = quoted {
+        if let Some(quoted) = quoted.clone() {
             paint::rows_at(painter, pos2(left, top), room, quoted, p.muted);
         }
         if lit.focus {
             paint::focus_ring(painter, theme, head, Ring::Inside);
         }
+    }
+    // The quote's words for a screen reader, whole.
+    let mut top = head.bottom();
+    let left = whole.left() + PAD;
+    for (index, (galley, words)) in [(said, attribution.unwrap_or_default()), (quoted, text)].into_iter().enumerate() {
+        let Some(galley) = galley else { continue };
+        let rect = Rect::from_min_size(pos2(left, top), vec2(room, galley.size().y));
+        let heard = ui.interact(rect, id.with(("words", index)), Sense::hover());
+        heard.widget_info(|| WidgetInfo::labeled(Role::Label, true, super::spoken(words)));
+        top += galley.size().y;
     }
     response
 }
