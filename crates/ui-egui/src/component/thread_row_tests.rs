@@ -159,3 +159,85 @@ fn the_thread_row_keeps_its_scaled_height_and_its_columns_at_130_percent_with_ho
         assert!(ended, "{start} cut with one ellipsis");
     }
 }
+
+/// The row `room` wide on the reader's `surface`.
+fn narrow(theme: Theme, line: ThreadLine<'static>, room: f32) -> Harness<'static> {
+    staged(
+        theme,
+        |p| p.surface,
+        vec2(room + 48.0, 100.0),
+        move |ui, theme| {
+            ui.set_width(room);
+            thread_row_with(ui, theme, &Keymap::default(), &line, Some(Shown::Rest));
+        },
+    )
+}
+
+#[test]
+fn in_a_narrow_row_nothing_paints_outside_its_box_and_the_date_stays_whole() {
+    let long = ThreadLine { sender: "Odile Brannock-Harbourmaster", ..FOLDED };
+    let open = ThreadLine { sender: "Odile Brannock-Harbourmaster", ..OPEN };
+    for scale in [TextScale::default(), TextScale::ALL[4]] {
+        let theme = Theme::new(Mode::Dark, scale);
+        for room in [640.0, 420.0, 340.0, 280.0, 240.0, 200.0] {
+            for (state, line) in [("folded", long), ("open", open), ("unread", ThreadLine { unread: true, ..long })] {
+                let harness = narrow(theme, line, room);
+                let name = spoken(&line);
+                let rect = harness.get_by_label(&name).rect();
+                let paint = painted(&harness, &name);
+                let at = format!("{scale:?} {room} {state}");
+                let texts: Vec<(Rect, String)> = paint
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.look {
+                        Look::Text { text, .. } => Some((shape.rect, text.clone())),
+                        _ => None,
+                    })
+                    .collect();
+                for (shape, text) in &texts {
+                    // Cut by the one rule, never clipped at the row's edge.
+                    assert!(rect.expand(0.01).contains_rect(*shape), "{text:?} at {shape:?} paints past the row {rect:?}: {at}");
+                }
+                for (index, (one, text)) in texts.iter().enumerate() {
+                    for (other, word) in texts.iter().skip(index + 1) {
+                        assert!(one.intersect(*other).area() <= 0.5 || one.width() < 1.0, "{text:?} runs over {word:?}: {at}");
+                    }
+                }
+                // The date never gives way.
+                assert!(texts.iter().any(|(_, text)| text == "13:40"), "the date whole: {texts:?} {at}");
+                // `details ▾`, where it stands, keeps inside the row.
+                if let Some(link) = harness.query_by_label("details ▾") {
+                    assert!(rect.expand(0.01).contains_rect(link.rect()), "details at {:?} in {rect:?}: {at}", link.rect());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_narrow_row_gives_way_first_the_words_then_details_then_the_sender() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let painted_texts = |room: f32, line: ThreadLine<'static>| -> (Vec<String>, bool) {
+        let harness = narrow(theme, line, room);
+        let paint = painted(&harness, &spoken(&line));
+        let texts = paint
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.look {
+                Look::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        (texts, harness.query_by_label("details ▾").is_some())
+    };
+    // Wide: the sender whole, the address and to whom, details and the date.
+    let (texts, details) = painted_texts(640.0, OPEN);
+    assert!(texts.iter().any(|text| text == "Marit Solheim") && texts.iter().any(|text| text.starts_with("marit@")) && details, "{texts:?}");
+    // The address goes first; details and the sender's 152 stay while they fit.
+    let (texts, details) = painted_texts(360.0, OPEN);
+    assert!(!texts.iter().any(|text| text.starts_with("marit@")) && details && texts.iter().any(|text| text == "Marit Solheim"), "{texts:?}");
+    // Then details; the sender is cut last, the date never.
+    let (texts, details) = painted_texts(230.0, OPEN);
+    assert!(!details, "details gives way before the sender is cut: {texts:?}");
+    assert!(texts.iter().any(|text| text.starts_with("Mar")) && texts.iter().any(|text| text == "13:40"), "{texts:?}");
+}

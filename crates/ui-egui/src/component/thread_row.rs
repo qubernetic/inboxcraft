@@ -9,6 +9,9 @@
 //! the row takes the `stage` fill and its avatar the `surface`; the focus ring stands inside it. The sender, the words
 //! and the address are data: plain words on one line, cut between grapheme clusters with one ellipsis; a screen reader
 //! hears them whole. Nothing moves: the row opens and folds at once (the design gives the fold no timing).
+//!
+//! A row narrower than its parts gives way by the design's widths rule: the words (the row's fill) first, then
+//! `details ▾` whole, then the sender is cut below its 152; the date is never cut. Nothing paints past the row.
 
 use egui::{Align, Layout, Rect, Response, Role, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
@@ -91,20 +94,27 @@ pub(crate) fn thread_row_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, line:
         (false, false) => (f.caption, p.muted),
     };
     let date_ink = if line.unread && !line.open { p.cyan_text } else { p.muted };
-    let date = super::fitted(ui, line.date, f.mono_s, date_ink, width / 4.0);
-    let date_width = paint::run_box(date.size().x);
-    let link_words = tr!("details");
-    let link = if line.open { link_caret_width(ui, theme, link_words) + GAP } else { 0.0 };
     let caret_left = rect.left() + PAD;
     let square_left = caret_left + caret_width(f.mono_s).ceil() + GAP;
     let avatar_left = square_left + SQUARE + GAP;
     let side = AvatarSize::S.side(theme);
     let sender_left = avatar_left + side + GAP;
-    let preview_left = sender_left + SENDER + GAP;
     let date_right = rect.right() - PAD;
-    let preview_right = (date_right - date_width - GAP - link).max(preview_left + 1.0);
+    // The date keeps whole: it may take all the room after the avatar.
+    let date = super::fitted(ui, line.date, f.mono_s, date_ink, (date_right - sender_left).max(1.0));
+    let date_left = date_right - paint::run_box(date.size().x);
+    // The room the sender, the words and `details ▾` share. The words give way first, then `details ▾` whole, then the
+    // sender below its column's width.
+    let shared = (date_left - GAP - sender_left).max(0.0);
+    let link_words = tr!("details");
+    let link = if line.open { link_caret_width(ui, theme, link_words) + GAP } else { 0.0 };
+    let linked = line.open && shared >= SENDER + link;
+    let sender_room = if linked { SENDER } else { SENDER.min(shared) };
+    let preview_left = sender_left + SENDER + GAP;
+    let preview_right = date_left - GAP - if linked { link } else { 0.0 };
     if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
+        // Below the least the row holds (the avatar and the date), what does not fit is clipped at the row's edge.
+        let painter = &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
         if lit.hover {
             painter.rect_filled(rect, 0.0, p.stage);
         }
@@ -119,10 +129,12 @@ pub(crate) fn thread_row_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, line:
         let face = Rect::from_min_size(pos2(avatar_left, (middle - side / 2.0).round()), vec2(side, side));
         paint_on(painter, theme, face, line.sender, line.address, if lit.hover { p.surface } else { p.stage });
         let top = |high: f32| (middle - high / 2.0).round();
-        let sender = super::fitted(ui, line.sender, sender_font, p.ink, SENDER);
+        let sender = super::fitted(ui, line.sender, sender_font, p.ink, sender_room);
         paint::run_at(painter, pos2(sender_left, top(sender.size().y)), sender, p.ink);
-        let preview = super::fitted(ui, line.preview, preview_font, preview_ink, preview_right - preview_left);
-        paint::run_at(painter, pos2(preview_left, top(preview.size().y)), preview, preview_ink);
+        if preview_right > preview_left {
+            let preview = super::fitted(ui, line.preview, preview_font, preview_ink, preview_right - preview_left);
+            paint::run_at(painter, pos2(preview_left, top(preview.size().y)), preview, preview_ink);
+        }
         paint::run_right(painter, date_right, top(date.size().y), date, date_ink);
         if lit.focus {
             let inside = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - 1.0));
@@ -130,8 +142,8 @@ pub(crate) fn thread_row_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, line:
         }
     }
     let mut details = false;
-    if line.open {
-        let link_rect = Rect::from_min_max(pos2(preview_right + GAP, rect.top()), pos2(date_right - date_width - GAP, rect.bottom()));
+    if linked {
+        let link_rect = Rect::from_min_max(pos2(date_left - link, rect.top()), pos2(date_left - GAP, rect.bottom()));
         let mut child = ui.new_child(UiBuilder::new().max_rect(link_rect).layout(Layout::left_to_right(Align::Center)));
         details = link_caret(&mut child, theme, keymap, link_words, Caret::Down).clicked();
     }

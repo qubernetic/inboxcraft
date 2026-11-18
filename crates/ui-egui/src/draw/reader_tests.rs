@@ -1329,3 +1329,92 @@ fn the_reader_s_menus_are_walked_by_the_keyboard_and_rest() {
         assert!(crate::component::tests::rests(&mut harness, 8), "{button}: it repaints at rest");
     }
 }
+
+/// The app with `subject` (in `folder`, or the unified inbox) open in a window `width` wide at `ppp` pixels per point,
+/// its text at `percent`.
+fn opened_in(fetch: &Recorder, folder: Option<u64>, subject: &str, width: f32, percent: u16, ppp: f32) -> Harness<'static, InboxApp> {
+    let mut app = app_with(fetch);
+    if let Some(folder) = folder {
+        app.mailbox_mut().open(crate::mailbox::Place::Folder(folder));
+    }
+    let id = app.mailbox().messages().iter().find(|row| row.subject == subject).unwrap().id;
+    app.mailbox_mut().select(Some(id));
+    app.set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+    let mut harness = Harness::builder()
+        .with_size(vec2(width, 800.0))
+        .with_pixels_per_point(ppp)
+        .with_theme(egui::Theme::Dark)
+        .with_max_steps(12)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    settle(&mut harness);
+    harness
+}
+
+/// Every text painted in the last frame that shows (not wholly clipped away): its whole galley's rect and its words.
+fn painted_texts(harness: &Harness<'static, InboxApp>) -> Vec<(egui::Rect, String)> {
+    fn walk(shape: &egui::Shape, clip: egui::Rect, found: &mut Vec<(egui::Rect, String)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, clip, found)),
+            egui::Shape::Text(text) => {
+                let at = egui::Rect::from_min_size(text.pos, text.galley.size());
+                if at.intersect(clip).is_positive() && !text.galley.job.text.trim().is_empty() {
+                    found.push((at, text.galley.job.text.clone()));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, clipped.clip_rect, &mut found));
+    found
+}
+
+/// The sizes the reader must keep to: a 1024 and a 1440 window, text at 100 and 130 %, at 1x and 1.5x.
+const NARROW_SIZES: [(f32, u16, f32); 8] = [
+    (1024.0, 100, 1.0),
+    (1024.0, 130, 1.0),
+    (1024.0, 100, 1.5),
+    (1024.0, 130, 1.5),
+    (1440.0, 100, 1.0),
+    (1440.0, 130, 1.0),
+    (1440.0, 100, 1.5),
+    (1440.0, 130, 1.5),
+];
+
+#[test]
+fn a_thread_s_rows_keep_their_words_inside_them_in_a_narrow_reader() {
+    for (folder, subject) in [(Some(3), "Re: Allotment rota for November"), (None, "Draft logo for the bakery")] {
+        for (width, percent, ppp) in NARROW_SIZES {
+            let fetch = Recorder::default();
+            let harness = opened_in(&fetch, folder, subject, width, percent, ppp);
+            let at = format!("{subject} {width} {percent}% {ppp}x");
+            let rows: Vec<egui::Rect> = harness
+                .query_all_by_role(Role::Button)
+                .filter(|node| node.accesskit_node().label().is_some_and(|label| label.contains(", folded") || label.contains(", open: ")))
+                .map(|node| node.rect())
+                .filter(|rect| rect.is_positive() && rect.bottom() <= 800.0)
+                .collect();
+            if folder.is_some() {
+                assert!(rows.len() > 1, "a thread shows its rows: {at}");
+            }
+            let texts = painted_texts(&harness);
+            for row in &rows {
+                assert!(row.right() <= width + 0.5, "the row stands in the window: {row:?} {at}");
+                let inside: Vec<&(egui::Rect, String)> =
+                    texts.iter().filter(|(rect, _)| rect.intersects(*row) && rect.intersect(*row).area() > 1.0).collect();
+                for (rect, text) in &inside {
+                    assert!(row.expand(0.5).contains_rect(*rect), "{text:?} at {rect:?} paints past its row {row:?}: {at}");
+                }
+                for (index, (one, text)) in inside.iter().enumerate() {
+                    for (other, word) in inside.iter().skip(index + 1) {
+                        assert!(one.intersect(*other).area() <= 1.0, "{text:?} at {one:?} runs over {word:?} at {other:?}: {at}");
+                    }
+                }
+            }
+            if let Some(link) = harness.query_by_label("details ▾") {
+                let rect = link.rect();
+                assert!(rows.iter().any(|row| row.expand(0.5).contains_rect(rect)), "details at {rect:?} stands in its row: {at}");
+            }
+        }
+    }
+}
