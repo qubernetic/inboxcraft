@@ -2478,3 +2478,36 @@ fn esc_that_closes_a_menu_in_the_reader_only_closes_it() {
     harness.run();
     assert!(selected_focused(&harness), "Esc in the reader: back on the list's row");
 }
+
+#[test]
+fn the_list_keys_rest_under_a_rows_open_menu() {
+    let mut harness = harness(true);
+    let odile = harness.state().mailbox().messages().iter().find(|row| row.sender == "Odile Brannock").unwrap().id;
+    harness.state_mut().mailbox_mut().select_keyed(odile);
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(odile)));
+    harness.run();
+    // The row keeps the focus while its menu, opened by the pointer, is open over it.
+    let row = harness.get_by_label(ODILE_READ).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    harness.event(egui::Event::PointerButton {
+        pos: row.center(),
+        button: egui::PointerButton::Secondary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    harness.event(egui::Event::PointerButton {
+        pos: row.center(),
+        button: egui::PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run();
+    assert!(egui::Popup::is_any_open(&harness.ctx), "the menu is open");
+    assert!(harness.ctx.memory(|memory| memory.has_focus(super::list::row_id(odile))), "the row still has the focus");
+    for key in [Key::J, Key::ArrowDown, Key::End] {
+        harness.key_press(key);
+        harness.run();
+        assert_eq!(harness.state().mailbox().selected(), Some(odile), "{key:?} under the open menu");
+    }
+}

@@ -650,11 +650,15 @@ impl InboxApp {
         if self.screen != Screen::Mail || self.palette.is_open() || self.settings.is_open() || self.settings.capturing().is_some() || self.docked() {
             return false;
         }
+        // A menu open over the list (a row's own included) keeps the keys: its arrows are its own.
+        if egui::Popup::is_any_open(ctx) {
+            return false;
+        }
         if self.list_row.is_some() {
             return true;
         }
         let focused = ctx.memory(|memory| memory.focused().is_some());
-        self.list_keys && !focused && !egui::Popup::is_any_open(ctx)
+        self.list_keys && !focused
     }
 
     /// Opens the time picker over the open message in the next frame, `typed` in its field: Snooze, or "Remind me if no
