@@ -1345,6 +1345,13 @@ impl Onboarding {
         self.running = running;
     }
 
+    /// How many forms are kept on the way out, and whether any of them holds a password: a test's look inside.
+    #[cfg(test)]
+    pub(crate) fn kept_forms(&self) -> (usize, bool) {
+        let forms: Vec<&Form> = self.kept.iter().map(|kept| &kept.form).chain(self.kept_edits.values().map(|(form, _)| form)).collect();
+        (forms.len(), forms.iter().any(|form| !form.password.is_empty()))
+    }
+
     /// Removes from the credential store the password of every account added here, for the end of a window over a
     /// store that is not kept, whose accounts the passwords would outlive. A window over a kept store does not call it:
     /// a password stays until its account is removed. One the credential store refuses again stays behind.

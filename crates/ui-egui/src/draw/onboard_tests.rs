@@ -827,3 +827,85 @@ fn detect_s_note_says_what_the_form_now_holds() {
     harness.get_by_label("Detect found imap.example.org; the IMAP server you typed stays.");
     assert!(harness.query_by_label("Found in your provider's settings file.").is_none(), "no server of Detect's is in the form");
 }
+
+/// Each way out of the page the window offers, by its name.
+fn leave(harness: &mut Harness<'static, InboxApp>, way: &str) {
+    match way {
+        "Esc" => harness.key_press(Key::Escape),
+        "a press beside" => {
+            let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+            let beside = egui::pos2(sheet.left() / 2.0, sheet.center().y);
+            harness.hover_at(beside);
+            harness.run();
+            for pressed in [true, false] {
+                harness.event(egui::Event::PointerButton { pos: beside, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+                harness.run();
+            }
+        }
+        "Back" => harness.get_by_label("Back to the accounts").click(),
+        "another section" => harness.get_by_label("Sending, settings page").click(),
+        "the calendar" => harness.state_mut().show_calendar(),
+        "the settings' first page" => harness.state_mut().open_settings(),
+        "the shortcuts" => harness.state_mut().open_shortcuts(),
+        _ => panic!("{way}"),
+    }
+    harness.run();
+    harness.run();
+}
+
+#[test]
+fn no_way_out_keeps_a_password_in_the_forms_it_keeps() {
+    let ways = ["Esc", "a press beside", "Back", "another section", "the calendar", "the settings' first page", "the shortcuts"];
+    for way in ways {
+        // The add form.
+        let mut harness = form_open(egui::Theme::Dark, FakeWorkers::passing());
+        let form = harness.state_mut().onboarding_mut().0.form_mut();
+        form.address = "carol@example.org".to_owned();
+        form.password = Secret::new(PASSWORD);
+        harness.run();
+        leave(&mut harness, way);
+        assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "{way}");
+        assert_eq!(harness.state().onboarding().kept_forms(), (1, false), "{way}: the add form is kept, without its password");
+        // An account's form, changed.
+        let (onboarding, mailbox) = harness.state_mut().onboarding_mut();
+        onboarding.open();
+        crate::onboard::tests::filled(onboarding.form_mut());
+        onboarding.add(mailbox);
+        assert_eq!(onboarding.stage(), Stage::Checking(1), "{way}: {:?}", onboarding.error());
+        onboarding.edit(mailbox, 1);
+        onboarding.form_mut().host = "imap.typed.example.org".to_owned();
+        onboarding.form_mut().password = Secret::new(PASSWORD);
+        harness.run();
+        leave(&mut harness, way);
+        assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "{way}");
+        assert_eq!(harness.state().onboarding().kept_forms(), (1, false), "{way}: the account's form is kept, without its password");
+    }
+}
+
+#[test]
+fn going_from_one_form_to_the_other_keeps_no_password() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) =
+        (crate::onboard::tests::mailbox(), crate::onboard::Onboarding::new(Arc::new(kept), Box::new(Proposed::default())));
+    onboarding.open();
+    crate::onboard::tests::filled(onboarding.form_mut());
+    onboarding.add(&mut mailbox);
+    onboarding.close();
+    // The add form, typed in, then an account's row.
+    onboarding.open();
+    onboarding.form_mut().address = "dave@example.org".to_owned();
+    onboarding.form_mut().password = Secret::new(PASSWORD);
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.kept_forms(), (1, false), "the add form");
+    // The account's form, changed, then Add account.
+    onboarding.form_mut().host = "imap.typed.example.org".to_owned();
+    onboarding.form_mut().password = Secret::new(PASSWORD);
+    onboarding.open();
+    assert!(onboarding.form().password.is_empty());
+    assert_eq!(onboarding.kept_forms(), (1, false), "the account's form; the add form is open again");
+    // And back to the account's form: the add form's password goes with it.
+    onboarding.form_mut().password = Secret::new(PASSWORD);
+    onboarding.edit(&mut mailbox, 1);
+    assert!(onboarding.form().password.is_empty());
+    assert_eq!(onboarding.kept_forms(), (1, false));
+}
