@@ -304,7 +304,6 @@ fn states(mailbox: &Mailbox, id: u64) -> Vec<(String, String)> {
     chips
 }
 
-/// The toolbar of mail actions, then the subject under it with who wrote in the thread.
 /// "Back to the list", the design's first tool of the reader when the window holds one pane: the arrow left, the action
 /// [`keymap::BACK`]; a press asks for [`Asked::Back`]. Its id is kept for [`take_back_id`]. Whether it was drawn.
 pub(super) fn back_to_list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, drawn: &mut Drawn) -> bool {
@@ -331,6 +330,8 @@ pub(super) fn take_back_id(ctx: &egui::Context) -> Option<egui::Id> {
     ctx.data_mut(|data| data.remove::<egui::Id>(back_kept_id()));
     id
 }
+
+/// The toolbar of mail actions, then the subject under it with who wrote in the thread.
 fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
     let s = &theme.spacing;
