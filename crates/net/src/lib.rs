@@ -54,6 +54,7 @@ pub mod envelope;
 mod error;
 mod imap;
 pub mod picture;
+pub mod probe;
 mod smtp;
 mod sync;
 mod tls;
