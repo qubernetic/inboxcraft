@@ -1416,3 +1416,26 @@ fn hundreds_of_recipients_in_cc_and_bcc_hold_the_layout() {
     let composer = harness.state().composer().unwrap();
     assert_eq!([Line::To, Line::Cc, Line::Bcc].map(|line| composer.chips(line).len()), [500, 500, 500]);
 }
+
+#[test]
+fn many_templates_in_a_short_window_stay_in_it() {
+    let mut harness = Harness::builder()
+        .with_size(vec2(1100.0, 520.0))
+        .with_max_steps(12)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+    harness.run();
+    for n in 0..40 {
+        let params = json!({ "account": 1, "name": format!("Template {n:02}"), "text": "Thank you." });
+        harness.state_mut().mailbox_mut().run("template.save", &params).unwrap();
+    }
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Templates").click();
+    harness.run();
+    let screen = harness.ctx.content_rect();
+    let rows: Vec<egui::Rect> = harness.query_all_by_role(Role::MenuItem).map(|row| row.rect()).collect();
+    assert!(!rows.is_empty(), "the menu is open");
+    let shown: Vec<&egui::Rect> = rows.iter().filter(|row| screen.intersects(**row)).collect();
+    assert!(shown.iter().all(|row| row.top() >= screen.top() + 3.0 - 0.5), "the menu keeps 3 clear of the window's top: {shown:?}");
+    assert!(shown.len() < rows.len(), "the rows past the room scroll: {} of {}", shown.len(), rows.len());
+}
