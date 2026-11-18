@@ -1302,27 +1302,206 @@ pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool
     add
 }
 
-/// "New senders": the list, then under it the screener's mode as pills, the choice the Triage settings page offers.
-fn senders(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>) -> (Built, Option<ScreenerMode>) {
-    let theme = rows.theme;
-    let s = &theme.spacing;
-    let room = ui.available_rect_before_wrap();
-    let lines = if room.width() < 360.0 { 2.0 } else { 1.0 };
-    let bar = (theme.fonts.button.line + s.s2) * lines + s.s2 * 2.0;
-    let list = Rect::from_min_max(room.min, pos2(room.right(), (room.bottom() - bar).max(room.top())));
-    let built = ui.scope_builder(UiBuilder::new().max_rect(list), |ui| show_lines(ui, rows, listing, "mail-list")).inner;
-    ui.add_space(s.s2);
-    let mut mode = None;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(s.s1, s.s1);
-        crate::component::label(ui, theme.fonts.label, tr!("Screener"), theme.palette.muted);
-        for choice in ScreenerMode::ALL {
-            if pill(ui, theme, super::settings::screener_name(choice), rows.mailbox.screener_mode() == choice).clicked() {
-                mode = Some(choice);
-            }
+/// One sender waiting in New senders: their newest held message (whose row the queue's card shows) and how many more
+/// they sent.
+struct Asker<'a> {
+    newest: &'a MessageRow,
+    more: usize,
+}
+
+/// The senders New senders holds, one for each address in the order their newest mail came (the list's order), at
+/// most [`QUEUE_MOST`].
+fn askers(mailbox: &Mailbox) -> Vec<Asker<'_>> {
+    let mut found: Vec<Asker<'_>> = Vec::new();
+    for message in mailbox.messages() {
+        let address = message.address.to_lowercase();
+        if let Some(asker) = found.iter_mut().find(|asker| asker.newest.address.to_lowercase() == address) {
+            asker.more = asker.more.saturating_add(1);
+        } else if found.len() < QUEUE_MOST {
+            found.push(Asker { newest: message, more: 0 });
         }
+    }
+    found
+}
+
+/// The most senders the queue shows a card for at once; the rest come as those are answered.
+const QUEUE_MOST: usize = 50;
+
+/// The queue's room around it and between its parts, in points, and the widest a card gets.
+const QUEUE_PAD: (f32, f32) = (56.0, 36.0);
+const QUEUE_GAP: f32 = 20.0;
+const CARD_GAP: f32 = 12.0;
+const CARD_WIDE: f32 = 900.0;
+
+/// "New senders", the design's queue: its label, "Who gets in?", what it is for, the screener's mode, then a card for
+/// each sender who waits (their avatar, name, account and address, their newest message and how many more, its first
+/// line) with Let in and Keep out; the first card is the current one, its edge in the accent, Let in primary and the
+/// line that says why it waits under its text. What was pressed: a card's answer, a mode.
+fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
+    let (theme, keymap, mailbox) = (rows.theme, rows.keymap, rows.mailbox);
+    let (p, f) = (&theme.palette, &theme.fonts);
+    let askers = askers(mailbox);
+    let mut mode = None;
+    let room = ui.available_rect_before_wrap();
+    ui.painter().rect_filled(room, 0.0, p.bg);
+    let area = ScrollArea::vertical().id_salt("new-senders").auto_shrink([false, false]);
+    crate::component::scroll::show(ui, theme, area, |ui| {
+        let pad = if ui.available_width() > CARD_WIDE { QUEUE_PAD.0 } else { theme.spacing.s4 };
+        Frame::new().inner_margin(Margin::symmetric(i8::try_from(pad as i32).unwrap_or(16), 36)).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, QUEUE_GAP);
+            let count = askers.len();
+            let word = if count == 1 {
+                tr!("NEW SENDERS · 1 FIRST-TIME SENDER").to_owned()
+            } else {
+                tr!("NEW SENDERS · {count} FIRST-TIME SENDERS", count = count)
+            };
+            crate::component::label::section_label(ui, theme, "[ 01 ]", &word, false);
+            ui.label(RichText::new(tr!("Who gets in?")).font(f.display.id()).color(p.ink));
+            let about =
+                tr!("Nobody new reaches the inbox before you say so. If you keep a sender out, their mail goes to Blocked, never to the inbox.");
+            ui.add(egui::Label::new(RichText::new(about).font(f.read.id()).color(p.muted)).wrap());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = theme.spacing.s3;
+                crate::component::label(ui, f.label, tr!("Screener"), p.muted);
+                let modes = ScreenerMode::ALL.map(|choice| (choice, super::settings::screener_name(choice), f.button));
+                if let Some(choice) = segmented_for(ui, theme, &modes, mailbox.screener_mode(), Some(tr!("the screener"))) {
+                    mode = Some(choice);
+                }
+            });
+            ui.spacing_mut().item_spacing.y = CARD_GAP;
+            for (index, asker) in askers.iter().enumerate() {
+                if let Some(act) = sender_card(ui, theme, keymap, mailbox, asker, index == 0) {
+                    rows.acted.set(Some((asker.newest.id, act)));
+                }
+            }
+            if let Some(id) = ui.data_mut(|data| data.remove_temp::<u64>(Id::unique("new-sender-opened"))) {
+                rows.clicked.set(Some(id));
+            }
+        });
     });
-    (built, mode)
+    (Built { first: 0, count: askers.len() }, mode)
+}
+
+/// The card of the sender `asker` across `ui` (at most [`CARD_WIDE`]): `current` for the first of the queue. The
+/// answer pressed: Let in or Keep out.
+fn sender_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, asker: &Asker<'_>, current: bool) -> Option<Act> {
+    let (p, f, s) = (&theme.palette, &theme.fonts, &theme.spacing);
+    let message = asker.newest;
+    let wide = ui.available_width().min(CARD_WIDE).floor();
+    let mut answer = None;
+    let mut opened = false;
+    let open = &mut opened;
+    let id = Id::unique("new-sender-card").with(message.address.to_lowercase());
+    let inner = ui.push_id(id, |ui| {
+        ui.set_max_width(wide);
+        let slot = ui.painter().add(egui::Shape::Noop);
+        let shown = Frame::new().inner_margin(Margin { left: 20, right: 20, top: 16, bottom: 16 }).show(ui, |ui| {
+            ui.set_width(wide - 40.0);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 16.0;
+                let side = crate::component::avatar::AvatarSize::L.side(theme);
+                let (face, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+                avatar::paint(ui.painter(), theme, face, &message.sender, &message.address);
+                // The answers at the right; under the text when the card is too narrow for both.
+                let narrow = ui.available_width() < 520.0;
+                let mut text = |ui: &mut Ui| {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 10.0;
+                            ui.add(egui::Label::new(RichText::new(&message.sender).font(f.strong.id()).color(p.ink)).truncate());
+                            if mailbox.accounts().len() > 1 {
+                                let index = mailbox.account(message.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0));
+                                let _ = crate::component::account_bar(ui, theme, index);
+                            }
+                            ui.add(egui::Label::new(theme.fonts.mono_s.rich(&message.address).color(p.muted)).truncate());
+                        });
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 10.0;
+                            let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
+                            // The subject opens the message as a preview in the reader, which asks the same and more.
+                            let opened =
+                                ui.add(egui::Label::new(RichText::new(subject).font(f.body.id()).color(p.ink)).truncate().sense(Sense::click()));
+                            let spoken = mailbox.spoken(message);
+                            opened.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Link, true, &spoken));
+                            if opened.clicked() {
+                                *open = true;
+                            }
+                            if asker.more > 0 {
+                                ui.label(theme.fonts.mono_s.rich(&tr!("and {count} more", count = asker.more)).color(p.muted));
+                            }
+                            ui.label(theme.fonts.mono_s.rich(&mailbox.row_date(message)).color(p.muted));
+                        });
+                        if !message.preview.trim().is_empty() {
+                            ui.add(egui::Label::new(RichText::new(&message.preview).font(f.caption.id()).color(p.muted)).truncate());
+                        }
+                        if current {
+                            why_line(ui, theme, &tr!("first mail from this address  ·  held back since {when}", when = mailbox.row_date(message)));
+                        }
+                    });
+                };
+                // Let in, then Keep out, read from the left; laid from the right, Keep out comes first.
+                let mut answers = |ui: &mut Ui, from_right: bool| {
+                    ui.spacing_mut().item_spacing.x = s.s2;
+                    let tone = if current { crate::component::button::Tone::Primary } else { crate::component::button::Tone::Secondary };
+                    for keep_out in if from_right { [true, false] } else { [false, true] } {
+                        let (name, act) =
+                            if keep_out { (tr!("Keep out"), Act::Block) } else { (tr!("Let in"), Act::Accept { group: None, open: false }) };
+                        let shown = if keep_out { button::TextButton::new(name).secondary() } else { button::TextButton::new(name).tone(tone) };
+                        if shown.show(ui, theme, keymap).clicked() {
+                            answer = Some(act);
+                        }
+                    }
+                };
+                if narrow {
+                    ui.vertical(|ui| {
+                        text(ui);
+                        ui.add_space(s.s2);
+                        ui.horizontal(|ui| answers(ui, false));
+                    });
+                } else {
+                    let answers_wide = 180.0;
+                    ui.allocate_ui(vec2((ui.available_width() - answers_wide - 16.0).max(1.0), 0.0), |ui| text(ui));
+                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| answers(ui, true));
+                }
+            });
+        });
+        let rect = shown.response.rect;
+        let edge = if current { p.cyan_edge } else { p.line };
+        let card = vec![
+            egui::Shape::rect_filled(rect, 0.0, p.surface),
+            egui::Shape::rect_stroke(rect, 0.0, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside),
+        ];
+        ui.painter().set(slot, egui::Shape::Vec(card));
+    });
+    let _ = inner;
+    if opened {
+        ui.data_mut(|data| data.insert_temp(Id::unique("new-sender-opened"), message.id));
+    }
+    answer
+}
+
+/// The line that says why a message waits, as the design's why-line: `WHY HERE` in the accent and `text`, on the panel
+/// with its edge.
+fn why_line(ui: &mut Ui, theme: &Theme, text: &str) {
+    let (p, f) = (&theme.palette, &theme.fonts);
+    let slot = ui.painter().add(egui::Shape::Noop);
+    let shown = Frame::new().inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 8 }).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 12.0;
+            crate::component::label(ui, f.label, tr!("WHY HERE"), p.cyan_text);
+            ui.add(egui::Label::new(f.mono_s.rich(text).color(p.muted)).truncate());
+        });
+    });
+    let rect = shown.response.rect;
+    ui.painter().set(
+        slot,
+        egui::Shape::Vec(vec![
+            egui::Shape::rect_filled(rect, 0.0, p.panel),
+            egui::Shape::rect_stroke(rect, 0.0, egui::Stroke::new(1.0, p.panel_line), egui::StrokeKind::Inside),
+        ]),
+    );
 }
 
 /// What the list laid out in a frame: from which line, how many.
@@ -1473,7 +1652,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let built = if outbox {
         show_lines(ui, &rows, &listing, "outbox-list")
     } else if mailbox.place() == Place::Senders && mailbox.query().is_empty() {
-        let (built, mode) = senders(ui, &rows, &listing);
+        let (built, mode) = senders(ui, &rows);
         screener_mode = mode;
         built
     } else {

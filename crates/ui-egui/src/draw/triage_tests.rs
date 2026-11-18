@@ -74,7 +74,29 @@ fn review_opens_new_senders_with_the_held_mail() {
     assert_eq!(harness.state().mailbox().place(), Place::Senders);
     harness.get_by_label("New senders");
     harness.get_by_label(SWIM);
-    assert_eq!(rows(&harness), 2);
+    // A queue of one card a sender, each with Let in and Keep out; the first is the current one.
+    assert_eq!(harness.query_all_by_role_and_label(Role::Button, "Let in").count(), 2);
+    assert_eq!(harness.query_all_by_role_and_label(Role::Button, "Keep out").count(), 2);
+    harness.get_by_label("Who gets in?");
+}
+
+#[test]
+fn let_in_and_keep_out_answer_the_sender_of_their_card() {
+    let mut harness = harness_of(app());
+    harness.get_by_role_and_label(Role::Button, "Review").click();
+    harness.run();
+    // Keep out on the first card: its sender is blocked, one card is left.
+    harness.query_all_by_role_and_label(Role::Button, "Keep out").next().unwrap().click();
+    harness.run();
+    harness.run();
+    harness.get_by_label("Blocked Harbour Swim Club");
+    assert_eq!(harness.query_all_by_role_and_label(Role::Button, "Let in").count(), 1);
+    // Let in on the card left: the queue is empty and says so.
+    harness.get_by_role_and_label(Role::Button, "Let in").click();
+    harness.run();
+    harness.run();
+    harness.get_by_label("Accepted Fernhill Nursery");
+    harness.get_by_label("Nobody is waiting.");
 }
 
 #[test]
@@ -134,7 +156,7 @@ fn block_files_the_sender_away() {
     harness.get_by_role_and_label(Role::Button, "Block").click();
     harness.run();
     harness.get_by_label("Blocked Harbour Swim Club");
-    assert_eq!(rows(&harness), 1);
+    assert_eq!(harness.query_all_by_role_and_label(Role::Button, "Let in").count(), 1, "one sender waits in the queue");
 }
 
 #[test]
@@ -298,10 +320,10 @@ fn a_triage_choice_that_cannot_be_kept_shows_why_once() {
 }
 
 #[test]
-fn new_senders_offers_the_screener_mode_under_the_list() {
+fn new_senders_offers_the_screener_mode_over_the_queue() {
     let mut harness = previewing();
-    assert_eq!(harness.get_by_role_and_label(Role::Button, "Before the inbox").accesskit_node().toggled(), Some(Toggled::True));
-    harness.get_by_role_and_label(Role::Button, "Inside, marked").click();
+    assert_eq!(harness.get_by_role_and_label(Role::RadioButton, "Before the inbox for the screener").accesskit_node().toggled(), Some(Toggled::True));
+    harness.get_by_role_and_label(Role::RadioButton, "Inside, marked for the screener").click();
     harness.run();
     assert_eq!(harness.state().mailbox().screener_mode(), ScreenerMode::Inside);
 }
