@@ -422,6 +422,34 @@ fn the_folder_pane_the_owner_widened_comes_back_to_the_pixel_after_a_slow_window
 }
 
 #[test]
+fn a_screen_reader_s_steps_narrow_the_squeezed_folder_pane_and_it_keeps_that_width() {
+    let mut harness = window(1000.0, 100);
+    drag_folders(&mut harness, 300.0);
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    let squeezed = harness.get_by_label("Accounts").rect().right();
+    let (splitter, tree) = harness.query_all_by_role(Role::Splitter).next().unwrap().accesskit_node().locate();
+    for _ in 0..3 {
+        harness.event(egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Decrement,
+            target_tree: tree,
+            target_node: splitter,
+            data: None,
+        }));
+        harness.step();
+        harness.step();
+    }
+    harness.run();
+    harness.run();
+    let stepped = harness.get_by_label("Accounts").rect().right();
+    assert!(stepped < squeezed - 20.0, "three Decrements narrow the pane: {squeezed} then {stepped}");
+    harness.get_by_label("Close; the draft is kept").click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.get_by_label("Accounts").rect().right(), stepped, "after Close, the width the screen reader left");
+}
+
+#[test]
 fn the_folder_pane_the_cap_squeezes_can_still_be_narrowed_and_keeps_that_width() {
     // At 720 the squeezed pane stands 42 above the least its folders take (egui gives a pane its content's width back
     // on release), so the drag there is 30; at 1000 it is 80.

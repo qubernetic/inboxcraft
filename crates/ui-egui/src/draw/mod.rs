@@ -284,8 +284,8 @@ fn list_widest(ui: &Ui, theme: &Theme, docked: bool) -> f32 {
 /// squeezed width as the pane's own, kept while the app runs): while the cap bites, the owner's width is kept; once it
 /// lets go (the composer closed or floating, the window wider), the pane is given back the owner's width, as far as the
 /// cap allows. A width the owner drags to while the cap does not bite is the owner's, and so is a narrower one while
-/// it is squeezed, but only from the pane's own resize handle: a width that changed under a window resized however
-/// slowly is the cap's. Both are kept with the pane's own.
+/// it is squeezed, but only from the pane's own resize handle (dragged, or stepped by a screen reader): a width that
+/// changed under a window resized however slowly is the cap's. Both are kept with the pane's own.
 fn keep_owners_width(ctx: &egui::Context, id: egui::Id, widest: f32) {
     let Some(mut state) = egui::containers::panel::PanelState::load(ctx, id) else { return };
     let width = state.outer_rect.width();
@@ -295,9 +295,13 @@ fn keep_owners_width(ctx: &egui::Context, id: egui::Id, widest: f32) {
     let key = id.with("owners-width");
     let (owner, squeezed) = ctx.data_mut(|data| data.get_persisted::<(f32, bool)>(key)).unwrap_or((width, false));
     // The handle dragged now, or released last frame: egui stores the width a drag leaves only in the frame the
-    // drag stops, so this frame reads it.
+    // drag stops, so this frame reads it. A screen reader's step or value on the handle is the owner's as a drag is.
     let handle = id.with("__resize");
-    let dragging = ctx.is_being_dragged(handle) || ctx.drag_stopped_id() == Some(handle);
+    let stepped = ctx.input(|input| {
+        use egui::accesskit::Action;
+        [Action::Increment, Action::Decrement, Action::SetValue].into_iter().any(|action| input.num_accesskit_action_requests(handle, action) > 0)
+    });
+    let dragging = ctx.is_being_dragged(handle) || ctx.drag_stopped_id() == Some(handle) || stepped;
     let flag = key.with("dragged");
     let dragged = ctx.data_mut(|data| data.get_temp::<bool>(flag)).unwrap_or(false) || dragging;
     ctx.data_mut(|data| data.insert_temp(flag, dragging));
