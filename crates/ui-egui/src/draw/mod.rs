@@ -1353,6 +1353,9 @@ impl InboxApp {
         if self.reader.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
         }
+        // What the engine's events changed is settled before this frame's keys: when the open message left with them,
+        // no key acts on the row the rule picked, which nobody has seen selected.
+        self.sync();
         self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
         let Keys { mut ran, escape, down, up, typing, quiet } = self.keys(ui.ctx());

@@ -1488,3 +1488,56 @@ fn done_on_the_first_row_then_down_opens_the_row_after_the_gap() {
         assert_eq!(got, None, "{after:?}: up at the start opens nothing");
     }
 }
+
+/// Workers that bring back, at the next pump, the events a test queued: the server's word from outside the window.
+#[derive(Clone, Default)]
+struct Outside(std::sync::Arc<std::sync::Mutex<Vec<inboxcraft_model::Event>>>);
+
+impl crate::workers::Workers for Outside {
+    fn send(&mut self, _account: &inboxcraft_model::Account, _job: inboxcraft_model::Job) {}
+
+    fn keep(&mut self, _accounts: &[inboxcraft_model::AccountId]) {}
+
+    fn events(&mut self) -> Vec<inboxcraft_model::Event> {
+        std::mem::take(&mut *self.0.lock().unwrap())
+    }
+}
+
+#[test]
+fn a_key_in_the_frame_the_server_removes_the_open_message_acts_on_no_row() {
+    use inboxcraft_model::{AccountId, Event, EventKind, FolderId, FolderState, Uid, UidSet, UidValidity};
+    const LEFT: &str = "Your library loan is due on Friday";
+    for key in [Key::D, Key::Delete] {
+        let fetch = Recorder::default();
+        let outside = Outside::default();
+        let mut app = app_with(&fetch).with_accounts(
+            std::sync::Arc::new(crate::onboard::NoKeychain),
+            Box::<crate::onboard::NoDetect>::default(),
+            Box::new(outside.clone()),
+        );
+        let id = app.mailbox().messages().iter().find(|row| row.subject == LEFT).unwrap().id;
+        app.mailbox_mut().select(Some(id));
+        let mut harness = harness_with(app, egui::Theme::Light);
+        settle(&mut harness);
+        assert_eq!(harness.state().reader().open_id(), Some(id));
+        let before = subjects(&harness);
+        let unseen: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect();
+        // The server says the open message is gone (as a sync or another device would), and a key lands in that frame.
+        let validity = UidValidity::new(1).unwrap();
+        let synced = EventKind::FolderSynced { folder: FolderId::new(1), state: FolderState::new(validity) };
+        let gone = EventKind::MessagesExpunged { folder: FolderId::new(1), uid_validity: validity, uids: UidSet::from_iter([Uid::new(2).unwrap()]) };
+        outside.0.lock().unwrap().extend([Event::new(AccountId::new(1), None, synced), Event::new(AccountId::new(1), None, gone)]);
+        harness.key_press(key);
+        harness.step();
+        assert!(row_of(&harness, id).is_none(), "{key:?}: the message left");
+        assert!(!any_selected(&harness), "{key:?}: no row is drawn selected, not even in the frame it left");
+        settle(&mut harness);
+        let left: Vec<String> = before.iter().filter(|subject| *subject != LEFT).cloned().collect();
+        assert_eq!(subjects(&harness), left, "{key:?} acted on a row the person never saw selected");
+        assert_eq!(harness.state().reader().open_id(), None, "{key:?}: nothing opens by itself");
+        assert_eq!(harness.state().mailbox().selected(), None, "{key:?}: no row selected");
+        for (row, seen) in unseen.iter().filter(|(row, _)| *row != id) {
+            assert_eq!(row_of(&harness, *row).map(|row| row.seen), Some(*seen), "{key:?}: {row} read unseen");
+        }
+    }
+}
