@@ -26,7 +26,7 @@ use crate::theme::Theme;
 use crate::tr;
 
 use super::button::{LinkSize, link_sized};
-use super::progress::{ProgressState, progress};
+use super::progress::{ProgressState, progress_with};
 
 /// Why a picture is not shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +110,19 @@ pub fn picture_box(
     alt: &str,
     size: Option<(u32, u32)>,
 ) -> (Response, Option<PictureAsked>) {
+    picture_box_with(ui, theme, keymap, look, alt, size, false)
+}
+
+/// [`picture_box`]; `still` draws the loading mark whole and standing (the gallery's board).
+pub(crate) fn picture_box_with(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    look: PictureLook<'_>,
+    alt: &str,
+    size: Option<(u32, u32)>,
+    still: bool,
+) -> (Response, Option<PictureAsked>) {
     let p = &theme.palette;
     let f = &theme.fonts;
     let room = ui.available_width().max(1.0).floor();
@@ -182,7 +195,7 @@ pub fn picture_box(
         let spot = Rect::from_min_size(pos2(rect.left() + PAD, top), vec2(inner, line));
         let mut child = ui.new_child(UiBuilder::new().max_rect(spot).layout(egui::Layout::top_down(egui::Align::Center)));
         child.set_clip_rect(rect.intersect(ui.clip_rect()));
-        progress(&mut child, theme, keymap, tr!("loading picture"), ProgressState::Running(0.0), "");
+        progress_with(&mut child, theme, keymap, tr!("loading picture"), ProgressState::Running(0.0), "", still);
         top += line + GAP;
     }
     let lines = [(why_galley, f.mono_s.line, why_ink), (alt_galley, f.caption.line, alt_ink), (size_galley, f.mono_s.line, p.muted)];

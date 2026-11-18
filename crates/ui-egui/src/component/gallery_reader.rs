@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The gallery page of the reader's sets for `ui_shot` (`"reader": true`): the boards of the why line, the content
-//! bar, the thread row, the quote fold, the attachment, the hairline table and the invitation card, every state drawn
-//! as its sheet says, labelled in the sheet's order with the design boards' words, on the boards' `bg`, three columns,
-//! the boards evenly apart. A page of its own: one picture is at most 4 096 px a side.
+//! bar, the thread row, the quote fold, the attachment, the hairline table, the invitation card and the picture box,
+//! every state drawn as its sheet says, labelled in the sheet's order with the design boards' words, on the boards'
+//! `bg`, three columns, the boards evenly apart. A page of its own: one picture is at most 4 096 px a side.
 
 use egui::{Rect, Ui, UiBuilder, Vec2, pos2, vec2};
 
@@ -225,6 +225,27 @@ fn invite_cards(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// The picture box's board: a remote picture not loaded, loading, not shown and failed, each a box of a 360 × 144
+/// picture, with the design's words.
+fn picture_boxes(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    use super::picture_box::{PictureLook, picture_box_with};
+    title(ui, theme, tr!("Picture box"));
+    let states = [
+        (tr!("not-loaded"), PictureLook::NotLoaded),
+        (tr!("loading"), PictureLook::Loading),
+        (tr!("not-shown"), PictureLook::NotShown),
+        (tr!("failed"), PictureLook::Failed(tr!("no connection"))),
+    ];
+    for (state, look) in states {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                ui.set_width(360.0);
+                picture_box_with(ui, theme, keymap, look, "The new kiln, lit for the first time", Some((360, 144)), true);
+            });
+        });
+    }
+}
+
 /// The left column.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     why_lines(ui, theme, keymap);
@@ -241,6 +262,8 @@ fn middle(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     attachments(ui, theme, keymap);
     ui.add_space(BOARD_GAP);
     tables(ui, theme);
+    ui.add_space(BOARD_GAP);
+    picture_boxes(ui, theme, keymap);
 }
 
 /// The right column.

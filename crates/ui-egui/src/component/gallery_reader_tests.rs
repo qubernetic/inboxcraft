@@ -14,7 +14,8 @@ use crate::motion;
 use crate::theme::{Mode, TextScale, Theme};
 
 /// The boards the page holds, by title.
-pub(crate) const BOARDS: [&str; 7] = ["Why line", "Content bar", "Thread row", "Quote fold", "Attachment", "Hairline table", "Invitation card"];
+pub(crate) const BOARDS: [&str; 8] =
+    ["Why line", "Content bar", "Thread row", "Quote fold", "Attachment", "Hairline table", "Invitation card", "Picture box"];
 
 /// The page in `mode`, motion reduced or not.
 fn harness(mode: Mode, reduce: bool) -> Harness<'static> {
