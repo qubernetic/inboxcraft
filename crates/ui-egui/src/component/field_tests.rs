@@ -288,7 +288,7 @@ fn hostile_text_in_a_field_never_panics() {
 
 /// The kinds of field a person types into, for the hostile tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(super) enum Kind {
     Text,
     Many,
     Password,
@@ -301,7 +301,7 @@ enum Kind {
 const KINDS: [Kind; 7] = [Kind::Text, Kind::Many, Kind::Password, Kind::Typed, Kind::Recipient, Kind::PlainLine, Kind::PlainText];
 
 /// The name a screen reader hears for the field of `kind`.
-fn kind_name(kind: Kind) -> &'static str {
+pub(super) fn kind_name(kind: Kind) -> &'static str {
     match kind {
         Kind::Typed => "Type a time",
         Kind::Recipient => "To",
@@ -312,7 +312,7 @@ fn kind_name(kind: Kind) -> &'static str {
 }
 
 /// A field of `kind` holding the harness's text, focused.
-fn field_of(kind: Kind, text: &str) -> Harness<'static, String> {
+pub(super) fn field_of(kind: Kind, text: &str) -> Harness<'static, String> {
     let theme = theme();
     let mut harness = builder().with_size(vec2(600.0, 500.0)).build_ui_state(
         move |ui, text: &mut String| {
@@ -355,6 +355,7 @@ fn field_of(kind: Kind, text: &str) -> Harness<'static, String> {
                 }
                 Kind::PlainText => {
                     let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, width: f32| {
+                        super::LAID_OUT.with(|most| most.set(most.get().max(text.as_str().len())));
                         let mut job = egui::text::LayoutJob::single_section(text.as_str().to_owned(), theme.fonts.body.format(theme.palette.ink));
                         job.wrap.max_width = width;
                         ui.fonts_mut(|fonts| fonts.layout_job(job))
@@ -372,7 +373,7 @@ fn field_of(kind: Kind, text: &str) -> Harness<'static, String> {
 }
 
 /// The most a field of `kind` holds, and whether that counts bytes (else characters).
-fn cap_of(kind: Kind) -> (usize, bool) {
+pub(super) fn cap_of(kind: Kind) -> (usize, bool) {
     match kind {
         Kind::Many => (super::MAX_TEXT, true),
         Kind::PlainText => (super::MAX_BODY, true),
@@ -383,7 +384,7 @@ fn cap_of(kind: Kind) -> (usize, bool) {
 }
 
 /// Whether the last frame says, somewhere, that something was refused as too long.
-fn says_too_long(harness: &Harness<'static, String>) -> bool {
+pub(super) fn says_too_long(harness: &Harness<'static, String>) -> bool {
     drawn(harness).iter().any(|text| text.text.starts_with("Too long"))
 }
 
@@ -1186,10 +1187,10 @@ fn a_frame_of_the_message_text_costs() {
 }
 
 /// The kinds the one-frame cap tests run over: a line, a password and both kinds of several lines.
-const ONE_FRAME: [Kind; 4] = [Kind::Text, Kind::Password, Kind::Many, Kind::PlainText];
+pub(super) const ONE_FRAME: [Kind; 4] = [Kind::Text, Kind::Password, Kind::Many, Kind::PlainText];
 
 /// The field of `kind` filled to its cap with "y", the caret at its end.
-fn at_the_cap(kind: Kind) -> (Harness<'static, String>, usize) {
+pub(super) fn at_the_cap(kind: Kind) -> (Harness<'static, String>, usize) {
     let (most, _) = cap_of(kind);
     let mut harness = field_of(kind, "");
     harness.event(egui::Event::Paste("y".repeat(most)));
@@ -1199,12 +1200,12 @@ fn at_the_cap(kind: Kind) -> (Harness<'static, String>, usize) {
 }
 
 /// `key` pressed and let go with `modifiers`.
-fn press(key: egui::Key, modifiers: egui::Modifiers) -> [egui::Event; 2] {
+pub(super) fn press(key: egui::Key, modifiers: egui::Modifiers) -> [egui::Event; 2] {
     [true, false].map(|pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers })
 }
 
 /// `events` in ONE frame (kittest's queue gives every event a frame of its own), then the field settles.
-fn one_frame(harness: &mut Harness<'static, String>, events: Vec<egui::Event>) {
+pub(super) fn one_frame(harness: &mut Harness<'static, String>, events: Vec<egui::Event>) {
     harness.input_mut().events.extend(events);
     harness.step();
     harness.run_ok();

@@ -271,3 +271,41 @@ fn a_signature_past_its_2000_characters_is_refused_whole_and_said() {
     harness.run();
     assert_eq!(harness.state().settings().signature(1).map(|typed| typed.chars().count()), Some(most), "exactly the cap goes in");
 }
+
+#[test]
+fn a_middle_click_paste_cannot_cut_a_signature_silently() {
+    let most = inboxcraft_model::Account::MAX_SIGNATURE_CHARS;
+    let mut harness = opened();
+    harness.get_by_label("Sending, settings page").click();
+    harness.run();
+    let field = || (Role::MultilineTextInput, "Signature of Personal");
+    harness.get_by_role_and_label(field().0, field().1).focus();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::A);
+    harness.run();
+    harness.key_press(Key::Backspace);
+    harness.run();
+    let own = "a".repeat(most - 10);
+    harness.event(egui::Event::Paste(own.clone()));
+    harness.run();
+    assert_eq!(harness.state().settings().signature(1), Some(own.as_str()));
+    // The field lets go of the keyboard; the PRIMARY selection is pasted where the middle button goes down, at its start.
+    harness.ctx.memory_mut(|memory| {
+        if let Some(focused) = memory.focused() {
+            memory.surrender_focus(focused);
+        }
+    });
+    harness.run();
+    assert!(!harness.get_by_role_and_label(field().0, field().1).is_focused());
+    let rect = harness.get_by_role_and_label(field().0, field().1).rect();
+    let at = egui::pos2(rect.left() + 2.0, rect.top().max(0.0) + 8.0);
+    harness.hover_at(at);
+    harness.run();
+    let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed, modifiers: egui::Modifiers::NONE };
+    harness.input_mut().events.extend([button(true), egui::Event::MiddleClickPaste { pos: at, text: "é".repeat(20) }, button(false)]);
+    harness.step();
+    harness.run();
+    assert_eq!(harness.state().settings().signature(1), Some(own.as_str()), "refused whole, nothing of the person's text cut");
+    let said = harness.query_all(egui_kittest::kittest::by().label_contains("Too long")).count();
+    assert_eq!(said, 1, "the field says why");
+}

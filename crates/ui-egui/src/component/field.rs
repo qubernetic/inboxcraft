@@ -1085,3 +1085,7 @@ thread_local! {
 #[cfg(test)]
 #[path = "field_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "field_cap_tests.rs"]
+mod cap_tests;
