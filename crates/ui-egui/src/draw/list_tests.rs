@@ -1368,6 +1368,78 @@ fn tab_walks_down_the_whole_list_building_rows_as_it_goes() {
     assert!(in_sight(&harness, 1_000_000));
 }
 
+/// Whether the message `id` is read, as the list holds it.
+fn seen(harness: &Harness<'static, InboxApp>, id: u64) -> bool {
+    harness.state().mailbox().messages().iter().find(|row| row.id == id).is_some_and(|row| row.seen)
+}
+
+#[test]
+fn tab_onto_rows_shows_their_messages_unread_and_enter_or_a_press_reads_them() {
+    let mut app = app(false);
+    app.set_reduce_motion(true);
+    let mut harness = harness_of(app);
+    let order = super::list::order(&harness.ctx);
+    let first = *order.first().unwrap();
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(first)));
+    harness.run();
+    let was: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect();
+    let was_seen = |id: u64| was.iter().find(|(row, _)| *row == id).is_some_and(|(_, seen)| *seen);
+    // Tab crosses rows and their actions: every row it reaches opens in the reader as a preview and stays unread.
+    let mut crossed_unread = Vec::new();
+    for _ in 0..40 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        let Some(focused) = super::list::focused_row(&harness.ctx) else { continue };
+        assert_eq!(harness.state().mailbox().selected(), Some(focused), "Tab onto a row keys it");
+        assert_eq!(harness.state().reader().open_id(), Some(focused), "and shows its message");
+        assert_eq!(seen(&harness, focused), was_seen(focused), "Tab onto {focused} leaves its read state");
+        if !was_seen(focused) && !crossed_unread.contains(&focused) {
+            crossed_unread.push(focused);
+        }
+        if crossed_unread.len() == 3 {
+            break;
+        }
+    }
+    assert_eq!(crossed_unread.len(), 3, "Tab crossed three unread rows: {crossed_unread:?}");
+    for (id, seen_before) in &was {
+        assert_eq!(seen(&harness, *id), *seen_before, "the walk left {id} as it was");
+    }
+    // Enter on the third reads it.
+    let third = crossed_unread[2];
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(seen(&harness, third), "Enter reads the previewed message");
+    assert!(!seen(&harness, crossed_unread[0]) && !seen(&harness, crossed_unread[1]), "and only it");
+    // Focus given by assistive technology shows a row unread too, and a press on it reads it.
+    let second = crossed_unread[1];
+    let label =
+        |harness: &Harness<'static, InboxApp>, id: u64| harness.state().mailbox().messages().iter().find(|row| row.id == id).unwrap().subject.clone();
+    let subject = label(&harness, second);
+    harness.query_all_by_label_contains(&subject).next().unwrap().focus();
+    harness.run();
+    harness.run();
+    assert_eq!(super::list::focused_row(&harness.ctx), Some(second));
+    assert_eq!(harness.state().reader().open_id(), Some(second), "the focused row's message shows");
+    assert!(!seen(&harness, second), "focus alone shows it unread");
+    harness.query_all_by_label_contains(&subject).next().unwrap().click();
+    harness.run();
+    assert!(seen(&harness, second), "a press reads it");
+    // The list's reading keys read as before: K from the row under it onto the first unread row marks it read.
+    let first_unread = crossed_unread[0];
+    let at = order.iter().position(|id| *id == first_unread).unwrap();
+    let under = order[at + 1];
+    let subject = label(&harness, under);
+    harness.query_all_by_label_contains(&subject).next().unwrap().focus();
+    harness.run();
+    harness.run();
+    assert!(!seen(&harness, first_unread));
+    harness.key_press(Key::K);
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), Some(first_unread));
+    assert!(seen(&harness, first_unread), "J reads the row it moves to");
+}
+
 /// The row of the selected message has the keyboard's focus.
 fn focus_selected(harness: &mut Harness<'static, InboxApp>) {
     let id = harness.state().mailbox().selected().unwrap();
@@ -2218,8 +2290,17 @@ fn every_scene_of_the_lists_is_walked_by_tab_and_rests() {
             })
             .filter_map(|node| node.accesskit_node().label())
             .collect();
+        // Tab is a focus key, not a reading one: every row it crosses keeps its read state.
+        let read_state = |harness: &Harness<'static, InboxApp>| -> Vec<(u64, bool)> {
+            harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect()
+        };
+        let before = read_state(&harness);
         let missed: Vec<String> = crate::component::tests::keyboard_walk(&mut harness).into_iter().filter(|label| in_list.contains(label)).collect();
         assert!(missed.is_empty(), "{name}: Tab never reaches {missed:?}");
+        assert_eq!(read_state(&harness), before, "{name}: the walk marks nothing read");
+        if matches!(name, "smart" | "grouped" | "list") {
+            assert!(before.iter().filter(|(_, seen)| !seen).count() >= 3, "{name}: the walk crosses unread rows");
+        }
         assert!(crate::component::tests::rests(&mut harness, 4), "{name}: at rest");
     }
 }

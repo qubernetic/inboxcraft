@@ -630,6 +630,11 @@ pub struct Mailbox {
     history: usize,
     /// The message an undo brought back, which opens without being marked read.
     restored: Option<u64>,
+    /// The message selected because its row took the focus (`Tab`, assistive technology): it opens as a preview,
+    /// not marked read, until a reading key, a press or `Enter` reads it ([`Mailbox::read_preview`]).
+    focused_in: Option<u64>,
+    /// The message the reader shows as a preview, opened by [`Mailbox::focused_in`]: read again, it stays unread.
+    previewed: Option<u64>,
     /// "Show done": the done mail is listed in its old place, dimmed.
     show_done: bool,
     /// How many messages of the place shown are on the park pile, from `mail.list`.
@@ -864,6 +869,8 @@ impl Mailbox {
             acts: 0,
             history: 0,
             restored: None,
+            focused_in: None,
+            previewed: None,
             show_done: false,
             parked: 0,
             piles: [0; 3],
@@ -1224,6 +1231,13 @@ impl Mailbox {
     /// The command's refusal.
     pub(crate) fn open_message(&mut self, id: u64) -> Result<Value, UiError> {
         let held = self.held(id);
+        // A row that only took the focus is shown, not read; read again (a fetched body), it stays a preview.
+        let by_focus = self.focused_in.take() == Some(id);
+        if by_focus || self.previewed == Some(id) {
+            self.previewed = Some(id);
+            return self.run("mail.read", &json!({ "id": id }));
+        }
+        self.previewed = None;
         if self.restored.take() == Some(id) || held {
             return self.run("mail.read", &json!({ "id": id }));
         }
@@ -1728,6 +1742,39 @@ impl Mailbox {
             self.selected = Some(id);
             self.keyed = true;
         }
+    }
+
+    /// Selects the message `id` because its row took the focus (`Tab`, `Shift Tab`, assistive technology): keyed as
+    /// [`Mailbox::select_keyed`], it opens as a preview and is not marked read.
+    pub fn select_by_focus(&mut self, id: u64) {
+        self.select_keyed(id);
+        if self.selected == Some(id) {
+            self.focused_in = Some(id);
+        }
+    }
+
+    /// The message `id` is read as the owner means it (`Enter`, a press on its row): one shown as a preview by
+    /// [`Mailbox::select_by_focus`] is marked read now, through `mail.open`. Whether it was a preview.
+    pub fn read_preview(&mut self, id: u64) -> bool {
+        let preview = self.previewed == Some(id) || self.focused_in == Some(id);
+        if !preview {
+            return false;
+        }
+        self.focused_in = None;
+        self.previewed = None;
+        if self.held(id) {
+            return true;
+        }
+        match self.run("mail.open", &json!({ "id": id })) {
+            Ok(answer) => {
+                if answer.get("marked_seen").and_then(Value::as_bool) == Some(true) {
+                    self.history = self.history.saturating_add(1);
+                    self.refresh();
+                }
+            }
+            Err(error) => self.error = Some(error.to_string()),
+        }
+        true
     }
 
     /// Hides the error until the next one.

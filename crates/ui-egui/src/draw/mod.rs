@@ -574,6 +574,7 @@ impl InboxApp {
     /// rest until `Esc` there gives it back.
     fn open_from_list(&mut self, ctx: &egui::Context) {
         let Some(id) = self.list_row.or_else(|| self.mailbox.selected()) else { return };
+        self.mailbox.read_preview(id);
         self.mailbox.select_keyed(id);
         ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(id)));
         self.list_keys = false;
@@ -593,19 +594,20 @@ impl InboxApp {
         true
     }
 
-    /// The row `clicked` in the list is selected and the list has the keyboard; a row that gained the focus (`Tab` onto
-    /// it) is keyed. Focus and selection move together: a row pressed while another row has the focus takes it away
-    /// from that row.
+    /// The row `clicked` in the list is selected, read, and the list has the keyboard; a row that gained the focus
+    /// (`Tab` onto it, or assistive technology) is keyed and shown as a preview, not marked read. Focus and selection
+    /// move together: a row pressed while another row has the focus takes it away from that row.
     fn follow_list(&mut self, ctx: &egui::Context, clicked: Option<u64>, gained: Option<u64>) {
-        if clicked.is_some() {
+        if let Some(id) = clicked {
+            self.mailbox.read_preview(id);
             self.mailbox.select(clicked);
             self.list_keys = true;
             if let Some(focused) = self.list_row.filter(|focused| Some(*focused) != clicked) {
                 ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(focused)));
             }
         }
-        if let Some(id) = gained.filter(|id| self.mailbox.selected() != Some(*id)) {
-            self.mailbox.select_keyed(id);
+        if let Some(id) = gained.filter(|id| self.mailbox.selected() != Some(*id) && clicked != Some(*id)) {
+            self.mailbox.select_by_focus(id);
             self.list_keys = true;
         }
     }
