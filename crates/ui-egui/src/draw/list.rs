@@ -1582,6 +1582,12 @@ fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, 
     });
 }
 
+/// [`sender_card`] for `newest`, the current one, in whatever room `ui` gives: its height (the tests' hostile rooms).
+#[cfg(test)]
+pub(super) fn sender_card_of(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, newest: &MessageRow) -> f32 {
+    sender_card(ui, theme, keymap, mailbox, &Asker { newest, more: 0 }, true, None).1
+}
+
 /// The card of the sender `asker` across `ui` (at most [`CARD_WIDE`]): `current` for the first of the queue, its edge
 /// `edge` when given (an answered card's). The answer pressed, Let in or Keep out, and the card's height.
 fn sender_card(
@@ -1604,7 +1610,7 @@ fn sender_card(
         ui.set_max_width(wide);
         let slot = ui.painter().add(egui::Shape::Noop);
         let shown = Frame::new().inner_margin(Margin { left: 20, right: 20, top: 16, bottom: 16 }).show(ui, |ui| {
-            ui.set_width(wide - 40.0);
+            ui.set_width((wide - 40.0).max(0.0));
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 16.0;
                 let side = crate::component::avatar::AvatarSize::L.side(theme);

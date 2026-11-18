@@ -414,3 +414,36 @@ fn an_answered_card_takes_its_answers_colour_fades_and_the_next_steps_up() {
         assert!(crate::component::tests::rests(&mut harness, 4), "and it rests");
     }
 }
+
+#[test]
+fn the_queue_in_a_room_narrower_than_a_cards_padding_draws_and_never_panics() {
+    use crate::theme::{Mode, TextScale, Theme};
+    // The room a hostile layout leaves the queue: none, a point, less than a card's 40 of padding.
+    for width in [0.0, 1.0, 20.0, 39.0, 41.0] {
+        let theme = Theme::new(Mode::Light, TextScale::default());
+        let keymap = crate::keymap::Keymap::default();
+        let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
+        mailbox.open(Place::Senders);
+        let mut harness = Harness::builder().with_size(vec2(440.0, 600.0)).with_context_setup(install_fonts).build_ui_state(
+            move |ui, mailbox: &mut Mailbox| {
+                crate::motion::set_reduced(ui.ctx(), true);
+                ui.set_style(theme.style());
+                let room = egui::Rect::from_min_size(ui.max_rect().min, vec2(width, 400.0));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(room), |ui| {
+                    let _ = super::list::rows(ui, &theme, &keymap, mailbox);
+                });
+                // A card alone in that room, as a layout that squeezes the queue's column would give it.
+                let newest = mailbox.messages().first().cloned();
+                if let Some(newest) = newest {
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(room), |ui| {
+                        let high = super::list::sender_card_of(ui, &theme, &keymap, mailbox, &newest);
+                        assert!(high.is_finite() && high > 0.0, "{width}: {high}");
+                    });
+                }
+            },
+            mailbox,
+        );
+        harness.run();
+        assert!(harness.query_all_by_role_and_label(Role::Button, "Let in").count() > 0, "{width}: the cards are drawn");
+    }
+}
