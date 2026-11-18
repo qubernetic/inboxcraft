@@ -258,7 +258,8 @@ fn a_row_that_leaves_acts_at_once_and_its_gap_closes_as_the_motion_level_says() 
     harness.step();
     assert!(harness.state().mailbox().messages().iter().all(|row| row.subject != "Allotment rota for November"), "done at once");
     assert!(harness.state().mailbox().left_row().is_some(), "its gap still closing");
-    assert!(harness.query_by_label(ODILE).is_none(), "the leaving row is no row of the list");
+    let ghost = harness.query_by_label(ODILE).map(|node| node.accesskit_node().is_disabled());
+    assert_eq!(ghost, Some(true), "the leaving row is named but takes no pointer or focus");
     let mut tops = vec![harness.get_by_label(&next).rect().top()];
     for _ in 0..14 {
         harness.step();
@@ -1108,7 +1109,7 @@ fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale
         for view in [InboxView::Simple, InboxView::List, InboxView::Cards] {
             let grouped = mailbox.groups();
             assert_eq!(grouped.len(), 4);
-            let listing = super::list::lines(&theme, mailbox, view, &grouped, &other, true, &|_| true, 1.0);
+            let listing = super::list::lines(&theme, mailbox, view, &grouped, &other, true, &|_| true, None);
             let rows = listing.lines.iter().filter(|line| matches!(line, super::list::Line::Mail(_))).count();
             assert_eq!(rows, 10_000, "{percent} {view:?}: every message a line");
             let spans: Vec<(f32, f32)> = (0..listing.lines.len()).map(|index| listing.span(index).unwrap()).collect();
@@ -1429,5 +1430,281 @@ fn done_all_on_the_grouped_lists_other_head_marks_its_messages_done_and_undo_bri
         undo(&mut harness);
         let mailbox = harness.state().mailbox();
         assert!(other.iter().all(|id| mailbox.messages().iter().any(|row| row.id == *id)), "by key {by_key}: Undo brings them back");
+    }
+}
+
+/// The sample's simple list alone in a pane `high` points high, motion on, a frame every sixtieth of a second, at
+/// `scale` and `ppp`.
+fn moving_pane(high: f32, scale: crate::theme::TextScale, ppp: f32) -> Harness<'static, Mailbox> {
+    use crate::theme::{Mode, Theme};
+    let theme = Theme::new(Mode::Light, scale);
+    let keymap = crate::keymap::Keymap::default();
+    let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
+    mailbox.set_inbox_view(InboxView::Simple);
+    let mut harness = Harness::builder()
+        .with_size(vec2(440.0, high))
+        .with_pixels_per_point(ppp)
+        .with_context_setup(install_fonts)
+        .with_step_dt(1.0 / 60.0)
+        .with_max_steps(240)
+        .build_ui_state(
+            move |ui, mailbox: &mut Mailbox| {
+                crate::motion::set_reduced(ui.ctx(), false);
+                ui.set_style(theme.style());
+                let asked = super::list::rows(ui, &theme, &keymap, mailbox);
+                if asked.out {
+                    mailbox.left();
+                }
+            },
+            mailbox,
+        );
+    harness.run_steps(2);
+    harness
+}
+
+/// The rectangle of the row of the message called `subject` in a pane, when it is built.
+fn pane_row(harness: &Harness<'static, Mailbox>, subject: &str) -> Option<egui::Rect> {
+    let row = harness.state().messages().iter().find(|row| row.subject == subject)?.clone();
+    harness.query_by_label(&harness.state().spoken(&row)).map(|node| node.rect())
+}
+
+/// The subjects of the sample's simple list, in order.
+fn subjects(mailbox: &Mailbox) -> Vec<String> {
+    mailbox.messages().iter().map(|row| row.subject.clone()).collect()
+}
+
+#[test]
+fn an_act_the_engine_refuses_leaves_no_leaving_row_and_the_row_stays() {
+    let mut harness = moving_pane(828.0, crate::theme::TextScale::default(), 1.0);
+    let mailbox = harness.state_mut();
+    let rota = mailbox.messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id).unwrap();
+    // A folder of another account: the engine refuses the move.
+    let elsewhere = mailbox.messages().iter().find(|row| row.account != mailbox.messages()[0].account).map(|row| row.folder).unwrap();
+    let account = mailbox.messages().iter().find(|row| row.id == rota).map(|row| row.account).unwrap();
+    assert_ne!(mailbox.messages().iter().find(|row| row.folder == elsewhere).map(|row| row.account), Some(account));
+    mailbox.start(rota, crate::mailbox::Act::Move(elsewhere));
+    assert!(mailbox.error().is_some(), "the engine refused");
+    assert!(mailbox.left_row().is_none(), "no leaving row");
+    assert!(mailbox.messages().iter().any(|row| row.id == rota), "the row stays");
+    let before = pane_row(&harness, "Allotment rota for November");
+    harness.run_steps(3);
+    assert_eq!(pane_row(&harness, "Allotment rota for November"), before, "in its place");
+}
+
+#[test]
+fn undo_while_the_gap_closes_puts_the_row_back_whole_and_nothing_moves_after() {
+    let mut harness = moving();
+    let next = after_odile(&harness);
+    let (odile, below) = (harness.get_by_label(ODILE).rect(), harness.get_by_label(&next).rect());
+    harness.get_by_label(ODILE).hover();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(Role::Button, "Done").click();
+    harness.run_steps(4);
+    assert!(harness.state().mailbox().left_row().is_some(), "still closing");
+    assert!(harness.get_by_label(&next).rect().top() < below.top(), "the gap has begun to close");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(2);
+    assert!(harness.state().mailbox().left_row().is_none(), "Undo lets the leaving row go");
+    assert_eq!(harness.get_by_label(ODILE).rect(), odile, "back in its place, whole");
+    assert!(!harness.get_by_label(ODILE).accesskit_node().is_disabled(), "a row again");
+    assert_eq!(harness.get_by_label(&next).rect(), below, "the row under it where it was");
+    harness.run_steps(15);
+    assert_eq!(harness.get_by_label(ODILE).rect(), odile, "no movement left over");
+}
+
+#[test]
+fn two_acts_within_the_close_on_neighbouring_rows_both_land() {
+    let mut harness = moving();
+    let start = subjects(harness.state().mailbox());
+    let at = start.iter().position(|subject| subject == "Allotment rota for November").unwrap();
+    let second = after_odile(&harness);
+    let third = {
+        let mailbox = harness.state().mailbox();
+        mailbox.spoken(&mailbox.messages()[at + 2])
+    };
+    let below = harness.get_by_label(&third).rect().top();
+    harness.get_by_label(ODILE).hover();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(Role::Button, "Done").click();
+    harness.run_steps(3);
+    harness.get_by_label(&second).hover();
+    harness.run_steps(1);
+    harness.get_by_role_and_label(Role::Button, "Done").click();
+    harness.run_steps(2);
+    let now = subjects(harness.state().mailbox());
+    assert_eq!(now.len(), start.len() - 2, "both acts landed at once: {now:?}");
+    harness.run_steps(20);
+    assert!(harness.state().mailbox().left_row().is_none());
+    assert_eq!(harness.get_by_label(&third).rect().top(), below - 112.0, "both gaps closed, nothing left over");
+}
+
+#[test]
+fn done_on_the_keyed_row_with_motion_keys_the_next_row_in_sight() {
+    let mut harness = moving();
+    let start = subjects(harness.state().mailbox());
+    let at = start.iter().position(|subject| subject == "Allotment rota for November").unwrap();
+    let rota = harness.state().mailbox().messages()[at].id;
+    let next = harness.state().mailbox().messages()[at + 1].id;
+    harness.state_mut().mailbox_mut().select(Some(rota));
+    harness.run_steps(2);
+    harness.key_press(Key::D);
+    harness.run_steps(2);
+    let mailbox = harness.state().mailbox();
+    assert!(mailbox.messages().iter().all(|row| row.id != rota), "done");
+    assert_eq!(mailbox.selected(), Some(next), "the row under it is the keyed one");
+    harness.run_steps(20);
+    let rect = row_rect(&harness, next).unwrap();
+    let view = super::list::view_rect(&harness.ctx).unwrap();
+    assert!(view.contains_rect(rect), "and in sight: {rect:?} in {view:?}");
+}
+
+#[test]
+fn a_row_leaving_above_the_viewport_keeps_the_first_row_in_sight_where_it_stands() {
+    let mut harness = moving_pane(300.0, crate::theme::TextScale::default(), 1.0);
+    harness.hover_at(egui::pos2(220.0, 150.0));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -200.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run_steps(40);
+    let first = super::list::first_in_sight(&harness.ctx).unwrap();
+    let top = pane_rect(&harness, first).unwrap().top();
+    let above = harness.state().messages().first().map(|row| row.id).unwrap();
+    assert_ne!(above, first, "the first message is above the viewport");
+    harness.state_mut().start(above, crate::mailbox::Act::Done);
+    for step in 0..16 {
+        harness.step();
+        assert_eq!(pane_rect(&harness, first).map(|rect| rect.top()), Some(top), "step {step}: the first row in sight stays");
+    }
+    assert!(harness.state().left_row().is_none(), "gone");
+}
+
+#[test]
+fn the_lines_add_up_to_whole_pixels_while_a_row_closes() {
+    use crate::theme::{Mode, TextScale, Theme};
+    let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
+    mailbox.set_inbox_view(InboxView::Simple);
+    let rota = mailbox.messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id).unwrap();
+    mailbox.start(rota, crate::mailbox::Act::Done);
+    let other = crate::mailbox::Group { icon: crate::iconset::IconId::Inbox, name: "Other".to_owned(), messages: Vec::new() };
+    for scale in [TextScale::default(), TextScale::ALL[4]] {
+        let theme = Theme::new(Mode::Light, scale);
+        let mut last = f32::INFINITY;
+        for closed in [0.0, 0.1, 0.33, 0.5, 0.77, 0.99] {
+            let gone = super::list::Gone { closed, faded: closed };
+            let listing = super::list::lines(&theme, &mailbox, InboxView::Simple, &[], &other, false, &|_| true, Some(gone));
+            let ghost = (0..listing.lines.len()).find(|index| matches!(listing.lines[*index], super::list::Line::Leaving(..))).unwrap();
+            let (top, bottom) = listing.span(ghost).unwrap();
+            let high = bottom - top;
+            assert!(high <= last && high <= theme.size(56.0), "{scale:?} {closed}: {high} shrinks");
+            last = high;
+            let mut sum = 0.0;
+            for index in 0..listing.lines.len() {
+                let (top, bottom) = listing.span(index).unwrap();
+                assert_eq!(top, sum, "{scale:?} {closed}: line {index} starts where the one above ends");
+                for ppp in [1.0_f32, 1.5] {
+                    assert_eq!((bottom * ppp).fract(), 0.0, "{scale:?} {closed} at {ppp}: line {index} ends on a whole pixel");
+                }
+                sum = bottom;
+            }
+            assert_eq!(listing.height, sum, "{scale:?} {closed}: the content's height is the lines' sum");
+        }
+    }
+}
+
+#[test]
+fn nothing_asks_for_a_frame_once_the_gap_has_closed() {
+    let mut harness = moving_pane(828.0, crate::theme::TextScale::default(), 1.0);
+    let rota = harness.state().messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id).unwrap();
+    harness.state_mut().start(rota, crate::mailbox::Act::Done);
+    harness.step();
+    assert!(harness.state().left_row().is_some(), "closing");
+    harness.run_steps(20);
+    assert!(harness.state().left_row().is_none(), "closed");
+    assert!(crate::component::tests::rests(&mut harness, 4), "and at rest");
+}
+
+#[test]
+fn a_snoozed_row_fades_in_its_place_and_is_then_gone() {
+    let mut harness = moving_pane(828.0, crate::theme::TextScale::default(), 1.0);
+    let at = subjects(harness.state()).iter().position(|subject| subject == "Allotment rota for November").unwrap();
+    let (rota, next) = (harness.state().messages()[at].id, harness.state().messages()[at + 1].subject.clone());
+    let below = pane_row(&harness, &next).unwrap().top();
+    let later = Timestamp::from_unix(1_793_869_200 + 86_400, 0).unwrap();
+    harness.state_mut().start(rota, crate::mailbox::Act::Snooze(later));
+    // Fading (125 ms), the row keeps its height: the row under it stays.
+    for step in 0..5 {
+        harness.step();
+        assert!(harness.state().left_row().is_some(), "step {step}: fading");
+        assert_eq!(pane_row(&harness, &next).map(|rect| rect.top()), Some(below), "step {step}: no gap closes");
+    }
+    harness.run_steps(6);
+    assert!(harness.state().left_row().is_none(), "gone after the fade");
+    assert_eq!(pane_row(&harness, &next).map(|rect| rect.top()), Some(below - 56.0), "and its place with it");
+}
+
+#[test]
+fn a_row_closes_on_its_card_and_in_the_grouped_list_too() {
+    for view in [InboxView::Cards, InboxView::List] {
+        let mut app = app(true);
+        app.mailbox_mut().set_inbox_view(view);
+        app.set_reduce_motion(false);
+        let mut harness = Harness::builder()
+            .with_size(vec2(1300.0, 900.0))
+            .with_context_setup(install_fonts)
+            .with_step_dt(1.0 / 60.0)
+            .with_max_steps(60)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        harness.run_steps(2);
+        let next = after_odile(&harness);
+        let below = harness.get_by_label(&next).rect().top();
+        harness.get_by_label(ODILE).hover();
+        harness.run_steps(2);
+        harness.get_by_role_and_label(Role::Button, "Done").click();
+        harness.run_steps(4);
+        let mid = harness.get_by_label(&next).rect().top();
+        assert!(mid < below && mid > below - 56.0, "{view:?}: closing in its group, {mid} between {below} and {}", below - 56.0);
+        harness.run_steps(20);
+        assert_eq!(harness.get_by_label(&next).rect().top(), below - 56.0, "{view:?}: closed");
+    }
+}
+
+#[test]
+fn while_a_row_closes_no_line_is_doubled_and_the_row_above_keeps_its_own() {
+    let mut harness = moving_pane(828.0, crate::theme::TextScale::default(), 1.0);
+    // The third row: a row above it and one under it.
+    let at = 2;
+    let (rota, above) = (harness.state().messages()[at].id, harness.state().messages()[at - 1].subject.clone());
+    let next = harness.state().messages()[at + 1].subject.clone();
+    let line = crate::theme::Theme::new(crate::theme::Mode::Light, crate::theme::TextScale::default()).palette.panel_line;
+    harness.state_mut().start(rota, crate::mailbox::Act::Done);
+    for step in 0..14 {
+        harness.step();
+        let (top, foot) = (pane_row(&harness, &above).unwrap(), pane_row(&harness, &next).unwrap());
+        let ys: Vec<f32> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(shape) if shape.fill == line && shape.rect.height() <= 2.0 && shape.rect.width() > 100.0 => {
+                    let y = shape.rect.center().y;
+                    (y > top.top() && y < foot.bottom() && clipped.clip_rect.contains(shape.rect.center())).then_some(y)
+                }
+                egui::Shape::LineSegment { points, stroke } if stroke.color == line => {
+                    let y = points[0].y;
+                    (y > top.top() && y < foot.bottom()).then_some(y)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(ys.iter().any(|y| (y - (top.bottom() - 0.5)).abs() < 0.6), "step {step}: the row above keeps its line: {ys:?}");
+        for (index, a) in ys.iter().enumerate() {
+            for b in ys.iter().skip(index + 1) {
+                assert!((a - b).abs() >= 2.0, "step {step}: two lines {a} and {b} touch: {ys:?}");
+            }
+        }
     }
 }
