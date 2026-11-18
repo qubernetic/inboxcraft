@@ -17,6 +17,7 @@ use super::Shown;
 use super::gallery::{cell, cells, title};
 use super::hover::Action;
 use super::group_head::{self, GroupHead};
+use super::draft_row::{self, DraftRow};
 use super::later_row::{self, LaterRow, Pile};
 use super::mail_row::{self, Mark, MailRow};
 use super::outbox_row::{self, OutboxRow, SendButton, Standing};
@@ -434,6 +435,66 @@ fn laters(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// One state of the draft row's sheet.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DraftState {
+    pub name: &'static str,
+    pub subject: Option<&'static str>,
+    pub to: &'static str,
+    pub when: &'static str,
+    pub shown: Shown,
+}
+
+/// The draft row's states, in the sheet's order, with the sheet's words.
+pub(crate) fn draft_states() -> [DraftState; 6] {
+    let default =
+        DraftState { name: "default", subject: Some("Price list for the winter workshops"), to: "to Sunniva Aalto", when: "edited 12:10", shown: Shown::Rest };
+    [
+        default,
+        DraftState { name: "hover", shown: Shown::Hover, ..default },
+        DraftState { name: "focus", shown: Shown::Focus, ..default },
+        DraftState { name: "no-subject", subject: None, to: "to Marit Solheim", when: "edited yesterday", ..default },
+        DraftState { name: "no-recipient", subject: Some("Notes for the open day"), to: "no recipient yet", when: "edited 9 Nov", ..default },
+        DraftState {
+            name: "long-text",
+            subject: Some("Minutes of the quarterly studio planning meeting, with the kiln rota and the open day plan"),
+            to: "to Annelise Vandenberghe-Okonkwo-Halvorssen",
+            ..default
+        },
+    ]
+}
+
+/// What a screen reader hears for the draft row of `state`.
+pub(crate) fn draft_spoken(state: &DraftState) -> String {
+    format!("{}, {}, {}", state.subject.unwrap_or(tr!("(no subject)")), state.to, state.when)
+}
+
+/// The draft row of `state`, 440 wide, at `ui`'s cursor.
+pub(crate) fn draft(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &DraftState) {
+    let spoken = draft_spoken(state);
+    let row = DraftRow { id: Id::unique("gallery-draft-row").with(state.name), spoken: &spoken, subject: state.subject, to: state.to, when: state.when, last: false };
+    let high = Theme::size(theme, draft_row::HEIGHT);
+    ui.allocate_ui(vec2(ROW_WIDTH, high), |ui| {
+        ui.set_width(ROW_WIDTH);
+        let ground = Rect::from_min_size(ui.cursor().min, vec2(ROW_WIDTH, high));
+        ui.painter().rect_filled(ground, 0.0, theme.palette.surface);
+        let forced = (state.shown != Shown::Rest).then_some(state.shown);
+        draft_row::draft_row(ui, theme, keymap, &row, false, forced);
+    });
+}
+
+/// The draft row's board: every state of its sheet, two to a line.
+fn drafts(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Draft row"));
+    for pair in draft_states().chunks(2) {
+        cells(ui, theme, |ui| {
+            for state in pair {
+                cell(ui, theme, state.name, |ui| draft(ui, theme, keymap, state));
+            }
+        });
+    }
+}
+
 /// The left column: the mail row.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     mail_rows(ui, theme, keymap);
@@ -446,6 +507,8 @@ fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     sends(ui, theme, keymap);
     ui.add_space(BOARD_GAP);
     laters(ui, theme, keymap);
+    ui.add_space(BOARD_GAP);
+    drafts(ui, theme, keymap);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
