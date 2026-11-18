@@ -88,6 +88,31 @@ fn event_rect<State>(harness: &Harness<'static, State>, text: &str) -> Rect {
     harness.query_all(by().role(Role::Button).label_contains(text)).next().unwrap().rect()
 }
 
+/// The cells the last frame painted for events: a ground (`surface` at rest) with an account's bar of 3 points at its
+/// top left, as tall as the ground.
+fn painted_cells<State>(harness: &Harness<'static, State>, ppp: f32) -> Vec<Rect> {
+    let p = Palette::of(Mode::Dark);
+    let all = rects(harness);
+    let bar = super::grid::pixels(3.0, ppp);
+    all.iter()
+        .filter(|(rect, fill)| *fill == p.surface && rect.width() > bar)
+        .filter(|(rect, _)| {
+            all.iter().any(|(other, fill)| {
+                *fill != p.surface && other.min == rect.min && (other.width() - bar).abs() < 0.01 && (other.height() - rect.height()).abs() < 0.01
+            })
+        })
+        .map(|(rect, _)| *rect)
+        .collect()
+}
+
+/// The painted cell of the first event whose name holds `text`: the one its button stands on (within 2 px).
+fn painted_rect<State>(harness: &Harness<'static, State>, text: &str, ppp: f32) -> Rect {
+    let near = event_rect(harness, text);
+    let cells = painted_cells(harness, ppp);
+    let found = cells.iter().copied().find(|cell| (cell.min - near.min).length() * ppp <= 2.0 && (cell.max - near.max).length() * ppp <= 2.0);
+    found.unwrap_or_else(|| panic!("{ppp}: no painted cell for {text:?} at {near:?} in {cells:?}"))
+}
+
 /// The pixels of one point's line at `ppp`.
 fn line_px(ppp: f32) -> f32 {
     ppp.round().max(1.0)
@@ -98,8 +123,8 @@ fn an_event_lies_on_the_grid_s_lines() {
     for ppp in SCALES {
         for percent in [100, 130] {
             let harness = window(ppp, percent, View::Week);
-            // Monday 2 November, 09:00 to 10:00: on the hour lines and the day lines.
-            let rect = event_rect(&harness, "Studio stand-up, Monday 2 November");
+            // Monday 2 November, 09:00 to 10:00: its painted cell on the hour lines and the day lines.
+            let rect = painted_rect(&harness, "Studio stand-up, Monday 2 November", ppp);
             let w = line_px(ppp);
             let (left, right, top, bottom) = (rect.left() * ppp, rect.right() * ppp, rect.top() * ppp, rect.bottom() * ppp);
             for edge in [left, right, top, bottom] {
@@ -177,19 +202,29 @@ fn overlapping_events_share_one_line() {
     for ppp in SCALES {
         let harness = window(ppp, 100, View::Week);
         // Thursday 5 November: the call (09:30 – 10:30) and the dentist (10:00 – 11:30) side by side.
-        let call = event_rect(&harness, "Call with Petra about the logo");
-        let dentist = event_rect(&harness, "Dentist");
+        let call = painted_rect(&harness, "Call with Petra about the logo", ppp);
+        let dentist = painted_rect(&harness, "Dentist", ppp);
         let w = line_px(ppp) / ppp;
         assert!((call.right() - w - dentist.left()).abs() < 0.01, "{ppp}: the line between them is one: {call:?} {dentist:?}");
         assert!(call.left() < dentist.left());
         let across = lines(&harness, ppp, true);
         assert!(across.iter().any(|x| (x - call.left() * ppp).abs() < 0.01), "{ppp}: the first stands on the day's line");
         assert!(across.iter().any(|x| (x - (dentist.right() - w) * ppp).abs() < 0.01), "{ppp}: the second ends on the next day's line");
-        // Two bands one above the other share one line too.
-        let p = Palette::of(Mode::Dark);
+        // Two bands one above the other share one line too: the lower one's top is the upper one's bottom line.
         let band_line = (super::grid::lane_pitch(24.0, ppp) * ppp).round();
         assert_eq!(band_line, (24.0 * ppp).round() - line_px(ppp), "{ppp}: a lane is a band less its line");
-        let _ = p;
+        let mut harness = window(ppp, 100, View::Week);
+        let mut events: Vec<EventRow> = harness.state().calendar().events().cloned().collect();
+        let fair = events.iter().find(|event| event.summary == "Small press book fair").cloned().unwrap();
+        events.push(EventRow { id: 9200, summary: "Second fair".to_owned(), ..fair });
+        harness.state_mut().calendar_mut().0.set_events(events);
+        harness.run();
+        let upper = painted_rect(&harness, "Small press book fair", ppp);
+        let lower = painted_rect(&harness, "Second fair", ppp);
+        assert!(whole(upper.top() * ppp) && whole(lower.top() * ppp) && whole(lower.bottom() * ppp), "{ppp}: bands on whole pixels");
+        assert!((upper.height() * ppp - (24.0 * ppp).round()).abs() < 0.01, "{ppp}: a band is 24 points in whole pixels: {upper:?}");
+        assert!(((lower.top() - (upper.bottom() - w)) * ppp).abs() < 0.01, "{ppp}: one line between the bands: {upper:?} {lower:?}");
+        assert_eq!((upper.left(), upper.right()), (lower.left(), lower.right()));
     }
 }
 
@@ -283,10 +318,31 @@ fn every_scene_is_walked_by_the_keyboard_and_rests() {
     let mut harness = window(1.0, 100, View::Week);
     harness.get_by_role_and_label(Role::Button, "New event").click();
     harness.run();
-    // The editor is modal: Tab goes round its own controls, and reaches every one of them.
-    let missed = keyboard_walk(&mut harness);
+    // The editor is modal: Tab goes round its own controls, and reaches every one of them: every node in its float (the
+    // area that holds its Title, under the window's root).
+    let title = harness.get_by_role_and_label(Role::TextInput, "Title");
+    let mut area = title.accesskit_node();
+    while let Some(parent) = area.parent().filter(|parent| parent.parent().is_some()) {
+        area = parent;
+    }
+    fn pressable(node: egui_kittest::kittest::AccessKitNode<'_>, out: &mut Vec<String>) {
+        let data = node.data();
+        if data.supports_action(egui::accesskit::Action::Click) || data.supports_action(egui::accesskit::Action::Focus) {
+            out.extend(node.label());
+        }
+        node.children().for_each(|child| pressable(child, out));
+    }
+    let mut inside = Vec::new();
+    pressable(area, &mut inside);
     let own = ["Title", "Starts", "Ends", "All day", "Private", "Repeat", "Busy", "Free", "Guests", "Cancel", "Save"];
-    let missed_own: Vec<&String> = missed.iter().filter(|label| own.contains(&label.as_str())).collect();
+    assert!(own.iter().all(|name| inside.iter().any(|label| label == name)), "the float holds {inside:?}");
+    // A name the window also has outside the float (the rail's Calendar) may be missed as often as it is outside.
+    let mut all = Vec::new();
+    pressable(harness.root().accesskit_node(), &mut all);
+    let missed = keyboard_walk(&mut harness);
+    let count = |list: &[String], name: &String| list.iter().filter(|label| *label == name).count();
+    let missed_own: Vec<&String> =
+        inside.iter().filter(|name| count(&missed, name) > count(&all, name).saturating_sub(count(&inside, name))).collect();
     assert!(missed_own.is_empty(), "the editor: Tab never reaches {missed_own:?}");
 }
 
@@ -341,18 +397,25 @@ fn hostile_events_never_panic_and_their_text_stays_in_its_cell() {
                     }
                 }
             }
-            // The crowd lays out a bounded number of cells.
+            // The crowd lays out exactly its bound: four columns in the hours, the day's 50 rows in the agenda (the four
+            // other events of Thursday come first), and in the month the cell's room, which the four others fill.
             let crowd = harness.query_all(by().role(Role::Button).label_contains("Crowd")).count();
-            assert!(crowd <= 64, "{view:?} {ppp}: {crowd} cells for 500 events");
-            // "+N more" opens the day's events in a float, bounded too.
-            let more =
-                harness.query_all(by().role(Role::Button)).find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with('+')));
-            if let Some(more) = more {
-                more.click();
-                harness.run();
-                let rows = harness.query_all(by().role(Role::Button).label_contains("Crowd")).count();
-                assert!(rows <= 64 + super::more::MOST_ROWS, "{view:?}: the float lists at most its rows");
-            }
+            let bound = match view {
+                View::Day | View::Week => super::hours::MOST_COLUMNS,
+                View::Agenda => super::agenda::MOST_ROWS - 4,
+                View::Month => 0,
+            };
+            assert_eq!(crowd, bound, "{view:?} {ppp}: {crowd} cells for 500 events");
+            let link =
+                harness.query_all(by().role(Role::Button)).any(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with('+')));
+            assert!(link, "{view:?} {ppp}: the rest are counted in a +N more");
+            // The day's float lists exactly its rows and counts the rest.
+            harness.state_mut().calendar_mut().0.set_more(Some(thursday));
+            harness.run();
+            let held = hostile.iter().filter(|event| event.covers(thursday)).count();
+            let rest = format!("and {} more in the day", held - super::more::MOST_ROWS);
+            assert!(harness.query_by_label(&rest).is_some(), "{view:?} {ppp}: the float says {rest:?}");
+            harness.state_mut().calendar_mut().0.set_more(None);
         }
     }
 }
