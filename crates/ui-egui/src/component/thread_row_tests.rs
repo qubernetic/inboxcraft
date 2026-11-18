@@ -228,7 +228,7 @@ fn narrow_at(theme: Theme, line: ThreadLine<'static>, room: f32, ppp: f32) -> Ha
 }
 
 #[test]
-fn every_room_up_to_400_cuts_the_words_then_the_sender_and_leaves_details_out_last() {
+fn every_room_from_the_least_to_400_cuts_the_words_then_the_sender_and_leaves_details_out_last() {
     const LONG: &str = "Odile Brannock-Harbourmaster";
     let lines = [("folded", ThreadLine { sender: LONG, ..FOLDED }), ("open", ThreadLine { sender: LONG, ..OPEN }), ("open, short sender", OPEN)];
     for scale in [TextScale::default(), TextScale::ALL[4]] {
@@ -240,7 +240,9 @@ fn every_room_up_to_400_cuts_the_words_then_the_sender_and_leaves_details_out_la
                 // in a narrower room. The sender as it stands in its whole column, at 400.
                 let (mut had_details, mut had_words, mut had_sender) = (true, true, true);
                 let mut column: Option<String> = None;
-                for room in (180..=400).rev().step_by(2) {
+                // Down to below the row's least (the avatar and the date: 125 at 100 %, 143 at 130 %).
+                let least = if scale == TextScale::default() { 125.0 } else { 143.0 };
+                for room in (120..=400).rev().step_by(2) {
                     let room = room as f32;
                     let harness = narrow_at(theme, line, room, ppp);
                     let name = spoken(&line);
@@ -264,7 +266,8 @@ fn every_room_up_to_400_cuts_the_words_then_the_sender_and_leaves_details_out_la
                             assert!(one.intersect(*other).area() <= 0.5 || one.width() < 1.0, "{text:?} runs over {word:?}: {at}");
                         }
                     }
-                    assert!(texts.iter().any(|(_, text)| text == line.date), "the date whole: {texts:?} {at}");
+                    // The date is whole while the row holds the avatar and the date.
+                    assert!(room < least || texts.iter().any(|(_, text)| text == line.date), "the date whole: {texts:?} {at}");
                     let sender = texts.iter().find(|(_, text)| first(text, line.sender) && text.chars().count() > 2).map(|(_, text)| text.clone());
                     let words = texts.iter().any(|(_, text)| first(text, line.preview));
                     let details = harness.query_by_label("details ▾").is_some();
