@@ -6,7 +6,7 @@
 use inboxcraft_mime::Headers;
 use inboxcraft_model::{EmailAddress, Envelope, Group, Signs};
 
-use super::{calendar, classify, robot};
+use super::{Rule, calendar, classify, classify_by, robot, rule_name};
 use crate::test_support::address;
 
 /// The envelope of an invented header block, read as `net` reads one: the first `From` and the signs.
@@ -55,6 +55,23 @@ fn the_classifier_table() {
     ];
     for (header, group) in table {
         assert_eq!(classify(&envelope(header)), *group, "{header:?}");
+    }
+}
+
+#[test]
+fn the_classifier_names_the_rule_that_gave_the_group() {
+    let table: &[(&str, Group, Rule, &str)] = &[
+        ("From: anna@example.org\r\nContent-Type: text/calendar\r\n\r\n", Group::Invitations, Rule::Calendar, "calendar"),
+        ("From: shop@example.org\r\nAuto-Submitted: auto-generated\r\n\r\n", Group::Updates, Rule::Automatic, "automatic"),
+        ("From: news@example.org\r\nList-Id: <news.example.org>\r\n\r\n", Group::Newsletters, Rule::List, "list"),
+        ("From: no-reply@example.org\r\nPrecedence: junk\r\n\r\n", Group::Updates, Rule::Junk, "junk"),
+        ("From: no-reply@example.org\r\n\r\n", Group::Updates, Rule::Robot, "robot"),
+        ("From: anna@example.org\r\n\r\n", Group::People, Rule::Other, "other"),
+    ];
+    for (header, group, rule, name) in table {
+        assert_eq!(classify_by(&envelope(header)), (*group, *rule), "{header:?}");
+        assert_eq!(classify(&envelope(header)), *group, "{header:?}");
+        assert_eq!(rule_name(*rule), *name);
     }
 }
 

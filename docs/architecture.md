@@ -91,6 +91,16 @@ fetches a remote picture: the front end asks its fetch for the pictures the owne
 fetch is `net::picture` on threads of its own (HTTPS only, a fixed user agent, no cookies or referrer, public
 addresses only), so the engine stays free of network I/O.
 
+`mail.why` (`safe`, `id`) says why a message stands where it does, from what the triage already decided and keeps:
+at most four reasons, most specific first, each a `kind` (`snooze`, `rule`, `sender`, `screener`, `thread`,
+`default`), a `text_id` from a fixed set (`why.snooze.returned`, `why.snooze.until`, `why.rule.group`,
+`why.sender.group`, `why.sender.accepted`, `why.sender.blocked`, `why.screener.held`, `why.screener.blocked`,
+`why.screener.new`, `why.screener.known`, `why.thread.yours`, `why.thread.other`, `why.default`) that the front end
+words in its own language, and `args` with a fixed set of keys per `text_id`: times, a group or rule name, the
+sender's address (cleaned and cut at 254 characters), a count, a folder id and role. No text of the message goes
+into the answer. `rule` names the grouped inbox classifier's rule (`calendar`, `automatic`, `list`, `junk`, `robot`,
+`other`) for mail in the inbox; `default` (the folder) comes only when nothing else does.
+
 The appearance commands (`ui.theme.set`, `ui.text_scale.set`, `ui.motion.set`, `ui.frame.set`, all `safe`) change
 one choice each of the session's `Appearance` (`engine::appearance`) and answer the whole of it. The colours, the
 typeface and the icons are fixed, so there is no command for them. The engine checks the values; it keeps nothing
