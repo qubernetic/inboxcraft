@@ -913,7 +913,9 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
                     if seen.focus && !field.read_only {
                         let clip = ui.clip_rect().intersect(view.expand2(vec2(caret_size(theme).x + s.s1, 0.0)));
                         paint_caret(ui, theme, id, &output, clip, seen.forced);
-                        if scrolls && (output.response.response.changed() || output.response.response.gained_focus()) {
+                        // A board's forced focus shows the field as the keyboard leaves it: the caret (at the end) in
+                        // sight, the text scrolled to it.
+                        if scrolls && (seen.forced || output.response.response.changed() || output.response.response.gained_focus()) {
                             // Keep the caret clear of the pads above and below the text.
                             let cursor = output.cursor_range.map_or_else(|| output.galley.end(), |range| range.primary);
                             let at = output.galley.pos_from_cursor(cursor).translate(output.galley_pos.to_vec2());

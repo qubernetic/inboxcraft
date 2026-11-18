@@ -1430,3 +1430,35 @@ fn a_hint_stands_where_the_text_typed_in_its_place_stands() {
         }
     }
 }
+
+#[test]
+fn a_board_s_focused_scrolling_field_shows_its_end_with_the_caret_on_the_last_line() {
+    let theme = theme();
+    // As the board's cell: the notes and a line begun after them, the caret on it.
+    let text = (1..=16).map(|n| format!("Line {n} of the notes.")).collect::<Vec<_>>().join("\n") + "\n";
+    let ground = theme.palette.bg;
+    let mut harness = builder().with_size(vec2(400.0, 400.0)).build_ui(move |ui| {
+        crate::component::tests::stage(ui, ground, |ui| {
+            ui.spacing_mut().scroll = crate::component::scroll::style(&theme);
+            ui.vertical(|ui| {
+                ui.set_width(320.0);
+                let mut text = text.clone();
+                super::multiline_with(ui, &theme, egui::Id::unique("board"), &mut text, &Field::new(NOTES, ""), Some(Shown::Focus));
+            });
+        });
+    });
+    harness.run();
+    let rect = box_of_ui(&harness);
+    let block = caret(&painted_in(&harness, NOTES, rect), theme.palette.cyan_edge);
+    let block = block.unwrap_or_else(|| panic!("no caret in {rect:?}"));
+    // The board: the caret 7 x 16 at 13, 210 in the 320 x 240 box, the text scrolled to its end. The app keeps the
+    // caret's line 8 clear of the box's foot as it does while typing, 2 lower than the board (a gaps line).
+    let at = block.min - rect.min;
+    assert!(at.x == 13.0 && (210.0..=212.0).contains(&at.y), "on the last line, by the board's: {block:?} in {rect:?}");
+    assert!(drawn(&harness).iter().any(|text| text.text.contains("Line 16")), "the end in sight");
+}
+
+/// The 320 wide box of a harness built with `build_ui`.
+fn box_of_ui(harness: &Harness<'static>) -> Rect {
+    box_of(harness, NOTES)
+}

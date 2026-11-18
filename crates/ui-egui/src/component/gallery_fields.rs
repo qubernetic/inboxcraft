@@ -168,7 +168,7 @@ fn multiline_fields(ui: &mut Ui, theme: &Theme) {
             (tr!("read-only"), first(2), Field { read_only: true, ..notes }, None),
         ],
         [(tr!("grown"), first(6), notes, None), (tr!("at-limit"), first(10), notes, None)],
-        [(tr!("scrolling"), first(16), notes, None), (tr!("scrolling-focus"), first(16), notes, Some(Shown::Focus))],
+        [(tr!("scrolling"), first(16), notes, None), (tr!("scrolling-focus"), first(16) + "\n", notes, Some(Shown::Focus))],
     ];
     for row in rows {
         cells(ui, theme, |ui| {
