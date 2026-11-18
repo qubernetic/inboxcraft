@@ -89,11 +89,16 @@ pub fn bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>) {
 
 /// [`bar`], its thumb travelling `ends` clear of the strip's top and bottom (a field's bar on its board: 4).
 pub fn bar_with_ends<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, ends: f32) {
+    paint_bar(ui, theme, output, ends, false);
+}
+
+/// Paints the bar of the area `output` came from; `over` the content when the area gives it no room of its own.
+fn paint_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, ends: f32, over: bool) {
     let id = output.id.with(1);
     let Some(strip) = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(id).map(|widget| widget.rect)) else { return };
     // egui starts showing a bar a frame before it gives it room beside the content: until the strip stands clear of
     // the content, nothing is painted, so no frame has the bar over a row.
-    if strip.left() < output.inner_rect.right() - 0.01 {
+    if !over && strip.left() < output.inner_rect.right() - 0.01 {
         return;
     }
     let (inner, content) = (output.inner_rect.height(), output.content_size.y);
@@ -128,6 +133,19 @@ pub fn show<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&m
 pub fn show_with_ends<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, ends: f32, add: impl FnOnce(&mut Ui) -> R) -> ScrollAreaOutput<R> {
     let output = area.show(ui, add);
     bar_with_ends(ui, theme, &output, ends);
+    output
+}
+
+/// Shows `area` in `ui` with `add` drawing its content as wide as the area, and paints its bar over the content's
+/// right edge (a view whose rows run under the bar, as the calendar's agenda and hours).
+pub fn show_over<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui) -> R) -> ScrollAreaOutput<R> {
+    let output = ui
+        .scope(|ui| {
+            ui.spacing_mut().scroll.floating_allocated_width = 0.0;
+            area.show(ui, add)
+        })
+        .inner;
+    paint_bar(ui, theme, &output, 0.0, true);
     output
 }
 

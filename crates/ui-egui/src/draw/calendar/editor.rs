@@ -1,14 +1,15 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The event editor, a float hanging from New event (also when Edit opened it) as the design's event-editor frames
-//! draw it, 432 wide, its right edge on New event's: its title with the Esc key, the event's title, Starts and Ends
-//! side by side, All day and Private, Repeat as a select with Show as busy or free beside it, "this event only" for a
-//! series (coming soon), the calendar of a new event as a select, the guests' addresses, and for an edit of an event
-//! with guests the question whether to tell them; then why the last save was refused, and Cancel and Save. The fields
-//! are the project's field components with their input caps. Esc or a press outside comes back as [`Asked::Leave`]:
-//! the editor closes when nothing was typed; else it stays and says how to keep or throw away the typing (Save; Cancel
-//! or a second Esc), and a press outside never closes it. A press outside reaches nothing under the editor.
+//! The event editor, a float as the design's event-editor frames draw it, 432 wide: a new event's hangs from New event,
+//! its right edge on New event's; an edit's stands over the details at the calendar card's bottom right. In it: its
+//! title with the Esc key, the event's title, Starts and Ends side by side, All day and Private, Repeat as a select
+//! with Show as busy or free beside it, "this event only" for a series (coming soon), the calendar of a new event as a
+//! select, the guests' addresses, and for an edit of an event with guests the question whether to tell them; then why
+//! the last save was refused, and Cancel and Save. The fields are the project's field components with their input caps.
+//! Esc or a press outside comes back as [`Asked::Leave`]: the editor closes when nothing was typed; else it stays and
+//! says how to keep or throw away the typing (Save; Cancel or a second Esc), and a press outside never closes it. A
+//! press outside reaches nothing under the editor.
 
 use egui::{Context, Id, Rect, Response, Ui, pos2, vec2};
 
@@ -31,6 +32,18 @@ use crate::tr;
 /// The editor's width, in points, its edge included, as the design draws it.
 const WIDTH: f32 = 432.0;
 
+/// From the editor of an existing event to the calendar card's right edge, in points, as the edit frames draw it.
+const EDIT_RIGHT: f32 = 3.0;
+
+/// How far under its anchor a float hangs, in points ([`Float::anchor`]).
+const HANG: f32 = 4.0;
+
+/// The room inside the box of the question to the guests, in points, its edge not counted.
+const NOTIFY_PAD: f32 = 12.0;
+
+/// From the question to the guests to its answers, in points.
+const NOTIFY_GAP: f32 = 10.0;
+
 /// Between the editor's rows, in points.
 const ROWS: f32 = 12.0;
 
@@ -45,13 +58,28 @@ fn float_id() -> Id {
     Id::unique("event-editor")
 }
 
-/// The editor hanging from `new_event` (New event's rect, if it was drawn); what was pressed in it. While `quiet`
-/// another surface lies over it (the palette, the settings sheet) and has the keys and the pointer.
-pub(in crate::draw) fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, editor: &mut Editor, new_event: Option<Rect>, quiet: bool) -> Vec<Asked> {
+/// The editor of a new event hanging from `new_event` (New event's rect, if it was drawn), and of an existing one over
+/// the details at the bottom right of `card` (the calendar card's room, if it was drawn); what was pressed in it.
+/// While `quiet` another surface lies over it (the palette, the settings sheet) and has the keys and the pointer.
+pub(in crate::draw) fn show(
+    ctx: &Context,
+    theme: &Theme,
+    keymap: &Keymap,
+    editor: &mut Editor,
+    (new_event, card): (Option<Rect>, Option<Rect>),
+    quiet: bool,
+) -> Vec<Asked> {
     let screen = ctx.content_rect();
     let button = new_event.unwrap_or_else(|| Rect::from_min_size(pos2(screen.right() - 16.0, screen.top() + 48.0), vec2(0.0, 0.0)));
     // Its right edge on New event's: the float hangs from a place as wide as it, ending where the button ends.
-    let anchor = Rect::from_min_max(pos2(button.right() - WIDTH, button.top()), button.max);
+    let mut anchor = Rect::from_min_max(pos2(button.right() - WIDTH, button.top()), button.max);
+    if let Some(card) = card.filter(|_| editor.id().is_some()) {
+        // An edit, as the design's edit frames: its right edge 3 inside the card's, its bottom edge on the card's bottom
+        // edge, as tall as it was the frame before (the first frame the window's room keeps it in sight).
+        let high = ctx.memory(|memory| memory.area_rect(float_id())).map_or(0.0, |rect| rect.height());
+        let bottom = card.bottom() + 1.0 - high - HANG;
+        anchor = Rect::from_min_max(pos2(card.right() - EDIT_RIGHT - WIDTH, bottom), pos2(card.right() - EDIT_RIGHT, bottom));
+    }
     let float = Float { id: float_id(), anchor, width: WIDTH, returns_to: Id::NULL };
     let mut asked = Vec::new();
     let shown = popup::held(ctx, theme, &float, quiet, |ui| {
@@ -217,23 +245,40 @@ fn calendar_choice(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f32) 
     }
 }
 
-/// The question whether to tell the guests of the change, with its two answers.
+/// The question whether to tell the guests of the change, with its two answers, in a box as the design's tell-guests
+/// frames draw it: `panel`, a 1 px `cyan_edge`, 12 inside, the answers 10 under the question.
 fn notify(ui: &mut Ui, theme: &Theme, editor: &mut Editor) {
     let p = &theme.palette;
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 8.0;
-        crate::component::label(ui, theme.fonts.body, &editor.notify_question(), p.ink);
-        let notify = editor.notify();
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 24.0;
-            if radio(ui, theme, tr!("Don't tell them"), !notify).clicked() {
-                editor.set_notify(false);
-            }
-            if radio(ui, theme, tr!("Send them the update"), notify).clicked() {
-                editor.set_notify(true);
-            }
-        });
+    let ppp = ui.pixels_per_point();
+    let line = super::grid::line(ppp);
+    let width = ui.available_width();
+    let inset = line + NOTIFY_PAD;
+    let start = ui.available_rect_before_wrap().min;
+    let start = pos2(super::grid::snap(start.x, ppp), super::grid::snap(start.y, ppp));
+    let ground = ui.painter().add(egui::Shape::Noop);
+    let inner = Rect::from_min_size(start + vec2(inset, inset), vec2((width - inset * 2.0).max(1.0), f32::INFINITY));
+    let mut inside = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::Min)));
+    inside.spacing_mut().item_spacing.y = NOTIFY_GAP;
+    let question = editor.notify_question();
+    let galley = crate::component::wrapped(&inside, &question, theme.fonts.body, p.ink, inner.width(), 4, egui::Align::Min);
+    let (rect, response) = inside.allocate_exact_size(vec2(inner.width(), galley.size().y), egui::Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Label, true, &question));
+    crate::draw::paint::rows_at(inside.painter(), rect.min, inner.width(), galley, p.ink);
+    let notify = editor.notify();
+    inside.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 24.0;
+        if radio(ui, theme, tr!("Don't tell them"), !notify).clicked() {
+            editor.set_notify(false);
+        }
+        if radio(ui, theme, tr!("Send them the update"), notify).clicked() {
+            editor.set_notify(true);
+        }
     });
+    let bottom = super::grid::snap(inside.min_rect().bottom() + inset, ppp);
+    let boxed = Rect::from_min_max(start, pos2(start.x + width, bottom.max(start.y)));
+    ui.allocate_rect(boxed, egui::Sense::hover());
+    ui.painter().set(ground, egui::Shape::rect_filled(boxed, 0.0, p.panel));
+    super::stroke(ui.painter(), boxed, line, p.cyan_edge);
 }
 
 #[cfg(test)]

@@ -82,6 +82,98 @@ fn the_toolbar_s_note_stands_20_after_the_title() {
 }
 
 #[test]
+fn the_toolbar_s_groups_stand_24_apart_and_their_controls_8() {
+    let harness = window(View::Week);
+    let rect = |role, name| harness.get_by_role_and_label(role, name).rect();
+    let back = rect(Role::Button, "Previous week");
+    let today = rect(Role::Button, "Today");
+    let on = rect(Role::Button, "Next week");
+    let views = rect(Role::RadioGroup, "Day / Week / Month / Agenda");
+    let new = rect(Role::Button, "New event");
+    // As the frame: step back 391, Today 431..494, step on 502..534, the views 558..801, New event 825.
+    assert_eq!(today.left() - back.right(), 8.0, "{back:?} {today:?}");
+    assert_eq!(on.left() - today.right(), 8.0, "{today:?} {on:?}");
+    assert_eq!(views.left() - on.right(), 24.0, "{on:?} {views:?}");
+    assert_eq!(new.left() - views.right(), 24.0, "{views:?} {new:?}");
+}
+
+#[test]
+fn one_line_stands_between_the_heads_or_the_all_day_lane_and_the_hours() {
+    let p = Palette::of(Mode::Dark);
+    for view in [View::Week, View::Day] {
+        let harness = window(view);
+        let found = rects(&harness);
+        let across = |colour: Color32| -> Vec<Rect> {
+            found.iter().filter(|(rect, fill)| *fill == colour && rect.width() > 400.0 && rect.height() <= 1.0).map(|(rect, _)| *rect).collect()
+        };
+        let lines = across(p.line);
+        // The frame: the `line` under the heads (or the lane), then the hours' `surface`; the first hour line 48 lower.
+        for under in &lines {
+            let doubled = across(p.panel_line).into_iter().find(|hour| (hour.top() - under.bottom()).abs() < 0.01);
+            assert!(doubled.is_none(), "{view:?}: {doubled:?} right under {under:?}");
+        }
+    }
+}
+
+#[test]
+fn the_agenda_s_rows_run_the_view_s_whole_width_under_the_scroll_bar() {
+    let p = Palette::of(Mode::Dark);
+    let harness = window(View::Agenda);
+    let found = rects(&harness);
+    // The `line` under the toolbar runs the view's width; the frame's row hairlines run as far, the thumb over them.
+    let toolbar = found
+        .iter()
+        .filter(|(rect, fill)| *fill == p.line && rect.height() <= 1.0 && rect.width() > 400.0 && (20.0..200.0).contains(&rect.top()))
+        .map(|(rect, _)| *rect)
+        .next()
+        .unwrap();
+    let rows: Vec<Rect> =
+        found.iter().filter(|(rect, fill)| *fill == p.panel_line && rect.height() <= 1.0 && rect.width() > 400.0).map(|(rect, _)| *rect).collect();
+    assert!(!rows.is_empty());
+    for row in rows {
+        assert_eq!((row.left(), row.right()), (toolbar.left(), toolbar.right()), "{row:?} under {toolbar:?}");
+    }
+}
+
+#[test]
+fn the_hours_draw_every_day_line_the_last_under_the_scroll_bar() {
+    let p = Palette::of(Mode::Dark);
+    for (view, days) in [(View::Week, 7), (View::Day, 1)] {
+        let harness = window(view);
+        // Down the hours: the gutter's line and one after each day, the last (the frame's x 940) too.
+        let mut lefts: Vec<f32> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                // What is in sight: the part of the line inside its clip.
+                egui::Shape::Rect(rect) if rect.fill == p.panel_line => Some(rect.rect.intersect(clipped.clip_rect)),
+                _ => None,
+            })
+            .filter(|rect| rect.width() > 0.0 && rect.width() <= 1.0 && rect.height() > 300.0)
+            .map(|rect| rect.left())
+            .collect();
+        lefts.sort_by(f32::total_cmp);
+        lefts.dedup();
+        assert_eq!(lefts.len(), days + 1, "{view:?}: {lefts:?}");
+    }
+}
+
+#[test]
+fn today_s_head_has_a_1_px_cyan_edge_under_it() {
+    let p = Palette::of(Mode::Dark);
+    let harness = window(View::Week);
+    // The frame's head: a `cyan_edge` bottom of 1 px, as wide as the day's column, over the heads' `line`.
+    let under: Vec<Rect> = rects(&harness)
+        .into_iter()
+        .filter(|(rect, fill)| *fill == p.cyan_edge && rect.top() < 150.0 && rect.height() <= 2.0 && (100.0..200.0).contains(&rect.width()))
+        .map(|(rect, _)| rect)
+        .collect();
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(under.iter().all(|rect| rect.height() == 1.0), "{under:?}");
+}
+
+#[test]
 fn the_day_s_float_counts_its_events_with_the_number_alone() {
     let mut harness = window(View::Month);
     let thursday = Day::new(2026, 11, 5).unwrap();
@@ -112,4 +204,22 @@ fn the_side_panel_s_content_stands_16_in_and_the_mini_month_is_220_wide() {
     assert_eq!(mini.left(), edge.right() + 16.0, "{mini:?}");
     assert_eq!(mini.width(), 220.0, "{mini:?}");
     assert_eq!(mini.top(), edge.top() + 16.0, "{mini:?}");
+}
+
+#[test]
+fn the_mini_month_s_arrows_stand_where_the_sheet_draws_them() {
+    let p = Palette::of(Mode::Dark);
+    let harness = window(View::Week);
+    let mini = rects(&harness)
+        .into_iter()
+        .find(|(rect, fill)| *fill == p.surface && rect.left() > 1100.0 && rect.width() == 220.0)
+        .map(|(rect, _)| rect)
+        .unwrap();
+    // The sheet: the head 12 in, "‹" an 8-wide box at +168 and "›" at +188, so their middles at +184 and +204.
+    let found = texts(&harness);
+    for (sign, middle) in [("‹", 184.0), ("›", 204.0)] {
+        let (x, wide, _) = found.iter().find(|(_, _, text)| text == sign).unwrap();
+        let at = x + wide / 2.0 - mini.left();
+        assert!((at - middle).abs() <= 0.5, "{sign} stands at +{at}, the sheet's +{middle}");
+    }
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The day and week views: a head per day (its name in the `label` style; today's in `cyan_text` with `today` beside
-//! it and a 2 px `cyan_edge` line under it), a lane of bands over whole days under "All day" when there are any (at
+//! it and a 1 px `cyan_edge` line under it), a lane of bands over whole days under "All day" when there are any (at
 //! most [`MOST_LANES`]; what does not fit is counted in a "+N more" under the day), then the day's hours on a grid of
 //! `panel_line` hairlines, scrolled to the morning at first. A timed event is a cell on the grid: from its start's
 //! line to its end's, from its day's line to the next, side by side with the events it overlaps (at most
@@ -117,14 +117,19 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
             scroll = scroll.vertical_scroll_offset(f32::from(earliest) * z.hour);
             ui.ctx().data_mut(|data| data.insert_temp(scrolled, true));
         }
-        crate::component::scroll::show(ui, theme, scroll, |ui| {
+        crate::component::scroll::show_over(ui, theme, scroll, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             let (content, _) = ui.allocate_exact_size(vec2(rect.width(), z.hour * 24.0 + line), Sense::hover());
             let top = content.top();
             let at = |minute: u16| snap(top + f32::from(minute) / 60.0 * z.hour, ppp);
             let painter = ui.painter().clone();
+            // An hour line at the top of what is in sight would double the `line` over the hours: the design has none.
+            let sight = ui.clip_rect().top() + line;
             for hour in 1..24_u16 {
                 let y = at(hour * 60);
+                if y < sight {
+                    continue;
+                }
                 painter.rect_filled(Rect::from_min_max(pos2(cols.line(0), y), pos2(cols.line(days), y + line)), 0.0, p.panel_line);
             }
             for index in 0..=days {
@@ -226,7 +231,7 @@ fn head(ui: &mut Ui, theme: &Theme, calendar: &Calendar, cols: &Lines, (top, bot
             if wide + 8.0 + note.size().x <= cell.width() - 20.0 {
                 run_at(ui.painter(), pos2(left + 10.0 + wide.ceil() + 8.0, y), note, p.muted);
             }
-            let under = pixels(2.0, ppp);
+            let under = pixels(1.0, ppp);
             ui.painter().rect_filled(Rect::from_min_max(pos2(left, bottom - under), pos2(right, bottom)), 0.0, p.cyan_edge);
         }
         let spoken = format!("{}{}", day::long(day), if today { format!(", {}", tr!("today")) } else { String::new() });

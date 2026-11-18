@@ -9,11 +9,12 @@
 //!
 //! The day and week views lay the hours out on a grid of `panel_line` hairlines under a lane of bands over whole days
 //! (`hours`), the month view the six weeks of the month (`month`), the agenda the days that hold events (`agenda`).
-//! Every event is a cell on its grid ([`grid`]): its edges take the pixels of the grid's lines. Every event is a
-//! button named after its summary and its days and times; pressing it picks it, and the keyboard's focus and the
-//! picked event are one thing ([`keys`]). Drawing only reads the [`Calendar`]; what was pressed comes back as
-//! [`Asked`] and is applied after the frame. New event, and Edit under the picked event's details, open the event
-//! editor (`editor`) as a float hanging from New event; "+N more" opens the day's events in a float (`more`).
+//! Every event is a cell on its grid ([`grid`]): its edges take the pixels of the grid's lines. Every event is a button
+//! named after its summary and its days and times; pressing it picks it, and the keyboard's focus and the picked event
+//! are one thing ([`keys`]). Drawing only reads the [`Calendar`]; what was pressed comes back as [`Asked`] and is
+//! applied after the frame. New event, and Edit under the picked event's details, open the event editor (`editor`) as a
+//! float (a new event's hanging from New event, an edit's over the details); "+N more" opens the day's events in a
+//! float (`more`).
 
 mod agenda;
 mod editor;
@@ -51,8 +52,11 @@ const VIEW_LEAST: f32 = 600.0;
 /// The room left and right in the toolbar, in points.
 const TOOLBAR_PAD: f32 = 16.0;
 
-/// Between the toolbar's controls, in points; the groups stand twice as far apart.
+/// Between the toolbar's controls, in points.
 const TOOLBAR_GAP: f32 = 8.0;
+
+/// Between the toolbar's groups (the steps, the views, New event), in points, as the design draws it.
+const GROUP_GAP: f32 = 24.0;
 
 /// From the toolbar's title to its note (the week's number, the agenda's days), in points, as the design draws it.
 const NOTE_GAP: f32 = 20.0;
@@ -126,10 +130,22 @@ pub(super) fn fixed(theme: &Theme, points: f32) -> f32 {
     Theme::size(theme, points)
 }
 
-/// The calendar card's content while there is no calendar: what will show here.
-pub(super) fn empty(ui: &mut Ui, theme: &Theme) {
+/// Under the empty state the design keeps the room of its "Open accounts" button, in points (a secondary button).
+const EMPTY_ACTION: f32 = 32.0;
+
+/// The calendar screen while there is no calendar: the calendar's card, as with calendars, and in its middle what will
+/// show here, where the design places it (over the room of a button the app has no command for yet).
+pub(super) fn empty(ui: &mut Ui, theme: &Theme, layers: &mut Panes) {
     let about = tr!("The calendars of your accounts show here, by day, week, month and agenda, once an account has a CalDAV address.");
-    crate::component::empty::empty_state(ui, theme, tr!("Calendar · no calendars"), tr!("No calendars yet."), about);
+    CentralPanel::no_frame().frame(Frame::NONE).show(ui, |ui| {
+        layers.card(ui, Margin::ZERO, |ui| {
+            let all = ui.max_rect();
+            let words = Rect::from_min_max(all.min, pos2(all.right(), (all.bottom() - fixed(theme, EMPTY_ACTION)).max(all.top())));
+            ui.scope_builder(UiBuilder::new().max_rect(words).id_salt("calendar-empty"), |ui| {
+                crate::component::empty::empty_state(ui, theme, tr!("Calendar · no calendars"), tr!("No calendars yet."), about);
+            });
+        });
+    });
 }
 
 /// The calendar screen with its calendars: the view and the side panel; what was pressed. While `over` the palette or
@@ -139,6 +155,7 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
     CentralPanel::no_frame().frame(Frame::NONE).show(ui, |ui| {
         layers.card(ui, Margin::ZERO, |ui| {
             let all = ui.max_rect();
+            ui.ctx().data_mut(|data| data.insert_temp(card_id(), all));
             let ppp = ui.pixels_per_point();
             let line = line_width(ppp);
             let with_side = all.width() - SIDE - line >= VIEW_LEAST;
@@ -193,6 +210,11 @@ pub(super) fn new_event_id() -> Id {
     Id::unique("calendar-new-event-button")
 }
 
+/// Where the editor of an existing event stands: the calendar card's room, kept from the screen for the float.
+fn card_id() -> Id {
+    Id::unique("calendar-card-room")
+}
+
 /// Where the control that opened the editor is kept (New event, or Edit), and whether the editor was open last frame.
 fn opener_id() -> Id {
     Id::unique("calendar-editor-opener")
@@ -234,11 +256,11 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
         if ui.ctx().data(|data| data.get_temp::<(Id, bool)>(opener_id())).is_none() {
             opened_from(ui.ctx(), new.id);
         }
-        ui.add_space(TOOLBAR_GAP);
+        ui.add_space(GROUP_GAP - TOOLBAR_GAP);
         if let Some(view) = segmented(ui, theme, &views, calendar.view()) {
             asked.push(Asked::View(view));
         }
-        ui.add_space(TOOLBAR_GAP);
+        ui.add_space(GROUP_GAP - TOOLBAR_GAP);
         if IconButton::new(IconId::Next, on).show(ui, theme, keymap).clicked() {
             asked.push(Asked::Step(true));
         }
@@ -505,7 +527,8 @@ fn stroke(painter: &egui::Painter, rect: Rect, line: f32, colour: Color32) {
     }
 }
 
-/// The event editor over the screen while it is open, hanging from New event; what was pressed in it.
+/// The event editor over the screen while it is open, hanging from New event (an edit: over the details, at the card's
+/// bottom right); what was pressed in it.
 /// While `quiet` another surface lies over it and has the keys.
 /// The frame after it closed, the keyboard goes back to the control that opened it; when that is gone (Edit hidden by
 /// a narrow window, or with its event deleted), to the grid's picked day (the month's number, the week's head), and
@@ -528,7 +551,8 @@ pub(super) fn editor(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, calend
         }
         ctx.data_mut(|data| data.insert_temp(opener_id(), (opener, open)));
     }
-    calendar.editor_mut().map(|editor| editor::show(ctx, theme, keymap, editor, anchor, quiet)).unwrap_or_default()
+    let card = ctx.data(|data| data.get_temp::<Rect>(card_id()));
+    calendar.editor_mut().map(|editor| editor::show(ctx, theme, keymap, editor, (anchor, card), quiet)).unwrap_or_default()
 }
 
 #[cfg(test)]
