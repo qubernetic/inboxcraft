@@ -332,7 +332,11 @@ fn the_password_field_takes_no_more_than_its_limit_and_never_grows_its_buffer() 
     harness.state_mut().onboarding_mut().0.open();
     harness.run();
     let capacity = harness.state_mut().onboarding_mut().0.form_mut().password.expose_mut().capacity();
+    // Past the limit, what was typed is refused whole (never cut) and the field says so.
     type_password(&mut harness, &"é".repeat(MAX_PASSWORD_CHARS + 10));
+    assert!(harness.state_mut().onboarding_mut().0.form_mut().password.expose().is_empty(), "refused whole");
+    assert!(harness.query_by_label_contains("Too long").is_some(), "the field says why");
+    type_password(&mut harness, &"é".repeat(MAX_PASSWORD_CHARS));
     let password = &mut harness.state_mut().onboarding_mut().0.form_mut().password;
     assert_eq!(password.expose().chars().count(), MAX_PASSWORD_CHARS);
     assert_eq!(password.expose_mut().capacity(), capacity, "typing reallocated the password");

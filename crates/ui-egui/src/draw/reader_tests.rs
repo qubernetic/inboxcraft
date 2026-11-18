@@ -675,6 +675,17 @@ fn the_notice_s_dismiss_is_a_link_that_space_presses() {
     assert_eq!(harness.state().reader().notice(), None);
 }
 
+#[test]
+fn more_and_move_open_by_the_pointer_enter_and_space_and_keep_tab_inside() {
+    for opener in ["More", "Move to a folder"] {
+        for key in [None, Some(Key::Enter), Some(Key::Space)] {
+            let fetch = Recorder::default();
+            let mut harness = opened(&fetch, None, "Photos from the coast walk");
+            crate::component::popup::tests::walk_a_menu(&mut harness, (Role::Button, opener), key);
+        }
+    }
+}
+
 /// A message of `html` drawn by the reader's blocks, its quotes shown or not: the harness and what it asked for.
 fn html_message(html: &str, quotes: bool) -> Harness<'static, Vec<super::reader::Asked>> {
     let options = inboxcraft_html::Options::default();

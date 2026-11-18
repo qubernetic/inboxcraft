@@ -28,13 +28,17 @@ pub(crate) const COMMANDS: &[CommandSpec] = &[NEW, UPDATE, SHOW, LIST, DISCARD, 
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["id", "account", "answers", "to", "cc", "bcc", "subject", "text", "signature", "name"];
+pub(crate) const FIELDS: &[&str] = &["id", "account", "answers", "to", "cc", "bcc", "typed", "subject", "text", "signature", "name"];
 
 /// The most recipients in one of `to`, `cc` and `bcc`.
 pub(crate) const MAX_RECIPIENTS: usize = 500;
 
 /// The longest recipient as typed, in bytes.
 pub(crate) const MAX_RECIPIENT_BYTES: usize = 998;
+
+/// The most characters kept of what is typed in one recipient line and not a recipient: the line's field holds no
+/// more.
+pub(crate) use inboxcraft_model::MAX_TYPED_CHARS;
 
 pub(crate) use crate::draft::{MAX_SUBJECT_BYTES, MAX_TEXT_BYTES};
 
@@ -212,6 +216,8 @@ struct UpdateParams {
     cc: Option<Vec<String>>,
     /// `Bcc`, as typed.
     bcc: Option<Vec<String>>,
+    /// What is typed in the To, Cc and Bcc lines and not a recipient, in that order: kept, never sent.
+    typed: Option<Vec<String>>,
     /// The subject.
     subject: Option<String>,
     /// The text.
@@ -225,6 +231,9 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
             return Err(EngineError::bad_params(UPDATE.id, "too many recipients, or one too long"));
         }
     }
+    if params.typed.as_ref().is_some_and(|typed| typed.len() > 3 || typed.iter().any(|text| text.chars().count() > MAX_TYPED_CHARS)) {
+        return Err(EngineError::bad_params(UPDATE.id, "what is typed in a recipient line is too long"));
+    }
     if params.subject.as_ref().is_some_and(|subject| subject.len() > MAX_SUBJECT_BYTES) {
         return Err(EngineError::bad_params(UPDATE.id, "the subject is too long"));
     }
@@ -232,10 +241,15 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         return Err(EngineError::bad_params(UPDATE.id, "the text is too long"));
     }
     let mut draft = changeable_draft(context, UPDATE.id, params.id)?;
+    let before = draft.clone();
     let mut outcome = Outcome::new(Value::Null);
     draft.to = params.to.unwrap_or(draft.to);
     draft.cc = params.cc.unwrap_or(draft.cc);
     draft.bcc = params.bcc.unwrap_or(draft.bcc);
+    if let Some(typed) = params.typed {
+        let mut lines = typed.into_iter();
+        draft.typed = [(); 3].map(|()| lines.next().unwrap_or_default());
+    }
     draft.subject = params.subject.unwrap_or(draft.subject);
     draft.text = params.text.unwrap_or(draft.text);
     if let Some(id) = params.account.filter(|id| *id != draft.account.get()) {
@@ -251,7 +265,12 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         draft.unnamed = false;
         draft.account = to.id();
     }
+    // The server's copy holds nothing of the typed text: a copy that was up to date stays so when only that changed.
+    let copy_unchanged = before.synced == Some(before.saved) && Draft { typed: before.typed.clone(), ..draft.clone() } == before;
     draft.saved = context.now();
+    if copy_unchanged {
+        draft.synced = Some(draft.saved);
+    }
     *outcome.value_mut() = draft_json(context.store(), &draft)?;
     Ok(outcome.with_change(Change::PutDraft(draft)))
 }

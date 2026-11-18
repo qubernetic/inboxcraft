@@ -37,6 +37,11 @@ pub struct Draft {
     /// `Bcc`, as typed; only ever in the envelope.
     #[serde(default)]
     pub bcc: Vec<String>,
+    /// What is typed in the To, Cc and Bcc lines and not (yet) a recipient: an address being typed, or what a line
+    /// could not take (past its most, or too long). Kept so that closing or a kill loses none of it; never sent. Read
+    /// within [`MAX_TYPED_CHARS`] a line, whatever the record holds ([`typed_lines`]).
+    #[serde(default, deserialize_with = "typed_lines::deserialize")]
+    pub typed: [String; 3],
     /// The subject.
     #[serde(default)]
     pub subject: String,
@@ -98,6 +103,7 @@ impl Draft {
             to: Vec::new(),
             cc: Vec::new(),
             bcc: Vec::new(),
+            typed: [String::new(), String::new(), String::new()],
             subject: String::new(),
             text: String::new(),
             answers: None,
@@ -120,6 +126,7 @@ impl fmt::Debug for Draft {
             .field("account", &self.account)
             .field("saved", &self.saved)
             .field("recipients", &(self.to.len(), self.cc.len(), self.bcc.len()))
+            .field("typed_bytes", &self.typed.each_ref().map(String::len))
             .field("subject_chars", &self.subject.chars().count())
             .field("text_bytes", &self.text.len())
             .field("answers", &self.answers)
@@ -443,6 +450,48 @@ pub struct Alert {
     /// The owner dismissed it.
     #[serde(default)]
     pub dismissed: bool,
+}
+
+/// The most characters of a [`Draft`]'s typed text in one recipient line: the line's field holds no more.
+pub const MAX_TYPED_CHARS: usize = 4096;
+
+/// A [`Draft`]'s typed text as a record holds it, read without failing the draft: the first three entries are the To,
+/// Cc and Bcc lines, and a line that is not text or is longer than [`MAX_TYPED_CHARS`] is read as empty, not cut (a cut
+/// address could still look like one). Entries past the third, or anything but a list, are left. The composer never
+/// writes such a record; a hand-edited store can, and the draft still opens with the rest of it.
+mod typed_lines {
+    use serde::de::IgnoredAny;
+    use serde::{Deserialize, Deserializer};
+
+    use super::MAX_TYPED_CHARS;
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Line {
+        Text(String),
+        Other(IgnoredAny),
+    }
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Lines {
+        List(Vec<Line>),
+        Other(IgnoredAny),
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[String; 3], D::Error> {
+        let mut typed: [String; 3] = Default::default();
+        if let Lines::List(lines) = Lines::deserialize(deserializer)? {
+            for (slot, line) in typed.iter_mut().zip(lines) {
+                if let Line::Text(text) = line
+                    && text.chars().count() <= MAX_TYPED_CHARS
+                {
+                    *slot = text;
+                }
+            }
+        }
+        Ok(typed)
+    }
 }
 
 /// A [`Timestamp`] as `[seconds, nanoseconds]`, checked on the way in.

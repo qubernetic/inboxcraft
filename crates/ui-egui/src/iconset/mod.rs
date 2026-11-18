@@ -231,12 +231,18 @@ pub fn glyph(id: IconId) -> char {
 /// Paints `id` in `colour` into the middle of `rect`, as large as its shorter side allows. An empty or unreal `rect`
 /// paints nothing.
 pub fn paint(painter: &Painter, rect: Rect, id: IconId, colour: Color32) {
+    paint_glyph(painter, rect, glyph(id), colour);
+}
+
+/// Paints the Phosphor Regular `glyph` as [`paint`] paints an icon: a glyph a component's sheet names that is not one
+/// of the [`IconId`]s (a field's lock, the password mark, a warning).
+pub(crate) fn paint_glyph(painter: &Painter, rect: Rect, glyph: char, colour: Color32) {
     let side = rect.width().min(rect.height());
     if !side.is_finite() || side <= 0.0 || !rect.center().x.is_finite() || !rect.center().y.is_finite() {
         return;
     }
     let metrics = phosphor::METRICS;
-    let galley = painter.layout_no_wrap(glyph(id).to_string(), theme::icon_font(side * metrics.size), colour);
+    let galley = painter.layout_no_wrap(glyph.to_string(), theme::icon_font(side * metrics.size), colour);
     let at = rect.center() + vec2(0.0, side * metrics.drop) - galley.size() / 2.0;
     painter.galley(at, galley, colour);
 }

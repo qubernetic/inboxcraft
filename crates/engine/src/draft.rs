@@ -96,6 +96,7 @@ pub(crate) fn json(store: &dyn Storage, draft: &Draft) -> Result<Value, EngineEr
         "to": recipients(&draft.to),
         "cc": recipients(&draft.cc),
         "bcc": recipients(&draft.bcc),
+        "typed": draft.typed,
         "subject": draft.subject,
         "text": draft.text,
         "answers": draft.answers.map(MessageId::get),

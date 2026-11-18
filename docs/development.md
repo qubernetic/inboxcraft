@@ -136,7 +136,9 @@ mixed up. It runs twice: with every core free, where the budget is a p95 of at m
 `taskset -c 0`, where it is one frame at 60 Hz, 16.6 ms; a scene that misses either is a miss. The pinned run pins
 the core but not the clock: the governor is printed, not set, as setting it needs root, and the header says so.
 Without `taskset` the pinned run is skipped with a line saying so. The bench is not a gate: a MISS never makes it
-fail.
+fail. `just bench-ui` runs the four; `cargo run --release -p inboxcraft-ui-egui --example ui_bench -- --compose`
+runs the composer's 16 scenes instead (a message text of 16 KiB to 1 MiB, at rest and typing, without and with
+AccessKit; see the example's own doc).
 
 ## The gates (`cargo xtask`)
 | Command | What it checks |

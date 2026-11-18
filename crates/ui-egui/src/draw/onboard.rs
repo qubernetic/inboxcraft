@@ -4,16 +4,16 @@
 //! The add-account page: the form with Detect, then the check's steps with the host, port and issuer each saw. An
 //! account already there gets the same fields, with a new password instead of the password.
 
-use egui::text_edit::TextEditState;
-use egui::{CollapsingHeader, Color32, Frame, Response, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
+use egui::{CollapsingHeader, Color32, Frame, Response, RichText, ScrollArea, Sense, Ui, vec2};
 
 use crate::component::button::{self, TextButton};
 use crate::component::checkbox::checkbox_wrapping;
-use crate::component::{field as field_style, margin, pill};
+use crate::component::field::{self, Field};
+use crate::component::{margin, pill};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
-use crate::onboard::{Form, Found, MAX_PASSWORD_CHARS, Onboarding, Outcome, Secret, Security, Stage, StepRow, StepState};
+use crate::onboard::{Form, Found, Onboarding, Outcome, Secret, Security, Stage, StepRow, StepState};
 use crate::theme::Theme;
 use crate::tr;
 
@@ -36,40 +36,25 @@ fn between(theme: &Theme) -> f32 {
     theme.spacing.s2
 }
 
-/// A field `width` points wide under its `label` (the `label` style in the muted colour); `add` draws the field.
-fn labelled(ui: &mut Ui, theme: &Theme, label: &str, width: f32, add: impl FnOnce(&mut Ui) -> Response) -> Response {
+/// A one-line field `width` points wide under its `label`, with `hint` in it while it is empty.
+fn line_field(ui: &mut Ui, theme: &Theme, label: &str, text: &mut String, hint: &str, width: f32) -> Response {
     ui.vertical(|ui| {
         ui.set_width(width);
-        ui.spacing_mut().item_spacing.y = theme.spacing.s1;
-        let label = crate::component::label(ui, theme.fonts.label, label, theme.palette.muted);
-        add(ui).labelled_by(label.id)
+        let id = ui.make_persistent_id(("onboard-field", label, hint));
+        field::text_field(ui, theme, id, text, &Field::new(label, hint))
     })
     .inner
 }
 
-/// A one-line field `width` points wide with `hint` in it while it is empty.
-fn line_edit<'t>(theme: &Theme, text: &'t mut String, hint: &str, width: f32) -> TextEdit<'t> {
-    TextEdit::singleline(text).hint_text(hint).margin(field_style::margin(theme)).desired_width(width)
-}
-
-/// The password field, `caption` over it and `hint` in it while it is empty. egui's undo history keeps plain copies of
-/// what was typed, so it is emptied after every frame: undo never brings back a password that was cleared, nor an
-/// earlier account's. The field takes no more than its [`Secret`]'s buffer holds, so typing never moves the text.
+/// The password field under its `caption`, `hint` in it while it is empty: with a hint it stands for a password the
+/// credential store holds ([`Secret::Stored`](field::Secret::Stored)). The field keeps nothing it is typed in its undo
+/// history, and takes no more than the [`Secret`]'s buffer holds, so typing never moves the text.
 fn password(ui: &mut Ui, theme: &Theme, caption: &str, hint: &str, secret: &mut Secret, width: f32) {
-    labelled(ui, theme, caption, width, |ui| {
-        let edit = TextEdit::singleline(secret.expose_mut())
-            .id_salt("account-password")
-            .hint_text(hint)
-            .password(true)
-            .char_limit(MAX_PASSWORD_CHARS)
-            .margin(field_style::margin(theme))
-            .desired_width(width);
-        let response = ui.add(edit);
-        if let Some(mut state) = TextEditState::load(ui.ctx(), response.id) {
-            state.clear_undoer();
-            state.store(ui.ctx(), response.id);
-        }
-        response
+    ui.vertical(|ui| {
+        ui.set_width(width);
+        let kept = if hint.is_empty() { field::Secret::Typed } else { field::Secret::Stored };
+        let id = ui.make_persistent_id("account-password");
+        field::password_field(ui, theme, id, secret.expose_mut(), &Field::new(caption, hint), kept);
     });
 }
 
@@ -117,7 +102,15 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
     ui.horizontal(|ui| {
         let name = if detecting { tr!("Detecting…") } else { tr!("Detect") };
         let room = width - ui.fonts_mut(|fonts| fonts.layout_no_wrap(name.to_owned(), theme.fonts.button.id(), p.ink).size().x) - 64.0;
-        ui.add(line_edit(theme, &mut form.address, "you@example.org", room.max(120.0))).labelled_by(label.id);
+        let address = ui
+            .allocate_ui(vec2(room.max(120.0), theme.boxes().field), |ui| {
+                ui.set_width(room.max(120.0));
+                let id = ui.make_persistent_id("onboard-address");
+                field::text_field(ui, theme, id, &mut form.address, &Field::new("", "you@example.org"))
+            })
+            .inner;
+        ui.ctx().accesskit_node_builder(address.id, |node| node.set_label(tr!("Address")));
+        address.labelled_by(label.id);
         let button = TextButton::new(name).secondary().icon(IconId::Search);
         if ui.add_enabled_ui(!detecting, |ui| button.show(ui, theme, keymap)).inner.clicked() {
             detect = true;
@@ -140,16 +133,21 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
     detect
 }
 
-/// The names of the account and the user name.
-fn names(ui: &mut Ui, theme: &Theme, form: &mut Form, width: f32) {
+/// The names of the account, then the user name beside the password (`caption` over it, `hint` in it while it is
+/// empty).
+fn names(ui: &mut Ui, theme: &Theme, form: &mut Form, width: f32, (caption, hint): (&str, &str)) {
     let gap = between(theme);
     let half = (width - gap) / 2.0;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = gap;
-        labelled(ui, theme, tr!("Name for the account"), half, |ui| ui.add(line_edit(theme, &mut form.label, tr!("the address"), half)));
-        labelled(ui, theme, tr!("Name on sent mail"), half, |ui| ui.add(line_edit(theme, &mut form.display_name, tr!("optional"), half)));
+        line_field(ui, theme, tr!("Name for the account"), &mut form.label, tr!("the address"), half);
+        line_field(ui, theme, tr!("Name on sent mail"), &mut form.display_name, tr!("optional"), half);
     });
-    labelled(ui, theme, tr!("User name"), width, |ui| ui.add(line_edit(theme, &mut form.username, tr!("the address"), width)));
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        line_field(ui, theme, tr!("User name"), &mut form.username, tr!("the address"), half);
+        password(ui, theme, caption, hint, &mut form.password, half);
+    });
 }
 
 /// One server's row: its host, its port (`usual` as the hint) and the choice of encryption. There is no unencrypted choice.
@@ -169,8 +167,8 @@ fn server_row(
     let room = (width - port - choices - 2.0 * gap).max(120.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = gap;
-        labelled(ui, theme, caption, room, |ui| ui.add(line_edit(theme, host, placeholder, room)));
-        labelled(ui, theme, tr!("Port"), port, |ui| ui.add(line_edit(theme, port_text, &usual(chosen).to_string(), port)));
+        line_field(ui, theme, caption, host, placeholder, room);
+        line_field(ui, theme, tr!("Port"), port_text, &usual(chosen).to_string(), port);
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = s.s1;
             crate::component::label(ui, theme.fonts.label, tr!("Security"), theme.palette.muted);
@@ -196,9 +194,7 @@ fn servers(ui: &mut Ui, theme: &Theme, form: &mut Form, width: f32) {
         Security::submission_port,
         width,
     );
-    labelled(ui, theme, tr!("CalDAV address, for calendars"), width, |ui| {
-        ui.add(line_edit(theme, &mut form.caldav, tr!("optional, https://dav.example.org"), width))
-    });
+    line_field(ui, theme, tr!("CalDAV address, for calendars"), &mut form.caldav, tr!("optional, https://dav.example.org"), width);
 }
 
 /// A note with the padlock before it.
@@ -226,8 +222,7 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     ui.add(egui::Label::new(RichText::new(address).font(theme.fonts.body.id()).color(p.ink)).wrap()).labelled_by(caption.id);
     ui.add_space(s.s1);
     let form = onboarding.form_mut();
-    names(ui, theme, form, width);
-    password(ui, theme, tr!("New password"), tr!("empty keeps the stored one"), &mut form.password, width);
+    names(ui, theme, form, width, (tr!("New password"), tr!("empty keeps the stored one")));
     servers(ui, theme, form, width);
     ui.add_space(s.s1);
     lock_note(ui, theme, tr!("A new password goes into your system's credential store. The stored one is never shown."));
@@ -260,8 +255,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
     }
     ui.add_space(s.s2);
     let form = onboarding.form_mut();
-    names(ui, theme, form, width);
-    password(ui, theme, tr!("Password"), "", &mut form.password, width);
+    names(ui, theme, form, width, (tr!("Password"), ""));
     servers(ui, theme, form, width);
     ui.add_space(s.s1);
     lock_note(ui, theme, tr!("The password goes into your system's credential store, never into InboxCraft's files."));

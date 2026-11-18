@@ -22,13 +22,15 @@
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
 //! - [`toast`]: a message that rises from the bottom edge, with Undo and its key chip.
 //! - [`popup`]: a float with menu rows, over sharp text or content that fades.
+//! - [`recipient`]: a recipient's chip and the recipient line of the composer.
 //! - [`switch`]: a square box with a square knob, on or off, waiting or unavailable.
 //! - [`slider`]: the text size on five ticks, 90 % to 130 %.
 //! - [`account_bar`]: the 3 × 12 px mark in an account's colour.
 //! - [`soon`]: what is designed and not built yet, drawn unavailable, and its "coming soon" tag.
 //! - [`time_picker`]: presets and a typed time for snooze, send later and reminders ([`typed_time`] reads the text).
 //!
-//! [`gallery`] draws every one of them on one page for `ui_shot`.
+//! [`gallery`] draws every one of them on one page for `ui_shot`, [`gallery_fields`] the fields, pickers and menus on a
+//! second.
 
 pub mod avatar;
 pub mod badge;
@@ -42,6 +44,7 @@ pub mod facts;
 pub mod field;
 pub mod gallery;
 pub mod gallery_blocks;
+pub mod gallery_fields;
 pub mod hover;
 pub mod icon;
 pub mod key;
@@ -49,6 +52,7 @@ pub mod label;
 pub mod pill;
 pub mod popup;
 pub mod progress;
+pub mod recipient;
 pub mod row;
 pub mod scroll;
 pub mod segmented;
@@ -187,7 +191,7 @@ pub(crate) fn cut(ui: &Ui, text: &str, font: Font, colour: egui::Color32, width:
     let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
     job.break_on_newline = false;
-    crate::draw::paint::on_baseline(crate::draw::paint::tight_cut(ui.painter(), ui.painter().layout_job(job)))
+    crate::draw::paint::on_baseline(crate::draw::paint::cut_within(ui.painter(), job, width.max(1.0)))
 }
 
 /// `text` in `font` and `colour`, wrapped at `width` onto at most `rows` lines (at least one), the last cut with one
@@ -307,12 +311,6 @@ pub(crate) fn margin(x: f32, y: f32) -> Margin {
     // Distances are a few points; the clamp keeps the casts inside i8.
     let points = |value: f32| value.clamp(0.0, 100.0) as i8;
     Margin::symmetric(points(x), points(y))
-}
-
-/// A plain tick in `colour` over `rect`, drawn in code: the mark of a ticked box and of a select's current choice.
-pub(crate) fn tick(painter: &egui::Painter, rect: egui::Rect, colour: egui::Color32) {
-    let at = |x: f32, y: f32| rect.lerp_inside(egui::vec2(x, y));
-    painter.line(vec![at(0.15, 0.55), at(0.4, 0.8), at(0.85, 0.2)], egui::Stroke::new(1.5, colour));
 }
 
 /// The size of the account bar in points: a fixed mark, as large at every text scale.

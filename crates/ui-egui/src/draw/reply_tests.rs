@@ -156,3 +156,14 @@ fn the_fill_in_button_takes_what_is_typed_and_asks_for_the_next_blank() {
     harness.get_by_role_and_label(Role::TextInput, "Fill in \"place\"");
     assert!(harness.state().composer().unwrap().text().starts_with("At ten by [[place]]."));
 }
+
+#[test]
+fn the_template_menu_opens_by_the_pointer_enter_and_space_and_keeps_tab_inside() {
+    for key in [None, Some(Key::Enter), Some(Key::Space)] {
+        let mut harness = harness(egui::Theme::Light);
+        template(&mut harness, "Thanks", "Thank you, [name].");
+        template(&mut harness, "Later", "I will answer on [day].");
+        press(&mut harness, "New message");
+        crate::component::popup::tests::walk_a_menu(&mut harness, (Role::Button, "Templates"), key);
+    }
+}

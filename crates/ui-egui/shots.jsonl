@@ -56,6 +56,10 @@
 # the time picker (E3.4) with a typed time.
 {"out": "docs/images/components-light.png", "mode": "light", "components": true}
 {"out": "docs/images/components-dark.png", "mode": "dark", "components": true}
+# The fields, pickers and menus (#234): text, multiline and password fields, recipients, popup, menu rows, typed time
+# and the time picker, on a page of their own.
+{"out": "docs/images/components-fields-light.png", "mode": "light", "fields": true}
+{"out": "docs/images/components-fields-dark.png", "mode": "dark", "fields": true}
 # The shared rows and blocks (#235): row, hover actions, banner, empty state, progress, settings row, check step,
 # facts, on a page of their own.
 {"out": "docs/images/components-blocks-light.png", "mode": "light", "blocks": true}
@@ -169,3 +173,14 @@
 {"out": "docs/images/bounce-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "bounce"}
 {"out": "docs/images/account-settings-light.png", "mode": "light", "size": [1200, 820], "accounts": true, "edit_account": 1}
 {"out": "docs/images/account-settings-dark.png", "mode": "dark", "size": [1200, 820], "accounts": true, "edit_account": 1}
+# The menus as floats (#234): the reader's More and Move, the composer's From and Templates, a row's group menu.
+{"out": "docs/images/menu-more-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "menu": "more"}
+{"out": "docs/images/menu-more-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "menu": "more"}
+{"out": "docs/images/menu-move-light.png", "mode": "light", "size": [1400, 860], "select": "Photos from the coast walk", "menu": "move"}
+{"out": "docs/images/menu-move-dark.png", "mode": "dark", "size": [1400, 860], "select": "Photos from the coast walk", "menu": "move"}
+{"out": "docs/images/menu-from-light.png", "mode": "light", "size": [1400, 860], "compose": "new", "menu": "from"}
+{"out": "docs/images/menu-from-dark.png", "mode": "dark", "size": [1400, 860], "compose": "new", "menu": "from"}
+{"out": "docs/images/menu-templates-light.png", "mode": "light", "size": [1400, 860], "compose": "template", "menu": "templates"}
+{"out": "docs/images/menu-templates-dark.png", "mode": "dark", "size": [1400, 860], "compose": "template", "menu": "templates"}
+{"out": "docs/images/menu-group-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}
+{"out": "docs/images/menu-group-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}

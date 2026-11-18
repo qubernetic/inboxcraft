@@ -202,3 +202,31 @@ fn no_frame_paints_the_bar_over_the_content_when_it_starts_or_stops_overflowing(
         assert!(bar_fills(&harness, fits, colours).is_empty(), "{mode:?}: no bar once it fits again");
     }
 }
+
+#[test]
+fn hostile_sizes_and_ends_never_panic_a_bar() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let odd = [0.0_f32, -10.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 1e30];
+    for height in odd {
+        for ends in odd.into_iter().chain([4.0, 6.0]) {
+            for rows in [0_usize, 1, 200] {
+                let mut harness = builder().with_size(vec2(200.0, 120.0)).build_ui(move |ui| {
+                    ui.spacing_mut().scroll = style(&theme);
+                    let area = ScrollArea::vertical().id_salt("wide").max_height(height);
+                    super::show_with_ends(ui, &theme, area, ends, |ui| {
+                        for row in 0..rows {
+                            ui.label(format!("row {row}"));
+                        }
+                    });
+                    let area = ScrollArea::vertical().id_salt("thin").max_height(height);
+                    super::show_thin(ui, &theme, area, [2.0, 40.0], [2.0, ends], |ui| {
+                        for row in 0..rows {
+                            ui.label(format!("row {row}"));
+                        }
+                    });
+                });
+                harness.run_steps(2);
+            }
+        }
+    }
+}

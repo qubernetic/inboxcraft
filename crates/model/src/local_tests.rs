@@ -205,3 +205,26 @@ fn debug_shows_no_mail_text() {
     let shown = format!("{outgoing:?}");
     assert!(!shown.contains("Budget") && shown.contains("message_bytes: 25"), "{shown}");
 }
+
+/// A stored draft's typed text is read within its cap, whatever the record holds: a line past 4 096 characters or not
+/// text is read as empty, lines past the third are left, and the draft still reads.
+#[test]
+fn a_hostile_typed_record_reads_within_the_cap() {
+    let base = r#"{"id":3,"account":1,"saved":[1000,0],"subject":"Budget","typed":"#;
+    let read = |typed: &str| -> Draft { serde_json::from_str(&format!("{base}{typed}}}")).unwrap() };
+    let fits = "ő".repeat(crate::MAX_TYPED_CHARS);
+    let over = "x".repeat(crate::MAX_TYPED_CHARS + 1);
+    let draft = read(&format!(r#"["{fits}","{over}","c@example.org","d@example.org","e"]"#));
+    assert_eq!(draft.typed, [fits.clone(), String::new(), "c@example.org".to_owned()]);
+    assert_eq!(draft.subject, "Budget", "the rest of the draft is read");
+    let draft = read(r#"[1, null, {"a": ["b"]}]"#);
+    assert_eq!(draft.typed, [String::new(), String::new(), String::new()]);
+    let draft = read(r#"["a@example.org"]"#);
+    assert_eq!(draft.typed, ["a@example.org".to_owned(), String::new(), String::new()]);
+    for odd in [r#""a@example.org""#, "7", "null", r#"{"to": "a"}"#, "true"] {
+        assert_eq!(read(odd).typed, [String::new(), String::new(), String::new()], "{odd}");
+    }
+    // Written back as three lines.
+    let written = serde_json::to_value(read(r#"["a","b","c","d"]"#)).unwrap();
+    assert_eq!(written["typed"], serde_json::json!(["a", "b", "c"]));
+}

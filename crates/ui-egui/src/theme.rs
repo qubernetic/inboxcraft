@@ -220,6 +220,14 @@ pub struct Sizes {
     pub check: f32,
     /// A pill's height.
     pub pill: f32,
+    /// The height of a field's caret, a block as wide as a mono character is high in sevenths (7 × 16).
+    pub caret: f32,
+    /// A multiline field's least and most height; past the most it scrolls.
+    pub multiline: [f32; 2],
+    /// A float's title row's height.
+    pub float_title: f32,
+    /// A recipient suggestion's height.
+    pub suggestion: f32,
     /// The height of a row's hover action, a progress line and a check step's line.
     pub strip: f32,
     /// The least height of a settings row.
@@ -243,6 +251,10 @@ pub(crate) const SIZES: Sizes = Sizes {
     mark: 14.0,
     check: 16.0,
     pill: 24.0,
+    caret: 16.0,
+    multiline: [96.0, 240.0],
+    float_title: 28.0,
+    suggestion: 40.0,
     strip: 24.0,
     settings_row: 56.0,
 };
@@ -797,6 +809,10 @@ impl Theme {
             pill: self.size(z.pill),
             avatar: z.avatar.map(|side| self.size(side)),
             badge: self.size(z.badge),
+            caret: self.size(z.caret),
+            multiline: z.multiline.map(|height| self.size(height)),
+            float_title: self.size(z.float_title),
+            suggestion: self.size(z.suggestion),
             strip: self.size(z.strip),
             settings_row: self.size(z.settings_row),
             ..z

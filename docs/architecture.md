@@ -300,6 +300,12 @@ before it is then removed for good (`Expunge`), and a copy of a draft discarded 
 goes too. An answer without a UID marks the draft (`Draft::unnamed`): that copy can be neither replaced nor taken
 back, so no further copy of the draft goes up to that account and it leaves at most one there. A draft with nothing
 typed, or of an account without a Drafts folder, stays here; a failed upload waits for the draft's next change.
+`compose.update` also takes `typed`: the text in the To, Cc and Bcc lines that is not a recipient yet, three lines of
+at most 4 096 characters (a shorter list empties the lines it leaves out; a stored line past the cap reads as empty).
+It is kept here and `compose.show` and `compose.list` answer it, but it never leaves the machine: it is in neither the
+sent message nor the Drafts copy, and a change of it alone uploads no copy. It never becomes a recipient unseen: the
+composer draws Cc and Bcc whenever either holds typed text, takes typed text as recipients only from the lines it
+draws, and refuses Send while a line it does not draw holds some.
 
 Replies and forwards (`engine::reply`) are drafts made from a message, from the account that holds it, all `safe`.
 `compose.reply` goes to the message's `Reply-To`, else its `From`, and a reply to the owner's own message to its `To`;

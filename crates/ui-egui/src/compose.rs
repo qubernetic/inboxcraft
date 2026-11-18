@@ -191,17 +191,6 @@ impl Suggestion {
     }
 }
 
-/// `text` cut to at most `bytes` bytes, at a character's start.
-pub(crate) fn cut(text: &mut String, bytes: usize) {
-    if text.len() > bytes {
-        let mut end = bytes;
-        while !text.is_char_boundary(end) {
-            end = end.saturating_sub(1);
-        }
-        text.truncate(end);
-    }
-}
-
 fn shape(command: &'static str, detail: &str) -> UiError {
     UiError::Answer { command, detail: detail.to_owned() }
 }
@@ -234,6 +223,18 @@ pub struct Composer {
     templates: Vec<String>,
     /// The time picked to send it at; `None` sends it now, after the hold.
     later: Option<Timestamp>,
+    /// Why the last fill of a blank was refused (it would make the subject or the text longer than the engine keeps),
+    /// and the text it refused: said while that text stands.
+    fill_refused: Option<(String, String)>,
+}
+
+/// What a line refused of what was typed in it, which stays in its typed text as it was written.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Refused {
+    /// Addresses not added because the line held [`MAX_RECIPIENTS`] already.
+    over: usize,
+    /// An address longer than [`MAX_RECIPIENT_BYTES`] was not added.
+    too_long: bool,
 }
 
 impl Composer {
@@ -275,7 +276,7 @@ impl Composer {
 
     /// Reads the names of the templates of the draft's account. A refusal leaves none, shown in the error banner: the
     /// draft is made by then, and the composer stays open over it without the menu.
-    fn load_templates(&mut self, mailbox: &mut Mailbox) {
+    pub(crate) fn load_templates(&mut self, mailbox: &mut Mailbox) {
         self.templates = match mailbox.run("template.list", &json!({ "account": self.account })) {
             Ok(answer) => answer
                 .get("templates")
@@ -309,14 +310,15 @@ impl Composer {
             filling: String::new(),
             templates: Vec::new(),
             later: None,
+            fill_refused: None,
         };
         composer.take_answer(answer);
-        composer.copies = !(composer.chips(Line::Cc).is_empty() && composer.chips(Line::Bcc).is_empty());
         Ok(composer)
     }
 
     /// Reads the draft as the engine kept it: the account, the chips checked, the subject, the text and what blocks
-    /// Send. What is being typed in a recipient line stays.
+    /// Send. What is being typed in a recipient line stays. Cc and Bcc show from then on when either holds a chip or
+    /// typed text, so nothing the draft holds is in a line that is not drawn.
     fn take_answer(&mut self, answer: &Value) {
         self.account = answer.get("account").and_then(Value::as_u64).unwrap_or(self.account);
         for line in Line::ALL {
@@ -330,6 +332,13 @@ impl Composer {
                         Some(Chip { text: text.to_owned(), ok: chip.get("ok").and_then(Value::as_bool) == Some(true) })
                     })
                     .collect();
+            }
+        }
+        if let Some(typed) = answer.get("typed").and_then(Value::as_array) {
+            for (line, text) in Line::ALL.iter().zip(typed) {
+                if let (Some(field), Some(text)) = (self.typing.get_mut(line.index()), text.as_str()) {
+                    text.clone_into(field);
+                }
             }
         }
         if let Some(subject) = answer.get("subject").and_then(Value::as_str) {
@@ -348,6 +357,7 @@ impl Composer {
             .and_then(Value::as_array)
             .map(|blanks| blanks.iter().filter_map(Value::as_str).map(str::to_owned).collect())
             .unwrap_or_default();
+        self.copies |= [Line::Cc, Line::Bcc].into_iter().any(|line| !self.chips(line).is_empty() || !self.typing(line).trim().is_empty());
     }
 
     /// The draft's id.
@@ -401,11 +411,10 @@ impl Composer {
         &mut self.text
     }
 
-    /// The subject or the text changed in their field: they are cut to what the engine keeps, and kept at the next
-    /// [`Composer::save`].
+    /// The subject or the text changed in their field: they are kept at the next [`Composer::save`]. Their fields hold
+    /// them to what the engine keeps (the subject [`MAX_SUBJECT_BYTES`], the text 1 MiB, under [`MAX_TEXT_BYTES`]),
+    /// refusing whole what would pass it, so nothing is cut here.
     pub fn edited(&mut self) {
-        cut(&mut self.subject, MAX_SUBJECT_BYTES);
-        cut(&mut self.text, MAX_TEXT_BYTES);
         self.changed = true;
     }
 
@@ -424,6 +433,13 @@ impl Composer {
     /// Shows the Cc and Bcc lines.
     pub fn show_copies(&mut self) {
         self.copies = true;
+    }
+
+    /// The recipient lines the composer draws: To, and Cc and Bcc once they show. The drawing and Send both read it, so
+    /// nothing becomes a recipient from a line that is not drawn.
+    #[must_use]
+    pub fn drawn(&self) -> &'static [Line] {
+        if self.copies { &Line::ALL } else { &[Line::To] }
     }
 
     /// Whether it is the floating panel.
@@ -447,12 +463,31 @@ impl Composer {
     /// Whether the draft can be sent as it is kept: it has a recipient and every one is an address.
     #[must_use]
     pub fn sendable(&self) -> bool {
-        self.blocks.is_empty()
+        self.blocks.is_empty() && Line::ALL.iter().all(|line| self.refusal(*line).is_none())
+    }
+
+    /// What `line` refused of what was typed in it, as its error line says it: addresses past a line's
+    /// [`MAX_RECIPIENTS`], an address past [`MAX_RECIPIENT_BYTES`]. They stay typed; none once the typed text is gone.
+    #[must_use]
+    pub fn refusal(&self, line: Line) -> Option<String> {
+        let refused = self.assess(line, self.typing(line));
+        if refused.too_long {
+            Some(tr!("An address is too long: it holds at most {size} bytes, and it was not added.", size = MAX_RECIPIENT_BYTES))
+        } else if refused.over == 1 {
+            Some(tr!("1 address not added: a line holds at most {most}.", most = MAX_RECIPIENTS))
+        } else if refused.over > 1 {
+            Some(tr!("{count} addresses not added: a line holds at most {most}.", count = refused.over, most = MAX_RECIPIENTS))
+        } else {
+            None
+        }
     }
 
     /// Why Send is blocked, as the composer says it; none when it is not.
     #[must_use]
     pub fn problem(&self) -> Option<String> {
+        if let Some(refused) = Line::ALL.iter().find_map(|line| self.refusal(*line)) {
+            return Some(refused);
+        }
         if let Some(bad) = Line::ALL.iter().flat_map(|line| self.chips(*line)).find(|chip| !chip.ok) {
             return Some(tr!("{address} is not an address", address = bad.address()));
         }
@@ -492,6 +527,12 @@ impl Composer {
         &mut self.filling
     }
 
+    /// Why the last fill was refused, as the blank's field says it under itself.
+    #[must_use]
+    pub fn fill_refused(&self) -> Option<&str> {
+        self.fill_refused.as_ref().filter(|(_, filling)| *filling == self.filling).map(|(said, _)| said.as_str())
+    }
+
     /// Puts what is typed for the first blank in its mark's place, in the subject and the text, and keeps the draft;
     /// nothing typed fills nothing.
     ///
@@ -505,8 +546,21 @@ impl Composer {
         if typed.is_empty() {
             return Ok(());
         }
-        self.subject = self.subject.replace(&mark, typed);
-        self.text = self.text.replace(&mark, typed);
+        let (subject, text) = (self.subject.replace(&mark, typed), self.text.replace(&mark, typed));
+        // Refused whole, said under the blank's field as a field says it: the blank and what was typed stay.
+        let refused = if subject.len() > MAX_SUBJECT_BYTES && subject.len() > self.subject.len() {
+            Some(crate::component::field::Cap::Bytes(MAX_SUBJECT_BYTES))
+        } else if text.len() > MAX_TEXT_BYTES && text.len() > self.text.len() {
+            Some(crate::component::field::Cap::Bytes(MAX_TEXT_BYTES))
+        } else {
+            None
+        };
+        self.fill_refused = refused.map(|cap| (cap.sentence(), self.filling.clone()));
+        if self.fill_refused.is_some() {
+            return Ok(());
+        }
+        self.subject = subject;
+        self.text = text;
         self.filling.clear();
         self.edited();
         self.save(mailbox)
@@ -571,15 +625,22 @@ impl Composer {
     ///
     /// A command's refusal; the typed text stays.
     pub fn typed(&mut self, mailbox: &mut Mailbox, line: Line) -> Result<(), UiError> {
+        // Kept with the draft at the end of the frame, as a change of the subject or the text is.
+        self.changed = true;
         let typed = self.typing(line).to_owned();
         if let Some(at) = typed.rfind(SEPARATORS) {
-            let (done, rest) = typed.split_at(at);
-            let rest = rest.get(1..).unwrap_or_default().trim_start().to_owned();
-            self.add(line, done);
+            // Through the last separator, which stays with what the line refuses; what follows is typed on.
+            let cut = at.saturating_add(1).min(typed.len());
+            let (done, rest) = (typed.get(..cut).unwrap_or(typed.as_str()), typed.get(cut..).unwrap_or_default());
+            let before = self.chips(line).len();
+            let kept = self.add(line, done);
             if let Some(field) = self.typing_mut(line) {
-                *field = rest;
+                *field = if kept.is_empty() { rest.trim_start().to_owned() } else { kept + rest };
             }
-            self.save(mailbox)?;
+            // A chip made is checked by the engine at once; refused text alone is kept at the frame's end.
+            if self.chips(line).len() != before {
+                self.save(mailbox)?;
+            }
         }
         self.suggest(mailbox, line)
     }
@@ -594,7 +655,10 @@ impl Composer {
             Some(at) => self.pick(mailbox, at),
             None => {
                 let typed = self.typing.get_mut(line.index()).map(std::mem::take).unwrap_or_default();
-                self.add(line, &typed);
+                let kept = self.add(line, &typed);
+                if let Some(field) = self.typing_mut(line) {
+                    *field = kept;
+                }
                 self.dismiss_suggestions();
                 self.save(mailbox)
             }
@@ -611,7 +675,10 @@ impl Composer {
         if let Some(field) = self.typing_mut(line) {
             field.clear();
         }
-        self.add(line, &suggestion.recipient());
+        let kept = self.add(line, &suggestion.recipient());
+        if let Some(field) = self.typing_mut(line) {
+            *field = kept;
+        }
         self.dismiss_suggestions();
         self.save(mailbox)
     }
@@ -644,23 +711,81 @@ impl Composer {
         }
     }
 
-    /// Adds the recipients in `typed` to `line`, split at the separators: each once across the lines, cut to what the
-    /// engine keeps.
-    fn add(&mut self, line: Line, typed: &str) {
+    /// Adds the recipients in `typed` to `line`, split at the separators: each once across the lines. What the line
+    /// cannot take (past its [`MAX_RECIPIENTS`], or an address past [`MAX_RECIPIENT_BYTES`]) is never cut or dropped:
+    /// it is given back exactly as it was typed (its separators, the spaces, a quoted name's comma), what was taken
+    /// left out, for the line's typed text, and the line says why ([`Composer::refusal`]). What comes back is part of
+    /// `typed`, so it is never longer.
+    fn add(&mut self, line: Line, typed: &str) -> String {
         let mut held: BTreeSet<String> = Line::ALL.iter().flat_map(|line| self.chips(*line)).map(|chip| split(&chip.text).1.to_lowercase()).collect();
-        let Some(chips) = self.lines.get_mut(line.index()) else { return };
-        for part in typed.split(SEPARATORS).map(str::trim).filter(|part| !part.is_empty()) {
-            if chips.len() >= MAX_RECIPIENTS {
-                break;
+        let Some(chips) = self.lines.get_mut(line.index()) else { return typed.to_owned() };
+        // Each part with the separator after it: `(start, end of the part, end of its separator)`.
+        let mut spans = Vec::new();
+        let mut start = 0;
+        for (at, c) in typed.char_indices() {
+            if SEPARATORS.contains(&c) {
+                let through = at.saturating_add(c.len_utf8());
+                spans.push((start, at, through));
+                start = through;
             }
-            let mut text = part.chars().filter(|c| !c.is_control()).collect::<String>();
-            cut(&mut text, MAX_RECIPIENT_BYTES);
-            if held.insert(split(&text).1.to_lowercase()) {
+        }
+        spans.push((start, typed.len(), typed.len()));
+        let mut kept = String::new();
+        let mut keeping = false;
+        for (from, to, through) in spans {
+            let whole = typed.get(from..through).unwrap_or_default();
+            let part = typed.get(from..to).unwrap_or_default().trim();
+            if part.is_empty() {
+                // Separators after a part kept stay with it.
+                if keeping {
+                    kept.push_str(whole);
+                }
+                continue;
+            }
+            let text = part.chars().filter(|c| !c.is_control()).collect::<String>();
+            let address = split(&text).1.to_lowercase();
+            keeping = text.len() > MAX_RECIPIENT_BYTES || (!held.contains(&address) && chips.len() >= MAX_RECIPIENTS);
+            if keeping {
+                kept.push_str(whole);
+            } else if held.insert(address) {
                 // Checked by the engine once kept; until then it counts as not an address.
                 chips.push(Chip { text, ok: false });
                 self.changed = true;
             }
         }
+        kept.trim_start().to_owned()
+    }
+
+    /// What a line would refuse of `typed` (it stays typed): addresses past [`MAX_RECIPIENT_BYTES`], and those no line
+    /// holds yet while this one holds [`MAX_RECIPIENTS`]. Worked out from the text each time, so it holds after the
+    /// draft is opened again, and it changes as soon as a chip goes or the text is edited.
+    fn assess(&self, line: Line, typed: &str) -> Refused {
+        // Room for so many more: the addresses typed past it are the ones not added. Asked every frame the line is
+        // drawn, so the chips are looked at only when more parts are typed than there is room for.
+        let room = MAX_RECIPIENTS.saturating_sub(self.chips(line).len());
+        let parts = typed.split(SEPARATORS).filter(|part| !part.trim().is_empty()).count();
+        let full = parts > room;
+        let held: BTreeSet<String> = if full {
+            Line::ALL.iter().flat_map(|line| self.chips(*line)).map(|chip| split(&chip.text).1.to_lowercase()).collect()
+        } else {
+            BTreeSet::new()
+        };
+        let mut counted = BTreeSet::new();
+        let mut refused = Refused::default();
+        let mut new = 0_usize;
+        for part in typed.split(SEPARATORS).map(str::trim).filter(|part| !part.is_empty()) {
+            let text = part.chars().filter(|c| !c.is_control()).collect::<String>();
+            if text.len() > MAX_RECIPIENT_BYTES {
+                refused.too_long = true;
+            } else if full {
+                let address = split(&text).1.to_lowercase();
+                if !held.contains(&address) && counted.insert(address) {
+                    new = new.saturating_add(1);
+                }
+            }
+        }
+        refused.over = new.saturating_sub(room);
+        refused
     }
 
     /// Looks up the people whose name or address holds what is typed in `line`.
@@ -709,6 +834,8 @@ impl Composer {
             "to": list(Line::To),
             "cc": list(Line::Cc),
             "bcc": list(Line::Bcc),
+            // What is typed and not a recipient: kept with the draft, so closing or a kill loses none of it.
+            "typed": self.typing,
             "subject": self.subject,
             "text": self.text,
         });
@@ -732,15 +859,19 @@ impl Composer {
         Ok(())
     }
 
-    /// Before the composer closes: what is typed in a recipient line becomes a chip and the draft is kept.
+    /// Before the composer closes: what is typed in a drawn recipient line becomes a chip and the draft is kept. Text in
+    /// a line not drawn stays typed text: it is never made a recipient unseen.
     ///
     /// # Errors
     ///
     /// The command's refusal; then the composer stays open with everything in it.
     pub fn close(&mut self, mailbox: &mut Mailbox) -> Result<(), UiError> {
-        for line in Line::ALL {
+        for &line in self.drawn() {
             let typed = self.typing.get_mut(line.index()).map(std::mem::take).unwrap_or_default();
-            self.add(line, &typed);
+            let kept = self.add(line, &typed);
+            if let Some(field) = self.typing_mut(line) {
+                *field = kept;
+            }
         }
         self.dismiss_suggestions();
         self.save(mailbox)
@@ -763,8 +894,16 @@ impl Composer {
     ///
     /// # Errors
     ///
-    /// A command's refusal (an account without a submission server, a time picked that has passed).
+    /// A command's refusal (an account without a submission server, a time picked that has passed); text typed in a
+    /// line that is not drawn, which is then shown and not sent ([`UiError::Refused`]).
     pub fn send(&mut self, mailbox: &mut Mailbox) -> Result<Option<Timestamp>, UiError> {
+        // Nothing the owner was not shown becomes a recipient: a line not drawn that holds typed text is shown, and
+        // Send waits for the next press.
+        if let Some(hidden) = Line::ALL.into_iter().find(|line| !self.drawn().contains(line) && !self.typing(*line).trim().is_empty()) {
+            self.show_copies();
+            let said = tr!("{line} holds text that was not shown: look at it, then send.", line = hidden.name());
+            return Err(UiError::Refused(said));
+        }
         self.close(mailbox)?;
         if !self.sendable() {
             return Ok(None);

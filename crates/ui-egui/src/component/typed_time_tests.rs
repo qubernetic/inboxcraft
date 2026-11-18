@@ -200,3 +200,139 @@ fn every_month_and_weekday_has_its_name() {
     let days: Vec<String> = (7..=13).map(|day| short(at(2026, 11, day, 9, 0), at(2026, 11, 7, 0, 0), Offset::UTC)).collect();
     assert_eq!(days, ["09:00", "Sun 09:00", "Mon 09:00", "Tue 09:00", "Wed 09:00", "Thu 09:00", "Fri 09:00"]);
 }
+
+/// The states of the typed time's sheet, with the past one the time picker shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Typed {
+    Empty,
+    Focus,
+    Valid,
+    Invalid,
+    Past,
+}
+
+/// The field of the sheet, 296 wide, in `state`, focused where the sheet focuses it.
+fn typed_in(
+    mode: crate::theme::Mode,
+    state: Typed,
+) -> (egui::Rect, crate::component::tests::Own, crate::component::tests::Paint, egui_kittest::Harness<'static>) {
+    use egui_kittest::kittest::Queryable as _;
+    let theme = crate::theme::Theme::new(mode, crate::theme::TextScale::default());
+    let value = match state {
+        Typed::Empty | Typed::Focus => "",
+        Typed::Valid => "thu 9",
+        Typed::Invalid => "thursdy",
+        Typed::Past => "2026-11-02 09:00",
+    };
+    let mut harness = crate::component::tests::staged(
+        theme,
+        |p| p.bg,
+        egui::vec2(400.0, 160.0),
+        move |ui, theme| {
+            let id = egui::Id::unique("typed");
+            let mut text = ui.data_mut(|data| data.get_temp_mut_or_insert_with(id.with("text"), || value.to_owned()).clone());
+            ui.vertical(|ui| {
+                ui.set_width(296.0);
+                super::typed_time_field(ui, theme, id, "Type a time", &mut text, now(), Offset::UTC);
+            });
+            ui.data_mut(|data| data.insert_temp(id.with("text"), text));
+        },
+    );
+    if state != Typed::Empty {
+        crate::component::tests::bring(&mut harness, "Type a time", crate::component::Shown::Focus);
+        harness.key_press(egui::Key::End);
+        harness.run();
+    }
+    let rect = harness.get_by_label("Type a time").rect();
+    let paint = crate::component::tests::painted(&harness, "Type a time");
+    (rect, crate::component::tests::own(&paint, rect), paint, harness)
+}
+
+#[test]
+fn a_typed_time_looks_as_its_sheet_says_in_every_state() {
+    use crate::component::field::tests::{caret, drawn, one};
+    for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
+        let p = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette;
+        for state in [Typed::Empty, Typed::Focus, Typed::Valid, Typed::Invalid, Typed::Past] {
+            let (rect, look, paint, harness) = typed_in(mode, state);
+            let at = format!("{mode:?} {state:?}: {look:#?}");
+            assert_eq!(rect.size(), egui::vec2(296.0, 36.0), "{at}");
+            assert_eq!(look.fill, Some(p.term), "{at}");
+            let edge = if state == Typed::Empty { p.line } else { p.cyan_edge };
+            assert_eq!(look.edge, Some((1.0, edge, false)), "{at}");
+            let hint = "thu 9, 12 nov 17:00, in 3 days";
+            let block = caret(&paint, p.cyan_edge);
+            match state {
+                Typed::Empty | Typed::Focus => {
+                    let shown = one(&harness, hint);
+                    let left = if state == Typed::Focus { 28.0 } else { 13.0 };
+                    assert_eq!(
+                        (shown.rect.min, shown.colour, shown.family.as_str(), shown.size, shown.row),
+                        (rect.min + egui::vec2(left, 8.0), p.muted, "Monospace", 13.0, 20.0),
+                        "{at}"
+                    );
+                    let expected =
+                        (state == Typed::Focus).then_some(egui::Rect::from_min_size(rect.min + egui::vec2(13.0, 10.0), egui::vec2(7.0, 16.0)));
+                    assert_eq!(block, expected, "{at}");
+                }
+                _ => {
+                    let value = match state {
+                        Typed::Valid => "thu 9",
+                        Typed::Invalid => "thursdy",
+                        _ => "2026-11-02 09:00",
+                    };
+                    let shown = one(&harness, value);
+                    assert_eq!(
+                        (shown.rect.min, shown.colour, shown.family.as_str(), shown.size),
+                        (rect.min + egui::vec2(13.0, 8.0), p.ink, "Monospace", 13.0),
+                        "{at}"
+                    );
+                    assert_eq!(
+                        block,
+                        Some(egui::Rect::from_min_size(egui::pos2((shown.rect.right() + 2.0).round(), rect.top() + 10.0), egui::vec2(7.0, 16.0))),
+                        "{at}"
+                    );
+                    assert!(drawn(&harness).iter().all(|text| text.text != hint), "{at}: no hint over typed text");
+                }
+            }
+            // What it reads as, 8 under the box in `caption`.
+            let reading = match state {
+                Typed::Valid => Some(("Thursday 12 November, 09:00", p.cyan_text, 18.0)),
+                Typed::Invalid => Some(("Not a time yet: try thu 9, 12 nov or in 3 days", p.muted, 0.0)),
+                Typed::Past => Some(("That time has passed: type one still ahead", p.muted, 0.0)),
+                _ => None,
+            };
+            let tick: Vec<_> = drawn(&harness).into_iter().filter(|text| text.text == crate::component::popup::CHECK.to_string()).collect();
+            match reading {
+                Some((words, colour, left)) => {
+                    let line = one(&harness, words);
+                    assert_eq!(
+                        (line.rect.min, line.colour, line.size, line.row),
+                        (rect.left_bottom() + egui::vec2(left, 8.0), colour, 12.0, 18.0),
+                        "{at}"
+                    );
+                    if state == Typed::Valid {
+                        assert!(
+                            tick.len() == 1
+                                && (tick[0].rect.center() - (rect.left_bottom() + egui::vec2(7.0, 17.0))).length() < 1.0
+                                && tick[0].colour == p.cyan_text,
+                            "{at} {tick:?}"
+                        );
+                    } else {
+                        assert!(tick.is_empty(), "{at}");
+                    }
+                }
+                None => assert!(tick.is_empty(), "{at}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn a_date_behind_now_has_passed_and_a_word_never_has() {
+    assert!(super::passed("2026-11-02", now(), Offset::UTC));
+    assert!(super::passed("1960-01-01", now(), Offset::UTC), "before 1970 too");
+    assert!(!super::passed("2026-11-20", now(), Offset::UTC));
+    assert!(!super::passed("thu 9", now(), Offset::UTC));
+    assert!(!super::passed("thursdy", now(), Offset::UTC));
+}

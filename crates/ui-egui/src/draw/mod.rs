@@ -169,6 +169,8 @@ pub struct InboxApp {
     sending: Option<u64>,
     /// The composer's send-later picker opens in the next frame.
     later_picker: bool,
+    /// A menu that opens in the next frame (the `ui_shot` scripts).
+    menu: Option<egui::Id>,
 }
 
 impl std::fmt::Debug for InboxApp {
@@ -252,6 +254,7 @@ impl InboxApp {
             picker: None,
             sending: None,
             later_picker: false,
+            menu: None,
         }
     }
 
@@ -534,6 +537,24 @@ impl InboxApp {
         self.picker = Some(typed.to_owned());
     }
 
+    /// Opens the menu `name` in the next frame (the `ui_shot` scripts): the reader's `more` or `move`, the composer's
+    /// `from` or `templates`, or the selected row's `group` menu; whether there is such a menu.
+    pub fn open_menu(&mut self, name: &str) -> bool {
+        let id = match name {
+            "more" => reader::more_menu(),
+            "move" => reader::move_menu(),
+            "from" => compose::from_menu(),
+            "templates" => compose::templates_menu(),
+            "group" => match self.mailbox.selected() {
+                Some(row) => list::group_menu_id(row),
+                None => return false,
+            },
+            _ => return false,
+        };
+        self.menu = Some(id);
+        true
+    }
+
     /// Opens the composer's send-later picker in the next frame, its presets read now (the `ui_shot` scripts).
     pub fn open_send_later(&mut self) {
         self.mailbox.load_presets();
@@ -543,14 +564,17 @@ impl InboxApp {
     /// Opens the time picker asked for by [`InboxApp::open_picker`], before the reader is drawn, and the composer's
     /// send-later picker asked for by [`InboxApp::open_send_later`].
     fn show_picker(&mut self, ctx: &egui::Context) {
+        if let Some(menu) = self.menu.take() {
+            crate::component::popup::set_open(ctx, menu, true);
+        }
         if std::mem::take(&mut self.later_picker) {
-            egui::Popup::open_id(ctx, compose::later_popup());
+            crate::component::popup::set_open(ctx, compose::later_popup(), true);
         }
         let Some(typed) = self.picker.take() else { return };
         let mut state = crate::component::time_picker::TimePicker::default();
         state.set_typed(&typed);
         ctx.data_mut(|data| data.insert_temp(reader::picker_id(), state));
-        egui::Popup::open_id(ctx, reader::picker_popup());
+        crate::component::popup::set_open(ctx, reader::picker_popup(), true);
     }
 
     /// Shows the calendar screen, leaving the settings sheet; its calendars and events are read again.
@@ -1276,15 +1300,9 @@ impl InboxApp {
         let mut asked = pane::Asked::default();
         let mut add = false;
         let mut header = list::Header::default();
-        let mut done_all = None;
-        let mut clicked = None;
-        let mut acted = None;
         // The row sliding out is out when the list is not drawn.
-        let mut out = true;
+        let mut listed = list::Asked { out: true, ..list::Asked::default() };
         let mut changed = None;
-        let mut review = false;
-        let mut outboxed = None;
-        let mut screener_mode = None;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
         let mut layers = Panes::begin(ui.painter());
@@ -1329,10 +1347,10 @@ impl InboxApp {
                         }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
-                    (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all, listed.outbox, listed.screener)
+                    (searched, listed)
                 })
             };
-            (header, clicked, acted, out, review, done_all, outboxed, screener_mode) = if self.reader.open_id().is_some() || docked {
+            (header, listed) = if self.reader.open_id().is_some() || docked {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -1344,6 +1362,7 @@ impl InboxApp {
                 CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| list(ui, &mut layers)).inner
             };
         }
+        let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, screener: screener_mode, presets } = listed;
         let mut drawn = reader::Drawn::default();
         let mut composed = Vec::new();
         // A texture lives no longer than the picture the reader keeps for it.
@@ -1424,6 +1443,11 @@ impl InboxApp {
             ui.ctx().request_repaint();
         }
         self.act(out, acted, undone, outboxed, screener_mode);
+        if presets {
+            // A row's time picker opened: the presets still ahead, read as the reader's picker reads them.
+            self.mailbox.load_presets();
+            ui.ctx().request_repaint();
+        }
         if let Some(ids) = done_all {
             self.mailbox.done_all(&ids);
         }
