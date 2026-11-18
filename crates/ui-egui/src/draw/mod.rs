@@ -1896,9 +1896,9 @@ impl InboxApp {
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };
         self.follow_adding();
         let adding = self.onboarding.stage() != Stage::Closed;
-        // One Esc closes one surface: a float open (a menu, a picker, a select) takes it before anything under it.
-        let closed_popup = escape && crate::component::popup::any_open(ui.ctx());
-        let left_settings = escape && !closed_popup && self.settings.is_open();
+        // One Esc closes one surface: `escape` is the window's only while no float (a menu, a picker, a select) is open
+        // ([`crate::component::popup::escape`]); an open float takes it before anything under it.
+        let left_settings = escape && self.settings.is_open();
         if left_settings {
             self.close_settings();
             // The sheet on top took the Esc: nothing under it sees it (the calendar's pick, the editor).
@@ -1908,12 +1908,12 @@ impl InboxApp {
         // The sheet or the palette coming over the window closes the lists, menus and pickers open under it.
         crate::component::popup::covered(ui.ctx(), setting || self.palette.is_open());
         self.calendar_before(ui.ctx(), setting);
-        let left_full = escape && !closed_popup && !left_settings && self.screen == Screen::Mail && self.reader.full_width();
+        let left_full = escape && !left_settings && self.screen == Screen::Mail && self.reader.full_width();
         if left_full {
             self.reader.set_full_width(false);
         }
         // Esc that closes a menu or a picker in the reader closes only that: the keyboard stays the reader's.
-        let back_to_list = escape && !left_settings && !left_full && !closed_popup && self.back_to_list(ui.ctx());
+        let back_to_list = escape && !left_settings && !left_full && self.back_to_list(ui.ctx());
         // The window's ground first, under the error banner too; then the place for the panes, then everything else.
         // The panes touch; a hairline divides them.
         let corner = self.window_corner(ui.ctx());
