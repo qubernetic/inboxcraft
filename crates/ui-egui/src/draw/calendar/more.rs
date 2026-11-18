@@ -32,9 +32,27 @@ fn float_id() -> Id {
     Id::unique("calendar-more-on-day")
 }
 
-/// Where "+N more" of `day` was drawn last: the float hangs from it.
-pub(super) fn anchor_id(day: Day) -> Id {
+/// Where "+N more" of `day` was drawn last, and its id: the float hangs from it and gives it the keyboard back.
+fn anchor_id(day: Day) -> Id {
     Id::unique(("calendar-more-anchor", day))
+}
+
+/// Where the "+N more" that gets the keyboard back is kept, while the float that closed is still drawn.
+fn refocus_id() -> Id {
+    Id::unique("calendar-more-refocus")
+}
+
+/// Gives the keyboard back to the "+N more" whose float closed last frame: called while no float is open.
+pub(super) fn refocus(ctx: &Context) {
+    if let Some(link) = ctx.data(|data| data.get_temp::<Id>(refocus_id())) {
+        ctx.data_mut(|data| data.remove::<Id>(refocus_id()));
+        ctx.memory_mut(|memory| memory.request_focus(link));
+    }
+}
+
+/// Keeps `link`, the "+N more" of `day`, for the float it opens.
+pub(super) fn keep_link(ctx: &Context, day: Day, link: &egui::Response) {
+    ctx.data_mut(|data| data.insert_temp(anchor_id(day), (link.rect, link.id)));
 }
 
 /// The id of the row of `event` in the float.
@@ -44,9 +62,11 @@ pub(super) fn row_id(event: &EventRow) -> Id {
 
 /// The float of `day`'s events; while `over` the palette or the settings sheet lies over it and has the keys.
 pub(super) fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, calendar: &Calendar, (day, over): (Day, bool), asked: &mut Vec<Asked>) {
-    let anchor =
-        ctx.data(|data| data.get_temp::<Rect>(anchor_id(day))).unwrap_or_else(|| Rect::from_center_size(ctx.content_rect().center(), vec2(1.0, 1.0)));
-    let float = Float { id: float_id(), anchor, width: WIDTH, returns_to: Id::NULL };
+    let (anchor, link) = ctx
+        .data(|data| data.get_temp::<(Rect, Id)>(anchor_id(day)))
+        .unwrap_or_else(|| (Rect::from_center_size(ctx.content_rect().center(), vec2(1.0, 1.0)), Id::NULL));
+    // Esc or a press outside gives the keyboard back to the "+N more" that opened it.
+    let float = Float { id: float_id(), anchor, width: WIDTH, returns_to: link };
     let events: Vec<&EventRow> = calendar.events().filter(|event| event.covers(day)).collect();
     let rows = |ui: &mut Ui| {
         let count = if events.len() == 1 { tr!("1 event").to_owned() } else { tr!("{count} events", count = events.len()) };
@@ -70,7 +90,13 @@ pub(super) fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, calendar: &Cal
     // Under the palette or the sheet the float stays as it is and takes no key.
     let shown = if over { popup::held(ctx, theme, &float, true, rows).map(|(out, _)| out) } else { popup::float(ctx, theme, &float, rows) };
     match shown {
-        Some(out) => asked.extend(out),
+        Some(out) => {
+            // A row or Open the day closed it: the keyboard goes back to "+N more" too, once the float is gone.
+            if out.contains(&Asked::More(None)) {
+                ctx.data_mut(|data| data.insert_temp(refocus_id(), link));
+            }
+            asked.extend(out);
+        }
         None => asked.push(Asked::More(None)),
     }
 }

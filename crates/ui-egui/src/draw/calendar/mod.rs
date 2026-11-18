@@ -179,12 +179,24 @@ fn view_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, o
     });
     if let Some(day) = calendar.more() {
         more::show(ui.ctx(), theme, keymap, calendar, (day, over), asked);
+    } else {
+        more::refocus(ui.ctx());
     }
 }
 
 /// Where the editor hangs from: New event's rect, kept from the toolbar for the float drawn after the screen.
 pub(super) fn new_event_id() -> Id {
     Id::unique("calendar-new-event-button")
+}
+
+/// Where the control that opened the editor is kept (New event, or Edit), and whether the editor was open last frame.
+fn opener_id() -> Id {
+    Id::unique("calendar-editor-opener")
+}
+
+/// Notes `opener` as the control that opened the editor: it gets the keyboard back when the editor closes.
+pub(super) fn opened_from(ctx: &egui::Context, opener: Id) {
+    ctx.data_mut(|data| data.insert_temp(opener_id(), (opener, false)));
 }
 
 /// The toolbar over the view: its title and note (the week's number, the agenda's days), the steps back, to today and
@@ -205,7 +217,12 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
         let new = TextButton::new(tr!("New event")).primary().arrow().show(ui, theme, keymap);
         ui.ctx().data_mut(|data| data.insert_temp(new_event_id(), new.rect));
         if new.clicked() {
+            opened_from(ui.ctx(), new.id);
             asked.push(Asked::New);
+        }
+        // An editor opened from elsewhere (a script) gives the keyboard to New event when it closes.
+        if ui.ctx().data(|data| data.get_temp::<(Id, bool)>(opener_id())).is_none() {
+            opened_from(ui.ctx(), new.id);
         }
         ui.add_space(TOOLBAR_GAP);
         if let Some(view) = segmented(ui, theme, &views, calendar.view()) {
@@ -479,8 +496,16 @@ fn stroke(painter: &egui::Painter, rect: Rect, line: f32, colour: Color32) {
 
 /// The event editor over the screen while it is open, hanging from New event; what was pressed in it.
 /// While `quiet` another surface lies over it and has the keys.
+/// The frame after it closed, the keyboard goes back to the control that opened it.
 pub(super) fn editor(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, calendar: &mut Calendar, quiet: bool) -> Vec<Asked> {
     let anchor = ctx.data(|data| data.get_temp::<Rect>(new_event_id()));
+    let open = calendar.editor().is_some();
+    if let Some((opener, was_open)) = ctx.data(|data| data.get_temp::<(Id, bool)>(opener_id())) {
+        if was_open && !open {
+            ctx.memory_mut(|memory| memory.request_focus(opener));
+        }
+        ctx.data_mut(|data| data.insert_temp(opener_id(), (opener, open)));
+    }
     calendar.editor_mut().map(|editor| editor::show(ctx, theme, keymap, editor, anchor, quiet)).unwrap_or_default()
 }
 
@@ -498,3 +523,7 @@ mod leave_tests;
 #[cfg(test)]
 #[path = "esc_tests.rs"]
 mod esc_tests;
+
+#[cfg(test)]
+#[path = "focus_tests.rs"]
+mod focus_tests;

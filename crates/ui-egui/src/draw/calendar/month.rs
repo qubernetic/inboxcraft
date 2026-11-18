@@ -187,7 +187,7 @@ fn day_events(
     let link = ui.scope_builder(UiBuilder::new().max_rect(place).id_salt(("calendar-month-more", day)), |ui| {
         link_sized(ui, theme, keymap, &words, LinkSize::Small)
     });
-    ui.ctx().data_mut(|data| data.insert_temp(super::more::anchor_id(day), link.inner.rect));
+    super::more::keep_link(ui.ctx(), day, &link.inner);
     if link.inner.clicked() {
         asked.push(Asked::More(Some(day)));
     }

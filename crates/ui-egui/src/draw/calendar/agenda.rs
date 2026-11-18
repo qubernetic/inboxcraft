@@ -104,10 +104,11 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
             if let Some(more) = rows.len().checked_sub(MOST_ROWS).filter(|more| *more > 0) {
                 let words = tr!("+{count} more", count = more);
                 let (rect, _) = ui.allocate_exact_size(vec2(width, row), Sense::hover());
-                let clicked = ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(16.0, 12.0))), |ui| {
-                    crate::component::button::link_sized(ui, theme, keymap, &words, crate::component::button::LinkSize::Small).clicked()
+                let link = ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(16.0, 12.0))), |ui| {
+                    crate::component::button::link_sized(ui, theme, keymap, &words, crate::component::button::LinkSize::Small)
                 });
-                if clicked.inner {
+                super::more::keep_link(ui.ctx(), day, &link.inner);
+                if link.inner.clicked() {
                     asked.push(Asked::More(Some(day)));
                 }
             }

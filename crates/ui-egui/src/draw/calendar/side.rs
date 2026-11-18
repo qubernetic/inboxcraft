@@ -321,7 +321,9 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
     ui.add_space(8.0 + 4.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
-        if TextButton::new(tr!("Edit")).secondary().icon(IconId::Compose).show(ui, theme, keymap).clicked() {
+        let edit = TextButton::new(tr!("Edit")).secondary().icon(IconId::Compose).show(ui, theme, keymap);
+        if edit.clicked() {
+            super::opened_from(ui.ctx(), edit.id);
             asked.push(Asked::Edit);
         }
         if TextButton::new(tr!("Delete")).secondary().icon(IconId::Delete).show(ui, theme, keymap).clicked() {
