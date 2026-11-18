@@ -159,10 +159,12 @@ fn the_hours_draw_every_day_line_the_last_under_the_scroll_bar() {
     }
 }
 
-/// The thumbs painted in `muted` inside a scroll strip at the view's right, x over 900.
+/// The thumbs painted in `muted` inside the bar over the view's right edge, x over 900: within the thumb's place on
+/// its strip ([`crate::component::scroll::over_thumb`]), painted on whole pixels.
 fn thumbs_at_the_right(harness: &Harness<'static, InboxApp>) -> Vec<Rect> {
     let p = Palette::of(Mode::Dark);
-    let strips: Vec<Rect> = harness.query_all_by_role(Role::ScrollBar).map(|node| node.rect()).filter(|strip| strip.left() > 900.0).collect();
+    let strips: Vec<Rect> =
+        crate::component::scroll::over_thumb(&harness.ctx).into_iter().filter(|strip| strip.left() > 900.0).map(|strip| strip.expand(1.0)).collect();
     rects(harness)
         .into_iter()
         .filter(|(rect, fill)| *fill == p.muted && rect.width() <= 8.0 && rect.height() >= 20.0)
