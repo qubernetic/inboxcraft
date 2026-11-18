@@ -33,7 +33,11 @@ fn finished(session: &mut Session, account: u64, seconds: i64) -> Applied {
 }
 
 fn failed(session: &mut Session, account: u64) {
-    assert_eq!(tell(session, account, EventKind::Failed { kind: ErrorKind::TimedOut, folder: None }), Applied::Changed);
+    failed_with(session, account, ErrorKind::TimedOut);
+}
+
+fn failed_with(session: &mut Session, account: u64, kind: ErrorKind) {
+    assert_eq!(tell(session, account, EventKind::Failed { kind, folder: None }), Applied::Changed);
 }
 
 fn status(session: &mut Session) -> Value {
@@ -241,4 +245,28 @@ fn the_first_sign_in_reads_offline_then_syncing_until_a_round_ends() {
     assert_eq!(state(&mut session), "syncing");
     finished(&mut session, 1, NOW);
     assert_eq!(state(&mut session), "synced");
+}
+
+#[test]
+fn a_refused_sign_in_reads_failing_with_no_account_connected() {
+    let mut session = single();
+    connection(&mut session, 1, ConnectionState::Connecting);
+    failed_with(&mut session, 1, ErrorKind::LoginRefused);
+    connection(&mut session, 1, ConnectionState::Offline);
+    assert_eq!(status(&mut session), json!({ "state": "failing", "done": 0, "of": 0, "last_synced": null, "failing_accounts": 1 }));
+    let mut session = single();
+    failed_with(&mut session, 1, ErrorKind::CredentialMissing);
+    connection(&mut session, 1, ConnectionState::Offline);
+    assert_eq!(state(&mut session), "failing", "no password");
+}
+
+#[test]
+fn a_server_out_of_reach_reads_offline() {
+    for kind in [ErrorKind::HostNotFound, ErrorKind::ConnectionRefused, ErrorKind::TimedOut, ErrorKind::ConnectionDropped] {
+        let mut session = single();
+        connection(&mut session, 1, ConnectionState::Connecting);
+        failed_with(&mut session, 1, kind);
+        connection(&mut session, 1, ConnectionState::Offline);
+        assert_eq!(state(&mut session), "offline", "{kind:?}");
+    }
 }

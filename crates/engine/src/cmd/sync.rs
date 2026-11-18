@@ -9,8 +9,10 @@
 //! (`EventKind::Failed`, the `failure` of `account.list`), the progress of its sync round
 //! (`EventKind::SyncProgress`) and the end of one (`EventKind::SyncFinished`). The state is the worst that holds:
 //!
+//! - `failing`, first: an account stopped by a failure only the owner can mend (a refused or unanswered sign-in, no
+//!   password, no login method, a certificate or encryption refused), connected or not;
 //! - `offline`: at least one account and none signed in (no connection told yet, connecting, offline, or backing
-//!   off), whatever failed;
+//!   off), when the failures are of the network or the server (no route, a timeout, a refused connection);
 //! - `failing`: an account's last connection or job failed, and it has not been online or ended a sync round since;
 //! - `syncing`: an account's sync round has folders left, or a signed-in account has not ended a round yet;
 //! - `synced`: none of these, and always with no account.
@@ -26,7 +28,7 @@
 
 use std::time::Duration;
 
-use inboxcraft_model::{AccountId, ConnectionState};
+use inboxcraft_model::{AccountId, ConnectionState, ErrorKind};
 use inboxcraft_time::Timestamp;
 use serde_json::{Value, json};
 
@@ -81,11 +83,32 @@ fn connected(held: Option<&AccountState>) -> bool {
     matches!(held.and_then(|held| held.connection), Some(ConnectionState::Online | ConnectionState::Watching))
 }
 
+/// Whether a failure of `kind` stops the account until the owner acts (a password or a setting to fix, a certificate
+/// or encryption refused), rather than waiting for the network or the server to come back.
+const fn stops(kind: ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::LoginRefused
+            | ErrorKind::LoginUnanswered
+            | ErrorKind::NoLoginMethod
+            | ErrorKind::CredentialMissing
+            | ErrorKind::CertificateUnknownIssuer
+            | ErrorKind::CertificateExpired
+            | ErrorKind::CertificateNotYetValid
+            | ErrorKind::CertificateWrongHost
+            | ErrorKind::ClockFarOff
+            | ErrorKind::Tls
+            | ErrorKind::StartTlsMissing
+            | ErrorKind::NotEncrypted
+            | ErrorKind::OtherServer
+    )
+}
+
 fn status(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let NoParams {} = decode(STATUS.id, params)?;
     let accounts = context.store().accounts()?;
     let held: Vec<Option<&AccountState>> = accounts.iter().map(|account| context.state().accounts.get(&account.id())).collect();
-    let (mut done, mut of, mut failing, mut syncing, mut online) = (0_u32, 0_u32, 0_u32, false, false);
+    let (mut done, mut of, mut failing, mut syncing, mut online, mut stopped) = (0_u32, 0_u32, 0_u32, false, false, false);
     let mut last: Option<Timestamp> = None;
     for state in &held {
         let signed_in = connected(*state);
@@ -93,8 +116,9 @@ fn status(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         let Some(state) = state else { continue };
         // Signed in and no round ended yet: the first sync is under way, even before the worker tells its round.
         syncing |= signed_in && state.synced.is_none();
-        if state.failure.is_some() {
+        if let Some((kind, _)) = state.failure {
             failing = failing.saturating_add(1);
+            stopped |= stops(kind);
         }
         if let Some((told, all)) = state.progress {
             done = done.saturating_add(told);
@@ -107,6 +131,8 @@ fn status(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     }
     let state = if accounts.is_empty() {
         "synced"
+    } else if stopped {
+        "failing"
     } else if !online {
         "offline"
     } else if failing > 0 {
