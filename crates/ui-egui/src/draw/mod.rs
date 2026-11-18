@@ -1851,7 +1851,11 @@ impl InboxApp {
     /// The composer's floating panel while it is not `docked`; what was asked in it.
     fn floating_composer(&mut self, ui: &Ui, theme: &Theme, docked: bool) -> Vec<compose::Asked> {
         match self.composer.as_mut() {
-            Some(composer) if !docked => compose::floating(ui.ctx(), theme, &self.keymap, &self.mailbox, composer, ui.ctx().content_rect()),
+            Some(composer) if !docked => {
+                // Over the reader's answers when it drew them in this pass: the panel never covers them.
+                let above = reader::answers_rect(ui.ctx()).map(|answers| answers.top());
+                compose::floating(ui.ctx(), theme, &self.keymap, &self.mailbox, composer, ui.ctx().content_rect(), above)
+            }
             _ => Vec::new(),
         }
     }

@@ -970,17 +970,32 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     asked
 }
 
-/// The floating panel at the bottom right of `screen`, [`FLOATING_IN`] in from its corner: the whole composer, or
-/// folded its head only. What was asked for.
-pub(super) fn floating(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &mut Composer, screen: Rect) -> Vec<Asked> {
+/// The floating panel, the whole composer or folded its head only, [`FLOATING_IN`] in from `screen`'s right edge; its
+/// foot [`FLOATING_IN`] over `screen`'s foot, or, while the reader draws its answers (their row's top `above`),
+/// [`FLOATING_IN`] over them, so it never covers them, folded or open: it may stand over the message's text instead.
+/// Where the room over them is less than its height, it is as tall as the room. What was asked for.
+pub(super) fn floating(
+    ctx: &egui::Context,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    composer: &mut Composer,
+    screen: Rect,
+    above: Option<f32>,
+) -> Vec<Asked> {
     let s = &theme.spacing;
-    let room = vec2((screen.width() - FLOATING_IN - CLEAR).max(1.0), (screen.height() - FLOATING_IN - CLEAR).max(1.0));
+    let foot = above.filter(|top| top.is_finite()).map_or(screen.bottom(), |top| top.min(screen.bottom()).floor());
+    let room = vec2((screen.width() - FLOATING_IN - CLEAR).max(1.0), (foot - screen.top() - FLOATING_IN - CLEAR).max(1.0));
     let folded_height = s.s3 * 2.0 + control_side(theme);
     let size = vec2(FLOATING.x.min(room.x), if composer.folded() { folded_height } else { FLOATING.y }.min(room.y));
-    let corner = screen.right_bottom() - vec2(FLOATING_IN, FLOATING_IN);
+    let corner = pos2(screen.right() - FLOATING_IN, foot - FLOATING_IN);
     let rect = Rect::from_min_size(corner - size, size);
     Area::new(Id::unique("compose-floating"))
         .order(Order::Middle)
+        // While it folds its content is still taller than the panel: the area is never moved to fit the window, and
+        // what takes the pointer ends at the panel's foot, never over the reader's answers.
+        .constrain(false)
+        .constrain_to(Rect::from_min_max(screen.min, pos2(screen.right(), rect.bottom())))
         .pivot(Align2::LEFT_TOP)
         .fixed_pos(rect.min)
         .fade_in(false)

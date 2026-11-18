@@ -265,6 +265,24 @@ pub(super) fn back_to_list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, drawn: &
 
 /// Where the id of the reader's first tool drawn in this pass is kept: "Back to the list" in one pane, Done beside the
 /// list.
+/// Where the rect of the answers' row drawn in this pass is kept, with the pass ([`answers_rect`]).
+fn answers_id() -> egui::Id {
+    egui::Id::unique("reader-answers")
+}
+
+/// Keeps `rect` as the answers' row drawn in this pass.
+pub(super) fn keep_answers(ctx: &egui::Context, rect: egui::Rect) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(answers_id(), (rect, pass)));
+}
+
+/// The rect of the reader's answers (Reply, Reply all, Forward) when the reader drew them in this pass: what the
+/// floating composer stands above.
+pub(in crate::draw) fn answers_rect(ctx: &egui::Context) -> Option<egui::Rect> {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<(egui::Rect, u64)>(answers_id())).filter(|(_, kept)| *kept == pass).map(|(rect, _)| rect)
+}
+
 fn back_kept_id() -> egui::Id {
     egui::Id::unique("reader-back")
 }

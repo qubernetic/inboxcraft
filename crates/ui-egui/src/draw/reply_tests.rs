@@ -97,13 +97,9 @@ fn a_reply_keeps_the_draft_that_was_being_written() {
     harness.query_all_by_label_contains(ROTA).next().unwrap().click();
     harness.run();
     assert!(harness.state().composer().unwrap().floating());
-    // The floating panel stands over the reader's foot, where the answers stand, folded too: Reply is reached by the
-    // keyboard.
+    // The floating panel stands over the reader's foot: folded, it leaves Reply in sight.
     press(&mut harness, "Fold the draft New message");
-    harness.get_by_role_and_label(Role::Button, "Reply").focus();
-    harness.run();
-    harness.key_press(egui::Key::Enter);
-    harness.run();
+    press(&mut harness, "Reply");
     let reply = harness.state().composer().unwrap();
     assert_ne!(reply.draft(), first);
     assert!(!reply.floating());
@@ -172,4 +168,64 @@ fn the_template_menu_opens_by_the_pointer_enter_and_space_and_keeps_tab_inside()
         press(&mut harness, "New message");
         crate::component::popup::tests::walk_a_menu(&mut harness, (Role::Button, "Templates"), key);
     }
+}
+
+/// The floating panel's rect, as it was drawn.
+fn panel(harness: &Harness<'static, InboxApp>) -> egui::Rect {
+    super::compose::drawn_rect(&harness.ctx).unwrap()
+}
+
+/// The reader's three answers' rects.
+fn answers(harness: &Harness<'static, InboxApp>) -> Vec<egui::Rect> {
+    ["Reply", "Reply all", "Forward"].iter().map(|name| harness.get_by_role_and_label(Role::Button, name).rect()).collect()
+}
+
+/// New message, then a message opened by a press: the composer floats beside the open message; `folded` folds it.
+fn floating_over_a_message(folded: bool) -> Harness<'static, InboxApp> {
+    let mut harness = harness(egui::Theme::Light);
+    press(&mut harness, "New message");
+    harness.query_all_by_label_contains(ROTA).next().unwrap().click();
+    harness.run();
+    assert!(harness.state().composer().unwrap().floating());
+    if folded {
+        press(&mut harness, "Fold the draft New message");
+        assert!(harness.state().composer().unwrap().folded());
+    }
+    harness
+}
+
+#[test]
+fn the_floating_panel_folded_or_open_never_covers_the_reader_s_answers_and_a_press_on_reply_answers() {
+    for folded in [true, false] {
+        let mut harness = floating_over_a_message(folded);
+        let panel = panel(&harness);
+        for answer in answers(&harness) {
+            assert!(!answer.intersects(panel), "folded {folded}: the answer {answer:?} under the panel {panel:?}");
+        }
+        // 16 over the answers' row, its right edge where it stood.
+        let top = answers(&harness).iter().map(|rect| rect.top()).fold(f32::INFINITY, f32::min);
+        assert_eq!(panel.bottom(), (top - 16.0).floor(), "folded {folded}: the panel's foot 16 over the answers");
+        assert_eq!(panel.right(), 1300.0 - 16.0, "folded {folded}: its right edge as before");
+        let first = harness.state().composer().unwrap().draft();
+        // A pointer press on Reply, at its middle.
+        let at = harness.get_by_role_and_label(Role::Button, "Reply").rect().center();
+        harness.hover_at(at);
+        harness.run();
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        harness.step();
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        harness.run();
+        assert_ne!(harness.state().composer().unwrap().draft(), first, "folded {folded}: Reply pressed by the pointer answers");
+    }
+}
+
+#[test]
+fn with_no_message_open_the_floating_panel_stands_where_it_did() {
+    let mut harness = harness(egui::Theme::Light);
+    press(&mut harness, "New message");
+    harness.state_mut().composer_mut().0.unwrap().set_floating(true);
+    harness.run();
+    assert!(harness.state().reader().open_id().is_none(), "nothing open");
+    // 520 × 560, 16 in from the window's right and bottom edges (1300 × 820).
+    assert_eq!(panel(&harness), egui::Rect::from_min_max(egui::pos2(764.0, 244.0), egui::pos2(1284.0, 804.0)));
 }

@@ -216,6 +216,7 @@ pub(super) fn answers(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, plac
     let room = ui.available_width();
     let side = crate::component::control_side(theme);
     let (_, whole) = ui.allocate_space(egui::vec2(room.max(0.0), placed.height));
+    super::keep_answers(ui.ctx(), whole);
     let mut line_ui: Option<(usize, Ui)> = None;
     for ((button, answer), line) in answer_buttons(placed.asks).into_iter().zip(placed.lines) {
         if line_ui.as_ref().is_none_or(|(at, _)| *at != line) {
