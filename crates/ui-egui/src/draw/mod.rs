@@ -1309,6 +1309,7 @@ impl InboxApp {
         let mut review = false;
         let mut outboxed = None;
         let mut screener_mode = None;
+        let mut presets = false;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
         let mut layers = Panes::begin(ui.painter());
@@ -1353,10 +1354,20 @@ impl InboxApp {
                         }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
-                    (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all, listed.outbox, listed.screener)
+                    (
+                        searched,
+                        listed.clicked,
+                        listed.acted,
+                        listed.out,
+                        listed.review,
+                        listed.done_all,
+                        listed.outbox,
+                        listed.screener,
+                        listed.presets,
+                    )
                 })
             };
-            (header, clicked, acted, out, review, done_all, outboxed, screener_mode) = if self.reader.open_id().is_some() || docked {
+            (header, clicked, acted, out, review, done_all, outboxed, screener_mode, presets) = if self.reader.open_id().is_some() || docked {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -1448,6 +1459,11 @@ impl InboxApp {
             ui.ctx().request_repaint();
         }
         self.act(out, acted, undone, outboxed, screener_mode);
+        if presets {
+            // A row's time picker opened: the presets still ahead, read as the reader's picker reads them.
+            self.mailbox.load_presets();
+            ui.ctx().request_repaint();
+        }
         if let Some(ids) = done_all {
             self.mailbox.done_all(&ids);
         }

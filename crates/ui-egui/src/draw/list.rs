@@ -40,6 +40,7 @@ use inboxcraft_engine::ScreenerMode;
 
 use crate::component::hover::{self, Action};
 use crate::component::pill::pill;
+use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
 use crate::component::{avatar, badge, button, field, margin, popup, tooltip};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
@@ -222,7 +223,7 @@ const STRIPE_ROOM: f32 = 15.0;
 /// The width of the account's stripe.
 const STRIPE_WIDTH: f32 = 3.0;
 
-/// The hover actions of `message`: Done (or "Not done" for a done one), mark read or unread, Delete.
+/// The hover actions of `message`: Done (or "Not done" for a done one), mark read or unread, Delete, Snooze.
 fn actions(message: &MessageRow) -> [Action<'static>; 4] {
     #[cfg(test)]
     super::list_tests::ACTIONS_BUILT.with(|built| built.set(built.get().saturating_add(1)));
@@ -233,12 +234,78 @@ fn actions(message: &MessageRow) -> [Action<'static>; 4] {
         Action { icon: IconId::Done, name: done, action: Some(keymap::DONE), unavailable: None },
         Action { icon: read_icon, name: read, action: Some(keymap::READ), unavailable: None },
         Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE), unavailable: None },
-        // Its key shows dashed, as the sheet's unavailable Snooze; an unavailable action offers no key and runs nothing.
-        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: Some(keymap::SNOOZE), unavailable: Some(tr!("Open the message to snooze it")) },
+        // It opens the time picker at the row ([`snooze_picker`]); the time chosen snoozes the message.
+        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: Some(keymap::SNOOZE), unavailable: None },
     ]
 }
 
-/// What the hover action at `index` of [`actions`] does to `message`.
+/// The place of Snooze in [`actions`]: it opens the time picker rather than acting at once.
+const SNOOZE_ACTION: usize = 3;
+
+/// The id of the time picker float opened from the Snooze of the message `id`'s row.
+pub(super) fn snooze_popup(id: u64) -> Id {
+    Id::unique("list-snooze-picker").with(id)
+}
+
+/// The id the row's time picker keeps its state under between frames (one picker is open at a time).
+fn snooze_state() -> Id {
+    Id::unique("list-snooze-picker-state")
+}
+
+/// Where the row's time picker hangs from, kept from its opening: the rect of the row's Snooze, relative to the row's
+/// top left, so the float follows the row while the group hides (the pointer gone into the float).
+fn snooze_anchor(id: u64) -> Id {
+    snooze_popup(id).with("anchor")
+}
+
+/// Opens the time picker of the message `message`'s row from its Snooze (the hover action's `id`) on the row `rect`.
+fn open_snooze(ctx: &egui::Context, message: u64, action: Id, rect: Rect) {
+    let anchor = ctx.read_response(action).map_or(rect, |response| response.rect);
+    ctx.data_mut(|data| {
+        data.insert_temp(snooze_anchor(message), anchor.translate(-rect.min.to_vec2()));
+        data.get_temp_mut_or_default::<TimePicker>(snooze_state()).open();
+    });
+    popup::set_open(ctx, snooze_popup(message), true);
+}
+
+/// The time picker of the message `message`'s row `rect` (`row` the row's response), while it is open: the time
+/// chosen, which snoozes the message. A choice or Cancel closes it and gives the row the keyboard; so do `Esc` and a
+/// press outside it, through the float.
+fn snooze_picker(ctx: &egui::Context, theme: &Theme, mailbox: &Mailbox, message: u64, rect: Rect, row: &Response) -> Option<Act> {
+    let popup = snooze_popup(message);
+    if !popup::is_open(ctx, popup) {
+        return None;
+    }
+    let anchor = ctx.data(|data| data.get_temp::<Rect>(snooze_anchor(message))).map_or(rect, |anchor| anchor.translate(rect.min.to_vec2()));
+    let float = popup::Float { id: popup, anchor, width: time_picker::WIDTH, returns_to: row.id };
+    let shown = popup::float(ctx, theme, &float, |ui| {
+        let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
+        let ask = Ask { title: tr!("Snooze until"), confirm: tr!("Snooze"), alert: None, presets: &presets, extra: None, note: None };
+        let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(snooze_state())).unwrap_or_default();
+        let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
+        ui.data_mut(|data| data.insert_temp(snooze_state(), state));
+        picked
+    });
+    match shown {
+        Some(Picked::At { at, .. }) => {
+            popup::set_open(ctx, popup, false);
+            row.request_focus();
+            Some(Act::Snooze(at))
+        }
+        Some(Picked::Cancelled | Picked::Extra) => {
+            popup::set_open(ctx, popup, false);
+            row.request_focus();
+            None
+        }
+        Some(Picked::Open) => None,
+        None => {
+            popup::set_open(ctx, popup, false);
+            None
+        }
+    }
+}
+
+/// What the hover action at `index` of [`actions`] does to `message` at once (Snooze asks for a time first).
 fn act(message: &MessageRow, index: usize) -> Option<Act> {
     match index {
         0 if message.done => Some(Act::Undone),
@@ -288,6 +355,8 @@ struct Drawn {
     acted: Option<Act>,
     /// It is the row sliding out, and it is all the way out.
     out: bool,
+    /// Its Snooze opened the time picker: the presets are to be read again.
+    presets: bool,
 }
 
 /// One message row across `ui`'s width; a click selects it. The row leaving the list slides to the right and fades
@@ -298,8 +367,10 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     let selected = mailbox.selected() == Some(message.id);
     response.widget_info(|| WidgetInfo::selected(WidgetRole::ListBoxOption, true, selected, mailbox.spoken(message)));
     let leaving = mailbox.leaving().is_some_and(|(id, _)| id == message.id);
+    // Drawn whether the row shows or not, so a picker stays with its row scrolled away.
+    let snoozed = snooze_picker(ui.ctx(), theme, mailbox, message.id, rect, &response);
     if !ui.is_rect_visible(rect) {
-        return Drawn { clicked: response.clicked(), acted: None, out: leaving };
+        return Drawn { clicked: response.clicked(), acted: snoozed, out: leaving, presets: false };
     }
     let gone = if leaving { motion::appear(ui.ctx(), Id::unique("row-leaving").with(message.id), theme.motion.row_slide) } else { 0.0 };
     let mut face = ui.new_child(UiBuilder::new().max_rect(rect));
@@ -312,7 +383,12 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         face.multiply_opacity(DONE_OPACITY);
     }
     let shifted = rect.translate(vec2(rect.width() * gone, 0.0));
-    let mut acted = paint_row(&mut face, theme, keymap, mailbox, message, account_marker, shifted, &response, leaving);
+    let pressed = paint_row(&mut face, theme, keymap, mailbox, message, account_marker, shifted, &response, leaving);
+    let mut acted = pressed.and_then(|index| act(message, index)).or(snoozed);
+    let presets = pressed == Some(SNOOZE_ACTION);
+    if presets {
+        open_snooze(ui.ctx(), message.id, actions_id(message.id).with(SNOOZE_ACTION), rect);
+    }
     if response.has_focus() {
         focus_ring(ui.painter(), theme, response.rect, Ring::Inside);
     }
@@ -327,13 +403,13 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
             ((), chosen.is_some())
         });
     }
-    Drawn { clicked: response.clicked(), acted, out: leaving && gone >= 1.0 }
+    Drawn { clicked: response.clicked(), acted, out: leaving && gone >= 1.0, presets }
 }
 
 /// How strongly a done row shows under "Show done".
 const DONE_OPACITY: f32 = 0.55;
 
-/// Paints a message row into `rect`; the hover action pressed. A leaving row shows no actions.
+/// Paints a message row into `rect`; the place of the hover action pressed. A leaving row shows no actions.
 #[expect(clippy::too_many_arguments, reason = "the parts of one row")]
 fn paint_row(
     ui: &mut Ui,
@@ -345,7 +421,7 @@ fn paint_row(
     rect: Rect,
     response: &Response,
     leaving: bool,
-) -> Option<Act> {
+) -> Option<usize> {
     let s = &theme.spacing;
     let p = &theme.palette;
     let f = &theme.fonts;
@@ -441,8 +517,13 @@ fn paint_row(
     let text = line(ui, &[(subject, f.caption, p.ink), (&preview, f.caption, p.muted)], right - left);
     ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.ink);
     // Last, so the solid float covers whatever of the row lies under it.
-    let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), actions_line.unwrap_or(rect), reach, actions);
-    shown.clicked.and_then(|index| act(message, index))
+    let shown = hover::actions(ui, theme, keymap, actions_id(message.id), actions_line.unwrap_or(rect), reach, actions);
+    shown.clicked
+}
+
+/// The id of the hover action group of the message `id`'s row; an action's is it with the action's place.
+fn actions_id(id: u64) -> Id {
+    Id::unique("row-actions").with(id)
 }
 
 /// Whether the pointer is on `rect`, a row of the list: rows touch, so a row owns its top edge and not its bottom one,
@@ -488,6 +569,8 @@ pub(super) struct Asked {
     pub(super) outbox: Option<(u64, Outbox)>,
     /// A pill of the screener's mode under "New senders".
     pub(super) screener: Option<ScreenerMode>,
+    /// A row's Snooze opened the time picker: the presets still ahead are to be read.
+    pub(super) presets: bool,
 }
 
 /// What a button of a send in the outbox asks for.
@@ -615,6 +698,8 @@ struct Rows<'a> {
     account_marker: bool,
     /// A hover action pressed this frame.
     acted: Cell<Option<(u64, Act)>>,
+    /// A row's Snooze opened the time picker this frame.
+    presets: Cell<bool>,
     /// Whether the row sliding out was drawn, and whether it is out.
     leaving: Cell<(bool, bool)>,
     /// "Done all" pressed this frame: the group's messages.
@@ -636,6 +721,9 @@ impl Rows<'_> {
             }
             if let Some(act) = drawn.acted {
                 self.acted.set(Some((message.id, act)));
+            }
+            if drawn.presets {
+                self.presets.set(true);
             }
             if self.mailbox.leaving().is_some_and(|(id, _)| id == message.id) {
                 self.leaving.set((true, drawn.out));
@@ -941,6 +1029,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         // Whose each row is shows in the simple list of more than one account; the grouped cards leave it out.
         account_marker: !grouping && mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
         acted: Cell::new(None),
+        presets: Cell::new(false),
         leaving: Cell::new((false, false)),
         done_all: Cell::new(None),
         built: Cell::new(0),
@@ -965,5 +1054,14 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let (drawn, out) = rows.leaving.get();
     let built = rows.built.get();
     ui.ctx().data_mut(|data| data.insert_temp(rows_built_id(), built));
-    Asked { clicked, acted: rows.acted.get(), out: !drawn || out, review, done_all: rows.done_all.take(), outbox: None, screener: screener_mode }
+    Asked {
+        clicked,
+        acted: rows.acted.get(),
+        out: !drawn || out,
+        review,
+        done_all: rows.done_all.take(),
+        outbox: None,
+        screener: screener_mode,
+        presets: rows.presets.get(),
+    }
 }

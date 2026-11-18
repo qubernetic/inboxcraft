@@ -460,7 +460,7 @@ fn show_all_is_an_accent_link_a_little_left_of_the_rows_text() {
 }
 
 #[test]
-fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order_snooze_not_yet() {
+fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order() {
     let mut harness = harness(true);
     harness.get_by_label(ODILE).hover();
     harness.run();
@@ -468,7 +468,7 @@ fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order_snooze_not_yet
     let mut lefts = Vec::new();
     for name in ["Done", "Mark as read", "Delete", "Snooze"] {
         let button = harness.query_all_by_role_and_label(Role::Button, name).find(|node| row.contains(node.rect().center())).expect(name);
-        assert_eq!(button.accesskit_node().is_disabled(), name == "Snooze", "{name}");
+        assert!(!button.accesskit_node().is_disabled(), "{name}");
         lefts.push(button.rect().left());
     }
     assert!(lefts.windows(2).all(|pair| pair[0] < pair[1]), "in the design's order: {lefts:?}");
@@ -616,7 +616,7 @@ fn a_pointer_press_on_done_beside_the_reader_marks_the_message_done() {
 }
 
 #[test]
-fn a_hovered_rows_snooze_shows_its_key_as_the_sheet_does_though_it_cannot_run_yet() {
+fn a_hovered_rows_snooze_shows_its_key_as_the_sheet_does() {
     let mut harness = harness(true);
     harness.get_by_label(ODILE).hover();
     harness.run();
@@ -628,7 +628,7 @@ fn a_hovered_rows_snooze_shows_its_key_as_the_sheet_does_though_it_cannot_run_ye
             .find(|rect| row.contains(rect.center()))
             .map(|rect| rect.width())
     };
-    // Its icon and its dashed one-letter chip, as wide as Done with its own.
+    // Its icon and its one-letter chip, as wide as Done with its own.
     assert_eq!(width(&harness, "Snooze"), width(&harness, "Done"));
 }
 
@@ -773,4 +773,66 @@ fn a_frame_of_a_thousand_rows_none_hovered_or_keyed_lays_out_no_hover_action() {
 thread_local! {
     /// How many rows' lists of hover actions were built on this thread (`list::actions`).
     pub(super) static ACTIONS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The rect of the button `name` on the row `row`.
+fn on_row(harness: &Harness<'static, InboxApp>, row: egui::Rect, name: &str) -> egui::Rect {
+    let found = harness.query_all_by_role_and_label(Role::Button, name).map(|node| node.rect()).find(|rect| row.contains(rect.center()));
+    found.unwrap_or_else(|| panic!("no {name} on the row"))
+}
+
+/// Opens the time picker from the Snooze of Odile's row with the pointer; the Snooze's rect.
+fn snooze_odile(harness: &mut Harness<'static, InboxApp>) -> egui::Rect {
+    let row = harness.get_by_label(ODILE).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    let snooze = on_row(harness, row, "Snooze");
+    harness.hover_at(snooze.center());
+    harness.run();
+    harness.query_all_by_role_and_label(Role::Button, "Snooze").find(|node| node.rect() == snooze).unwrap().click();
+    harness.run();
+    snooze
+}
+
+#[test]
+fn the_hover_snooze_opens_the_time_picker_at_the_row_and_a_choice_snoozes_that_message() {
+    let mut harness = still();
+    let snooze = snooze_odile(&mut harness);
+    let title = harness.get_by_label("Snooze until").rect();
+    assert!(title.top() > snooze.bottom() && title.top() < snooze.bottom() + 40.0, "under the row's Snooze: {title:?} {snooze:?}");
+    harness.get_by_label("Tomorrow morning, Fri 08:00").click();
+    harness.run_steps(4);
+    assert_eq!(harness.state().mailbox().undoable().map(|undo| undo.text.as_str()), Some("Snoozed until Friday 6 November, 08:00"));
+    assert!(harness.state().mailbox().messages().iter().all(|row| row.subject != "Allotment rota for November"), "that message left");
+    assert_eq!(rows(&harness), 10, "and no other");
+    assert!(harness.query_by_label("Snooze until").is_none(), "the picker closed");
+}
+
+#[test]
+fn the_keyboard_opens_the_hover_snooze_s_picker_and_esc_gives_the_row_back_its_focus() {
+    // The row's group shows under the pointer; the keyboard goes to its Snooze (beside the reader the keyed row's
+    // group has no room for it, and H opens the reader's own picker).
+    let mut harness = still();
+    let row = harness.get_by_label(ODILE).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    let snooze = on_row(&harness, row, "Snooze");
+    harness.query_all_by_role_and_label(Role::Button, "Snooze").find(|node| node.rect() == snooze).unwrap().focus();
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    let title = harness.get_by_label("Snooze until").rect();
+    assert!(title.top() > snooze.bottom() && title.top() < snooze.bottom() + 40.0, "under the row's Snooze: {title:?} {snooze:?}");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none(), "Esc closes it");
+    assert!(harness.get_by_label(ODILE).is_focused(), "and the row has the keyboard again");
+    assert!(harness.state().mailbox().undoable().is_none(), "nothing snoozed");
+    // The pointer's opening closes on Esc the same way.
+    snooze_odile(&mut harness);
+    harness.get_by_label("Snooze until");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none());
+    assert!(harness.state().mailbox().undoable().is_none());
 }
