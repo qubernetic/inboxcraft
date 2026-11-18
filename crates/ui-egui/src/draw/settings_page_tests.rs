@@ -50,7 +50,7 @@ fn focused(harness: &Harness<'static, InboxApp>) -> Option<(String, egui::Rect)>
 fn the_nine_sections_stand_in_the_design_s_order() {
     let mut harness = opened();
     // The design counts its nine; AI and Plugins come after them.
-    harness.get_by_label("9 sections");
+    harness.get_by_label("11 sections");
     let tops: Vec<f32> = NAMES.iter().map(|name| harness.get_by_label(&format!("{name}, settings page")).rect().top()).collect();
     assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "the design's order, then AI and Plugins: {tops:?}");
     let first = harness.get_by_label("Appearance, settings page").rect();
@@ -458,7 +458,7 @@ fn at_every_text_size_the_section_count_stands_whole_and_close_gives_way() {
             harness.state_mut().settings_mut().open_at(section);
             harness.run();
             let texts = painted_texts(&harness);
-            assert!(texts.iter().any(|(text, _)| text == "9 sections"), "{percent} %, {section:?}: the count is cut");
+            assert!(texts.iter().any(|(text, _)| text == "11 sections"), "{percent} %, {section:?}: the count is cut");
             let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
             let close = harness.get_by_role_and_label(Role::Button, "Close").rect();
             assert!(sheet.contains_rect(close), "{percent} %, {section:?}: Close {close:?} on the sheet {sheet:?}");

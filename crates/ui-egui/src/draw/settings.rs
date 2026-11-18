@@ -510,10 +510,10 @@ fn section_row(ui: &mut Ui, theme: &Theme, section: Section, shown: bool) -> Res
 /// The room between the section count and the sheet's Close in the sections' head, in points.
 const CLOSE_GAP: f32 = 8.0;
 
-/// "<n> sections": the design counts its nine; the two planned ones, AI and Plugins, come after them uncounted.
+/// "<n> sections": every row the list shows, the two planned ones, AI and Plugins, among them (the design's list has
+/// nine rows and says nine).
 fn section_count() -> String {
-    let nine = Section::ALL.iter().filter(|section| !matches!(section, Section::Ai | Section::Plugins)).count();
-    tr!("{count} sections", count = nine)
+    tr!("{count} sections", count = Section::ALL.len())
 }
 
 /// Whether the sheet's Close fits in the sections' head, `width` wide, beside "Settings" and the whole count. It does
