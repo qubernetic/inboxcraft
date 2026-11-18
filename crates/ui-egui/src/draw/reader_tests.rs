@@ -174,6 +174,22 @@ fn a_texture_goes_with_its_picture() {
     assert!(harness.state().textures.contains_key(url));
 }
 
+/// A picture that is here but cannot be drawn is a box that says it is not shown, with no `try again`: trying again
+/// would get the same bytes.
+#[test]
+fn a_picture_that_cannot_be_drawn_offers_no_try_again() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");
+    harness.get_by_label("always for prize-desk@example.org").click();
+    harness.run();
+    let url = "https://track.example.net/open.png?id=4417";
+    let broken = crate::picture::Decoded { width: 2, height: 2, rgba: vec![0; 3] };
+    harness.state_mut().reader_mut().0.put_picture(url, crate::reader::PictureState::Ready(std::sync::Arc::new(broken)));
+    settle(&mut harness);
+    harness.get_by_label_contains("Picture not shown");
+    assert!(harness.query_by_label("try again").is_none(), "a try again that can do nothing");
+}
+
 #[test]
 fn the_link_under_the_pointer_shows_where_it_goes_and_a_click_copies_it() {
     let fetch = Recorder::default();

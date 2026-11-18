@@ -694,6 +694,12 @@ impl Reader {
         self.thread.iter().find(|row| row.id == id).and_then(|row| row.opened.as_ref())
     }
 
+    /// The picture `key` as it would stand in `state` (the tests' pictures that are here but cannot be drawn).
+    #[cfg(test)]
+    pub(crate) fn put_picture(&mut self, key: &str, state: PictureState) {
+        self.pictures.insert(key.to_owned(), state);
+    }
+
     /// Message `id` of the thread as it would stand with `content` and `cut` (the tests' states without text).
     #[cfg(test)]
     pub(crate) fn show_as(&mut self, id: u64, content: Content, cut: bool) {
