@@ -44,13 +44,18 @@ fn harness(theme: egui::Theme) -> Harness<'static, InboxApp> {
 
 /// The sample mail in a real session whose first account can send.
 fn sending() -> Harness<'static, InboxApp> {
+    harness_over(sending_mailbox(), egui::Theme::Light)
+}
+
+/// The sample mail in a real session whose first account can send, without a window.
+fn sending_mailbox() -> Mailbox {
     let mut store = sample::mailbox(Timestamp::from_unix(NOW, 0).unwrap()).unwrap();
     let account = store.accounts().unwrap().into_iter().find(|account| account.id() == AccountId::new(1)).unwrap();
     let server = Server::new(Host::new("smtp.example.org").unwrap(), Security::Tls.submission_port(), Security::Tls);
     let mut batch = Batch::new();
     batch.push(Change::PutAccount(account.with_submission(Some(server))));
     store.apply(&batch).unwrap();
-    harness_over(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()), egui::Theme::Light)
+    Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock())
 }
 
 /// The harness with the composer open from the pane's New message.
@@ -675,6 +680,8 @@ fn a_close_in_the_frame_after_a_keystroke_keeps_it() {
     let mut harness = composing_over(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     let id = harness.state().composer().unwrap().draft();
     typed_by_frames(&mut harness, "Plot 14");
+    // Typed within the second: the keep waits, so only Close can have kept it.
+    assert!(!kept(&mut harness, id)["text"].as_str().unwrap_or_default().starts_with("Plot 14"), "not kept yet");
     harness.get_by_role_and_label(Role::Button, "Close; the draft is kept").click();
     harness.step();
     assert!(harness.state().composer().is_none());
@@ -870,6 +877,16 @@ fn escape_in_the_suggestions_closes_them_and_keeps_the_text() {
     let mut harness = composing(egui::Theme::Dark);
     type_into(&mut harness, "To", "teo");
     assert!(!harness.state().composer().unwrap().suggestions().1.is_empty(), "suggested");
+    // Under the line, at the start of its chips, 360 wide with its edge (the composer's frame).
+    let from = rect_of(&harness, Role::ComboBox, "From Mira Holloway <mira@example.org>");
+    let to = rect_of(&harness, Role::TextInput, "To");
+    let row = harness
+        .query_all_by_role(Role::ListBoxOption)
+        .find(|row| row.accesskit_node().label().is_some_and(|label| label.contains("teodor@example.org")))
+        .unwrap()
+        .rect();
+    assert!((row.left() - 1.0 - from.left()).abs() < 0.5 && (row.width() - 358.0).abs() < 0.5, "{row:?} under {from:?}");
+    assert!(row.top() > to.bottom(), "{row:?} under {to:?}");
     harness.key_press(Key::Escape);
     harness.run();
     let composer = harness.state().composer().unwrap();
@@ -967,6 +984,14 @@ fn hostile_drafts_hold_their_layout() {
     assert!(send.bottom() > screen.bottom() - 60.0, "and at its place: {send:?}");
     let text = rect_of(&harness, Role::MultilineTextInput, "Message text");
     assert!(text.top() < send.top(), "the text above the foot");
+    // The foot as its frames draw it whatever the draft holds: Send at the left in line with the text's box,
+    // Discard at the right.
+    assert!((send.left() - (text.left() - 17.0)).abs() < 1.0 && discard.left() > send.right(), "{send:?} {discard:?} {text:?}");
+    // The To line holds its 500 in four rows that scroll: the subject stays under it, in sight.
+    let subject = rect_of(&harness, Role::TextInput, "Subject");
+    let from = rect_of(&harness, Role::ComboBox, "From Mira Holloway <mira@example.org>");
+    assert!(subject.top() - from.bottom() < 4.0 * 24.0 + 3.0 * 4.0 + 12.0 + 6.0 + 2.0 + 8.0, "{subject:?} {from:?}");
+    assert!(screen.contains_rect(subject));
     assert_eq!(harness.state().composer().unwrap().chips(Line::To).len(), 500);
 }
 
@@ -1271,4 +1296,123 @@ fn the_from_menu_hangs_on_the_from_line_s_rule() {
     // The menu's top (its 1 px edge over the first row) on the hairline under the line: 6 under the value's box.
     assert!((first.top() - 1.0 - (from.bottom() + 6.0)).abs() < 0.5, "{first:?} under {from:?}");
     assert!((first.left() - 1.0 - from.left()).abs() < 0.5, "{first:?} under {from:?}");
+}
+
+/// The sample at 50 frames a second, its composer just opened from New message and drawn once: wiping in.
+fn wiping() -> Harness<'static, InboxApp> {
+    let mut harness = Harness::builder()
+        .with_size(vec2(1300.0, 820.0))
+        .with_max_steps(60)
+        .with_step_dt(0.02)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.step();
+    harness.step();
+    assert_eq!(scan_lines(&harness).len(), 1, "wiping in");
+    harness
+}
+
+#[test]
+fn a_pointer_press_during_the_wipe_ends_it_at_once() {
+    let mut harness = wiping();
+    let at = rect_of(&harness, Role::MultilineTextInput, "Message text").center();
+    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    harness.step();
+    assert!(scan_lines(&harness).is_empty(), "a press ends it");
+}
+
+#[test]
+fn the_wheel_during_the_wipe_ends_it_at_once() {
+    let mut harness = wiping();
+    let at = rect_of(&harness, Role::MultilineTextInput, "Message text").center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: vec2(0.0, -1.0),
+        modifiers: Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+    });
+    harness.step();
+    assert!(scan_lines(&harness).is_empty(), "the wheel ends it");
+}
+
+#[test]
+fn with_reduced_motion_the_composer_is_there_at_once() {
+    let mut harness = Harness::builder()
+        .with_size(vec2(1300.0, 820.0))
+        .with_max_steps(60)
+        .with_step_dt(0.02)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+    harness.run();
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::MOTION);
+    harness.run();
+    assert!(crate::motion::reduced(&harness.ctx), "motion reduced");
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.step();
+    harness.step();
+    assert!(scan_lines(&harness).is_empty(), "no wipe");
+    // Seen whole at once: Send takes it from the next frame on.
+    harness.ctx.memory_mut(|memory| memory.surrender_focus(super::compose::field_id(Line::To)));
+    assert!(crate::component::tests::rests(&mut harness, 2), "nothing moves");
+}
+
+#[test]
+fn control_characters_and_right_to_left_text_in_a_draft_hold_the_layout() {
+    // The window's fonts hold no Hebrew or Arabic: it draws a box for each, as the app does (the harness would panic).
+    let mut harness = Harness::builder()
+        .with_size(vec2(1300.0, 820.0))
+        .with_max_steps(12)
+        .allow_missing_glyphs()
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(sending_mailbox()));
+    harness.run();
+    let mailbox = harness.state_mut().mailbox_mut();
+    let id = mailbox.run_for_agent("compose.new", &json!({})).unwrap()["id"].as_u64().unwrap();
+    let subject = "\u{202e}gpj.exe\u{202c} \u{5e9}\u{5dc}\u{5d5}\u{5dd} \u{627}\u{644}\u{633}\u{644}\u{627}\u{645}\u{7}\u{1b}[31m\u{0}";
+    let text = "\u{5e9}\u{5dc}\u{5d5}\u{5dd}\u{200f} line\u{0}\u{7}\u{8}\u{1b}[2J\r\n\u{202e}reversed\u{2066}isolated\n\u{feff}\u{200b}".repeat(200);
+    let typed = ["\u{202e}odile@example.org\u{0}", "\u{5e9}\u{5dc}\u{5d5}\u{5dd}@example.org", "\u{7}\u{1b}"];
+    // The engine may refuse a subject with control characters; what it keeps is drawn.
+    let _ = mailbox.run_for_agent("compose.update", &json!({ "id": id, "subject": subject, "text": text, "typed": typed }));
+    let _ = mailbox.run_for_agent("compose.update", &json!({ "id": id, "text": text, "typed": typed }));
+    harness.state_mut().reopen(id);
+    harness.run();
+    let screen = harness.ctx.content_rect();
+    for (role, label) in [(Role::ComboBox, "From Mira Holloway <mira@example.org>"), (Role::Button, "Send"), (Role::Button, "Discard the draft")] {
+        let rect = rect_of(&harness, role, label);
+        assert!(screen.contains_rect(rect), "{label} stays in the window: {rect:?}");
+    }
+    // The head's title is cut inside its row, the Close button beside it.
+    let close = rect_of(&harness, Role::Button, "Close; the draft is kept");
+    assert!(screen.contains_rect(close));
+    assert!(harness.state().composer().unwrap().text().contains("reversed"), "the text opens whole");
+    harness.key_press(Key::Tab);
+    harness.run();
+}
+
+#[test]
+fn hundreds_of_recipients_in_cc_and_bcc_hold_the_layout() {
+    let mut harness = sending();
+    let mailbox = harness.state_mut().mailbox_mut();
+    let id = mailbox.run_for_agent("compose.new", &json!({})).unwrap()["id"].as_u64().unwrap();
+    let many = |line: &str| (0..500).map(|n| format!("{line}{n}@example.org")).collect::<Vec<String>>();
+    mailbox.run_for_agent("compose.update", &json!({ "id": id, "to": many("to"), "cc": many("cc"), "bcc": many("bcc"), "subject": "Plot" })).unwrap();
+    let clock = inboxcraft_time::SystemClock::new();
+    let started = inboxcraft_time::Clock::monotonic(&clock);
+    harness.state_mut().reopen(id);
+    harness.run();
+    assert!(inboxcraft_time::Clock::monotonic(&clock).saturating_sub(started) < std::time::Duration::from_secs(10));
+    let screen = harness.ctx.content_rect();
+    // Each line of 500 takes four rows of chips that scroll (4 × 24, 3 × 4 between, 6 above and below, a hairline):
+    // the subject stays in sight under the three, and the foot at its place.
+    let from = rect_of(&harness, Role::ComboBox, "From Mira Holloway <mira@example.org>");
+    let subject = rect_of(&harness, Role::TextInput, "Subject");
+    let line = 4.0 * 24.0 + 3.0 * 4.0 + 12.0 + 1.0;
+    assert!((subject.top() - (from.bottom() + 6.0 + 1.0 + 3.0 * line)).abs() < 1.0, "{subject:?} {from:?}");
+    assert!(screen.contains_rect(subject), "the subject in sight: {subject:?}");
+    let send = rect_of(&harness, Role::Button, "Send");
+    assert!(screen.contains_rect(send) && send.bottom() > screen.bottom() - 60.0, "{send:?}");
+    let composer = harness.state().composer().unwrap();
+    assert_eq!([Line::To, Line::Cc, Line::Bcc].map(|line| composer.chips(line).len()), [500, 500, 500]);
 }

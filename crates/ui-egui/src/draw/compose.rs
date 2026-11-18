@@ -806,8 +806,8 @@ pub(super) fn ease(t: f32) -> f32 {
 }
 
 /// How far the wipe of `id` has come, 0 to 1 over [`WIPE`] from the first frame it was drawn in (a frame missed
-/// starts it again), not eased; 1 with reduced motion. A key, typing or a press during it ends it at once: the owner
-/// never waits. A repaint is asked for while it runs.
+/// starts it again), not eased; 1 with reduced motion. A key, typing, a press or the wheel during it ends it at once:
+/// the owner never waits. A repaint is asked for while it runs.
 fn wiped(ctx: &egui::Context, id: Id) -> f32 {
     if crate::motion::reduced(ctx) {
         return 1.0;
@@ -822,6 +822,7 @@ fn wiped(ctx: &egui::Context, id: Id) -> f32 {
                     | egui::Event::Text(_)
                     | egui::Event::Paste(_)
                     | egui::Event::PointerButton { pressed: true, .. }
+                    | egui::Event::MouseWheel { .. }
             )
         })
     });
