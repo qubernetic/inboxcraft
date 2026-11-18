@@ -927,7 +927,8 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
                 };
                 let response = if scrolls {
                     let area = ScrollArea::vertical().id_salt(id.with("scroll")).max_height(inside.height()).auto_shrink([false, false]);
-                    scroll::show(ui, theme, area, |ui| {
+                    // The thumb keeps 4 from the strip's ends, as the field's board draws it.
+                    scroll::show_with_ends(ui, theme, area, s.s1, |ui| {
                         ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_x_y_ranges(inside.x_range(), view.y_range())));
                         edit(ui)
                     })

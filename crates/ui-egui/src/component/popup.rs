@@ -47,6 +47,9 @@ const BAR: f32 = 2.0;
 /// The width and length of a float's scroll thumb, in points.
 const THUMB: [f32; 2] = [2.0, 40.0];
 
+/// How far the thin thumb keeps from the list's top and bottom: 6, the board's and the sheet's.
+const THUMB_ENDS: f32 = 6.0;
+
 /// A float a control opens: where, how wide, and who gets the keyboard back.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Float {
@@ -194,7 +197,7 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
             // Its rows scroll once it would be taller than the window: it was as tall as the room last frame.
             if size.y >= room.y - 0.5 {
                 let area = ScrollArea::vertical().id_salt(float.id.with("rows")).max_height(room.y - 2.0);
-                super::scroll::show_thin(ui, theme, area, THUMB, BAR, add).inner
+                super::scroll::show_thin(ui, theme, area, THUMB, [BAR, THUMB_ENDS], add).inner
             } else {
                 ui.set_max_height(room.y - 2.0);
                 add(ui)
@@ -309,7 +312,7 @@ pub fn empty(ui: &mut Ui, theme: &Theme, text: &str) {
 pub fn scrolled<R>(ui: &mut Ui, theme: &Theme, id: Id, most: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let most = if most.is_finite() { most.max(theme.boxes().menu_row) } else { theme.boxes().menu_row };
     let area = ScrollArea::vertical().id_salt(id).max_height(most);
-    super::scroll::show_thin(ui, theme, area, THUMB, BAR, add).inner
+    super::scroll::show_thin(ui, theme, area, THUMB, [BAR, THUMB_ENDS], add).inner
 }
 
 /// The state of a menu row, as its sheet names it.

@@ -261,8 +261,10 @@ fn a_float_looks_as_its_sheet_says_in_every_state() {
                     let label = crate::component::field::tests::one(&harness, "MOVE TO");
                     assert_eq!((label.rect.min, label.colour), (pos2(33.0, 63.0), p.muted), "{at}");
                     assert!(
-                        found.iter().any(|(rect, fill, _)| rect.left() == 255.0 && rect.width() == 2.0 && rect.height() == 40.0 && *fill == p.muted),
-                        "{at}: the thumb"
+                        found
+                            .iter()
+                            .any(|(rect, fill, _)| *rect == egui::Rect::from_min_size(pos2(255.0, 92.0), egui::vec2(2.0, 40.0)) && *fill == p.muted),
+                        "{at}: the thumb, 6 in from the list's top as the board has it"
                     );
                     assert_eq!(harness.get_all_by_label("Archive").next().map(|row| row.rect().top()), Some(86.0), "{at}");
                 }

@@ -716,6 +716,10 @@ fn marks_of_a_multiline_field(mode: Mode, state: Many, rect: Rect, paint: &crate
         paint.rects().find(|shape| matches!(shape.look, Look::Rect { fill, .. } if fill == p.muted) && (shape.rect.width() - 4.0).abs() < 0.01);
     if matches!(state, Many::Scrolling | Many::ScrollingFocus) {
         let thumb = thumb.map(|shape| shape.rect);
+        if state == Many::Scrolling {
+            // At the top: the board's thumb 4 clear of the strip's top (5 in the box), 148 long.
+            assert_eq!(thumb, Some(Rect::from_min_size(rect.min + vec2(311.0, 5.0), vec2(4.0, 148.0))), "{at}");
+        }
         assert!(
             thumb
                 .is_some_and(|thumb| thumb.left() == rect.left() + 311.0 && thumb.top() >= rect.top() + 1.0 && thumb.bottom() <= rect.bottom() - 1.0),
