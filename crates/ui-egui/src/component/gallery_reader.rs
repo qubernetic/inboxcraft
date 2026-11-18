@@ -114,6 +114,23 @@ fn thread_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// The quote fold's board: folded, open and hover, 560 wide, with the design board's words.
+fn quote_folds(ui: &mut Ui, theme: &Theme) {
+    use super::quote_fold::quote_fold_with;
+    title(ui, theme, tr!("Quote fold"));
+    let said = "On Mon 16 Nov 2026 at 14:02, Teodor Vasquez wrote:";
+    let quoted = "Hi Odile, two directions attached. The first is close to the sign they have now. The second keeps the colours and \
+                  changes the type.";
+    for (state, open, shown) in [(tr!("folded"), false, Shown::Rest), (tr!("open"), true, Shown::Rest), (tr!("hover"), false, Shown::Hover)] {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                ui.set_width(560.0);
+                quote_fold_with(ui, theme, 14, open, Some(said), quoted, Some(shown));
+            });
+        });
+    }
+}
+
 /// The left column.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     why_lines(ui, theme, keymap);
@@ -121,6 +138,8 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     content_bars(ui, theme, keymap);
     ui.add_space(BOARD_GAP);
     thread_rows(ui, theme, keymap);
+    ui.add_space(BOARD_GAP);
+    quote_folds(ui, theme);
 }
 
 /// The middle column.

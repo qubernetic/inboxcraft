@@ -54,6 +54,7 @@ pub mod label;
 pub mod pill;
 pub mod popup;
 pub mod progress;
+pub mod quote_fold;
 pub mod recipient;
 pub mod row;
 pub mod scroll;
