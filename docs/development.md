@@ -28,7 +28,8 @@ just --list       # every recipe
 ```
 
 Other recipes: `test` (nextest; extra arguments go to it), `lint`, `fmt`, `fmt-check`, `deny`, `cov`, `layers`,
-`wasm`, `shot` (the `ui_shot` pictures of the sample window, see `docs/design.md`), `side-by-side` (each of
+`wasm`, `shot` (the `ui_shot` pictures of the sample window, see `docs/design.md`; `cargo xtask shots --fix`
+writes every picture of `shots.jsonl` and `--check` says which ones the code no longer draws), `side-by-side` (each of
 those pictures beside its mood sketch, see `docs/design.md`, "Pictures"), `icon` (exports the app icon),
 `flatpak-sources` and `flatpak-sources-check`, `shell`, `dev`, `down`, `rebuild`, `clean` (removes the cargo
 volumes and `target/`), on the host `flatpak` (see "The dev Flatpak") and, for the owner only, `it-live` (see "Live
@@ -143,13 +144,14 @@ AccessKit; see the example's own doc).
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|
-| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `changes`, `layers`, `flatpak-sources-check`, doctests, `cov --check` (the one test run, nextest profile `ci`, `.config/nextest.toml`), `wasm`, `cargo deny check`, `stats` |
+| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `changes`, `layers`, `flatpak-sources-check`, doctests, `cov --check` (the one test run, nextest profile `ci`, `.config/nextest.toml`), `wasm`, `cargo deny check`, `shots --check`, `stats` |
 | `cargo xtask spdx` | every `.rs` file starts with a `// SPDX-FileCopyrightText:` line and `// SPDX-License-Identifier:` with the workspace licence; `--fix` adds what is missing, a file under another licence is reported and never changed |
 | `cargo xtask test-files` | no inline test module (`mod tests { ... }`, `mod <name>_tests { ... }`, or any module with a body under `#[cfg(test)]`) outside test files |
 | `cargo xtask cov` | line coverage per crate and for the workspace under `cargo llvm-cov nextest` (profile `ci`), the report in `lcov.info`; `--check` fails below the floors in `.config/coverage.toml` (see "The coverage gate") |
 | `cargo xtask assets` | every asset file (picture, icon, font or sound by extension, or anything under `assets/`) has a row in `ATTRIBUTION.md`; `<name>` in a row path stands for one or more characters within one directory; and the files under the folders of `.config/assets.toml` match their pinned sha256 (see "Pinned asset files") |
 | `cargo xtask changes` | every change fragment in `changes/` is well formed (see "Change fragments"); `--fold` writes them into the documents and deletes them, and is not part of `ci` |
 | `cargo xtask layers` | the layering rules below, from the table in `xtask/src/layers.rs` |
+| `cargo xtask shots` | every scene of `crates/ui-egui/shots.jsonl`, drawn by `ui_shot` as `just shot` runs it (into `shots/` under the target directory, `ui_shot --out-dir`), equals its committed picture byte for byte; fails naming the scene on a picture that differs, a scene without a picture, two scenes that write one picture, and a PNG in a folder of the pictures that no scene writes; `--check` is the default, `--fix` writes the renders over the pictures and deletes those of no scene. The render is deterministic, so there is no tolerance. About 25 s in the dev container with a warm build (22 to 32 s measured) |
 | `cargo xtask flatpak-sources-check` | `contrib/flatpak/cargo-sources.json` is what `Cargo.lock` gives (see "The dev Flatpak"); `cargo xtask flatpak-sources` writes it |
 | `cargo xtask wasm` | the standalone and layer 0 to 5 crates, all but `net`, build for `wasm32-unknown-unknown` (one `cargo build`) |
 | `cargo xtask stats` | Rust files, code lines and test lines (not blank) per crate, and a total; it only reports |

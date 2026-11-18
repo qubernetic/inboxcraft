@@ -81,8 +81,9 @@ invented.
 ## Quality gates
 - Before every commit: `just ci` (= `cargo xtask ci` in the container, natively with `AGENT_HORDE=1`; see
   `docs/development.md`): fmt, clippy `-D warnings`, tests, doctests, assets, changes, spdx, test-files,
-  layers, flatpak-sources-check, wasm, deny, and the coverage floors in `.config/coverage.toml`
-  (`cargo xtask cov --check`).
+  layers, flatpak-sources-check, wasm, deny, shots (every committed picture of `shots.jsonl` is what the code
+  draws, byte for byte; `cargo xtask shots --fix` writes them), and the coverage floors in
+  `.config/coverage.toml` (`cargo xtask cov --check`).
 - The dev Flatpak keeps building: a `Cargo.lock` change commits the output of `just flatpak-sources` with it, and a
   new permission goes into the manifest's `finish-args` with its reason in a comment above it
   (`contrib/flatpak/`).
