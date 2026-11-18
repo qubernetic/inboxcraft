@@ -822,7 +822,7 @@ fn after_done_the_reader_shows_nothing_open() {
     assert!(harness.query_by_role_and_label(Role::Button, "Reply").is_none());
     // The bare empty state, its lines centred in the reader's pane.
     let label = harness.get_by_label("Pick a message.\nIt opens here.").rect();
-    // The help in the frame's words, with the keys the owner has.
+    // The help says how a message opens from here: the arrows (the lists' J, K and Enter come with them).
     fn texts(shape: &egui::Shape, found: &mut String) {
         match shape {
             egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, found)),
@@ -832,7 +832,7 @@ fn after_done_the_reader_shows_nothing_open() {
     }
     let mut painted = String::new();
     harness.output().shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut painted));
-    assert!(painted.contains("J and K move in the list, Enter opens"), "{painted}");
+    assert!(painted.contains("The arrow keys move in the list and open"), "{painted}");
     assert!(painted.contains("Ctrl K runs any"), "{painted}");
     let pane_middle = (pane.0 + pane.1) / 2.0;
     assert!((label.center().x - pane_middle).abs() <= 1.0, "in the middle of the reader's pane: {label:?} {pane:?}");
@@ -902,20 +902,21 @@ fn after_a_second_done_no_message_opens_by_itself() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
     done(&mut harness);
-    // J opens the message the rule names, Done on it, and still nothing opens.
-    harness.key_press(Key::J);
-    settle(&mut harness);
-    assert!(harness.state().reader().open_id().is_some(), "J opens a row");
-    done(&mut harness);
-    assert!(!any_selected(&harness));
-    // The arrows open a row too.
+    // The down arrow opens a row, Done on it, and still nothing opens.
     harness.key_press(Key::ArrowDown);
     settle(&mut harness);
     assert!(harness.state().reader().open_id().is_some(), "the down arrow opens a row");
     done(&mut harness);
-    harness.key_press(Key::K);
+    assert!(!any_selected(&harness));
+    // The message the rule names opens from the palette's command, and again Done leaves nothing open.
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::OPEN_HELD);
     settle(&mut harness);
-    assert!(harness.state().reader().open_id().is_some(), "K opens a row");
+    assert!(harness.state().reader().open_id().is_some(), "the rule's message opens");
+    done(&mut harness);
+    harness.key_press(Key::ArrowDown);
+    settle(&mut harness);
+    assert!(harness.state().reader().open_id().is_some(), "the down arrow opens a row again");
     done(&mut harness);
     harness.key_press(Key::ArrowUp);
     settle(&mut harness);
@@ -925,7 +926,8 @@ fn after_a_second_done_no_message_opens_by_itself() {
 #[test]
 fn the_next_message_rule_names_what_a_key_opens_after_a_message_left() {
     for after in [After::Next, After::Previous] {
-        for key in [Key::Enter, Key::J, Key::ArrowDown, Key::K, Key::ArrowUp] {
+        // `None`: the command that opens the message the rule names (the lists' Enter, once they land).
+        for key in [None, Some(Key::ArrowDown), Some(Key::ArrowUp)] {
             let fetch = Recorder::default();
             let mut harness = opened(&fetch, None, "Photos from the coast walk");
             let list = subjects(&harness);
@@ -935,11 +937,18 @@ fn the_next_message_rule_names_what_a_key_opens_after_a_message_left() {
             harness.state_mut().mailbox_mut().set_after(after);
             done(&mut harness);
             let wanted = match (key, after) {
-                // Enter opens the message the rule names: the next one, or the one before.
-                (Key::Enter, After::Next) | (Key::J | Key::ArrowDown, _) => &behind,
+                // The command opens the message the rule names: the next one, or the one before; the arrows open the
+                // row each side of the gap.
+                (None, After::Next) | (Some(Key::ArrowDown), _) => &behind,
                 _ => &before,
             };
-            harness.key_press(key);
+            match key {
+                Some(key) => harness.key_press(key),
+                None => {
+                    let ctx = harness.ctx.clone();
+                    harness.state_mut().run_action(&ctx, crate::keymap::OPEN_HELD);
+                }
+            }
             settle(&mut harness);
             assert_eq!(open_subject(&harness).as_deref(), Some(wanted.as_str()), "{after:?} {key:?}");
         }

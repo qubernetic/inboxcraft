@@ -131,7 +131,8 @@ pub struct InboxApp {
     textures: reader::Textures,
     hover: Option<String>,
     /// The row the next-message rule names when the open message left the list, and the rule: the reader shows nothing
-    /// open and the list selects no row until the owner opens a message; a key starts from it.
+    /// open and the list selects no row until the owner opens a message; an arrow starts from it, and "Open the message
+    /// the rule names" opens it.
     held_back: Option<Held>,
     search: String,
     /// The appearance installed in the context, once installed.
@@ -480,8 +481,7 @@ impl InboxApp {
             keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => self.row_act(id).is_some(),
             keymap::UNDO => self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
-            keymap::NEXT | keymap::PREVIOUS => self.screen == Screen::Mail && !self.docked(),
-            keymap::OPEN => self.screen == Screen::Mail && !self.docked() && self.held_back.is_some(),
+            keymap::OPEN_HELD => self.screen == Screen::Mail && !self.docked() && self.held_back.is_some(),
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             keymap::SEND => self.docked(),
@@ -525,9 +525,7 @@ impl InboxApp {
                 self.search.clear();
             }
             keymap::SNOOZE => self.open_picker(""),
-            keymap::NEXT => self.step_list(true),
-            keymap::PREVIOUS => self.step_list(false),
-            keymap::OPEN => {
+            keymap::OPEN_HELD => {
                 if let Some(held) = self.held_back.take() {
                     self.mailbox.select(Some(held.pick));
                 }

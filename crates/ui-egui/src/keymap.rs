@@ -84,14 +84,9 @@ pub const COMPOSE: &str = "ui.compose.new";
 /// Send the message being written (`mail.send`).
 pub const SEND: &str = "ui.compose.send";
 
-/// Open the row below in the list (the down arrow does too); after the open message left, the row that followed it.
-pub const NEXT: &str = "ui.list.next";
-
-/// Open the row above in the list (the up arrow does too); after the open message left, the row before it.
-pub const PREVIOUS: &str = "ui.list.previous";
-
-/// After the open message left the list, open the message the next-message rule names.
-pub const OPEN: &str = "ui.list.open";
+/// After the open message left the list, open the message the next-message rule names (the next or the previous
+/// one). No key of its own: the palette runs it.
+pub const OPEN_HELD: &str = "ui.reader.open_held";
 
 /// The longest key text read, in bytes; `Command+Shift+Alt+ArrowRight` takes 28.
 pub const MAX_TEXT: usize = 64;
@@ -120,9 +115,7 @@ pub fn actions() -> Vec<Action> {
         action(COMPOSE, tr!("New message"), IconId::Compose),
         action(SEND, tr!("Send the message"), IconId::Send),
         action(CALENDAR, tr!("Show the calendar"), IconId::Calendar),
-        action(NEXT, tr!("Next message"), IconId::Mail),
-        action(PREVIOUS, tr!("Previous message"), IconId::Mail),
-        action(OPEN, tr!("Open the message"), IconId::Mail),
+        action(OPEN_HELD, tr!("Open the message the rule names"), IconId::Mail),
         action(DONE, tr!("Done"), IconId::Done),
         action(ARCHIVE, tr!("Archive"), IconId::Archive),
         action(SNOOZE, tr!("Snooze or remind me"), IconId::Snooze),
@@ -225,9 +218,6 @@ impl Default for Keymap {
         keymap.bind(FIND, KeyboardShortcut::new(Modifiers::COMMAND, Key::F));
         keymap.bind(MAIL, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num1));
         keymap.bind(SETTINGS, KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma));
-        keymap.bind(NEXT, KeyboardShortcut::new(Modifiers::NONE, Key::J));
-        keymap.bind(PREVIOUS, KeyboardShortcut::new(Modifiers::NONE, Key::K));
-        keymap.bind(OPEN, KeyboardShortcut::new(Modifiers::NONE, Key::Enter));
         keymap.bind(DONE, KeyboardShortcut::new(Modifiers::NONE, Key::D));
         keymap.bind(ARCHIVE, KeyboardShortcut::new(Modifiers::NONE, Key::A));
         keymap.bind(SNOOZE, KeyboardShortcut::new(Modifiers::NONE, Key::H));
