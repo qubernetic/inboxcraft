@@ -295,6 +295,29 @@ pub(super) fn blocks(
     true
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The cap a test sets in place of [`KEPT_GLYPHS`] (egui_kittest draws on the test's own thread).
+    static CAP: std::cell::Cell<usize> = const { std::cell::Cell::new(KEPT_GLYPHS) };
+}
+
+/// The most letters the kept layouts hold together: [`KEPT_GLYPHS`], or in a test the cap it set.
+fn cap() -> usize {
+    #[cfg(test)]
+    return CAP.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    KEPT_GLYPHS
+}
+
+/// Runs `run` with the kept layouts capped at `cap` letters, then sets the cap back.
+#[cfg(test)]
+pub(crate) fn with_cap<T>(cap: usize, run: impl FnOnce() -> T) -> T {
+    let before = CAP.with(|kept| kept.replace(cap));
+    let out = run();
+    CAP.with(|kept| kept.set(before));
+    out
+}
+
 /// The layouts kept, the ones refused, the galley that shows whether egui built its font atlas afresh since they were
 /// made, and how many layouts were made.
 #[derive(Default)]
@@ -358,7 +381,7 @@ fn kept(ui: &Ui, probe: Arc<Galley>, who: u64, key: u64, make: impl FnOnce() -> 
     // Refused before: still plain while it would not fit beside what is kept, and not laid out again to see.
     if let Some(refusal) = refused.iter_mut().find(|refusal| refusal.who == who && refusal.key == key) {
         refusal.pass = pass;
-        if refusal.glyphs.saturating_add(total) > KEPT_GLYPHS {
+        if refusal.glyphs.saturating_add(total) > cap() {
             return None;
         }
     }
@@ -369,7 +392,7 @@ fn kept(ui: &Ui, probe: Arc<Galley>, who: u64, key: u64, make: impl FnOnce() -> 
     *made = made.saturating_add(1);
     let count = glyphs(&laid);
     let total = keeps.iter().map(|keep| keep.glyphs).fold(count, usize::saturating_add);
-    if total > KEPT_GLYPHS {
+    if total > cap() {
         refused.push(Refused { who, key, pass, glyphs: count });
         return None;
     }

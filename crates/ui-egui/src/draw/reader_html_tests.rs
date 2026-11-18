@@ -508,6 +508,31 @@ fn the_plain_view_is_set_in_mono() {
 }
 
 #[test]
+fn a_message_that_does_not_fit_beside_the_kept_layouts_is_shown_plain_and_says_why() {
+    // With the kept layouts capped at one letter, no fitted message fits: the reader shows it plain, under a notice.
+    let harness = super::reader::with_cap(1, || {
+        let mut harness = opened(None, "Your bike is due for a service");
+        harness.run();
+        harness
+    });
+    harness.get_by_label("This message is shown as plain text: the reader holds as much fitted text as it keeps.");
+    assert!(harness.query_by_label("Time for a check-up").is_none(), "the fitted heading is not drawn");
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let mut sizes = Vec::new();
+    fn walk(shape: &Shape, sizes: &mut Vec<f32>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, sizes)),
+            Shape::Text(text) if text.galley.text().contains("Book a slot") => {
+                sizes.extend(text.galley.job.sections.iter().map(|section| section.format.font_id.size));
+            }
+            _ => {}
+        }
+    }
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut sizes));
+    assert!(sizes.contains(&theme.fonts.mono.size) && !sizes.contains(&theme.fonts.read.size), "{sizes:?}");
+}
+
+#[test]
 fn a_message_s_headings_are_set_as_the_frames_set_them() {
     // The frames set a message's heading in Plex Sans SemiBold 22/29 and a deeper one as `strong`, 14/22.
     let harness = fitted(display("<h1>Thank you, Odile.</h1><h2>Your order</h2><h3>Delivery</h3>"), false, 640.0, 400.0);

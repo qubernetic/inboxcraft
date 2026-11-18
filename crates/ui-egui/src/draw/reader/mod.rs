@@ -59,6 +59,8 @@ use body::bounced;
 #[cfg(test)]
 pub(super) use body::{blocks, column_widths};
 pub(crate) use fitted::board as fitted_board;
+#[cfg(test)]
+pub(super) use fitted::with_cap;
 pub(super) use head::{more_menu, move_menu, picker_id, picker_popup};
 use head::{screening, sender_header};
 use thread::{answers, folded, message};
