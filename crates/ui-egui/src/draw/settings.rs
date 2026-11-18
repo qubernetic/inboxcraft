@@ -21,7 +21,7 @@
 
 use egui::{Align, Area, Id, LayerId, Layout, Order, Rect, Response, Role, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use inboxcraft_engine::ScreenerMode;
-use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
 
 use super::paint::{Ring, focus_ring};
@@ -416,11 +416,8 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool, vi
         let level = if reduce { MotionLevel::Off } else { MotionLevel::Reduced };
         let said =
             if reduce { tr!("Off: every change happens at once.") } else { tr!("Reduced keeps what explains a change and drops the text effects.") };
-        let motion_help = if current.motion == Motion::System {
-            tr!("{level} Until you choose, motion follows the computer where InboxCraft can read it.", level = said)
-        } else {
-            said.to_owned()
-        };
+        // The second sentence stands whether or not the owner chose, as the design's help has it.
+        let motion_help = tr!("{level} Until you choose, the computer's reduce-motion setting gives Off.", level = said);
         settings_row(ui, theme, tr!("Motion"), Some(&motion_help), |ui| {
             // Full, the first option, is planned: the coming-soon mark stands just before it (the row's control room
             // runs right to left).

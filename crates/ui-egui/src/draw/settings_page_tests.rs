@@ -553,3 +553,11 @@ fn the_privacy_page_says_its_words_as_the_design_has_them() {
         "The senders whose remote pictures load without asking. “ask again” takes one off the list: its pictures are held again, in every message.",
     );
 }
+
+#[test]
+fn the_motion_row_says_what_the_computer_gives_until_the_owner_chooses() {
+    let harness = opened();
+    // `settings-appearance/default`: the help in two sentences, the row 84 high.
+    let help = "Reduced keeps what explains a change and drops the text effects. Until you choose, the computer's reduce-motion setting gives Off.";
+    harness.get_by_label_contains(help);
+}
