@@ -80,10 +80,10 @@ pub(super) struct Header {
 /// the next card they are than the header's margin keeps them.
 const PILL_PULL: i8 = 4;
 
-/// The view switch of the unified inbox, as the design file words and orders it: "Grouped" is the one list under
-/// headings ([`InboxView::Grouped`]), beside the simple list and the cards.
+/// The view switch of the unified inbox, as the design file words and orders it: Grouped, Smart, List ([`InboxView::ALL`]'s
+/// order; the arrows walk it so). "Grouped" is the one list under headings ([`InboxView::Grouped`]).
 fn view_switch() -> [(InboxView, &'static str); 3] {
-    [(InboxView::Grouped, tr!("Grouped")), (InboxView::List, InboxView::List.text()), (InboxView::Smart, InboxView::Smart.text())]
+    [(InboxView::Grouped, tr!("Grouped")), (InboxView::Smart, InboxView::Smart.text()), (InboxView::List, InboxView::List.text())]
 }
 
 /// The pills under the header: the piles in "Later"; elsewhere "Show done" and the park pile, after the view switch

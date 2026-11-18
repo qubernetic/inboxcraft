@@ -565,6 +565,28 @@ fn the_view_switch_changes_the_view() {
 }
 
 #[test]
+fn the_view_switch_reads_grouped_smart_list_as_the_design_file_orders_it() {
+    let mut harness = harness(true);
+    let left = |harness: &Harness<'static, InboxApp>, name: &str| {
+        harness.get_by_role_and_label(Role::RadioButton, &format!("{name} for the inbox")).rect().left()
+    };
+    let lefts = ["Grouped", "Smart", "List"].map(|name| left(&harness, name));
+    assert!(lefts[0] < lefts[1] && lefts[1] < lefts[2], "Grouped, Smart, List: {lefts:?}");
+    // The arrows walk the views as they are drawn.
+    harness.get_by_role_and_label(Role::RadioButton, "Grouped for the inbox").click();
+    harness.run();
+    harness.get_by_role_and_label(Role::RadioGroup, "the inbox").focus();
+    harness.run();
+    let mut walked = Vec::new();
+    for _ in 0..2 {
+        harness.key_press(Key::ArrowRight);
+        harness.run();
+        walked.push(harness.state().mailbox().inbox_view());
+    }
+    assert_eq!(walked, [InboxView::Smart, InboxView::List]);
+}
+
+#[test]
 fn the_view_switch_stays_beside_an_open_message() {
     let mut harness = harness(true);
     harness.get_by_label(ODILE).click();
