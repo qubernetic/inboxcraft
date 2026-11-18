@@ -133,3 +133,25 @@ fn a_hostile_list_address_stays_inside_the_bar_and_is_heard_whole() {
     assert!(matches!(&run.look, Look::Text { text, .. } if text.ends_with('…')), "{run:?}");
     assert!(run.rect.right() < harness.get_by_label("unsubscribe").rect().left() && run.rect.left() > rect.left(), "{run:?}");
 }
+
+#[test]
+fn in_a_narrow_bar_the_browser_s_link_gives_way_and_nothing_lies_over_another() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(420.0 + 48.0, 100.0),
+        move |ui, theme| {
+            ui.set_width(420.0);
+            let bar = ContentBar { kind: BarKind::Html, view: View::Fitted, views: false, held: "nothing held back", waiting: false, links: &[] };
+            content_bar(ui, theme, &Keymap::default(), &bar);
+        },
+    );
+    assert_eq!(harness.query_all_by_label("open in browser ↗").count(), 0);
+    let group = harness.get_by_role(egui::accesskit::Role::RadioGroup).rect();
+    let label = spoken(BarKind::Html, "nothing held back");
+    let paint = painted(&harness, &label);
+    let words = paint.shapes.iter().find(|shape| matches!(&shape.look, Look::Text { text, .. } if text.starts_with("nothing")));
+    let words = words.unwrap_or_else(|| panic!("{paint:#?}"));
+    assert!(words.rect.left() >= group.right() + 12.0 - 1.0, "{words:?} {group:?}");
+}

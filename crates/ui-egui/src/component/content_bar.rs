@@ -77,6 +77,9 @@ const PAD: f32 = 12.0;
 /// The room between two links, in points.
 const LINK_GAP: f32 = 10.0;
 
+/// The least room the words keep before the browser's link gives way, in points.
+const LEAST_WORDS: f32 = 48.0;
+
 /// The tag's word for `kind`, as the sheet writes it.
 fn word(kind: BarKind) -> &'static str {
     match kind {
@@ -125,11 +128,14 @@ pub fn content_bar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, bar: &ContentBar
     let small = |text: &str| super::galley(ui, text, f.mono_s, p.muted).size().x.ceil();
     let browser = tr!("open in browser ↗");
     let soon_width = small(tr!("coming soon")) + 12.0;
-    let end = if plain { 0.0 } else { soon_width + PAD + small(browser) + PAD };
     let links: Vec<(String, &BannerLink<'_>)> = bar.links.iter().map(|link| (super::spoken(link.name), link)).collect();
     let links_width = links.iter().map(|(name, _)| small(name)).sum::<f32>() + LINK_GAP * links.len().saturating_sub(1) as f32;
     let links_room = if links.is_empty() { 0.0 } else { links_width + PAD };
     let words_left = child.cursor().left();
+    // The browser's link and its tag give way first in a narrow bar, so nothing lies over another.
+    let wanted = soon_width + PAD + small(browser) + PAD;
+    let browsing = !plain && inner.right() - wanted - links_room >= words_left + LEAST_WORDS;
+    let end = if browsing { wanted } else { 0.0 };
     let words_right = (inner.right() - end - links_room).max(words_left + 1.0);
     let room = words_right - words_left;
     let ink = if bar.waiting { p.warn } else { p.muted };
@@ -158,7 +164,7 @@ pub fn content_bar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, bar: &ContentBar
             asked.link = Some(link.id.to_owned());
         }
     }
-    if !plain {
+    if browsing {
         let end_rect = Rect::from_min_max(pos2(inner.right() - end + PAD, rect.top()), pos2(inner.right(), rect.bottom()));
         let mut tail = ui.new_child(UiBuilder::new().max_rect(end_rect).layout(Layout::left_to_right(Align::Center)));
         tail.spacing_mut().item_spacing.x = PAD;
