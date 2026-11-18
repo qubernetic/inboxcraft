@@ -1602,3 +1602,25 @@ fn at_every_width_the_foot_s_controls_stand_apart_inside_the_composer_and_a_pres
         }
     }
 }
+
+/// No window of the app (720 at least) leaves the docked composer narrower than its least width; one 280 wide does,
+/// standing in for a composer too narrow for Send, its caret and Discard: Discard gives way, nothing leaves the
+/// composer, and Send still sends.
+#[test]
+fn in_a_composer_too_narrow_for_discard_discard_gives_way_and_send_still_sends() {
+    let mut harness = composing_at(280.0, 100);
+    let composer = super::compose::drawn_rect(&harness.ctx).unwrap();
+    assert!(composer.width() < 216.0, "narrower than its least: {composer:?}");
+    let send = rect_of(&harness, Role::Button, "Send");
+    let later = rect_of(&harness, Role::Button, "Send later");
+    assert!(composer.contains_rect(send) && composer.contains_rect(later) && !send.intersects(later), "{send:?} {later:?} in {composer:?}");
+    let discard = harness.query_by_label("Discard the draft").map(|node| node.rect());
+    assert!(discard.is_none_or(|discard| composer.contains_rect(discard) && !discard.intersects(later)), "Discard {discard:?} in {composer:?}");
+    assert!(discard.is_none(), "Discard gave way");
+    let at = send.center();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+    assert!(harness.state().composer().is_none(), "sent");
+}
