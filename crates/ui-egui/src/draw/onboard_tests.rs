@@ -464,6 +464,7 @@ fn the_typed_form_outlasts_every_way_out_of_the_sheet() {
         }
         harness.run();
         assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "{way}: the form is left");
+        assert!(harness.state().onboarding().form().password.is_empty(), "{way}: the parked form holds no password");
         if way == "palette" {
             assert!(!harness.state().settings().is_open(), "the palette closed the sheet");
             harness.key_press(Key::Escape);
@@ -476,7 +477,7 @@ fn the_typed_form_outlasts_every_way_out_of_the_sheet() {
         let onboarding = harness.state().onboarding();
         assert_eq!(onboarding.stage(), Stage::Form, "{way}");
         assert_eq!(onboarding.form().address, "carol@example.org", "{way}: the address as typed");
-        assert!(!onboarding.form().password.is_empty(), "{way}: the password as typed, in memory only");
+        assert!(onboarding.form().password.is_empty(), "{way}: the password is dropped on the way out and typed again");
         // Cancel on the form itself lets it go: the next form is empty.
         harness.state_mut().onboarding_mut().0.close();
         harness.state_mut().onboarding_mut().0.open();

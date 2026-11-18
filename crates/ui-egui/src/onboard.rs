@@ -677,13 +677,15 @@ impl Onboarding {
         self.stage = Stage::Form;
     }
 
-    /// Leaves the form as it is typed, password included (in memory only), on a way out of the settings sheet: Add
+    /// Leaves the form as it is typed, all but the password, on a way out of the settings sheet: Add
     /// account, or any account's row, brings it back ([`Onboarding::open`], [`Onboarding::edit`]). A check that
     /// runs or ran is closed as [`Onboarding::close`] closes it.
     pub fn park(&mut self) {
         match self.stage {
             Stage::Form | Stage::Edit(_) => {
                 self.parked = Some(self.stage);
+                // The password is not kept past the form: it is typed again when the form comes back.
+                self.form.password.clear();
                 self.detecting = false;
                 self.stage = Stage::Closed;
             }
