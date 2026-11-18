@@ -93,7 +93,7 @@ try:
 - the appearance settings (the gear on the rail, Ctrl+Comma): mode, window frame, text scale and reduced
   motion, kept in `inboxcraft/appearance.json` in the owner's config folder as in the normal window.
 - the composer (New message in the folder pane, or C): recipients as chips with suggestions from the sample's people,
-  a signature from the Sending page, the draft kept at every change; Close keeps it, Discard removes it. Send is
+  a signature from the Sending page, the draft kept as it is typed (at most once a second while typing); Close keeps it, Discard removes it. Send is
   refused, with the reason in the error banner: the sample's accounts have no submission server, so the outbox, the
   countdown toast of Undo send and Schedule show only with an account that can send (`ui_shot`'s `"outbox"` pictures
   them); "Undo send" on the Sending page sets the hold all the same. Reply, Reply all

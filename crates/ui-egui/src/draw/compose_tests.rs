@@ -610,3 +610,92 @@ fn send_refuses_typed_text_in_a_line_not_drawn_and_shows_the_line() {
     assert!(error.contains("Bcc"), "and Send says why: {error}");
     assert!(harness.query_all_by_label_contains(&error).next().is_some(), "in view");
 }
+
+/// The harness with the composer open over `mailbox`, a frame every 60th of a second as a window runs.
+fn composing_over(mailbox: Mailbox) -> Harness<'static, InboxApp> {
+    let mut harness = Harness::builder()
+        .with_size(vec2(1300.0, 820.0))
+        .with_max_steps(12)
+        .with_step_dt(1.0 / 60.0)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    harness
+}
+
+/// Types `text` into the message text a character a frame, the field keeping the keys.
+fn typed_by_frames(harness: &mut Harness<'static, InboxApp>, text: &str) {
+    harness.get_by_role_and_label(Role::MultilineTextInput, "Message text").focus();
+    harness.run();
+    for c in text.chars() {
+        harness.get_by_role_and_label(Role::MultilineTextInput, "Message text").type_text(&c.to_string());
+        harness.step();
+    }
+}
+
+fn text_of(harness: &Harness<'static, InboxApp>) -> String {
+    harness.state().composer().map(|composer| composer.text().to_owned()).unwrap_or_default()
+}
+
+#[test]
+fn typing_keeps_the_draft_at_most_once_a_second() {
+    let mut harness = composing_over(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let id = harness.state().composer().unwrap().draft();
+    let before = harness.state().mailbox().runs();
+    // Thirty characters in half a second: one keep at the first, the rest wait for the second to pass.
+    typed_by_frames(&mut harness, "We meet at the plot at ten. B.");
+    let runs = harness.state().mailbox().runs() - before;
+    assert!(runs <= 3, "{runs} commands for 30 characters typed in half a second");
+    assert!(harness.state().composer().unwrap().changed(), "the rest waits");
+    assert_ne!(kept(&mut harness, id)["text"].as_str().map(str::len), Some(text_of(&harness).len()));
+    // A second later the draft is kept whole, the field still having the keys.
+    for _ in 0..70 {
+        harness.step();
+    }
+    assert_eq!(kept(&mut harness, id)["text"], json!(text_of(&harness)));
+    assert!(!harness.state().composer().unwrap().changed());
+}
+
+#[test]
+fn a_close_in_the_frame_after_a_keystroke_keeps_it() {
+    let mut harness = composing_over(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let id = harness.state().composer().unwrap().draft();
+    typed_by_frames(&mut harness, "Plot 14");
+    harness.get_by_role_and_label(Role::Button, "Close; the draft is kept").click();
+    harness.step();
+    assert!(harness.state().composer().is_none());
+    assert!(kept(&mut harness, id)["text"].as_str().unwrap().starts_with("Plot 14"));
+}
+
+#[test]
+fn closing_the_window_in_the_frame_after_a_keystroke_keeps_it() {
+    let mut harness = composing_over(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let id = harness.state().composer().unwrap().draft();
+    typed_by_frames(&mut harness, "Plot 14");
+    assert!(harness.state().composer().unwrap().changed(), "not kept yet");
+    harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+    harness.step();
+    assert!(kept(&mut harness, id)["text"].as_str().unwrap().starts_with("Plot 14"));
+}
+
+#[test]
+fn the_end_of_the_app_in_the_frame_after_a_keystroke_keeps_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = Timestamp::from_unix(NOW, 0).unwrap();
+    let mut store = inboxcraft_store::Sqlite::open(dir.path(), inboxcraft_store::StoreConfig::default()).unwrap();
+    let mut batch = Batch::new();
+    for account in sample::mailbox(now).unwrap().accounts().unwrap() {
+        batch.push(Change::PutAccount(account));
+    }
+    store.apply(&batch).unwrap();
+    let mut harness = composing_over(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()));
+    let (draft, account) = harness.state().composer().map(|composer| (composer.draft(), composer.account())).unwrap();
+    typed_by_frames(&mut harness, "Plot 14");
+    assert!(harness.state().composer().unwrap().changed(), "not kept yet");
+    drop(harness);
+    let store = inboxcraft_store::Sqlite::open(dir.path(), inboxcraft_store::StoreConfig::default()).unwrap();
+    let drafts = store.drafts(AccountId::new(account)).unwrap();
+    let kept = drafts.iter().find(|held| held.id.get() == draft).unwrap();
+    assert!(kept.text.starts_with("Plot 14"), "{:?}", kept.text);
+}

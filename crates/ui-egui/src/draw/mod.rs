@@ -171,6 +171,21 @@ pub struct InboxApp {
     later_picker: bool,
     /// A menu that opens in the next frame (the `ui_shot` scripts).
     menu: Option<egui::Id>,
+    /// The input time the draft was last kept by [`InboxApp::keep_draft`], in seconds.
+    kept_at: Option<f64>,
+}
+
+/// While the person types in the composer, its draft is kept at most once in this many seconds: keeping it runs
+/// `compose.update`, which writes the whole draft to the store on the window's thread. Leaving a field, closing,
+/// sending, a close of the window and the end of the app keep it at once, so only a crash can lose what was typed in
+/// the last second.
+pub(crate) const KEEP_EVERY: f64 = 1.0;
+
+/// The end of the app keeps the draft being written, however little time passed since it was last kept.
+impl Drop for InboxApp {
+    fn drop(&mut self) {
+        self.keep_draft_now();
+    }
 }
 
 impl std::fmt::Debug for InboxApp {
@@ -254,6 +269,7 @@ impl InboxApp {
             picker: None,
             sending: None,
             later_picker: false,
+            kept_at: None,
             menu: None,
         }
     }
@@ -1100,11 +1116,30 @@ impl InboxApp {
         for asked in asked {
             self.apply_compose(ctx, asked);
         }
-        self.keep_draft();
+        self.keep_draft(ctx);
     }
 
-    /// Keeps the draft when its subject or text changed in this frame: silently, at once.
-    fn keep_draft(&mut self) {
+    /// Keeps the draft when something in it changed, silently: at once when no field of the composer has the keys or
+    /// the window is closing, otherwise at most once in [`KEEP_EVERY`], a frame asked for when the rest is due.
+    fn keep_draft(&mut self, ctx: &egui::Context) {
+        if !self.composer.as_ref().is_some_and(Composer::changed) {
+            return;
+        }
+        let now = ctx.input(|input| input.time);
+        let typing = ctx.memory(|memory| memory.focused()).is_some_and(compose::is_field);
+        let closing = ctx.input(|input| input.viewport().close_requested());
+        // A time that went back, or is no number, keeps it now.
+        let wait = self.kept_at.map_or(0.0, |at| KEEP_EVERY - (now - at));
+        if typing && !closing && wait > 0.0 && wait <= KEEP_EVERY {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+            return;
+        }
+        self.kept_at = Some(now);
+        self.keep_draft_now();
+    }
+
+    /// Keeps the draft at once if something in it changed since it was last kept: the end of a window or of the app.
+    pub fn keep_draft_now(&mut self) {
         if let Some(composer) = self.composer.as_mut().filter(|composer| composer.changed())
             && let Err(error) = composer.save(&mut self.mailbox)
         {

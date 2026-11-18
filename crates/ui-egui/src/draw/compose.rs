@@ -104,6 +104,11 @@ pub(super) fn blank_id() -> Id {
     Id::unique("compose-blank")
 }
 
+/// Whether `id` is one of the composer's fields that take typing: a recipient line, the subject, the text, a blank.
+pub(super) fn is_field(id: Id) -> bool {
+    id == subject_id() || id == text_id() || id == blank_id() || Line::ALL.iter().any(|line| id == field_id(*line))
+}
+
 fn suggestions_id() -> Id {
     Id::unique("compose-suggestions")
 }

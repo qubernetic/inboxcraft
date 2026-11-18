@@ -283,7 +283,10 @@ it, not by `mail.unsend`), and writes the event into the account's first calenda
 cancellation is about as `event.delete` does, with its undo window. Nothing in an invitation changes the calendar on
 its own.
 
-Drafts (`engine::draft`) are kept in the store at every change, so a kill loses nothing typed. `compose.new` starts
+Drafts (`engine::draft`) are kept in the store as they change: the composer runs `compose.update` at once for a chip,
+a template or a field left, and at most once a second while a field of it has the keys (each keep writes the whole
+draft on the window's thread), so a kill loses at most the last second typed; closing, sending, the window's close
+and the end of the app keep it at once. `compose.new` starts
 one from the account that last sent (the newest message in a Sent folder, else the first account) with that
 account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft at once;
 `compose.show` and `compose.list` read them; `compose.discard` removes one here and its copy on the server where
