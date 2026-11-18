@@ -60,6 +60,11 @@ pub fn initials(name: &str, address: &str) -> String {
 /// square with corners of 2, in the key style (Plex Mono SemiBold 11/14), and 13/16 from the large side up. A person
 /// with neither a name nor a usable address is a `?` in a dashed `line` box with the same corners.
 pub fn paint(painter: &Painter, theme: &Theme, rect: Rect, name: &str, address: &str) {
+    paint_on(painter, theme, rect, name, address, theme.palette.stage);
+}
+
+/// [`paint`] with the square in `ground` (a suggestion row lit on `stage` puts its avatar on `surface`).
+pub(crate) fn paint_on(painter: &Painter, theme: &Theme, rect: Rect, name: &str, address: &str, ground: egui::Color32) {
     let side = rect.width().min(rect.height());
     if !side.is_finite() || side <= 0.0 {
         return;
@@ -74,7 +79,7 @@ pub fn paint(painter: &Painter, theme: &Theme, rect: Rect, name: &str, address: 
     if letters == UNKNOWN {
         dashed_round(painter, square, p.line, CORNER);
     } else {
-        painter.rect_filled(square, CORNER, p.stage);
+        painter.rect_filled(square, CORNER, ground);
     }
     let large = side >= AvatarSize::L.side(theme) - 0.5;
     let font = if large { theme.fonts.button.semibold() } else { theme.fonts.key };

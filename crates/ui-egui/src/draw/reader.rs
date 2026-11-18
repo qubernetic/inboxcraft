@@ -39,8 +39,8 @@ use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Id, Layout, Margin, Order, Popup, PopupCloseBehavior, Pos2, Rect, RichText,
-    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
+    Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Id, Layout, Margin, Order, Pos2, Rect, RichText, ScrollArea, Sense, Shape, Stroke,
+    StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_html::{Block, Cell, Document, Image, ImageSource, Marker, TextKind};
 
@@ -187,7 +187,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         drawn.asked.push(Asked::Close);
     }
     paint::rule(ui, p.line);
-    crate::component::label(ui, theme.fonts.label, tr!("When a message leaves the list"), p.muted);
+    popup::title(ui, theme, tr!("When a message leaves the list"), None);
     for after in [After::Next, After::Previous, After::List] {
         let response = popup::choice(ui, theme, after_text(after), mailbox.after() == after);
         if response.clicked() {
@@ -205,21 +205,30 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
     };
     let response = button.show(ui, theme, keymap);
     let width = theme.fonts.body.size * MENU_WIDTH;
-    Popup::menu(&response).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, width, |ui| {
-            crate::component::label(ui, theme.fonts.label, tr!("Move to"), theme.palette.muted);
-            for folder in mailbox.move_targets(id) {
-                // The full path, so a folder inside another says where it is.
-                if popup::entry(ui, theme, keymap, &folder.name, None).clicked() {
-                    drawn.asked.push(Asked::Act(id, Act::Move(folder.id)));
-                }
+    popup::menu(ui.ctx(), theme, &response, move_menu(), width, |ui| {
+        popup::title(ui, theme, tr!("Move to"), None);
+        let mut chosen = false;
+        for folder in mailbox.move_targets(id) {
+            // The full path, so a folder inside another says where it is.
+            let item = popup::Item { icon: None, name: &folder.name, caption: None, action: None, state: popup::ItemState::Default };
+            if popup::menu_item(ui, theme, keymap, &item).clicked() {
+                drawn.asked.push(Asked::Act(id, Act::Move(folder.id)));
+                chosen = true;
             }
-        })
+        }
+        ((), chosen)
     });
 }
 
-/// The width of the time picker, in body text sizes.
-const PICKER_WIDTH: f32 = 22.75;
+/// The id of the Move menu.
+pub(super) fn move_menu() -> Id {
+    Id::unique("reader-move-menu")
+}
+
+/// The id of the More menu.
+pub(super) fn more_menu() -> Id {
+    Id::unique("reader-more-menu")
+}
 
 /// The id the time picker's state is kept under between frames and openings.
 pub(super) fn picker_id() -> Id {
@@ -246,31 +255,41 @@ fn picker(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: 
         return;
     };
     let response = button.show(ui, theme, keymap);
-    if response.clicked() {
-        // A new opening: the presets read again, the text typed before gone.
-        drawn.asked.push(Asked::Presets);
-        ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(picker_id()).open());
+    let ctx = ui.ctx().clone();
+    if popup::clicked(&ctx, &response, picker_popup()) {
+        let open = !popup::is_open(&ctx, picker_popup());
+        popup::set_open(&ctx, picker_popup(), open);
+        if open {
+            // A new opening: the presets read again, the text typed before gone.
+            drawn.asked.push(Asked::Presets);
+            ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(picker_id()).open());
+        }
     }
-    let width = theme.fonts.body.size * PICKER_WIDTH;
-    Popup::menu(&response).id(picker_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).gap(theme.spacing.s3).frame(Frame::NONE).show(
-        |ui| {
-            popup::panel(ui, theme, width, |ui| {
-                let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
-                let ask = Ask { title, confirm, alert: None, presets: &presets };
-                let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(picker_id())).unwrap_or_default();
-                let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
-                ui.data_mut(|data| data.insert_temp(picker_id(), state));
-                match picked {
-                    Picked::At { at, .. } => {
-                        drawn.asked.push(Asked::Act(id, if sent { Act::FollowUp(at) } else { Act::Snooze(at) }));
-                        ui.close();
-                    }
-                    Picked::Cancelled => ui.close(),
-                    Picked::Open => {}
-                }
-            })
-        },
-    );
+    if !popup::is_open(&ctx, picker_popup()) {
+        return;
+    }
+    let float = popup::Float { id: picker_popup(), anchor: response.rect, width: time_picker::WIDTH, returns_to: response.id };
+    let shown = popup::float(&ctx, theme, &float, |ui| {
+        let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
+        let ask = Ask { title, confirm, alert: None, presets: &presets, extra: None, note: None };
+        let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(picker_id())).unwrap_or_default();
+        let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
+        ui.data_mut(|data| data.insert_temp(picker_id(), state));
+        picked
+    });
+    match shown {
+        Some(Picked::At { at, .. }) => {
+            drawn.asked.push(Asked::Act(id, if sent { Act::FollowUp(at) } else { Act::Snooze(at) }));
+            popup::set_open(&ctx, picker_popup(), false);
+            response.request_focus();
+        }
+        Some(Picked::Cancelled | Picked::Extra) => {
+            popup::set_open(&ctx, picker_popup(), false);
+            response.request_focus();
+        }
+        Some(Picked::Open) => {}
+        None => popup::set_open(&ctx, picker_popup(), false),
+    }
 }
 
 /// Pin, or "Take the pin off" (shown active) for a pinned message.
@@ -373,9 +392,12 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
                 divider(ui, theme);
                 let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
                 let width = theme.fonts.body.size * MENU_WIDTH;
-                Popup::menu(&response)
-                    .frame(Frame::NONE)
-                    .show(|ui| popup::panel(ui, theme, width, |ui| more(ui, theme, keymap, mailbox, reader, drawn)));
+                popup::menu(ui.ctx(), theme, &response, more_menu(), width, |ui| {
+                    // Any row chosen closes it: each asks for something.
+                    let before = drawn.asked.len();
+                    more(ui, theme, keymap, mailbox, reader, drawn);
+                    ((), drawn.asked.len() > before)
+                });
             });
         });
     });

@@ -42,13 +42,15 @@
 //! `icons` set to `true` draws every icon
 //! in every style in the theme's colours instead of the window, `components` set to `true` the gallery of
 //! the components ([`crate::component::gallery`]), `blocks` set to `true` the page of the shared rows and blocks
-//! ([`crate::component::gallery_blocks`]), `lists` set to `true` the page of the mail lists' rows
+//! ([`crate::component::gallery_blocks`]), `fields` set to `true` the page of the fields, pickers and menus
+//! ([`crate::component::gallery_fields`]), `lists` set to `true` the page of the mail lists' rows
 //! ([`crate::component::gallery_lists`]). The typeface and the icons are fixed, so a script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
 //! before the picture, so what that opens (a menu, a list) is in it; `put_away` set to `true` snoozes, pins, parks and marks
 //! done some of the sample's mail first ([`sample::put_away`]), `later` opens a pile of "Later" (`snoozed`, `pins`
-//! or `parked`), `show_done` set to `true` lists the done mail in its old place, and `picker` opens the time picker
+//! or `parked`), `show_done` set to `true` lists the done mail in its old place, `menu` opens a menu (`more`, `move`,
+//! `from`, `templates`, `group`), and `picker` opens the time picker
 //! over the selected message with that text typed (`""` for none). `outbox` shows the sample with its first account
 //! able to send and its sent message bounced ([`sample::sending`]): `waiting` the outbox with a send counting down its
 //! hold, one scheduled and one the server refused, `countdown` the toast of a message just sent, `schedule` the
@@ -215,6 +217,9 @@ pub struct Shot {
     /// The gallery of the components instead of the window.
     #[serde(default)]
     pub components: Option<bool>,
+    /// The page of the fields, pickers and menus instead of the window.
+    #[serde(default)]
+    pub fields: Option<bool>,
     /// The page of the shared rows and blocks instead of the window.
     #[serde(default)]
     pub blocks: Option<bool>,
@@ -240,6 +245,9 @@ pub struct Shot {
     /// Whether "Show done" lists the done mail in its old place.
     #[serde(default)]
     pub show_done: Option<bool>,
+    /// A menu open: the reader's `more` or `move`, the composer's `from` or `templates`, the selected row's `group`.
+    #[serde(default)]
+    pub menu: Option<String>,
     /// The time picker open over the selected message, with this text typed (`""` for none).
     #[serde(default)]
     pub picker: Option<String>,
@@ -501,6 +509,8 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
             "text": "Hi both,\n\nWe meet at the plot at {?time} and finish by noon. Bring gloves; the shed has spades and the wheelbarrow.\n",
         });
         mailbox.run("template.save", &params)?;
+        // The menu of templates knows the one just saved.
+        composer.load_templates(mailbox);
         return composer.use_template(mailbox, "Work party");
     }
     if scene != "new" {
@@ -618,8 +628,9 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.later.is_some()
         || shot.show_done.is_some()
         || shot.picker.is_some()
+        || shot.menu.is_some()
         || shot.outbox.is_some()
-        || [shot.icons, shot.components, shot.blocks, shot.lists].iter().filter(|page| **page == Some(true)).count() > 1;
+        || [shot.icons, shot.components, shot.blocks, shot.fields, shot.lists].iter().filter(|page| **page == Some(true)).count() > 1;
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
     }
@@ -639,6 +650,22 @@ fn component_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
         gallery::page(ui, &theme, &keymap);
+    })
+}
+
+/// The page of the fields, pickers and menus of `shot` in `mode`.
+fn fields_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of the fields, pickers and menus")?;
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = gallery::keymap();
+    let mut fonts = true;
+    paint(crate::component::gallery_fields::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            // The app's own style, so the boards' text is drawn as the app draws it (coverage, hinting).
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_fields::page(ui, &theme, &keymap);
     })
 }
 
@@ -1048,6 +1075,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if shot.components == Some(true) {
         return component_gallery(shot, mode);
     }
+    if shot.fields == Some(true) {
+        return fields_gallery(shot, mode);
+    }
     if shot.blocks == Some(true) {
         return blocks_gallery(shot, mode);
     }
@@ -1166,6 +1196,11 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
             return Err(bad(format!("{}: the time picker needs a selected row", shot.out)));
         }
         app.open_picker(typed);
+    }
+    if let Some(menu) = &shot.menu
+        && !app.open_menu(menu)
+    {
+        return Err(bad(format!("{}: there is no menu {menu:?} to open here", shot.out)));
     }
     if let Some(state) = &shot.onboard {
         app = onboard(app, &shot.out, state)?;

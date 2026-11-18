@@ -19,19 +19,17 @@
 //! through the [`Composer`]'s methods, which run the engine's commands.
 
 use egui::text::{LayoutJob, TextFormat};
-use egui::{
-    Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Popup, PopupCloseBehavior, Pos2, Rect, RichText, Role, Sense, Stroke, TextEdit,
-    Ui, WidgetInfo, vec2,
-};
+use egui::{Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Pos2, Rect, RichText, Role, Sense, Stroke, Ui, WidgetInfo, vec2};
 use inboxcraft_time::Timestamp;
 
 use super::paint::line;
-use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
+use crate::component::field::{self, Field};
 use crate::component::popup;
+use crate::component::recipient::{self, Recipient, RecipientState, Recipients};
 use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
 use crate::component::typed_time;
-use crate::compose::{Chip, Composer, Line};
+use crate::compose::{Composer, Line};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
 use crate::mailbox::Mailbox;
@@ -40,9 +38,6 @@ use crate::tr;
 
 /// The width of the line names (From, To, Subject), in body-size units.
 const NAMES: f32 = 4.5;
-
-/// The narrowest the recipient field gets after the chips, in body-size units.
-const FIELD: f32 = 10.0;
 
 /// The width of the floating panel, in body-size units.
 const FLOATING: f32 = 22.0;
@@ -118,48 +113,66 @@ fn later_id() -> Id {
     Id::unique("compose-later")
 }
 
+/// The width of the recipient suggestions' float, in points: rows of 320 inside its edge.
+const SUGGESTIONS: f32 = 322.0;
+
+/// The id of the From line's menu of the accounts.
+pub(super) fn from_menu() -> Id {
+    Id::unique("compose-from-menu")
+}
+
+/// The id of the menu of the templates.
+pub(super) fn templates_menu() -> Id {
+    Id::unique("compose-templates-menu")
+}
+
 /// The id of the send-later picker's popup.
 pub(super) fn later_popup() -> Id {
     Id::unique("compose-later-popup")
 }
 
-/// The width of the send-later picker, in body-size units.
-const PICKER: f32 = 22.0;
-
 /// The caret beside Send: it opens the time picker, whose time makes Send a Schedule, and "Send now instead" while a
 /// time is picked; with it, the note that nothing goes while InboxCraft is closed.
 fn later(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &Composer, asked: &mut Vec<Asked>) {
     let response = IconButton::new(IconId::Caret, tr!("Send later")).show(ui, theme, keymap);
-    if response.clicked() {
-        // A new opening: the presets read again, the text typed before gone.
-        asked.push(Asked::Presets);
-        ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(later_id()).open());
+    let ctx = ui.ctx().clone();
+    if popup::clicked(&ctx, &response, later_popup()) {
+        let open = !popup::is_open(&ctx, later_popup());
+        popup::set_open(&ctx, later_popup(), open);
+        if open {
+            // A new opening: the presets read again, the text typed before gone.
+            asked.push(Asked::Presets);
+            ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(later_id()).open());
+        }
     }
-    let width = theme.fonts.body.size * PICKER;
-    Popup::menu(&response).id(later_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, width, |ui| {
-            let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
-            let ask = Ask { title: tr!("Send later"), confirm: tr!("Schedule"), alert: None, presets: &presets };
-            let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(later_id())).unwrap_or_default();
-            let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
-            ui.data_mut(|data| data.insert_temp(later_id(), state));
-            match picked {
-                Picked::At { at, .. } => {
-                    asked.push(Asked::Later(Some(at)));
-                    ui.close();
-                }
-                Picked::Cancelled => ui.close(),
-                Picked::Open => {}
-            }
-            if composer.later().is_some() && popup::entry(ui, theme, keymap, tr!("Send now instead"), None).clicked() {
-                asked.push(Asked::Later(None));
-                ui.close();
-            }
-            ui.add_space(theme.spacing.s1);
-            let note = tr!("It goes while InboxCraft or its tray runs; a time missed sends at the next start, and says so.");
-            ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
-        });
+    if !popup::is_open(&ctx, later_popup()) {
+        return;
+    }
+    let float = popup::Float { id: later_popup(), anchor: response.rect, width: time_picker::WIDTH, returns_to: response.id };
+    let shown = popup::float(&ctx, theme, &float, |ui| {
+        let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
+        let note = tr!("It goes while InboxCraft or its tray runs; a time missed sends at the next start, and says so.");
+        let extra = composer.later().is_some().then_some(tr!("Send now instead"));
+        let ask = Ask { title: tr!("Send later"), confirm: tr!("Schedule"), alert: None, presets: &presets, extra, note: Some(note) };
+        let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(later_id())).unwrap_or_default();
+        let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
+        ui.data_mut(|data| data.insert_temp(later_id(), state));
+        picked
     });
+    let close = |asked: &mut Vec<Asked>, later: Option<Option<inboxcraft_time::Timestamp>>| {
+        if let Some(later) = later {
+            asked.push(Asked::Later(later));
+        }
+        popup::set_open(&ctx, later_popup(), false);
+        response.request_focus();
+    };
+    match shown {
+        Some(Picked::At { at, .. }) => close(asked, Some(Some(at))),
+        Some(Picked::Extra) => close(asked, Some(None)),
+        Some(Picked::Cancelled) => close(asked, None),
+        Some(Picked::Open) => {}
+        None => popup::set_open(&ctx, later_popup(), false),
+    }
 }
 
 /// A line's name on the left, in the muted colour, `width` points wide and in the middle of the first `height` points.
@@ -169,44 +182,11 @@ fn name(ui: &mut Ui, theme: &Theme, text: &str, width: f32, height: f32) {
     ui.painter().galley(egui::pos2(rect.left(), rect.top() + (rect.height() - galley.size().y) / 2.0), galley, theme.palette.muted);
 }
 
-/// How tall a chip is.
-fn chip_height(theme: &Theme) -> f32 {
-    theme.fonts.body.line * 1.2 + 4.0
-}
-
 /// A rule under a line.
 fn rule(ui: &mut Ui, theme: &Theme) {
     ui.add_space(theme.spacing.s1);
     ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, theme.palette.line));
     ui.add_space(theme.spacing.s1 + 1.0);
-}
-
-/// A recipient's chip with its remove button; whether that was pressed.
-fn chip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, chip: &Chip) -> bool {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let (fill, ink, edge) = if chip.ok { (p.panel, p.ink, p.line) } else { (p.minus, p.bg, p.minus) };
-    let side = theme.fonts.body.line * 1.2;
-    let shown = chip.shown();
-    let mut removed = false;
-    Frame::new().fill(fill).stroke(Stroke::new(1.0, edge)).corner_radius(255).inner_margin(egui::Margin::symmetric(3, 2)).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s1;
-            let galley = line(ui, &[(&shown, theme.fonts.body, ink)], f32::INFINITY);
-            let (rect, response) = ui.allocate_exact_size(vec2(side + s.s1 + galley.size().x, side), Sense::hover());
-            response.widget_info(|| WidgetInfo::labeled(Role::ListItem, true, chip.spoken()));
-            let mark = Rect::from_min_size(rect.min, vec2(side, side));
-            if chip.ok {
-                avatar::paint(ui.painter(), theme, mark, &shown, &chip.address());
-            } else {
-                crate::iconset::paint(ui.painter(), mark.shrink(1.0), IconId::Junk, ink);
-            }
-            ui.painter().galley(egui::pos2(mark.right() + s.s1, rect.center().y - galley.size().y / 2.0), galley, ink);
-            let remove = tr!("Remove {recipient}", recipient = shown);
-            removed = IconButton::new(IconId::Close, &remove).ink(ink).side(side).show(ui, theme, keymap).clicked();
-        });
-    });
-    removed
 }
 
 /// The keys of a recipient line that has the focus, read before its field takes them.
@@ -224,65 +204,64 @@ fn line_keys(ui: &Ui, composer: &Composer, line: Line, asked: &mut Vec<Asked>) {
     }
 }
 
-/// A recipient line: its name, its chips and the field to type in; the To line ends with "Cc Bcc" while those are
-/// hidden.
-fn recipients(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Composer, line: Line, asked: &mut Vec<Asked>) {
-    let body = theme.fonts.body.size;
-    ui.horizontal_top(|ui| {
-        name(ui, theme, line.name(), body * NAMES, chip_height(theme));
-        let copies = line == Line::To && !composer.copies();
-        let link = copies.then(|| line_width(ui, theme, tr!("Cc  Bcc")));
-        let room = ui.available_width() - link.unwrap_or(0.0);
-        ui.allocate_ui_with_layout(vec2(room.max(1.0), 0.0), Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
-            ui.spacing_mut().item_spacing = vec2(theme.spacing.s1, theme.spacing.s1);
-            for (at, shown) in composer.chips(line).to_vec().iter().enumerate() {
-                if chip(ui, theme, keymap, shown) {
-                    asked.push(Asked::Remove(line, at));
-                }
-            }
-            let id = field_id(line);
-            if ui.memory(|memory| memory.has_focus(id)) {
-                line_keys(ui, composer, line, asked);
-            }
-            // The rest of the chips' row, or a row of its own when that is too narrow.
-            let rest = ui.available_size_before_wrap().x;
-            let width = if rest >= body * FIELD { rest } else { ui.available_width() };
-            let hint = if composer.chips(line).is_empty() { tr!("Name or address") } else { "" };
-            let Some(typing) = composer.typing_mut(line) else { return };
-            let edit = TextEdit::singleline(typing).id(id).frame(Frame::NONE).hint_text(hint).desired_width(width);
-            let response = ui.add(edit.min_size(vec2(0.0, chip_height(theme))).align(Align2::LEFT_CENTER));
-            ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(line.name()));
-            if response.changed() {
-                asked.push(Asked::Typed(line));
-            }
-            if response.lost_focus() {
-                let entered = ui.input(|input| input.key_pressed(Key::Enter));
-                // A press on a suggestion takes the field's focus first; the suggestion is taken, not the text.
-                let on_list = ui
-                    .ctx()
-                    .pointer_latest_pos()
-                    .zip(ui.ctx().data(|data| data.get_temp::<Rect>(suggestions_id())))
-                    .is_some_and(|(at, list)| list.contains(at));
-                let escaped = ui.input(|input| input.key_pressed(Key::Escape));
-                if entered {
-                    asked.push(Asked::Take(line));
-                    response.request_focus();
-                } else if escaped && !composer.suggestions().1.is_empty() {
-                    // Escape puts the suggestions away and leaves the text and the focus where they are.
-                    asked.push(Asked::Dismiss);
-                    response.request_focus();
-                } else if !escaped && !on_list && !composer.typing(line).trim().is_empty() {
-                    asked.push(Asked::Take(line));
-                }
-            }
-            if composer.suggestions().0 == Some(line) {
-                suggestions(ui.ctx(), theme, composer, response.rect.left_bottom(), asked);
-            }
-        });
-        if copies && crate::component::button::link(ui, theme, keymap, tr!("Cc  Bcc")).clicked() {
-            asked.push(Asked::Copies);
+/// A recipient line: its name, its chips and the field to type in ([`recipient::recipient_field`]); the To line ends
+/// with "Cc Bcc" while those are hidden.
+fn recipients(ui: &mut Ui, theme: &Theme, composer: &mut Composer, line: Line, asked: &mut Vec<Asked>) {
+    let id = field_id(line);
+    if ui.memory(|memory| memory.has_focus(id)) {
+        line_keys(ui, composer, line, asked);
+    }
+    let chips: Vec<Recipient> = composer
+        .chips(line)
+        .iter()
+        .map(|chip| Recipient {
+            shown: chip.shown(),
+            spoken: chip.spoken(),
+            state: if chip.ok { RecipientState::Valid } else { RecipientState::Invalid },
+        })
+        .collect();
+    // The sheet's invalid state: the first recipient of the line that is not an address, named under it.
+    // What the line refused of what was typed comes first: it waits in the typed text.
+    let wrong = composer
+        .refusal(line)
+        .or_else(|| composer.chips(line).iter().find(|chip| !chip.ok).map(|chip| tr!("{address} is not an address", address = chip.address())));
+    let copies = line == Line::To && !composer.copies();
+    let Some(typing) = composer.typing_mut(line) else { return };
+    let fields = Recipients { name: line.name(), chips: &chips, hint: tr!("Name or address"), copies, error: wrong.as_deref(), enabled: true };
+    let out = recipient::recipient_field(ui, theme, id, typing, &fields);
+    if let Some(at) = out.removed {
+        asked.push(Asked::Remove(line, at));
+    }
+    if out.copies {
+        asked.push(Asked::Copies);
+    }
+    let response = out.field;
+    if response.changed() {
+        asked.push(Asked::Typed(line));
+    }
+    if response.lost_focus() {
+        let entered = ui.input(|input| input.key_pressed(Key::Enter));
+        // A press on a suggestion takes the field's focus first; the suggestion is taken, not the text.
+        let on_list = ui
+            .ctx()
+            .pointer_latest_pos()
+            .zip(ui.ctx().data(|data| data.get_temp::<Rect>(suggestions_id())))
+            .is_some_and(|(at, list)| list.contains(at));
+        let escaped = ui.input(|input| input.key_pressed(Key::Escape));
+        if entered {
+            asked.push(Asked::Take(line));
+            response.request_focus();
+        } else if escaped && !composer.suggestions().1.is_empty() {
+            // Escape puts the suggestions away and leaves the text and the focus where they are.
+            asked.push(Asked::Dismiss);
+            response.request_focus();
+        } else if !escaped && !on_list && !composer.typing(line).trim().is_empty() {
+            asked.push(Asked::Take(line));
         }
-    });
+    }
+    if composer.suggestions().0 == Some(line) {
+        suggestions(ui.ctx(), theme, composer, response.rect.left_bottom(), asked);
+    }
 }
 
 /// The width of `text` as a link, with its margins.
@@ -296,10 +275,15 @@ fn suggestions(ctx: &egui::Context, theme: &Theme, composer: &Composer, at: Pos2
     if found.is_empty() {
         return;
     }
-    let width = theme.fonts.body.size * MENU;
+    // The suggestion rows are the sheet's 320 wide, inside the float's 1 px edge.
+    let width = SUGGESTIONS;
     let rect = popup::show(ctx, theme, suggestions_id(), at, width, |ui| {
         for (index, person) in found.iter().enumerate() {
-            if popup::choice(ui, theme, &person.shown(), composer.highlighted() == Some(index)).clicked() {
+            let row = popup::suggestion_row(ui, theme, person.name.trim(), &person.address, composer.highlighted() == Some(index));
+            // A screen reader hears the person as the line will hold them.
+            let spoken = person.shown();
+            ui.ctx().accesskit_node_builder(row.id, |node| node.set_label(spoken.as_str()));
+            if row.clicked() {
                 asked.push(Asked::Pick(index));
             }
         }
@@ -331,15 +315,18 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, aske
         if response.has_focus() {
             super::paint::focus_ring(ui.painter(), theme, response.rect, super::paint::Ring::Inside);
         }
-        Popup::menu(&response).frame(Frame::NONE).show(|ui| {
-            popup::panel(ui, theme, body * MENU, |ui| {
-                for choice in mailbox.accounts() {
-                    let text = tr!("{label} ({address})", label = choice.label, address = choice.address);
-                    if popup::choice(ui, theme, &text, choice.id == account.id).clicked() && choice.id != account.id {
+        popup::menu(ui.ctx(), theme, &response, from_menu(), body * MENU, |ui| {
+            let mut chosen = false;
+            for choice in mailbox.accounts() {
+                let text = tr!("{label} ({address})", label = choice.label, address = choice.address);
+                if popup::choice(ui, theme, &text, choice.id == account.id).clicked() {
+                    chosen = true;
+                    if choice.id != account.id {
                         asked.push(Asked::From(choice.id));
                     }
                 }
-            });
+            }
+            ((), chosen)
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.label(RichText::new(&account.label).font(theme.fonts.caption.id()).color(p.muted));
@@ -355,15 +342,17 @@ fn templates(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &Composer, a
         return;
     }
     let response = button.show(ui, theme, keymap);
-    Popup::menu(&response).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, theme.fonts.body.size * MENU, |ui| {
-            ui.label(RichText::new(tr!("Put in a template")).font(theme.fonts.caption.id()).color(theme.palette.muted));
-            for (at, name) in composer.templates().iter().enumerate() {
-                if popup::entry(ui, theme, keymap, name, None).clicked() {
-                    asked.push(Asked::Template(at));
-                }
+    popup::menu(ui.ctx(), theme, &response, templates_menu(), theme.fonts.body.size * MENU, |ui| {
+        popup::title(ui, theme, tr!("Put in a template"), None);
+        let mut chosen = false;
+        for (at, name) in composer.templates().iter().enumerate() {
+            let item = popup::Item { icon: None, name, caption: None, action: None, state: popup::ItemState::Default };
+            if popup::menu_item(ui, theme, keymap, &item).clicked() {
+                asked.push(Asked::Template(at));
+                chosen = true;
             }
-        });
+        }
+        ((), chosen)
     });
 }
 
@@ -376,9 +365,14 @@ fn blank(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Composer, a
             let fill = TextButton::new(tr!("Fill in")).secondary();
             let room = (ui.available_width() - line_width(ui, theme, tr!("Fill in")) - theme.spacing.s4).max(1.0);
             let spoken = tr!("Fill in \"{blank}\"", blank = prompt);
-            let edit = TextEdit::singleline(composer.filling_mut()).id(blank_id()).hint_text(&spoken).desired_width(room);
-            let response = ui.add(edit);
-            ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(spoken.as_str()));
+            let response = ui
+                .allocate_ui(vec2(room, theme.boxes().field), |ui| {
+                    ui.set_width(room);
+                    let refused = composer.fill_refused().map(str::to_owned);
+                    let field = Field { error: refused.as_deref(), ..Field::new("", &spoken) };
+                    field::text_field(ui, theme, blank_id(), composer.filling_mut(), &field)
+                })
+                .inner;
             if response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                 asked.push(Asked::Fill);
             }
@@ -426,8 +420,8 @@ fn send_label(mailbox: &Mailbox, composer: &Composer) -> (String, Option<String>
     }
 }
 
-/// The toolbar at the foot: Discard and Templates, then why Send is blocked, Send and the caret of send later at the
-/// right end.
+/// The toolbar at the foot: Discard and Templates, then why Send is blocked (unless a recipient line says it), Send and
+/// the caret of send later at the right end.
 fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &Composer, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     ui.horizontal(|ui| {
@@ -449,7 +443,10 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compo
                     }
                 }
             }
-            if let Some(problem) = problem {
+            // A recipient that is not an address is named under its line (the sheet's place), so not again here; Send's
+            // tooltip still says why it cannot go.
+            let said_under = composer.drawn().iter().flat_map(|line| composer.chips(*line)).any(|chip| !chip.ok);
+            if let Some(problem) = problem.filter(|_| !said_under) {
                 ui.label(RichText::new(problem).font(theme.fonts.caption.id()).color(p.ink));
                 let side = theme.fonts.caption.line;
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
@@ -479,16 +476,20 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         ui.add_space(s.s2);
         from(ui, theme, mailbox, composer, &mut asked);
         rule(ui, theme);
-        let lines: &[Line] = if composer.copies() { &Line::ALL } else { &[Line::To] };
-        for line in lines {
-            recipients(ui, theme, keymap, composer, *line, &mut asked);
+        for line in composer.drawn() {
+            recipients(ui, theme, composer, *line, &mut asked);
             rule(ui, theme);
         }
         ui.horizontal(|ui| {
             name(ui, theme, tr!("Subject"), theme.fonts.body.size * NAMES, 0.0);
-            let edit = TextEdit::singleline(composer.subject_mut()).id(subject_id()).frame(Frame::NONE).desired_width(ui.available_width());
-            let response = ui.add(edit);
-            ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(tr!("Subject")));
+            let response = field::plain_line(
+                ui,
+                theme,
+                subject_id(),
+                composer.subject_mut(),
+                tr!("Subject"),
+                field::Cap::Bytes(crate::compose::MAX_SUBJECT_BYTES),
+            );
             if response.changed() {
                 asked.push(Asked::Edited);
             }
@@ -503,14 +504,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, width: f32| marked(ui, theme, &marks, text.as_str(), width);
         crate::component::scroll::show(ui, theme, egui::ScrollArea::vertical().max_height(height).auto_shrink([false, true]), |ui| {
             // A whole number of rows, fewer than a few hundred: the cast keeps it.
-            let edit = TextEdit::multiline(composer.text_mut())
-                .layouter(&mut layouter)
-                .id(text_id())
-                .frame(Frame::NONE)
-                .desired_width(ui.available_width())
-                .desired_rows(rows as usize);
-            let response = ui.add(edit);
-            ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(tr!("Message text")));
+            let response = field::plain_text(ui, text_id(), composer.text_mut(), rows as usize, &mut layouter, tr!("Message text"), theme);
             if response.changed() {
                 asked.push(Asked::Edited);
             }

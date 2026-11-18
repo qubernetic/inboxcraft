@@ -241,7 +241,14 @@ fn picker(ui: &mut Ui, theme: &Theme, _: &Keymap) {
         Preset { name: tr!("Tomorrow morning"), at: at(7, 8, 0) },
         Preset { name: tr!("Next week"), at: at(9, 8, 0) },
     ];
-    let ask = Ask { title: tr!("Snooze until"), confirm: tr!("Snooze"), alert: Some(tr!("Notify me when it comes back")), presets: &presets };
+    let ask = Ask {
+        title: tr!("Snooze until"),
+        confirm: tr!("Snooze"),
+        alert: Some(tr!("Notify me when it comes back")),
+        presets: &presets,
+        extra: None,
+        note: None,
+    };
     let id = Id::unique("gallery-time-picker");
     let mut state = ui.data_mut(|data| {
         data.get_temp_mut_or_insert_with(id, || {

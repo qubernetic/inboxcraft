@@ -516,3 +516,12 @@ fn a_leaving_cards_subject_is_plain_text() {
     harness.step();
     assert_eq!(links(&harness), 1, "the answered card, leaving, offers its subject to open no more");
 }
+
+#[test]
+fn a_row_s_context_menu_keeps_tab_inside_and_esc_gives_the_row_the_keyboard() {
+    let mut harness = harness_of(app());
+    harness.get_by_label(ODILE).click_secondary();
+    harness.run();
+    let role = harness.get_by_label(ODILE).accesskit_node().role();
+    crate::component::popup::tests::walk_an_open_menu(&mut harness, (role, ODILE));
+}

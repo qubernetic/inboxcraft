@@ -1,30 +1,35 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The time picker, one for snooze, send later and reminders (`docs/design.md`, "Time picker"): its title, the
-//! presets still ahead with their time (a preset behind is hidden), "Or type a time" with a field whose text counts as
-//! soon as it parses ([`typed_time`]), without Enter, the time it reads shown under it, the alert switch when the
-//! caller asks about one, Cancel and the confirm button.
+//! The time picker, one for snooze, send later and reminders, as its sheet draws it (`time-picker`): in a float 320
+//! wide, its title in the `label` style with the Esc key chip at its right end; under a hairline the presets still
+//! ahead, menu rows with their time in `mono_s` at the right (a preset behind is hidden), `panel_line` between them;
+//! an extra row when the caller asks for one ("Take the reminder off", "Send now instead"); "Or type a time" over the
+//! [`typed_time`] field, whose text counts as soon as it parses, without Enter, the time it reads shown under it (and
+//! while it is focused and empty, a line that says so); the alert row with its switch when the caller asks about one;
+//! Cancel and the confirm button at the right of the last row, the confirm unavailable while no time is chosen; and a
+//! note under all when the caller gives one.
 //!
 //! The time shown is always the time used: the line under the field and the confirm button read the same text at the
 //! same now, every frame, so a typed `17:30` that falls behind while the picker is open shows, and is, tomorrow's.
 //! The alert switch lives in the [`TimePicker`] the caller keeps, so it remembers its last value from one opening to
-//! the next; [`TimePicker::open`] clears only the text.
+//! the next; [`TimePicker::open`] clears only the text. In a [`super::popup::float`] Esc closes the float; drawn
+//! anywhere else Esc cancels.
 
-use egui::{Align, Align2, Frame, Key, Layout, Margin, Response, Role, Sense, Stroke, StrokeKind, TextEdit, Ui, WidgetInfo, pos2, vec2};
+use egui::{Align, Key, Layout, Modifiers, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 use inboxcraft_time::{Offset, Timestamp};
 
-use crate::draw::paint;
-use crate::iconset::IconId;
 use crate::keymap::Keymap;
-use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
 
-use super::button::{self, TextButton};
+use super::button::TextButton;
+use super::key::{Chip, ChipState, key_words};
+use super::popup::{self, Item, ItemState};
 use super::switch::switch;
-use super::typed_time::{self, long, short};
-use super::{control_side, cut, galley, margin, soon};
+use super::typed_time::{self, short};
+use super::{solid, soon};
+use crate::draw::paint;
 
 pub use super::typed_time::MAX_TYPED;
 
@@ -48,6 +53,10 @@ pub struct Ask<'a> {
     pub alert: Option<&'a str>,
     /// The presets, in the order shown; those not ahead of now are hidden.
     pub presets: &'a [Preset<'a>],
+    /// One more row under the presets ("Take the reminder off", "Send now instead"), or `None`.
+    pub extra: Option<&'a str>,
+    /// A sentence under the buttons, or `None`.
+    pub note: Option<&'a str>,
 }
 
 /// What the person did in this frame.
@@ -57,6 +66,8 @@ pub enum Picked {
     Open,
     /// Cancel or Escape.
     Cancelled,
+    /// The extra row.
+    Extra,
     /// A time, from a preset or typed, and whether to alert (always `false` without an alert switch).
     At {
         /// The time picked, ahead of now.
@@ -118,129 +129,148 @@ impl TimePicker {
     }
 }
 
-/// A preset row: the name on the left, the time on the right in the muted caption; clicked when chosen.
-fn preset_row(ui: &mut Ui, theme: &Theme, name: &str, time: &str) -> Response {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let height = theme.boxes().field;
-    let soon = soon::is_soon(ui);
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), soon::sense(ui, Sense::click()));
-    response.widget_info(|| WidgetInfo::labeled(Role::MenuItem, !soon, tr!("{name}, {time}", name = name, time = time)));
-    let lit = !soon && (response.hovered() || response.has_focus());
-    let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
+/// The width of the picker's float, in points.
+pub const WIDTH: f32 = 320.0;
+
+/// A hairline across the picker in `colour`.
+fn rule(ui: &mut Ui, colour: egui::Color32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
     if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
-        if hover > 0.0 {
-            painter.rect_filled(rect, 0.0, p.stage);
-        }
-        let time = galley(ui, time, theme.fonts.caption, p.muted);
-        let right = rect.right() - s.s3 - time.size().x;
-        painter.galley(pos2(right, rect.center().y - time.size().y / 2.0), time, p.muted);
-        let left = rect.left() + s.s3;
-        let ink = soon::ink(ui, theme, p.ink);
-        let text = cut(ui, name, theme.fonts.body, ink, right - s.s3 - left);
-        painter.galley(pos2(left, rect.center().y - text.size().y / 2.0), text, ink);
-        if response.has_focus() {
-            painter.rect_stroke(rect, 0.0, Stroke::new(2.0, p.cyan_edge), StrokeKind::Inside);
-        }
+        ui.painter().rect_filled(rect, 0.0, colour);
     }
+}
+
+/// The title row: 36 high, the title in the `label` style and the Esc chip at the right end.
+fn title(ui: &mut Ui, theme: &Theme, text: &str) {
+    let p = &theme.palette;
+    let pad = theme.spacing.s3;
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), theme.boxes().field), Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text));
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let painter = solid(ui);
+    let chip = Chip::new(ui, theme, &key_words(&egui::KeyboardShortcut::new(Modifiers::NONE, Key::Escape)), ChipState::Default);
+    let size = chip.size();
+    let right = rect.right() - pad - size.x;
+    chip.paint(&painter, pos2(right, (rect.center().y - size.y / 2.0).round()));
+    let words = super::cut(ui, text, theme.fonts.label, p.muted, right - theme.spacing.s2 - rect.left() - pad);
+    paint::run_at(&painter, pos2(rect.left() + pad, rect.center().y - words.size().y / 2.0), words, p.muted);
+}
+
+/// A preset row: the name, and its time in `mono_s` at the right end; clicked when chosen. A screen reader hears both.
+fn preset_row(ui: &mut Ui, theme: &Theme, name: &str, time: &str, shown: Option<super::Shown>) -> Response {
+    let item = Item { icon: None, name, caption: Some(time), action: None, state: ItemState::Default };
+    let response = popup::menu_item_with(ui, theme, &Keymap::empty(), &item, false, shown);
+    let spoken = tr!("{name}, {time}", name = name, time = time);
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(spoken.as_str()));
     response
 }
 
-/// The line under the field: the time read, with a tick, in the accent colour; or why there is none.
-fn reading(ui: &mut Ui, theme: &Theme, chosen: Option<Timestamp>, now: Timestamp, offset: Offset) {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = s.s1;
-        match chosen {
-            Some(at) => {
-                let side = theme.fonts.caption.line;
-                let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                crate::iconset::paint(ui.painter(), rect, IconId::Done, p.cyan_text);
-                ui.label(galley(ui, &long(at, now, offset), theme.fonts.caption, p.cyan_text));
-            }
-            None => {
-                ui.label(galley(ui, tr!("Not a time yet: try thu 9, 12 nov or in 3 days"), theme.fonts.caption, p.muted));
-            }
-        }
-    });
+/// Draws the picker into `ui` (a float's panel 320 wide, see [`super::popup`]) for `state` and `ask`, at `now` on the
+/// wall clock of `offset`; what the person did in this frame.
+pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, now: Timestamp, offset: Offset) -> Picked {
+    show_with(ui, theme, state, ask, now, offset, Forced::default())
 }
 
-/// Draws the picker into `ui` (a popup's panel, see [`super::popup`]) for `state` and `ask`, at `now` on the wall
-/// clock of `offset`; what the person did in this frame.
-pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, now: Timestamp, offset: Offset) -> Picked {
+/// What a board of the gallery forces on the picker: a hovered preset, a focused typed time.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Forced {
+    /// The preset (counted among those shown) drawn hovered.
+    pub hover: Option<usize>,
+    /// The typed time drawn focused, its caret still.
+    pub typing: bool,
+}
+
+/// [`show`] with `forced` states: a board of the gallery.
+pub(crate) fn show_with(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, now: Timestamp, offset: Offset, forced: Forced) -> Picked {
     let p = &theme.palette;
     let s = &theme.spacing;
     let keys = Keymap::empty();
     let mut picked = Picked::Open;
-    Frame::new().inner_margin(margin(s.s2, s.s2)).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = s.s1;
-        ui.label(galley(ui, ask.title, theme.fonts.strong, p.ink));
-        ui.add_space(s.s1);
-        for preset in ask.presets.iter().filter(|preset| preset.at > now) {
-            if preset_row(ui, theme, preset.name, &short(preset.at, now, offset)).clicked() {
-                picked = Picked::At { at: preset.at, alert: false };
-            }
+    ui.spacing_mut().item_spacing = vec2(s.s2, 0.0);
+    title(ui, theme, ask.title);
+    rule(ui, p.line);
+    for (index, preset) in ask.presets.iter().filter(|preset| preset.at > now).enumerate() {
+        if index > 0 {
+            rule(ui, p.panel_line);
         }
-        let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
-        ui.painter().rect_filled(line, 0.0, p.line);
-        let caption = ui.label(galley(ui, tr!("Or type a time"), theme.fonts.caption, p.muted));
-        let id = ui.make_persistent_id("time-picker-typed");
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), control_side(theme) + s.s2), Sense::hover());
-        let edge = if ui.memory(|memory| memory.has_focus(id)) { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
-        ui.painter().rect_filled(rect, 0.0, p.term);
-        if soon::is_soon(ui) {
-            // Coming soon, the field is disabled with its `Ui`, and its edge is dashed.
-            paint::dashed(ui.painter(), rect, p.muted);
-        } else {
-            ui.painter().rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
+        let shown = (forced.hover == Some(index)).then_some(super::Shown::Hover);
+        if preset_row(ui, theme, preset.name, &short(preset.at, now, offset), shown).clicked() {
+            picked = Picked::At { at: preset.at, alert: false };
         }
-        let inner = rect.shrink2(vec2(s.s2, 0.0));
-        let edit = TextEdit::singleline(&mut state.typed)
-            .id(id)
-            .char_limit(MAX_TYPED)
-            .hint_text(tr!("thu 9, 12 nov 17:00, in 3 days"))
-            .frame(Frame::NONE)
-            .margin(Margin::ZERO)
-            .align(Align2::LEFT_CENTER)
-            .desired_width(inner.width());
-        let field = ui.put(inner, edit).labelled_by(caption.id);
+    }
+    if let Some(extra) = ask.extra {
+        rule(ui, p.line);
+        let item = Item { icon: None, name: extra, caption: None, action: None, state: ItemState::Default };
+        if popup::menu_item(ui, theme, &keys, &item).clicked() {
+            picked = Picked::Extra;
+        }
+    }
+    rule(ui, p.line);
+    // The typed time: 12 around it, its label, the field and what it reads as.
+    let id = ui.make_persistent_id("time-picker-typed");
+    let mut entered = false;
+    let chosen = egui::Frame::NONE.inner_margin(super::margin(s.s3, s.s3)).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = s.s2;
+        let caption = super::label(ui, theme.fonts.label, tr!("Or type a time"), p.muted);
+        let typing = forced.typing.then_some(super::Shown::Focus);
+        let field = typed_time::typed_time_with(ui, theme, id, tr!("Or type a time"), &mut state.typed, now, offset, typing).labelled_by(caption.id);
         // Read after the edit, so the line and the button see this frame's text.
-        let chosen = state.chosen(now, offset);
-        let entered = !soon::is_soon(ui) && field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
-        if !state.typed.trim().is_empty() {
-            reading(ui, theme, chosen, now, offset);
+        entered = !soon::is_soon(ui) && field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+        if (field.has_focus() || forced.typing) && state.typed.trim().is_empty() {
+            let mut job = egui::text::LayoutJob::single_section(
+                tr!("It counts as soon as it reads as a time: no Enter needed.").to_owned(),
+                theme.fonts.caption.format(p.muted),
+            );
+            job.wrap.max_width = ui.available_width().max(1.0);
+            let text = ui.painter().layout_job(job);
+            let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), text.size().y), Sense::hover());
+            response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text.text()));
+            paint::rows_at(&solid(ui), rect.min, rect.width(), text, p.muted);
         }
-        if let Some(name) = ask.alert {
-            ui.horizontal(|ui| {
-                ui.label(galley(ui, name, theme.fonts.body, p.ink));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if switch(ui, theme, name, state.alert).clicked() {
-                        state.alert = !state.alert;
-                    }
-                });
-            });
-        }
-        ui.add_space(s.s1);
-        let row = vec2(ui.available_width(), control_side(theme));
-        ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = s.s2;
-            let confirm = match chosen {
-                Some(_) => TextButton::new(ask.confirm).primary(),
-                None => TextButton::new(ask.confirm).primary().unavailable(tr!("Pick a time above or type one first")),
-            };
-            if (confirm.show(ui, theme, &keys).clicked() || entered)
-                && let Some(at) = chosen
-            {
-                picked = Picked::At { at, alert: false };
-            }
-            if button::link(ui, theme, &keys, tr!("Cancel")).clicked() {
-                picked = Picked::Cancelled;
-            }
-        });
+        state.chosen(now, offset)
     });
-    if !soon::is_soon(ui) && ui.input(|input| input.key_pressed(Key::Escape)) {
+    let chosen = chosen.inner;
+    if let Some(name) = ask.alert {
+        rule(ui, p.panel_line);
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), theme.boxes().field), Sense::hover());
+        let mut row = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(s.s3, 0.0))).layout(Layout::right_to_left(Align::Center)));
+        if switch(&mut row, theme, name, state.alert).clicked() {
+            state.alert = !state.alert;
+        }
+        let words = super::cut(ui, name, theme.fonts.body, p.ink, row.min_rect().left() - s.s2 - rect.left() - s.s3);
+        paint::run_at(&solid(ui), pos2(rect.left() + s.s3, rect.center().y - words.size().y / 2.0), words, p.ink);
+    }
+    rule(ui, p.line);
+    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), theme.boxes().button + s.s2 * 2.0), Sense::hover());
+    let mut buttons = ui.new_child(egui::UiBuilder::new().max_rect(row.shrink2(vec2(s.s3, s.s2))).layout(Layout::right_to_left(Align::Center)));
+    buttons.spacing_mut().item_spacing.x = s.s2;
+    let confirm = match chosen {
+        Some(_) => TextButton::new(ask.confirm).primary(),
+        None => TextButton::new(ask.confirm).primary().unavailable(tr!("Pick a time above or type one first")),
+    };
+    if (confirm.show(&mut buttons, theme, &keys).clicked() || entered)
+        && let Some(at) = chosen
+    {
+        picked = Picked::At { at, alert: false };
+    }
+    if TextButton::new(tr!("Cancel")).plain().show(&mut buttons, theme, &keys).clicked() {
+        picked = Picked::Cancelled;
+    }
+    if let Some(note) = ask.note {
+        rule(ui, p.line);
+        egui::Frame::NONE.inner_margin(egui::Margin { left: 12, right: 12, top: 8, bottom: 10 }).show(ui, |ui| {
+            let mut job = egui::text::LayoutJob::single_section(note.to_owned(), theme.fonts.caption.format(p.muted));
+            job.wrap.max_width = ui.available_width().max(1.0);
+            let text = ui.painter().layout_job(job);
+            let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), text.size().y), Sense::hover());
+            response.widget_info(|| WidgetInfo::labeled(Role::Label, true, note));
+            paint::rows_at(&solid(ui), rect.min, rect.width(), text, p.muted);
+        });
+    }
+    // Esc cancels where no float takes it.
+    if !soon::is_soon(ui) && popup::escape(ui.ctx()) {
         picked = Picked::Cancelled;
     }
     match picked {

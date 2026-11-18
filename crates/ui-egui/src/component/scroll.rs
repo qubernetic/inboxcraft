@@ -83,11 +83,11 @@ pub fn paint(painter: &Painter, theme: &Theme, strip: Rect, thumb: Rangef, bar: 
 /// none, or showed it over the content): the strip egui senses, the thumb where egui's drag puts it. Only the
 /// vertical bar: a horizontal one is not painted.
 pub fn bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>) {
-    paint_bar(ui, theme, output);
+    bar_with_ends(ui, theme, output, 0.0);
 }
 
-/// [`bar`]: beside the content.
-fn paint_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>) {
+/// [`bar`], its thumb travelling `ends` clear of the strip's top and bottom (a field's bar on its board: 4).
+pub fn bar_with_ends<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, ends: f32) {
     let id = output.id.with(1);
     let Some(strip) = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(id).map(|widget| widget.rect)) else { return };
     // egui starts showing a bar a frame before it gives it room beside the content: until the strip stands clear of
@@ -96,14 +96,19 @@ fn paint_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>) {
         return;
     }
     let (inner, content) = (output.inner_rect.height(), output.content_size.y);
-    let length = strip.height();
+    // max then min, never `clamp`: a bound from a rect's height may be negative or NaN, and `min` and `max` keep the
+    // other number then.
+    let ends = if ends.is_finite() { ends.max(0.0).min(strip.height().max(0.0) / 4.0) } else { 0.0 };
+    let length = strip.height() - ends * 2.0;
     if !(content > inner && inner > 0.0 && length > 0.0 && content.is_finite()) {
         return;
     }
     let size = (inner / content * length).max(ui.spacing().scroll.handle_min_length).min(length);
+    // A thumb kept clear of the ends is a whole number of points long, rounded down: the field's board's 148, not 149.
+    let size = if ends > 0.0 { size.floor() } else { size };
     let most = content - inner;
     let share = (output.state.clamped_offset().y / most).clamp(0.0, 1.0);
-    let top = strip.top() + share * (length - size);
+    let top = strip.top() + ends + share * (length - size);
     let response = ui.ctx().read_response(id);
     let state = match response {
         Some(response) if response.dragged() || response.is_pointer_button_down_on() => Bar::Dragging,
@@ -115,8 +120,38 @@ fn paint_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>) {
 
 /// Shows `area` in `ui` with `add` drawing its content, and paints its bar.
 pub fn show<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui) -> R) -> ScrollAreaOutput<R> {
+    show_with_ends(ui, theme, area, 0.0, add)
+}
+
+/// [`show`], the thumb travelling `ends` clear of the strip's ends ([`bar_with_ends`]).
+pub fn show_with_ends<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, ends: f32, add: impl FnOnce(&mut Ui) -> R) -> ScrollAreaOutput<R> {
     let output = area.show(ui, add);
-    bar(ui, theme, &output);
+    bar_with_ends(ui, theme, &output, ends);
+    output
+}
+
+/// Shows `area` in `ui` with `add` drawing its content and no bar of egui's: a thin thumb, `thumb` (width, length)
+/// in `muted`, `inset` in from the area's right edge and travelling `inset[1]` clear of its top and bottom, over the
+/// content (a float's rows, which keep the room clear).
+pub fn show_thin<R>(
+    ui: &mut Ui,
+    theme: &Theme,
+    area: ScrollArea,
+    thumb: [f32; 2],
+    inset: [f32; 2],
+    add: impl FnOnce(&mut Ui) -> R,
+) -> ScrollAreaOutput<R> {
+    let output = area.scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, add);
+    let (inner, content) = (output.inner_rect, output.content_size.y);
+    let ends = if inset[1].is_finite() { inset[1].max(0.0).min(inner.height().max(0.0) / 4.0) } else { 0.0 };
+    let room = inner.height() - ends * 2.0;
+    if content > inner.height() && room > 0.0 && content.is_finite() {
+        let length = thumb[1].min(room);
+        let share = (output.state.clamped_offset().y / (content - inner.height())).clamp(0.0, 1.0);
+        let top = inner.top() + ends + share * (room - length);
+        let rect = Rect::from_min_size(egui::pos2(inner.right() - inset[0] - thumb[0], top), egui::vec2(thumb[0], length));
+        ui.painter().rect_filled(rect, 0.0, theme.palette.muted);
+    }
     output
 }
 

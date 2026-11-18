@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::collections::HashSet;
 
 use egui::accesskit::Role as AccessRole;
-use egui::{Align, Frame, Id, Key, Layout, Margin, Popup, Rect, RichText, ScrollArea, Sense, Ui, UiBuilder, pos2, vec2};
+use egui::{Align, Frame, Id, Layout, Margin, Rect, RichText, ScrollArea, Sense, Ui, UiBuilder, pos2, vec2};
 use inboxcraft_model::Role;
 
 use inboxcraft_engine::ScreenerMode;
@@ -46,6 +46,7 @@ use crate::component::outbox_row::{OutboxRow as OutboxRowView, SendButton, Stand
 use crate::component::pill::pill;
 use crate::component::segmented::segmented_for;
 use crate::component::tag::TagKind;
+use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
 use crate::component::{avatar, button, field, popup, tooltip};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
@@ -186,7 +187,8 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
             if response.changed() {
                 changed = Some(search.clone());
             }
-            if (response.has_focus() || response.lost_focus()) && ui.input(|input| input.key_pressed(Key::Escape)) {
+            // Esc empties the field, unless a float over it takes the key.
+            if (response.has_focus() || response.lost_focus()) && popup::escape(ui.ctx()) {
                 search.clear();
                 changed = Some(String::new());
             }
@@ -286,7 +288,7 @@ pub(super) fn row_height(theme: &Theme) -> f32 {
     theme.boxes().mail_row
 }
 
-/// The hover actions of `message`: Done (or "Not done" for a done one), mark read or unread, Delete.
+/// The hover actions of `message`: Done (or "Not done" for a done one), mark read or unread, Delete, Snooze.
 fn actions(message: &MessageRow) -> [Action<'static>; 4] {
     #[cfg(test)]
     super::list_tests::ACTIONS_BUILT.with(|built| built.set(built.get().saturating_add(1)));
@@ -297,12 +299,151 @@ fn actions(message: &MessageRow) -> [Action<'static>; 4] {
         Action { icon: IconId::Done, name: done, action: Some(keymap::DONE), unavailable: None },
         Action { icon: read_icon, name: read, action: Some(keymap::READ), unavailable: None },
         Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE), unavailable: None },
-        // Its key shows dashed, as the sheet's unavailable Snooze; an unavailable action offers no key and runs nothing.
-        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: Some(keymap::SNOOZE), unavailable: Some(tr!("Open the message to snooze it")) },
+        // It opens the time picker at the row ([`snooze_picker`]); the time chosen snoozes the message.
+        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: Some(keymap::SNOOZE), unavailable: None },
     ]
 }
 
-/// What the hover action at `index` of [`actions`] does to `message`.
+/// The id of the time picker float opened from the Snooze of the message `id`'s row.
+pub(super) fn snooze_popup(id: u64) -> Id {
+    Id::unique("list-snooze-picker").with(id)
+}
+
+/// The id the row's time picker keeps its state under between frames (one picker is open at a time).
+fn snooze_state() -> Id {
+    Id::unique("list-snooze-picker-state")
+}
+
+/// Where the list keeps the open time picker ([`SnoozeOpen`]) and where the row of its message was drawn
+/// ([`SnoozeRow`]).
+fn snooze_open_id() -> Id {
+    Id::unique("list-snooze-open")
+}
+
+fn snooze_row_id() -> Id {
+    Id::unique("list-snooze-row")
+}
+
+/// Where the list keeps the row the keyboard is on, as a pass drew it in sight: `(its response, the pass)`.
+fn keyed_row_id() -> Id {
+    Id::unique("list-keyed-row")
+}
+
+/// The time picker open from a row's Snooze: it belongs to a message, not to the row drawn for it.
+#[derive(Debug, Clone, Copy)]
+struct SnoozeOpen {
+    /// The message it snoozes.
+    message: u64,
+    /// Where it hangs from: the rect of the row's Snooze when it opened, relative to the row's top left, so it follows
+    /// the row while the group hides (the pointer gone into the float) or the row moves (mail coming in above).
+    anchor: Rect,
+    /// The last pass that showed it: a pass between without it (the list not drawn) closes it.
+    shown: u64,
+}
+
+/// The row of the open picker's message as a pass drew it, in sight.
+#[derive(Debug, Clone, Copy)]
+struct SnoozeRow {
+    message: u64,
+    rect: Rect,
+    /// The row's response, which the keyboard goes back to.
+    row: Id,
+    pass: u64,
+}
+
+/// Opens the time picker of the message `message`'s row from its Snooze (the hover action's `id`) on the row `rect`.
+fn open_snooze(ctx: &egui::Context, message: u64, action: Id, rect: Rect) {
+    let anchor = ctx.read_response(action).map_or(rect, |response| response.rect).translate(-rect.min.to_vec2());
+    let shown = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| {
+        data.insert_temp(snooze_open_id(), SnoozeOpen { message, anchor, shown });
+        data.get_temp_mut_or_default::<TimePicker>(snooze_state()).open();
+    });
+}
+
+/// The row of `message` was drawn in sight at `rect` (`row` its response): the open picker of that message, if any,
+/// stands under it this frame.
+fn note_snooze_row(ctx: &egui::Context, message: u64, rect: Rect, row: Id) {
+    let open = ctx.data(|data| data.get_temp::<SnoozeOpen>(snooze_open_id())).is_some_and(|open| open.message == message);
+    if open {
+        let pass = ctx.cumulative_pass_nr();
+        ctx.data_mut(|data| data.insert_temp(snooze_row_id(), SnoozeRow { message, rect, row, pass }));
+    }
+}
+
+/// Closes the row's time picker, whichever message it is open on.
+fn close_snooze(ctx: &egui::Context) {
+    ctx.data_mut(|data| {
+        data.remove::<SnoozeOpen>(snooze_open_id());
+        data.remove::<SnoozeRow>(snooze_row_id());
+    });
+}
+
+/// The time picker open from a row's Snooze, after the list drew its rows: under its message's row if this pass drew
+/// that row in sight, and the pass before showed it; else it closes for good (scrolled away, another list or screen,
+/// the message gone), whichever list drew or did not draw the row, and the keyboard it held goes nowhere. The time chosen snoozes the message. A choice or Cancel
+/// closes it and gives the row the keyboard; so do `Esc` and a press outside it, through the float.
+fn snooze_picker(ctx: &egui::Context, theme: &Theme, mailbox: &Mailbox) -> Option<(u64, Act)> {
+    let open = ctx.data(|data| data.get_temp::<SnoozeOpen>(snooze_open_id()))?;
+    let pass = ctx.cumulative_pass_nr();
+    let drawn = ctx.data(|data| data.get_temp::<SnoozeRow>(snooze_row_id())).filter(|row| row.message == open.message && row.pass == pass);
+    let Some(drawn) = drawn.filter(|_| open.shown.saturating_add(1) >= pass) else {
+        close_snooze(ctx);
+        // The keyboard it held goes back to the list, as Esc gives it back: to the keyed row in sight, else nowhere.
+        let popup = snooze_popup(open.message);
+        let held = ctx
+            .memory(|memory| memory.focused())
+            .and_then(|focused| ctx.read_response(focused))
+            .is_some_and(|response| response.layer_id.id == popup);
+        if held {
+            let keyed = ctx.data(|data| data.get_temp::<(Id, u64)>(keyed_row_id())).filter(|(_, at)| *at == pass).map(|(row, _)| row);
+            ctx.memory_mut(|memory| match keyed {
+                Some(row) => memory.request_focus(row),
+                None => {
+                    if let Some(focused) = memory.focused() {
+                        memory.surrender_focus(focused);
+                    }
+                }
+            });
+        }
+        return None;
+    };
+    ctx.data_mut(|data| data.insert_temp(snooze_open_id(), SnoozeOpen { shown: pass, ..open }));
+    let float = popup::Float {
+        id: snooze_popup(open.message),
+        anchor: open.anchor.translate(drawn.rect.min.to_vec2()),
+        width: time_picker::WIDTH,
+        returns_to: drawn.row,
+    };
+    let shown = popup::float(ctx, theme, &float, |ui| {
+        let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
+        let ask = Ask { title: tr!("Snooze until"), confirm: tr!("Snooze"), alert: None, presets: &presets, extra: None, note: None };
+        let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(snooze_state())).unwrap_or_default();
+        let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
+        ui.data_mut(|data| data.insert_temp(snooze_state(), state));
+        picked
+    });
+    match shown {
+        Some(Picked::At { at, .. }) => {
+            close_snooze(ctx);
+            ctx.memory_mut(|memory| memory.request_focus(drawn.row));
+            Some((open.message, Act::Snooze(at)))
+        }
+        Some(Picked::Cancelled | Picked::Extra) => {
+            close_snooze(ctx);
+            ctx.memory_mut(|memory| memory.request_focus(drawn.row));
+            None
+        }
+        Some(Picked::Open) => None,
+        // Esc or a press outside: the float already gave the row the keyboard.
+        None => {
+            close_snooze(ctx);
+            None
+        }
+    }
+}
+
+/// What the hover action at `index` of [`actions`] does to `message` at once (Snooze asks for a time first).
 fn act(message: &MessageRow, index: usize) -> Option<Act> {
     match index {
         0 if message.done => Some(Act::Undone),
@@ -314,6 +455,11 @@ fn act(message: &MessageRow, index: usize) -> Option<Act> {
     }
 }
 
+/// The id of the group menu of the message `id`'s row.
+pub(super) fn group_menu_id(id: u64) -> Id {
+    Id::unique("list-group-menu").with(id)
+}
+
 /// The width of the group menu, in body text sizes.
 const MENU_WIDTH: f32 = 18.0;
 
@@ -321,7 +467,7 @@ const MENU_WIDTH: f32 = 18.0;
 /// the act chosen. A line under them says that all the sender's mail moves, the kept and the future.
 pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>, address: &str, focus_first: bool) -> Option<Act> {
     let mut chosen = None;
-    crate::component::label(ui, theme.fonts.label, tr!("Group"), theme.palette.muted);
+    popup::title(ui, theme, tr!("Group"), None);
     for (index, kind) in GroupKind::SHOWN.into_iter().enumerate() {
         let choice = popup::choice(ui, theme, kind.text(), current == Some(kind));
         if focus_first && index == 0 {
@@ -334,9 +480,11 @@ pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>,
     if popup::choice(ui, theme, tr!("Let InboxCraft sort it"), false).clicked() {
         chosen = Some(Act::Group(None));
     }
-    ui.add_space(theme.spacing.s1);
     let note = tr!("Moves all mail from {address}, kept and future.", address = address);
-    ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
+    // 12 in, as a float's words stand (8 above, 10 below, as the time picker's note).
+    Frame::NONE.inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 10 }).show(ui, |ui| {
+        ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
+    });
     chosen
 }
 
@@ -351,6 +499,8 @@ struct Drawn {
     focused: bool,
     /// It gained the focus this frame.
     gained: bool,
+    /// Its Snooze opened the time picker: the presets are to be read again.
+    presets: bool,
 }
 
 /// Where a row stands in its list: its place among the list's rows and how many there are (a screen reader says "12 of
@@ -423,11 +573,26 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     // Its place among all the list's rows, built or not: a screen reader says "12 of 1000".
     slot.tell(ui, response.id);
     keep_arrows(ui, response);
+    let rect = response.rect;
+    // In sight: the time picker open on this message, if any, stands under this row ([`snooze_picker`]); the keyed
+    // row is where the keyboard goes when a picker closes unasked.
+    if ui.is_rect_visible(rect) {
+        note_snooze_row(ui.ctx(), message.id, rect, response.id);
+        if keyed {
+            let pass = ui.ctx().cumulative_pass_nr();
+            ui.ctx().data_mut(|data| data.insert_temp(keyed_row_id(), (response.id, pass)));
+        }
+    }
     let mut acted = drawn.acted.and_then(|index| act(message, index));
+    let presets = drawn.acted == Some(SNOOZE_ACTION);
+    if presets {
+        open_snooze(ui.ctx(), message.id, actions_id(message.id).with(SNOOZE_ACTION), rect);
+        note_snooze_row(ui.ctx(), message.id, rect, response.id);
+    }
     if message.group.is_some() {
         acted = acted.or(menu(ui, theme, response, message, selected));
     }
-    Drawn { clicked: response.clicked(), acted, focused: response.has_focus(), gained: response.gained_focus() }
+    Drawn { clicked: response.clicked(), acted, focused: response.has_focus(), gained: response.gained_focus(), presets }
 }
 
 /// What a mail row says, worked out once for a list of rows and kept while it stays ([`row_text`]).
@@ -534,7 +699,13 @@ fn later(
     }
     slot.tell(ui, response.id);
     keep_arrows(ui, response);
-    Drawn { clicked: response.clicked(), acted: drawn.link.then_some(Act::Unsnooze), focused: response.has_focus(), gained: response.gained_focus() }
+    Drawn {
+        clicked: response.clicked(),
+        acted: drawn.link.then_some(Act::Unsnooze),
+        focused: response.has_focus(),
+        gained: response.gained_focus(),
+        presets: false,
+    }
 }
 
 /// Keeps the arrow keys from moving egui's focus off the row `response` while it has the focus: they are the list's
@@ -607,12 +778,21 @@ fn by_keys_id() -> Id {
     Id::unique("list-menu-by-keys")
 }
 
+/// Where the open group menu is kept: the message whose row showed it, and the pass that did.
+fn menu_shown_id() -> Id {
+    Id::unique("list-menu-shown")
+}
+
 /// Settles the rows' menus after a pass: an ask ([`ask_menu`]) no row took in a whole pass is dropped (its row was not
 /// drawn: its message gone), so it never opens later, away from the moment it was asked for; a menu the keyboard
-/// opened that is no longer open has ended, whatever closed it (a menu whose row is not drawn is closed by egui, as
-/// every popup not shown), so it gives the focus back to nothing later.
+/// opened that is no longer open has ended, whatever closed it (a menu whose row this pass did not draw closes, as
+/// every float not shown), so it gives the focus back to nothing later.
 pub(super) fn settle_menus(ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
+    if let Some((id, _)) = ctx.data(|data| data.get_temp::<(u64, u64)>(menu_shown_id())).filter(|(_, at)| *at < pass) {
+        popup::set_open(ctx, group_menu_id(id), false);
+        ctx.data_mut(|data| data.remove::<(u64, u64)>(menu_shown_id()));
+    }
     // A landing no list took (the list not drawn, or a place without rows: New senders' queue) is dropped, so it
     // never lands later, in another place.
     if ctx.data(|data| data.get_temp::<(u64, u64)>(land_id())).is_some_and(|(_, at)| pass > at.saturating_add(2)) {
@@ -621,7 +801,7 @@ pub(super) fn settle_menus(ctx: &egui::Context) {
     if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_asked_id())).is_some_and(|(_, at)| at < pass) {
         ctx.data_mut(|data| data.remove::<(u64, u64)>(menu_asked_id()));
     }
-    if ctx.data(|data| data.get_temp::<(u64, Id)>(by_keys_id())).is_some_and(|(_, popup)| !Popup::is_id_open(ctx, popup)) {
+    if ctx.data(|data| data.get_temp::<(u64, Id)>(by_keys_id())).is_some_and(|(_, popup)| !popup::is_open(ctx, popup)) {
         ctx.data_mut(|data| data.remove::<(u64, Id)>(by_keys_id()));
     }
 }
@@ -632,7 +812,7 @@ pub(super) fn settle_menus(ctx: &egui::Context) {
 /// the reader shows. The act chosen.
 fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow, keyed: bool) -> Option<Act> {
     let ctx = ui.ctx().clone();
-    let popup_id = Popup::default_response_id(response);
+    let popup_id = group_menu_id(message.id);
     let first_id = popup_id.with("focus-first");
     if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_asked_id())).is_some_and(|(id, _)| id == message.id) {
         ctx.data_mut(|data| {
@@ -640,28 +820,24 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow,
             data.insert_temp(by_keys_id(), (message.id, popup_id));
             data.insert_temp(first_id, true);
         });
-        Popup::open_id(&ctx, popup_id);
+        popup::open_under(&ctx, popup_id);
     }
     if response.secondary_clicked() {
         ctx.data_mut(|data| data.remove::<(u64, Id)>(by_keys_id()));
     }
     let by_keys = ctx.data(|data| data.get_temp::<(u64, Id)>(by_keys_id())).is_some_and(|(id, popup)| id == message.id && popup == popup_id);
     let first = ctx.data_mut(|data| data.remove_temp::<bool>(first_id)).unwrap_or(false);
-    let mut popup = Popup::context_menu(response).frame(Frame::NONE);
-    if by_keys {
-        popup = popup.at_position(response.rect.left_bottom());
-    }
     let width = theme.fonts.body.size * MENU_WIDTH;
-    let mut acted = None;
-    popup.show(|ui| {
-        popup::panel(ui, theme, width, |ui| {
-            if let Some(chosen) = group_menu(ui, theme, message.group, &message.address, first) {
-                acted = Some(chosen);
-                ui.close();
-            }
-        });
-    });
-    if by_keys && !Popup::is_id_open(&ctx, popup_id) {
+    let acted = popup::context_menu(&ctx, theme, response, popup_id, width, |ui| {
+        let chosen = group_menu(ui, theme, message.group, &message.address, first);
+        (chosen, chosen.is_some())
+    })
+    .flatten();
+    if popup::is_open(&ctx, popup_id) {
+        let pass = ctx.cumulative_pass_nr();
+        ctx.data_mut(|data| data.insert_temp(menu_shown_id(), (message.id, pass)));
+    }
+    if by_keys && !popup::is_open(&ctx, popup_id) {
         ctx.data_mut(|data| data.remove::<(u64, Id)>(by_keys_id()));
         let in_sight = ui.clip_rect().contains_rect(response.rect);
         if keyed && in_sight {
@@ -672,12 +848,10 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow,
 }
 
 /// Where Snooze stands among a row's hover actions ([`actions`]): its id is `actions_id(id).with(SNOOZE_ACTION)`.
-#[cfg_attr(not(test), expect(dead_code, reason = "the Snooze picker of the fields branch anchors to it after the merge"))]
 pub(crate) const SNOOZE_ACTION: usize = 3;
 
 /// The id of the hover action group of message `id`'s row: its n-th action is `actions_id(id).with(n)` (Snooze's
 /// [`SNOOZE_ACTION`]), what a picker opened from an action anchors to.
-#[cfg_attr(not(test), expect(dead_code, reason = "the Snooze picker of the fields branch anchors to it after the merge"))]
 pub(crate) fn actions_id(id: u64) -> Id {
     crate::component::mail_row::actions_id(row_id(id))
 }
@@ -772,6 +946,8 @@ pub(super) struct Asked {
     pub(super) screener: Option<ScreenerMode>,
     /// The row that gained the keyboard's focus this frame (`Tab` onto it).
     pub(super) gained: Option<u64>,
+    /// A row's Snooze opened the time picker: the presets still ahead are to be read.
+    pub(super) presets: bool,
 }
 
 /// What a button of a send in the outbox asks for.
@@ -851,6 +1027,8 @@ struct Rows<'a> {
     clicked: Cell<Option<u64>>,
     /// A hover action pressed this frame.
     acted: Cell<Option<(u64, Act)>>,
+    /// A row's Snooze opened the time picker this frame.
+    presets: Cell<bool>,
     /// "Done all" pressed this frame: the group's messages.
     done_all: Cell<Option<Vec<u64>>>,
     /// Review pressed on the screener card.
@@ -881,6 +1059,9 @@ impl Rows<'_> {
         }
         if let Some(act) = drawn.acted {
             self.acted.set(Some((message.id, act)));
+        }
+        if drawn.presets {
+            self.presets.set(true);
         }
     }
 }
@@ -1980,6 +2161,16 @@ fn other_of(ctx: &egui::Context, mailbox: &Mailbox, view: InboxView, groups: &[G
 
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
 pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
+    let mut asked = drawn_rows(ui, theme, keymap, mailbox);
+    // After every row of every list path: the picker stands under its message's row only if one was drawn.
+    if let Some(snoozed) = snooze_picker(ui.ctx(), theme, mailbox) {
+        asked.acted = asked.acted.or(Some(snoozed));
+    }
+    asked
+}
+
+/// [`rows`] before the row's time picker.
+fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     // The line between the list's head and its rows, in the panel's line colour; the rows start under it.
     let room = ui.max_rect();
     super::paint::hairline(ui.painter(), room.left_top(), room.right_top(), theme.palette.panel_line);
@@ -2013,6 +2204,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         account_marker: view == InboxView::List && mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
         clicked: Cell::new(None),
         acted: Cell::new(None),
+        presets: Cell::new(false),
         done_all: Cell::new(None),
         review: Cell::new(false),
         outbox: Cell::new(None),
@@ -2056,5 +2248,6 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         outbox: rows.outbox.get(),
         screener: screener_mode,
         gained: rows.gained.get(),
+        presets: rows.presets.get(),
     }
 }

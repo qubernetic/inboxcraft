@@ -512,7 +512,7 @@ fn show_all_is_an_accent_link_in_its_groups_head_before_the_count() {
 }
 
 #[test]
-fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order_snooze_not_yet() {
+fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order() {
     let mut harness = harness(true);
     harness.get_by_label(ODILE).hover();
     harness.run();
@@ -520,7 +520,7 @@ fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order_snooze_not_yet
     let mut lefts = Vec::new();
     for name in ["Done", "Mark as read", "Delete", "Snooze"] {
         let button = harness.query_all_by_role_and_label(Role::Button, name).find(|node| row.contains(node.rect().center())).expect(name);
-        assert_eq!(button.accesskit_node().is_disabled(), name == "Snooze", "{name}");
+        assert!(!button.accesskit_node().is_disabled(), "{name}");
         lefts.push(button.rect().left());
     }
     assert!(lefts.windows(2).all(|pair| pair[0] < pair[1]), "in the design's order: {lefts:?}");
@@ -829,7 +829,7 @@ fn a_pointer_press_on_done_beside_the_reader_marks_the_message_done() {
 }
 
 #[test]
-fn a_hovered_rows_snooze_shows_its_key_as_the_sheet_does_though_it_cannot_run_yet() {
+fn a_hovered_rows_snooze_shows_its_key_as_the_sheet_does() {
     let mut harness = harness(true);
     harness.get_by_label(ODILE).hover();
     harness.run();
@@ -841,7 +841,7 @@ fn a_hovered_rows_snooze_shows_its_key_as_the_sheet_does_though_it_cannot_run_ye
             .find(|rect| row.contains(rect.center()))
             .map(|rect| rect.width())
     };
-    // Its icon and its dashed one-letter chip, as wide as Done with its own.
+    // Its icon and its one-letter chip, as wide as Done with its own.
     assert_eq!(width(&harness, "Snooze"), width(&harness, "Done"));
 }
 
@@ -2448,7 +2448,7 @@ fn every_scene_of_the_lists_is_walked_by_tab_and_rests() {
 
 #[test]
 fn a_rows_menu_never_lingers_away_from_its_row() {
-    let open = |harness: &Harness<'static, InboxApp>| egui::Popup::is_any_open(&harness.ctx);
+    let open = |harness: &Harness<'static, InboxApp>| crate::component::popup::any_open(&harness.ctx);
     // Open by the keys, then the row scrolls out of the rows built: the menu closes, and the list's keys work again.
     let mut harness = ten_thousand(InboxView::List);
     harness.key_press(Key::J);
@@ -2457,7 +2457,13 @@ fn a_rows_menu_never_lingers_away_from_its_row() {
     harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
     harness.run();
     assert!(open(&harness), "Shift F10 opens the keyed row's menu");
+    // The menu is a float that holds the pointer: the wheel does not scroll the list under it.
     wheel(&mut harness, 4000.0);
+    harness.run();
+    assert!(row_rect(&harness, keyed).is_some() && open(&harness), "the list stays under the open menu");
+    // The list moves another way (a row far below brought into sight): the menu closes with its row.
+    let far = super::list::order(&harness.ctx).get(40).copied().unwrap();
+    super::list::bring(&harness.ctx, far);
     harness.run();
     assert!(row_rect(&harness, keyed).is_none(), "the row is no longer built");
     assert!(!open(&harness), "its menu closed with it");
@@ -2523,7 +2529,7 @@ fn shift_f10_on_a_keyed_row_out_of_sight_brings_it_into_sight_and_opens_its_menu
     harness.run();
     harness.run();
     assert!(in_sight(&harness, keyed), "the row comes into sight");
-    assert!(egui::Popup::is_any_open(&harness.ctx), "and its menu opens at it");
+    assert!(crate::component::popup::any_open(&harness.ctx), "and its menu opens at it");
     let row = row_rect(&harness, keyed).unwrap();
     let first = harness.get_by_role_and_label(Role::MenuItemRadio, "People").rect();
     assert!(first.top() >= row.bottom() - 1.0, "under the row: {first:?} {row:?}");
@@ -2537,10 +2543,10 @@ fn esc_that_closes_a_menu_in_the_reader_only_closes_it() {
     // The reader's More menu, opened with the pointer: the reader has the keyboard.
     harness.get_by_role_and_label(Role::Button, "More").click();
     harness.run();
-    assert!(egui::Popup::is_any_open(&harness.ctx), "More is open");
+    assert!(crate::component::popup::any_open(&harness.ctx), "More is open");
     harness.key_press(Key::Escape);
     harness.run();
-    assert!(!egui::Popup::is_any_open(&harness.ctx), "Esc closes it");
+    assert!(!crate::component::popup::any_open(&harness.ctx), "Esc closes it");
     assert!(!selected_focused(&harness), "and leaves the focus where it was, not on the list's row");
     harness.key_press(Key::J);
     harness.run();
@@ -2575,8 +2581,9 @@ fn the_list_keys_rest_under_a_rows_open_menu() {
         modifiers: Modifiers::NONE,
     });
     harness.run();
-    assert!(egui::Popup::is_any_open(&harness.ctx), "the menu is open");
-    assert!(harness.ctx.memory(|memory| memory.has_focus(super::list::row_id(odile))), "the row still has the focus");
+    assert!(crate::component::popup::any_open(&harness.ctx), "the menu is open");
+    // The menu takes the keyboard from the row, so that Tab starts on its first choice; Esc gives it back.
+    assert_eq!(harness.ctx.memory(|memory| memory.focused()), None, "the keyboard left the row for its menu");
     for key in [Key::J, Key::ArrowDown, Key::End] {
         harness.key_press(key);
         harness.run();
@@ -2939,10 +2946,10 @@ fn in_one_pane_the_list_over_the_docked_composer_has_its_keys_and_sends_nothing(
     assert_eq!(written(&harness), Some(("Dear Odile".to_owned(), false)), "the composer stays behind the list as it was");
     harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
     harness.run();
-    assert!(egui::Popup::is_any_open(&harness.ctx), "Shift F10 opens the keyed row's menu");
+    assert!(crate::component::popup::any_open(&harness.ctx), "Shift F10 opens the keyed row's menu");
     harness.key_press(Key::Escape);
     harness.run();
-    assert!(!egui::Popup::is_any_open(&harness.ctx));
+    assert!(!crate::component::popup::any_open(&harness.ctx));
     // Enter opens the keyed message in front; the composer floats with its text.
     let keyed = second.unwrap();
     harness.key_press(Key::Enter);
@@ -3248,4 +3255,167 @@ fn dragging_the_lists_thumb_keeps_the_grab_point_under_the_pointer_past_an_end_a
     assert!(under(&harness, y), "back 100 above the end's grab point: the thumb {:?} is under the pointer at {y}", thumb(&harness));
     harness.drop_at(egui::pos2(grab.x, y));
     harness.run();
+}
+
+/// The rect of the button `name` on the row `row`.
+fn on_row(harness: &Harness<'static, InboxApp>, row: egui::Rect, name: &str) -> egui::Rect {
+    let found = harness.query_all_by_role_and_label(Role::Button, name).map(|node| node.rect()).find(|rect| row.contains(rect.center()));
+    found.unwrap_or_else(|| panic!("no {name} on the row"))
+}
+
+/// Opens the time picker from the Snooze of Odile's row with the pointer; the Snooze's rect.
+fn snooze_odile(harness: &mut Harness<'static, InboxApp>) -> egui::Rect {
+    let row = harness.get_by_label(ODILE).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    let snooze = on_row(harness, row, "Snooze");
+    harness.hover_at(snooze.center());
+    harness.run();
+    harness.query_all_by_role_and_label(Role::Button, "Snooze").find(|node| node.rect() == snooze).unwrap().click();
+    harness.run();
+    snooze
+}
+
+#[test]
+fn the_hover_snooze_opens_the_time_picker_at_the_row_and_a_choice_snoozes_that_message() {
+    let mut harness = still();
+    let snooze = snooze_odile(&mut harness);
+    let title = harness.get_by_label("Snooze until").rect();
+    assert!(title.top() > snooze.bottom() && title.top() < snooze.bottom() + 40.0, "under the row's Snooze: {title:?} {snooze:?}");
+    harness.get_by_label("Tomorrow morning, Fri 08:00").click();
+    harness.run_steps(4);
+    assert_eq!(harness.state().mailbox().undoable().map(|undo| undo.text.as_str()), Some("Snoozed until Friday 6 November, 08:00"));
+    assert!(harness.state().mailbox().messages().iter().all(|row| row.subject != "Allotment rota for November"), "that message left");
+    assert_eq!(rows(&harness), 10, "and no other");
+    assert!(harness.query_by_label("Snooze until").is_none(), "the picker closed");
+}
+
+#[test]
+fn the_keyboard_opens_the_hover_snooze_s_picker_and_esc_gives_the_row_back_its_focus() {
+    // The row's group shows under the pointer; the keyboard goes to its Snooze (beside the reader the keyed row's
+    // group has no room for it, and H opens the reader's own picker).
+    let mut harness = still();
+    let row = harness.get_by_label(ODILE).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    let snooze = on_row(&harness, row, "Snooze");
+    harness.query_all_by_role_and_label(Role::Button, "Snooze").find(|node| node.rect() == snooze).unwrap().focus();
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    let title = harness.get_by_label("Snooze until").rect();
+    assert!(title.top() > snooze.bottom() && title.top() < snooze.bottom() + 40.0, "under the row's Snooze: {title:?} {snooze:?}");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none(), "Esc closes it");
+    assert!(harness.get_by_label(ODILE).is_focused(), "and the row has the keyboard again");
+    assert!(harness.state().mailbox().undoable().is_none(), "nothing snoozed");
+    // The pointer's opening closes on Esc the same way.
+    snooze_odile(&mut harness);
+    harness.get_by_label("Snooze until");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none());
+    assert!(harness.state().mailbox().undoable().is_none());
+}
+
+/// The id of the listed message with `subject`.
+fn id_with(harness: &Harness<'static, InboxApp>, subject: &str) -> u64 {
+    harness.state().mailbox().messages().iter().find(|row| row.subject == subject).map(|row| row.id).unwrap()
+}
+
+#[test]
+fn the_hover_snooze_s_picker_closes_for_good_when_its_row_is_not_drawn() {
+    let mut harness = still();
+    snooze_odile(&mut harness);
+    harness.get_by_label("Snooze until");
+    // Another list: the row is not drawn, the picker goes, and does not come back with the row.
+    harness.state_mut().mailbox_mut().open(Place::View(inboxcraft_model::Role::Archive));
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none(), "gone with its row");
+    harness.state_mut().mailbox_mut().open(Place::View(inboxcraft_model::Role::Inbox));
+    harness.run_steps(5);
+    harness.get_by_label(ODILE);
+    assert!(harness.query_by_label("Snooze until").is_none(), "and stays closed with the row back");
+    assert!(harness.state().mailbox().undoable().is_none(), "nothing snoozed");
+    // The list itself undrawn (the calendar, then Mail again): the same.
+    snooze_odile(&mut harness);
+    harness.get_by_label("Snooze until");
+    harness.state_mut().show_calendar();
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none());
+    harness.state_mut().run_action(&egui::Context::default(), crate::keymap::MAIL);
+    harness.run_steps(5);
+    harness.get_by_label(ODILE);
+    assert!(harness.query_by_label("Snooze until").is_none(), "no picker comes back with the list");
+}
+
+#[test]
+fn the_hover_snooze_s_picker_closes_when_its_message_goes_and_stays_closed_when_it_comes_back() {
+    let mut harness = still();
+    let rota = id_with(&harness, "Allotment rota for November");
+    snooze_odile(&mut harness);
+    harness.state_mut().mailbox_mut().act(rota, crate::mailbox::Act::Done);
+    harness.run_steps(5);
+    assert!(harness.query_by_label(ODILE).is_none(), "the message is done");
+    assert!(harness.query_by_label("Snooze until").is_none(), "its picker went with it");
+    harness.state_mut().mailbox_mut().undo();
+    harness.run_steps(5);
+    harness.get_by_label(ODILE);
+    assert!(harness.query_by_label("Snooze until").is_none(), "and does not come back with it");
+}
+
+#[test]
+fn the_hover_snooze_s_picker_stays_with_its_message_when_mail_comes_in_above() {
+    let mut harness = still();
+    let rota = id_with(&harness, "Allotment rota for November");
+    harness.state_mut().mailbox_mut().act(rota, crate::mailbox::Act::Done);
+    harness.run_steps(3);
+    // Teodor's row, its picker open.
+    let row = harness.get_by_label(TEODOR).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    let snooze = on_row(&harness, row, "Snooze");
+    harness.hover_at(snooze.center());
+    harness.run();
+    harness.query_all_by_role_and_label(Role::Button, "Snooze").find(|node| node.rect() == snooze).unwrap().click();
+    harness.run();
+    let before = harness.get_by_label("Snooze until").rect();
+    // The rota comes back above it: Teodor's row moves down, and the picker with it.
+    harness.state_mut().mailbox_mut().undo();
+    harness.run_steps(3);
+    let moved = harness.get_by_label(TEODOR).rect().top() - row.top();
+    assert!(moved > 0.0, "the row moved down");
+    let after = harness.get_by_label("Snooze until").rect();
+    assert!((after.top() - before.top() - moved).abs() < 0.5, "the picker followed it: {before:?} {after:?} {moved}");
+    harness.get_by_label("Tomorrow morning, Fri 08:00").click();
+    harness.run_steps(4);
+    assert!(harness.state().mailbox().messages().iter().all(|row| row.subject != "Photos from the coast walk"), "Teodor's message snoozed");
+    harness.get_by_label(ODILE);
+}
+
+#[test]
+fn a_picker_pushed_out_of_sight_by_a_smaller_window_closes_and_leaves_no_keyboard_in_it() {
+    let mut harness = still();
+    let row = harness.get_by_label(TEODOR).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    let snooze = on_row(&harness, row, "Snooze");
+    harness.hover_at(snooze.center());
+    harness.run();
+    harness.query_all_by_role_and_label(Role::Button, "Snooze").find(|node| node.rect() == snooze).unwrap().click();
+    harness.run();
+    // The keyboard goes into the picker's rows.
+    harness.key_press(Key::Tab);
+    harness.run();
+    let inside = harness.ctx.memory(|memory| memory.focused());
+    assert!(inside.is_some(), "a row of the picker has the keyboard");
+    harness.set_size(vec2(1300.0, row.top() - 20.0));
+    harness.run_steps(3);
+    assert!(harness.query_by_label("Snooze until").is_none(), "closed with its row out of sight");
+    let now = harness.ctx.memory(|memory| memory.focused());
+    assert!(now.is_none() || now != inside, "the keyboard is not left in the closed picker: {now:?}");
+    harness.set_size(vec2(1300.0, 900.0));
+    harness.run_steps(3);
+    assert!(harness.query_by_label("Snooze until").is_none(), "and stays closed");
 }

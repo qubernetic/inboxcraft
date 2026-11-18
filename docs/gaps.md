@@ -408,9 +408,9 @@ time from the code as it is, not measured.
 - Hover actions (#89, #131): Done, read or unread and Delete act on a real account as on the sample, through the
   engine's commands (#131). Done marks the message read and done (`mail.done`, #135); on a done row under "Show
   done" it is "Not done". Flag and Archive have keys (S, A) but no hover button: the design's hover group is Done,
-  read, Delete and Snooze, and the hover Snooze stays disabled ("Open the message to snooze it") because the time
-  picker opens from the reader only (#135). The act lands at once and the leaving row's gap closes over 180 ms
-  (#236). The keys (D, A, R, S, Delete, Ctrl+Z) can be changed on the Shortcuts page (#130).
+  read, Delete and Snooze; the hover Snooze opens the time picker at the row (#234). The act lands at once and the
+  leaving row's gap closes over 180 ms (#236). The keys (D, A, R, S, Delete, Ctrl+Z) can be changed on the Shortcuts
+  page (#130).
 - Reader (#90, #131): Done, Archive, Delete and Move to a folder act on the open message, flag and read or unread
   from More (#131); Reply, Reply all and Forward open the composer filled in (#133). Snooze (H) and Pin act on the
   open message (#135). More also holds Full width,
@@ -623,8 +623,7 @@ time from the code as it is, not measured.
 - The Let in card's group pills are forgotten when another message opens; a sender's group is chosen on the card or
   later in the group menu, not when the sender is blocked. New senders lists the held mail of the accounts shown, at
   most 1000 messages of the screener folders and 1000 of the inboxes (#134).
-- The time picker opens from the reader only: the hover Snooze on a row stays disabled, and Pin and Park have no keys.
-  The picker's alert switch is not shown, because notifying of a returned snooze is one choice for all mail
+- Pin and Park have no keys. The picker's alert switch is not shown, because notifying of a returned snooze is one choice for all mail
   (`notify.set`), not one per message. "Show done" is forgotten at a restart and is not offered while searching or
   in New senders. The rail's Later opens on the pins; it shows the snoozed, pinned and parked mail of the accounts
   shown, at most 1000 of each (#135).

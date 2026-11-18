@@ -271,8 +271,13 @@ fn read(shape: &Shape, own: Rect) -> Option<(Rect, Look)> {
 /// When no widget or more than one has `label`, when the harness does not [`record_layers`] (build it with
 /// [`builder`]), or when no ground holds the widget (place it with [`stage`]).
 pub(crate) fn painted<State>(harness: &Harness<'_, State>, label: &str) -> Paint {
+    painted_in(harness, label, harness.get_by_label(label).rect())
+}
+
+/// [`painted`] for the widget `label` whose own rect is `own` and not its node's: a field whose text node scrolls
+/// inside its box.
+pub(crate) fn painted_in<State>(harness: &Harness<'_, State>, label: &str, own: Rect) -> Paint {
     let node = harness.get_by_label(label);
-    let own = node.rect();
     let grown = own.expand(AROUND);
     let id = node.accesskit_node().locate().0;
     let recorded = harness
@@ -339,7 +344,7 @@ fn focused<State>(harness: &Harness<'_, State>) -> Option<NodeId> {
 }
 
 /// The labels of the pressable controls (a click or focus action, not disabled, not hidden; static text, which egui
-/// makes focusable for selecting, left out) Tab never focuses: Tab is pressed
+/// makes focusable for selecting, and scroll bars left out) Tab never focuses: Tab is pressed
 /// until the focus comes back to a control it has been on (at most 2 000 presses), two frames after each press. A
 /// control without a label is named by its role.
 pub(crate) fn keyboard_walk<State>(harness: &mut Harness<'_, State>) -> Vec<String> {
@@ -353,6 +358,8 @@ pub(crate) fn keyboard_walk<State>(harness: &mut Harness<'_, State>) -> Vec<Stri
                 && !node.is_disabled()
                 && !node.is_hidden()
                 && node.role() != accesskit::Role::Label
+                // A scroll bar is never a Tab stop: the keyboard scrolls what it holds (a field's text, a list).
+                && node.role() != accesskit::Role::ScrollBar
         })
         .map(|node| {
             let node = node.accesskit_node();
@@ -684,4 +691,30 @@ fn a_line_is_cut_once_while_its_text_and_room_stay_and_the_store_stays_small() {
     assert_eq!(cut, 400, "only each frame's new line is cut again: {cut}");
     let kept = super::fit_store_len(&harness.ctx);
     assert!(kept <= super::FIT_STORE, "the store stays bounded: {kept}");
+}
+
+#[test]
+fn a_cut_line_is_never_wider_than_its_box_however_egui_rounds_its_letters() {
+    let theme = theme();
+    let mut harness = builder().build_ui_state(
+        move |ui, found: &mut Vec<(String, f32)>| {
+            found.clear();
+            for (text, font, width) in [
+                ("Bakery on the corner, orders and deliveries", theme.fonts.body, 144.0_f32),
+                ("orders-and-deliveries@bakery-on-the-corner.example.org", theme.fonts.mono_s, 112.0),
+            ] {
+                let cut = super::cut(ui, text, font, theme.palette.ink, width);
+                let shown: String = cut.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+                let wide: f32 = cut.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum();
+                found.push((shown, wide));
+            }
+        },
+        Vec::new(),
+    );
+    harness.run();
+    let found = harness.state();
+    // The boards: `Bakery on the corner…` (the comma does not fit) and `orders-and-deli…` (16 × 6.6 is past 112).
+    assert_eq!(found[0].0, "Bakery on the corner…", "{found:?}");
+    assert_eq!(found[1].0, "orders-and-deli…", "{found:?}");
+    assert!(found[0].1 <= 144.0 && found[1].1 <= 112.0, "{found:?}");
 }

@@ -947,7 +947,7 @@ fn words(code: &str, name: &str) -> Vec<usize> {
 /// one of their types (an accessibility role or a text style of the same name, `Role::ComboBox`, `TextStyle::Button`,
 /// is not one).
 fn raw_widgets(code: &str) -> Vec<(usize, String)> {
-    const METHODS: [&str; 13] = [
+    const METHODS: [&str; 15] = [
         "button",
         "small_button",
         "checkbox",
@@ -957,18 +957,22 @@ fn raw_widgets(code: &str) -> Vec<(usize, String)> {
         "selectable_value",
         "toggle_value",
         "separator",
+        "text_edit_singleline",
+        "text_edit_multiline",
         "link",
         "hyperlink",
         "menu_button",
         "collapsing",
     ];
-    const TYPES: [&str; 11] = [
+    const TYPES: [&str; 13] = [
         "ComboBox",
         "Button",
         "Checkbox",
         "SelectableLabel",
         "Separator",
         "RadioButton",
+        "TextEdit",
+        "Popup",
         "Hyperlink",
         "ImageButton",
         "Slider",
@@ -976,6 +980,10 @@ fn raw_widgets(code: &str) -> Vec<(usize, String)> {
         "CollapsingHeader",
     ];
     let mut found = Vec::new();
+    // egui's popups (the float is the one way to a menu): its free function as well as its type.
+    for call in ["popup_below_widget(", "popup_above_or_below_widget("] {
+        found.extend(code.match_indices(call).filter(|(at, _)| word_at(code, *at, call.trim_end_matches('('))).map(|(at, _)| (at, call.to_owned())));
+    }
     for method in METHODS {
         for call in [format!(".{method}("), format!("Ui::{method}(")] {
             found.extend(code.match_indices(call.as_str()).map(|(at, _)| (at, call.clone())));
@@ -1099,6 +1107,17 @@ fn the_widget_scan_sees_calls_and_types_however_they_are_written() {
     assert!(scan("WidgetInfo::labeled(Role::ComboBox, true, name); egui::PointerButton::Primary").is_empty());
     assert!(scan("(TextStyle::Button, f.button.id())").is_empty());
     assert!(scan("theme.fonts.button.rich(text); // ui.button(\"x\")\nlet s = \"ui.separator()\";").is_empty());
+    // Text: views write in the fields of `component::field`.
+    assert_eq!(scan("ui.add(egui::TextEdit::singleline(&mut text).hint_text(hint));"), ["TextEdit"]);
+    assert_eq!(
+        scan("ui.text_edit_singleline(&mut text); ui . text_edit_multiline ( &mut more );"),
+        [".text_edit_singleline(", ".text_edit_multiline("]
+    );
+    assert!(scan("if let Some(state) = egui::text_edit::TextEditState::load(ctx, id) {}").is_empty());
+    // Menus: views open them through `component::popup`.
+    assert_eq!(scan("egui::Popup::menu(&response).show(|ui| {});"), ["Popup"]);
+    assert_eq!(scan("Popup::context_menu(&row).show(add); egui::popup_below_widget(ui, id, &r, close, add);"), ["Popup", "popup_below_widget("]);
+    assert!(scan("popup::menu(ctx, theme, &response, id, width, add); PopupCloseBehavior::CloseOnClick;").is_empty());
 }
 
 #[test]

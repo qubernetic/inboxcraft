@@ -39,8 +39,14 @@ fn harness(alert: bool) -> Harness<'static, Probe> {
             motion::set_reduced(ui.ctx(), true);
             let presets: Vec<Preset<'_>> =
                 PRESETS.iter().map(|(name, [day, hour, minute])| Preset { name, at: at(2026, 11, *day, *hour, *minute) }).collect();
-            let ask =
-                Ask { title: "Snooze until", confirm: "Snooze", alert: probe.alert.then_some("Notify me when it comes back"), presets: &presets };
+            let ask = Ask {
+                title: "Snooze until",
+                confirm: "Snooze",
+                alert: probe.alert.then_some("Notify me when it comes back"),
+                presets: &presets,
+                extra: None,
+                note: None,
+            };
             match show(ui, &theme, &mut probe.picker, &ask, probe.now, Offset::UTC) {
                 Picked::Open => {}
                 picked => probe.picked.push(picked),
@@ -199,4 +205,160 @@ fn set_typed_keeps_at_most_max_typed_bytes_at_a_character_boundary() {
     assert_eq!(picker.typed().chars().count(), super::MAX_TYPED / 2);
     picker.set_typed(&format!("a{}", "é".repeat(super::MAX_TYPED)));
     assert_eq!(picker.typed().len(), super::MAX_TYPED - 1, "the cut steps back to the last whole character");
+}
+
+/// The states of the time picker's sheet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sheet {
+    Presets,
+    Hover,
+    TypedValid,
+    TypedInvalid,
+    WithAlert,
+    Past,
+    EmptyHint,
+}
+
+const SHEET: [Sheet; 7] = [Sheet::Presets, Sheet::Hover, Sheet::TypedValid, Sheet::TypedInvalid, Sheet::WithAlert, Sheet::Past, Sheet::EmptyHint];
+
+/// The sheet's presets: later today, tomorrow morning, this weekend and next week from Monday 16 November 2026.
+const SHEET_PRESETS: [(&str, [u8; 3]); 4] =
+    [("Later today", [16, 17, 0]), ("Tomorrow morning", [17, 8, 0]), ("This weekend", [21, 9, 0]), ("Next week", [23, 8, 0])];
+
+/// The picker of the sheet in `state`, in a float's panel 320 wide at (16, 16) on `bg`.
+fn sheet_in(mode: crate::theme::Mode, state: Sheet) -> Harness<'static> {
+    let theme = crate::theme::Theme::new(mode, crate::theme::TextScale::default());
+    // Monday 16 November 2026: 10:00, or 18:00 when the first preset has passed.
+    let now = at(2026, 11, 16, if state == Sheet::Past { 18 } else { 10 }, 0);
+    let typed = match state {
+        Sheet::TypedValid | Sheet::WithAlert => "thu 9",
+        Sheet::TypedInvalid => "thursdy",
+        Sheet::Past => "2026-11-02 09:00",
+        _ => "",
+    };
+    let mut harness = builder().with_size(egui::vec2(420.0, 480.0)).build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), true);
+        ui.painter().rect_filled(ui.max_rect(), 0.0, theme.palette.bg);
+        let id = egui::Id::unique("sheet-picker");
+        let mut picker = ui.data_mut(|data| {
+            data.get_temp_mut_or_insert_with(id, || {
+                let mut picker = TimePicker::with_alert(true);
+                picker.set_typed(typed);
+                picker
+            })
+            .clone()
+        });
+        let presets: Vec<Preset<'_>> =
+            SHEET_PRESETS.iter().map(|(name, [day, hour, minute])| Preset { name, at: at(2026, 11, *day, *hour, *minute) }).collect();
+        let alert = (state == Sheet::WithAlert).then_some("Notify me when it comes back");
+        let ask = Ask { title: "Snooze until", confirm: "Snooze", alert, presets: &presets, extra: None, note: None };
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            crate::component::popup::panel(ui, &theme, super::WIDTH, |ui| show(ui, &theme, &mut picker, &ask, now, Offset::UTC));
+        });
+        ui.data_mut(|data| data.insert_temp(id, picker));
+    });
+    harness.run();
+    match state {
+        Sheet::Hover => {
+            harness.get_by_label("Tomorrow morning, Tue 08:00").hover();
+            harness.run();
+        }
+        Sheet::TypedValid | Sheet::TypedInvalid | Sheet::WithAlert | Sheet::Past | Sheet::EmptyHint => {
+            harness.get_by_label("Or type a time").focus();
+            harness.run();
+            harness.key_press(Key::End);
+            harness.run();
+        }
+        Sheet::Presets => {}
+    }
+    harness
+}
+
+/// The rects the last frame painted with their fill.
+fn fills(harness: &Harness<'static>) -> Vec<(egui::Rect, egui::Color32)> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<(egui::Rect, egui::Color32)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Rect(rect) if rect.blur_width == 0.0 && rect.fill.a() > 0 => found.push((rect.rect, rect.fill)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+    found
+}
+
+#[test]
+fn a_time_picker_looks_as_its_sheet_says_in_every_state() {
+    use crate::component::field::tests::one;
+    use egui::{pos2, vec2};
+    for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
+        let p = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette;
+        for state in SHEET {
+            let harness = sheet_in(mode, state);
+            let at = format!("{mode:?} {state:?}");
+            let found = fills(&harness);
+            let origin = pos2(16.0, 16.0);
+            let float = found.iter().find(|(_, fill)| *fill == p.surface).map(|(rect, _)| *rect);
+            let height = match state {
+                Sheet::Presets | Sheet::Hover => 304.0,
+                Sheet::TypedValid | Sheet::TypedInvalid => 330.0,
+                Sheet::WithAlert => 367.0,
+                Sheet::Past => 297.0,
+                Sheet::EmptyHint => 348.0,
+            };
+            assert_eq!(float, Some(egui::Rect::from_min_size(origin, vec2(320.0, height))), "{at}");
+            // The title in the `label` style 12 in and 10 down, the Esc chip at the right end.
+            let title = one(&harness, "SNOOZE UNTIL");
+            assert_eq!((title.rect.min, title.colour, title.size), (origin + vec2(13.0, 11.0), p.muted, 11.0), "{at}");
+            let esc = one(&harness, "Esc");
+            assert!((esc.rect.center().x - (origin.x + 1.0 + 276.0 + 15.0)).abs() < 1.0, "{at} {esc:?}");
+            let line = |y: f32, colour| {
+                found.iter().any(|(rect, fill)| *rect == egui::Rect::from_min_size(origin + vec2(1.0, y), vec2(318.0, 1.0)) && *fill == colour)
+            };
+            assert!(line(37.0, p.line), "{at}: the title's hairline");
+            // The presets still ahead, 32 high, `panel_line` between them.
+            let names: Vec<&str> = if state == Sheet::Past {
+                vec!["Tomorrow morning, Tue 08:00", "This weekend, Sat 09:00", "Next week, Mon 23 Nov"]
+            } else {
+                vec!["Later today, 17:00", "Tomorrow morning, Tue 08:00", "This weekend, Sat 09:00", "Next week, Mon 23 Nov"]
+            };
+            for (index, name) in names.iter().enumerate() {
+                let top = 38.0 + 33.0 * index as f32;
+                assert_eq!(harness.get_by_label(name).rect(), egui::Rect::from_min_size(origin + vec2(1.0, top), vec2(318.0, 32.0)), "{at} {name}");
+                if index > 0 {
+                    assert!(line(top - 1.0, p.panel_line), "{at}: the line over {name}");
+                }
+            }
+            let typed_top = 38.0 + 33.0 * names.len() as f32 - 1.0;
+            assert!(line(typed_top, p.line), "{at}: the line over the typed time");
+            let label = one(&harness, "OR TYPE A TIME");
+            assert_eq!(label.rect.min, origin + vec2(13.0, typed_top + 13.0), "{at}");
+            let field = harness.get_by_label("Or type a time").rect();
+            assert_eq!(field, egui::Rect::from_min_size(origin + vec2(13.0, typed_top + 37.0), vec2(294.0, 36.0)), "{at}");
+            let hovered = found.iter().any(|(rect, fill)| *fill == p.stage && rect.height() == 32.0);
+            assert_eq!(hovered, state == Sheet::Hover, "{at}");
+            if state == Sheet::EmptyHint {
+                let hint = crate::component::field::tests::rows(&harness, "It counts as soon as it reads as a time: no Enter needed.");
+                assert_eq!((hint.rect.min, hint.colour, hint.rect.height()), (field.left_bottom() + vec2(0.0, 8.0), p.muted, 36.0), "{at}");
+            }
+            if state == Sheet::WithAlert {
+                let words = one(&harness, "Notify me when it comes back");
+                assert_eq!((words.rect.min, words.colour), (origin + vec2(13.0, 288.0), p.ink), "{at}");
+                let switch = harness.get_by_role(Role::Switch).rect();
+                assert_eq!(switch, egui::Rect::from_min_size(origin + vec2(279.0, 291.0), vec2(28.0, 16.0)), "{at}");
+            }
+            // Cancel and the confirm at the right of the last row, 8 down, 71 × 32.
+            let row = height - 49.0;
+            let cancel = harness.get_by_role_and_label(Role::Button, "Cancel").rect();
+            let confirm = harness.get_by_role_and_label(Role::Button, "Snooze").rect();
+            assert_eq!(confirm, egui::Rect::from_min_size(origin + vec2(236.0, row + 8.0), vec2(71.0, 32.0)), "{at}");
+            assert_eq!(cancel, egui::Rect::from_min_size(origin + vec2(157.0, row + 8.0), vec2(71.0, 32.0)), "{at}");
+            let ready = matches!(state, Sheet::TypedValid | Sheet::WithAlert);
+            assert_eq!(harness.get_by_role_and_label(Role::Button, "Snooze").accesskit_node().is_disabled(), !ready, "{at}");
+            assert!(line(row - 1.0, p.line), "{at}: the line over the buttons");
+        }
+    }
 }
