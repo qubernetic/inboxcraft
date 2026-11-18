@@ -253,7 +253,7 @@ fn list_widest(ui: &Ui, theme: &Theme, docked: bool) -> f32 {
 }
 
 /// Keeps the width the owner gave the resizable pane `id` apart from what `widest` squeezes it to (egui keeps the
-/// squeezed width as the pane's own, also between runs): while the cap bites, the owner's width is kept; once it
+/// squeezed width as the pane's own, kept while the app runs): while the cap bites, the owner's width is kept; once it
 /// lets go (the composer closed or floating, the window wider), the pane is given back the owner's width, as far as the
 /// cap allows. A width the owner drags to while the cap does not bite is the owner's, and so is a narrower one while
 /// it is squeezed: the width changed under a cap that did not move. Both are kept with the pane's own.
