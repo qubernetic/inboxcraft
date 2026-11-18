@@ -718,3 +718,36 @@ fn a_cut_line_is_never_wider_than_its_box_however_egui_rounds_its_letters() {
     assert_eq!(found[1].0, "orders-and-deli…", "{found:?}");
     assert!(found[0].1 <= 144.0 && found[1].1 <= 112.0, "{found:?}");
 }
+
+#[test]
+fn a_fitted_line_is_cut_by_the_one_rule_never_wider_than_its_room() {
+    let theme = theme();
+    let texts = [
+        ("Bakery on the corner, orders and deliveries", theme.fonts.body),
+        ("orders-and-deliveries@bakery-on-the-corner.example.org", theme.fonts.mono_s),
+        ("Minutes of the quarterly studio planning meeting, with the kiln rota", theme.fonts.caption),
+        ("Odile Brannock, Teodor Lisk and the allotment committee", theme.fonts.strong),
+    ];
+    let mut harness = builder().build_ui_state(
+        move |ui, found: &mut Vec<(String, f32, f32)>| {
+            found.clear();
+            for (text, font) in texts {
+                // Every room from 40 to 300 in quarter points: the cut cache's line never reaches past its room.
+                for quarter in 160..1200_u16 {
+                    let room = f32::from(quarter) / 4.0;
+                    let fitted = super::fitted(ui, text, font, theme.palette.ink, room);
+                    let kept: String = fitted.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+                    let wide: f32 = fitted.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum();
+                    // The rule's slack: what adding up the advances in `f32` drifts by.
+                    if wide - room > 0.001 {
+                        found.push((kept, wide, room));
+                    }
+                }
+            }
+        },
+        Vec::new(),
+    );
+    harness.run();
+    let found = harness.state();
+    assert!(found.is_empty(), "{} lines past their room: {:?}", found.len(), found.iter().take(5).collect::<Vec<_>>());
+}

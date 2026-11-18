@@ -77,6 +77,15 @@ fn advances(galley: &Galley) -> f32 {
     galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum()
 }
 
+/// How far a run's added-up advances may pass its box and still fit: what adding up the advances in `f32` drifts by.
+const SLACK: f32 = 0.001;
+
+/// Whether `galley`'s letters fit in `width` as the one cutting rule measures them ([`cut_within`]): their advances
+/// added up, not the galley's width. Not when a width is NaN.
+pub(crate) fn within(galley: &Galley, width: f32) -> bool {
+    advances(galley) - width <= SLACK
+}
+
 /// `job` (one line, cut with an ellipsis) laid out and cut as the design cuts it ([`tight_cut`]), its letters' advances
 /// never above `width`: egui fits the letters by their rounded places and can keep one that reaches past the box (a
 /// comma, a sixteenth mono letter); then it is laid out again narrower, at most a few times, a letter fewer each.
@@ -86,7 +95,7 @@ pub(crate) fn cut_within(painter: &Painter, job: LayoutJob, width: f32) -> Arc<G
     for _ in 0..8 {
         let over = advances(&galley) - width;
         // `over` is NaN when an advance is: then nothing more is tried.
-        if over.is_nan() || over <= 0.001 || !job.wrap.max_width.is_finite() {
+        if over.is_nan() || over <= SLACK || !job.wrap.max_width.is_finite() {
             break;
         }
         job.wrap.max_width = (job.wrap.max_width - over - 0.01).max(1.0);

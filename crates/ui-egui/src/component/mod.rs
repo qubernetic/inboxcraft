@@ -245,12 +245,13 @@ pub(crate) fn capped(text: &str, most: usize) -> (&str, bool) {
 }
 
 /// `text` as it fits on one line of `room` points in `font`: whole, or its longest beginning in the written order that
-/// ends at a grapheme boundary, with no space before one closing `…`; empty when not even the `…` fits. A right-to-left
-/// name is cut at its logical end and laid out once, so it is never mirrored.
+/// ends at a grapheme boundary, with no space before one closing `…`; empty when not even the `…` fits. A line fits
+/// as the one cutting rule measures it ([`crate::draw::paint::within`]: its letters' advances added up). A
+/// right-to-left name is cut at its logical end and laid out once, so it is never mirrored.
 pub(crate) fn fit(ui: &Ui, text: &str, font: Font, room: f32) -> String {
     use unicode_segmentation::UnicodeSegmentation as _;
-    let width = |text: &str| galley(ui, text, font, egui::Color32::PLACEHOLDER).size().x;
-    if width(text) <= room {
+    let fits = |text: &str| crate::draw::paint::within(&galley(ui, text, font, egui::Color32::PLACEHOLDER), room);
+    if fits(text) {
         return text.to_owned();
     }
     let ends: Vec<usize> = text.grapheme_indices(true).map(|(at, grapheme)| at + grapheme.len()).collect();
@@ -260,12 +261,12 @@ pub(crate) fn fit(ui: &Ui, text: &str, font: Font, room: f32) -> String {
     };
     // The most clusters whose cut fits: a binary search, each step one layout (egui keeps the galleys it laid out).
     let (mut low, mut high) = (0_usize, ends.len());
-    if width(&cut(0)) > room {
+    if !fits(&cut(0)) {
         return String::new();
     }
     while low < high {
         let middle = low + (high - low).div_ceil(2);
-        if width(&cut(middle)) <= room {
+        if fits(&cut(middle)) {
             low = middle;
         } else {
             high = middle - 1;
