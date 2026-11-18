@@ -1369,3 +1369,25 @@ fn the_longest_sender_and_subject_cut_with_one_ellipsis_at_130() {
     }
     assert!(long_texts.iter().all(|(at, _)| at.right() <= long_rect.right() + 0.5), "nothing runs out of the row: {long_texts:?}");
 }
+
+#[test]
+fn the_last_row_of_a_card_draws_no_line_under_it() {
+    let harness = harness(true);
+    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    let line = theme.palette.panel_line;
+    // Whether a hairline in `panel_line` runs along the foot of `rect`.
+    let lined = |rect: egui::Rect| {
+        harness.output().shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::LineSegment { points, stroke } => {
+                stroke.color == line && (points[0].y - (rect.bottom() - 0.5)).abs() < 0.6 && points[0].x <= rect.left() + 1.0
+            }
+            egui::Shape::Rect(shape) => shape.fill == line && (shape.rect.bottom() - rect.bottom()).abs() < 0.6 && shape.rect.height() <= 2.0,
+            _ => false,
+        })
+    };
+    // Kasimir's row is alone on the last card; Odile's has a row under it.
+    let last = harness.get_by_label_contains("Kasimir Vell").rect();
+    let first = harness.get_by_label(ODILE).rect();
+    assert!(lined(first), "a row with a row under it has its line");
+    assert!(!lined(last), "the card's edge follows the last row: no line of its own");
+}

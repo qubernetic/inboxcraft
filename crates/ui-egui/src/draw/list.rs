@@ -238,8 +238,27 @@ struct Drawn {
     focused: bool,
 }
 
+/// Where a row stands in its list: its place among the list's rows and how many there are (a screen reader says "12 of
+/// 1000"), and whether it is the last line of its card or list, which draws no line under it.
+#[derive(Debug, Clone, Copy)]
+struct Slot {
+    rank: usize,
+    size: usize,
+    last: bool,
+}
+
+impl Slot {
+    /// Tells AccessKit the place of the widget `id` in its list.
+    fn tell(self, ui: &Ui, id: Id) {
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_position_in_set(self.rank);
+            node.set_size_of_set(self.size);
+        });
+    }
+}
+
 /// One message row across `ui`'s width, the mail row of the design; a click selects it.
-fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool, set: (usize, usize)) -> Drawn {
+fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool, slot: Slot) -> Drawn {
     let selected = mailbox.selected() == Some(message.id);
     let keyed = selected && mailbox.keyed();
     let spoken = mailbox.spoken(message);
@@ -269,7 +288,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         time: &time,
         unread: !message.seen,
         current: selected,
-        last: false,
+        last: slot.last,
         account,
         tag,
         marks: &marks,
@@ -288,10 +307,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         response.scroll_to_me(None);
     }
     // Its place among all the list's rows, built or not: a screen reader says "12 of 1000".
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_position_in_set(set.0);
-        node.set_size_of_set(set.1);
-    });
+    slot.tell(ui, response.id);
     let mut acted = drawn.acted.and_then(|index| act(message, index));
     if message.group.is_some() {
         let width = theme.fonts.body.size * MENU_WIDTH;
@@ -318,7 +334,7 @@ fn later(
     message: &MessageRow,
     pile: Pile,
     account_marker: bool,
-    set: (usize, usize),
+    slot: Slot,
 ) -> Drawn {
     let selected = mailbox.selected() == Some(message.id);
     let keyed = selected && mailbox.keyed();
@@ -340,7 +356,7 @@ fn later(
         when: &when,
         unread: !message.seen,
         current: selected,
-        last: false,
+        last: slot.last,
         account,
         pile: stands,
         link: (stands == LaterPile::Snoozed).then_some(tr!("bring back now")),
@@ -350,10 +366,7 @@ fn later(
     if response.gained_focus() {
         response.scroll_to_me(None);
     }
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_position_in_set(set.0);
-        node.set_size_of_set(set.1);
-    });
+    slot.tell(ui, response.id);
     Drawn { clicked: response.clicked(), acted: drawn.link.then_some(Act::Unsnooze), focused: response.has_focus() }
 }
 
@@ -443,15 +456,7 @@ pub(super) enum Outbox {
 
 /// One send of the outbox across `ui`'s width, the design's outbox row: whom it goes to and the subject (with the
 /// server's reply for a refused one), where it stands, and its buttons; the button pressed.
-fn outbox_row(
-    ui: &mut Ui,
-    theme: &Theme,
-    keymap: &Keymap,
-    mailbox: &Mailbox,
-    row: &OutboxRow,
-    account_marker: bool,
-    set: (usize, usize),
-) -> Option<Outbox> {
+fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, row: &OutboxRow, account_marker: bool, slot: Slot) -> Option<Outbox> {
     let subject = if row.subject.is_empty() { tr!("(no subject)") } else { row.subject.as_str() };
     let left = mailbox.seconds_left(row.draft);
     let standing = match (&row.state, left) {
@@ -497,15 +502,11 @@ fn outbox_row(
         standing,
         reply,
         buttons: &buttons,
-        last: false,
+        last: slot.last,
     };
     let pressed = outbox_view(ui, theme, keymap, &shown, None);
     // Its place among the outbox's sends: a screen reader says "2 of 3".
-    let id = shown.id;
-    ui.ctx().accesskit_node_builder(id, |node| {
-        node.set_position_in_set(set.0);
-        node.set_size_of_set(set.1);
-    });
+    slot.tell(ui, shown.id);
     pressed.and_then(|index| asks.get(index).copied())
 }
 
@@ -529,12 +530,12 @@ struct Rows<'a> {
 
 impl Rows<'_> {
     /// Draws `message`'s row across `ui`, the `rank`th (from 0) of the list's `size` rows.
-    fn mail(&self, ui: &mut Ui, message: &MessageRow, rank: usize, size: usize) {
+    fn mail(&self, ui: &mut Ui, message: &MessageRow, slot: Slot) {
         let drawn = match self.mailbox.place() {
             Place::Later(pile) if self.mailbox.query().is_empty() => {
-                later(ui, self.theme, self.keymap, self.mailbox, message, pile, self.account_marker, (rank, size))
+                later(ui, self.theme, self.keymap, self.mailbox, message, pile, self.account_marker, slot)
             }
-            _ => row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker, (rank, size)),
+            _ => row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker, slot),
         };
         if drawn.focused {
             ui.data_mut(|data| data.insert_temp(focused_row_id(), message.id));
@@ -921,7 +922,7 @@ fn salt(line: &Line<'_>) -> Id {
 }
 
 /// Draws `line` across `ui`, the line's own room.
-fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, rank: usize, size: usize) {
+fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, slot: Slot) {
     let (theme, keymap, mailbox) = (rows.theme, rows.keymap, rows.mailbox);
     match line {
         Line::Head(group, state) => {
@@ -930,7 +931,7 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, rank: usize, size: u
                 rows.done_all.set(Some(all.collect()));
             }
         }
-        Line::Mail(message) => rows.mail(ui, message, rank, size),
+        Line::Mail(message) => rows.mail(ui, message, slot),
         Line::Leaving(message, _) => leaving_row(ui, theme, keymap, mailbox, message, rows.account_marker),
         Line::More(group, state) => {
             if more(ui, theme, keymap, *state) {
@@ -943,7 +944,7 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, rank: usize, size: u
             }
         }
         Line::Send(row) => {
-            if let Some(pressed) = outbox_row(ui, theme, keymap, mailbox, row, rows.account_marker, (rank, size)) {
+            if let Some(pressed) = outbox_row(ui, theme, keymap, mailbox, row, rows.account_marker, slot) {
                 rows.outbox.set(Some((row.draft, pressed)));
             }
         }
@@ -1072,9 +1073,12 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
             };
             let rect = at(top, bottom, inset);
             let rank = listing.ranks.get(index).copied().unwrap_or(0);
+            // The last line of a card or of the list draws no line under it: the card's edge or nothing follows.
+            let last = listing.span(index + 1).is_none_or(|(next, _)| next > bottom);
+            let slot = Slot { rank, size: listing.rows, last };
             listed.scope_builder(UiBuilder::new().id_salt(salt(line)).max_rect(rect).layout(layout), |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, if matches!(line, Line::Card(_)) { theme.spacing.s2 } else { 0.0 });
-                draw_line(ui, rows, line, rank, listing.rows);
+                draw_line(ui, rows, line, slot);
             });
         }
         if let Some((top, bottom)) = scroll_to {
