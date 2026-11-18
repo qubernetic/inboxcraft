@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! An HTML message fitted to the app: its blocks set in the app's type and colours, 12 apart. Paragraphs and list
-//! items in `read` (a list's marks in a column of 24), a heading in the title's or the heading's size in Plex Sans
-//! SemiBold (a heading is the writer's words, and people's words are in Plex Sans), preformatted text in `mono_s` on
-//! `term` in a 1 px `line` box, 8 × 12 inside, a rule as a `panel_line` hairline. A link is `cyan_text`, underlined, a Tab stop with
-//! the focus ring round its words; Enter or a click copies its address and the status float says where it goes;
+//! items in `read` (a list's marks in a column of 24); a heading in Plex Sans SemiBold 22/29, a deeper one in `strong`
+//! (a heading is the writer's words, and people's words are in Plex Sans); preformatted text in `mono_s` on `term` in a
+//! 1 px `line` box, 8 × 12 inside; a rule as a `panel_line` hairline. A link is `cyan_text`, underlined, a Tab stop
+//! with the focus ring round its words; Enter or a click copies its address and the status float says where it goes;
 //! nothing opens. A paragraph is no Tab stop: a screen reader hears it as a label.
 //!
 //! A quote (`blockquote`) that follows the message's own text is folded behind a quote fold ("▸ 14 quoted lines");
@@ -18,12 +18,14 @@
 //! high (a row of head cells 28, on `panel`, its words in `label` and `muted`) and a taller one 6 above and below its
 //! words. Its columns get their widths from [`column_widths`], each what its words ask while all fit (the cleaner
 //! keeps no widths of the mail's own), cut at whole pixels; a column keeps at least 36, and a table that cannot keep
-//! that in its room scrolls sideways inside itself. Tables nest 4 deep; a deeper one is set as its cells' blocks one after another.
-//! At most 64 columns and 1 000 rows are drawn; a line under the table says what was left out.
+//! that in its room scrolls sideways inside itself. Tables nest 4 deep; a deeper one is set as its cells' blocks one
+//! after another. At most 64 columns and 1 000 rows are drawn; a line under the table says what was left out.
 //!
 //! Everything in a message is data and bounded: the blocks are laid out once for a message, a width and the state of
-//! its quotes and pictures, and kept; each frame only what is in sight is painted, and only what is within a pane's
-//! height of it takes the pointer and the keyboard (and the link that has the focus, wherever it is).
+//! its quotes and pictures, and kept while they are drawn (again only when egui builds its font atlas afresh); each
+//! frame only what is in sight is painted, and only what is within a pane's height of it takes the pointer and the
+//! keyboard, with the nearest link before and after that (so Tab always reaches the next one) and the link that has
+//! the focus, wherever it is.
 
 use std::hash::{Hash as _, Hasher as _};
 use std::sync::{Arc, Mutex};
@@ -566,9 +568,9 @@ fn font_of(theme: &Theme, kind: TextKind, style: Style) -> Font {
     match kind {
         TextKind::Preformatted => f.mono_s,
         _ if style.head => f.label,
-        // A heading in a message is its writer's words: in Plex Sans SemiBold, in the title's or the heading's size.
+        // A heading in a message is its writer's words: in Plex Sans SemiBold, 22/29 at the first level, `strong` below.
         TextKind::Heading(1) => f.written_title(),
-        TextKind::Heading(_) => f.written_heading(),
+        TextKind::Heading(_) => f.strong,
         TextKind::Paragraph | TextKind::ListItem { .. } => style.text,
     }
 }
@@ -902,8 +904,8 @@ fn remember<T: Clone + Send + Sync + 'static>(ui: &Ui, slot: Id, holds: Option<T
 }
 
 impl Show<'_> {
-    /// Draws what of `laid` `reach` asks, with its top left at `origin`, its widgets' ids from `base`; whether one of its
-    /// links has the focus.
+    /// Draws what of `laid` `reach` asks, with its top left at `origin`, its widgets' ids from `base`; whether one of
+    /// its links has the focus.
     fn laid(&mut self, ui: &mut Ui, laid: &Laid, origin: Pos2, base: Id, reach: Reach) -> bool {
         let sight = ui.clip_rect();
         let p = &self.theme.palette;
@@ -1061,8 +1063,8 @@ impl Show<'_> {
         }
     }
 
-    /// Draws `grid` with its top left at `origin`, giving the pointer and the keyboard what `reach` asks; whether a link
-    /// in it has the focus.
+    /// Draws `grid` with its top left at `origin`, giving the pointer and the keyboard what `reach` asks; whether a
+    /// link in it has the focus.
     fn grid(&mut self, ui: &mut Ui, grid: &Grid, origin: Pos2, id: Id, reach: Reach) -> bool {
         let p = &self.theme.palette;
         let sight = ui.clip_rect();

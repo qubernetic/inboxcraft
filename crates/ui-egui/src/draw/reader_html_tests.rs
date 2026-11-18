@@ -506,3 +506,24 @@ fn the_plain_view_is_set_in_mono() {
     // The message's words in `mono` 13/20, not in the reading style (a row's preview of them stays in its caption).
     assert!(sizes.contains(&theme.fonts.mono.size) && !sizes.contains(&theme.fonts.read.size), "{sizes:?}");
 }
+
+#[test]
+fn a_message_s_headings_are_set_as_the_frames_set_them() {
+    // The frames set a message's heading in Plex Sans SemiBold 22/29 and a deeper one as `strong`, 14/22.
+    let harness = fitted(display("<h1>Thank you, Odile.</h1><h2>Your order</h2><h3>Delivery</h3>"), false, 640.0, 400.0);
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let set = |words: &str| {
+        leaves(&harness).into_iter().find_map(|shape| match shape {
+            Shape::Text(text) if text.galley.text() == words => {
+                text.galley.job.sections.first().map(|section| (section.format.font_id.clone(), section.format.line_height))
+            }
+            _ => None,
+        })
+    };
+    let title = theme.fonts.written_title();
+    assert_eq!((title.size, title.line), (22.0, 29.0));
+    assert_eq!(set("Thank you, Odile."), Some((title.id(), Some(29.0))));
+    for words in ["Your order", "Delivery"] {
+        assert_eq!(set(words), Some((theme.fonts.strong.id(), Some(22.0))), "{words}");
+    }
+}
