@@ -223,7 +223,10 @@ fn a_recipient_field_looks_as_its_sheet_says_in_every_state() {
                 assert!(drawn(&harness).iter().all(|text| text.text != "Cc Bcc"), "{at}");
             } else {
                 let copies = one(&harness, "Cc Bcc");
-                assert!((copies.rect.right() - (rect.right() - 13.0)).abs() < 0.5 && copies.colour == p.muted && copies.size == 11.0, "{at} {copies:?}");
+                assert!(
+                    (copies.rect.right() - (rect.right() - 13.0)).abs() < 0.5 && copies.colour == p.muted && copies.size == 11.0,
+                    "{at} {copies:?}"
+                );
             }
             let block = caret(&paint, p.cyan_edge);
             match state {

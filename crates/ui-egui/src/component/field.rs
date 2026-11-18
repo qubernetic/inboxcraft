@@ -938,7 +938,9 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
                             // Keep the caret clear of the pads above and below the text.
                             let cursor = output.cursor_range.map_or_else(|| output.galley.end(), |range| range.primary);
                             let at = output.galley.pos_from_cursor(cursor).translate(output.galley_pos.to_vec2());
-                            ui.scroll_to_rect(at.expand2(vec2(0.0, s.s2)), None);
+                            // A board's picture is one frame: there the scroll is at once.
+                            let motion = if seen.forced { egui::style::ScrollAnimation::none() } else { ui.style().scroll_animation };
+                            ui.scroll_to_rect_animation(at.expand2(vec2(0.0, s.s2)), None, motion);
                         }
                     }
                     output.response.response
