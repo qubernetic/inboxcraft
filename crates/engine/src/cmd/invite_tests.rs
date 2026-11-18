@@ -567,3 +567,21 @@ fn an_answer_goes_at_once_without_the_hold() {
     assert!(!sends_waiting(&session), "no send waits on the schedule");
     assert!(bad(session.run("mail.unsend", &json!({ "id": sent.draft.get() }))));
 }
+
+/// The organiser's title is hostile: escaped line breaks, a control character and a header in it never reach the
+/// answer's header lines.
+#[test]
+fn a_hostile_title_never_reaches_a_header_line_of_the_answer() {
+    let mut session = session();
+    let hostile = "SUMMARY:Lunch\\nBcc: evil@example.org\\r\\nX-Evil: 1\u{7}\u{202e}fdp.exe";
+    let calendar = object("REQUEST", "evil@example.org", 0, REQUEST_AT, "").replace("SUMMARY:Lunch with Odile", hostile);
+    let id = arrive(&mut session, 41, "evil@example.org", &calendar);
+    answer(&mut session, id, "accepted").unwrap();
+    let sent = out(&mut session);
+    let head = sent.raw.split("\r\n\r\n").next().unwrap_or_default();
+    for line in head.split("\r\n") {
+        assert!(!line.starts_with("Bcc:") && !line.starts_with("X-Evil:"), "a header from the title: {line:?} in {head}");
+        assert!(!line.contains(['\n', '\r', '\u{0}', '\u{7}']), "a control character in a header line: {line:?}");
+    }
+    assert_eq!(sent.recipients, ["odile@example.org"], "the answer goes only to the organiser");
+}
