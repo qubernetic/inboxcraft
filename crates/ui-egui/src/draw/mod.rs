@@ -162,7 +162,7 @@ pub struct InboxApp {
     /// Whether the keyboard focus was inside the composer at the start of this frame: Send's key acts only then.
     composer_keys: bool,
     /// Whether the composer has taken the list's place this frame: too narrow for its heads beside it, the list is not
-    /// drawn, and no list key runs.
+    /// drawn, and nothing acts on its rows (no key, no palette command, no Undo).
     list_hidden: bool,
     /// Where the list was drawn last, to tell whether the keyboard was in it when it goes.
     list_rect: Option<Rect>,
@@ -500,8 +500,10 @@ impl InboxApp {
     #[must_use]
     pub fn can_run(&self, id: &str) -> bool {
         match id {
-            keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => self.row_act(id).is_some(),
-            keymap::UNDO => self.mailbox.can_undo(),
+            // With the list hidden nothing acts on a row the owner cannot see, by a key or from the palette; Undo, which
+            // may take back an act on such a row, rests too.
+            keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => !self.list_hidden && self.row_act(id).is_some(),
+            keymap::UNDO => !self.list_hidden && self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
             // The search field is the list's: hidden, it is not there to take the keys.
             keymap::FIND => !self.list_hidden,

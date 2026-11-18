@@ -12,6 +12,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
+use crate::keymap;
 use crate::mailbox::Mailbox;
 use crate::sample;
 
@@ -131,8 +132,27 @@ fn at_every_width_nothing_in_the_list_s_or_the_composer_s_heads_stands_over_anyt
 #[test]
 fn the_hidden_list_takes_no_tab_stop_and_no_key() {
     for percent in [100, 130] {
-        let mut harness = composing(720.0, percent);
+        // A row picked and flagged first, so its acts and Undo could run.
+        let mut harness = window(720.0, percent);
+        harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
+        harness.run();
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, keymap::FLAG);
+        harness.run();
+        assert!(harness.state().can_run(keymap::DELETE) && harness.state().can_run(keymap::UNDO), "{percent}: before");
+        harness.get_by_role_and_label(Role::Button, "New message").click();
+        harness.run();
         assert!(search_box(&harness).is_none(), "{percent}: the composer has the list's place");
+        // The palette lists what `can_run` lets through and runs it through `run_action`: nothing of the hidden rows.
+        for id in [keymap::DONE, keymap::ARCHIVE, keymap::READ, keymap::FLAG, keymap::DELETE, keymap::SNOOZE, keymap::UNDO, keymap::FIND] {
+            assert!(!harness.state().can_run(id), "{percent}: {id} with the list hidden");
+        }
+        let (rows, picked) = (harness.state().mailbox().messages().len(), harness.state().mailbox().selected());
+        for id in [keymap::DELETE, keymap::ARCHIVE, keymap::UNDO] {
+            harness.state_mut().run_action(&ctx, id);
+            harness.run();
+        }
+        assert_eq!((harness.state().mailbox().messages().len(), harness.state().mailbox().selected()), (rows, picked), "{percent}");
         harness.ctx.memory_mut(|memory| memory.request_focus(super::compose::text_id()));
         harness.run();
         let mut walked = Vec::new();
