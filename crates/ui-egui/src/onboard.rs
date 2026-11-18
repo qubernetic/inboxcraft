@@ -443,6 +443,27 @@ pub(crate) fn port_typed(text: &str) -> Result<Option<u16>, String> {
     }
 }
 
+/// The encryption a registered mail port is for: IMAP 143 STARTTLS and 993 TLS, submission 587 STARTTLS and 465 TLS,
+/// 25 STARTTLS; `None` for any other port.
+const fn registered(port: u16) -> Option<Security> {
+    match port {
+        993 | 465 => Some(Security::Tls),
+        143 | 587 | 25 => Some(Security::StartTls),
+        _ => None,
+    }
+}
+
+/// Whether the encryption of a server row is unusual for its port: the port as it is typed (`usual` for the
+/// encryption when empty) and the encryption the form sends (TLS when none is picked). The port and the encryption that
+/// port is registered for, when it is the other one; `None` for the usual pair, an unregistered port or a port typed
+/// wrong. It only says so: saving is not held back and nothing is changed.
+#[must_use]
+pub fn unusual_encryption(port: &str, security: Option<Security>, usual: fn(Security) -> u16) -> Option<(u16, Security)> {
+    let security = security.unwrap_or(Security::Tls);
+    let port = port_typed(port).ok()?.unwrap_or_else(|| usual(security));
+    registered(port).filter(|registered| *registered != security).map(|registered| (port, registered))
+}
+
 /// `{host, port, security}` of a server the form names, `None` for an empty host; the usual port when none was typed.
 fn server(host: &str, port: &str, security: Option<Security>, usual: fn(Security) -> u16) -> Result<Option<Value>, String> {
     let host = host.trim();

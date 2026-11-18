@@ -1300,3 +1300,28 @@ fn a_form_filled_by_hand_never_says_its_servers_come_from_detect() {
     onboarding.form_mut().address = "dave@example.org".to_owned();
     assert!(!onboarding.detect_older(), "the address changed, but no server came from Detect");
 }
+
+#[test]
+fn the_registered_ports_say_which_encryption_is_usual_and_others_say_nothing() {
+    use crate::onboard::unusual_encryption;
+    // IMAP 143 STARTTLS, 993 TLS; submission 587 STARTTLS, 465 TLS; 25 STARTTLS: the other encryption is unusual.
+    for (port, usual) in [(143, Security::StartTls), (993, Security::Tls), (587, Security::StartTls), (465, Security::Tls), (25, Security::StartTls)]
+    {
+        let other = if usual == Security::Tls { Security::StartTls } else { Security::Tls };
+        assert_eq!(unusual_encryption(&port.to_string(), Some(usual), usual_port), None, "{port} with {usual:?}");
+        assert_eq!(unusual_encryption(&port.to_string(), Some(other), usual_port), Some((port, usual)), "{port} with {other:?}");
+    }
+    // No port typed: the usual one for the encryption, never unusual; no encryption picked is TLS, as the form sends it.
+    assert_eq!(unusual_encryption("", Some(Security::StartTls), usual_port), None);
+    assert_eq!(unusual_encryption(" 143 ", None, usual_port), Some((143, Security::StartTls)));
+    // An unknown port, 0, the highest port and junk warn of nothing (the field's own error speaks for junk).
+    for port in ["0", "65535", "1993", "8443", "abc", "99999", "-1", "\u{202e}993"] {
+        for security in [Some(Security::Tls), Some(Security::StartTls), None] {
+            assert_eq!(unusual_encryption(port, security, usual_port), None, "{port:?} {security:?}");
+        }
+    }
+}
+
+fn usual_port(security: Security) -> u16 {
+    security.imap_port()
+}

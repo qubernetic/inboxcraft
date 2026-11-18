@@ -8,7 +8,9 @@
 //! row for a field in a row. Beside it, 40 to its right (the form's own 16 and 24), an always-open column says what
 //! Detect asked and where, once it ran; on a page too narrow for both it stands under the form. Detect's answer stands over the form's fields as a note (or a careful
 //! one, for a guess or an unencrypted redirect); while Detect runs, a progress line stands there and the server rows
-//! wait, disabled.
+//! wait, disabled. Under a server row whose encryption is unusual for its port (STARTTLS on 993, TLS on 143, …) one
+//! muted caption line says so; saving is not held back. Under Detect's note one line says when the server rows are
+//! an earlier Detect's, for another address than the one typed now.
 //!
 //! The check prints its seven steps as `check-step` lines, one by one as they run (motion M13: the line of the step
 //! running is printed when it starts and takes its answer when it ends; the steps after it are not shown yet), in a
@@ -37,7 +39,7 @@ use crate::component::soon::{soon, soon_tag};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
-use crate::onboard::{Form, Found, Onboarding, Outcome, Secret, Security, Slot, Stage, StepRow, StepState, port_typed};
+use crate::onboard::{Form, Found, Onboarding, Outcome, Secret, Security, Slot, Stage, StepRow, StepState, port_typed, unusual_encryption};
 use crate::theme::{Font, Theme};
 use crate::tr;
 
@@ -186,18 +188,18 @@ impl Faults {
 }
 
 /// A field or a row of fields that `add` draws, with its `errors` under it, the first `UNDER` below it and each under
-/// the one before, in `caption` and `minus`, then `note` in `caption` and `muted`.
-fn with_error<R>(ui: &mut Ui, theme: &Theme, errors: &[Option<&str>], note: Option<&str>, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+/// the one before, in `caption` and `minus`, then its `notes` in `caption` and `muted`.
+fn with_error<R>(ui: &mut Ui, theme: &Theme, errors: &[Option<&str>], notes: &[Option<&str>], width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = UNDER;
         let added = add(ui);
-        if errors.iter().any(Option::is_some) || note.is_some() {
+        if errors.iter().chain(notes).any(Option::is_some) {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for error in errors.iter().flatten() {
                     words(ui, error, theme.fonts.caption, theme.palette.minus, width);
                 }
-                if let Some(note) = note {
+                for note in notes.iter().flatten() {
                     words(ui, note, theme.fonts.caption, theme.palette.muted, width);
                 }
             });
@@ -251,7 +253,7 @@ fn security(ui: &mut Ui, theme: &Theme, name: &str, chosen: Security, drop: f32)
 
 /// One server's row, `width` wide: its host, its port (`usual` as the hint) and its security, with the error of its
 /// host or port under the whole row, and a line saying so while the row holds the encryption Detect `set` over one the
-/// owner had picked. What the owner changed in it.
+/// owner had picked, and one while its encryption is unusual for its port. What the owner changed in it.
 #[allow(clippy::too_many_arguments)]
 fn server_row(
     ui: &mut Ui,
@@ -274,13 +276,22 @@ fn server_row(
         let port = port_typed(port_text).ok().flatten().unwrap_or_else(|| usual(set));
         tr!("Detect set the encryption to {security} for port {port}.", security = set.text(), port = port)
     });
+    // An encryption unusual for the port: one line says so, and nothing is held back or changed.
+    let unusual = unusual_encryption(port_text, *chosen, usual).map(|(port, registered)| {
+        tr!(
+            "Port {port} usually goes with {usual}, not {chosen}: check both with your provider.",
+            port = port,
+            usual = registered.text(),
+            chosen = current.text()
+        )
+    });
     // A host caption of more lines than one (a narrow row) puts the host's box lower: the port and the security come
     // down with it, so the row's boxes stand level, as the frame's.
     let label = theme.fonts.label;
     let mut job = egui::text::LayoutJob::single_section(label.text(caption), label.format(theme.palette.muted));
     job.wrap = egui::text::TextWrapping { max_width: room.max(1.0), ..Default::default() };
     let drop = (ui.painter().layout_job(job).size().y.max(label.line) - label.line).max(0.0);
-    with_error(ui, theme, &said, note.as_deref(), width, |ui| {
+    with_error(ui, theme, &said, &[note.as_deref(), unusual.as_deref()], width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             let response = line_field(ui, theme, (caption, placeholder, name), host, errors[0], room);
@@ -320,7 +331,7 @@ fn names(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: f3
         line_field(ui, theme, (tr!("Name on sent mail"), tr!("optional"), ""), &mut form.display_name, None, width - GAP - half);
     });
     let error = faults.of_slot(Slot::Password);
-    with_error(ui, theme, &[error], None, width, |ui| {
+    with_error(ui, theme, &[error], &[], width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             line_field(ui, theme, (tr!("User name"), tr!("the address"), ""), &mut form.username, None, half);
@@ -360,7 +371,7 @@ fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, (width,
             width,
         ));
         let error = faults.of_slot(Slot::Caldav);
-        with_error(ui, theme, &[error], None, width, |ui| {
+        with_error(ui, theme, &[error], &[], width, |ui| {
             let words = (tr!("CalDAV address, for calendars"), tr!("optional, https://dav.example.org"), "");
             let response = line_field(ui, theme, words, &mut form.caldav, error, width);
             faults.mark(ui, Slot::Caldav, &response);
@@ -409,7 +420,7 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
     let name = if detecting { tr!("Detecting…") } else { tr!("Detect") };
     let button = paint::run_box(component::galley(ui, name, f.button, theme.palette.ink).size().x) + 2.0 * theme.spacing.s3;
     let error = faults.of_slot(Slot::Address);
-    with_error(ui, theme, &[error], None, width, |ui| {
+    with_error(ui, theme, &[error], &[], width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             let room = (width - button - GAP).max(HOST_MIN);

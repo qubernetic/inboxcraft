@@ -1656,3 +1656,55 @@ fn a_long_address_does_not_widen_the_earlier_detect_line_or_the_form() {
     assert_eq!(after.width(), before.width(), "the form keeps its width");
     assert!(line.left() >= after.left() && line.right() <= after.left() + 720.0, "{line:?} in the form's column from {after:?}");
 }
+
+#[test]
+fn a_line_under_a_server_row_says_when_its_encryption_is_unusual_for_its_port_and_saving_stays() {
+    let line = |port: u16, usual: &str, chosen: &str| format!("Port {port} usually goes with {usual}, not {chosen}: check both with your provider.");
+    // (outgoing row, port, encryption, the line or none)
+    let cases = [
+        (false, "143", Security::Tls, Some(line(143, "STARTTLS", "TLS"))),
+        (false, "993", Security::StartTls, Some(line(993, "TLS", "STARTTLS"))),
+        (false, "587", Security::Tls, Some(line(587, "STARTTLS", "TLS"))),
+        (false, "993", Security::Tls, None),
+        (false, "", Security::StartTls, None),
+        (true, "465", Security::StartTls, Some(line(465, "TLS", "STARTTLS"))),
+        (true, "25", Security::Tls, Some(line(25, "STARTTLS", "TLS"))),
+        (true, "587", Security::StartTls, None),
+        (true, "0", Security::Tls, None),
+        (true, "65535", Security::StartTls, None),
+        (false, "imap", Security::Tls, None),
+    ];
+    for (outgoing, port, security, said) in cases {
+        let mut harness = form_open(egui::Theme::Light, FakeWorkers::passing());
+        {
+            let form = harness.state_mut().onboarding_mut().0.form_mut();
+            form.address = "carol@example.org".to_owned();
+            form.host = "imap.example.org".to_owned();
+            form.smtp_host = "smtp.example.org".to_owned();
+            let (field, chosen) = if outgoing { (&mut form.smtp_port, &mut form.smtp_security) } else { (&mut form.port, &mut form.security) };
+            *field = port.to_owned();
+            *chosen = Some(security);
+        }
+        harness.run();
+        let shown: Vec<String> = harness
+            .query_all_by_label_contains(" usually goes with ")
+            .map(|node| node.accesskit_node().label().filter(|label| !label.is_empty()).or_else(|| node.accesskit_node().value()).unwrap_or_default())
+            .collect();
+        assert_eq!(shown, said.clone().into_iter().collect::<Vec<_>>(), "{outgoing} {port:?} {security:?}");
+        if said.is_some() {
+            // It stands under its own row: below that row's port field, above the next row's or the CalDAV field.
+            let at = harness.get_by_label(said.as_deref().unwrap()).rect();
+            let ports: Vec<egui::Rect> = harness.query_all_by_label("Port").map(|node| node.rect()).collect();
+            let own = if outgoing { ports.last() } else { ports.first() }.copied().unwrap();
+            assert!(at.top() >= own.bottom(), "{port}: {at:?} under its port {own:?}");
+            let next = if outgoing { harness.get_by_label("CalDAV address, for calendars").rect() } else { ports[ports.len() - 1] };
+            assert!(at.bottom() <= next.top(), "{port}: {at:?} over {next:?}");
+        }
+        // Saving is not held back for it, and nothing in the form was changed.
+        let add = harness.get_by_role_and_label(Role::Button, "Check and add");
+        assert!(!add.accesskit_node().is_disabled(), "{port}: Check and add stays");
+        let form = harness.state().onboarding().form();
+        let kept = if outgoing { (form.smtp_port.as_str(), form.smtp_security) } else { (form.port.as_str(), form.security) };
+        assert_eq!(kept, (port, Some(security)));
+    }
+}
