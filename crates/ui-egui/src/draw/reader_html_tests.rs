@@ -620,3 +620,26 @@ fn a_fitted_message_s_remote_picture_is_its_box_in_every_state() {
     assert!(harness.query_by_label_contains("could not be shown").is_none(), "not the failed box");
     assert!(harness.query_by_label("try again").is_none(), "a try again that can do nothing");
 }
+
+/// The remote-picture banner stands over a fitted message, not over the plain view the owner chose; over the plain
+/// view a message falls back to when it does not fit beside the kept layouts it still stands, as the owner chose
+/// nothing there.
+#[test]
+fn the_picture_banner_leaves_the_chosen_plain_view_and_stays_over_the_fallback() {
+    const BANNER: &str = "1 remote picture is not shown. Loading it tells the sender that you opened this message.";
+    let mut harness = opened(None, "Your bike is due for a service");
+    harness.get_by_label(BANNER);
+    harness.get_by_label("plain text").click();
+    harness.run();
+    assert!(harness.query_by_label(BANNER).is_none(), "the plain view the owner chose shows no banner");
+    harness.get_by_label("fitted").click();
+    harness.run();
+    harness.get_by_label(BANNER);
+    let harness = super::reader::with_cap(1, || {
+        let mut harness = opened(None, "Your bike is due for a service");
+        harness.run();
+        harness
+    });
+    harness.get_by_label("This message is shown as plain text: the reader holds as much fitted text as it keeps.");
+    harness.get_by_label(BANNER);
+}

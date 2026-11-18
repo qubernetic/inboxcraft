@@ -57,10 +57,12 @@ pub(super) fn bounced(ui: &mut Ui, theme: &Theme, reason: &str) {
 }
 
 /// The remote-content banner, while remote pictures of the message are blocked: PICTURES, what loading them tells the
-/// sender, `load once` and `always for` the sender's address.
+/// sender, `load once` and `always for` the sender's address. Not over the plain view the owner chose, which shows no
+/// picture; over the plain view a message falls back to when it does not fit beside the kept layouts it stands, as
+/// the owner did not choose plain there.
 pub(super) fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, opened: &Opened, drawn: &mut Drawn) {
     let Content::Html(document) = &opened.content else { return };
-    if document.remote_blocked == 0 || reader.remote_allowed(opened.id) {
+    if document.remote_blocked == 0 || reader.remote_allowed(opened.id) || reader.shows_plain(opened.id) {
         return;
     }
     let count = document.remote_blocked;
