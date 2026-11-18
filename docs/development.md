@@ -101,9 +101,9 @@ try:
   the sample has none, and saving one (`template.save`, `owner`) has no place in the window yet.
 - the screener and the grouped inbox: the screener is on (before the inbox) and holds two invented new senders;
   Review on the screener card opens New senders, where a message is a preview with Accept (into a group), Accept and
-  open, and Block. The inbox shows People and Updates as cards; a right click on a row (or the reader's More menu)
-  puts its sender in another group. Settings, Triage changes the screener's mode, the inbox view (cards, grouped
-  list, simple list) and each account's grouping. Each act has a toast with Undo.
+  open, and Block. The inbox shows People and Updates under their heads (Smart: the first three rows of each); a right click on a
+  row (or the reader's More menu) puts its sender in another group. Settings, Triage changes the screener's mode,
+  the inbox view (Grouped, Smart, List) and each account's grouping. Each act has a toast with Undo.
 - done, park, pin, snooze and reminders: Snooze (H) in the reader opens the time picker; on a message in Sent the
   same button sets a "Remind me if no reply" reminder. Pin pins the open message, More parks it. Later on the rail
   lists the snoozed mail, the pins and the park pile. "Done all" on a group card files the group.

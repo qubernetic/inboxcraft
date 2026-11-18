@@ -188,7 +188,7 @@ fn the_list_counts_unread_while_it_shows_groups_and_messages_otherwise() {
     let mut mailbox = mailbox();
     let unread = mailbox.messages().iter().filter(|row| !row.seen).count();
     assert_eq!(mailbox.list_count(), format!("{unread} unread"));
-    mailbox.set_inbox_view(InboxView::Simple);
+    mailbox.set_inbox_view(InboxView::List);
     assert_eq!(mailbox.list_count(), format!("{} messages", mailbox.messages().len()));
     assert!(mailbox.can_group(), "the simple list can go back to its groups");
     let accounts: Vec<u64> = mailbox.accounts().iter().map(|account| account.id).collect();
@@ -199,16 +199,16 @@ fn the_list_counts_unread_while_it_shows_groups_and_messages_otherwise() {
 }
 
 #[test]
-fn the_inbox_view_is_cards_until_changed() {
+fn the_inbox_view_is_smart_until_changed() {
     let mut mailbox = mailbox();
-    assert_eq!(mailbox.inbox_view(), InboxView::Cards);
-    mailbox.set_inbox_view(InboxView::Simple);
-    assert_eq!(mailbox.inbox_view(), InboxView::Simple);
-    assert!(mailbox.groups().is_empty(), "the simple list has no groups");
+    assert_eq!(mailbox.inbox_view(), InboxView::Smart);
     mailbox.set_inbox_view(InboxView::List);
+    assert_eq!(mailbox.inbox_view(), InboxView::List);
+    assert!(mailbox.groups().is_empty(), "the simple list has no groups");
+    mailbox.set_inbox_view(InboxView::Grouped);
     assert_eq!(mailbox.groups().len(), 2);
     let names: Vec<(&str, &str)> = InboxView::ALL.iter().map(|view| (view.id(), view.text())).collect();
-    assert_eq!(names, [("cards", "Cards"), ("list", "Grouped list"), ("simple", "Simple list")]);
+    assert_eq!(names, [("grouped", "Grouped"), ("smart", "Smart"), ("list", "List")]);
     assert_eq!(InboxView::named("list"), Some(InboxView::List));
     assert_eq!(InboxView::named("tiles"), None);
 }

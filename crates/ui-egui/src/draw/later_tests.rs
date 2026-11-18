@@ -32,7 +32,7 @@ fn clock() -> Box<FakeClock> {
 fn app() -> InboxApp {
     let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
-    app.mailbox_mut().set_inbox_view(InboxView::Simple);
+    app.mailbox_mut().set_inbox_view(InboxView::List);
     app
 }
 
@@ -287,7 +287,7 @@ fn sent_mail_gets_a_reminder_through_the_same_picker() {
 #[test]
 fn done_all_on_a_group_card_files_the_group() {
     let mut app = app();
-    app.mailbox_mut().set_inbox_view(InboxView::Cards);
+    app.mailbox_mut().set_inbox_view(InboxView::Smart);
     let updates: Vec<u64> = app.mailbox().messages().iter().filter(|row| row.group == Some(GroupKind::Updates)).map(|row| row.id).collect();
     let unread = u64::try_from(app.mailbox().messages().iter().filter(|row| updates.contains(&row.id) && !row.seen).count()).unwrap();
     let mut harness = harness_of(app);

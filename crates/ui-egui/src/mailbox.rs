@@ -245,42 +245,65 @@ impl GroupKind {
 /// How the unified inbox shows its groups.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum InboxView {
-    /// A card for each group, its first rows and "Show all".
+    /// Every group open, each under its head.
+    Grouped,
+    /// The first three rows of each group under its head, and "show all".
     #[default]
-    Cards,
-    /// One list, each group under a heading.
+    Smart,
+    /// One list by time, without groups.
     List,
-    /// One list by date, without groups.
-    Simple,
 }
 
 impl InboxView {
-    /// Every view, in the order the Triage page offers them.
-    pub const ALL: [Self; 3] = [Self::Cards, Self::List, Self::Simple];
+    /// Every view, in the order the view switch and the Triage page offer them.
+    pub const ALL: [Self; 3] = [Self::Grouped, Self::Smart, Self::List];
 
     /// Its name where it is kept.
     #[must_use]
     pub fn id(self) -> &'static str {
         match self {
-            Self::Cards => "cards",
+            Self::Grouped => "grouped",
+            Self::Smart => "smart",
             Self::List => "list",
-            Self::Simple => "simple",
         }
     }
 
-    /// The view kept as `name`.
+    /// The view named `name` by [`InboxView::id`].
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|view| view.id() == name)
+    }
+
+    /// The view an earlier InboxCraft kept as `name`: `cards` is Smart, `list` (the list under headings) Grouped and
+    /// `simple` List. Kept files of then name the view under another key than now, so the old `list` is never read
+    /// as today's.
+    #[must_use]
+    pub fn named_before(name: &str) -> Option<Self> {
+        match name {
+            "cards" => Some(Self::Smart),
+            "list" => Some(Self::Grouped),
+            "simple" => Some(Self::List),
+            _ => None,
+        }
+    }
+
+    /// The id an earlier InboxCraft kept for the view, which [`InboxView::named_before`] reads.
+    #[must_use]
+    pub fn id_before(self) -> &'static str {
+        match self {
+            Self::Grouped => "list",
+            Self::Smart => "cards",
+            Self::List => "simple",
+        }
     }
 
     /// Its name as the person reads it.
     #[must_use]
     pub fn text(self) -> &'static str {
         match self {
-            Self::Cards => tr!("Cards"),
-            Self::List => tr!("Grouped list"),
-            Self::Simple => tr!("Simple list"),
+            Self::Grouped => tr!("Grouped"),
+            Self::Smart => tr!("Smart"),
+            Self::List => tr!("List"),
         }
     }
 }
@@ -961,7 +984,7 @@ impl Mailbox {
     /// [`GroupKind::ALL`]. The rows no group holds are left out.
     #[must_use]
     pub fn groups(&self) -> Vec<Group> {
-        if self.place != Place::View(Role::Inbox) || !self.query.is_empty() || self.inbox_view == InboxView::Simple {
+        if self.place != Place::View(Role::Inbox) || !self.query.is_empty() || self.inbox_view == InboxView::List {
             return Vec::new();
         }
         if !self.showcase.groups.is_empty() {

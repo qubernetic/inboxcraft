@@ -35,7 +35,7 @@ fn app(showcase: bool) -> InboxApp {
         let invented = sample::showcase(&mailbox);
         mailbox.set_showcase(invented);
     } else {
-        mailbox.set_inbox_view(InboxView::Simple);
+        mailbox.set_inbox_view(InboxView::List);
     }
     InboxApp::new(mailbox)
 }
@@ -112,7 +112,7 @@ fn on_a_real_account_the_hover_actions_and_their_keys_act_too() {
     let session = Session::new(Box::new(sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap()), clock()).unwrap();
     let mut app = InboxApp::new(Mailbox::new(session, clock()));
     app.set_reduce_motion(true);
-    app.mailbox_mut().set_inbox_view(InboxView::Simple);
+    app.mailbox_mut().set_inbox_view(InboxView::List);
     let mut harness = harness_of(app);
     press(&mut harness, ODILE, "Mark as read");
     harness.get_by_label(ODILE_READ);
@@ -519,24 +519,24 @@ fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order_snooze_not_yet
 #[test]
 fn the_view_switch_shows_over_the_wide_inbox_and_changes_the_view() {
     let mut harness = harness(true);
-    harness.get_by_role_and_label(Role::Button, "Simple list").click();
+    harness.get_by_role_and_label(Role::Button, "List").click();
     harness.run();
-    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::Simple);
+    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::List);
     harness.get_by_role_and_label(Role::Button, "Grouped").click();
     harness.run();
-    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::List, "Grouped is the one list under headings");
-    harness.get_by_role_and_label(Role::Button, "Cards").click();
+    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::Grouped);
+    harness.get_by_role_and_label(Role::Button, "Smart").click();
     harness.run();
-    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::Cards);
+    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::Smart);
 }
 
 #[test]
 fn the_view_switch_leaves_the_narrow_list_beside_an_open_message() {
     let mut harness = harness(true);
-    harness.get_by_role_and_label(Role::Button, "Cards");
+    harness.get_by_role_and_label(Role::Button, "Smart");
     harness.get_by_label(ODILE).click();
     harness.run();
-    assert!(harness.query_by_role_and_label(Role::Button, "Cards").is_none());
+    assert!(harness.query_by_role_and_label(Role::Button, "Smart").is_none());
     harness.get_by_role_and_label(Role::Button, "Show done");
 }
 
@@ -804,7 +804,7 @@ fn a_frame_of_a_thousand_rows_none_hovered_or_keyed_lays_out_no_hover_action() {
     let store = sample::grown(Timestamp::from_unix(1_793_869_200, 0).unwrap(), 1_200).unwrap();
     let session = sample::session_over(store, Box::new(clock.clone())).unwrap();
     let mut mailbox = Mailbox::new(session, Box::new(clock));
-    mailbox.set_inbox_view(InboxView::List);
+    mailbox.set_inbox_view(InboxView::Grouped);
     let mut harness = harness_of(InboxApp::new(mailbox));
     harness.hover_at(egui::pos2(1.0, 1.0));
     harness.run();
@@ -915,7 +915,7 @@ const MOST_ROWS: usize = 828_usize.div_ceil(56) + 1 + 4;
 
 #[test]
 fn ten_thousand_messages_build_only_the_rows_in_sight() {
-    let mut harness = pane(InboxView::List);
+    let mut harness = pane(InboxView::Grouped);
     let view = super::list::view_rect(&harness.ctx).unwrap();
     assert!(view.height() > 780.0 && view.height() <= 828.0, "the list's viewport fills the pane: {view:?}");
     let built = super::list::built(&harness.ctx).unwrap();
@@ -930,7 +930,7 @@ fn ten_thousand_messages_build_only_the_rows_in_sight() {
     assert!(pane_rect(&harness, first).is_some(), "the first in sight is built");
     assert!(pane_rect(&harness, 1_000_000).is_none(), "the first of the list is not");
     // The simple list, rows only, builds no more than the rows of 56 that meet the pane and four.
-    let mut harness = pane(InboxView::Simple);
+    let mut harness = pane(InboxView::List);
     pane_wheel(&mut harness, 280_000.0);
     let built = super::list::built(&harness.ctx).unwrap();
     assert!(built.count <= MOST_ROWS && built.first > 4_000, "{built:?} in the simple list");
@@ -938,7 +938,7 @@ fn ten_thousand_messages_build_only_the_rows_in_sight() {
 
 #[test]
 fn a_group_opening_or_folding_above_the_viewport_keeps_the_first_message_in_sight() {
-    let mut harness = pane(InboxView::Cards);
+    let mut harness = pane(InboxView::Smart);
     // The last group opens; the list scrolls into its middle.
     harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("Invitations"), true));
     harness.run();
@@ -960,7 +960,7 @@ fn a_group_opening_or_folding_above_the_viewport_keeps_the_first_message_in_sigh
 
 #[test]
 fn each_row_tells_a_screen_reader_its_place_in_the_whole_list_and_the_list_its_size() {
-    let mut harness = pane(InboxView::Simple);
+    let mut harness = pane(InboxView::List);
     pane_wheel(&mut harness, 280_000.0);
     let list = harness.get_by_role_and_label(Role::ListBox, "Messages");
     assert_eq!(list.accesskit_node().size_of_set(), Some(10_000), "the list's size, built or not");
@@ -1003,13 +1003,13 @@ fn selected_at(harness: &Harness<'static, InboxApp>) -> Option<usize> {
 
 #[test]
 fn the_keyed_row_is_scrolled_into_sight_though_it_was_not_built() {
-    for view in [InboxView::Simple, InboxView::List, InboxView::Cards] {
+    for view in [InboxView::List, InboxView::Grouped, InboxView::Smart] {
         let mut harness = ten_thousand(view);
         // A row far down, chosen without the keyboard: nothing scrolls to it.
         harness.state_mut().mailbox_mut().select(Some(1_005_000));
         harness.run();
         assert!(row_rect(&harness, 1_005_000).is_none(), "{view:?}: not built");
-        if view == InboxView::Cards {
+        if view == InboxView::Smart {
             // On cards a group shows its first rows: the next row's group (5 001 is in Updates) shows all of them.
             harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("Updates"), true));
             harness.run();
@@ -1025,7 +1025,7 @@ fn the_keyed_row_is_scrolled_into_sight_though_it_was_not_built() {
 
 #[test]
 fn a_row_the_pointer_hovers_far_down_the_list_is_built_with_its_actions() {
-    let mut harness = ten_thousand(InboxView::Simple);
+    let mut harness = ten_thousand(InboxView::List);
     wheel(&mut harness, 300_000.0);
     let first = super::list::first_in_sight(&harness.ctx).unwrap();
     let rect = row_rect(&harness, first + 3).unwrap();
@@ -1036,7 +1036,7 @@ fn a_row_the_pointer_hovers_far_down_the_list_is_built_with_its_actions() {
 
 #[test]
 fn a_message_arriving_above_keeps_the_rows_in_sight_in_place_unless_the_list_is_at_its_top() {
-    let mut harness = ten_thousand(InboxView::Simple);
+    let mut harness = ten_thousand(InboxView::List);
     let arrive = |harness: &mut Harness<'static, InboxApp>, id: u64| {
         let mut rows = harness.state().mailbox().messages().to_vec();
         let mut new = rows[0].clone();
@@ -1063,7 +1063,7 @@ fn done_on_the_keyed_row_keeps_the_next_keyed_and_in_sight() {
     let clock = FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap());
     let session = sample::session_over(store, Box::new(clock.clone())).unwrap();
     let mut mailbox = Mailbox::new(session, Box::new(clock));
-    mailbox.set_inbox_view(InboxView::Simple);
+    mailbox.set_inbox_view(InboxView::List);
     let deep = mailbox.messages()[600].id;
     let mut app = InboxApp::new(mailbox);
     app.set_reduce_motion(true);
@@ -1085,7 +1085,7 @@ fn done_on_the_keyed_row_keeps_the_next_keyed_and_in_sight() {
 
 #[test]
 fn an_empty_list_a_list_of_one_and_a_list_shorter_than_its_pane_draw() {
-    for view in [InboxView::Simple, InboxView::List, InboxView::Cards] {
+    for view in [InboxView::List, InboxView::Grouped, InboxView::Smart] {
         let mut harness = ten_thousand(view);
         harness.state_mut().mailbox_mut().set_rows(Vec::new());
         harness.run();
@@ -1094,7 +1094,7 @@ fn an_empty_list_a_list_of_one_and_a_list_shorter_than_its_pane_draw() {
         harness.get_by_label("Nothing here");
     }
     for count in [1_u64, 3] {
-        for view in [InboxView::Simple, InboxView::List, InboxView::Cards] {
+        for view in [InboxView::List, InboxView::Grouped, InboxView::Smart] {
             let mut harness = ten_thousand(view);
             let rows: Vec<_> = harness.state().mailbox().messages().iter().take(usize::try_from(count).unwrap()).cloned().collect();
             harness.state_mut().mailbox_mut().set_rows(rows.clone());
@@ -1120,12 +1120,12 @@ fn an_empty_list_a_list_of_one_and_a_list_shorter_than_its_pane_draw() {
 fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale() {
     use crate::mailbox::Group;
     use crate::theme::{Mode, TextScale, Theme};
-    let harness = ten_thousand(InboxView::List);
+    let harness = ten_thousand(InboxView::Grouped);
     let mailbox = harness.state().mailbox();
     let other = Group { icon: crate::iconset::IconId::Inbox, name: "Other".to_owned(), messages: Vec::new() };
     for percent in [100, 130] {
         let theme = Theme::new(Mode::Light, TextScale::from_percent(percent).unwrap());
-        for view in [InboxView::Simple, InboxView::List, InboxView::Cards] {
+        for view in [InboxView::List, InboxView::Grouped, InboxView::Smart] {
             let grouped = mailbox.groups();
             assert_eq!(grouped.len(), 4);
             let listing = super::list::lines(&theme, mailbox, view, &grouped, &other, true, &|_| true, None);
@@ -1153,7 +1153,7 @@ fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale
             }
             let end = listing.sheets.last().map_or(spans.last().unwrap().1, |sheet| sheet.1);
             assert_eq!(end, listing.height, "{percent} {view:?}: the last line (or its card) ends the content exactly");
-            if view == InboxView::Simple {
+            if view == InboxView::List {
                 assert_eq!(spans.last().unwrap().1, listing.height, "the last row's bottom is the content's height");
                 assert_eq!(listing.height, theme.size(56.0) * 10_000.0, "{percent}: no point lost over 10 000 rows");
             }
@@ -1192,7 +1192,7 @@ fn first_place(harness: &Harness<'static, InboxApp>) -> (u64, egui::Rect) {
 #[test]
 fn a_keyed_row_scrolled_away_from_stays_away_when_mail_arrives_above() {
     use crate::mailbox::GroupKind;
-    let mut harness = ten_thousand(InboxView::List);
+    let mut harness = ten_thousand(InboxView::Grouped);
     key(&mut harness, 1_005_001);
     wheel(&mut harness, 20_000.0);
     let before = first_place(&harness);
@@ -1207,7 +1207,7 @@ fn a_keyed_row_scrolled_away_from_stays_away_when_mail_arrives_above() {
 
 #[test]
 fn a_keyed_row_scrolled_away_from_stays_away_when_a_group_opens_or_folds_above() {
-    let mut harness = ten_thousand(InboxView::Cards);
+    let mut harness = ten_thousand(InboxView::Smart);
     harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("Invitations"), true));
     harness.run();
     // 5 003 is in Invitations, the last group, open.
@@ -1231,7 +1231,7 @@ fn a_keyed_row_scrolled_away_from_stays_away_when_a_group_opens_or_folds_above()
 
 #[test]
 fn tab_walks_down_the_whole_list_building_rows_as_it_goes() {
-    let mut harness = ten_thousand(InboxView::Simple);
+    let mut harness = ten_thousand(InboxView::List);
     harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(1_000_000)));
     harness.run();
     for _ in 0..40 {
@@ -1272,7 +1272,7 @@ fn page_down_page_up_end_and_home_move_the_focused_row_as_keymap_actions() {
         assert_eq!(defaults.shortcut(action), Some(egui::KeyboardShortcut::new(Modifiers::NONE, key)), "{action}");
         assert!(keymap::action(action).is_some(), "{action} is an action, on the Shortcuts page");
     }
-    let mut harness = ten_thousand(InboxView::Simple);
+    let mut harness = ten_thousand(InboxView::List);
     key(&mut harness, 1_005_001);
     focus_selected(&mut harness);
     harness.key_press(Key::PageDown);
@@ -1304,7 +1304,7 @@ fn page_down_page_up_end_and_home_move_the_focused_row_as_keymap_actions() {
 
 #[test]
 fn the_list_keys_rest_while_the_list_does_not_have_the_keyboard() {
-    let mut harness = ten_thousand(InboxView::Simple);
+    let mut harness = ten_thousand(InboxView::List);
     // A message open, nothing focused: reading, End and Page Down leave the open message alone.
     harness.state_mut().mailbox_mut().select(Some(1_000_003));
     harness.run();
@@ -1336,7 +1336,7 @@ fn the_longest_sender_and_subject_cut_with_one_ellipsis_at_130() {
     let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
     let keymap = crate::keymap::Keymap::default();
     let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
-    mailbox.set_inbox_view(InboxView::Simple);
+    mailbox.set_inbox_view(InboxView::List);
     let model = mailbox.messages().first().unwrap().clone();
     let sender: String = "Annelise Vandenberghe-Okonkwo-Halvorssen ".repeat(5).chars().take(200).collect();
     let subject = "Q".repeat(400);
@@ -1416,7 +1416,7 @@ fn the_last_row_of_a_card_keeps_its_line_six_points_above_the_cards_edge() {
 /// The showcase in the grouped list, and the messages its "Other" head stands over: those no group holds.
 fn grouped_other() -> (Harness<'static, InboxApp>, Vec<u64>, String) {
     let mut app = app(true);
-    app.mailbox_mut().set_inbox_view(InboxView::List);
+    app.mailbox_mut().set_inbox_view(InboxView::Grouped);
     let groups = app.mailbox().groups();
     let held: std::collections::HashSet<u64> = groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
     let other: Vec<u64> = app.mailbox().messages().iter().map(|row| row.id).filter(|id| !held.contains(id)).collect();
@@ -1460,7 +1460,7 @@ fn moving_pane(high: f32, scale: crate::theme::TextScale, ppp: f32) -> Harness<'
     let theme = Theme::new(Mode::Light, scale);
     let keymap = crate::keymap::Keymap::default();
     let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
-    mailbox.set_inbox_view(InboxView::Simple);
+    mailbox.set_inbox_view(InboxView::List);
     let mut harness = Harness::builder()
         .with_size(vec2(440.0, high))
         .with_pixels_per_point(ppp)
@@ -1606,7 +1606,7 @@ fn a_row_leaving_above_the_viewport_keeps_the_first_row_in_sight_where_it_stands
 fn the_lines_add_up_to_whole_pixels_while_a_row_closes() {
     use crate::theme::{Mode, TextScale, Theme};
     let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
-    mailbox.set_inbox_view(InboxView::Simple);
+    mailbox.set_inbox_view(InboxView::List);
     let rota = mailbox.messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id).unwrap();
     mailbox.start(rota, crate::mailbox::Act::Done);
     let other = crate::mailbox::Group { icon: crate::iconset::IconId::Inbox, name: "Other".to_owned(), messages: Vec::new() };
@@ -1615,7 +1615,7 @@ fn the_lines_add_up_to_whole_pixels_while_a_row_closes() {
         let mut last = f32::INFINITY;
         for closed in [0.0, 0.1, 0.33, 0.5, 0.77, 0.99] {
             let gone = super::list::Gone { closed, faded: closed };
-            let listing = super::list::lines(&theme, &mailbox, InboxView::Simple, &[], &other, false, &|_| true, Some(gone));
+            let listing = super::list::lines(&theme, &mailbox, InboxView::List, &[], &other, false, &|_| true, Some(gone));
             let ghost = (0..listing.lines.len()).find(|index| matches!(listing.lines[*index], super::list::Line::Leaving(..))).unwrap();
             let (top, bottom) = listing.span(ghost).unwrap();
             let high = bottom - top;
@@ -1668,7 +1668,7 @@ fn a_snoozed_row_fades_in_its_place_and_is_then_gone() {
 
 #[test]
 fn a_row_closes_on_its_card_and_in_the_grouped_list_too() {
-    for view in [InboxView::Cards, InboxView::List] {
+    for view in [InboxView::Smart, InboxView::Grouped] {
         let mut app = app(true);
         app.mailbox_mut().set_inbox_view(view);
         app.set_reduce_motion(false);

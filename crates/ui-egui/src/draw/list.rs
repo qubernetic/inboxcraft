@@ -85,9 +85,9 @@ const SWITCH_ROOM: f32 = 520.0;
 const PILL_PULL: i8 = 4;
 
 /// The view switch of the unified inbox, as the design file words and orders it: "Grouped" is the one list under
-/// headings ([`InboxView::List`]), beside the simple list and the cards.
+/// headings ([`InboxView::Grouped`]), beside the simple list and the cards.
 fn view_switch() -> [(InboxView, &'static str); 3] {
-    [(InboxView::List, tr!("Grouped")), (InboxView::Simple, InboxView::Simple.text()), (InboxView::Cards, InboxView::Cards.text())]
+    [(InboxView::Grouped, tr!("Grouped")), (InboxView::List, InboxView::List.text()), (InboxView::Smart, InboxView::Smart.text())]
 }
 
 /// The pills under the header: the piles in "Later"; elsewhere "Show done" and the park pile, after the view switch
@@ -867,7 +867,7 @@ pub(super) fn lines<'a>(
     gone: Option<Gone>,
 ) -> Listing<'a> {
     let leaving = mailbox.left_row().zip(gone);
-    if view == InboxView::Simple {
+    if view == InboxView::List {
         let mut stack = Stack::new(theme, 0.0);
         for (line, _) in listed(mailbox, leaving) {
             stack.push(line);
@@ -882,7 +882,7 @@ pub(super) fn lines<'a>(
     // A group whose last row is leaving keeps its card while it goes.
     let rows = |line: &Line<'_>| matches!(line, Line::Mail(_) | Line::Leaving(..));
     let parts = groups.iter().zip(&members).filter(|(_, lines)| lines.iter().any(rows));
-    if view == InboxView::Cards {
+    if view == InboxView::Smart {
         for (index, (group, lines)) in parts.enumerate() {
             let state = head_state(lines, open(group), true, index);
             stack.open();
@@ -1342,8 +1342,8 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let inbox = mailbox.place() == Place::View(Role::Inbox) && mailbox.query().is_empty();
     let wait = inbox && !mailbox.waiting().is_empty();
     let groups = mailbox.groups();
-    let view = if groups.is_empty() { InboxView::Simple } else { mailbox.inbox_view() };
-    let grouping = view != InboxView::Simple;
+    let view = if groups.is_empty() { InboxView::List } else { mailbox.inbox_view() };
+    let grouping = view != InboxView::List;
     let rows = Rows {
         theme,
         keymap,

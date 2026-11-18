@@ -137,7 +137,7 @@ fn a_mail_row_and_a_text_button_keep_the_design_s_heights_at_every_text_scale() 
 #[test]
 fn the_unified_inbox_lists_its_rows_by_sender_subject_and_date() {
     let mut app = sample_app();
-    app.mailbox_mut().set_inbox_view(InboxView::Simple);
+    app.mailbox_mut().set_inbox_view(InboxView::List);
     // Tall enough for every row under the header and its pills.
     let mut harness = Harness::builder().with_size(vec2(1100.0, 800.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();

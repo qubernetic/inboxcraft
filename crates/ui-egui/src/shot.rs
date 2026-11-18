@@ -159,7 +159,8 @@ pub struct Shot {
     /// Whether the settings sheet is open on Notifications.
     #[serde(default)]
     pub notifications: Option<bool>,
-    /// How the unified inbox shows its groups: `cards` when left out, `list` or `simple`.
+    /// How the unified inbox shows its groups: `smart` when left out, `grouped` or `list` (the earlier `cards` and
+    /// `simple` read as `smart` and `list`).
     #[serde(default)]
     pub view: Option<String>,
     /// The composer, the first account signed: `new`, `written` (two people, a subject and a few lines), `bad`
@@ -1094,7 +1095,10 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         app.mailbox_mut().narrow(Some(account));
     }
     if let Some(name) = &shot.view {
-        let view = InboxView::named(name).ok_or_else(|| bad(format!("{}: view {name:?} is not cards, list or simple", shot.out)))?;
+        // Today's ids; the earlier `cards` and `simple` are read too (`list` is today's List).
+        let view = InboxView::named(name)
+            .or_else(|| InboxView::named_before(name).filter(|_| name != "list"))
+            .ok_or_else(|| bad(format!("{}: view {name:?} is not grouped, smart or list", shot.out)))?;
         app.mailbox_mut().set_inbox_view(view);
     }
     if shot.put_away == Some(true) {

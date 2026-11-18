@@ -783,3 +783,39 @@ fn an_agents_read_keeps_the_windows_undo() {
     assert!(mailbox.undoable().is_some());
     assert!(mailbox.can_undo());
 }
+
+#[test]
+fn the_old_view_ids_read_as_the_new_views() {
+    use super::InboxView;
+    use crate::keep::Triage;
+
+    // Today's ids name today's views; Smart is the default.
+    let ids: Vec<&str> = InboxView::ALL.iter().map(|view| view.id()).collect();
+    assert_eq!(ids, ["grouped", "smart", "list"]);
+    assert_eq!(InboxView::default(), InboxView::Smart);
+    // The ids kept before: the cards are Smart, the list under headings Grouped, the simple list List.
+    assert_eq!(InboxView::named_before("cards"), Some(InboxView::Smart));
+    assert_eq!(InboxView::named_before("list"), Some(InboxView::Grouped));
+    assert_eq!(InboxView::named_before("simple"), Some(InboxView::List));
+    // A keep file of then, under its `view` key: each choice survives the rename.
+    for (old, now) in [("cards", InboxView::Smart), ("list", InboxView::Grouped), ("simple", InboxView::List)] {
+        let kept = Triage::from_value(&json!({ "screener": "off", "view": old }));
+        assert_eq!(kept.view, now, "{old}");
+        // Written again and read back, it stays; the earlier key keeps the earlier id for an earlier InboxCraft.
+        let written = kept.to_value();
+        assert_eq!(written["inbox_view"], json!(now.id()));
+        assert_eq!(written["view"], json!(old));
+        assert_eq!(Triage::from_value(&written).view, now);
+    }
+    // Today's key wins over the earlier one: today's `list` is List, never the old grouped list.
+    assert_eq!(Triage::from_value(&json!({ "inbox_view": "list", "view": "list" })).view, InboxView::List);
+    // Hostile and unknown ids: no view of theirs, the default one, no panic.
+    for hostile in [json!("tiles"), json!(""), json!("\u{0}"), json!("CARDS"), json!(7), json!(null), json!({ "x": [] }), json!("x".repeat(100_000))] {
+        assert_eq!(Triage::from_value(&json!({ "inbox_view": hostile.clone() })).view, InboxView::Smart, "{hostile}");
+        assert_eq!(Triage::from_value(&json!({ "view": hostile.clone() })).view, InboxView::Smart, "{hostile}");
+        if let Some(text) = hostile.as_str() {
+            assert_eq!(InboxView::named(text), None);
+            assert_eq!(InboxView::named_before(text), None);
+        }
+    }
+}

@@ -629,7 +629,7 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
             }
         });
         let views = InboxView::ALL.map(|view| (view, view.text(), f.button));
-        let view_note = tr!("People, Updates, Newsletters and Invitations as cards, as one list under headings, or one list by date.");
+        let view_note = tr!("Every group open, the first three rows of each group, or one list by time.");
         row(ui, theme, tr!("Inbox"), &[view_note], &mut |ui| {
             if let Some(view) = segmented(ui, theme, &views, mailbox.inbox_view()) {
                 asked = Some(Asked::InboxView(view));
