@@ -17,6 +17,7 @@
 
 mod agenda;
 mod editor;
+mod glide;
 mod grid;
 mod hours;
 pub(super) mod keys;
@@ -314,7 +315,8 @@ pub(super) fn block(
     }
     response.widget_info(|| WidgetInfo::selected(egui::accesskit::Role::Button, true, picked, event.spoken()));
     if ui.is_rect_visible(rect) {
-        let lit = Lit { hover: response.hovered(), focus: response.has_focus() };
+        let ground = crate::motion::fade(ui.ctx(), response.id.with("ground"), picked || response.hovered(), theme.motion.fast);
+        let lit = Lit { focus: response.has_focus(), ground };
         paint_block(ui, theme, bar_colour(theme, calendar, event.calendar), rect, lit, picked, kind, words);
     }
     if response.clicked() {
@@ -326,8 +328,9 @@ pub(super) fn block(
 /// What a block shows of the pointer and the keyboard.
 #[derive(Debug, Clone, Copy, Default)]
 struct Lit {
-    hover: bool,
     focus: bool,
+    /// How far the ground has faded to `stage`, 0 to 1 (hovered or picked).
+    ground: f32,
 }
 
 /// One state of the event-block sheet for the gallery's board, named as the sheet names it (`timed`, `band`, `chip`,
@@ -342,7 +345,8 @@ pub(crate) fn event_board(ui: &mut Ui, theme: &Theme, state: &str) -> Response {
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let name = format!("{} {state}", tr!("Event"));
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, &name));
-    let lit = Lit { hover: state == "hover" || response.hovered(), focus: state == "focus" || response.has_focus() };
+    let hover = state == "hover" || response.hovered();
+    let lit = Lit { focus: state == "focus" || response.has_focus(), ground: if hover || state == "picked" { 1.0 } else { 0.0 } };
     paint_block(ui, theme, theme.account_colour(1), rect, lit, state == "picked", kind, &words);
     if kind == Kind::Row {
         let line = line_width(ui.pixels_per_point());
@@ -358,10 +362,11 @@ fn paint_block(ui: &Ui, theme: &Theme, bar: Color32, rect: Rect, shown: Lit, pic
     let ppp = ui.pixels_per_point();
     let line = line_width(ppp);
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    let lit = picked || shown.hover;
+    let lit = shown.ground > 0.0;
+    let ground = crate::theme::mix(p.surface, p.stage, shown.ground);
     match kind {
         Kind::Timed { narrow } => {
-            painter.rect_filled(rect, 0.0, if lit { p.stage } else { p.surface });
+            painter.rect_filled(rect, 0.0, ground);
             painter.rect_filled(Rect::from_min_size(rect.min, vec2(pixels(BAR, ppp), rect.height())), 0.0, bar);
             let gap = if narrow { 3.0 } else { 8.0 };
             let left = rect.left() + pixels(BAR, ppp) + gap;
@@ -377,7 +382,7 @@ fn paint_block(ui: &Ui, theme: &Theme, bar: Color32, rect: Rect, shown: Lit, pic
             stroke(&painter, rect, line, if picked { p.cyan_edge } else { p.line });
         }
         Kind::Band => {
-            painter.rect_filled(rect, 0.0, if lit { p.stage } else { p.surface });
+            painter.rect_filled(rect, 0.0, ground);
             painter.rect_filled(Rect::from_min_size(rect.min, vec2(pixels(BAR, ppp), rect.height())), 0.0, bar);
             let left = rect.left() + pixels(BAR, ppp) + 8.0;
             let right = rect.right() - 9.0;
@@ -397,7 +402,7 @@ fn paint_block(ui: &Ui, theme: &Theme, bar: Color32, rect: Rect, shown: Lit, pic
             if lit {
                 let frame = Rect::from_min_max(rect.min - vec2(3.0, 1.0), rect.max + vec2(4.0, 1.0));
                 let painter = ui.painter().with_clip_rect(frame.intersect(ui.clip_rect()));
-                painter.rect_filled(frame, 0.0, p.stage);
+                painter.rect_filled(frame, 0.0, ground);
                 stroke(&painter, frame, line, if picked { p.cyan_edge } else { p.line });
             }
             let middle = rect.center().y;
@@ -416,7 +421,7 @@ fn paint_block(ui: &Ui, theme: &Theme, bar: Color32, rect: Rect, shown: Lit, pic
         }
         Kind::Row => {
             if lit {
-                painter.rect_filled(rect, 0.0, p.stage);
+                painter.rect_filled(rect, 0.0, ground);
             }
             if picked {
                 painter.rect_filled(Rect::from_min_size(rect.min, vec2(pixels(2.0, ppp), rect.height())), 0.0, p.cyan_edge);

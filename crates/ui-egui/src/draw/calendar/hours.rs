@@ -140,7 +140,19 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
                     let shared = piece.columns.clamp(1, MOST_COLUMNS);
                     let sub = Lines::cut(cols.line(index), cols.line(index + 1), shared, ppp);
                     let (left, right) = sub.cell(piece.column, piece.column + 1);
-                    let area = Rect::from_min_max(pos2(left, at(piece.from)), pos2(right, at(piece.to) + line));
+                    let cell = Rect::from_min_max(pos2(left, at(piece.from)), pos2(right, at(piece.to) + line));
+                    let from_top = cell.translate(-content.min.to_vec2());
+                    let glided = super::glide::glide(ui.ctx(), event, (calendar.span(), i64::try_from(index).unwrap_or(0)), from_top);
+                    let moved = glided.translate(content.min.to_vec2());
+                    // On its way it stands on whole pixels too; landed, it is its cell.
+                    let area = if glided == from_top {
+                        cell
+                    } else {
+                        Rect::from_min_max(
+                            pos2(snap(moved.left(), ppp), snap(moved.top(), ppp)),
+                            pos2(snap(moved.right(), ppp), snap(moved.bottom(), ppp)),
+                        )
+                    };
                     let detail = detail(event, days == 1);
                     let words = Words { title: &event.summary, detail: &detail, time: "" };
                     let salt = i64::try_from(index).unwrap_or(0);
