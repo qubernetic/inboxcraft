@@ -724,7 +724,11 @@ impl InboxApp {
             keymap::SNOOZE => self.open_picker(""),
             keymap::OPEN_HELD => {
                 if let Some(held) = self.held_back.take() {
+                    // The owner's open, as a press: the message in the reader, read, a docked composer floating.
                     self.mailbox.select(Some(held.pick));
+                    self.reading = true;
+                    self.focus_reader = one_pane(ctx);
+                    self.float_behind();
                 }
             }
             keymap::CALENDAR => self.show_calendar(),

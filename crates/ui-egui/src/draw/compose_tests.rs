@@ -1098,6 +1098,68 @@ fn a_press_or_enter_on_a_row_beside_the_docked_composer_floats_it() {
 }
 
 #[test]
+fn opening_the_held_back_message_beside_the_docked_composer_opens_it_as_a_press_does() {
+    for width in [720.0, 1300.0] {
+        let mut harness = Harness::builder()
+            .with_size(vec2(width, 820.0))
+            .with_max_steps(12)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+        harness.run();
+        harness.get_by_role_and_label(Role::Button, "New message").click();
+        harness.run();
+        type_into(&mut harness, "Message text", "Hello Odile");
+        if width < 980.0 {
+            // One pane: Esc brings the list over the composer, Tab walks onto a row.
+            harness.key_press(Key::Escape);
+            harness.run();
+            for _ in 0..60 {
+                if super::list::focused_row(&harness.ctx).is_some() {
+                    break;
+                }
+                harness.key_press(Key::Tab);
+                harness.run();
+            }
+        } else {
+            harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("compose-from")));
+            harness.run();
+            harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+            harness.run();
+        }
+        let previewed = super::list::focused_row(&harness.ctx).unwrap();
+        assert_eq!(harness.state().reader().open_id(), Some(previewed), "{width}: a preview behind the composer");
+        assert!(docked_with(&harness).0, "{width}: the preview leaves it docked");
+        if width >= 980.0 {
+            // Back into the text: a removed row that had the keyboard hands it to another row, which opens.
+            harness.ctx.memory_mut(|memory| memory.request_focus(super::compose::text_id()));
+            harness.run();
+        }
+        // The server takes the previewed message away: the rule's next message is held back.
+        let (_, mailbox) = harness.state_mut().reader_mut();
+        mailbox.run("mail.done", &json!({ "id": previewed, "done": true })).unwrap();
+        mailbox.refresh();
+        harness.run();
+        harness.run();
+        assert_eq!(docked_with(&harness), (true, "Hello Odile".to_owned()), "{width}: the server's removal floats nothing");
+        assert!(harness.state().can_run(keymap::OPEN_HELD), "{width}: the held-back message can be opened");
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, keymap::OPEN_HELD);
+        harness.run();
+        harness.run();
+        assert_eq!(docked_with(&harness), (false, "Hello Odile".to_owned()), "{width}: the composer floats, the draft whole");
+        let open = harness.state().reader().open_id();
+        assert!(open.is_some(), "{width}: a message open");
+        assert!(super::reader_rect(&harness.ctx).is_some(), "{width}: the reader is drawn with the message");
+        let seen = harness.state().mailbox().messages().iter().find(|row| Some(row.id) == open).is_some_and(|row| row.seen);
+        assert!(seen, "{width}: the message is read, as a press reads it");
+        if width < 980.0 {
+            let reader = super::reader_rect(&harness.ctx).unwrap();
+            let focused = harness.ctx.memory(|memory| memory.focused()).and_then(|id| harness.ctx.read_response(id));
+            assert!(focused.is_some_and(|response| reader.contains_rect(response.rect)), "{width}: the keyboard in the reader, as after a press");
+        }
+    }
+}
+
+#[test]
 fn hostile_drafts_hold_their_layout() {
     let mut harness = sending();
     let mailbox = harness.state_mut().mailbox_mut();
