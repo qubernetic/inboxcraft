@@ -149,8 +149,6 @@
 # typed time, and the reminder picker over a sent message.
 {"out": "docs/images/later-snoozed-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "later": "snoozed", "select": "Your ferry booking is confirmed"}
 {"out": "docs/images/later-snoozed-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "later": "snoozed", "select": "Your ferry booking is confirmed"}
-{"out": "docs/images/later-pins-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "later": "pins"}
-{"out": "docs/images/later-pins-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "later": "pins"}
 {"out": "docs/images/show-done-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "show_done": true, "view": "list"}
 {"out": "docs/images/show-done-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "show_done": true, "view": "list"}
 {"out": "docs/images/snooze-picker-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
