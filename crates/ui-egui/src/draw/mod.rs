@@ -82,6 +82,10 @@ use paint::Panes;
 /// pane is a point wider, for the line between it and the pane at its left.
 pub(super) const LIST_WIDTH: f32 = 440.0;
 
+/// A window narrower than this, in points, holds one pane beside the folders: the open message and the list swap
+/// (`Enter` or a press opens, `Esc` goes back), as the design's breakpoint has it.
+pub(super) const ONE_PANE: f32 = 980.0;
+
 /// The default width of the folder pane, in points.
 pub(super) const FOLDER_PANE: f32 = 240.0;
 
@@ -127,6 +131,9 @@ pub struct InboxApp {
     /// A row of the list was pressed or keyed last, not the reader: with nothing else focused the list has the keyboard
     /// ([`InboxApp::list_has_keyboard`]).
     list_keys: bool,
+    /// In one pane ([`ONE_PANE`]), the list stands in the open message's place (`Esc` there); otherwise the message
+    /// does.
+    list_front: bool,
     search: String,
     /// The appearance installed in the context, once installed.
     themed: Option<Appearance>,
@@ -197,6 +204,17 @@ fn around(left: f32, right: f32, gap: f32) -> Frame {
     Frame::new().inner_margin(Margin { left: side(left), right: side(right), top: side(gap), bottom: side(gap) })
 }
 
+/// Whether the window holds one pane beside the folders ([`ONE_PANE`]).
+fn one_pane(ctx: &egui::Context) -> bool {
+    ctx.content_rect().width() < ONE_PANE
+}
+
+/// The reader's pane on the screen in the last frame that drew it.
+#[cfg(test)]
+pub(super) fn reader_rect(ctx: &egui::Context) -> Option<egui::Rect> {
+    ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::unique("reader-rect")))
+}
+
 /// One card in the middle of the window, as tall as what `add` draws in it; what `add` gave.
 fn middle_card<R>(ui: &mut Ui, theme: &Theme, layers: &mut Panes, mut add: impl FnMut(&mut Ui) -> R) -> R {
     let s = theme.spacing;
@@ -234,6 +252,7 @@ impl InboxApp {
             hover: None,
             list_row: None,
             list_keys: true,
+            list_front: false,
             search: String::new(),
             themed: None,
             keep: Box::new(NoKeep),
@@ -559,7 +578,12 @@ impl InboxApp {
             self.mailbox.select_keyed(from);
         }
         self.mailbox.step_in(&list::order(ctx), forward, rows);
+        let hidden = one_pane(ctx) && self.list_front;
         if let Some(to) = self.mailbox.selected() {
+            // In one pane with the list in front the reader is not shown: the keyed message is not read yet.
+            if hidden {
+                self.mailbox.select_by_focus(to);
+            }
             ctx.memory_mut(|memory| {
                 // egui read the arrow as a move of its focus when the frame began: the list's key moves it instead.
                 memory.move_focus(egui::FocusDirection::None);
@@ -578,15 +602,18 @@ impl InboxApp {
         self.mailbox.select_keyed(id);
         ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(id)));
         self.list_keys = false;
+        self.list_front = false;
         ctx.request_repaint();
     }
 
     /// `Esc` in the reader gives the keyboard back to the list: its keyed row takes the focus. Whether it did.
     fn back_to_list(&mut self, ctx: &egui::Context) -> bool {
-        if self.screen != Screen::Mail || self.list_keys || self.docked() {
+        let swapped = one_pane(ctx) && !self.list_front && self.reader.open_id().is_some();
+        if self.screen != Screen::Mail || (self.list_keys && !swapped) || self.docked() {
             return false;
         }
         self.list_keys = true;
+        self.list_front = one_pane(ctx);
         if let Some(id) = self.mailbox.selected() {
             self.mailbox.select_keyed(id);
             ctx.memory_mut(|memory| memory.request_focus(list::row_id(id)));
@@ -602,6 +629,7 @@ impl InboxApp {
             self.mailbox.read_preview(id);
             self.mailbox.select(clicked);
             self.list_keys = true;
+            self.list_front = false;
             if let Some(focused) = self.list_row.filter(|focused| Some(*focused) != clicked) {
                 ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(focused)));
             }
@@ -1391,7 +1419,14 @@ impl InboxApp {
         let mut gained = None;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
+        // In one pane the open message (or the composer in its place) and the list swap.
+        let single = one_pane(ui.ctx());
+        let front = docked || (!self.list_front && self.reader.open_id().is_some());
+        let list_shown = !single || !front;
+        let reader_shown = !single || front || full;
         let mut layers = Panes::begin(ui.painter());
+        #[cfg(test)]
+        ui.data_mut(|data| data.remove::<egui::Rect>(egui::Id::unique("reader-rect")));
         let (gap, half) = (0.0, 0.0);
         let width = pane::rail_width(&theme);
         let rail = Panel::left("rail")
@@ -1443,7 +1478,9 @@ impl InboxApp {
                     )
                 })
             };
-            (header, clicked, acted, out, review, done_all, outboxed, screener_mode, gained) = if self.reader.open_id().is_some() || docked {
+            (header, clicked, acted, out, review, done_all, outboxed, screener_mode, gained) = if !list_shown {
+                (list::Header::default(), None, None, true, false, None, None, None, None)
+            } else if !single && (self.reader.open_id().is_some() || docked) {
                 // The list keeps its 440 beside the reader: no splitter, and a width a person once dragged to is
                 // not read.
                 Panel::left("list")
@@ -1461,9 +1498,9 @@ impl InboxApp {
         let mut composed = Vec::new();
         // A texture lives no longer than the picture the reader keeps for it.
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
-        if docked {
+        if docked && reader_shown {
             composed = self.composer_card(ui, &theme, &mut layers, half);
-        } else if self.screen == Screen::Mail && self.reader.open_id().is_some() {
+        } else if self.screen == Screen::Mail && self.reader.open_id().is_some() && reader_shown && !docked {
             let hover = self.hover.take();
             let left = if full { gap } else { half };
             let shown = CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| {
@@ -1473,6 +1510,8 @@ impl InboxApp {
             });
             // A press in the reader: someone reads there, and the list's keys rest until a row is pressed or keyed.
             let reader = shown.response.rect;
+            #[cfg(test)]
+            ui.data_mut(|data| data.insert_temp(egui::Id::unique("reader-rect"), reader));
             if ui.input(|input| input.pointer.any_pressed() && input.pointer.press_origin().is_some_and(|at| reader.contains(at))) {
                 self.list_keys = false;
             }

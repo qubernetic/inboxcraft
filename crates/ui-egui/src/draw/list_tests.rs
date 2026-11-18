@@ -666,24 +666,47 @@ fn the_list_is_440_wide_beside_the_reader() {
 }
 
 #[test]
-fn a_narrow_window_squeezes_the_reader_and_nothing_overlaps_or_panics() {
-    // Rail, folders and the 441 of the list take about 790: under that the reader has nothing left; under the rail and
-    // the folders' width the list gets what remains.
-    for width in [1100.0, 900.0, 800.0, 600.0, 300.0] {
+fn under_980_the_message_and_the_list_swap_and_the_reader_always_has_room() {
+    // From 980 up the reader stands beside the 440 list; under it the window holds one pane beside the folders, and the
+    // open message and the list swap: a press or Enter opens, Esc goes back. The window's least width is 800.
+    for width in [1100.0, 980.0, 979.0, 900.0, 800.0, 600.0, 300.0] {
         let mut harness = Harness::builder()
             .with_size(vec2(width, 1400.0))
             .with_context_setup(install_fonts)
             .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(false));
         harness.run();
+        let odile = harness.get_by_label(ODILE).rect();
         harness.query_all_by_label_contains("Photos from the coast walk").next().unwrap().click();
         harness.run();
         harness.run();
-        let row = harness.get_by_label(ODILE).rect();
-        if width >= 800.0 {
-            assert_eq!(row.width(), 440.0, "{width}: the rows keep their width");
-        } else {
-            // The rail and the folders come first: the list gets what is left, never more than its 440.
-            assert!(row.width() <= 440.0, "{width}: {row:?}");
+        let reader = super::reader_rect(&harness.ctx);
+        if width >= 980.0 {
+            assert_eq!(harness.get_by_label(ODILE).rect().width(), 440.0, "{width}: the rows keep their width beside the reader");
+            let reader = reader.unwrap();
+            assert!(reader.width() >= 200.0, "{width}: the reader beside the list: {reader:?}");
+            assert!(reader.left() >= harness.get_by_label(ODILE).rect().right(), "{width}: beside, not over the list");
+        } else if width >= 800.0 {
+            // The message stands in the list's place, as wide as the list was with nothing open.
+            assert_eq!(rows(&harness), 0, "{width}: the list gave its place to the message");
+            let reader = reader.unwrap();
+            assert!(reader.width() >= 440.0, "{width}: the reader has the one pane, at least the list's room: {reader:?}");
+            assert!(reader.left() <= odile.left() && reader.right() >= odile.right() - 1.0, "{width}: in the list's place: {reader:?} {odile:?}");
+            // Esc goes back to the list, its keyed row focused; Enter opens the message again.
+            harness.key_press(Key::Escape);
+            harness.run();
+            harness.run();
+            assert!(rows(&harness) > 0, "{width}: Esc brings the list back");
+            assert_eq!(super::reader_rect(&harness.ctx), None, "{width}: in the message's place");
+            assert!(selected_focused(&harness), "{width}: the keyed row has the focus");
+            assert!(harness.get_by_label(ODILE).rect().width() > 440.0, "{width}: the list has the whole pane");
+            harness.key_press(Key::Enter);
+            harness.run();
+            harness.run();
+            assert_eq!(rows(&harness), 0, "{width}: Enter opens it again");
+            assert!(super::reader_rect(&harness.ctx).is_some_and(|reader| reader.width() >= 440.0));
+            harness.key_press(Key::Escape);
+            harness.run();
+            harness.run();
         }
         // Every row stands in the list's column, one under another.
         let rows: Vec<egui::Rect> = harness.query_all_by_role(Role::ListBoxOption).map(|node| node.rect()).collect();
@@ -691,11 +714,40 @@ fn a_narrow_window_squeezes_the_reader_and_nothing_overlaps_or_panics() {
             assert!(pair[0].bottom() <= pair[1].top() + 0.01, "{width}: rows overlap: {pair:?}");
             assert_eq!(pair[0].left(), pair[1].left());
         }
-        for key in [Key::ArrowDown, Key::End, Key::Home, Key::J, Key::K] {
+        for key in [Key::ArrowDown, Key::End, Key::Home, Key::J, Key::K, Key::Enter, Key::Escape] {
             harness.key_press(key);
             harness.run();
         }
     }
+}
+
+#[test]
+fn in_one_pane_the_keys_move_the_keyed_row_without_reading_what_is_not_shown() {
+    let mut app = app(false);
+    app.set_reduce_motion(true);
+    let mut harness =
+        Harness::builder().with_size(vec2(900.0, 1400.0)).with_context_setup(install_fonts).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    let order = super::list::order(&harness.ctx);
+    let first = *order.first().unwrap();
+    harness.state_mut().mailbox_mut().select(Some(first));
+    harness.run();
+    assert_eq!(rows(&harness), 0, "the open message is in front");
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(selected_focused(&harness), "Esc: the list in front, the keyed row focused");
+    let was: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect();
+    for _ in 0..4 {
+        harness.key_press(Key::J);
+        harness.run();
+        assert!(rows(&harness) > 0, "the list stays in front");
+        assert_eq!(super::reader_rect(&harness.ctx), None);
+    }
+    let keyed = harness.state().mailbox().selected().unwrap();
+    assert_ne!(keyed, first);
+    let now: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect();
+    assert_eq!(now, was, "J moved over rows whose messages were not shown: none read");
 }
 
 #[test]
