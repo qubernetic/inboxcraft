@@ -213,13 +213,13 @@ pub(super) fn show(
         (Some(id), None, false) => {
             // The answers stand on one line, or on more where the pane is narrower than they are.
             let inner = room.width() - f32::from(foot_margin.left) - f32::from(foot_margin.right);
-            let answers = thread::answers_height(ui, theme, keymap, inner);
-            let high = (answers + f32::from(foot_margin.top) + f32::from(foot_margin.bottom)).min(room.height());
-            Some((id, Rect::from_min_max(egui::pos2(room.left(), room.bottom() - high), room.max)))
+            let placed = thread::answer_lines(ui, theme, keymap, inner);
+            let high = (placed.height + f32::from(foot_margin.top) + f32::from(foot_margin.bottom)).min(room.height());
+            Some((id, placed, Rect::from_min_max(egui::pos2(room.left(), room.bottom() - high), room.max)))
         }
         _ => None,
     };
-    let message_room = foot.map_or(room, |(_, foot)| Rect::from_min_max(room.min, egui::pos2(room.right(), foot.top())));
+    let message_room = foot.map_or(room, |(_, _, foot)| Rect::from_min_max(room.min, egui::pos2(room.right(), foot.top())));
     // A message alone in its thread stands 16 under the head; a thread's lines 4 under it.
     let top = if reader.thread().len() > 1 { THREAD_TOP } else { MESSAGE_TOP };
     ui.scope_builder(egui::UiBuilder::new().max_rect(message_room), |ui| {
@@ -244,9 +244,9 @@ pub(super) fn show(
             });
         });
     });
-    if let Some((id, rect)) = foot {
+    if let Some((id, placed, rect)) = foot {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::top_down(egui::Align::Min)));
-        Frame::new().inner_margin(foot_margin).show(&mut child, |ui| answers(ui, theme, keymap, id, &mut drawn));
+        Frame::new().inner_margin(foot_margin).show(&mut child, |ui| answers(ui, theme, keymap, id, placed, &mut drawn));
         paint::hairline(ui.painter(), rect.left_top(), egui::pos2(rect.right() - 1.0, rect.top()), p.panel_line);
     }
     if let Some(text) = hover {
