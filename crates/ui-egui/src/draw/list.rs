@@ -37,13 +37,13 @@ use inboxcraft_model::Role;
 
 use inboxcraft_engine::ScreenerMode;
 
-use crate::component::hover::Action;
 use crate::component::group_head::{GroupHead, group_head};
+use crate::component::hover::Action;
 use crate::component::later_row::{LaterRow, Pile as LaterPile, later_row};
-use crate::component::mail_row::{Mark, MailRow, mail_row};
-use crate::component::outbox_row::{SendButton, OutboxRow as OutboxRowView, Standing, outbox_row as outbox_view};
-use crate::component::tag::TagKind;
+use crate::component::mail_row::{MailRow, Mark, mail_row};
+use crate::component::outbox_row::{OutboxRow as OutboxRowView, SendButton, Standing, outbox_row as outbox_view};
 use crate::component::pill::pill;
+use crate::component::tag::TagKind;
 use crate::component::{avatar, button, field, margin, popup, tooltip};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
@@ -443,7 +443,15 @@ pub(super) enum Outbox {
 
 /// One send of the outbox across `ui`'s width, the design's outbox row: whom it goes to and the subject (with the
 /// server's reply for a refused one), where it stands, and its buttons; the button pressed.
-fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, row: &OutboxRow, account_marker: bool, set: (usize, usize)) -> Option<Outbox> {
+fn outbox_row(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    row: &OutboxRow,
+    account_marker: bool,
+    set: (usize, usize),
+) -> Option<Outbox> {
     let subject = if row.subject.is_empty() { tr!("(no subject)") } else { row.subject.as_str() };
     let left = mailbox.seconds_left(row.draft);
     let standing = match (&row.state, left) {
@@ -470,9 +478,10 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
         Standing::Sending => (Vec::new(), Vec::new()),
         // An answer to an invitation changes only from the invitation.
         Standing::Refused if row.invite_answer => (vec![SendButton { name: tr!("Send again"), spoken: &again }], vec![Outbox::Retry]),
-        Standing::Refused => {
-            (vec![SendButton { name: tr!("Send again"), spoken: &again }, SendButton { name: tr!("Edit"), spoken: &edit }], vec![Outbox::Retry, Outbox::Edit])
-        }
+        Standing::Refused => (
+            vec![SendButton { name: tr!("Send again"), spoken: &again }, SendButton { name: tr!("Edit"), spoken: &edit }],
+            vec![Outbox::Retry, Outbox::Edit],
+        ),
     };
     let to = tr!("To {whom}", whom = mailbox.recipients(row));
     let words = mailbox.standing_shown(row);
@@ -522,7 +531,9 @@ impl Rows<'_> {
     /// Draws `message`'s row across `ui`, the `rank`th (from 0) of the list's `size` rows.
     fn mail(&self, ui: &mut Ui, message: &MessageRow, rank: usize, size: usize) {
         let drawn = match self.mailbox.place() {
-            Place::Later(pile) if self.mailbox.query().is_empty() => later(ui, self.theme, self.keymap, self.mailbox, message, pile, self.account_marker, (rank, size)),
+            Place::Later(pile) if self.mailbox.query().is_empty() => {
+                later(ui, self.theme, self.keymap, self.mailbox, message, pile, self.account_marker, (rank, size))
+            }
             _ => row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker, (rank, size)),
         };
         if drawn.focused {
@@ -746,7 +757,11 @@ fn listed<'m>(mailbox: &'m Mailbox, leaving: Option<(&'m Leaving, f32)>) -> impl
         .iter()
         .enumerate()
         .flat_map(move |(at, message)| ghost(at).into_iter().chain(std::iter::once((Line::Mail(message), None))))
-        .chain(leaving.filter(|(left, _)| left.at >= count).map(|(left, gone)| (Line::Leaving(&left.row, gone), Some(left.group.as_deref().unwrap_or("")))))
+        .chain(
+            leaving
+                .filter(|(left, _)| left.at >= count)
+                .map(|(left, gone)| (Line::Leaving(&left.row, gone), Some(left.group.as_deref().unwrap_or("")))),
+        )
 }
 
 /// The rows of each of `groups` and those no group holds, in the list's order, the row that has just left among them
@@ -1269,7 +1284,8 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let other = Group { icon: IconId::Inbox, name: tr!("Other").to_owned(), messages: Vec::new() };
     let open = |group: &Group| ui.data(|data| data.get_temp::<bool>(group_open_id(&group.name))).unwrap_or(false);
     // The gap of the row that left closes over `row_collapse`; with motion off it is closed at once.
-    let gone = mailbox.left_row().map_or(1.0, |left| motion::appear(ui.ctx(), Id::unique("row-leaving").with(left.row.id), theme.motion.row_collapse));
+    let gone =
+        mailbox.left_row().map_or(1.0, |left| motion::appear(ui.ctx(), Id::unique("row-leaving").with(left.row.id), theme.motion.row_collapse));
     let listing = if outbox { sends(theme, mailbox) } else { lines(theme, mailbox, view, &groups, &other, wait, &open, gone) };
     let mut screener_mode = None;
     let built = if outbox {

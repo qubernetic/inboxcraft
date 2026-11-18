@@ -271,7 +271,7 @@ pub fn top(ui: &mut Ui, theme: &Theme, line: Rect, top: &Top<'_>, end: Option<f3
     }
     // `right` now stands a gap left of the right part, or at the line's end when it holds nothing: the spacer and a gap
     // before it either way, as the sheet's auto layout puts a gap after the spacer.
-    let tag =top.tag.map(|(words, kind)| (words, kind, paint::run_box(super::galley(ui, words, f.mono_s, Color32::PLACEHOLDER).size().x) + 12.0));
+    let tag = top.tag.map(|(words, kind)| (words, kind, paint::run_box(super::galley(ui, words, f.mono_s, Color32::PLACEHOLDER).size().x) + 12.0));
     let after = top.account.map_or(0.0, |_| GAP + BAR.x) + tag.map_or(0.0, |(_, _, wide)| GAP + wide);
     let room = (right - SPACER - GAP - line.left() - after).max(0.0);
     let name = super::fitted(ui, top.name, top.font, top.ink, room);

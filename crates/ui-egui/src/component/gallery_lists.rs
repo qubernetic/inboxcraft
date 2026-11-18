@@ -14,14 +14,14 @@ use crate::theme::Theme;
 use crate::tr;
 
 use super::Shown;
-use super::gallery::{cell, cells, title};
-use super::hover::Action;
-use super::group_head::{self, GroupHead};
 use super::draft_row::{self, DraftRow};
+use super::gallery::{cell, cells, title};
+use super::group_head::{self, GroupHead};
+use super::hover::Action;
 use super::later_row::{self, LaterRow, Pile};
-use super::mail_row::{self, Mark, MailRow};
-use super::outbox_row::{self, OutboxRow, SendButton, Standing};
+use super::mail_row::{self, MailRow, Mark};
 use super::margin;
+use super::outbox_row::{self, OutboxRow, SendButton, Standing};
 use super::tag::TagKind;
 
 /// The page's size in points.
@@ -78,7 +78,8 @@ pub(crate) struct MailState {
 
 /// The sheet's default sender, line and time.
 const TEODOR: &str = "Teodor Vasquez";
-const DRAFT_LOGO: &str = "Draft logo for the bakery — Hi Odile, two directions attached. The first is close to the sketch you sent, the second is bolder.";
+const DRAFT_LOGO: &str =
+    "Draft logo for the bakery — Hi Odile, two directions attached. The first is close to the sketch you sent, the second is bolder.";
 const INVOICE: &str = "Invoice 2026-114 — Attached, due on the 30th.";
 const INVITATION: &str = "Updated invitation: Design review, Mon 16 Nov 15:00 — Moved by an hour, Ines has a call until then.";
 
@@ -300,8 +301,13 @@ pub(crate) const SEND_REPLY: &str = "550 5.1.1 The address odette@example.org do
 
 /// The outbox row's states, in the sheet's order, with the sheet's words.
 pub(crate) fn send_states() -> [SendState; 6] {
-    let countdown =
-        SendState { name: "countdown", words: "sending in 4 s", standing: Standing::Countdown { share: 0.8 }, buttons: &["Undo"], shown: Shown::Rest };
+    let countdown = SendState {
+        name: "countdown",
+        words: "sending in 4 s",
+        standing: Standing::Countdown { share: 0.8 },
+        buttons: &["Undo"],
+        shown: Shown::Rest,
+    };
     [
         countdown,
         SendState { name: "scheduled", words: "Tue 08:00", standing: Standing::Scheduled, buttons: &["Edit"], shown: Shown::Rest },
@@ -454,8 +460,13 @@ pub(crate) struct DraftState {
 
 /// The draft row's states, in the sheet's order, with the sheet's words.
 pub(crate) fn draft_states() -> [DraftState; 6] {
-    let default =
-        DraftState { name: "default", subject: Some("Price list for the winter workshops"), to: "to Sunniva Aalto", when: "edited 12:10", shown: Shown::Rest };
+    let default = DraftState {
+        name: "default",
+        subject: Some("Price list for the winter workshops"),
+        to: "to Sunniva Aalto",
+        when: "edited 12:10",
+        shown: Shown::Rest,
+    };
     [
         default,
         DraftState { name: "hover", shown: Shown::Hover, ..default },
@@ -479,7 +490,14 @@ pub(crate) fn draft_spoken(state: &DraftState) -> String {
 /// The draft row of `state`, 440 wide, at `ui`'s cursor.
 pub(crate) fn draft(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &DraftState) {
     let spoken = draft_spoken(state);
-    let row = DraftRow { id: Id::unique("gallery-draft-row").with(state.name), spoken: &spoken, subject: state.subject, to: state.to, when: state.when, last: false };
+    let row = DraftRow {
+        id: Id::unique("gallery-draft-row").with(state.name),
+        spoken: &spoken,
+        subject: state.subject,
+        to: state.to,
+        when: state.when,
+        last: false,
+    };
     let high = Theme::size(theme, draft_row::HEIGHT);
     ui.allocate_ui(vec2(ROW_WIDTH, high), |ui| {
         ui.set_width(ROW_WIDTH);

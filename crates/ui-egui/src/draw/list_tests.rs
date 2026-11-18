@@ -745,9 +745,7 @@ fn a_hovered_rows_flag_and_pin_stay_left_of_its_actions() {
             }
         }
         // The sender is cut short of the marks: the sheet's spacer and a gap.
-        let sender = texts_in(&harness, rect)
-            .into_iter()
-            .find(|(_, words)| words.len() > 1 && row.sender.starts_with(words.trim_end_matches('…')));
+        let sender = texts_in(&harness, rect).into_iter().find(|(_, words)| words.len() > 1 && row.sender.starts_with(words.trim_end_matches('…')));
         let sender = sender.unwrap_or_else(|| panic!("{name}: the sender is drawn"));
         assert!(sender.0.right() <= leftmost - 11.0 + 0.5, "{name}: the sender {:?} ends 11 short of the marks at {leftmost}", sender.0);
         // A sender cut short of them ends with one ellipsis after its last letter kept.
@@ -1356,10 +1354,13 @@ fn the_longest_sender_and_subject_cut_with_one_ellipsis_at_130() {
     };
     let (long_texts, short_texts) = (texts(long_rect), texts(short_rect));
     let time = harness.state().row_date(&long);
-    let place = |texts: &[(egui::Rect, String)], origin: egui::Pos2| texts.iter().find(|(_, words)| *words == time).map(|(at, _)| at.translate(-origin.to_vec2()));
+    let place = |texts: &[(egui::Rect, String)], origin: egui::Pos2| {
+        texts.iter().find(|(_, words)| *words == time).map(|(at, _)| at.translate(-origin.to_vec2()))
+    };
     assert_eq!(place(&long_texts, long_rect.min), place(&short_texts, short_rect.min), "the time column's rect is untouched");
     assert!(place(&long_texts, long_rect.min).is_some(), "the time is drawn");
-    let line_one = long_texts.iter().find(|(_, words)| sender.starts_with(words.trim_end_matches('…')) && words.len() > 1).map(|(_, words)| words.clone());
+    let line_one =
+        long_texts.iter().find(|(_, words)| sender.starts_with(words.trim_end_matches('…')) && words.len() > 1).map(|(_, words)| words.clone());
     let line_two = long_texts.iter().find(|(_, words)| words.starts_with('Q')).map(|(_, words)| words.clone());
     for (line, words) in [("sender", line_one), ("subject", line_two)] {
         let words = words.unwrap_or_else(|| panic!("the {line} is drawn: {long_texts:?}"));

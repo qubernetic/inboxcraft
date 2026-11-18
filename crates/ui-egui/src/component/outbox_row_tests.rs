@@ -54,7 +54,8 @@ fn an_outbox_row_looks_as_its_sheet_says_in_every_state() {
                 .collect();
             // A text as drawn: whole, or cut with one ellipsis (the refused row's room is narrow).
             let find = |text: &str| {
-                let cut = |t: &&(Rect, String, Color32, String, f32)| t.1.ends_with('…') && t.1.len() > 4 && text.starts_with(t.1.trim_end_matches('…'));
+                let cut =
+                    |t: &&(Rect, String, Color32, String, f32)| t.1.ends_with('…') && t.1.len() > 4 && text.starts_with(t.1.trim_end_matches('…'));
                 texts.iter().find(|t| t.1 == text || cut(t)).cloned().unwrap_or_else(|| panic!("{text}: {at}"))
             };
             let (_, ink) = state.standing.look(&theme);
@@ -85,7 +86,8 @@ fn an_outbox_row_looks_as_its_sheet_says_in_every_state() {
             // A held send draws the share of its hold left along its foot.
             // 2 high, its lower pixel row under the row's line, as the design draws its line over the bar.
             let bar = Rect::from_min_size(o + vec2(0.0, 54.0), vec2(352.0, 1.0));
-            let barred = paint.rects().any(|shape| matches!(shape.look, Look::Rect { fill, stroke: None, .. } if fill == p.cyan_edge) && shape.rect == bar);
+            let barred =
+                paint.rects().any(|shape| matches!(shape.look, Look::Rect { fill, stroke: None, .. } if fill == p.cyan_edge) && shape.rect == bar);
             assert_eq!(barred, matches!(state.standing, Standing::Countdown { .. }), "{at}");
             let ring: Vec<Rect> = paint
                 .rects()

@@ -86,7 +86,11 @@ pub fn draft_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &DraftRow<'_>
         let mut x = right - total;
         for (index, (words, wide)) in words.iter().zip(&wides).enumerate() {
             let place = Rect::from_min_size(pos2(x, at(high)), vec2(*wide, high));
-            let clicked = ui.scope_builder(UiBuilder::new().max_rect(place).id_salt(index), |ui| link_with(ui, theme, keymap, words, LinkSize::Small, true, None).clicked()).inner;
+            let clicked = ui
+                .scope_builder(UiBuilder::new().max_rect(place).id_salt(index), |ui| {
+                    link_with(ui, theme, keymap, words, LinkSize::Small, true, None).clicked()
+                })
+                .inner;
             if index == 0 {
                 open = clicked;
             } else {
