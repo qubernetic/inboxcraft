@@ -406,3 +406,31 @@ fn the_thumb_of_the_bar_over_the_content_is_no_tab_stop() {
     harness.run();
     tab_never_onto_the_thumb(&mut harness, 120, "the agenda");
 }
+
+#[test]
+fn opening_the_held_back_message_rests_while_the_list_is_hidden() {
+    // Two panes, the list hidden beside the composer by the window's width.
+    let width = 1000.0;
+    let mut harness = window(width);
+    harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
+    harness.run();
+    // The server takes the open message away: the reader holds the rule's next message back.
+    let open = harness.state().reader().open_id().unwrap();
+    let (_, mailbox) = harness.state_mut().reader_mut();
+    mailbox.run("mail.done", &serde_json::json!({ "id": open, "done": true })).unwrap();
+    mailbox.refresh();
+    harness.run();
+    harness.run();
+    assert!(harness.state().can_run(keymap::OPEN_HELD), "{width}: the held-back message can be opened");
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    harness.run();
+    assert!(harness.state().list_hidden, "{width}: the list hidden");
+    assert!(!harness.state().can_run(keymap::OPEN_HELD), "{width}: it rests with the list hidden");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    harness.state_mut().palette_mut().set_query("rule names");
+    harness.run();
+    let item = harness.get_by_role_and_label(Role::MenuItem, "Open the message the rule names");
+    assert!(item.accesskit_node().is_disabled(), "{width}: the palette offers it as unavailable");
+}
