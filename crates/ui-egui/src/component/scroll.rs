@@ -152,7 +152,7 @@ pub fn show_with_ends<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, ends: f32
 /// a press anywhere else in the strip goes to the content under it. The wheel scrolls as everywhere.
 pub fn show_over<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui) -> R) -> ScrollAreaOutput<R> {
     let ctx = ui.ctx().clone();
-    let held = ui.id().with("scroll-over-thumb");
+    let held = ui.scope_id().with("scroll-over-thumb");
     let mut area = area.scroll_source(egui::scroll_area::ScrollSource { scroll_bar: false, ..egui::scroll_area::ScrollSource::default() });
     // The thumb held since the last frame: the content follows the pointer's move along its travel.
     if ctx.dragged_id() == Some(held)
