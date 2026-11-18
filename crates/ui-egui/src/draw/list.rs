@@ -597,11 +597,14 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         open_snooze(ui.ctx(), message.id, actions_id(message.id).with(SNOOZE_ACTION), rect);
         note_snooze_row(ui.ctx(), message.id, rect, response.id);
     }
+    let mut closed = false;
     if message.group.is_some() {
-        acted = acted.or(menu(ui, theme, response, message));
+        let (chosen, closed_here) = menu(ui, theme, response, message);
+        acted = acted.or(chosen);
+        closed = closed_here;
     }
-    // The focus its menu gives back on closing is not a walk to the row: it selects nothing.
-    let gained = response.gained_focus() && !returned_to(ui.ctx(), message.id);
+    // The focus its menu gives back as it closes is not a walk to the row: it selects nothing.
+    let gained = response.gained_focus() && !closed;
     Drawn { clicked: response.clicked(), acted, focused: response.has_focus(), gained, presets }
 }
 
@@ -788,30 +791,11 @@ fn menu_shown_id() -> Id {
     Id::unique("list-menu-shown")
 }
 
-/// Where the row whose menu just closed is kept, with the pass it closed in: the focus the menu gives back to it is
-/// not a walk to it ([`returned_to`]).
-fn menu_closed_id() -> Id {
-    Id::unique("list-menu-closed")
-}
-
-/// How many passes after its menu closed a row's gained focus is the menu giving it back.
-const RETURN_PASSES: u64 = 2;
-
-/// Whether message `id`'s row gains the focus from its menu, which just closed: it gives the row the keyboard, and a
-/// menu closing never changes the message shown, so that row is not selected by the focus.
-fn returned_to(ctx: &egui::Context, id: u64) -> bool {
-    let pass = ctx.cumulative_pass_nr();
-    ctx.data(|data| data.get_temp::<(u64, u64)>(menu_closed_id())).is_some_and(|(row, at)| row == id && pass <= at.saturating_add(RETURN_PASSES))
-}
-
 /// Settles the rows' menus after a pass: an ask ([`ask_menu`]) no row took in a whole pass is dropped (its row was not
 /// drawn: its message gone), so it never opens later, away from the moment it was asked for; a menu whose row this
 /// pass did not draw closes, as every float not shown.
 pub(super) fn settle_menus(ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
-    if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_closed_id())).is_some_and(|(_, at)| pass > at.saturating_add(RETURN_PASSES)) {
-        ctx.data_mut(|data| data.remove::<(u64, u64)>(menu_closed_id()));
-    }
     if let Some((id, _)) = ctx.data(|data| data.get_temp::<(u64, u64)>(menu_shown_id())).filter(|(_, at)| *at < pass) {
         popup::set_open(ctx, group_menu_id(id), false);
         ctx.data_mut(|data| data.remove::<(u64, u64)>(menu_shown_id()));
@@ -829,8 +813,9 @@ pub(super) fn settle_menus(ctx: &egui::Context) {
 /// The group menu of `message`'s row `response`: by a right click at the pointer, or asked for by the keyboard
 /// ([`ask_menu`]) under the row, its first choice focused. A menu the keyboard opened gives its row the keyboard back
 /// however it closes (Esc, a choice, a press outside); one the pointer opened, on Esc. A menu closing never changes
-/// the message the reader shows. The act chosen.
-fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow) -> Option<Act> {
+/// the message the reader shows. The act chosen, and whether the menu closed in this call (and so gave the row the
+/// focus it gains now, if any).
+fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow) -> (Option<Act>, bool) {
     let ctx = ui.ctx().clone();
     let popup_id = group_menu_id(message.id);
     let first_id = popup_id.with("focus-first");
@@ -849,13 +834,12 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow)
         (chosen, chosen.is_some())
     })
     .flatten();
-    let pass = ctx.cumulative_pass_nr();
-    if popup::is_open(&ctx, popup_id) {
+    let open = popup::is_open(&ctx, popup_id);
+    if open {
+        let pass = ctx.cumulative_pass_nr();
         ctx.data_mut(|data| data.insert_temp(menu_shown_id(), (message.id, pass)));
-    } else if was_open {
-        ctx.data_mut(|data| data.insert_temp(menu_closed_id(), (message.id, pass)));
     }
-    acted
+    (acted, was_open && !open)
 }
 
 /// The id of the hover action group of message `id`'s row: its n-th action is `actions_id(id).with(n)` (Snooze's
