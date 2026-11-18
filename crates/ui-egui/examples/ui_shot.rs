@@ -15,11 +15,11 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Read};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use inboxcraft_ui_egui::UiError;
-use inboxcraft_ui_egui::shot::{MAX_SCRIPT, parse_script, shoot};
+use inboxcraft_ui_egui::shot::{MAX_SCRIPT, out_path, parse_script, script_text, shoot};
 
 const USAGE: &str = "usage: ui_shot [--out-dir <dir>] <script.jsonl>";
 
@@ -48,7 +48,7 @@ fn main() -> ExitCode {
         }
     };
     for shot in &shots {
-        let written = target(dir.as_deref(), &shot.out).and_then(|target| {
+        let written = out_path(dir.as_deref(), &shot.out).and_then(|target| {
             let picture = shoot(shot)?;
             if let Some(parent) = target.parent().filter(|parent| !parent.as_os_str().is_empty()) {
                 std::fs::create_dir_all(parent).map_err(|error| UiError::Shot(error.to_string()))?;
@@ -67,19 +67,10 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The script at `path`, at most [`MAX_SCRIPT`] bytes (one more is read, so `parse_script` refuses a longer one).
-fn read(path: &Path) -> std::io::Result<String> {
-    let mut text = String::new();
-    File::open(path)?.take(u64::try_from(MAX_SCRIPT).unwrap_or(u64::MAX).saturating_add(1)).read_to_string(&mut text)?;
-    Ok(text)
-}
-
-/// Where the picture `out` goes: `out` itself, or `out` under `dir`, where it must stay.
-fn target(dir: Option<&Path>, out: &str) -> Result<PathBuf, UiError> {
-    let Some(dir) = dir else { return Ok(PathBuf::from(out)) };
-    let relative = Path::new(out);
-    if out.is_empty() || !relative.components().all(|part| matches!(part, Component::Normal(_))) {
-        return Err(UiError::Shot(format!("{out:?} is not a relative path that stays under --out-dir")));
-    }
-    Ok(dir.join(relative))
+/// The script at `path`, read up to one byte past [`MAX_SCRIPT`], so a longer one is refused whole.
+fn read(path: &Path) -> Result<String, UiError> {
+    let mut bytes = Vec::new();
+    let limit = u64::try_from(MAX_SCRIPT).unwrap_or(u64::MAX).saturating_add(1);
+    File::open(path).and_then(|file| file.take(limit).read_to_end(&mut bytes)).map_err(|error| UiError::Shot(error.to_string()))?;
+    script_text(bytes)
 }

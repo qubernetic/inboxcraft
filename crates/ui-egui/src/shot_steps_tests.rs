@@ -9,7 +9,8 @@ use egui::{Key, KeyboardShortcut, Modifiers, Rect, pos2, vec2};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::{
-    Do, MAX_LINE, MAX_NAME, MAX_NTH, MAX_SCRIPT, MAX_SHOTS, MAX_STEPS, MAX_TIMES, Picture, Pointer, Run, SHOT_TIME, parse_script, render_steps, shoot,
+    Do, MAX_FRAMES, MAX_LINE, MAX_NAME, MAX_NTH, MAX_SCRIPT, MAX_SHOTS, MAX_STEPS, MAX_TIMES, Picture, Pointer, Run, SHOT_TIME, out_path,
+    parse_script, render_steps, script_text, shoot,
 };
 use crate::keymap;
 use crate::mailbox::Mailbox;
@@ -134,7 +135,7 @@ fn a_name_no_control_has_or_several_have_is_an_error_not_a_silent_step() {
     let error = refusal(&selected(r#"[{"press": "Snooze", "nth": 3}]"#));
     assert!(error.contains("nth 3, but only 2 controls"), "{error}");
     let error = refusal(&line(r#"[{"tab": 1}, {"press": "Nothing at all"}]"#));
-    assert!(error.contains("step 2: no enabled control is named"), "{error}");
+    assert!(error.contains("step 2: no enabled control that can be pressed is named"), "{error}");
     let error = refusal(r#"{"out": "a.png", "mode": "light", "lists": true, "steps": [{"tab": 1}]}"#);
     assert!(error.contains("has no window"), "{error}");
 }
@@ -209,9 +210,9 @@ fn a_step_settles_the_window_until_nothing_moves() {
     let mut run = bare();
     let (on, value) = (Cell::new(false), Cell::new(0.0_f32));
     let mut draw = |ui: &mut egui::Ui| value.set(ui.ctx().animate_bool_with_time(egui::Id::unique("slide"), on.get(), 0.5));
-    run.frame(Vec::new(), &mut draw);
+    run.frame(Vec::new(), &mut draw).unwrap();
     on.set(true);
-    run.frame(Vec::new(), &mut draw);
+    run.frame(Vec::new(), &mut draw).unwrap();
     assert!(value.get() < 1.0, "half a second to go");
     run.settle(&mut draw).unwrap();
     assert!((value.get() - 1.0).abs() < f32::EPSILON, "settled where the motion ends: {}", value.get());
@@ -249,4 +250,71 @@ fn a_target_that_flees_the_pointer_is_an_error_after_a_few_tries() {
     let error = run.step(&Do::Press { name: "Go".to_owned(), nth: None }, &mut None, &mut draw).unwrap_err();
     assert_eq!(error, "\"Go\" moved each time the pointer came over it");
     assert!(!pressed.get());
+}
+
+#[test]
+fn an_out_under_out_dir_cannot_leave_it() {
+    let dir = std::path::Path::new("/renders");
+    assert_eq!(out_path(Some(dir), "docs/images/a.png").unwrap(), dir.join("docs/images/a.png"));
+    assert_eq!(out_path(None, "../anywhere.png").unwrap(), std::path::PathBuf::from("../anywhere.png"), "without --out-dir as before");
+    for out in ["", "/etc/a.png", "../a.png", "docs/../../a.png", "./a.png"] {
+        let error = out_path(Some(dir), out).unwrap_err().to_string();
+        assert!(error.contains("stays under --out-dir"), "{out:?}: {error}");
+    }
+}
+
+#[test]
+fn a_script_over_its_cap_is_refused_whole_even_mid_character() {
+    let mut bytes = vec![b'#'; MAX_SCRIPT];
+    // "é" is two bytes; a read that stops one byte past the cap splits it.
+    bytes.push(0xC3);
+    assert!(script_text(bytes).unwrap_err().to_string().contains(&format!("longer than {MAX_SCRIPT} bytes")));
+    assert!(script_text(vec![0xFF, b'a']).unwrap_err().to_string().contains("not UTF-8"));
+    assert_eq!(script_text("# é\n".as_bytes().to_vec()).unwrap(), "# é\n");
+}
+
+#[test]
+fn a_huge_line_a_million_lines_and_deep_json_are_refused_quickly() {
+    let huge = format!(r#"{{"out": "a.png", "mode": "light", "search": "{}"}}"#, "x".repeat(10 * 1024 * 1024));
+    assert!(parse_script(&huge).unwrap_err().to_string().contains("longer than"));
+    let million = format!("{}{}", "\n".repeat(1_000_000), r#"{"out": "a.png", "mode": "light"}"#);
+    assert_eq!(parse_script(&million).unwrap().len(), 1);
+    let comments = "#\n".repeat(1_000_000);
+    assert!(parse_script(&comments).unwrap().is_empty());
+    for depth in [200, 5000] {
+        let deep = format!(r#"{{"out": "a.png", "mode": "light", "steps": {}{}}}"#, "[".repeat(depth), "]".repeat(depth));
+        assert!(parse_script(&deep).is_err(), "{depth}");
+    }
+}
+
+#[test]
+fn a_picture_draws_at_most_its_frames() {
+    let mut run = bare();
+    let mut draw = |ui: &mut egui::Ui| {
+        ui.label("Nothing moves");
+    };
+    let tab = Do::Tab { back: false, times: 64 };
+    let error = (0..MAX_FRAMES).find_map(|_| run.step(&tab, &mut None, &mut draw).err()).unwrap();
+    assert_eq!(error, format!("the picture has drawn its {MAX_FRAMES} frames"));
+    assert_eq!(run.frames, MAX_FRAMES);
+}
+
+#[test]
+fn a_press_aims_only_at_a_control_that_can_be_pressed() {
+    let mut run = bare();
+    let mut draw = |ui: &mut egui::Ui| {
+        let at = Rect::from_min_size(pos2(20.0, 30.0), vec2(60.0, 40.0));
+        ui.interact(at, egui::Id::unique("words"), egui::Sense::hover())
+            .widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Image, true, "Go"));
+    };
+    run.settle(&mut draw).unwrap();
+    let error = run.step(&Do::Press { name: "Go".to_owned(), nth: None }, &mut None, &mut draw).unwrap_err();
+    assert!(error.starts_with("no enabled control that can be pressed is named \"Go\""), "{error}");
+}
+
+#[test]
+fn a_click_runs_safe_commands_only() {
+    // The reader's Done, at the left of its toolbar: mail.done is the owner's.
+    let error = refusal(r#"{"out": "a.png", "mode": "light", "select": "Photos from the coast walk", "click": [782, 37]}"#);
+    assert!(error.contains("the click reached mail.done, which only the owner runs"), "{error}");
 }

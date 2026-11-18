@@ -280,6 +280,8 @@ pub const MAX_SHOTS: usize = 1024;
 pub const MAX_SETTLE: usize = 240;
 /// How often a press aims again at a control that moved when the pointer came over it.
 pub const MAX_AIM: usize = 4;
+/// The most frames one picture draws, its steps and their settling together.
+pub const MAX_FRAMES: usize = 2000;
 
 /// One thing a person does to the window, written as one key of an object:
 ///
@@ -1127,7 +1129,7 @@ fn render_steps(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode, pointer:
     app.mailbox_mut().set_caller(inboxcraft_engine::Caller::Agent);
     let mut draw = |ui: &mut egui::Ui| app.ui(ui);
     for frame in 0..pointer.frames() {
-        run.frame(pointer.events(frame), &mut draw);
+        run.frame(pointer.events(frame), &mut draw)?;
     }
     run.settle(&mut draw)?;
     let mut at = pointer.rest.or(pointer.click);
@@ -1186,7 +1188,7 @@ pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, draw: impl FnMut(&mut eg
 fn paint_pointed(size: Vec2, scale: f32, mode: Mode, pointer: Pointer, mut draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
     let mut run = Run::new(size, scale, mode)?;
     for frame in 0..pointer.frames() {
-        run.frame(pointer.events(frame), &mut draw);
+        run.frame(pointer.events(frame), &mut draw).map_err(bad)?;
     }
     run.picture()
 }
@@ -1199,6 +1201,8 @@ struct Run {
     height: usize,
     textures: HashMap<TextureId, Texture>,
     last: Option<egui::FullOutput>,
+    /// The frames drawn so far, at most [`MAX_FRAMES`].
+    frames: usize,
 }
 
 impl Run {
@@ -1220,11 +1224,15 @@ impl Run {
             Mode::Light => egui::Theme::Light,
             Mode::Dark => egui::Theme::Dark,
         });
-        Ok(Self { ctx, size, width, height, textures: HashMap::new(), last: None })
+        Ok(Self { ctx, size, width, height, textures: HashMap::new(), last: None, frames: 0 })
     }
 
-    /// Draws one frame with `events`.
-    fn frame(&mut self, events: Vec<egui::Event>, draw: &mut impl FnMut(&mut egui::Ui)) {
+    /// Draws one frame with `events`, or says that the picture has drawn its [`MAX_FRAMES`].
+    fn frame(&mut self, events: Vec<egui::Event>, draw: &mut impl FnMut(&mut egui::Ui)) -> Result<(), String> {
+        if self.frames >= MAX_FRAMES {
+            return Err(format!("the picture has drawn its {MAX_FRAMES} frames"));
+        }
+        self.frames = self.frames.saturating_add(1);
         let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)), events, ..RawInput::default() };
         let mut output = self.ctx.run_ui(input, |ui| {
             motion::set_reduced(ui.ctx(), true);
@@ -1232,13 +1240,14 @@ impl Run {
         });
         apply_textures(&mut self.textures, &mut output.textures_delta);
         self.last = Some(output);
+        Ok(())
     }
 
     /// Draws frames without input until egui asks for no frame at once (nothing moves any more), at least one and at
     /// most [`MAX_SETTLE`].
     fn settle(&mut self, draw: &mut impl FnMut(&mut egui::Ui)) -> Result<(), String> {
         for _ in 0..MAX_SETTLE {
-            self.frame(Vec::new(), draw);
+            self.frame(Vec::new(), draw)?;
             let delay =
                 self.last.as_ref().and_then(|output| output.viewport_output.get(&egui::ViewportId::ROOT)).map(|viewport| viewport.repaint_delay);
             if delay != Some(std::time::Duration::ZERO) {
@@ -1312,20 +1321,20 @@ impl Run {
                 let mut modifiers = shortcut.modifiers;
                 modifiers.ctrl |= modifiers.command;
                 modifiers.command = modifiers.ctrl;
-                self.frame(key(shortcut.logical_key, modifiers), draw);
-                self.frame(up, draw);
+                self.frame(key(shortcut.logical_key, modifiers), draw)?;
+                self.frame(up, draw)?;
             }
             Do::Tab { back, times } => {
                 let modifiers = if *back { egui::Modifiers::SHIFT } else { egui::Modifiers::NONE };
                 for _ in 0..*times {
-                    self.frame(key(egui::Key::Tab, modifiers), draw);
+                    self.frame(key(egui::Key::Tab, modifiers), draw)?;
                 }
-                self.frame(up, draw);
+                self.frame(up, draw)?;
             }
             Do::Focus { name, nth } => {
                 let (node, _) = self.find(name, *nth, "control that takes the focus", |node| node.supports_action(Action::Focus))?;
                 let request = ActionRequest { action: Action::Focus, target_tree: TreeId::ROOT, target_node: node, data: None };
-                self.frame(vec![egui::Event::AccessKitActionRequest(request)], draw);
+                self.frame(vec![egui::Event::AccessKitActionRequest(request)], draw)?;
                 self.settle(draw)?;
                 if self.tree().map(|tree| tree.focus) != Some(node) {
                     return Err(format!("{:?} did not take the focus", cut(name)));
@@ -1335,7 +1344,8 @@ impl Run {
                 let screen = Rect::from_min_size(Pos2::ZERO, self.size);
                 let mut aimed = None;
                 for _ in 0..MAX_AIM {
-                    let (_, rect) = self.find(name, *nth, "enabled control", |node| !node.is_disabled())?;
+                    let (_, rect) = self
+                        .find(name, *nth, "enabled control that can be pressed", |node| !node.is_disabled() && node.supports_action(Action::Click))?;
                     let at = rect.center();
                     if !screen.contains(at) {
                         return Err(format!("{:?} is not in the window", cut(name)));
@@ -1345,14 +1355,14 @@ impl Run {
                         break;
                     }
                     *pointer = Some(at);
-                    self.frame(vec![egui::Event::PointerMoved(at)], draw);
+                    self.frame(vec![egui::Event::PointerMoved(at)], draw)?;
                     self.settle(draw)?;
                 }
                 let Some(at) = aimed else { return Err(format!("{:?} moved each time the pointer came over it", cut(name))) };
                 for pressed in [true, false] {
                     let event =
                         egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-                    self.frame(vec![event], draw);
+                    self.frame(vec![event], draw)?;
                 }
             }
         }
@@ -1541,9 +1551,45 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
             .map_err(|error| bad(format!("{}: {error}", shot.out)));
     }
     match shot.click {
-        Some([x, y]) => render_clicked(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer, pos2(x, y)),
+        Some([x, y]) => {
+            // A scripted press, like a step's: the window's commands run for an agent, so only a safe one runs.
+            app.mailbox_mut().set_caller(inboxcraft_engine::Caller::Agent);
+            let picture = render_clicked(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer, pos2(x, y))?;
+            match app.mailbox().refused() {
+                Some(command) => Err(bad(format!("{}: the click reached {command}, which only the owner runs", shot.out))),
+                None => Ok(picture),
+            }
+        }
         None => render_pointed(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer),
     }
+}
+
+/// Where the picture `out` goes: `out` itself, or with `dir`, `out` under it, which an `out` that is empty, absolute
+/// or has `.` or `..` in it cannot leave.
+///
+/// # Errors
+///
+/// [`UiError::Shot`] for such an `out` with a `dir`.
+pub fn out_path(dir: Option<&std::path::Path>, out: &str) -> Result<std::path::PathBuf, UiError> {
+    let Some(dir) = dir else { return Ok(std::path::PathBuf::from(out)) };
+    let relative = std::path::Path::new(out);
+    if out.is_empty() || !relative.components().all(|part| matches!(part, std::path::Component::Normal(_))) {
+        return Err(bad(format!("{:?} is not a relative path that stays under --out-dir", cut(out))));
+    }
+    Ok(dir.join(relative))
+}
+
+/// The text of a script read as bytes (at most [`MAX_SCRIPT`] and one more): refused whole when longer, so a cut
+/// never splits a character, then read as UTF-8.
+///
+/// # Errors
+///
+/// [`UiError::Shot`] for a script longer than [`MAX_SCRIPT`] or one that is not UTF-8.
+pub fn script_text(bytes: Vec<u8>) -> Result<String, UiError> {
+    if bytes.len() > MAX_SCRIPT {
+        return Err(bad(format!("the script is longer than {MAX_SCRIPT} bytes")));
+    }
+    String::from_utf8(bytes).map_err(|_| bad("the script is not UTF-8"))
 }
 
 #[cfg(test)]
