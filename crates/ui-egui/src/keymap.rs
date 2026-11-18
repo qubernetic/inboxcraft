@@ -132,7 +132,9 @@ impl Scope {
 }
 
 /// The scope of action `id`: the calendar's keys act on the calendar screen, the `ui.list.*` actions on the mail
-/// screen's list, every other action anywhere.
+/// screen's list, every other action anywhere. The scope is read from the id alone: a `ui.list.*` action must never
+/// be live on the calendar, and an action that can act on more than one screen (the composer's, which floats over
+/// either) keeps an id outside both, so it is the window's.
 #[must_use]
 pub fn scope(id: &str) -> Scope {
     if CALENDAR_KEYS.contains(&id) {

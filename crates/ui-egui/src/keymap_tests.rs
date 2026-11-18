@@ -233,3 +233,35 @@ fn a_keymap_kept_before_the_calendar_s_keys_still_loads() {
         }
     }
 }
+
+/// The composer floats over the calendar as well as the mail: its actions are the window's, so no screen's key may
+/// take theirs, and a key given to one of them is taken from every screen.
+#[test]
+fn the_composer_s_actions_are_the_window_s_and_share_no_key_with_a_screen() {
+    use super::{CALENDAR_OPEN, COMPOSE, FOLD, SEND, Scope, scope};
+    for id in [COMPOSE, SEND, FOLD] {
+        assert_eq!(scope(id), Scope::Window, "{id} acts wherever the composer shows");
+    }
+    // The defaults: no two actions whose scopes meet share a key, the composer's among them.
+    let defaults = Keymap::default();
+    for a in actions() {
+        for b in actions() {
+            let shared = a.id != b.id && defaults.shortcut(a.id).is_some() && defaults.shortcut(a.id) == defaults.shortcut(b.id);
+            assert!(!(shared && scope(a.id).meets(scope(b.id))), "{} and {} share a key in scopes that meet", a.id, b.id);
+        }
+    }
+    // Fold given the calendar's Enter takes it from the calendar; given the mail list's ArrowDown, from the list.
+    let (enter, down) = (KeyboardShortcut::new(Modifiers::NONE, Key::Enter), KeyboardShortcut::new(Modifiers::NONE, Key::ArrowDown));
+    let mut keymap = Keymap::default();
+    assert_eq!(keymap.clash(FOLD, enter), Some(CALENDAR_OPEN));
+    keymap.bind(FOLD, enter);
+    assert_eq!((keymap.shortcut(FOLD), keymap.shortcut(CALENDAR_OPEN)), (Some(enter), None));
+    keymap.bind("ui.list.down", down);
+    keymap.bind(FOLD, down);
+    assert_eq!((keymap.shortcut(FOLD), keymap.shortcut("ui.list.down")), (Some(down), None));
+    // And the other way: a screen's key given Send's takes it from Send.
+    let send = keymap.shortcut(SEND);
+    assert!(send.is_some());
+    keymap.bind(CALENDAR_OPEN, send.unwrap_or(enter));
+    assert_eq!(keymap.shortcut(SEND), None, "one key runs one action where the window's and the calendar's meet");
+}
