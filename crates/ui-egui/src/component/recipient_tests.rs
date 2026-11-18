@@ -6,7 +6,7 @@ use egui::{Rect, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::{Recipient, RecipientState, Recipients, recipient_chip, recipient_field};
+use super::{Recipient, RecipientState, Recipients, recipient_chip, recipient_field, recipient_line};
 use crate::component::Shown;
 use crate::component::field::tests::{caret, drawn, one};
 use crate::component::tests::{Own, bring, own, painted, staged};
@@ -418,4 +418,57 @@ fn a_long_line_paints_only_the_rows_in_view() {
     let few = shape_count(&line_of(persons(40)));
     let many = shape_count(&line_of(persons(400)));
     assert_eq!(few, many, "the shapes a frame paints do not grow with the chips out of view");
+}
+
+/// A composer's recipient line of `chips` on the composer's `surface`, 684 wide (the docked frame's lines).
+fn composer_line(chips: Vec<Recipient>, focus: bool) -> Harness<'static> {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(760.0, 400.0),
+        move |ui, theme| {
+            ui.spacing_mut().scroll = crate::component::scroll::style(theme);
+            let mut typing = String::new();
+            let line = Recipients { name: "To", chips: &chips, hint: "Name or address", copies: true, error: None, enabled: true };
+            ui.vertical(|ui| {
+                ui.set_width(684.0);
+                recipient_line(ui, theme, egui::Id::unique("to"), &mut typing, &line);
+            });
+        },
+    );
+    if focus {
+        harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("to")));
+        harness.run();
+    }
+    harness
+}
+
+#[test]
+fn a_composer_line_has_no_box_its_name_in_a_column_of_64_and_cc_bcc_at_its_end() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    for focus in [false, true] {
+        let harness = composer_line(people(&["Cosima Reuter"]), focus);
+        assert!(!drawn_fills(&harness).iter().any(|(rect, fill)| *fill == theme.palette.term && rect.width() > 500.0), "no box on `term`");
+        let chip = harness.get_by_role_and_label(Role::ListItem, "Cosima Reuter").rect();
+        let copies = harness.get_by_role_and_label(Role::Button, "Cc  Bcc").rect();
+        let typing = harness.get_by_role_and_label(Role::TextInput, "To").rect();
+        // The chips 76 in (64 of names and 12), 6 under the line's top; Cc Bcc at its right end.
+        let left = copies.right() - 684.0;
+        assert!((chip.left() - left - 76.0).abs() < 0.5, "{chip:?} 76 in from {left}");
+        assert!(typing.left() > chip.right(), "the typing after the chip");
+        assert_eq!(typing.height(), 36.0, "a line of 36: {typing:?}");
+        assert!((chip.top() - typing.top() - 6.0).abs() < 0.5, "{chip:?} in {typing:?}");
+    }
+}
+
+#[test]
+fn a_composer_line_wraps_its_chips_four_apart_and_grows() {
+    let names: Vec<String> = (0..12).map(|n| format!("Person number {n}")).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let harness = composer_line(people(&names), false);
+    let rows: std::collections::BTreeSet<i32> = harness.query_all_by_role(Role::ListItem).map(|chip| chip.rect().top().round() as i32).collect();
+    let rows: Vec<i32> = rows.into_iter().collect();
+    assert!(rows.len() > 1, "wrapped: {rows:?}");
+    assert_eq!(rows[1] - rows[0], 28, "24 high, 4 apart: {rows:?}");
 }

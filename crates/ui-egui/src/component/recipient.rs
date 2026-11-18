@@ -14,6 +14,10 @@
 //! `cyan_edge` with the caret; a line with a chip that is not an address has a `minus` edge and the reason under the
 //! box. Chips that do not fit on one row wrap, 10 apart, and the box grows. Nothing moves: the design gives a chip and
 //! the field no transition.
+//!
+//! In the composer the same line has no box ([`recipient_line`], the composer's frames): its name in a column 64 wide,
+//! the chips 12 after it, 4 apart and wrapping 4 apart, 6 above and below them, and "Cc  Bcc" as a small link at the
+//! right end; the composer rules a hairline under it. The caret says that it has the keys.
 
 use egui::{Color32, Id, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
@@ -46,6 +50,24 @@ const WIDEST: f32 = 176.0;
 /// The gap between two rows of chips, in points.
 const ROW_GAP: f32 = 10.0;
 
+/// The width of a composer line's name column, in points (the composer's frames).
+pub const LINE_NAMES: f32 = 64.0;
+
+/// The narrowest a composer's recipient line gets with its widest chip whole beside its name and "Cc  Bcc".
+pub fn line_least(ui: &Ui, theme: &Theme) -> f32 {
+    let copies = galley(ui, tr!("Cc  Bcc"), theme.fonts.mono_s, theme.palette.cyan_text);
+    LINE_NAMES + theme.spacing.s3 + WIDEST + theme.spacing.s3 + paint::run_box(copies.size().x)
+}
+
+/// How a recipient line is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Look {
+    /// The sheet's field: a box on `term`.
+    Boxed,
+    /// A line of the composer: no box, the name in its column.
+    Line,
+}
+
 /// A recipient's chip (see the module), 24 high: its response is the cross's, clicked when the recipient is to go.
 /// A screen reader hears the chip as `name` and the cross as "Remove `name`".
 pub fn recipient_chip(ui: &mut Ui, theme: &Theme, name: &str, state: RecipientState) -> Response {
@@ -66,7 +88,9 @@ pub(crate) fn chip_with(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str, st
     // edge after it.
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
     let tail = s.s1 + glyph + s.s1 + 1.0;
-    let most = (WIDEST - lead - tail).max(1.0);
+    // In a line narrower than a chip's 176, the chip is cut to the line's room ([`chip_width`]).
+    let widest = WIDEST.min(ui.available_width()).max(1.0);
+    let most = (widest - lead - tail).max(1.0);
     let words = cut(ui, name, theme.fonts.body, ink, most);
     let width = (lead + words_box(ui, theme, name, ink, &words, most) + tail).ceil();
     let (rect, chip) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
@@ -174,23 +198,50 @@ pub(crate) fn recipient_field_with(
     line: &Recipients<'_>,
     shown: Option<Shown>,
 ) -> RecipientsOutput {
+    recipients_drawn(ui, theme, id, typing, line, shown, Look::Boxed)
+}
+
+/// A recipient line of the composer (see the module), filling the width `ui` offers: the field `id` with `typing` in
+/// it, without a box.
+pub fn recipient_line(ui: &mut Ui, theme: &Theme, id: Id, typing: &mut String, line: &Recipients<'_>) -> RecipientsOutput {
+    recipients_drawn(ui, theme, id, typing, line, None, Look::Line)
+}
+
+/// A recipient line in `look`.
+#[allow(clippy::too_many_lines)]
+fn recipients_drawn(
+    ui: &mut Ui,
+    theme: &Theme,
+    id: Id,
+    typing: &mut String,
+    line: &Recipients<'_>,
+    shown: Option<Shown>,
+    look: Look,
+) -> RecipientsOutput {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let width = if ui.available_width().is_finite() { ui.available_width().max(theme.boxes().field * 4.0) } else { theme.boxes().field * 4.0 };
+    let boxed = look == Look::Boxed;
+    let least = if boxed { theme.boxes().field * 4.0 } else { LINE_NAMES * 2.0 };
+    let width = if ui.available_width().is_finite() { ui.available_width().max(least) } else { least };
     let enabled = line.enabled && ui.is_enabled() && !soon::is_soon(ui);
-    let pad = s.s3 + 1.0;
+    let pad = if boxed { s.s3 + 1.0 } else { 0.0 };
     let chip = theme.boxes().pill;
-    let field_height = theme.boxes().field;
+    let field_height = if boxed { theme.boxes().field } else { chip + s.s3 };
     let label = theme.fonts.label;
-    let name_width = galley(ui, line.name, label, p.muted).size().x.max(NAME_COLUMN);
-    let copies_text = tr!("Cc Bcc");
+    let name_width = if boxed { galley(ui, line.name, label, p.muted).size().x.max(NAME_COLUMN) } else { LINE_NAMES };
+    let copies_text = if boxed { tr!("Cc Bcc") } else { tr!("Cc  Bcc") };
     // A disabled line offers no Cc Bcc: its board draws none.
-    let copies = (line.copies && enabled).then(|| galley(ui, copies_text, theme.fonts.mono_s, p.muted));
-    let right = pad + copies.as_ref().map_or(0.0, |copies| paint::run_box(copies.size().x) + s.s2);
-    let left = pad + name_width + s.s2;
+    // The composer's is a link, in the accent.
+    let copies_ink = if boxed { p.muted } else { p.cyan_text };
+    let copies = (line.copies && enabled).then(|| galley(ui, copies_text, theme.fonts.mono_s, copies_ink));
+    let gap = if boxed { s.s2 } else { s.s3 };
+    let right = pad + copies.as_ref().map_or(0.0, |copies| paint::run_box(copies.size().x) + gap);
+    let left = pad + name_width + gap;
     let room = (width - left - right).max(1.0);
+    let row_gap = if boxed { ROW_GAP } else { s.s1 };
     let inks: Vec<Color32> = line.chips.iter().map(|recipient| chip_ink(theme, recipient.state, enabled)).collect();
-    let widths: Vec<f32> = line.chips.iter().zip(&inks).map(|(recipient, ink)| chip_width(ui, theme, recipient, *ink)).collect();
+    let widths: Vec<f32> =
+        line.chips.iter().zip(&inks).map(|(recipient, ink)| chip_width(ui, theme, recipient, *ink, room - theme.sizes.scrollbar - s.s1)).collect();
     let (mut places, mut typing_at, mut rows) = flow(&widths, room, s.s1);
     // Past its most rows the line scrolls: the bar's room comes off the chips' row.
     let scrolls = rows > MOST_ROWS;
@@ -199,8 +250,12 @@ pub(crate) fn recipient_field_with(
     }
     let shown_rows = rows.min(MOST_ROWS) as f32;
     let wrapped = rows > 1;
-    let inner = |rows: f32| rows * chip + (rows - 1.0).max(0.0) * ROW_GAP;
-    let height = if wrapped { inner(shown_rows) + (s.s1 + s.s1 / 2.0 + 1.0) * 2.0 } else { field_height };
+    let inner = |rows: f32| rows * chip + (rows - 1.0).max(0.0) * row_gap;
+    let height = match (wrapped, boxed) {
+        (false, _) => field_height,
+        (true, true) => inner(shown_rows) + (s.s1 + s.s1 / 2.0 + 1.0) * 2.0,
+        (true, false) => inner(shown_rows) + (field_height - chip),
+    };
     ui.vertical(|ui| {
         let (mut removed, mut copies_pressed) = (None, false);
         ui.spacing_mut().item_spacing.y = s.s2;
@@ -209,7 +264,7 @@ pub(crate) fn recipient_field_with(
         let invalid =
             line.error.is_some() || field::refusal(ui.ctx(), id).is_some() || line.chips.iter().any(|chip| chip.state == RecipientState::Invalid);
         let painter = solid(ui);
-        if ui.is_rect_visible(rect) {
+        if boxed && ui.is_rect_visible(rect) {
             if !enabled {
                 paint::dashed(&painter, rect, p.line);
             } else {
@@ -231,7 +286,7 @@ pub(crate) fn recipient_field_with(
         let mut typed = None;
         // The chips and the typing, from `origin`: in the box, or in the area that scrolls in it.
         let mut content = |ui: &mut Ui, origin: egui::Pos2| {
-            let at = |(x, row): (f32, usize)| origin + vec2(x, row as f32 * (chip + ROW_GAP));
+            let at = |(x, row): (f32, usize)| origin + vec2(x, row as f32 * (chip + row_gap));
             for (index, (recipient, place)) in line.chips.iter().zip(places.iter()).enumerate() {
                 let place = Rect::from_min_size(at(*place), vec2(widths.get(index).copied().unwrap_or(0.0), chip));
                 // Every chip is built, in view or not, so Tab and a screen reader reach it; one out of view paints
@@ -276,7 +331,19 @@ pub(crate) fn recipient_field_with(
             let place = Rect::from_min_size(pos2(rect.right() - pad - size.x, first - size.y / 2.0), size);
             let response = ui.interact(place, id.with("copies"), if enabled { Sense::click() } else { Sense::hover() });
             response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, tr!("Cc  Bcc")));
-            let ink = if enabled && (response.hovered() || response.has_focus()) { p.ink } else { p.muted };
+            let ink = if boxed {
+                if enabled && (response.hovered() || response.has_focus()) { p.ink } else { p.muted }
+            } else {
+                // The composer's is a small link: the accent, underlined under the pointer, on the wash pressed.
+                if response.is_pointer_button_down_on() {
+                    painter.rect_filled(place, 0.0, p.cyan_muted);
+                }
+                if response.hovered() {
+                    let under = place.bottom() - 1.0;
+                    painter.hline(place.x_range(), under + 0.5, Stroke::new(1.0, p.cyan_text));
+                }
+                p.cyan_text
+            };
             paint::run_at(&painter, place.min, copies, ink);
             if response.has_focus() {
                 paint::focus_ring(&painter, theme, place, paint::Ring::Outside);
@@ -335,14 +402,15 @@ fn chip_ink(theme: &Theme, state: RecipientState, enabled: bool) -> Color32 {
     }
 }
 
-/// The width a recipient's chip takes, in points, its name laid out in `ink` as the chip lays it out.
-fn chip_width(ui: &Ui, theme: &Theme, recipient: &Recipient, ink: Color32) -> f32 {
+/// The width a recipient's chip takes, in points, its name laid out in `ink` as the chip lays it out: at most 176, and
+/// at most `room` (with a scroll bar beside the chips too) in a line narrower than that.
+fn chip_width(ui: &Ui, theme: &Theme, recipient: &Recipient, ink: Color32, room: f32) -> f32 {
     let s = &theme.spacing;
     let glyph = theme.boxes().mark.min(theme.boxes().pill);
     let invalid = recipient.state == RecipientState::Invalid;
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
     let tail = s.s1 + glyph + s.s1 + 1.0;
-    let most = (WIDEST - lead - tail).max(1.0);
+    let most = (WIDEST.min(room).max(1.0) - lead - tail).max(1.0);
     let words = cut(ui, &recipient.shown, theme.fonts.body, ink, most);
     (lead + words_box(ui, theme, &recipient.shown, ink, &words, most) + tail).ceil()
 }

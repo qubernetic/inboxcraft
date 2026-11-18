@@ -39,7 +39,7 @@ fn closing_forgets_the_key_waited_for_the_text_and_the_notes_so_the_sheet_opens_
 }
 
 #[test]
-fn a_signature_typed_shows_until_it_is_saved_or_the_sheet_closes() {
+fn a_signature_typed_shows_until_it_is_saved() {
     let mut settings = Settings::default();
     settings.open_at(Section::Sending);
     assert_eq!(settings.signature(1), None);
@@ -50,7 +50,7 @@ fn a_signature_typed_shows_until_it_is_saved_or_the_sheet_closes() {
     assert_eq!(settings.signature(1), None);
     settings.signature_mut(2, "").push_str("Studio");
     settings.close();
-    assert_eq!(settings.signature(2), None, "closing forgets what was not saved");
+    assert_eq!(settings.signature(2), Some("Studio"), "closing keeps what was typed and not saved");
     // A stored signature longer than the field holds opens whole, never cut silently: the field lets it be edited
     // down and never grow, and a save the engine will not keep is refused with its reason.
     let long = "ő".repeat(16 * 1024);
@@ -70,4 +70,20 @@ fn the_note_on_starting_with_the_computer_lasts_until_the_sheet_opens_again() {
     settings.set_login_note(Some("again".to_owned()));
     settings.open_at(Section::Notifications);
     assert_eq!(settings.login_note(), None);
+}
+
+#[test]
+fn a_typed_signature_outlasts_every_way_out_of_the_sheet() {
+    let mut settings = Settings::default();
+    settings.open_at(Section::Sending);
+    settings.signature_mut(1, "Mira").push_str("\nPlot 14");
+    settings.show(Section::Appearance);
+    assert_eq!(settings.signature(1), Some("Mira\nPlot 14"), "another page keeps it");
+    settings.close();
+    settings.open();
+    assert_eq!(settings.signature(1), Some("Mira\nPlot 14"), "closing keeps it");
+    settings.open_at(Section::Sending);
+    assert_eq!(settings.signature_mut(1, "Mira"), "Mira\nPlot 14", "the field opens on what was typed, not on the kept one");
+    settings.saved_signature(1);
+    assert_eq!(settings.signature(1), None, "saved, the page shows the kept one");
 }

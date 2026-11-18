@@ -101,11 +101,15 @@ pub struct Appearance {
     pub motion: Motion,
     /// Who draws the window's frame.
     pub frame: WindowFrame,
+    /// The app's own frame last on, the top row or the strip, never [`WindowFrame::System`]: the one the own frame
+    /// comes back as after the desktop's title bar.
+    pub own_frame: WindowFrame,
 }
 
 impl Default for Appearance {
     fn default() -> Self {
-        Self { theme: ThemeMode::default(), text_scale: 100, motion: Motion::default(), frame: WindowFrame::default() }
+        let frame = WindowFrame::default();
+        Self { theme: ThemeMode::default(), text_scale: 100, motion: Motion::default(), frame, own_frame: frame }
     }
 }
 
@@ -118,6 +122,7 @@ impl Appearance {
             "text_scale": self.text_scale,
             "motion": self.motion.id(),
             "frame": self.frame.id(),
+            "own_frame": self.own_frame.id(),
         })
     }
 
@@ -130,6 +135,7 @@ impl Appearance {
         let object = value.as_object().unwrap_or(&empty);
         let text = |key: &str| object.get(key).and_then(Value::as_str);
         let default = Self::default();
+        let frame = text("frame").and_then(WindowFrame::named).unwrap_or(default.frame);
         Self {
             theme: text("theme").and_then(ThemeMode::named).unwrap_or(default.theme),
             text_scale: object
@@ -139,8 +145,16 @@ impl Appearance {
                 .filter(|percent| TEXT_SCALES.contains(percent))
                 .unwrap_or(default.text_scale),
             motion: text("motion").and_then(Motion::named).unwrap_or(default.motion),
-            frame: text("frame").and_then(WindowFrame::named).unwrap_or(default.frame),
+            frame,
+            own_frame: Self::own_of(frame, text("own_frame").and_then(WindowFrame::named)),
         }
+    }
+
+    /// The own frame to keep beside `frame`: `frame` itself when it is one of the app's own, else `kept` when that is
+    /// one, else the default.
+    #[must_use]
+    pub fn own_of(frame: WindowFrame, kept: Option<WindowFrame>) -> WindowFrame {
+        [Some(frame), kept].into_iter().flatten().find(|own| *own != WindowFrame::System).unwrap_or_default()
     }
 }
 

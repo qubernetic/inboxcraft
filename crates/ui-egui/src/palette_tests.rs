@@ -12,7 +12,7 @@ fn ids(query: &str) -> Vec<&'static str> {
 fn an_empty_text_lists_every_action_and_words_narrow_it() {
     assert_eq!(matching("").len(), actions().len());
     assert_eq!(matching("   ").len(), actions().len());
-    assert_eq!(ids("calendar"), vec![keymap::CALENDAR]);
+    assert_eq!(ids("show the calendar"), vec![keymap::CALENDAR]);
     assert_eq!(ids("SHOW CAL"), vec![keymap::CALENDAR], "case and order of words left aside");
     assert_eq!(ids("palette.open"), vec![keymap::PALETTE], "the id counts too");
     assert!(ids("zzz nothing").is_empty());
@@ -63,4 +63,16 @@ fn hostile_text_is_cut_and_matches_nothing() {
         palette.set_query(text);
         assert!(palette.matches().is_empty(), "{text:?}");
     }
+}
+
+#[test]
+fn a_screen_s_own_actions_are_listed_on_that_screen_alone() {
+    let mut palette = super::Palette::default();
+    let calendar_keys = |palette: &super::Palette| palette.matches().iter().filter(|action| keymap::CALENDAR_KEYS.contains(&action.id)).count();
+    palette.set_screen(keymap::Scope::Mail);
+    palette.set_query("calendar");
+    assert_eq!(palette.matches().iter().map(|action| action.id).collect::<Vec<_>>(), vec![keymap::CALENDAR], "on the mail");
+    palette.set_screen(keymap::Scope::Calendar);
+    assert_eq!(calendar_keys(&palette), keymap::CALENDAR_KEYS.len(), "on the calendar its six keys are listed");
+    assert!(palette.matches().iter().any(|action| action.id == keymap::CALENDAR));
 }

@@ -47,7 +47,7 @@ use crate::component::pill::pill;
 use crate::component::segmented::segmented_for;
 use crate::component::tag::TagKind;
 use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
-use crate::component::{avatar, button, field, popup, tooltip};
+use crate::component::{avatar, button, field, galley, popup, tooltip};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, Group, GroupKind, InboxView, Leaving, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState, Waiting};
@@ -171,11 +171,7 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.label(RichText::new(mailbox.title()).font(theme.fonts.title.id()).color(p.ink));
-            let line = match mailbox.outbox_summary().filter(|_| mailbox.place() == Place::Outbox && mailbox.query().is_empty()) {
-                Some(summary) => summary,
-                None => tr!("{whose} · {shown}", whose = mailbox.subtitle(), shown = mailbox.list_count()),
-            };
-            ui.label(theme.fonts.mono_s.rich(&line).color(p.muted));
+            ui.label(theme.fonts.mono_s.rich(&subtitle(mailbox)).color(p.muted));
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if !search.is_empty() && button::text(ui, theme, keymap, tr!("Clear"), None, false).clicked() {
@@ -197,6 +193,70 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
     let mut asked = Header { searched: changed, ..Header::default() };
     pills(ui, theme, mailbox, &mut asked);
     asked
+}
+
+/// The line under the list's title: whose mail and how much, or the outbox's summary.
+fn subtitle(mailbox: &Mailbox) -> String {
+    match mailbox.outbox_summary().filter(|_| mailbox.place() == Place::Outbox && mailbox.query().is_empty()) {
+        Some(summary) => summary,
+        None => tr!("{whose} · {shown}", whose = mailbox.subtitle(), shown = mailbox.list_count()),
+    }
+}
+
+/// The narrowest the list gets, its pane's left margin left out, with its own head (the title and the line under it
+/// beside the search field, and Clear while something is searched) and each group's head whole (index, name, how many
+/// show and "show all" in Smart, "done all" and the unread count), as [`header`] and [`head`] lay them out: the head
+/// 16 in at each side, a group's head across the list, the line at its left. Never more than the list's default
+/// width: a head that does not fit there is not helped by hiding the list.
+pub(super) fn least_width(ui: &Ui, theme: &Theme, mailbox: &Mailbox, search: &str) -> f32 {
+    let s = &theme.spacing;
+    let p = &theme.palette;
+    let gap = ui.spacing().item_spacing.x;
+    let title = galley(ui, &mailbox.title(), theme.fonts.title, p.ink).size().x;
+    let under = galley(ui, &subtitle(mailbox), theme.fonts.mono_s, p.muted).size().x;
+    let clear = if search.is_empty() { 0.0 } else { button::text_width(ui, theme, tr!("Clear")) + gap };
+    let head = s.s4 * 2.0 + title.max(under).ceil() + gap + super::FOLDER_PANE * 0.75 + clear;
+    // The line at the list's left stands before its heads.
+    (head.max(group_heads_width(ui, theme, mailbox)) + 1.0).min(super::LIST_WIDTH + 1.0)
+}
+
+/// The widest of the group heads [`lines`] draws for `mailbox`'s list (none in the List view or with no groups),
+/// "Other" among them while it holds a message: each at its most, its hover link shown, in Smart "show all" or "show
+/// fewer" and how many show.
+fn group_heads_width(ui: &Ui, theme: &Theme, mailbox: &Mailbox) -> f32 {
+    let groups = mailbox.groups();
+    if groups.is_empty() {
+        return 0.0;
+    }
+    let smart = mailbox.inbox_view() == InboxView::Smart;
+    let held: HashSet<u64> = groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
+    let other: Vec<u64> = mailbox.messages().iter().map(|message| message.id).filter(|id| !held.contains(id)).collect();
+    let other = Group { icon: IconId::Inbox, name: tr!("Other").to_owned(), messages: other };
+    let link = [tr!("show all"), tr!("show fewer")].into_iter().max_by(|a, b| a.len().cmp(&b.len()));
+    let mut widest = 0.0_f32;
+    for (index, group) in groups.iter().chain(std::iter::once(&other)).filter(|group| !group.messages.is_empty()).enumerate() {
+        let members: HashSet<u64> = group.messages.iter().copied().collect();
+        let listed = || mailbox.messages().iter().filter(|message| members.contains(&message.id));
+        let count = listed().count();
+        if count == 0 {
+            continue;
+        }
+        let unread = u64::try_from(listed().filter(|message| !message.seen).count()).unwrap_or(u64::MAX);
+        let state = HeadState { unread, count, open: true, folds: smart && count > GROUP_ROWS, index };
+        let letter = char::from(b'A'.saturating_add(u8::try_from(state.index % 26).unwrap_or(0)));
+        let shown = state.folds.then(|| tr!("{shown} of {count} ·", shown = count, count = count));
+        let head = GroupHead {
+            id: Id::NULL,
+            index: &format!("[ {letter} ]"),
+            name: &group.name,
+            unread,
+            shown: shown.as_deref(),
+            link: link.filter(|_| state.folds),
+            hover_link: Some(tr!("done all")),
+        };
+        widest = widest.max(crate::component::group_head::least_width(ui, theme, &head));
+    }
+    widest
 }
 
 /// What `key`'s action is pressed with, and `with` after it ("H snoozes the open message."), or nothing when the
@@ -385,6 +445,21 @@ fn close_snooze(ctx: &egui::Context) {
         data.remove::<SnoozeOpen>(snooze_open_id());
         data.remove::<SnoozeRow>(snooze_row_id());
     });
+}
+
+/// Closes the list's floats, a row's time picker and a group's menu on a row, without handing the keyboard back to
+/// the row; whether one was open.
+pub(super) fn close_floats(ctx: &egui::Context, mailbox: &Mailbox) -> bool {
+    let mut open = ctx.data(|data| data.get_temp::<SnoozeOpen>(snooze_open_id())).is_some();
+    close_snooze(ctx);
+    for row in mailbox.messages() {
+        let menu = group_menu_id(row.id);
+        if popup::is_open(ctx, menu) {
+            popup::set_open(ctx, menu, false);
+            open = true;
+        }
+    }
+    open
 }
 
 /// The time picker open from a row's Snooze, after the list drew its rows: under its message's row if this pass drew
@@ -1680,33 +1755,6 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
         }
     });
     built
-}
-
-/// The empty window's card: the inbox icon, "No accounts yet" and what to do. Where the window can add accounts
-/// (`can_add`), Add account, which opens the settings on Accounts; whether it was pressed.
-pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool) -> bool {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let side = theme.fonts.body.line * 3.6;
-    let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-    crate::iconset::paint(ui.painter(), rect, IconId::Inbox, p.cyan_text);
-    ui.add_space(s.s3);
-    ui.label(RichText::new(tr!("No accounts yet")).font(theme.fonts.title.id()).color(p.ink));
-    ui.add_space(s.s1);
-    let about = if can_add {
-        tr!("Add an account to read its mail here. Nothing leaves this computer before you do.")
-    } else {
-        tr!("Start InboxCraft with --sample to look around an invented mailbox.")
-    };
-    ui.add(egui::Label::new(RichText::new(about).font(theme.fonts.body.id()).color(p.muted)).wrap());
-    if !can_add {
-        return false;
-    }
-    ui.add_space(s.s4);
-    let add = button::TextButton::new(tr!("Add account")).icon(IconId::Add).primary().show(ui, theme, keymap).clicked();
-    ui.add_space(s.s1);
-    ui.label(RichText::new(tr!("Opens Settings · Accounts")).font(theme.fonts.caption.id()).color(p.muted));
-    add
 }
 
 /// One sender waiting in New senders: their newest held message (whose row the queue's card shows) and how many more

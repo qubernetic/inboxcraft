@@ -37,7 +37,7 @@ of other open-source Rust mail clients; see [NOTICE](NOTICE).
   system's credential store; folders with their roles, a unified inbox, threads, attachments. Read and unread, flag,
   done, archive, move and delete from the hover actions, the toolbar or the keys, each undoable, also offline (the
   server catches up after the reconnect).
-- **Writing:** a composer with recipient suggestions, a signature per account and drafts kept at every change and
+- **Writing:** a composer with recipient suggestions, a signature per account and drafts kept as they are typed and
   copied to the Drafts folder; reply, reply all, forward and templates; sending over SMTP with implicit TLS or
   STARTTLS, a Sent copy, an outbox with retry, and bounces marked on the sent message.
 - **Triage:** the screener for new senders (accept into a group, or block), the grouped inbox (People, Updates,

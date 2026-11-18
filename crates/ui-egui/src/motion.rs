@@ -100,6 +100,12 @@ pub fn fade(ctx: &Context, id: Id, on: bool, seconds: f32) -> f32 {
     ctx.animate_bool_with_time_and_easing(id, on, seconds, easing::linear)
 }
 
+/// [`toggle`] on `easing`: a transition on a curve of its own (the calendar's ground on CSS's `ease`).
+pub fn fade_eased(ctx: &Context, id: Id, on: bool, seconds: f32, easing: fn(f32) -> f32) -> f32 {
+    let seconds = duration(ctx, seconds);
+    ctx.animate_bool_with_time_and_easing(id, on, seconds, easing)
+}
+
 /// How far `id` has appeared over `seconds` since the first frame it was shown in, eased, 0 to 1; something that
 /// missed a frame appears again. A repaint is asked for until it has.
 pub fn appear(ctx: &Context, id: Id, seconds: f32) -> f32 {
@@ -133,7 +139,7 @@ pub fn elapsed(ctx: &Context, id: Id, seconds: f32) -> f32 {
 }
 
 /// The design's one curve, `cubic-bezier(.2, .7, .2, 1)`: how far a movement has come at `share` of its time (0 to
-/// 1; below 0 counts as 0, above 1 as 1, and not a number as 1, the end of the movement). The curve's time is found by
+/// 1; below 0 counts as 0, above 1 or not a number as 1, the end of the movement). The curve's time is found by
 /// halving its interval a fixed number of times (its x rises from 0 to 1), so it always ends.
 #[must_use]
 pub fn ease(share: f32) -> f32 {
@@ -152,7 +158,7 @@ pub fn css_ease(share: f32) -> f32 {
 
 /// The curve `cubic-bezier(x1, y1, x2, y2)` (x1 and x2 within 0 to 1) at `share` of its time.
 fn cubic_bezier([x1, y1, x2, y2]: [f64; 4], share: f32) -> f32 {
-    let share = if share.is_nan() { 0.0 } else { f64::from(share.clamp(0.0, 1.0)) };
+    let share = if share.is_nan() { 1.0 } else { f64::from(share.clamp(0.0, 1.0)) };
     // The ends exactly: a movement starts where it was and lands where it goes.
     if share <= 0.0 {
         return 0.0;

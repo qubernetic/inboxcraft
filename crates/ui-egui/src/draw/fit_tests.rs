@@ -100,7 +100,7 @@ fn inside(inner: Rect, outer: Rect) -> bool {
 /// What does not fit: a text that sticks out of the row or button it belongs to, is cut at the side of its pane (a
 /// text cut at the top or bottom of a scrolling pane is only scrolled), or lies over another text. While a dialog (the
 /// settings sheet) is open, only what lies in it counts: the window under it is covered on purpose.
-fn misfits<S>(harness: &Harness<'_, S>) -> Vec<String> {
+pub(super) fn misfits<S>(harness: &Harness<'_, S>) -> Vec<String> {
     let mut found = Vec::new();
     // A dialog covers the controls made before it.
     let nodes: Vec<_> = harness.root().children_recursive().collect();

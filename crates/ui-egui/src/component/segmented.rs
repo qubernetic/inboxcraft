@@ -54,6 +54,20 @@ pub fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &
     segmented_with(ui, theme, options, current, about, None)
 }
 
+/// [`segmented_for`] with the options in `unavailable` drawn as the sheet's disabled segment (the word `muted`, no fill
+/// under the pointer) and never chosen, by the pointer or the arrows, which pass them by: an option not built yet.
+pub fn segmented_but<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    theme: &Theme,
+    options: &[(T, &str, Font)],
+    current: T,
+    about: Option<&str>,
+    unavailable: &[T],
+) -> Option<T> {
+    let off: Vec<usize> = options.iter().enumerate().filter(|(_, (value, ..))| unavailable.contains(value)).map(|(index, _)| index).collect();
+    segmented_core(ui, theme, options, current, about, None, &off)
+}
+
 /// [`segmented_for`] with the option at the index of `shown` drawn hovered or pressed, or the control focused, whatever
 /// the pointer and the keyboard do: a board of the gallery.
 pub(crate) fn segmented_with<T: Copy + PartialEq>(
@@ -63,6 +77,19 @@ pub(crate) fn segmented_with<T: Copy + PartialEq>(
     current: T,
     about: Option<&str>,
     shown: Option<(Shown, usize)>,
+) -> Option<T> {
+    segmented_core(ui, theme, options, current, about, shown, &[])
+}
+
+/// The control, the options at the indices in `off` unavailable.
+fn segmented_core<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    theme: &Theme,
+    options: &[(T, &str, Font)],
+    current: T,
+    about: Option<&str>,
+    shown: Option<(Shown, usize)>,
+    off: &[usize],
 ) -> Option<T> {
     if options.is_empty() {
         return None;
@@ -98,19 +125,20 @@ pub(crate) fn segmented_with<T: Copy + PartialEq>(
     // Each option is a node of its own, inside the group for a screen reader: pressable (by the pointer, or by a screen
     // reader's click) but never a Tab stop, which the group is.
     let inside = ui.new_child(UiBuilder::new().max_rect(track).accessibility_parent(response.id));
-    let sense = if enabled { Sense::CLICK } else { Sense::hover() };
     let segments: Vec<Response> = options
         .iter()
         .zip(&rects)
         .enumerate()
         .map(|(index, ((_, name, _), rect))| {
+            let open = enabled && !off.contains(&index);
+            let sense = if open { Sense::CLICK } else { Sense::hover() };
             let segment = inside.interact(*rect, response.id.with(("segment", index)), sense);
             let spoken = match about {
                 Some(about) => tr!("{option} for {about}", option = name, about = about),
                 None => (*name).to_owned(),
             };
             let on = Some(index) == now;
-            segment.widget_info(|| WidgetInfo::selected(Role::RadioButton, enabled, on, &spoken));
+            segment.widget_info(|| WidgetInfo::selected(Role::RadioButton, open, on, &spoken));
             segment
         })
         .collect();
@@ -125,14 +153,17 @@ pub(crate) fn segmented_with<T: Copy + PartialEq>(
             None => (segments.iter().position(Response::hovered), None),
         },
     };
-    let mut chosen = if enabled { segments.iter().position(Response::clicked) } else { None };
+    // An unavailable option is never hovered, pressed or chosen.
+    let (hovered, pressed) = (hovered.filter(|index| !off.contains(index)), pressed.filter(|index| !off.contains(index)));
+    let mut chosen = if enabled { segments.iter().position(Response::clicked).filter(|index| !off.contains(index)) } else { None };
     if enabled && response.has_focus() {
         let (back, on) = ui.input(|input| (input.key_pressed(Key::ArrowLeft), input.key_pressed(Key::ArrowRight)));
         let at = now.unwrap_or(0);
+        // The nearest option that can be chosen that way, if there is one.
         if back {
-            chosen = Some(at.saturating_sub(1));
+            chosen = (0..at).rev().find(|index| !off.contains(index)).or(chosen);
         } else if on {
-            chosen = Some((at + 1).min(options.len() - 1));
+            chosen = (at.saturating_add(1)..options.len()).find(|index| !off.contains(index)).or(chosen);
         }
     }
     let visible = ui.is_rect_visible(track);
@@ -150,7 +181,9 @@ pub(crate) fn segmented_with<T: Copy + PartialEq>(
             continue;
         }
         let pushed = enabled && pressed == Some(index);
-        let (fill, ink) = match (enabled, on, pushed) {
+        // An unavailable option looks as a disabled control's: its word `muted`, chosen the `stage` fill.
+        let open = enabled && !off.contains(&index);
+        let (fill, ink) = match (open, on, pushed) {
             (false, true, _) => (p.stage, p.muted),
             (false, false, _) => (Color32::TRANSPARENT, p.muted),
             (true, _, true) => (p.cyan_muted, if on { p.ink } else { p.cyan_text }),
@@ -161,7 +194,7 @@ pub(crate) fn segmented_with<T: Copy + PartialEq>(
             painter.rect_filled(*rect, 0.0, fill);
         }
         if on {
-            let bar = if enabled { p.cyan_edge } else { p.muted };
+            let bar = if open { p.cyan_edge } else { p.muted };
             painter.rect_filled(Rect::from_min_max(pos2(rect.left(), rect.bottom() - BAR), rect.max), 0.0, bar);
         }
         if index + 1 < options.len() {

@@ -28,6 +28,7 @@
 //! - [`toast`]: a message that rises from the bottom edge, with Undo and its key chip.
 //! - [`popup`]: a float with menu rows, over sharp text or content that fades.
 //! - [`recipient`]: a recipient's chip and the recipient line of the composer.
+//! - [`draft_file`]: a file on a draft (attaching files comes later).
 //! - [`switch`]: a square box with a square knob, on or off, waiting or unavailable.
 //! - [`slider`]: the text size on five ticks, 90 % to 130 %.
 //! - [`account_bar`]: the 3 × 12 px mark in an account's colour.
@@ -35,7 +36,7 @@
 //! - [`time_picker`]: presets and a typed time for snooze, send later and reminders ([`typed_time`] reads the text).
 //!
 //! [`gallery`] draws every one of them on one page for `ui_shot`, [`gallery_fields`] the fields, pickers and menus on a
-//! second.
+//! second, [`gallery_screens`] the screens' own sets on another.
 
 pub mod attachment;
 pub mod avatar;
@@ -47,15 +48,18 @@ pub mod card;
 pub mod check_step;
 pub mod checkbox;
 pub mod content_bar;
+pub mod draft_file;
 pub mod draft_row;
 pub mod empty;
 pub mod facts;
 pub mod field;
 pub mod gallery;
 pub mod gallery_blocks;
+pub mod gallery_calendar;
 pub mod gallery_fields;
 pub mod gallery_lists;
 pub mod gallery_reader;
+pub mod gallery_screens;
 pub mod group_head;
 pub mod hairline_table;
 pub mod hover;

@@ -83,12 +83,40 @@ fn unfolding_id() -> Id {
     Id::unique("popup-unfolding")
 }
 
-/// What a float keeps from one frame to the next: when it opened, the pass it was last drawn in, and its rect.
+/// Where the layer of the float whose rows are being drawn is kept, for a float opened from inside it.
+fn showing_id() -> Id {
+    Id::unique("popup-showing-float")
+}
+
+/// What a float keeps from one frame to the next: when it opened, the pass it was last drawn in, its rect, and how
+/// many times a surface had come over the window when it was drawn ([`covered`]).
 #[derive(Clone, Copy)]
 struct Kept {
     opened: f64,
     pass: u64,
     rect: Rect,
+    cover: u64,
+}
+
+/// Where [`covered`] keeps whether a surface lies over the window, and how many times one came over it.
+fn cover_id() -> Id {
+    Id::unique("inboxcraft-float-cover")
+}
+
+/// How many times the settings sheet or the palette came over the window.
+fn covers(ctx: &Context) -> u64 {
+    ctx.data(|data| data.get_temp::<(bool, u64)>(cover_id())).map_or(0, |(_, count)| count)
+}
+
+/// Says, each frame before the floats are drawn, whether the settings sheet or the palette lies over the window. The
+/// frame one of them comes over it, every [`float`] open under it closes: it picks nothing, and asks for no keyboard
+/// back (the surface over it has the keyboard), so nothing under that surface stands over it, holds the modal layer,
+/// keeps `Tab` or takes its Esc. A [`held`] float (the event editor) stays as it is, quiet; a float opened afterwards
+/// (a list on the sheet) is not touched.
+pub fn covered(ctx: &Context, covered: bool) {
+    let (was, count) = ctx.data(|data| data.get_temp::<(bool, u64)>(cover_id())).unwrap_or((false, 0));
+    let count = if covered && !was { count.saturating_add(1) } else { count };
+    ctx.data_mut(|data| data.insert_temp(cover_id(), (covered, count)));
 }
 
 /// How far the next row of the float being drawn has come in, 0 to 1 (1 outside a float); a row that takes a press
@@ -146,14 +174,74 @@ fn sane(width: f32) -> f32 {
     if width.is_finite() { width.clamp(32.0, 2048.0) } else { 240.0 }
 }
 
+/// How a person asked a [`held`] float to close.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Leave {
+    /// `Esc`.
+    Escape,
+    /// A press outside it.
+    Beside,
+}
+
+/// Whether a float closes itself on `Esc` and a press outside it, or its caller decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// It closes itself.
+    Closes,
+    /// The caller decides; while `quiet` another surface lies over it and has the keys and the pointer.
+    Held { quiet: bool },
+}
+
+/// The ground under a held float, over the window's panes (as the palette's and the settings sheet's dim ground): a
+/// press outside the float lands on it, from the press to the release, and reaches nothing under it. It paints
+/// nothing and takes no keyboard. The window's own controls and the toasts stand over it, as over those grounds. It
+/// stays on top of the other middle layers (the floating composer), whichever showed first: a press on them only
+/// warns.
+fn backdrop(ctx: &Context, float: Id) {
+    let screen = ctx.content_rect();
+    let shown = Area::new(float.with("backdrop")).order(Order::Middle).fixed_pos(screen.min).constrain(false).fade_in(false).show(ctx, |ui| {
+        ui.allocate_exact_size(screen.size(), Sense::CLICK | Sense::DRAG);
+    });
+    ctx.move_to_top(shown.response.layer_id);
+}
+
 /// Shows `float` with `add` drawing its rows, as the module says; what `add` gave, or `None` once `Esc` or a press
 /// outside it closed it (the caller then forgets it is open). The first frame it shows, the keyboard leaves the
 /// control it opened from: the first `Tab` lands on its first row.
 pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+    shown(ctx, theme, float, Mode::Closes, add).map(|(inner, _)| inner)
+}
+
+/// A float that holds what a person typed (the event editor): `Esc` and a press outside it close nothing, they come
+/// back as [`Leave`] and the caller decides. A press outside it reaches nothing under it (a ground of its own lies
+/// between them). That ground also swallows the wheel and the hover of everything under it, so nothing under the float
+/// scrolls or lights up while it is open; surfaces in the foreground (the window's own controls, the toasts) stay
+/// live over it. It closes when the caller stops drawing it, and the caller gives the
+/// keyboard back. While `quiet` another surface lies over it (the palette, the settings sheet): it takes neither key
+/// nor press, and is not modal, so that surface has them. What `add` gave (always there), and how it was asked to close.
+pub fn held<R>(ctx: &Context, theme: &Theme, float: &Float, quiet: bool, add: impl FnOnce(&mut Ui) -> R) -> Option<(R, Option<Leave>)> {
+    shown(ctx, theme, float, Mode::Held { quiet }, add)
+}
+
+fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl FnOnce(&mut Ui) -> R) -> Option<(R, Option<Leave>)> {
     let key = float.id.with("float-kept");
     let pass = ctx.cumulative_pass_nr();
     let now = ctx.input(|input| input.time);
     let kept = ctx.data(|data| data.get_temp::<Kept>(key)).filter(|kept| kept.pass.saturating_add(1) >= pass);
+    let cover = covers(ctx);
+    if mode == Mode::Closes && kept.is_some_and(|kept| kept.cover != cover) {
+        // The settings sheet or the palette came over it ([`covered`]): it closes, choosing nothing, and leaves the
+        // keyboard to that surface. Where the keyboard was in it, it goes to the control the float opened from in this
+        // same frame, before the surface takes it, so the surface gives it back there when it closes.
+        let mine = LayerId::new(Order::Foreground, float.id);
+        let inside =
+            ctx.memory(|memory| memory.focused()).and_then(|focused| ctx.read_response(focused)).is_some_and(|focused| focused.layer_id == mine);
+        if inside {
+            ctx.memory_mut(|memory| memory.request_focus(float.returns_to));
+        }
+        ctx.data_mut(|data| data.remove::<Kept>(key));
+        return None;
+    }
     let opening = kept.is_none();
     // Never larger than the window less its 3 px of ground: past that its rows scroll.
     let screen = ctx.content_rect();
@@ -162,13 +250,24 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
     // Only the float on top answers Esc and a press outside it: one opened from it closes first.
     let mine = LayerId::new(Order::Foreground, float.id);
     let on_top = ctx.memory(|memory| memory.top_modal_layer()).is_none_or(|top| top == mine);
-    if !opening && on_top {
+    let quiet = mode == Mode::Held { quiet: true };
+    let mut leave = None;
+    if !opening && on_top && !quiet {
         let rect = kept.map(|kept| kept.rect);
         let (escaped, beside) = ctx.input_mut(|input| {
             let beside = input.pointer.any_pressed() && input.pointer.interact_pos().is_some_and(|at| rect.is_some_and(|rect| !rect.contains(at)));
             (input.consume_key(Modifiers::NONE, Key::Escape), beside)
         });
-        if escaped || beside {
+        if mode != Mode::Closes {
+            // Held: the caller decides, and the float stays as it is (no second unfolding).
+            leave = if escaped {
+                Some(Leave::Escape)
+            } else if beside {
+                Some(Leave::Beside)
+            } else {
+                None
+            };
+        } else if escaped || beside {
             ctx.data_mut(|data| data.remove::<Kept>(key));
             if beside {
                 // The press that closed it may come up on the control it opened from: that is not a press to open it.
@@ -188,11 +287,27 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
     let opened = kept.map_or(now, |kept| kept.opened);
     let size = kept.map_or(vec2(width, 0.0), |kept| kept.rect.size());
     let at = placed(float.anchor.left_bottom() + vec2(0.0, DROP), size, ctx.content_rect(), ctx.pixels_per_point());
-    // Only the float takes the keyboard and the pointer while it is open: Tab goes round its rows.
-    ctx.memory_mut(|memory| memory.set_modal_layer(mine));
-    // Drawn after the float it may be opened from, it stands over it: a float opened from another is on top.
-    ctx.move_to_top(mine);
+    // A float opened from inside another stands directly over it, however the two were ordered before (a list of a
+    // select in the event editor, opened a second time).
+    let parent = ctx.data(|data| data.get_temp::<LayerId>(showing_id()));
+    if let Some(parent) = parent.filter(|parent| *parent != mine) {
+        ctx.memory_mut(|memory| memory.areas_mut().set_sublayer(parent, mine));
+    }
+    if mode == (Mode::Held { quiet: false }) {
+        backdrop(ctx, float.id);
+    }
+    if !quiet {
+        // Only the float takes the keyboard and the pointer while it is open: Tab goes round its rows.
+        ctx.memory_mut(|memory| memory.set_modal_layer(mine));
+        // It says itself that a float is open, for the window's Esc and a sheet's press beside ([`any_open`]): another
+        // surface may be a modal layer too. A quiet float (the event editor under the sheet) says nothing.
+        ctx.data_mut(|data| data.insert_temp(shown_id(), pass));
+        // Drawn after the float it may be opened from, it stands over it: a float opened from another is on top.
+        ctx.move_to_top(mine);
+    }
     let shown = Area::new(float.id).order(Order::Foreground).pivot(Align2::LEFT_TOP).fixed_pos(at).fade_in(false).show(ctx, |ui| {
+        // The float whose rows are drawn now: one opened from them stands over it.
+        ctx.data_mut(|data| data.insert_temp(showing_id(), mine));
         unfolding(ui, theme, width, opened, |ui| {
             // Its rows scroll once it would be taller than the window: it was as tall as the room last frame.
             if size.y >= room.y - 0.5 {
@@ -204,7 +319,14 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
             }
         })
     });
-    ctx.data_mut(|data| data.insert_temp(key, Kept { opened, pass, rect: shown.response.rect }));
+    ctx.data_mut(|data| {
+        if let Some(parent) = parent {
+            data.insert_temp(showing_id(), parent);
+        } else {
+            data.remove::<LayerId>(showing_id());
+        }
+    });
+    ctx.data_mut(|data| data.insert_temp(key, Kept { opened, pass, rect: shown.response.rect, cover }));
     let (inner, rows) = shown.inner;
     // Home and End go to the first and the last row, from a row (a field in the float keeps them for its text).
     let focused = ctx.memory(|memory| memory.focused());
@@ -221,7 +343,7 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
             ctx.memory_mut(|memory| memory.request_focus(*to));
         }
     }
-    Some(inner)
+    Some((inner, leave))
 }
 
 /// Draws a float `width` points wide into `ui` with `add` drawing its rows, 1 px in from its edge.
@@ -249,6 +371,7 @@ pub fn show<R>(ctx: &Context, theme: &Theme, id: Id, anchor: Pos2, width: f32, a
     let pass = ctx.cumulative_pass_nr();
     let now = ctx.input(|input| input.time);
     let kept = ctx.data(|data| data.get_temp::<Kept>(key)).filter(|kept| kept.pass.saturating_add(1) >= pass);
+    let cover = covers(ctx);
     let width = sane(width);
     let opened = kept.map_or(now, |kept| kept.opened);
     let size = kept.map_or(vec2(width, 0.0), |kept| kept.rect.size());
@@ -259,7 +382,7 @@ pub fn show<R>(ctx: &Context, theme: &Theme, id: Id, anchor: Pos2, width: f32, a
         .fixed_pos(at)
         .fade_in(false)
         .show(ctx, |ui| unfolding(ui, theme, width, opened, add));
-    ctx.data_mut(|data| data.insert_temp(key, Kept { opened, pass, rect: shown.response.rect }));
+    ctx.data_mut(|data| data.insert_temp(key, Kept { opened, pass, rect: shown.response.rect, cover }));
     shown.inner.0
 }
 
@@ -519,6 +642,86 @@ pub(crate) fn menu_choice_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool,
     response
 }
 
+/// An account's row of a menu, 32 high (the composer's From menu): the tick in `cyan_text` when it is the one `on`,
+/// the account's bar in its colour (the account `index` counted from 0), its `name` in `body` and its `address` in
+/// `mono_s` and `muted` after it, cut with an ellipsis. Clicked when chosen.
+pub fn account_choice(ui: &mut Ui, theme: &Theme, name: &str, address: &str, index: u64, on: bool) -> Response {
+    account_choice_with(ui, theme, name, address, index, on, None)
+}
+
+/// [`account_choice`] drawn in `shown`: a board of the gallery.
+pub(crate) fn account_choice_with(ui: &mut Ui, theme: &Theme, name: &str, address: &str, index: u64, on: bool, shown: Option<Shown>) -> Response {
+    let p = &theme.palette;
+    let s = &theme.spacing;
+    let available = ui.is_enabled();
+    let (response, row) = row_rect(ui, theme, theme.boxes().menu_row, available, shown);
+    let spoken = tr!("{name}, {address}", name = name, address = address);
+    response.widget_info(|| WidgetInfo::selected(Role::MenuItemRadio, available && !soon::is_soon(ui), on, &spoken));
+    if !ui.is_rect_visible(row.rect) {
+        return response;
+    }
+    let painter = solid(ui);
+    if row.pressed && on {
+        painter.rect(row.rect, 0.0, p.cyan_muted, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
+    } else {
+        paint_ground(&painter, theme, row, false);
+    }
+    let shown = row.shown;
+    let drop = RISE * (1.0 - shown);
+    let inset = s.s3 + if row.focus { 1.0 } else { 0.0 };
+    let mid = row.rect.center().y - drop;
+    let side = theme.boxes().icon;
+    let mut left = row.rect.left() + inset;
+    if on {
+        let at = Rect::from_min_size(pos2(left, mid - side / 2.0), vec2(side, side));
+        crate::iconset::paint_glyph(&painter, at, CHECK, arriving(theme, p.cyan_text, shown));
+    }
+    left += side + s.s2;
+    let bar = Rect::from_min_size(pos2(left, (mid - ACCOUNT_BAR.y / 2.0).round()), ACCOUNT_BAR);
+    painter.rect_filled(bar, 0.0, arriving(theme, theme.account_colour(index), shown));
+    left = bar.right() + s.s2;
+    let right = row.rect.right() - inset;
+    let ink = arriving(theme, p.ink, shown);
+    let words = galley(ui, name, theme.fonts.body, ink);
+    let most = (right - left).max(1.0);
+    let name_box = if words.size().x > most { most } else { paint::run_box(words.size().x) };
+    let text = cut(ui, name, theme.fonts.body, ink, most);
+    paint::run_at(&painter, pos2(left, mid - text.size().y / 2.0), text, ink);
+    let start = left + name_box + s.s2;
+    if right - start > 1.0 && !address.is_empty() {
+        let muted = arriving(theme, p.muted, shown);
+        let address = cut(ui, address, theme.fonts.mono_s, muted, right - start);
+        paint::run_at(&painter, pos2(start, mid - address.size().y / 2.0), address, muted);
+    }
+    response
+}
+
+/// The account bar beside an account's name in a menu, as [`super::account_bar`] draws it.
+const ACCOUNT_BAR: Vec2 = vec2(3.0, 12.0);
+
+/// A note under a float's rows, after a hairline: `text` in `caption` and `muted`, 8 above, 12 beside and 10 under.
+pub fn note(ui: &mut Ui, theme: &Theme, text: &str) {
+    let s = &theme.spacing;
+    hairline_in(ui, theme, theme.palette.panel_line);
+    let width = ui.available_width();
+    let mut job = egui::text::LayoutJob::single_section(text.to_owned(), theme.fonts.caption.format(theme.palette.muted));
+    job.wrap.max_width = (width - s.s3 * 2.0).max(1.0);
+    let text = ui.painter().layout_job(job);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, text.size().y + s.s2 + s.s2 + 2.0), Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text.text()));
+    if ui.is_rect_visible(rect) {
+        paint::rows_at(ui.painter(), rect.min + vec2(s.s3, s.s2), width - s.s3 * 2.0, text, theme.palette.muted);
+    }
+}
+
+/// A line across a float in `colour`.
+fn hairline_in(ui: &mut Ui, _theme: &Theme, colour: Color32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        ui.painter().rect_filled(rect, 0.0, colour);
+    }
+}
+
 /// The tick of a chosen choice: Phosphor's check.
 pub(crate) const CHECK: char = '\u{e182}';
 
@@ -662,7 +865,22 @@ pub fn menu<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width: f
     menu_at(ctx, theme, opener, opener.rect, id, width, add)
 }
 
-/// Opens or closes the menu `id` on a press of `opener`, and gives the opener the keyboard back after a choice.
+/// [`menu`] hung 4 px under `anchor` instead of under `opener` (the composer's From menu, which hangs on its line's
+/// rule).
+pub fn menu_under<R>(
+    ctx: &Context,
+    theme: &Theme,
+    opener: &Response,
+    anchor: Rect,
+    id: Id,
+    width: f32,
+    add: impl FnOnce(&mut Ui) -> (R, bool),
+) -> Option<R> {
+    toggle(ctx, opener, id);
+    menu_at(ctx, theme, opener, anchor, id, width, add)
+}
+
+/// Opens or closes the menu `id` as a press on `opener` asks, and keeps whether it was the keyboard's.
 fn toggle(ctx: &Context, opener: &Response, id: Id) {
     refocus(ctx, opener, id);
     if clicked(ctx, opener, id) {
@@ -673,6 +891,23 @@ fn toggle(ctx: &Context, opener: &Response, id: Id) {
         let by_key = open && !opener.clicked_by(egui::PointerButton::Primary);
         ctx.data_mut(|data| data.insert_temp(by_key_id(id), by_key));
     }
+}
+
+/// [`menu`] that stands 4 px over `opener`, its right edge on the opener's: the menu of a button at a foot (the
+/// composer's Templates). Its height is measured in a first pass of the frame it opens in, so it never jumps.
+pub fn menu_up<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
+    toggle(ctx, opener, id);
+    let pass = ctx.cumulative_pass_nr();
+    let kept = ctx.data(|data| data.get_temp::<Kept>(id.with("float-kept"))).filter(|kept| kept.pass.saturating_add(1) >= pass);
+    if is_open(ctx, id) && kept.is_none() {
+        ctx.request_discard("a menu over its button measures its height first");
+    }
+    let height = kept.map_or(0.0, |kept| kept.rect.height());
+    let width = sane(width);
+    let top = opener.rect.top() - DROP - height;
+    // The float hangs `DROP` under its anchor: the anchor stands that much over the menu's top.
+    let anchor = Rect::from_min_size(pos2(opener.rect.right() - width, top - DROP), Vec2::ZERO);
+    menu_at(ctx, theme, opener, anchor, id, width, add)
 }
 
 /// [`menu`] hung with its right edge on `opener`'s right edge, as the reader's More and Move do; still kept 3 in from
@@ -750,17 +985,23 @@ fn menu_at<R>(
     }
 }
 
-/// Whether a float (or a popup of egui's) is open: the keys of what lies under it rest.
+/// Where [`float`] notes the pass it last showed in.
+fn shown_id() -> Id {
+    Id::unique("inboxcraft-float-shown")
+}
+
+/// Whether a float (an open list or menu) showed in this pass or the one before: the surface on top, which takes Esc
+/// and a press beside it. Only a float says so; a sheet that is a modal layer itself is not one.
 #[must_use]
 pub fn any_open(ctx: &Context) -> bool {
-    ctx.memory(|memory| memory.top_modal_layer().is_some()) || egui::Popup::is_any_open(ctx)
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<u64>(shown_id())).is_some_and(|shown| shown.saturating_add(1) >= pass)
 }
 
 /// Whether `Esc` was pressed for a control under the floats: false while a float is open, which takes it.
 #[must_use]
 pub fn escape(ctx: &Context) -> bool {
-    let open = ctx.memory(|memory| memory.top_modal_layer().is_some());
-    !open && ctx.input(|input| input.key_pressed(Key::Escape))
+    !any_open(ctx) && ctx.input(|input| input.key_pressed(Key::Escape))
 }
 
 #[cfg(test)]

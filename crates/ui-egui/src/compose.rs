@@ -223,6 +223,17 @@ pub struct Composer {
     templates: Vec<String>,
     /// The time picked to send it at; `None` sends it now, after the hold.
     later: Option<Timestamp>,
+    /// The first frame that painted the whole composer, its lines in sight, since it was opened, moved to another
+    /// place or changed from outside its fields: Send waits for a frame after it.
+    painted_in: Option<u64>,
+    /// A script set the scene without a frame and counts it as seen.
+    scripted: bool,
+    /// The place it was last drawn in: in the reader's place (`true`) or floating.
+    drawn_docked: Option<bool>,
+    /// Whether the floating panel is folded to its head.
+    folded: bool,
+    /// When the engine last kept the draft.
+    saved: Option<Timestamp>,
     /// Why the last fill of a blank was refused (it would make the subject or the text longer than the engine keeps),
     /// and the text it refused: said while that text stands.
     fill_refused: Option<(String, String)>,
@@ -311,6 +322,11 @@ impl Composer {
             templates: Vec::new(),
             later: None,
             fill_refused: None,
+            painted_in: None,
+            scripted: false,
+            drawn_docked: None,
+            folded: false,
+            saved: None,
         };
         composer.take_answer(answer);
         Ok(composer)
@@ -321,6 +337,7 @@ impl Composer {
     /// typed text, so nothing the draft holds is in a line that is not drawn.
     fn take_answer(&mut self, answer: &Value) {
         self.account = answer.get("account").and_then(Value::as_u64).unwrap_or(self.account);
+        self.saved = answer.get("saved").and_then(Value::as_str).and_then(parse_date).or(self.saved);
         for line in Line::ALL {
             if let Some(list) = answer.get(line.key()).and_then(Value::as_array)
                 && let Some(chips) = self.lines.get_mut(line.index())
@@ -450,7 +467,65 @@ impl Composer {
 
     /// Makes it the floating panel, or puts it back in the reader's place.
     pub fn set_floating(&mut self, floating: bool) {
+        if self.floating != floating {
+            self.unsee();
+        }
         self.floating = floating;
+        if !floating {
+            self.folded = false;
+        }
+    }
+
+    /// Whether the floating panel is folded to its head.
+    #[must_use]
+    pub fn folded(&self) -> bool {
+        self.folded
+    }
+
+    /// Folds the floating panel to its head, or opens it again.
+    pub fn toggle_fold(&mut self) {
+        self.folded = !self.folded;
+        self.unsee();
+    }
+
+    /// When the engine last kept the draft, if it said.
+    #[must_use]
+    pub fn saved(&self) -> Option<Timestamp> {
+        self.saved
+    }
+
+    /// Whether the whole composer, its lines in sight, was painted in a frame before `frame` since it was opened,
+    /// moved to another place or changed from outside its fields, so that the person has seen what Send would send.
+    #[must_use]
+    pub fn seen(&self, frame: u64) -> bool {
+        self.scripted || self.painted_in.is_some_and(|painted| painted < frame)
+    }
+
+    /// The whole composer, its lines in sight, was painted in `frame`.
+    pub(crate) fn mark_painted(&mut self, frame: u64) {
+        if self.painted_in.is_none() {
+            self.painted_in = Some(frame);
+        }
+    }
+
+    /// What a script set up counts as seen: the shots set a scene without a frame.
+    pub(crate) fn mark_seen(&mut self) {
+        self.scripted = true;
+    }
+
+    /// It is drawn in the reader's place (`docked`) or floating: a place other than the last one has not been seen.
+    pub(crate) fn drawn_in(&mut self, docked: bool) {
+        if self.drawn_docked != Some(docked) {
+            self.unsee();
+        }
+        self.drawn_docked = Some(docked);
+    }
+
+    /// What it shows changed in a way the person has not seen yet (it moved, a template or a fill went in, the
+    /// sender changed): Send waits for a frame that paints it.
+    pub(crate) fn unsee(&mut self) {
+        self.painted_in = None;
+        self.scripted = false;
     }
 
     /// What the composer's title says: the subject, or "New message".
@@ -502,6 +577,16 @@ impl Composer {
             return Some(tr!("The forwarded message is no longer here, so this cannot be sent").to_owned());
         }
         (!self.blocks.is_empty()).then(|| tr!("This draft cannot be sent yet").to_owned())
+    }
+
+    /// Whether [`Composer::problem`] only waits for something still to do (a recipient, a blank to fill in) rather than
+    /// saying something is wrong: the composer says the first in `muted`, the second in `minus` with a warning.
+    #[must_use]
+    pub fn only_waits(&self) -> bool {
+        let wrong =
+            Line::ALL.iter().any(|line| self.refusal(*line).is_some()) || Line::ALL.iter().flat_map(|line| self.chips(*line)).any(|chip| !chip.ok);
+        let waiting = self.blocks.iter().all(|block| block == "no_recipient" || block == "blank");
+        !wrong && waiting
     }
 
     /// The prompt of the first blank still to fill in, fit for one line.

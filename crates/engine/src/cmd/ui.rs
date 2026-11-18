@@ -100,5 +100,6 @@ struct FrameParams {
 fn frame(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: FrameParams = decode(FRAME.id, params)?;
     let frame = WindowFrame::named(&params.frame).ok_or_else(|| EngineError::bad_params(FRAME.id, "frame is system, top_row or strip"))?;
-    Ok(changed(Appearance { frame, ..context.state().appearance }))
+    let now = context.state().appearance;
+    Ok(changed(Appearance { frame, own_frame: Appearance::own_of(frame, Some(now.own_frame)), ..now }))
 }

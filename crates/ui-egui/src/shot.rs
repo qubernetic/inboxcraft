@@ -16,8 +16,8 @@
 //! point (1 to 4, 1 when left out), `text_scale` the text scale in per cent (90 to 130 in steps of 10, 100 when left
 //! out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
-//! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
-//! (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
+//! sample: `empty`, `form` (typed by hand), `invalid` (a port and a CalDAV address typed wrong), `detected` (after
+//! Detect), `checking` (the third step under way), `passed` or `failed` (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
 //! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page,
 //! `shortcuts` set to `true` the Shortcuts page, where `capture` names the action waiting for a key
 //! (`ui.calendar.show`), `sending` set to `true` the Sending page, `triage` set to `true` the Triage page,
@@ -29,7 +29,7 @@
 //! `edit`, on the picked one, and `delete_event` set to `true` deletes the picked event, so its toast shows. `compose`
 //! opens the
 //! composer: `new`, `written`, `bad` (a recipient that is no address), `suggest` (the people a half-typed name could
-//! be), `floating` (a message opened over it), `reply` (a reply to Odile's rota, a line written over the quote) or
+//! be), `floating` (a message opened over it), `folded` (the same, the floating panel folded), `reply` (a reply to Odile's rota, a line written over the quote) or
 //! `template` (two people and a template with a blank); the first account then has an invented signature.
 //! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts.
 //! `open` takes `{"role": "senders"}` for "New senders", and `view` shows the inbox's groups as `cards` (when left
@@ -43,7 +43,9 @@
 //! in every style in the theme's colours instead of the window, `components` set to `true` the gallery of
 //! the components ([`crate::component::gallery`]), `blocks` set to `true` the page of the shared rows and blocks
 //! ([`crate::component::gallery_blocks`]), `fields` set to `true` the page of the fields, pickers and menus
-//! ([`crate::component::gallery_fields`]), `reader` set to `true` the page of the reader's sets
+//! ([`crate::component::gallery_fields`]), `screens` set to `true` the page of the screens' own sets
+//! ([`crate::component::gallery_screens`]), `calendar_sets` set to `true` the page of the calendar's sets
+//! ([`crate::component::gallery_calendar`]), `reader` set to `true` the page of the reader's sets
 //! ([`crate::component::gallery_reader`]), `lists` set to `true` the page of the mail lists' rows
 //! ([`crate::component::gallery_lists`]). The typeface and the icons are fixed, so a script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
@@ -140,7 +142,8 @@ pub struct Shot {
     /// Whether the selected message shows its quotes.
     #[serde(default)]
     pub quotes: Option<bool>,
-    /// The add-account page: `form`, `detected`, `checking`, `passed` or `failed`.
+    /// The add-account page: `empty`, `form`, `invalid` (a port and a CalDAV address typed wrong), `detected`,
+    /// `checking` (at its third step), `passed` or `failed`.
     #[serde(default)]
     pub onboard: Option<String>,
     /// Whether the appearance settings page is open.
@@ -164,13 +167,16 @@ pub struct Shot {
     /// Whether the settings sheet is open on Notifications.
     #[serde(default)]
     pub notifications: Option<bool>,
+    /// The settings sheet open on the section of this name (`appearance` … `plugins`, [`crate::settings::Section::id`]).
+    #[serde(default)]
+    pub section: Option<String>,
     /// How the unified inbox shows its groups: `smart` when left out, `grouped` or `list` (the earlier `cards` and
     /// `simple` read as `smart` and `list`).
     #[serde(default)]
     pub view: Option<String>,
     /// The composer, the first account signed: `new`, `written` (two people, a subject and a few lines), `bad`
     /// (written, with a recipient that is no address), `suggest` (one person, and a name half typed with the people it
-    /// could be under it), `floating` (written, then a message opened), `reply` (a reply with a line written) or
+    /// could be under it), `floating` (written, then a message opened), `folded` (the same, folded), `reply` (a reply with a line written) or
     /// `template` (two people and a template whose blank is left).
     #[serde(default)]
     pub compose: Option<String>,
@@ -227,6 +233,12 @@ pub struct Shot {
     /// The page of the shared rows and blocks instead of the window.
     #[serde(default)]
     pub blocks: Option<bool>,
+    /// The page of the screens' own sets instead of the window.
+    #[serde(default)]
+    pub screens: Option<bool>,
+    /// The page of the calendar's sets (event block, mini month) instead of the window.
+    #[serde(default)]
+    pub calendar_sets: Option<bool>,
     /// The page of the reader's sets instead of the window.
     #[serde(default)]
     pub reader: Option<bool>,
@@ -416,26 +428,33 @@ fn pictured_proposal() -> Proposal {
 fn onboard(app: InboxApp, out: &str, state: &str) -> Result<InboxApp, UiError> {
     let passed = |step| (step, StepStatus::Passed);
     let workers = match state {
-        "form" | "detected" | "passed" => Scripted::passing(),
-        "checking" => Scripted::answering(&[passed(CheckStep::Dns), passed(CheckStep::Tcp), passed(CheckStep::Tls)]).unfinished(),
+        "empty" | "form" | "invalid" | "detected" | "passed" => Scripted::passing(),
+        "checking" => Scripted::answering(&[passed(CheckStep::Dns), passed(CheckStep::Tcp)]).unfinished(),
         "failed" => Scripted::answering(&[
             passed(CheckStep::Dns),
             passed(CheckStep::Tcp),
             passed(CheckStep::Tls),
             (CheckStep::Certificate, StepStatus::Failed(ErrorKind::CertificateExpired)),
         ]),
-        other => return Err(bad(format!("{out}: onboard {other:?} is not form, detected, checking, passed or failed"))),
+        other => return Err(bad(format!("{out}: onboard {other:?} is not empty, form, invalid, detected, checking, passed or failed"))),
     };
     let mut app = app.with_accounts(Arc::new(Pictured), Box::new(Proposed::new(pictured_proposal())), Box::new(workers));
     let (onboarding, mailbox) = app.onboarding_mut();
     onboarding.open();
+    if state == "empty" {
+        return Ok(app);
+    }
     let form = onboarding.form_mut();
     form.address = "robin@example.org".to_owned();
     form.display_name = "Robin Example".to_owned();
     form.password = Secret::new("invented-pass");
-    if state == "form" {
+    if state == "form" || state == "invalid" {
         form.host = "mail.example.org".to_owned();
         form.security = Some(Security::StartTls);
+        if state == "invalid" {
+            form.port = "99999".to_owned();
+            form.caldav = "http://dav.example.org/robin/".to_owned();
+        }
         return Ok(app);
     }
     onboarding.detect();
@@ -553,6 +572,10 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     if shot.shortcuts == Some(true) {
         app.open_shortcuts();
     }
+    if let Some(name) = &shot.section {
+        let section = crate::settings::Section::named(name).ok_or_else(|| bad(format!("{}: no settings section {name:?}", shot.out)))?;
+        app.settings_mut().open_at(section);
+    }
     if let Some(waiting) = &shot.capture {
         let Some(action) = crate::keymap::action(waiting).filter(|_| shot.shortcuts == Some(true)) else {
             return Err(bad(format!("{}: capture {waiting:?} is not an action on the Shortcuts page", shot.out)));
@@ -605,8 +628,8 @@ fn sign(app: &mut InboxApp) {
 
 /// Opens the composer as `scene` asks.
 fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
-    if !["new", "written", "bad", "suggest", "floating", "reply", "template"].contains(&scene) {
-        return Err(bad(format!("{out}: compose {scene:?} is not new, written, bad, suggest, floating, reply or template")));
+    if !["new", "written", "bad", "suggest", "floating", "folded", "reply", "template"].contains(&scene) {
+        return Err(bad(format!("{out}: compose {scene:?} is not new, written, bad, suggest, floating, folded, reply or template")));
     }
     sign(app);
     if scene == "reply" {
@@ -630,7 +653,7 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
         composer.typed(mailbox, Line::To)
     };
     match scene {
-        "written" | "bad" | "floating" | "template" => to("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,")?,
+        "written" | "bad" | "floating" | "folded" | "template" => to("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,")?,
         "suggest" => to("Odile Brannock <odile@example.org>, te")?,
         _ => {}
     }
@@ -662,7 +685,10 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
     if scene == "suggest" {
         composer.step(true);
     }
-    if scene == "floating" {
+    if scene == "folded" {
+        composer.toggle_fold();
+    }
+    if scene == "floating" || scene == "folded" {
         let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").map(|row| row.id);
         app.mailbox_mut().select(id);
     }
@@ -684,6 +710,8 @@ fn send(app: &mut InboxApp, out: &str, to: &str, subject: &str, later: Option<Ti
     subject.clone_into(composer.subject_mut());
     composer.edited();
     composer.set_later(later);
+    // The scene is set without a frame: what the script wrote counts as seen.
+    composer.mark_seen();
     app.send_composer();
     if app.composer().is_some() {
         return Err(bad(format!("{out}: {subject:?} was not sent: {}", app.mailbox().error().unwrap_or("no reason"))));
@@ -743,6 +771,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.sending.is_some()
         || shot.triage.is_some()
         || shot.notifications.is_some()
+        || shot.section.is_some()
         || shot.view.is_some()
         || shot.compose.is_some()
         || shot.capture.is_some()
@@ -767,7 +796,13 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.menu.is_some()
         || shot.outbox.is_some()
         || shot.steps.is_some()
-        || [shot.icons, shot.components, shot.blocks, shot.fields, shot.reader, shot.lists].iter().filter(|page| **page == Some(true)).count() > 1;
+        || [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists]
+            .iter()
+            .filter(|page| **page == Some(true))
+            .count()
+            > 1
+        || (shot.calendar_sets == Some(true)
+            && [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists].contains(&Some(true)));
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
     }
@@ -803,6 +838,36 @@ fn fields_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
         crate::component::gallery_fields::page(ui, &theme, &keymap);
+    })
+}
+
+/// The page of the screens' own sets of `shot` in `mode`.
+fn screens_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of the screens' own sets")?;
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = gallery::keymap();
+    let mut fonts = true;
+    paint(crate::component::gallery_screens::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_screens::page(ui, &theme, &keymap);
+    })
+}
+
+/// The page of the calendar's sets of `shot` in `mode`.
+fn calendar_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of the calendar's sets")?;
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = gallery::keymap();
+    let mut fonts = true;
+    paint(crate::component::gallery_calendar::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_calendar::page(ui, &theme, &keymap);
     })
 }
 
@@ -1430,6 +1495,12 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if shot.blocks == Some(true) {
         return blocks_gallery(shot, mode);
+    }
+    if shot.screens == Some(true) {
+        return screens_gallery(shot, mode);
+    }
+    if shot.calendar_sets == Some(true) {
+        return calendar_gallery(shot, mode);
     }
     if shot.reader == Some(true) {
         return reader_gallery(shot, mode);

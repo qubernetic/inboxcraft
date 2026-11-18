@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The scroll bar: a strip 12 px wide beside what scrolls, never over it, so a thumb never covers a row or its focus
-//! edge. The mail list is the one exception ([`show_viewport_over`]): its rows keep the design's 440 whether they
-//! scroll or not, so its bar lies over their right edge, and a focus edge the thumb passes is painted over the thumb. At rest it shows only a 4 px `muted` thumb in its middle; under the pointer the strip takes the `stage` fill
+//! edge. The views whose rows run under it are the exception ([`show_over`], [`show_viewport_over`]): the mail list's
+//! rows keep the design's 440 whether they scroll or not, the calendar's agenda and hours run the view's whole width, so
+//! their bar lies over the rows' right edge, and a focus edge the thumb passes is painted over the thumb. At rest it
+//! shows only a 4 px `muted` thumb in its middle; under the pointer the strip takes the `stage` fill
 //! and the thumb grows to 8 px, 2 from each side; while dragged the thumb is `ink`. Square, no fade, no movement of
 //! its own: the presentation gives it none.
 //!
 //! egui keeps the scrolling and the bar's pointer ([`style`] makes it paint nothing of its own); [`show`] and
-//! [`show_viewport`] show an area and paint its bar as the sheet has it ([`bar`]).
+//! [`show_viewport`] show an area and paint its bar as the sheet has it ([`bar`]). A bar over the content ([`over_bar`])
+//! keeps the pointer itself: only its thumb takes a press.
 
 use egui::scroll_area::ScrollAreaOutput;
 use egui::style::{ScrollFadeStyle, ScrollStyle};
@@ -88,12 +91,25 @@ pub fn bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>) {
 
 /// [`bar`], its thumb travelling `ends` clear of the strip's top and bottom (a field's bar on its board: 4).
 pub fn bar_with_ends<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, ends: f32) {
+    let Some((strip, thumb)) = thumb_of(ui, output, ends) else { return };
+    let response = ui.ctx().read_response(output.id.with(1));
+    let state = match response {
+        Some(response) if response.dragged() || response.is_pointer_button_down_on() => Bar::Dragging,
+        Some(response) if response.hovered() => Bar::Hover,
+        _ => Bar::Rest,
+    };
+    paint(ui.painter(), theme, strip, thumb, state);
+}
+
+/// Where the bar of the area `output` came from stands: the strip egui senses and the thumb's range down it; nothing
+/// when it shows no bar.
+fn thumb_of<R>(ui: &Ui, output: &ScrollAreaOutput<R>, ends: f32) -> Option<(Rect, Rangef)> {
     let id = output.id.with(1);
-    let Some(strip) = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(id).map(|widget| widget.rect)) else { return };
+    let strip = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(id).map(|widget| widget.rect))?;
     // egui starts showing a bar a frame before it gives it room beside the content: until the strip stands clear of
     // the content, nothing is painted, so no frame has the bar over a row.
     if strip.left() < output.inner_rect.right() - 0.01 {
-        return;
+        return None;
     }
     let (inner, content) = (output.inner_rect.height(), output.content_size.y);
     // max then min, never `clamp`: a bound from a rect's height may be negative or NaN, and `min` and `max` keep the
@@ -101,7 +117,7 @@ pub fn bar_with_ends<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, en
     let ends = if ends.is_finite() { ends.max(0.0).min(strip.height().max(0.0) / 4.0) } else { 0.0 };
     let length = strip.height() - ends * 2.0;
     if !(content > inner && inner > 0.0 && length > 0.0 && content.is_finite()) {
-        return;
+        return None;
     }
     let size = (inner / content * length).max(ui.spacing().scroll.handle_min_length).min(length);
     // A thumb kept clear of the ends is a whole number of points long, rounded down: the field's board's 148, not 149.
@@ -109,13 +125,7 @@ pub fn bar_with_ends<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, en
     let most = content - inner;
     let share = (output.state.clamped_offset().y / most).clamp(0.0, 1.0);
     let top = strip.top() + ends + share * (length - size);
-    let response = ui.ctx().read_response(id);
-    let state = match response {
-        Some(response) if response.dragged() || response.is_pointer_button_down_on() => Bar::Dragging,
-        Some(response) if response.hovered() => Bar::Hover,
-        _ => Bar::Rest,
-    };
-    paint(ui.painter(), theme, strip, Rangef::new(top, top + size), state);
+    Some((strip, Rangef::new(top, top + size)))
 }
 
 /// Shows `area` in `ui` with `add` drawing its content, and paints its bar.
@@ -128,6 +138,13 @@ pub fn show_with_ends<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, ends: f32
     let output = area.show(ui, add);
     bar_with_ends(ui, theme, &output, ends);
     output
+}
+
+/// Shows `area` in `ui` with `add` drawing its content as wide as the area, and paints its bar over the content's
+/// right edge (a view whose rows run under the bar, as the calendar's agenda and hours): [`show_viewport_over`] for
+/// content drawn whole.
+pub fn show_over<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui) -> R) -> ScrollAreaOutput<R> {
+    show_viewport_over(ui, theme, area, |ui, _| add(ui))
 }
 
 /// Shows `area` in `ui` with `add` drawing its content and no bar of egui's: a thin thumb, `thumb` (width, length)
@@ -164,9 +181,11 @@ pub fn show_viewport<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl 
 }
 
 /// [`show_viewport`] with the bar over the content's right edge, not beside it: the content keeps the area's whole
-/// width whether it scrolls or not (the mail list's 440 rows). egui shows no bar of its own here: only the thumb takes
-/// the pointer, so a press in the strip beside it reaches the row under it ([`over_bar`]). A row's focus edge the
-/// thumb passes is painted again over the thumb ([`super::row::Row::finish`]), so the thumb never covers it.
+/// width whether it scrolls or not (the mail list's 440 rows, the calendar's agenda and hours). egui shows no bar of
+/// its own here: only the thumb takes the pointer, so a press in the strip beside it reaches the content under it
+/// ([`over_bar`]); the wheel scrolls as everywhere, and the keys scroll the view as they did (the thumb is no Tab stop).
+/// A row's focus edge the thumb passes is painted again over the thumb ([`super::row::Row::finish`]), so the thumb
+/// never covers it.
 pub fn show_viewport_over<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui, Rect) -> R) -> ScrollAreaOutput<R> {
     super::row::forget_focus_edge(ui.ctx());
     let held = ui.scope_id().with("scroll-over-held");
@@ -212,7 +231,7 @@ impl Held {
     }
 }
 
-/// The bar of [`show_viewport_over`], over the content's right 12: the thumb alone senses the pointer, registered
+/// The bar of [`show_viewport_over`], over the content's right 12: the thumb alone (8 of its 12) senses the pointer, registered
 /// after the content so it wins over a row there, and a drag on it moves the content as egui's bar does, the point
 /// it was taken by staying under the pointer ([`Held`]); the strip shows its hover while the pointer is over it.
 /// Nothing when the content fits. The thumb held, `was` while it was already held.
@@ -231,7 +250,12 @@ fn over_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, was: Option
     let thumb = Rect::from_x_y_ranges(strip.x_range(), Rangef::new(top, top + size));
     #[cfg(test)]
     ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("over-thumb-rect"), thumb));
-    let response = ui.interact(thumb, output.id.with("over-thumb"), egui::Sense::drag());
+    // The thumb under the pointer is 8 wide, 2 in from each side of the strip: a press beside it, at the content's
+    // very edge, is the content's.
+    let inset = theme.spacing.s1 / 2.0;
+    let sensed = Rect::from_x_y_ranges(Rangef::new(strip.left() + inset, strip.right() - inset), thumb.y_range());
+    // Dragged, never focused: `Sense::drag()` would make the thumb an unnamed Tab stop.
+    let response = ui.interact(sensed, output.id.with("over-thumb"), egui::Sense::DRAG);
     let held = (response.dragged() || response.is_pointer_button_down_on()).then(|| {
         // Taken where the press began; kept while held, as the bar moves under it.
         let grab = was

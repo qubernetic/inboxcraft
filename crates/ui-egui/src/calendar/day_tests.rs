@@ -68,3 +68,14 @@ fn the_names_of_days_months_and_spans() {
     assert_eq!(span(day(2026, 11, 30), day(2026, 12, 6)), "30 November – 6 December 2026");
     assert_eq!(span(day(2026, 12, 28), day(2027, 1, 3)), "28 December 2026 – 3 January 2027");
 }
+
+#[test]
+fn the_week_number_is_iso_8601_s_and_months_have_short_names() {
+    let day = |year, month, date| Day::new(year, month, date).unwrap();
+    assert_eq!(day(2026, 11, 16).iso_week(), 47);
+    assert_eq!(day(2026, 11, 5).iso_week(), 45);
+    assert_eq!(day(2027, 1, 1).iso_week(), 53, "1 January 2027 is a Friday: still in 2026's last week");
+    assert_eq!(day(2026, 1, 1).iso_week(), 1);
+    assert_eq!(super::month_short(12), "Dec");
+    assert_eq!(super::short(day(2026, 11, 16)), "16 Nov");
+}

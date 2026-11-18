@@ -373,9 +373,58 @@ pub(crate) fn shadow_box(mesh: &egui::epaint::Mesh) -> Option<Rect> {
     black.then(|| Rect::from_points(&mesh.vertices.iter().map(|v| v.pos).collect::<Vec<_>>()).shrink(reach))
 }
 
-/// Paints a float over `rect`: the one shadow, the `surface` fill and its 1 px edge.
+/// Paints a float over `rect`: the one shadow, the `surface` fill and its edge, both on whole physical pixels at the
+/// painter's scale: the fill [`snapped`], the edge a pane's band on each side ([`edge_shape`]), a [`hairline`]'s
+/// pixels thick, so no side has a half-tone fringe at 1.25, 1.5 or 1.75. At 1 a float on whole points is painted as
+/// [`float_shapes`] paints it.
 pub(crate) fn float(painter: &Painter, theme: &Theme, rect: Rect, edge: FloatEdge) {
-    painter.extend(float_shapes(theme, rect, edge));
+    painter.extend(float_at(theme, rect, edge, painter.pixels_per_point()));
+}
+
+/// The shapes of a [`float`] over `rect` at `ppp` (a scale that is not a positive number counts as 1, [`line_pixels`]).
+fn float_at(theme: &Theme, rect: Rect, edge: FloatEdge, ppp: f32) -> Vec<Shape> {
+    let (ppp, _) = line_pixels(ppp);
+    let p = theme.palette;
+    let colour = match edge {
+        FloatEdge::Keyboard => p.cyan_edge,
+        FloatEdge::Quiet => p.line,
+    };
+    let whole = snapped(rect, ppp);
+    let mut shapes = vec![Shape::mesh(shadow_mesh(rect)), Shape::rect_filled(whole, 0.0, p.surface)];
+    shapes.extend([Side::Left, Side::Top, Side::Right, Side::Bottom].map(|side| edge_shape(whole, side, colour, ppp)));
+    shapes
+}
+
+/// A box over `rect` with no shadow: its `fill` and a 1 px `edge` inside it, both on whole physical pixels at the
+/// painter's scale, as a [`float`]'s.
+pub(crate) fn boxed(painter: &Painter, rect: Rect, fill: Color32, edge: Color32) {
+    painter.extend(boxed_at(rect, fill, edge, painter.pixels_per_point()));
+}
+
+/// The shapes of a [`boxed`] `rect` at `ppp` (a scale that is not a positive number counts as 1).
+fn boxed_at(rect: Rect, fill: Color32, edge: Color32, ppp: f32) -> Vec<Shape> {
+    let (ppp, _) = line_pixels(ppp);
+    let mut shapes = vec![Shape::rect_filled(snapped(rect, ppp), 0.0, fill)];
+    shapes.extend(outline_at(rect, edge, ppp));
+    shapes
+}
+
+/// A 1 px `edge` inside `rect`, no fill: a pane's band on each side, on whole physical pixels at the painter's scale.
+pub(crate) fn outline(painter: &Painter, rect: Rect, edge: Color32) {
+    painter.extend(outline_at(rect, edge, painter.pixels_per_point()));
+}
+
+/// The shapes of an [`outline`] of `rect` at `ppp` (a scale that is not a positive number counts as 1).
+fn outline_at(rect: Rect, edge: Color32, ppp: f32) -> [Shape; 4] {
+    let (ppp, _) = line_pixels(ppp);
+    let whole = snapped(rect, ppp);
+    [Side::Left, Side::Top, Side::Right, Side::Bottom].map(|side| edge_shape(whole, side, edge, ppp))
+}
+
+/// The inside of a [`float`] over `rect` at `ppp`: its fill less the edge's band on every side, on whole pixels.
+pub(crate) fn float_inside(rect: Rect, ppp: f32) -> Rect {
+    let (ppp, pixels) = line_pixels(ppp);
+    snapped(rect, ppp).shrink(pixels / ppp)
 }
 
 /// The scale `ppp` made safe (a scale that is not a positive number counts as 1), and how many whole physical pixels a
@@ -393,6 +442,37 @@ fn hairline_shape(a: Pos2, b: Pos2, colour: Color32, ppp: f32) -> Shape {
     // The middle of a run of `pixels` physical pixels from the one `at` falls in.
     let snap = |at: f32| ((at * ppp).floor() + pixels / 2.0) / ppp;
     Shape::line_segment([pos2(snap(a.x), snap(a.y)), pos2(snap(b.x), snap(b.y))], Stroke::new(pixels / ppp, colour))
+}
+
+/// `rect` on whole physical pixels at `ppp`: each side rounded to the nearest pixel boundary.
+fn snapped(rect: Rect, ppp: f32) -> Rect {
+    let whole = |at: f32| (at * ppp).round() / ppp;
+    Rect::from_min_max(pos2(whole(rect.left()), whole(rect.top())), pos2(whole(rect.right()), whole(rect.bottom())))
+}
+
+/// Which edge of a pane.
+#[derive(Clone, Copy)]
+enum Side {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+/// The band of a pane's edge on `side` of `rect` (on whole pixels, [`snapped`]) at `ppp`: a [`hairline`]'s pixels
+/// across, the outermost of the rect on that side, and along the rect's whole length, so the edges stand inside the
+/// fill, meet at its corners and never run past one another. A filled band, not a line: egui puts the ends of a level
+/// or upright line on pixel centres, half a pixel past a corner.
+fn edge_shape(rect: Rect, side: Side, colour: Color32, ppp: f32) -> Shape {
+    let (ppp, pixels) = line_pixels(ppp);
+    let thick = pixels / ppp;
+    let band = match side {
+        Side::Left => Rect::from_min_max(rect.min, pos2(rect.left() + thick, rect.bottom())),
+        Side::Right => Rect::from_min_max(pos2(rect.right() - thick, rect.top()), rect.max),
+        Side::Top => Rect::from_min_max(rect.min, pos2(rect.right(), rect.top() + thick)),
+        Side::Bottom => Rect::from_min_max(pos2(rect.left(), rect.bottom() - thick), rect.max),
+    };
+    Shape::rect_filled(band, 0.0, colour)
 }
 
 /// A line one point wide (whole physical pixels, at least one) in `colour` from `a` to `b`, on whole pixels.
@@ -450,29 +530,29 @@ impl Panes {
         let ppp = painter.pixels_per_point();
         let colour = theme.palette.line;
         let near = |a: f32, b: f32| (a - b).abs() < 0.5;
-        let mut shapes: Vec<Shape> = self.rects.iter().map(|rect| Shape::rect_filled(*rect, 0.0, theme.palette.surface)).collect();
+        // Each pane on whole physical pixels: its fill and its edges, which stand inside it.
+        let mut shapes: Vec<Shape> = self.rects.iter().map(|rect| Shape::rect_filled(snapped(*rect, ppp), 0.0, theme.palette.surface)).collect();
         for rect in &self.rects {
-            let (top, bottom) = (rect.top(), rect.bottom() - 1.0);
-            let (left, right) = (rect.left(), rect.right() - 1.0);
+            let whole = snapped(*rect, ppp);
             // A strip's own edge is the line between it and this pane.
             let beside_edge = self.edged.iter().any(|strip| near(strip.right(), rect.left()));
             if !near(rect.left(), window.left()) && !beside_edge {
-                shapes.push(hairline_shape(pos2(left, top), pos2(left, rect.bottom()), colour, ppp));
+                shapes.push(edge_shape(whole, Side::Left, colour, ppp));
             }
             // The next pane's left edge is this one's right edge: drawn once, by the next.
             let followed = self.rects.iter().any(|other| near(other.left(), rect.right()));
             if !near(rect.right(), window.right()) && !followed {
-                shapes.push(hairline_shape(pos2(right, top), pos2(right, rect.bottom()), colour, ppp));
+                shapes.push(edge_shape(whole, Side::Right, colour, ppp));
             }
             // A strip's own bottom edge is the line between it and this pane.
             let under_cap = self.capped.iter().any(|strip| near(strip.bottom(), rect.top()));
             if !near(rect.top(), window.top()) && !under_cap {
-                shapes.push(hairline_shape(pos2(left, top), pos2(rect.right(), top), colour, ppp));
+                shapes.push(edge_shape(whole, Side::Top, colour, ppp));
             }
             // The pane under this one starts at its bottom: that pane's top line is the one line between them.
             let stacked = self.rects.iter().any(|other| near(other.top(), rect.bottom()));
             if !near(rect.bottom(), window.bottom()) && !stacked {
-                shapes.push(hairline_shape(pos2(left, bottom), pos2(rect.right(), bottom), colour, ppp));
+                shapes.push(edge_shape(whole, Side::Bottom, colour, ppp));
             }
         }
         painter.set(self.slot, Shape::Vec(shapes));

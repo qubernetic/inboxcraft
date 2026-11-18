@@ -40,8 +40,18 @@
 # Acting on mail (#131): the open message archived, the next one open (and read) and the toast with Undo.
 {"out": "docs/images/reader-archive-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
 {"out": "docs/images/reader-archive-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
-# Adding an account (E1.11), over the sample: the form typed by hand, after Detect, the check under way, passed, and
+# The window with no account yet (#238): the welcome box in the middle, with Add account and where it leads.
+{"out": "docs/images/welcome-light.png", "mode": "light", "size": [1200, 820], "first": true}
+{"out": "docs/images/welcome-dark.png", "mode": "dark", "size": [1200, 820], "first": true}
+# Adding an account (E1.11, #238), over the sample: the form empty, typed by hand, with a port and a CalDAV address
+# typed wrong, at 130 % text, after Detect (what it asked beside the form), the check at its third step, passed, and
 # failed at the certificate. The check is scripted; nothing connects.
+{"out": "docs/images/onboard-empty-light.png", "mode": "light", "size": [1200, 820], "onboard": "empty"}
+{"out": "docs/images/onboard-empty-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "empty"}
+{"out": "docs/images/onboard-invalid-light.png", "mode": "light", "size": [1200, 820], "onboard": "invalid"}
+{"out": "docs/images/onboard-invalid-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "invalid"}
+{"out": "docs/images/onboard-form-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "onboard": "form"}
+{"out": "docs/images/onboard-form-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "onboard": "form"}
 {"out": "docs/images/onboard-form-light.png", "mode": "light", "size": [1200, 820], "onboard": "form"}
 {"out": "docs/images/onboard-form-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "form"}
 {"out": "docs/images/onboard-detected-light.png", "mode": "light", "size": [1200, 820], "onboard": "detected"}
@@ -68,10 +78,16 @@
 # and the time picker, on a page of their own.
 {"out": "docs/images/components-fields-light.png", "mode": "light", "fields": true}
 {"out": "docs/images/components-fields-dark.png", "mode": "dark", "fields": true}
+# The screens' own sets (#238): the file on a draft, coming soon.
+{"out": "docs/images/components-screens-light.png", "mode": "light", "screens": true}
+{"out": "docs/images/components-screens-dark.png", "mode": "dark", "screens": true}
 # The shared rows and blocks (#235): row, hover actions, banner, empty state, progress, settings row, check step,
 # facts, on a page of their own.
 {"out": "docs/images/components-blocks-light.png", "mode": "light", "blocks": true}
 {"out": "docs/images/components-blocks-dark.png", "mode": "dark", "blocks": true}
+# The calendar's sets (#238): the event block and the mini month.
+{"out": "docs/images/components-calendar-light.png", "mode": "light", "calendar_sets": true}
+{"out": "docs/images/components-calendar-dark.png", "mode": "dark", "calendar_sets": true}
 # The reader's sets (#237): thread row, content bar, why line, attachment, quote fold, hairline table, invitation card,
 # on a page of their own.
 {"out": "docs/images/components-reader-light.png", "mode": "light", "reader": true}
@@ -82,6 +98,23 @@
 # The appearance settings page (E1.16b).
 {"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true}
 {"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true}
+# The settings pages (#238): the sections not shot elsewhere, dark and light; Appearance and Shortcuts at 130 %.
+{"out": "docs/images/settings-accounts-light.png", "mode": "light", "size": [1200, 820], "section": "accounts"}
+{"out": "docs/images/settings-accounts-dark.png", "mode": "dark", "size": [1200, 820], "section": "accounts"}
+{"out": "docs/images/settings-calendar-light.png", "mode": "light", "size": [1200, 820], "section": "calendar"}
+{"out": "docs/images/settings-calendar-dark.png", "mode": "dark", "size": [1200, 820], "section": "calendar"}
+{"out": "docs/images/settings-privacy-light.png", "mode": "light", "size": [1200, 820], "section": "privacy"}
+{"out": "docs/images/settings-privacy-dark.png", "mode": "dark", "size": [1200, 820], "section": "privacy"}
+{"out": "docs/images/settings-about-light.png", "mode": "light", "size": [1200, 820], "section": "about"}
+{"out": "docs/images/settings-about-dark.png", "mode": "dark", "size": [1200, 820], "section": "about"}
+{"out": "docs/images/settings-ai-light.png", "mode": "light", "size": [1200, 820], "section": "ai"}
+{"out": "docs/images/settings-ai-dark.png", "mode": "dark", "size": [1200, 820], "section": "ai"}
+{"out": "docs/images/settings-plugins-light.png", "mode": "light", "size": [1200, 820], "section": "plugins"}
+{"out": "docs/images/settings-plugins-dark.png", "mode": "dark", "size": [1200, 820], "section": "plugins"}
+{"out": "docs/images/settings-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "section": "appearance"}
+{"out": "docs/images/settings-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "section": "appearance"}
+{"out": "docs/images/shortcuts-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
+{"out": "docs/images/shortcuts-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
 # The message list (E1.17a): the screener and group cards and the hover actions on the row selected by
 # keyboard, with invented data the app does not show yet.
 {"out": "docs/images/list-showcase-light.png", "mode": "light", "size": [1400, 860], "showcase": true, "step": 2}
@@ -136,6 +169,8 @@
 {"out": "docs/images/compose-suggest-dark.png", "mode": "dark", "size": [1400, 860], "compose": "suggest"}
 {"out": "docs/images/compose-floating-light.png", "mode": "light", "size": [1400, 860], "compose": "floating"}
 {"out": "docs/images/compose-floating-dark.png", "mode": "dark", "size": [1400, 860], "compose": "floating"}
+{"out": "docs/images/compose-folded-light.png", "mode": "light", "size": [1400, 860], "compose": "folded"}
+{"out": "docs/images/compose-folded-dark.png", "mode": "dark", "size": [1400, 860], "compose": "folded"}
 # Reply and templates (E2.4, E2.5): a reply to Odile's rota with a line written over the quote; a template whose
 # blank is still to fill in, Send blocked until it is.
 {"out": "docs/images/compose-reply-light.png", "mode": "light", "size": [1400, 860], "compose": "reply"}
@@ -221,6 +256,9 @@
 {"out": "docs/images/menu-templates-dark.png", "mode": "dark", "size": [1400, 860], "compose": "template", "menu": "templates"}
 {"out": "docs/images/menu-group-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}
 {"out": "docs/images/menu-group-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}
+# The Accounts page with no account: one box in the middle of the page, Add account in it (settings-accounts/empty).
+{"out": "docs/images/settings-accounts-empty-light.png", "mode": "light", "size": [1200, 820], "first": true, "accounts": true}
+{"out": "docs/images/settings-accounts-empty-dark.png", "mode": "dark", "size": [1200, 820], "first": true, "accounts": true}
 # The reader's banners, cards and states (#237): remote pictures held back with their boxes, a held sender's let-in
 # card, an invitation that asks and a narrow reader at 130 % with an invitation and a held sender.
 {"out": "docs/images/reader-remote-light.png", "mode": "light", "size": [1440, 900], "open": {"folder": 5}, "select": "You have won a lighthouse"}
@@ -242,3 +280,6 @@
 {"out": "docs/images/accounts-open-dark.png", "mode": "dark", "size": [1400, 860], "steps": [{"press": "Accounts"}]}
 {"out": "docs/images/row-snooze-picker-light.png", "mode": "light", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}
 {"out": "docs/images/row-snooze-picker-dark.png", "mode": "dark", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}
+# An open list on the settings sheet: the add-account form's IMAP security select, its list open over the sheet (#238).
+{"out": "docs/images/settings-select-open-light.png", "mode": "light", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
+{"out": "docs/images/settings-select-open-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}

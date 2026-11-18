@@ -657,6 +657,9 @@ pub struct Mailbox {
     gap: Option<usize>,
     error: Option<String>,
     runs: u64,
+    /// Counts the reads and changes of what the list's head and cards show (the rows, the place, the folders, the
+    /// accounts, the outbox, the view): a measure kept from the list stays good while it is the same.
+    revision: u64,
     /// The id of the last command run through [`Mailbox::run`].
     last: Option<&'static str>,
     /// Who the window's commands run for: the owner, or an agent while a picture's script steps drive the window.
@@ -892,6 +895,7 @@ impl Mailbox {
             gap: None,
             error: None,
             runs: 0,
+            revision: 0,
             last: None,
             caller: Caller::Owner,
             refused: None,
@@ -985,8 +989,15 @@ impl Mailbox {
         &self.showcase
     }
 
+    /// How often what the list's head and cards show was read or changed: equal, nothing of it changed in between.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     /// Shows `showcase` in the list, for `ui_shot`.
     pub fn set_showcase(&mut self, showcase: Showcase) {
+        self.revision = self.revision.wrapping_add(1);
         self.showcase = showcase;
     }
 
@@ -1040,6 +1051,7 @@ impl Mailbox {
 
     /// Shows the unified inbox's groups as `view` does.
     pub fn set_inbox_view(&mut self, view: InboxView) {
+        self.revision = self.revision.wrapping_add(1);
         self.inbox_view = view;
     }
 
@@ -1577,6 +1589,7 @@ impl Mailbox {
     }
 
     fn load_accounts(&mut self) -> Result<(), UiError> {
+        self.revision = self.revision.wrapping_add(1);
         let answer = self.run("account.list", &json!({}))?;
         self.accounts = array("account.list", &answer, "accounts")?
             .iter()
@@ -1598,6 +1611,7 @@ impl Mailbox {
     }
 
     fn load_folders(&mut self) -> Result<(), UiError> {
+        self.revision = self.revision.wrapping_add(1);
         let answer = self.run("folder.list", &json!({ "account": self.narrowed }))?;
         let mut folders: Vec<FolderRow> = array("folder.list", &answer, "folders")?
             .iter()
@@ -1654,12 +1668,14 @@ impl Mailbox {
 
     /// Reads the outbox (`outbox.list`).
     fn load_outbox(&mut self) -> Result<(), UiError> {
+        self.revision = self.revision.wrapping_add(1);
         let answer = self.run("outbox.list", &json!({}))?;
         self.outbox = array("outbox.list", &answer, "items")?.iter().map(outbox_row).collect();
         Ok(())
     }
 
     fn load_list(&mut self, place: Place) -> Result<(), UiError> {
+        self.revision = self.revision.wrapping_add(1);
         // The outbox shows while anything is in it, and gives way to the inbox after.
         let place = if place == Place::Outbox && self.outbox.is_empty() { Place::View(Role::Inbox) } else { place };
         let rows = if self.query.is_empty() { self.list(place)? } else { self.found()? };
@@ -1880,6 +1896,7 @@ impl Mailbox {
     /// Puts `rows` in the list in place of the engine's: a list longer than the engine lists, for a test.
     #[cfg(test)]
     pub(crate) fn set_rows(&mut self, rows: Vec<MessageRow>) {
+        self.revision = self.revision.wrapping_add(1);
         self.messages = rows;
         self.rows_serial = self.rows_serial.wrapping_add(1);
     }

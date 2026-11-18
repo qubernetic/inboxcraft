@@ -36,6 +36,7 @@
 
 mod accounts;
 mod calendar;
+pub(crate) use self::calendar::{event_board, mini_month_board};
 mod compose;
 mod frame;
 mod invite;
@@ -52,7 +53,7 @@ pub use list::rows_built;
 
 use std::sync::Arc;
 
-use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, Ui, UiBuilder, pos2};
+use egui::{CentralPanel, Frame, Key, Margin, Panel, Rect, Ui, pos2};
 use inboxcraft_engine::appearance::{Appearance, Motion, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
@@ -89,9 +90,6 @@ pub(super) const ONE_PANE: f32 = 980.0;
 
 /// The default width of the folder pane, in points.
 pub(super) const FOLDER_PANE: f32 = 240.0;
-
-/// The widest the card of the window with no account gets, in points.
-const WELCOME_WIDTH: f32 = 640.0;
 
 /// How long the toast after an act shows, in seconds; its Undo works until then.
 pub const TOAST_SECONDS: f64 = 6.0;
@@ -168,6 +166,8 @@ pub struct InboxApp {
     focus_walked: bool,
     /// The last act on a row came by a key (or the palette), not by a press: the keyboard is in the window.
     act_by_key: bool,
+    /// An Undo beside the docked composer gave a selection back: it opens as a preview, never as the owner's open.
+    restored: bool,
     /// Whether the window held one pane in the last frame drawn; `None` before the first.
     single: Option<bool>,
     /// Whether the list was shown in the last frame drawn.
@@ -213,6 +213,24 @@ pub struct InboxApp {
     frame_applied: Option<WindowFrame>,
     /// The message being written, in the reader's place or floating.
     composer: Option<Composer>,
+    /// Whether the keyboard focus was inside the composer at the start of this frame: Send's key acts only then.
+    composer_keys: bool,
+    /// Whether the composer has taken the list's place this frame (too narrow for the list's heads beside it, or in
+    /// front of it in one pane): the list is not drawn, and nothing acts on it or its rows (no key, no palette command,
+    /// no Undo).
+    list_hidden: bool,
+    /// Where the list was drawn last, to tell whether the keyboard was in it when it goes.
+    list_rect: Option<Rect>,
+    /// The list's least width beside the docked composer and what it was measured for: the mailbox's revision, whether
+    /// something is searched, the text size and the scale ([`InboxApp::list_least`]).
+    list_least: Option<((u64, bool, u32, u32), f32)>,
+    /// For how many more frames the keyboard is given to the composer's text, the list having gone with it.
+    keys_to_text: u8,
+    /// How often [`list::least_width`] was measured (for the tests).
+    #[cfg(test)]
+    measured: usize,
+    /// The frame being drawn; between frames, the next one.
+    frame: u64,
     /// What the composer's last step says in a toast (the draft kept, the message on its way), and since when.
     notice: Option<(String, Option<f64>)>,
     /// The time picker opens over the open message in the next frame, with this text typed.
@@ -223,6 +241,21 @@ pub struct InboxApp {
     later_picker: bool,
     /// A menu that opens in the next frame (the `ui_shot` scripts).
     menu: Option<egui::Id>,
+    /// The input time the draft was last kept by [`InboxApp::keep_draft`], in seconds.
+    kept_at: Option<f64>,
+}
+
+/// While the person types in the composer, its draft is kept at most once in this many seconds: keeping it runs
+/// `compose.update`, which writes the whole draft to the store on the window's thread. Leaving a field, closing,
+/// sending, a close of the window and the end of the app keep it at once, so only a crash can lose what was typed in
+/// the last second.
+pub(crate) const KEEP_EVERY: f64 = 1.0;
+
+/// The end of the app keeps the draft being written, however little time passed since it was last kept.
+impl Drop for InboxApp {
+    fn drop(&mut self) {
+        self.keep_draft_now();
+    }
 }
 
 impl std::fmt::Debug for InboxApp {
@@ -238,6 +271,91 @@ impl std::fmt::Debug for InboxApp {
 fn margin(points: f32) -> Margin {
     // Distances are a few points; the clamp keeps the cast inside i8.
     Margin::same(points.clamp(0.0, 100.0) as i8)
+}
+
+/// The widest a pane at the left of the reader's place (the folders, the list) gets in `ui`: with the composer `docked`
+/// there, what leaves the composer its least width and the card's 8 beside it, so in a narrow window the pane gives way
+/// to it. A width that is not a number counts as 1.
+fn list_widest(ui: &Ui, theme: &Theme, docked: bool) -> f32 {
+    if docked { (ui.available_width() - compose::least_width(ui, theme) - theme.spacing.s2).max(1.0) } else { f32::INFINITY }
+}
+
+/// Keeps the width the owner gave the resizable pane `id` apart from what `widest` squeezes it to (egui keeps the
+/// squeezed width as the pane's own, kept while the app runs): while the cap bites, the owner's width is kept; once it
+/// lets go (the composer closed or floating, the window wider), the pane is given back the owner's width, as far as the
+/// cap allows. A width the owner drags to while the cap does not bite is the owner's, and so is a narrower one while
+/// it is squeezed, but only from the pane's own resize handle (dragged, or stepped by a screen reader): a width that
+/// changed under a window resized however slowly is the cap's. Both are kept with the pane's own.
+fn keep_owners_width(ctx: &egui::Context, id: egui::Id, widest: f32) {
+    let Some(mut state) = egui::containers::panel::PanelState::load(ctx, id) else { return };
+    let width = state.outer_rect.width();
+    if !width.is_finite() {
+        return;
+    }
+    let key = id.with("owners-width");
+    let (owner, squeezed) = ctx.data_mut(|data| data.get_persisted::<(f32, bool)>(key)).unwrap_or((width, false));
+    // The handle dragged now, or released last frame: egui stores the width a drag leaves only in the frame the
+    // drag stops, so this frame reads it. A screen reader's step or value on the handle is the owner's as a drag is.
+    let handle = id.with("__resize");
+    let stepped = ctx.input(|input| {
+        use egui::accesskit::Action;
+        [Action::Increment, Action::Decrement, Action::SetValue].into_iter().any(|action| input.num_accesskit_action_requests(handle, action) > 0)
+    });
+    let dragging = ctx.is_being_dragged(handle) || ctx.drag_stopped_id() == Some(handle) || stepped;
+    let flag = key.with("dragged");
+    let dragged = ctx.data_mut(|data| data.get_temp::<bool>(flag)).unwrap_or(false) || dragging;
+    ctx.data_mut(|data| data.insert_temp(flag, dragging));
+    let biting = width >= widest - 0.5;
+    let kept = if biting {
+        (owner, true)
+    } else if squeezed && dragged {
+        (width, false)
+    } else if squeezed {
+        let to = owner.min(widest);
+        if to.is_finite() && to > width + 0.5 {
+            state.outer_rect.set_width(to);
+            ctx.data_mut(|data| data.insert_persisted(id, state));
+        }
+        (owner, owner > widest + 0.5)
+    } else {
+        (width, false)
+    };
+    ctx.data_mut(|data| data.insert_persisted(key, kept));
+}
+
+/// Where the list stands: not drawn in one pane while something stands in its place (`shown` false); beside the
+/// reader or the composer (`beside`), but not drawn while the composer `docked` beside it would leave it (`widest`,
+/// [`list_widest`]) narrower than its heads need (`least`, [`InboxApp::list_least`]); else over the whole middle.
+fn list_place(shown: bool, beside: bool, docked: bool, widest: f32, least: f32) -> ListPlace {
+    if !shown {
+        ListPlace::Away
+    } else if beside && docked && widest < least {
+        ListPlace::Hidden
+    } else if beside {
+        ListPlace::Beside
+    } else {
+        ListPlace::Whole
+    }
+}
+
+/// The list's pane at the left: its 440 and the line at its left, no splitter, and a width a person once dragged to is
+/// not read; beside the docked composer never wider than what leaves the composer its own (`widest`).
+fn list_panel(docked: bool, widest: f32) -> Panel {
+    let width = if docked { (LIST_WIDTH + 1.0).min(widest) } else { LIST_WIDTH + 1.0 };
+    Panel::left("list").resizable(false).exact_size(width).show_separator_line(false)
+}
+
+/// Where the list stands in a frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ListPlace {
+    /// Not drawn: in one pane, the open message or the composer stands in its place.
+    Away,
+    /// Not drawn: the composer in the reader's place has taken its place too.
+    Hidden,
+    /// At the left, beside the reader or the composer.
+    Beside,
+    /// Over the whole middle.
+    Whole,
 }
 
 /// A pane's frame: no fill, `left` and `right` of its pane and `gap` above and below it.
@@ -256,25 +374,6 @@ pub(super) fn one_pane(ctx: &egui::Context) -> bool {
 #[cfg(test)]
 pub(super) fn reader_rect(ctx: &egui::Context) -> Option<egui::Rect> {
     ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::unique("reader-rect")))
-}
-
-/// One card in the middle of the window, as tall as what `add` draws in it; what `add` gave.
-fn middle_card<R>(ui: &mut Ui, theme: &Theme, layers: &mut Panes, mut add: impl FnMut(&mut Ui) -> R) -> R {
-    let s = theme.spacing;
-    CentralPanel::no_frame()
-        .frame(around(s.s2, s.s2, s.s2))
-        .show(ui, |ui| {
-            let room = ui.max_rect();
-            let pad = s.s6 * 2.0;
-            let width = WELCOME_WIDTH.min(room.width());
-            let inside = Rect::from_min_size(room.min, egui::vec2((width - 2.0 * pad).max(1.0), room.height()));
-            let mut sizing = ui.new_child(UiBuilder::new().max_rect(inside).layout(Layout::top_down(Align::Center)).sizing_pass().invisible());
-            add(&mut sizing);
-            let height = (sizing.min_rect().height() + 2.0 * pad).min(room.height());
-            let card = Rect::from_center_size(room.center(), egui::vec2(width, height));
-            ui.scope_builder(UiBuilder::new().max_rect(card).layout(Layout::top_down(Align::Center)), |ui| layers.card(ui, margin(pad), add)).inner
-        })
-        .inner
 }
 
 impl InboxApp {
@@ -302,6 +401,7 @@ impl InboxApp {
             list_over_composer: false,
             focus_reader: false,
             focus_walked: false,
+            restored: false,
             act_by_key: false,
             single: None,
             list_was_shown: true,
@@ -326,10 +426,19 @@ impl InboxApp {
             own_frame: false,
             frame_applied: None,
             composer: None,
+            composer_keys: false,
+            list_hidden: false,
+            list_rect: None,
+            list_least: None,
+            keys_to_text: 0,
+            #[cfg(test)]
+            measured: 0,
+            frame: 0,
             notice: None,
             picker: None,
             sending: None,
             later_picker: false,
+            kept_at: None,
             menu: None,
         }
     }
@@ -554,15 +663,28 @@ impl InboxApp {
     #[must_use]
     pub fn can_run(&self, id: &str) -> bool {
         match id {
-            keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => self.row_act(id).is_some(),
-            keymap::UNDO => self.mailbox.can_undo(),
+            // With the list hidden nothing acts on a row the owner cannot see, by a key or from the palette; Undo, which
+            // may take back an act on such a row, rests too.
+            keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => !self.list_hidden && self.row_act(id).is_some(),
+            keymap::UNDO => !self.list_hidden && self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
-            keymap::OPEN_HELD => self.screen == Screen::Mail && !self.docked() && self.held_back.is_some(),
+            // The held-back message opens as a press on its row does (it floats a docked composer); with the list
+            // hidden it rests, as every command of the list does.
+            keymap::OPEN_HELD => self.screen == Screen::Mail && !self.list_hidden && self.held_back.is_some(),
+            // The search field is the list's: hidden, it is not there to take the keys.
+            keymap::FIND => !self.list_hidden,
+            // In one pane only, where it brings the list back in front: the list hidden beside a composer in two panes
+            // has no Back.
             keymap::BACK => self.screen == Screen::Mail && self.single == Some(true) && self.in_place_of_list(),
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
-            keymap::SEND => self.composer_in_front(),
-            _ if keymap::LIST_KEYS.contains(&id) => self.screen == Screen::Mail && (self.list_row.is_some() || self.list_keys),
+            keymap::FOLD => self.composer.is_some() && !self.docked(),
+            // In front in the reader's place; or the floating panel open with the keys inside it.
+            keymap::SEND => self.composer_in_front() || (self.composer_keys && self.composer.as_ref().is_some_and(|composer| !composer.folded())),
+            _ if keymap::CALENDAR_KEYS.contains(&id) => self.screen == Screen::Calendar && !self.calendar.is_empty(),
+            // The list's keys and its views act on the list: hidden, it is not there to act on.
+            _ if keymap::LIST_KEYS.contains(&id) => self.screen == Screen::Mail && !self.list_hidden && (self.list_row.is_some() || self.list_keys),
+            keymap::VIEW_GROUPED | keymap::VIEW_SMART | keymap::VIEW_LIST => !self.list_hidden,
             _ => keymap::action(id).is_some(),
         }
     }
@@ -572,6 +694,10 @@ impl InboxApp {
     pub fn run_action(&mut self, ctx: &egui::Context, id: &str) {
         // An action only a coming-soon control offered runs by no way in.
         if !self.can_run(id) || soon::blocked(ctx, id) {
+            return;
+        }
+        if keymap::CALENDAR_KEYS.contains(&id) {
+            self.calendar_key(ctx, id);
             return;
         }
         match id {
@@ -605,7 +731,11 @@ impl InboxApp {
             keymap::SNOOZE => self.open_picker(""),
             keymap::OPEN_HELD => {
                 if let Some(held) = self.held_back.take() {
+                    // The owner's open, as a press: the message in the reader, read, a docked composer floating.
                     self.mailbox.select(Some(held.pick));
+                    self.reading = true;
+                    self.focus_reader = one_pane(ctx);
+                    self.float_behind();
                 }
             }
             keymap::CALENDAR => self.show_calendar(),
@@ -614,6 +744,11 @@ impl InboxApp {
                 ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
             }
             keymap::SEND => self.send_composer(),
+            keymap::FOLD => {
+                if let Some(composer) = self.composer.as_mut() {
+                    composer.toggle_fold();
+                }
+            }
             keymap::SETTINGS => {
                 if !self.settings.is_open() {
                     self.open_settings();
@@ -856,10 +991,10 @@ impl InboxApp {
         }
     }
 
-    /// A message opened from the list over the docked composer (one pane) takes the composer's place: the composer
-    /// floats, all it holds kept.
+    /// A message the owner opens from the list (a press on its row, Enter) takes the docked composer's place, in one
+    /// pane or two, also when it was already selected as a preview: the composer floats, all it holds kept.
     fn float_behind(&mut self) {
-        if self.list_over_composer
+        if self.docked()
             && let Some(composer) = &mut self.composer
         {
             composer.set_floating(true);
@@ -880,13 +1015,14 @@ impl InboxApp {
 
     /// Whether the list has the keyboard: a row has the focus, or a row was pressed or keyed last and nothing else has
     /// the focus; never while the palette, the settings, the composer in the reader's place or the calendar hold the
-    /// keys, or a popup is open.
+    /// keys, the list is hidden, or a popup is open.
     fn list_has_keyboard(&self, ctx: &egui::Context) -> bool {
         if self.screen != Screen::Mail
             || self.palette.is_open()
             || self.settings.is_open()
             || self.settings.capturing().is_some()
             || self.composer_in_front()
+            || self.list_hidden
         {
             return false;
         }
@@ -951,7 +1087,7 @@ impl InboxApp {
     /// Shows the calendar screen, leaving the settings sheet; its calendars and events are read again.
     pub fn show_calendar(&mut self) {
         self.close_settings();
-        self.screen = Screen::Calendar;
+        self.screen_to(Screen::Calendar);
         self.calendar.refresh(&mut self.mailbox);
     }
 
@@ -984,11 +1120,56 @@ impl InboxApp {
                 calendar::Asked::Delete => calendar.delete_picked(mailbox),
                 calendar::Asked::Save => calendar.save(mailbox),
                 calendar::Asked::Cancel => calendar.close_editor(),
+                calendar::Asked::Leave(leave) => calendar.leave_editor(leave == crate::component::popup::Leave::Escape),
+                calendar::Asked::More(day) => calendar.set_more(day),
+                calendar::Asked::PickDay(day) => calendar.pick_day(Some(day)),
             }
         }
     }
 
-    /// Opens the settings sheet on Shortcuts, closing the add-account form.
+    /// Before the calendar screen is drawn: the time now for its now line, and its own keys.
+    fn calendar_before(&mut self, ctx: &egui::Context, setting: bool) {
+        if self.screen != Screen::Calendar {
+            return;
+        }
+        self.calendar.tick(self.mailbox.now(), self.mailbox.offset());
+        let open = setting || self.palette.is_open() || self.settings.capturing().is_some();
+        for id in calendar::keys::pressed(ctx, &self.keymap, &self.calendar, open) {
+            self.calendar_key(ctx, id);
+        }
+        calendar::keys::begin(ctx);
+    }
+
+    /// Runs the calendar's key `id` ([`keymap::CALENDAR_KEYS`]): moves the pick, opens it or leaves it, and hands the
+    /// keyboard to what is picked.
+    fn calendar_key(&mut self, ctx: &egui::Context, id: &str) {
+        use crate::calendar::Way;
+        let (calendar, mailbox) = (&mut self.calendar, &mut self.mailbox);
+        let mini = calendar.picked_day().is_some_and(|day| ctx.memory(|memory| memory.focused()) == Some(calendar::mini_id(day)));
+        let target = match id {
+            keymap::CALENDAR_LEFT => calendar.move_pick(mailbox, Way::Left, mini),
+            keymap::CALENDAR_RIGHT => calendar.move_pick(mailbox, Way::Right, mini),
+            keymap::CALENDAR_UP => calendar.move_pick(mailbox, Way::Up, mini),
+            keymap::CALENDAR_DOWN => calendar.move_pick(mailbox, Way::Down, mini),
+            keymap::CALENDAR_OPEN => calendar.open_pick(mailbox, mini),
+            _ => {
+                calendar.leave_pick();
+                ctx.memory_mut(|memory| {
+                    if let Some(focused) = memory.focused() {
+                        memory.surrender_focus(focused);
+                    }
+                });
+                None
+            }
+        };
+        if let Some(target) = target {
+            calendar::keys::want(ctx, target);
+            // The key moved the pick: egui does not move the focus on as well.
+            ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+        }
+    }
+
+    /// Opens the settings sheet on Shortcuts, keeping the account forms as they are typed, all but the password.
     pub fn open_shortcuts(&mut self) {
         self.onboarding.close();
         self.settings.open_at(Section::Shortcuts);
@@ -997,7 +1178,19 @@ impl InboxApp {
     /// Shows the mail, leaving the settings sheet and the calendar.
     fn show_mail(&mut self) {
         self.close_settings();
-        self.screen = Screen::Mail;
+        self.screen_to(Screen::Mail);
+    }
+
+    /// Shows `screen`. A composer in the reader's place moves to the floating panel with the calendar and back with the
+    /// mail: in its new place it has not been seen yet.
+    fn screen_to(&mut self, screen: Screen) {
+        let was = self.docked();
+        self.screen = screen;
+        if was != self.docked()
+            && let Some(composer) = self.composer.as_mut()
+        {
+            composer.unsee();
+        }
     }
 
     /// Gives the action waiting on the Shortcuts page the key pressed in this frame, taking it from the action that had
@@ -1007,7 +1200,7 @@ impl InboxApp {
         match keymap::captured(ctx) {
             Some(Captured::Cancel) => self.settings.captured(None),
             Some(Captured::Key(shortcut)) => {
-                let had = self.keymap.action_of(shortcut).filter(|other| *other != waiting).and_then(keymap::action);
+                let had = self.keymap.clash(waiting, shortcut).and_then(keymap::action);
                 self.keymap.bind(waiting, shortcut);
                 let note = had.map(|had| {
                     tr!("{key} was the key of {action}; it has none now.", key = crate::component::key::key_words(&shortcut), action = had.name)
@@ -1022,6 +1215,9 @@ impl InboxApp {
     /// the keys are theirs; the settings sheet, the palette and the calendar lie over the list or in its place, so the
     /// mail's keys (the arrows, the acts on a row) rest while they show.
     fn keys(&mut self, ctx: &egui::Context) -> Keys {
+        // Send's key acts only from inside the composer, open and not under the settings sheet: never from a field in
+        // front of it or beside it.
+        self.composer_keys = !self.settings.is_open() && self.composer.as_ref().is_some_and(|composer| !composer.folded()) && compose::has_keys(ctx);
         let held = self.settings.capturing().is_some() || self.palette.is_open();
         self.capture_key(ctx);
         // Read before anything returns: a row that lost the focus while the palette was open is not the list's row.
@@ -1036,20 +1232,46 @@ impl InboxApp {
         }
         let listing = self.list_has_keyboard(ctx);
         let ran = self.pressed(ctx, quiet, listing);
-        let escape = ctx.input(|input| input.key_pressed(Key::Escape));
+        // Esc goes to the topmost surface only: a list of choices open over the window takes it, not what lies under.
+        let escape = crate::component::popup::escape(ctx);
         Keys { ran, escape, typing, quiet }
     }
 
     /// The actions whose key was pressed in this frame, besides the acts on a row (the list takes those) and Undo while
     /// a toast with Undo shows (the toast takes it). While `quiet` (a field has the focus, or the sheet is open) a key
-    /// without Command, Ctrl or Alt runs nothing, so a letter typed is typed, and Undo is the field's.
+    /// without Command, Ctrl or Alt runs nothing, so a letter typed is typed, and Undo is the field's. While the
+    /// settings sheet is open only the keys of the sheet and of the window as a whole run, with a modifier too: Snooze,
+    /// New message, Send and Fold wait for it to close.
     fn pressed(&self, ctx: &egui::Context, quiet: bool, listing: bool) -> Vec<&'static str> {
+        /// The keys of the settings sheet and of the window as a whole: the sheet's own, the palette, the mode and motion,
+        /// and the ways to a place of the window, which close the sheet first. None acts on what lies under the sheet.
+        const SHEET_KEYS: [&str; 13] = [
+            keymap::SETTINGS,
+            keymap::SHORTCUTS,
+            keymap::PALETTE,
+            keymap::LIGHT,
+            keymap::DARK,
+            keymap::SYSTEM_MODE,
+            keymap::MOTION,
+            keymap::MAIL,
+            keymap::SENT,
+            keymap::LATER,
+            keymap::CALENDAR,
+            keymap::FIND,
+            keymap::FULL_WIDTH,
+        ];
         let toasted = self.mailbox.undoable().is_some_and(|undo| undo.undoable) || self.counting().is_some();
         keymap::actions()
             .into_iter()
             .map(|action| action.id)
             .filter(|id| !ROW_ACTS.iter().any(|(act, _)| act == id))
+            // The calendar's keys are taken by the calendar screen alone (`calendar::keys`).
+            .filter(|id| !keymap::CALENDAR_KEYS.contains(id))
             .filter(|id| *id != keymap::UNDO || !(quiet || toasted))
+            .filter(|id| *id != keymap::SEND || self.composer_keys)
+            // Under the sheet only its own keys and the window's run, with a modifier or without: nothing of the mail,
+            // the reader, the composer or the calendar opens, sends or moves behind it.
+            .filter(|id| !self.settings.is_open() || SHEET_KEYS.contains(id))
             .filter(|id| {
                 // The list's keys run while the list has the keyboard, and never else: a field keeps its letters, its
                 // Home and End, the reader its open message.
@@ -1110,7 +1332,7 @@ impl InboxApp {
         &mut self.settings
     }
 
-    /// Opens the settings sheet on Appearance, closing the add-account form.
+    /// Opens the settings sheet on Appearance, keeping the account forms as they are typed, all but the password.
     pub fn open_settings(&mut self) {
         self.onboarding.close();
         self.settings.open();
@@ -1121,7 +1343,7 @@ impl InboxApp {
         self.settings.open_at(Section::Accounts);
     }
 
-    /// Closes the settings sheet and the add-account form on it.
+    /// Closes the settings sheet, keeping the account forms on it as they are typed, all but the password.
     pub fn close_settings(&mut self) {
         self.onboarding.close();
         self.settings.close();
@@ -1186,9 +1408,12 @@ impl InboxApp {
         (&mut self.reader, &mut self.mailbox)
     }
 
-    /// Opens the selected message in the reader, or closes it, when the selection changed; a message selected while
-    /// the composer has the reader's place sends the composer to its floating panel, unless the list stands over the
-    /// composer in one pane and the person only walks it.
+    /// Opens the selected message in the reader, or closes it, when the selection changed. A preview never floats a
+    /// docked composer, in one pane or two: a selection the focus made (Tab, Shift Tab), in one pane with the list over
+    /// the composer the list's keys too (the arrows, J and K; in two panes they rest beside it), the walk-on after an
+    /// act or an Undo's selection only moves the list's selection; the composer keeps the reader's place and the
+    /// message opens behind it as a preview, not read. Only the owner's open floats it: a press on a row, Enter, the
+    /// held-back message opened as a press opens it ([`InboxApp::float_behind`]), or a message selected from outside.
     ///
     /// When the owner's own act takes the open message out of the list (done, snoozed, moved), the list walks on to the
     /// row the next-message rule selects; when the server takes it away, the reader shows nothing open and that row is
@@ -1208,10 +1433,17 @@ impl InboxApp {
             // The keyboard stays on the list: on the row walked on to.
             self.land_held = self.mailbox.selected();
         }
-        if walking && !from_list && std::mem::take(&mut self.act_by_key) {
+        // Beside the docked composer the reader is not drawn: nothing asks for its tool, and a focus in the composer
+        // is left alone.
+        if walking && !from_list && !self.docked() && std::mem::take(&mut self.act_by_key) {
             // The keyboard stays in the reader: on the widget it was on, else (a key acted with nothing focused) on the
             // reader's first tool, never on nothing.
             self.focus_walked = true;
+        }
+        if walking && !from_list && self.docked() {
+            // Nor on nothing beside the docked composer: on the row walked on to, unless a widget keeps the focus (the
+            // composer's text).
+            self.land_held = self.mailbox.selected();
         }
         // Read by the first sync after the act, which sees what it took away: it counts once.
         self.act_by_key = false;
@@ -1238,18 +1470,20 @@ impl InboxApp {
             self.held_back = None;
         }
         let opening = self.mailbox.selected();
+        // Read by the first sync after the Undo, which sees what it gave back.
+        let restored = std::mem::take(&mut self.restored);
         if open != opening {
-            let walked = self.list_over_composer && !self.reading;
-            // In one pane with the list in front the reader is not shown: a message selected there (the next one after
-            // an act on the keyed row, from the keys, the pointer, a notification or the engine) opens as a preview,
-            // not marked read.
+            let preview = walking || restored || (self.mailbox.keyed() && !self.reading);
+            // In one pane with the list in front, and behind the docked composer, the reader is not shown: a message
+            // selected there (the next one after an act on the keyed row, from the keys, the pointer, a notification
+            // or the engine; a preview beside the composer) opens as a preview, not marked read.
             if let Some(id) = opening
-                && self.list_in_front()
+                && (self.list_in_front() || (preview && self.docked()))
             {
                 self.mailbox.select_by_focus(id);
             }
             if opening.is_some()
-                && !walked
+                && !preview
                 && let Some(composer) = &mut self.composer
             {
                 composer.set_floating(true);
@@ -1367,7 +1601,9 @@ impl InboxApp {
     /// picked, a toast saying when (`mail.send_later`). A blocked one stays, saying why, and so does one the engine
     /// refuses.
     pub fn send_composer(&mut self) {
-        let Some(composer) = &mut self.composer else { return };
+        // A composer opened or moved in this frame has not been seen yet: Send acts once it has been painted.
+        let frame = self.frame;
+        let Some(composer) = self.composer.as_mut().filter(|composer| composer.seen(frame)) else { return };
         let (draft, later) = (composer.draft(), composer.later());
         match composer.send(&mut self.mailbox) {
             Ok(Some(at)) => {
@@ -1477,6 +1713,7 @@ impl InboxApp {
             Asked::Close => return self.close_composer(),
             Asked::Discard => return self.discard_composer(),
             Asked::Open => return self.compose(),
+            Asked::Fold => return self.run_action(ctx, keymap::FOLD),
             _ => {}
         }
         let Some(composer) = &mut self.composer else { return };
@@ -1508,12 +1745,20 @@ impl InboxApp {
                 composer.show_copies();
                 Ok(())
             }
-            Asked::From(account) => composer.set_account(mailbox, account),
-            Asked::Template(at) => match composer.templates().get(at).cloned() {
-                Some(name) => composer.use_template(mailbox, &name),
-                None => Ok(()),
-            },
+            // What these put in changes the draft after it was painted: Send waits for the next frame to show it.
+            Asked::From(account) => {
+                composer.unsee();
+                composer.set_account(mailbox, account)
+            }
+            Asked::Template(at) => {
+                composer.unsee();
+                match composer.templates().get(at).cloned() {
+                    Some(name) => composer.use_template(mailbox, &name),
+                    None => Ok(()),
+                }
+            }
             Asked::Fill => {
+                composer.unsee();
                 ctx.memory_mut(|memory| memory.request_focus(compose::blank_id()));
                 composer.fill(mailbox)
             }
@@ -1525,10 +1770,62 @@ impl InboxApp {
                 mailbox.load_presets();
                 Ok(())
             }
-            Asked::Send | Asked::Close | Asked::Discard | Asked::Open => Ok(()),
+            Asked::Send | Asked::Close | Asked::Discard | Asked::Open | Asked::Fold => Ok(()),
         };
         if let Err(error) = result {
             self.mailbox.fail(error);
+        }
+    }
+
+    /// The narrowest the list beside the docked composer gets, `left` its pane's left margin; beside the reader, any (0).
+    /// [`list::least_width`] is measured once and kept while the mailbox's [`Mailbox::revision`], whether something is
+    /// searched (Clear), the text size and the scale stay the same.
+    fn list_least(&mut self, ui: &Ui, theme: &Theme, docked: bool, left: f32) -> f32 {
+        if !docked {
+            return 0.0;
+        }
+        let key = (self.mailbox.revision(), self.search.is_empty(), theme.fonts.title.size.to_bits(), ui.pixels_per_point().to_bits());
+        let least = match self.list_least {
+            Some((kept, least)) if kept == key => least,
+            _ => {
+                let least = list::least_width(ui, theme, &self.mailbox, &self.search);
+                self.list_least = Some((key, least));
+                #[cfg(test)]
+                {
+                    self.measured = self.measured.saturating_add(1);
+                }
+                least
+            }
+        };
+        left + least
+    }
+
+    /// Notes whether the list is `hidden` this frame. When it goes, its floats (a row's time picker, a group's menu)
+    /// close, and the keyboard in it or in one of them goes to the composer that took its place: nothing of the hidden
+    /// list keeps it.
+    fn hide_list(&mut self, ctx: &egui::Context, hidden: bool) {
+        self.list_hidden = hidden;
+        if !hidden {
+            self.keys_to_text = 0;
+            return;
+        }
+        // Drawn the frame before: it goes now. Its floats close first and do not come back with it.
+        if let Some(list) = self.list_rect.take() {
+            let floated = list::close_floats(ctx, &self.mailbox);
+            let focused = ctx.memory(|memory| memory.focused()).and_then(|id| ctx.read_response(id));
+            let in_list = focused.is_some_and(|response| list.contains_rect(response.rect));
+            if in_list || (floated && !compose::has_keys(ctx)) {
+                // This frame and the next: a float shown the frame before still holds the keys from what lies under it.
+                self.keys_to_text = 2;
+            }
+        }
+        if self.keys_to_text > 0 {
+            self.keys_to_text = self.keys_to_text.saturating_sub(1);
+            if ctx.memory(|memory| memory.focused()) != Some(compose::text_id()) {
+                ctx.memory_mut(|memory| memory.request_focus(compose::text_id()));
+                // Drawn again with the keys where they are now.
+                ctx.request_repaint();
+            }
         }
     }
 
@@ -1572,6 +1869,18 @@ impl InboxApp {
             .inner
     }
 
+    /// The composer's floating panel while it is not `docked`; what was asked in it.
+    fn floating_composer(&mut self, ui: &Ui, theme: &Theme, docked: bool) -> Vec<compose::Asked> {
+        match self.composer.as_mut() {
+            Some(composer) if !docked => {
+                // Over the reader's answers when it drew them in this pass: the panel never covers them.
+                let above = reader::answers_rect(ui.ctx()).map(|answers| answers.top());
+                compose::floating(ui.ctx(), theme, &self.keymap, &self.mailbox, composer, ui.ctx().content_rect(), above)
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Applies what was asked in the composer this frame and keeps its draft; a message `clicked` in the list takes
     /// the reader's place, also when it was selected under the composer, which floats.
     fn composed(&mut self, ctx: &egui::Context, clicked: bool, asked: Vec<compose::Asked>) {
@@ -1581,11 +1890,30 @@ impl InboxApp {
         for asked in asked {
             self.apply_compose(ctx, asked);
         }
-        self.keep_draft();
+        self.keep_draft(ctx);
     }
 
-    /// Keeps the draft when its subject or text changed in this frame: silently, at once.
-    fn keep_draft(&mut self) {
+    /// Keeps the draft when something in it changed, silently: at once when no field of the composer has the keys or
+    /// the window is closing, otherwise at most once in [`KEEP_EVERY`], a frame asked for when the rest is due.
+    fn keep_draft(&mut self, ctx: &egui::Context) {
+        if !self.composer.as_ref().is_some_and(Composer::changed) {
+            return;
+        }
+        let now = ctx.input(|input| input.time);
+        let typing = ctx.memory(|memory| memory.focused()).is_some_and(compose::is_field);
+        let closing = ctx.input(|input| input.viewport().close_requested());
+        // A time that went back, or is no number, keeps it now.
+        let wait = self.kept_at.map_or(0.0, |at| KEEP_EVERY - (now - at));
+        if typing && !closing && wait > 0.0 && wait <= KEEP_EVERY {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+            return;
+        }
+        self.kept_at = Some(now);
+        self.keep_draft_now();
+    }
+
+    /// Keeps the draft at once if something in it changed since it was last kept: the end of a window or of the app.
+    pub fn keep_draft_now(&mut self) {
         if let Some(composer) = self.composer.as_mut().filter(|composer| composer.changed())
             && let Err(error) = composer.save(&mut self.mailbox)
         {
@@ -1751,33 +2079,30 @@ impl InboxApp {
         self.sync();
         self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
+        self.frame = ui.ctx().cumulative_frame_nr();
         let Keys { mut ran, escape, typing, quiet } = self.keys(ui.ctx());
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };
         self.act_by_key |= keyed.is_some();
         self.follow_adding();
         let adding = self.onboarding.stage() != Stage::Closed;
-        // One Esc closes one surface: a float open (a menu, a picker, a select) takes it before anything under it.
-        let closed_popup = escape && crate::component::popup::any_open(ui.ctx());
-        let left_settings = escape && !closed_popup && self.settings.is_open();
+        // One Esc closes one surface: `escape` is the window's only while no float (a menu, a picker, a select) is open
+        // ([`crate::component::popup::escape`]); an open float takes it before anything under it.
+        let left_settings = escape && self.settings.is_open();
         if left_settings {
             self.close_settings();
+            // The sheet on top took the Esc: nothing under it sees it (the calendar's pick, the editor).
+            ui.ctx().input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Escape));
         }
         let setting = self.settings.is_open();
-        // Escape closes a list of choices open in the editor first; the list's own control takes the key.
-        let left_editor = escape
-            && !closed_popup
-            && !left_settings
-            && self.screen == Screen::Calendar
-            && self.calendar.editor().is_some_and(|editor| editor.menu().is_none());
-        if left_editor {
-            self.calendar.close_editor();
-        }
-        let left_full = escape && !closed_popup && !left_settings && self.screen == Screen::Mail && self.reader.full_width();
+        // The sheet or the palette coming over the window closes the lists, menus and pickers open under it.
+        crate::component::popup::covered(ui.ctx(), setting || self.palette.is_open());
+        self.calendar_before(ui.ctx(), setting);
+        let left_full = escape && !left_settings && self.screen == Screen::Mail && self.reader.full_width();
         if left_full {
             self.reader.set_full_width(false);
         }
         // Esc that closes a menu or a picker in the reader closes only that: the keyboard stays the reader's.
-        let back_to_list = escape && !left_settings && !left_full && !closed_popup && self.back_to_list(ui.ctx());
+        let back_to_list = escape && !left_settings && !left_full && self.back_to_list(ui.ctx());
         // The window's ground first, under the error banner too; then the place for the panes, then everything else.
         // The panes touch; a hairline divides them.
         let corner = self.window_corner(ui.ctx());
@@ -1814,13 +2139,23 @@ impl InboxApp {
         layers.capped(banner);
         ran.extend(clicked_rail.actions());
         let mut on_calendar = Vec::new();
+        let mut composer_left = half;
+        self.list_hidden = false;
         if self.screen == Screen::Calendar {
             on_calendar = self.calendar_screen(ui, &theme, &mut layers);
         } else if self.mailbox.accounts().is_empty() {
             add = self.welcome(ui, &theme, &mut layers);
         } else if !full {
             let left;
-            (asked, left) = self.folders(ui, &theme, &mut layers);
+            (asked, left) = self.folders(ui, &theme, &mut layers, docked);
+            let (widest, least) = (list_widest(ui, &theme, docked), self.list_least(ui, &theme, docked, left));
+            // The list stands beside the reader while a message is open, and stays, with nothing open, when the open
+            // message left the list (held back); and beside the docked composer.
+            let reading = self.reader.open_id().is_some() || self.held_back.is_some();
+            let place = list_place(list_shown, !single && (reading || docked), docked, widest, least);
+            // The list is hidden where the composer stands in its place: beside a composer too narrow for it, and in
+            // one pane with the composer in front. Nothing of it acts then.
+            let hidden = place == ListPlace::Hidden || (place == ListPlace::Away && self.composer_in_front());
             let (mailbox, search, keymap) = (&self.mailbox, &mut self.search, &self.keymap);
             let mut list = |ui: &mut Ui, layers: &mut Panes| {
                 layers.card(ui, Margin::ZERO, |ui| {
@@ -1838,27 +2173,25 @@ impl InboxApp {
                     (searched, listed)
                 })
             };
-            // The reader stands beside the list while a message is open, and stays, with nothing open, when the open
-            // message left the list.
-            let reading = self.reader.open_id().is_some() || self.held_back.is_some();
-            (header, listed) = if !list_shown {
-                (list::Header::default(), list::Asked { out: true, ..list::Asked::default() })
-            } else if !single && (reading || docked) {
-                // Where the panel keeps the width a drag gave it (egui's `PanelState`): the tests plant one there.
-                #[cfg(test)]
-                ui.data_mut(|data| data.insert_temp(egui::Id::unique("list-panel-id"), ui.scope_id().with_salt(egui::IdSalt::new("list"))));
-                // The list keeps its 440 beside the reader: no splitter, and a width a person once dragged to is
-                // not read.
-                Panel::left("list")
-                    .resizable(false)
-                    .exact_size(LIST_WIDTH + 1.0)
-                    .show_separator_line(false)
-                    .frame(around(left, half, gap))
-                    .show(ui, |ui| list(ui, &mut layers))
-                    .inner
-            } else {
-                CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| list(ui, &mut layers)).inner
-            };
+            match place {
+                ListPlace::Away if !hidden => self.list_rect = None,
+                ListPlace::Away => {}
+                ListPlace::Hidden => composer_left = left,
+                ListPlace::Beside => {
+                    // Where the panel keeps the width a drag gave it (egui's `PanelState`): the tests plant one there.
+                    #[cfg(test)]
+                    ui.data_mut(|data| data.insert_temp(egui::Id::unique("list-panel-id"), ui.scope_id().with_salt(egui::IdSalt::new("list"))));
+                    let shown = list_panel(docked, widest).frame(around(left, half, gap)).show(ui, |ui| list(ui, &mut layers));
+                    self.list_rect = Some(shown.response.rect);
+                    (header, listed) = shown.inner;
+                }
+                ListPlace::Whole => {
+                    let shown = CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| list(ui, &mut layers));
+                    self.list_rect = Some(shown.response.rect);
+                    (header, listed) = shown.inner;
+                }
+            }
+            self.hide_list(ui.ctx(), hidden);
         }
         let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, screener: screener_mode, presets, gained } = listed;
         let mut drawn = reader::Drawn::default();
@@ -1866,7 +2199,7 @@ impl InboxApp {
         // A texture lives no longer than the picture the reader keeps for it.
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
         if docked && reader_shown {
-            composed = self.composer_card(ui, &theme, &mut layers, half);
+            composed = self.composer_card(ui, &theme, &mut layers, composer_left);
         } else if self.screen == Screen::Mail && (self.reader.open_id().is_some() || self.held_back.is_some()) && reader_shown && !docked {
             drawn = self.reader_card(ui, &theme, &mut layers, if full { gap } else { half });
         }
@@ -1874,25 +2207,24 @@ impl InboxApp {
         // A row's menu whose row this pass did not draw closes; an ask no row took is dropped.
         list::settle_menus(ui.ctx());
         if self.screen == Screen::Calendar {
-            on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, ui.max_rect()));
+            // The palette and the settings sheet lie over the editor: they have the keys and the pointer.
+            let over = setting || self.palette.is_open();
+            on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, over));
         }
         if setting {
             changed = self.settings_sheet(ui.ctx(), &theme);
+        } else {
+            settings::rest(ui.ctx());
         }
         let palette = if self.palette.is_open() {
+            self.palette.set_screen(if self.screen == Screen::Calendar { keymap::Scope::Calendar } else { keymap::Scope::Mail });
             let runnable: Vec<&str> =
                 keymap::actions().into_iter().map(|action| action.id).filter(|id| self.can_run(id) && !soon::blocked(ui.ctx(), id)).collect();
             palette::show(ui.ctx(), &theme, &self.keymap, &mut self.palette, &runnable)
         } else {
             None
         };
-        composed.extend(
-            self.composer
-                .as_ref()
-                .filter(|_| !docked)
-                .map(|composer| compose::floating(ui.ctx(), &theme, &self.keymap, composer, ui.max_rect()))
-                .unwrap_or_default(),
-        );
+        composed.extend(self.floating_composer(ui, &theme, docked));
         let (undone, unsent) = self.toasts(ui, &theme, quiet);
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
@@ -1905,7 +2237,6 @@ impl InboxApp {
             || screener_mode.is_some()
             || (out && leaving)
             || left_full
-            || left_editor
             || left_settings
             || !ran.is_empty()
             || palette.is_some()
@@ -1974,6 +2305,8 @@ impl InboxApp {
         self.hear_desk();
         self.own_frame_over(ui.ctx(), &theme, corner);
         self.sync();
+        // What runs after this pass, before the next frame, comes after everything this frame painted.
+        self.frame = ui.ctx().cumulative_frame_nr().saturating_add(1);
     }
 
     /// Shows what was asked for this frame: an account narrowed, a place opened in the pane or by a pill of the
@@ -2073,14 +2406,19 @@ impl InboxApp {
 
     /// The folder pane on a card at the left, when there is an account: without one it would hold only the app's
     /// name. What was asked on it, and how far right of it the next card starts (a full gap from the rail without it).
-    fn folders(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes) -> (pane::Asked, f32) {
+    /// Beside the `docked` composer it is never wider than [`list_widest`].
+    fn folders(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, docked: bool) -> (pane::Asked, f32) {
         let s = theme.spacing;
         if self.mailbox.accounts().is_empty() {
             return (pane::Asked::default(), 0.0);
         }
+        let widest = list_widest(ui, theme, docked);
+        keep_owners_width(ui.ctx(), ui.scope_id().with_salt(egui::IdSalt::new("folders")), widest);
         let shown = Panel::left("folders")
             .resizable(true)
             .default_size(FOLDER_PANE)
+            // However far its edge is dragged, the docked composer keeps its least width beside it.
+            .max_size(widest)
             .show_separator_line(false)
             .frame(around(0.0, 0.0, 0.0))
             .show(ui, |ui| layers.card(ui, margin(s.s3), |ui| pane::show(ui, theme, &self.keymap, &self.mailbox)));
@@ -2089,17 +2427,18 @@ impl InboxApp {
 
     /// The window with no account: one card in the middle, as tall as what it says; whether Add account was pressed.
     fn welcome(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes) -> bool {
-        let (keymap, can_add) = (&self.keymap, self.can_add);
-        middle_card(ui, theme, layers, |ui| list::welcome(ui, theme, keymap, can_add))
+        onboard::welcome(ui, theme, &self.keymap, layers, self.can_add)
     }
 
-    /// The calendar screen: its empty state on one card in the middle until there are calendars; what was pressed.
+    /// The calendar screen: its empty state on the calendar's card until there are calendars; what was pressed.
     fn calendar_screen(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes) -> Vec<calendar::Asked> {
         if self.calendar.is_empty() {
-            middle_card(ui, theme, layers, |ui| calendar::empty(ui, theme));
+            calendar::empty(ui, theme, layers);
             return Vec::new();
         }
-        calendar::screen(ui, theme, &self.keymap, &self.calendar, layers)
+        // The palette and the settings sheet lie over the screen's floats: they have the keys.
+        let over = self.palette.is_open() || self.settings.is_open();
+        calendar::screen(ui, theme, &self.keymap, &self.calendar, layers, over)
     }
 
     /// Where the rail sits: the window's `corner`, and its mark one `gap` down, under the strip when there is one,
@@ -2177,6 +2516,7 @@ impl InboxApp {
     /// Takes the toast's act back, or the newest act of the history; the calendar is read again when it shows.
     fn undo(&mut self) {
         self.mailbox.undo();
+        self.restored = self.docked();
         if self.screen == Screen::Calendar {
             self.calendar.refresh(&mut self.mailbox);
         }
@@ -2340,6 +2680,7 @@ impl InboxApp {
             onboard::Asked::CheckAgain => onboarding.check_again(mailbox),
             onboard::Asked::Change => onboarding.change(mailbox),
             onboard::Asked::Close => onboarding.close(),
+            onboard::Asked::Cancel => onboarding.cancel(),
         }
         // The new account's jobs go out in this frame.
         self.pump();
@@ -2408,6 +2749,9 @@ mod appearance_tests;
 #[path = "compose_tests.rs"]
 mod compose_tests;
 #[cfg(test)]
+#[path = "cover_tests.rs"]
+mod cover_tests;
+#[cfg(test)]
 #[path = "fit_tests.rs"]
 mod fit_tests;
 #[cfg(test)]
@@ -2422,6 +2766,9 @@ mod later_tests;
 #[cfg(test)]
 #[path = "list_tests.rs"]
 mod list_tests;
+#[cfg(test)]
+#[path = "narrow_tests.rs"]
+mod narrow_tests;
 #[cfg(test)]
 #[path = "notify_tests.rs"]
 mod notify_tests;
@@ -2446,6 +2793,9 @@ mod reader_tests;
 #[cfg(test)]
 #[path = "reply_tests.rs"]
 mod reply_tests;
+#[cfg(test)]
+#[path = "rests_tests.rs"]
+mod rests_tests;
 #[cfg(test)]
 #[path = "settings_tests.rs"]
 mod settings_tests;

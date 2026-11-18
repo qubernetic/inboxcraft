@@ -187,6 +187,9 @@ pub struct TextButton<'a> {
     arrow: bool,
     key: bool,
     shown: Option<Shown>,
+    /// The widest its label gets ([`Self::widest`]).
+    label_widest: f32,
+    /// The widest the whole button gets ([`Self::within`]).
     widest: Option<f32>,
 }
 
@@ -194,7 +197,19 @@ impl<'a> TextButton<'a> {
     /// A plain button called `name`.
     #[must_use]
     pub fn new(name: &'a str) -> Self {
-        Self { name, icon: None, tone: Tone::Plain, action: None, note: None, enabled: true, arrow: false, key: false, shown: None, widest: None }
+        Self {
+            name,
+            icon: None,
+            tone: Tone::Plain,
+            action: None,
+            note: None,
+            enabled: true,
+            arrow: false,
+            key: false,
+            shown: None,
+            label_widest: LABEL_WIDEST,
+            widest: None,
+        }
     }
 
     /// The primary button: on the cyan fill.
@@ -255,6 +270,16 @@ impl<'a> TextButton<'a> {
         self
     }
 
+    /// The widest its label gets before it ends with an ellipsis, in points: at most the 240 of every text button, at
+    /// least 1 (a value that is not a number keeps the 240).
+    #[must_use]
+    pub fn widest(mut self, points: f32) -> Self {
+        if points.is_finite() {
+            self.label_widest = points.clamp(1.0, LABEL_WIDEST);
+        }
+        self
+    }
+
     /// The action it runs, whose key its tooltip shows.
     #[must_use]
     pub fn action(mut self, action: &'a str) -> Self {
@@ -312,14 +337,15 @@ impl<'a> TextButton<'a> {
             (true, _) => ChipState::Default,
         };
         let chip = key.map(|key| Chip::new(ui, theme, &key, chip_state));
-        // The label's room: its widest, or what `within` leaves it beside the other parts and the pads.
+        // The label's room: its widest ([`Self::widest`]), or less, what `within` leaves it beside the other parts and
+        // the pads.
         let others =
             [self.icon.map(|_| theme.icon_side()), arrow.as_ref().map(|arrow| arrow.size().x.ceil()), chip.as_ref().map(|chip| chip.size().x)];
         let beside = others.iter().flatten().map(|wide| wide + GAP).sum::<f32>();
         let room = self
             .widest
             .filter(|widest| widest.is_finite())
-            .map_or(LABEL_WIDEST, |widest| LABEL_WIDEST.min(widest - beside - PAD * 2.0))
+            .map_or(self.label_widest, |widest| self.label_widest.min(widest - beside - PAD * 2.0))
             .floor()
             .max(1.0);
         let label = super::cut(ui, self.name, font, Color32::PLACEHOLDER, room);
@@ -418,6 +444,14 @@ pub fn text(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Opt
         None => button,
     }
     .show(ui, theme, keymap)
+}
+
+/// The width of a [`text`] button called `name`, with no icon, arrow or key: its words (cut at 240) and its 12 at each
+/// side.
+pub fn text_width(ui: &Ui, theme: &Theme, name: &str) -> f32 {
+    let label = super::cut(ui, name, theme.fonts.button, Color32::PLACEHOLDER, LABEL_WIDEST);
+    let words = if label.elided { LABEL_WIDEST } else { label.size().x.ceil() };
+    words + PAD * 2.0
 }
 
 /// A text button like [`text`] that cannot be pressed yet: drawn disabled, and its tooltip says why (`note`).

@@ -40,6 +40,23 @@ const TAG_GAP: f32 = 8.0;
 /// The most lines the help takes.
 const ROWS: usize = 4;
 
+/// The tag on the [`Ui`] that [`page`] opens.
+const PAGE: &str = "inboxcraft-settings-page";
+
+/// Draws `add` as a settings page: its rows take the page's whole width (the design's 720-wide column) in place of the
+/// component's 640. What `add` gave.
+pub fn page<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope_builder(UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag(PAGE)), add).inner
+}
+
+/// The width of a row drawn in `ui`: the room there on a [`page`], at most 640 elsewhere; on whole points.
+fn width_in(ui: &Ui) -> f32 {
+    let on_page = ui.stack().iter().any(|frame| frame.tags().contains(PAGE));
+    let room = ui.available_width();
+    let width = if on_page { room } else { WIDTH.min(room) };
+    if width.is_finite() { width.max(PAD_X * 2.0 + 1.0).floor() } else { WIDTH }
+}
+
 /// A settings row called `title` with `help` under it and the control `control` draws; what `control` gave.
 pub fn settings_row<R>(ui: &mut Ui, theme: &Theme, title: &str, help: Option<&str>, control: impl FnOnce(&mut Ui) -> R) -> R {
     settings_row_with(ui, theme, title, help, false, None, control)
@@ -55,6 +72,12 @@ pub fn settings_row_soon(ui: &mut Ui, theme: &Theme, title: &str, reason: &str) 
     });
 }
 
+/// [`settings_row_soon`] with the control `control` draws in place of the switch (a choice of a segmented control, a
+/// link), drawn unavailable as everything inside [`soon`] is; what `control` gave.
+pub fn settings_row_soon_with<R>(ui: &mut Ui, theme: &Theme, title: &str, reason: &str, control: impl FnOnce(&mut Ui) -> R) -> R {
+    soon(ui, theme, |ui| settings_row_with(ui, theme, title, Some(reason), true, None, control))
+}
+
 /// [`settings_row`], with the coming-soon tag after the title when `tagged`, drawn hovered or focused as `shown` says
 /// (the gallery's board).
 pub(crate) fn settings_row_with<R>(
@@ -68,7 +91,7 @@ pub(crate) fn settings_row_with<R>(
 ) -> R {
     let p = &theme.palette;
     let f = &theme.fonts;
-    let width = WIDTH.min(ui.available_width()).max(PAD_X * 2.0 + 1.0).floor();
+    let width = width_in(ui);
     let id = ui.scope_id().with("settings-row").with(title);
     // The control's size from the frame before: the words wrap in the room it leaves. A change of it redraws the
     // frame before it is shown.

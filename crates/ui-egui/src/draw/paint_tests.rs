@@ -301,6 +301,32 @@ fn panes_that_meet_share_one_line_side_by_side_and_stacked() {
 }
 
 #[test]
+fn a_lone_pane_s_edges_end_at_its_corners() {
+    for ppp in [1.0_f32, 1.5, 2.0] {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0))), ..Default::default() };
+        input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
+        let theme = Theme::new(Mode::Dark, TextScale::default());
+        let card = egui::Rect::from_min_max(pos2(40.0, 30.0), pos2(360.0, 270.0));
+        let mut output = ctx.run_ui(input, |ui| {
+            let mut panes = super::Panes::begin(ui.painter());
+            ui.scope_builder(egui::UiBuilder::new().max_rect(card), |ui| panes.card(ui, egui::Margin::ZERO, |_| ()));
+            panes.finish(ui.painter(), &theme);
+        });
+        output.textures_delta.clear();
+        let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
+        let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
+        let mut lines = Vec::new();
+        for clipped in tessellator.tessellate_shapes(output.shapes) {
+            let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
+            lines.extend(mesh.vertices.iter().filter(|vertex| vertex.color == theme.palette.line).map(|vertex| vertex.pos));
+        }
+        // The four edges lie inside the pane: no line runs a pixel past a corner.
+        assert_eq!(egui::Rect::from_points(&lines), card, "{ppp}");
+    }
+}
+
+#[test]
 fn a_text_box_hugs_its_run_rounded_up_to_a_whole_point() {
     assert_eq!(super::run_box(6.6), 7.0);
     assert_eq!(super::run_box(13.2), 14.0);
@@ -728,6 +754,205 @@ fn every_line_of_text_stands_on_the_whole_pixel_nearest_the_designs_baseline() {
     }
     let (got, _) = baselines(f.caption, 1.0);
     assert!(got.iter().all(|(baseline, top)| baseline - top == 13.0), "the caption's baseline 13 under its top: {got:?}");
+}
+
+#[test]
+fn a_lone_pane_s_edges_meet_at_every_corner_on_odd_points_too() {
+    for ppp in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
+        for card in [egui::Rect::from_min_max(pos2(40.0, 30.0), pos2(360.0, 270.0)), egui::Rect::from_min_max(pos2(41.0, 31.0), pos2(361.0, 271.0))] {
+            let ctx = egui::Context::default();
+            let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0))), ..Default::default() };
+            input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
+            let theme = Theme::new(Mode::Dark, TextScale::default());
+            let mut output = ctx.run_ui(input, |ui| {
+                let mut panes = super::Panes::begin(ui.painter());
+                ui.scope_builder(egui::UiBuilder::new().max_rect(card), |ui| panes.card(ui, egui::Margin::ZERO, |_| ()));
+                panes.finish(ui.painter(), &theme);
+            });
+            output.textures_delta.clear();
+            let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
+            let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
+            // Each edge is a band of four corners, in physical pixels.
+            let mut bands = Vec::new();
+            let mut fill = egui::Rect::NOTHING;
+            for clipped in tessellator.tessellate_shapes(output.shapes) {
+                let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
+                for vertex in mesh.vertices.iter().filter(|vertex| vertex.color == theme.palette.surface) {
+                    fill.extend_with(pos2(vertex.pos.x * ppp, vertex.pos.y * ppp));
+                }
+                let lines: Vec<egui::Pos2> =
+                    mesh.vertices.iter().filter(|vertex| vertex.color == theme.palette.line).map(|vertex| vertex.pos).collect();
+                bands.extend(
+                    lines.chunks(4).map(|band| egui::Rect::from_points(&band.iter().map(|at| pos2(at.x * ppp, at.y * ppp)).collect::<Vec<_>>())),
+                );
+            }
+            assert_eq!(bands.len(), 4, "{ppp} {card:?}");
+            let outline = bands.iter().fold(egui::Rect::NOTHING, |all, band| all.union(*band));
+            // The fill stands on whole pixels, and the edges are its outermost pixels: no column or row of fill outside
+            // an edge, no edge running past the fill or past another edge.
+            let whole = |at: f32| (at - at.round()).abs() < 0.01;
+            assert!([fill.left(), fill.top(), fill.right(), fill.bottom()].into_iter().all(whole), "{ppp} {card:?}: fill {fill:?}");
+            // And it stands where its card rounds to: each side on the pixel boundary nearest the card's.
+            let rounded = [card.left(), card.top(), card.right(), card.bottom()].map(|at| (at * ppp).round());
+            assert_eq!([fill.left(), fill.top(), fill.right(), fill.bottom()].map(f32::round), rounded, "{ppp} {card:?}: where the pane lands");
+            let near = |a: egui::Rect, b: egui::Rect| (a.min - b.min).length() < 0.01 && (a.max - b.max).length() < 0.01;
+            assert!(near(outline, fill), "{ppp} {card:?}: edges {outline:?} against the fill {fill:?}");
+            let covered = |x: f32, y: f32| bands.iter().any(|band| band.contains(pos2(x + 0.5, y + 0.5)));
+            let (left, top, right, bottom) =
+                (outline.left().round(), outline.top().round(), outline.right().round() - 1.0, outline.bottom().round() - 1.0);
+            // Every pixel of the outline is drawn: no corner left out, no gap.
+            let mut x = left;
+            while x <= right {
+                assert!(covered(x, top) && covered(x, bottom), "{ppp} {card:?}: column {x} of {outline:?}");
+                x += 1.0;
+            }
+            let mut y = top;
+            while y <= bottom {
+                assert!(covered(left, y) && covered(right, y), "{ppp} {card:?}: row {y} of {outline:?}");
+                y += 1.0;
+            }
+        }
+    }
+}
+
+/// Two cards that touch, side by side and stacked, split on whole, half and other points: at every scale each pane
+/// stands where its card rounds to, the two fills meet with no gap, and one line a hairline's pixels thick stands
+/// between them, on the second pane's first pixels.
+#[test]
+fn touching_panes_share_one_line_on_whole_pixels_at_every_scale() {
+    for ppp in [1.0_f32, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5] {
+        for split in [200.0_f32, 201.0, 200.5, 200.3] {
+            for stacked in [false, true] {
+                let (a, b) = if stacked {
+                    (
+                        egui::Rect::from_min_max(pos2(40.0, 30.0), pos2(360.0, split - 60.0)),
+                        egui::Rect::from_min_max(pos2(40.0, split - 60.0), pos2(360.0, 270.0)),
+                    )
+                } else {
+                    (egui::Rect::from_min_max(pos2(40.0, 30.0), pos2(split, 270.0)), egui::Rect::from_min_max(pos2(split, 30.0), pos2(360.0, 270.0)))
+                };
+                let ctx = egui::Context::default();
+                let mut input =
+                    egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0))), ..Default::default() };
+                input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
+                let theme = Theme::new(Mode::Dark, TextScale::default());
+                let mut output = ctx.run_ui(input, |ui| {
+                    let mut panes = super::Panes::begin(ui.painter());
+                    for card in [a, b] {
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(card), |ui| panes.card(ui, egui::Margin::ZERO, |_| ()));
+                    }
+                    panes.finish(ui.painter(), &theme);
+                });
+                output.textures_delta.clear();
+                let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
+                let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
+                let (mut fills, mut bands) = (Vec::new(), Vec::new());
+                for clipped in tessellator.tessellate_shapes(output.shapes) {
+                    let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
+                    let quads = |colour: egui::Color32| -> Vec<egui::Rect> {
+                        let at: Vec<egui::Pos2> = mesh
+                            .vertices
+                            .iter()
+                            .filter(|vertex| vertex.color == colour)
+                            .map(|vertex| pos2(vertex.pos.x * ppp, vertex.pos.y * ppp))
+                            .collect();
+                        at.chunks(4).map(egui::Rect::from_points).collect()
+                    };
+                    fills.extend(quads(theme.palette.surface));
+                    bands.extend(quads(theme.palette.line));
+                }
+                let case = format!("{ppp} split {split} stacked {stacked}");
+                assert_eq!(fills.len(), 2, "{case}");
+                for (fill, card) in fills.iter().zip([a, b]) {
+                    let rounded = [card.left(), card.top(), card.right(), card.bottom()].map(|at| (at * ppp).round());
+                    let got = [fill.left(), fill.top(), fill.right(), fill.bottom()];
+                    assert!(got.iter().zip(rounded).all(|(got, want)| (got - want).abs() < 0.01), "{case}: {got:?} against {rounded:?}");
+                }
+                let shared = if stacked { fills[0].bottom() } else { fills[0].right() };
+                let meets = if stacked { fills[1].top() } else { fills[1].left() };
+                assert!((shared - meets).abs() < 0.01, "{case}: no gap between the fills");
+                // Seven edges: four of each pane less the one they share.
+                assert_eq!(bands.len(), 7, "{case}");
+                let pixels = super::line_pixels(ppp).1;
+                let between: Vec<&egui::Rect> = bands
+                    .iter()
+                    .filter(|band| {
+                        if stacked {
+                            (band.top() - shared).abs() < 0.01 && band.width() > 100.0
+                        } else {
+                            (band.left() - shared).abs() < 0.01 && band.height() > 100.0
+                        }
+                    })
+                    .collect();
+                assert_eq!(between.len(), 1, "{case}: one line between them: {bands:?}");
+                let thick = if stacked { between[0].height() } else { between[0].width() };
+                assert!((thick - pixels).abs() < 0.01, "{case}: the line {thick} px, a hairline's {pixels}");
+            }
+        }
+    }
+}
+
+/// The physical pixels across of the `cyan_edge` painted by [`super::float`] over `rect` at `ppp`, tessellated without
+/// feathering: the distinct columns and rows its vertices stand on.
+fn float_edge_at(ppp: f32, rect: egui::Rect) -> (Vec<f32>, Vec<f32>) {
+    let ctx = egui::Context::default();
+    let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1600.0, 1000.0))), ..Default::default() };
+    input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let mut output = ctx.run_ui(input, |ui| super::float(ui.painter(), &theme, rect, FloatEdge::Keyboard));
+    output.textures_delta.clear();
+    assert_eq!(output.pixels_per_point, ppp, "the pass ran at {ppp}");
+    let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
+    let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
+    let mut points = Vec::new();
+    for clipped in tessellator.tessellate_shapes(output.shapes) {
+        let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
+        points.extend(
+            mesh.vertices.iter().filter(|vertex| vertex.color == theme.palette.cyan_edge).map(|vertex| pos2(vertex.pos.x * ppp, vertex.pos.y * ppp)),
+        );
+    }
+    let distinct = |mut all: Vec<f32>| {
+        all.sort_by(f32::total_cmp);
+        all.dedup_by(|a, b| (*a - *b).abs() < 1e-3);
+        all
+    };
+    (distinct(points.iter().map(|at| at.x).collect()), distinct(points.iter().map(|at| at.y).collect()))
+}
+
+#[test]
+fn a_float_s_edge_stands_on_whole_pixels_at_every_scale() {
+    // The settings sheet's place in a window of 1440 × 900: whole points, not whole pixels at 1.25, 1.5 and 1.75.
+    let rect = egui::Rect::from_min_size(pos2(203.0, 61.0), vec2(1035.0, 780.0));
+    for ppp in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
+        let (columns, rows) = float_edge_at(ppp, rect);
+        let pixels = super::line_pixels(ppp).1;
+        for (across, ends) in [(&columns, (rect.left(), rect.right())), (&rows, (rect.top(), rect.bottom()))] {
+            assert!(across.iter().all(|at| (at - at.round()).abs() < 1e-3), "{ppp}: the edge on whole pixels: {across:?}");
+            // Each side one band a hairline's pixels thick, the outermost of the float: two lines either side.
+            let (low, high) = ((ends.0 * ppp).round(), (ends.1 * ppp).round());
+            let want = [low, low + pixels, high - pixels, high];
+            assert_eq!(across.len(), 4, "{ppp}: {across:?} against {want:?}");
+            assert!(across.iter().zip(want).all(|(got, want)| (got - want).abs() < 1e-3), "{ppp}: {across:?} against {want:?}");
+        }
+    }
+}
+
+#[test]
+fn a_float_a_box_and_an_outline_at_a_scale_of_0_nan_or_infinity_have_finite_rects() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let rect = egui::Rect::from_min_size(pos2(10.3, 20.7), vec2(120.4, 80.2));
+    let (fill, edge) = (egui::Color32::WHITE, egui::Color32::BLACK);
+    for ppp in [0.0, f32::NAN, f32::INFINITY] {
+        let mut shapes = super::float_at(&theme, rect, FloatEdge::Keyboard, ppp);
+        shapes.extend(super::boxed_at(rect, fill, edge, ppp));
+        shapes.extend(super::outline_at(rect, edge, ppp));
+        for shape in &shapes {
+            let bounds = shape.visual_bounding_rect();
+            assert!(bounds.is_finite(), "{ppp}: {shape:?}");
+        }
+        // As at a scale of 1.
+        assert_eq!(super::outline_at(rect, edge, ppp), super::outline_at(rect, edge, 1.0), "{ppp}");
+    }
 }
 
 /// The text shapes `shapes` hold, nested ones included, and the rows they paint.

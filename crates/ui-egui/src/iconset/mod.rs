@@ -116,6 +116,8 @@ pub enum IconId {
     Pause,
     /// Came back: an arrow turning up and back, a row back from a snooze.
     CameBack,
+    /// Back in the reader's place: the floating composer's (its frame's glyph, past the icon sheet's own).
+    Dock,
 }
 
 impl IconId {
@@ -125,7 +127,7 @@ impl IconId {
     pub const SHEET: usize = 45;
 
     /// Every id, in the order of [`IconId::index`].
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 50] = [
         Self::Inbox,
         Self::Done,
         Self::Archive,
@@ -175,6 +177,7 @@ impl IconId {
         Self::Countdown,
         Self::Pause,
         Self::CameBack,
+        Self::Dock,
     ];
 
     /// Its place in [`IconId::ALL`]; a test checks the two agree, so a new id must join the list.
@@ -230,6 +233,7 @@ impl IconId {
             Self::Countdown => 46,
             Self::Pause => 47,
             Self::CameBack => 48,
+            Self::Dock => 49,
         }
     }
 }

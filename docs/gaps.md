@@ -387,8 +387,8 @@ time from the code as it is, not measured.
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
 - Appearance (#86, #87, #231): the four `ui.*.set` commands, the file that keeps their result and the settings sheet that
-  runs them exist; of the sheet's sections only Appearance, Accounts and Shortcuts (#130) are built, the others are faded and say so (#104). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
-  or `InboxApp::open_settings`. The preview shows invented rows, not the owner's mail. Reduced motion has an on/off switch; going back to
+  runs them exist; every section of the sheet opens, and what is not built yet (Calendar, Privacy, About, AI, Plugins, rows on the others) is drawn coming soon (#238). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
+  or `InboxApp::open_settings`. Reduced motion has an on/off switch; going back to
   "follow the system" after a choice is possible only through `ui.motion.set` with `reduce: system`. Loading the
   owner's own font file or icon pack is an idea only and the page offers neither: both are outside files, needing
   the hostile-input rules (safe parsing, size caps, a fuzz target, an SVG rasteriser for icons) and handling of

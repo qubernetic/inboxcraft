@@ -63,5 +63,6 @@ pub(super) const fn glyph(id: IconId) -> char {
         IconId::Countdown => '\u{ed2c}', // clock-countdown
         IconId::Pause => '\u{e39e}',     // pause
         IconId::CameBack => '\u{e08a}',  // arrow-u-up-left
+        IconId::Dock => '\u{e0a6}',      // the composer frame's glyph for its place
     }
 }

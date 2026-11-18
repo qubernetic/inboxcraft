@@ -218,7 +218,7 @@ fn css_ease_runs_from_0_to_1_as_cubic_bezier_25_1_25_1() {
         assert!(at >= last && (0.0..=1.0).contains(&at), "{step}: {at}");
         last = at;
     }
-    assert_eq!((css_ease(-1.0), css_ease(2.0), css_ease(f32::NAN), css_ease(f32::NEG_INFINITY)), (0.0, 1.0, 0.0, 0.0));
+    assert_eq!((css_ease(-1.0), css_ease(2.0), css_ease(f32::NAN), css_ease(f32::NEG_INFINITY)), (0.0, 1.0, 1.0, 0.0));
 }
 
 #[test]

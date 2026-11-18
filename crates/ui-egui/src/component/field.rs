@@ -120,6 +120,9 @@ const PASSWORD: char = '\u{e752}';
 /// The caret's width at 100 %, in points.
 const CARET_WIDTH: f32 = 7.0;
 
+/// The height of the caret in the composer's text at 100 %, in points (its rows are 26).
+const TEXT_CARET: f32 = 20.0;
+
 /// The caret's block, 7 × 16 at 100 %, in points at the text scale.
 fn caret_size(theme: &Theme) -> Vec2 {
     vec2((CARET_WIDTH * theme.text_scale.factor()).round(), theme.boxes().caret)
@@ -462,6 +465,20 @@ pub(crate) fn refusal(ctx: &egui::Context, id: Id) -> Option<(String, bool)> {
         .map(|kept| (Cap::Chars(MAX_LINE).sentence(), fresh(ctx, kept.since)))
 }
 
+/// The tag of a `Ui` whose fields say their errors through their caller ([`quietly`]).
+const QUIET: &str = "inboxcraft-field-quiet";
+
+/// Draws `add` with the one-line fields in it marking an error by their edge alone: the caller says the error, under
+/// a row of fields. What a field refuses itself (text past its cap) it still says under itself.
+pub fn quietly<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope_builder(UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag(QUIET)), add).inner
+}
+
+/// Whether `ui` lies inside [`quietly`].
+fn is_quiet(ui: &Ui) -> bool {
+    ui.stack().iter().any(|frame| frame.tags().contains(QUIET))
+}
+
 /// The kind of a one-line field.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Line {
@@ -633,10 +650,14 @@ fn edit_scope(ui: &mut Ui, enabled: bool) {
 /// Paints the caret of the edit in `output` (the field `id`), clipped to `clip`: a block 2 after a character before
 /// it on its row, at the row's start otherwise, 3 down in a 22 row (centred); blinking unless `still`.
 fn paint_caret(ui: &Ui, theme: &Theme, id: Id, output: &TextEditOutput, clip: Rect, still: bool) {
+    paint_caret_sized(ui, theme, id, output, clip, still, caret_size(theme));
+}
+
+/// [`paint_caret`] with a block of `size`: 7 × 20 in the composer's text of 26 rows.
+fn paint_caret_sized(ui: &Ui, theme: &Theme, id: Id, output: &TextEditOutput, clip: Rect, still: bool, size: Vec2) {
     let cursor = output.cursor_range.map_or_else(|| output.galley.end(), |range| range.primary);
     let at = output.galley.pos_from_cursor(cursor);
     let column = output.galley.layout_from_cursor(cursor).column;
-    let size = caret_size(theme);
     // At the end of its row's text, 2 past the box the design gives the text (its width rounded up, as `run_box`); inside
     // the text, 2 after where egui puts the caret (the boards draw no caret there).
     let row_end = output.galley.rows.get(output.galley.layout_from_cursor(cursor).row).map(|row| row.char_count_excluding_newline());
@@ -708,7 +729,8 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
         let guarded = guard(ui, id, text, cap);
         let said = guarded.said;
         let refusal = said.map(|_| cap.sentence());
-        let bring = said == Some(Refusal::Fresh) && field.error.is_none();
+        let quiet = is_quiet(ui);
+        let bring = said == Some(Refusal::Fresh) && (field.error.is_none() || quiet);
         let field = &Field { error: field.error.or(refusal.as_deref()), ..*field };
         let seen = seen(ui, id, rect, field, shown);
         let (fill, edge, dashed) = box_look(theme, field, seen);
@@ -787,7 +809,7 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
             crate::iconset::paint_glyph(&painter, at, glyph, ink);
         }
         let note = (stored && !disabled_password).then_some(tr!("The stored password is in your system's credential store and is never shown."));
-        under(ui, theme, field.error, note, width, bring);
+        under(ui, theme, if quiet { refusal.as_deref() } else { field.error }, note, width, bring);
         response
     })
     .inner
@@ -797,15 +819,21 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
 /// on a recipient line, after the chips. Its caret and its hint are the fields' (the hint 4 after the caret while it
 /// has the focus); drawn in `shown` for a board.
 pub(crate) fn bare_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, shown: Option<Shown>) -> Response {
+    bare(ui, theme, id, text, field, shown, Cap::Chars(MAX_LINE), theme.fonts.body)
+}
+
+/// [`bare_line`] holding at most `cap`, its text (not its hint) in `font`.
+#[allow(clippy::too_many_arguments)]
+fn bare(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, shown: Option<Shown>, cap: Cap, font: Font) -> Response {
     let p = &theme.palette;
     let rect = ui.max_rect();
     let seen = seen(ui, id, rect, field, shown);
-    let font = theme.fonts.body;
+    let hint_font = theme.fonts.body;
     let colour = if seen.enabled { p.ink } else { p.muted };
     let vertical = ((rect.height() - font.line) / 2.0).max(0.0);
     let inner = Rect::from_min_max(pos2(rect.left(), rect.top() + vertical), pos2(rect.right(), rect.bottom() - vertical));
     edit_scope(ui, seen.enabled);
-    let guarded = guard(ui, id, text, Cap::Chars(MAX_LINE));
+    let guarded = guard(ui, id, text, cap);
     let empty = text.is_empty();
     let mut layouter = |ui: &Ui, text: &dyn TextBuffer, _: f32| layout(ui, text.as_str(), font, colour, None, false);
     let mut buffer = capped(text, &guarded, true, false);
@@ -822,7 +850,7 @@ pub(crate) fn bare_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, f
     hold(ui, id, text, guarded, outcome, &mut response);
     if empty && !field.hint.is_empty() {
         let shift = if seen.focus { caret_size(theme).x + theme.spacing.s1 } else { 0.0 };
-        let hint = layout(ui, field.hint, font, p.muted, None, false);
+        let hint = layout(ui, field.hint, hint_font, p.muted, None, false);
         // Where egui puts the text typed in its place, painted as egui paints it ([`paint_hint`]).
         super::solid(ui).with_clip_rect(rect).galley(output.galley_pos + vec2(shift, 0.0), hint, p.muted);
     }
@@ -976,30 +1004,31 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
     .inner
 }
 
-/// A plain one-line edit without a box, filling the width `ui` offers: the composer's subject until the composer is
-/// restyled. Its text is `body` in `ink`; `name` is its screen-reader name. It holds at most `cap` (the subject what
-/// the engine keeps of one, 998 bytes); what would pass it is refused whole, and a line under it says so.
-pub fn plain_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, name: &str, cap: Cap) -> Response {
-    let guarded = guard(ui, id, text, cap);
-    let said = guarded.said;
-    let mut buffer = capped(text, &guarded, true, false);
-    let edit = TextEdit::singleline(&mut buffer).id(id).font(theme.fonts.body.id()).frame(egui::Frame::NONE).desired_width(ui.available_width());
-    let mut response = ui.add(edit);
-    let outcome = buffer.finish();
-    drop(buffer);
-    hold(ui, id, text, guarded, outcome, &mut response);
+/// A one-line edit without a box, `height` high across the width `ui` offers: the composer's subject. Its text is
+/// `strong` in `ink`, `hint` in `body` and `muted` while it is empty, its caret the fields' (see [`bare_line`]); `name`
+/// is its screen-reader name. It holds at most `cap` (the subject what the engine keeps of one, 998 bytes); what would
+/// pass it is refused whole, and a line under it says so.
+#[allow(clippy::too_many_arguments)]
+pub fn plain_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, name: &str, hint: &str, cap: Cap, height: f32) -> Response {
+    let width = ui.available_width().max(1.0);
+    let said = ui.data(|data| data.get_temp::<Refused>(refused_id(id))).is_some();
+    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let mut child = ui.new_child(UiBuilder::new().max_rect(rect));
+    let field = Field { label: "", hint, error: None, enabled: true, read_only: false };
+    let response = bare(&mut child, theme, id, text, &field, None, cap, theme.fonts.strong);
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
-    if said == Some(Refusal::Fresh) || (said.is_some() && !response.changed()) {
-        let width = ui.available_width();
-        under(ui, theme, Some(&cap.sentence()), None, width, said == Some(Refusal::Fresh));
+    let refused = ui.data(|data| data.get_temp::<Refused>(refused_id(id)));
+    if let Some(refused) = refused.filter(|_| said || !response.changed()) {
+        under(ui, theme, Some(&cap.sentence()), None, width, fresh(ui.ctx(), refused.since));
     }
     response
 }
 
-/// A plain edit of several lines without a box, `rows` rows high at least and laid out by `layouter`: the composer's
-/// message text until the composer is restyled. `name` is its screen-reader name. It holds at most [`MAX_BODY`]; what
-/// would pass it is refused whole, and a line over the text says so, brought into view. A text already longer (a draft
-/// from the store) opens whole and can be edited down.
+/// An edit of several lines without a box, `rows` rows high at least and laid out by `layouter`: the composer's
+/// message text, in the box the composer draws round it. `name` is its screen-reader name; its caret is the fields'
+/// block, blinking ([`crate::motion::blink`]). It holds at most [`MAX_BODY`]; what would pass it is refused whole, and
+/// a line over the text says so, brought into view. A text already longer (a draft from the store) opens whole and can
+/// be edited down.
 pub fn plain_text(
     ui: &mut Ui,
     id: Id,
@@ -1018,9 +1047,26 @@ pub fn plain_text(
         under(ui, theme, Some(&cap.sentence()), None, width, said == Some(Refusal::Fresh));
     }
     let mut buffer = capped(text, &guarded, true, false);
-    let edit =
-        TextEdit::multiline(&mut buffer).layouter(layouter).id(id).frame(egui::Frame::NONE).desired_width(ui.available_width()).desired_rows(rows);
-    let mut response = ui.add(edit);
+    let output = ui
+        .scope(|ui| {
+            edit_scope(ui, true);
+            let output = TextEdit::multiline(&mut buffer)
+                .layouter(layouter)
+                .id(id)
+                .frame(egui::Frame::NONE)
+                .desired_width(ui.available_width())
+                .desired_rows(rows)
+                .show(ui);
+            if output.response.response.has_focus() {
+                let clip = ui.clip_rect();
+                // The text's caret is as high as its letters: 20 in its rows of 26.
+                let size = vec2(caret_size(theme).x, Theme::size(theme, TEXT_CARET));
+                paint_caret_sized(ui, theme, id, &output, clip, false, size);
+            }
+            output
+        })
+        .inner;
+    let mut response = output.response.response;
     let outcome = buffer.finish();
     drop(buffer);
     hold(ui, id, text, guarded, outcome, &mut response);

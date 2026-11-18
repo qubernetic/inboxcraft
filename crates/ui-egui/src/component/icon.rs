@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! An icon on its own: one of the 49 glyphs of Phosphor Regular ([`crate::iconset`]), 16 px at 100 % text, in
+//! An icon on its own: one of the 50 glyphs of Phosphor Regular ([`crate::iconset`]), 16 px at 100 % text, in
 //! `muted`, never in a tile. A control that holds an icon paints it in the control's own colour.
 
 use egui::{Response, Role, Sense, Ui, WidgetInfo, vec2};
@@ -73,6 +73,7 @@ pub const fn name(id: IconId) -> &'static str {
         IconId::Countdown => "countdown",
         IconId::Pause => "pause",
         IconId::CameBack => "came-back",
+        IconId::Dock => "dock",
     }
 }
 

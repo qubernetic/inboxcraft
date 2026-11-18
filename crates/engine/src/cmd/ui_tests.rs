@@ -131,3 +131,16 @@ fn the_removed_appearance_commands_are_unknown() {
         assert!(session.registry().get(id).is_none(), "{id}");
     }
 }
+
+#[test]
+fn the_desktop_s_frame_keeps_the_own_frame_last_on_to_come_back_to() {
+    let mut session = session();
+    assert_eq!(session.appearance().own_frame, WindowFrame::Strip, "the strip until another own frame is on");
+    for own in [WindowFrame::Strip, WindowFrame::TopRow] {
+        session.run("ui.frame.set", &json!({ "frame": own.id() })).unwrap();
+        let answer = session.run("ui.frame.set", &json!({ "frame": "system" })).unwrap();
+        assert_eq!(session.appearance().frame, WindowFrame::System);
+        assert_eq!(session.appearance().own_frame, own, "the own frame left for the desktop's");
+        assert_eq!(answer["appearance"]["own_frame"], own.id());
+    }
+}

@@ -419,7 +419,7 @@ fn an_error_shows_in_a_banner_until_dismissed() {
 fn without_accounts_the_window_says_how_to_look_around() {
     let session = Session::new(Box::new(Memory::new(StoreConfig::default())), clock()).unwrap();
     let harness = harness_with(InboxApp::new(Mailbox::new(session, clock())), egui::Theme::Dark);
-    harness.get_by_label("No accounts yet");
+    harness.get_by_label("This window cannot add an account.");
     harness.get_by_label_contains("--sample");
     assert!(harness.query_by_label("Accounts").is_none());
 }

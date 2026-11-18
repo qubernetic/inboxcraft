@@ -107,6 +107,14 @@ impl Day {
         u8::try_from(month).ok().and_then(|month| Self::new(year, month, 1)).unwrap_or(self.first_of_month())
     }
 
+    /// The day's week of the year as ISO 8601 counts it (weeks from Monday; week 1 holds the year's first Thursday).
+    #[must_use]
+    pub fn iso_week(self) -> i64 {
+        let thursday = self.monday().plus(3);
+        let first = Self::new(thursday.year(), 1, 1).unwrap_or(thursday);
+        thursday.since(first).div_euclid(7).saturating_add(1)
+    }
+
     /// The day's midnight in UTC, as the engine reads a moment: `2026-11-09T00:00:00Z`.
     #[must_use]
     pub fn iso_midnight(self) -> String {
@@ -208,6 +216,31 @@ pub fn span(first: Day, last: Day) -> String {
     } else {
         tr!("{from} – {to} {to_month} {year}", from = first.date(), to = last.date(), to_month = to_month, year = year)
     }
+}
+
+/// The short name of `month` (1 to 12): `Dec`.
+#[must_use]
+pub fn month_short(month: u8) -> &'static str {
+    match month {
+        1 => tr!("Jan"),
+        2 => tr!("Feb"),
+        3 => tr!("Mar"),
+        4 => tr!("Apr"),
+        5 => tr!("May"),
+        6 => tr!("Jun"),
+        7 => tr!("Jul"),
+        8 => tr!("Aug"),
+        9 => tr!("Sep"),
+        10 => tr!("Oct"),
+        11 => tr!("Nov"),
+        _ => tr!("Dec"),
+    }
+}
+
+/// A day with its short month: `16 Nov`.
+#[must_use]
+pub fn short(day: Day) -> String {
+    tr!("{date} {month}", date = day.date(), month = month_short(day.month()))
 }
 
 #[cfg(test)]

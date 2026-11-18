@@ -4,7 +4,8 @@
 //! The keymap: which key runs which action. Actions are named by id, the engine's command ids once they have a key
 //! and the window's own (`ui.search.focus`) until then. Everything that shows a key (the key chip of a tooltip, a
 //! menu row, a toast's Undo) reads it from here when it is drawn, so a changed key shows at once; one key runs one
-//! action.
+//! action of a [`Scope`]: actions of screens never shown together (the calendar's arrows, the mail list's) may share
+//! one.
 //!
 //! Every action of the window is in [`actions`], with its name, so the command palette lists them all and the
 //! Shortcuts page gives each one a key. The keymap is kept between runs as [`Keymap::to_value`]: every action's key
@@ -96,6 +97,67 @@ pub const COMPOSE: &str = "ui.compose.new";
 /// Send the message being written (`mail.send`).
 pub const SEND: &str = "ui.compose.send";
 
+/// Fold the floating composer to its head, or open it again.
+pub const FOLD: &str = "ui.compose.fold";
+
+/// Calendar: move the pick left (a day back, or the event of the day before).
+pub const CALENDAR_LEFT: &str = "ui.calendar.left";
+
+/// Calendar: move the pick right (a day on, or the event of the next day).
+pub const CALENDAR_RIGHT: &str = "ui.calendar.right";
+
+/// Calendar: move the pick up (a week back, or the event before).
+pub const CALENDAR_UP: &str = "ui.calendar.up";
+
+/// Calendar: move the pick down (a week on, or the next event).
+pub const CALENDAR_DOWN: &str = "ui.calendar.down";
+
+/// Calendar: open the picked day, or take the keyboard into the picked event's details.
+pub const CALENDAR_OPEN: &str = "ui.calendar.open";
+
+/// Calendar: leave the picked event's details and let the pick go.
+pub const CALENDAR_CLOSE: &str = "ui.calendar.close";
+
+/// The calendar's keys: they act on the calendar screen only (`draw/calendar/keys.rs`).
+pub const CALENDAR_KEYS: [&str; 6] = [CALENDAR_LEFT, CALENDAR_RIGHT, CALENDAR_UP, CALENDAR_DOWN, CALENDAR_OPEN, CALENDAR_CLOSE];
+
+/// Where an action acts: the whole window, or one screen. Two actions may share a key when their scopes are never
+/// active together (the calendar's arrows and the mail list's); within a scope, and against the window's, one key runs
+/// one action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// Anywhere in the window.
+    Window,
+    /// The calendar screen alone ([`CALENDAR_KEYS`]).
+    Calendar,
+    /// The mail screen's list alone: the `ui.list.*` actions.
+    Mail,
+}
+
+impl Scope {
+    /// Whether actions in this scope and in `other` can be pressed at the same time: the window's with every scope, a
+    /// screen's with its own.
+    #[must_use]
+    pub fn meets(self, other: Self) -> bool {
+        self == Self::Window || other == Self::Window || self == other
+    }
+}
+
+/// The scope of action `id`: the calendar's keys act on the calendar screen, the `ui.list.*` actions on the mail
+/// screen's list, every other action anywhere. The scope is read from the id alone: a `ui.list.*` action must never
+/// be live on the calendar, and an action that can act on more than one screen (the composer's, which floats over
+/// either) keeps an id outside both, so it is the window's.
+#[must_use]
+pub fn scope(id: &str) -> Scope {
+    if CALENDAR_KEYS.contains(&id) {
+        Scope::Calendar
+    } else if id.starts_with("ui.list.") {
+        Scope::Mail
+    } else {
+        Scope::Window
+    }
+}
+
 /// After the open message left the list, open the message the next-message rule names (the next or the previous
 /// one). No key of its own: the palette runs it.
 pub const OPEN_HELD: &str = "ui.reader.open_held";
@@ -164,7 +226,14 @@ pub fn actions() -> Vec<Action> {
         action(LATER, tr!("Show later: snoozed, pins and parked"), IconId::Pin),
         action(COMPOSE, tr!("New message"), IconId::Compose),
         action(SEND, tr!("Send the message"), IconId::Send),
+        action(FOLD, tr!("Fold or open the floating draft"), IconId::Dock),
         action(CALENDAR, tr!("Show the calendar"), IconId::Calendar),
+        action(CALENDAR_LEFT, tr!("Calendar: pick to the left"), IconId::Previous),
+        action(CALENDAR_RIGHT, tr!("Calendar: pick to the right"), IconId::Next),
+        action(CALENDAR_UP, tr!("Calendar: pick above"), IconId::Previous),
+        action(CALENDAR_DOWN, tr!("Calendar: pick below"), IconId::Next),
+        action(CALENDAR_OPEN, tr!("Calendar: open what is picked"), IconId::Calendar),
+        action(CALENDAR_CLOSE, tr!("Calendar: leave the details"), IconId::Close),
         action(OPEN_HELD, tr!("Open the message the rule names"), IconId::Mail),
         action(DONE, tr!("Done"), IconId::Done),
         action(ARCHIVE, tr!("Archive"), IconId::Archive),
@@ -294,6 +363,12 @@ impl Default for Keymap {
         keymap.bind(CALENDAR, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num2));
         keymap.bind(COMPOSE, KeyboardShortcut::new(Modifiers::NONE, Key::C));
         keymap.bind(SEND, KeyboardShortcut::new(Modifiers::COMMAND, Key::Enter));
+        keymap.bind(CALENDAR_LEFT, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowLeft));
+        keymap.bind(CALENDAR_RIGHT, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowRight));
+        keymap.bind(CALENDAR_UP, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowUp));
+        keymap.bind(CALENDAR_DOWN, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowDown));
+        keymap.bind(CALENDAR_OPEN, KeyboardShortcut::new(Modifiers::NONE, Key::Enter));
+        keymap.bind(CALENDAR_CLOSE, KeyboardShortcut::new(Modifiers::NONE, Key::Escape));
         keymap.bind(NEXT, KeyboardShortcut::new(Modifiers::NONE, Key::J));
         keymap.bind(PREVIOUS, KeyboardShortcut::new(Modifiers::NONE, Key::K));
         keymap.bind(DOWN, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowDown));
@@ -328,6 +403,14 @@ impl Keymap {
         self.bindings.iter().find(|(_, held)| **held == shortcut).map(|(id, _)| id.as_str())
     }
 
+    /// The action that would lose `shortcut` were `action` given it: another action holding it in a scope that meets
+    /// `action`'s ([`Scope::meets`]).
+    #[must_use]
+    pub fn clash(&self, action: &str, shortcut: KeyboardShortcut) -> Option<&str> {
+        let mine = scope(action);
+        self.bindings.iter().find(|(id, held)| **held == shortcut && id.as_str() != action && scope(id).meets(mine)).map(|(id, _)| id.as_str())
+    }
+
     /// Every action's key, to keep: `{"keys": {"ui.search.focus": "Command+F", "ui.sent.show": null, ...}}`.
     #[must_use]
     pub fn to_value(&self) -> Value {
@@ -358,9 +441,11 @@ impl Keymap {
         keymap
     }
 
-    /// Gives `action` the key `shortcut`, in place of its old one; an action that had the key loses it.
+    /// Gives `action` the key `shortcut`, in place of its old one; an action that had the key in a scope that meets
+    /// `action`'s loses it ([`Keymap::clash`]); one of a screen never shown with `action`'s keeps it.
     pub fn bind(&mut self, action: &str, shortcut: KeyboardShortcut) {
-        self.bindings.retain(|_, held| *held != shortcut);
+        let mine = scope(action);
+        self.bindings.retain(|id, held| *held != shortcut || !scope(id).meets(mine));
         self.bindings.insert(action.to_owned(), shortcut);
     }
 

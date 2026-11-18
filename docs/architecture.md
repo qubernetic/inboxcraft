@@ -284,7 +284,12 @@ it, not by `mail.unsend`), and writes the event into the account's first calenda
 cancellation is about as `event.delete` does, with its undo window. Nothing in an invitation changes the calendar on
 its own.
 
-Drafts (`engine::draft`) are kept in the store at every change, so a kill loses nothing typed. `compose.new` starts
+Drafts (`engine::draft`) are kept in the store as they change: the composer runs `compose.update` at once for a chip,
+a template or a field left, and at most once a second while a field of it has the keys (each keep writes the whole
+draft on the window's thread), so a kill loses at most the last second typed in its recipient lines, subject and
+text; closing, sending, the window's close and the end of the app keep it at once. What is typed in the field that
+fills a template's blank is not part of the draft: it lives in the composer only, and closing it, answering, opening
+another draft or quitting drops it. `compose.new` starts
 one from the account that last sent (the newest message in a Sent folder, else the first account) with that
 account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft at once;
 `compose.show` and `compose.list` read them; `compose.discard` removes one here and its copy on the server where
@@ -304,9 +309,11 @@ typed, or of an account without a Drafts folder, stays here; a failed upload wai
 `compose.update` also takes `typed`: the text in the To, Cc and Bcc lines that is not a recipient yet, three lines of
 at most 4 096 characters (a shorter list empties the lines it leaves out; a stored line past the cap reads as empty).
 It is kept here and `compose.show` and `compose.list` answer it, but it never leaves the machine: it is in neither the
-sent message nor the Drafts copy, and a change of it alone uploads no copy. It never becomes a recipient unseen: the
-composer draws Cc and Bcc whenever either holds typed text, takes typed text as recipients only from the lines it
-draws, and refuses Send while a line it does not draw holds some.
+sent message nor the Drafts copy, and a change of it alone uploads no copy. It becomes a recipient only from a line
+the composer lays out: the composer draws Cc and Bcc whenever either holds typed text, takes typed text as recipients
+only from the lines it draws, refuses Send while a line it does not draw holds some, and sends only once it has been
+painted since it opened or moved. A line laid out is not always in sight whole: past four rows of chips it scrolls,
+and typed text longer than the field's width runs past its right end.
 
 Replies and forwards (`engine::reply`) are drafts made from a message, from the account that holds it, all `safe`.
 `compose.reply` goes to the message's `Reply-To`, else its `From`, and a reply to the owner's own message to its `To`;

@@ -316,6 +316,94 @@ fn a_waiting_key_chip_has_a_1_px_edge_and_the_focus_ring_stands_2_px_clear_of_it
     }
 }
 
+/// The page under the key scopes: it says a key runs one action per screen, lists Fold and the calendar's keys, takes
+/// a key only from an action whose scope meets the one given it, and names that action.
+#[test]
+fn the_page_lists_fold_and_the_calendar_s_keys_and_moves_a_key_only_where_scopes_meet() {
+    let mut harness = on_shortcuts(egui::Theme::Dark);
+    harness.get_by_label("Every action can have a key. One key runs one action per screen: giving a key takes it from its holder there.");
+    harness.get_by_label("Fold or open the floating draft has no key");
+    for name in ["left", "right"] {
+        let row = format!("Key of Calendar: pick to the {name}");
+        assert!(
+            harness.query_all_by_role(Role::Button).any(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with(&row))),
+            "{row}"
+        );
+    }
+    // Fold given the calendar's Enter: the window's and the calendar's scopes meet, so Open loses it, and the page says so.
+    let enter = KeyboardShortcut::new(Modifiers::NONE, Key::Enter);
+    press_chip(&mut harness, "Fold or open the floating draft has no key");
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().keymap().shortcut(keymap::FOLD), Some(enter));
+    assert_eq!(harness.state().keymap().shortcut(keymap::CALENDAR_OPEN), None, "one key runs one action where scopes meet");
+    assert!(harness.state().settings().keys_note().is_some_and(|note| note.contains("Calendar: open what is picked")));
+    // A key held only by the mail list's action stays the list's when a calendar key takes it: the two screens never
+    // show together, so nothing is taken and nothing is said.
+    let j = KeyboardShortcut::new(Modifiers::NONE, Key::J);
+    harness.state_mut().keymap_mut().bind("ui.list.down", j);
+    press_chip(&mut harness, "Key of Calendar: pick to the left");
+    harness.key_press(Key::J);
+    harness.run();
+    assert_eq!(harness.state().keymap().shortcut(keymap::CALENDAR_LEFT), Some(j));
+    assert_eq!(harness.state().keymap().shortcut("ui.list.down"), Some(j), "the list keeps its key");
+    assert_eq!(harness.state().settings().keys_note(), None);
+    // Within the calendar's scope one key still runs one action: Right given J takes it from Left.
+    press_chip(&mut harness, "Key of Calendar: pick to the right");
+    harness.key_press(Key::J);
+    harness.run();
+    assert_eq!(harness.state().keymap().shortcut(keymap::CALENDAR_LEFT), None);
+    assert_eq!(harness.state().keymap().shortcut("ui.list.down"), Some(j));
+    assert!(harness.state().settings().keys_note().is_some_and(|note| note.contains("Calendar: pick to the left")));
+}
+
+/// The `colour` filled rects painted this frame inside `within`.
+fn fills_in(output: &egui::FullOutput, colour: egui::Color32, within: egui::Rect) -> Vec<egui::Rect> {
+    fn walk(shape: &egui::Shape, colour: egui::Color32, within: egui::Rect, found: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, colour, within, found)),
+            egui::Shape::Rect(rect) if rect.fill == colour && within.contains_rect(rect.rect) => found.push(rect.rect),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, colour, within, &mut found);
+    }
+    found
+}
+
+#[test]
+fn the_row_waiting_for_a_key_is_a_box_720_by_36_with_a_1_px_cyan_edge() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = on_shortcuts(theme);
+        press_chip(&mut harness, "Show sent mail has no key");
+        let chip = harness.get_by_label("Show sent mail: press a key, or Escape to keep the old one").rect();
+        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        // `settings-shortcuts/capture`: the whole row, the column's 720 by its 36, the chip 8 under its top and 16 in
+        // from its right end.
+        let left = sheet.left() + 1.0 + 232.0 + 1.0 + 40.0;
+        let row = egui::Rect::from_min_size(egui::pos2(left, chip.top() - 8.0), vec2(720.0, 36.0));
+        assert_eq!(chip.right(), row.right() - 16.0, "{theme:?}: {chip:?} in {row:?}");
+        let mode = if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light };
+        let cyan = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette.cyan_edge;
+        let bands: Vec<_> = fills_in(harness.output(), cyan, row).into_iter().filter(|band| band.width() == 1.0 || band.height() == 1.0).collect();
+        assert_eq!(bands.len(), 4, "{theme:?}: four sides: {bands:?}");
+        let around = bands.iter().fold(egui::Rect::NOTHING, |all, band| all.union(*band));
+        assert_eq!(around, row, "{theme:?}: the edge round the whole row");
+    }
+}
+
+#[test]
+fn reset_all_keys_is_a_secondary_button_134_by_32() {
+    let harness = on_shortcuts(egui::Theme::Dark);
+    let reset = harness.get_by_role_and_label(Role::Button, "Reset all keys").rect();
+    // `settings-shortcuts/default`: a secondary text button, its 1 px `line` edge round 134 × 32.
+    assert_eq!((reset.width(), reset.height()), (134.0, 32.0), "{reset:?}");
+    let line = crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default()).palette.line;
+    assert!(!super::tests::strokes_round(harness.output(), line, reset).is_empty(), "its edge");
+}
+
 #[test]
 fn the_inbox_views_are_actions_the_palette_runs_and_a_key_can_take() {
     use crate::mailbox::InboxView;

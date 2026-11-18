@@ -360,12 +360,12 @@ fn rendering_any_app_needs_a_sane_size() {
 
 #[test]
 fn a_shot_shows_the_add_account_page_in_each_state_and_refuses_another() {
-    for state in ["form", "detected", "checking", "passed", "failed"] {
+    for state in ["empty", "form", "invalid", "detected", "checking", "passed", "failed"] {
         let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "size": [700, 500], "onboard": "{state}"}}"#))).unwrap();
         assert_eq!((picture.width(), picture.height()), (700, 500), "{state}");
     }
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "onboard": "half"}"#)).unwrap_err().to_string();
-    assert!(error.contains("onboard \"half\" is not form, detected, checking, passed or failed"), "{error}");
+    assert!(error.contains("onboard \"half\" is not empty, form, invalid, detected, checking, passed or failed"), "{error}");
 }
 
 #[test]
@@ -456,6 +456,7 @@ fn a_shot_shows_the_composer_in_each_scene_and_the_sending_page() {
         r#""compose": "bad""#,
         r#""compose": "suggest""#,
         r#""compose": "floating""#,
+        r#""compose": "folded""#,
         r#""compose": "reply""#,
         r#""compose": "template""#,
         r#""sending": true"#,
@@ -466,7 +467,7 @@ fn a_shot_shows_the_composer_in_each_scene_and_the_sending_page() {
         seen.push(picture);
     }
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "compose": "sent"}"#)).unwrap_err().to_string();
-    assert!(error.contains("is not new, written, bad, suggest, floating, reply or template"), "{error}");
+    assert!(error.contains("is not new, written, bad, suggest, floating, folded, reply or template"), "{error}");
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "first": true, "compose": "reply"}"#)).unwrap_err().to_string();
     assert!(error.contains("the reply did not open"), "{error}");
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "first": true, "compose": "new"}"#)).unwrap_err().to_string();
@@ -908,5 +909,18 @@ fn a_pointer_or_a_click_off_any_window_is_refused_by_name() {
             let error = shoot(&shot(&line)).err().map(|error| error.to_string()).unwrap_or_default();
             assert!(error.contains("x.png") && error.contains(key), "{key} {at}: {error:?}");
         }
+    }
+}
+
+#[test]
+fn the_screens_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "screens": true}}"#))).unwrap();
+        let size = crate::component::gallery_screens::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""fields": true"#, r#""blocks": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "screens": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
     }
 }

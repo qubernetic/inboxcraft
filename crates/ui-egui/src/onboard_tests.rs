@@ -13,8 +13,8 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::json;
 
 use super::{
-    Form, Keychain, MAX_PASSWORD_CHARS, NoDetect, NoKeychain, Onboarding, Outcome, Proposal, Proposed, Secret, Security, Source, Stage, StepState,
-    Suggestion,
+    Form, Keychain, MAX_PASSWORD_CHARS, NoDetect, NoKeychain, Onboarding, Outcome, Proposal, Proposed, Secret, Security, Slot, Source, Stage,
+    StepState, Suggestion,
 };
 use crate::mailbox::Mailbox;
 use crate::workers::{NoWorkers, Scripted, Workers};
@@ -756,7 +756,7 @@ fn a_threaded_detect_answers_from_its_thread_and_wakes_the_window() {
     let mut detect = super::Threaded::new(run, Some(wake));
     assert!(format!("{detect:?}").starts_with("Threaded"));
     assert!(super::Detect::finished(&mut detect).is_none());
-    super::Detect::start(&mut detect, "carol@example.org", true);
+    super::Detect::start(&mut detect, 7, "carol@example.org", true);
     let mut answer = None;
     for _ in 0..2000 {
         answer = super::Detect::finished(&mut detect);
@@ -765,7 +765,8 @@ fn a_threaded_detect_answers_from_its_thread_and_wakes_the_window() {
         }
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(answer.unwrap().asked, ["carol@example.org true"]);
+    let (run, answer) = answer.unwrap();
+    assert_eq!((run, answer.asked), (7, vec!["carol@example.org true".to_owned()]));
     for _ in 0..2000 {
         if woken.load(Ordering::SeqCst) > 0 {
             break;
@@ -773,4 +774,485 @@ fn a_threaded_detect_answers_from_its_thread_and_wakes_the_window() {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(woken.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_fault_names_its_field_typed_ones_as_they_are_typed() {
+    let mut form = Form::default();
+    assert!(form.typed_faults().is_empty(), "an empty form is not wrong, only unfinished");
+    assert_eq!(form.fault(true).map(|(slot, _)| slot), Some(Slot::Address));
+    assert_eq!(form.fault(false).map(|(slot, _)| slot), Some(Slot::Host), "an account's form has its address and password");
+    filled(&mut form);
+    assert_eq!(form.fault(true), None);
+    form.port = "99999".to_owned();
+    form.smtp_port = "smtp".to_owned();
+    form.caldav = "http://dav.example.org/".to_owned();
+    let typed: Vec<Slot> = form.typed_faults().into_iter().map(|(slot, _)| slot).collect();
+    assert_eq!(typed, [Slot::Port, Slot::SmtpPort, Slot::Caldav]);
+    // A port typed wrong stops the form even without its server: what is typed is never sent half-read.
+    assert_eq!(form.fault(true), Some((Slot::Port, "The port is a number from 1 to 65535.".to_owned())));
+    form.password.clear();
+    assert_eq!(form.fault(true).map(|(slot, _)| slot), Some(Slot::Password));
+}
+
+#[test]
+fn a_missing_field_s_error_stands_under_it_until_it_is_typed_in() {
+    let kept = Kept::default();
+    let mut mailbox = mailbox();
+    let mut onboarding = onboarding(&kept);
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.add(&mut mailbox);
+    assert_eq!((onboarding.error(), onboarding.error_slot()), (Some("Enter the password."), Some(Slot::Password)));
+    onboarding.edited(Slot::Host);
+    assert_eq!(onboarding.error_slot(), Some(Slot::Password), "another field leaves it");
+    onboarding.edited(Slot::Password);
+    assert_eq!((onboarding.error(), onboarding.error_slot()), (None, None));
+    // The engine's refusal belongs to no field.
+    filled(onboarding.form_mut());
+    onboarding.form_mut().host = "bad host!".to_owned();
+    onboarding.add(&mut mailbox);
+    assert!(onboarding.error().is_some());
+    assert_eq!(onboarding.error_slot(), None);
+    assert!(mailbox.accounts().is_empty());
+}
+
+#[test]
+fn what_was_typed_is_kept_on_every_way_out_and_back_but_cancel() {
+    let kept = Kept::default();
+    let mut mailbox = mailbox();
+    let mut onboarding = Onboarding::new(Arc::new(kept.clone()), Box::new(Proposed::new(proposal(Source::Srv))));
+    onboarding.open();
+    filled(onboarding.form_mut());
+    onboarding.form_mut().label = "Allotment".to_owned();
+    onboarding.form_mut().port = "1143".to_owned();
+    onboarding.detect();
+    assert!(onboarding.poll());
+    let as_left = |onboarding: &Onboarding| {
+        let form = onboarding.form();
+        (form.address.clone(), form.label.clone(), form.display_name.clone(), form.host.clone(), form.port.clone())
+    };
+    let left = as_left(&onboarding);
+    assert_eq!(left.3, "imap.example.org");
+    // Back, Esc or another page: closed and opened again, all but the password is there, and what Detect found.
+    onboarding.close();
+    assert_eq!(onboarding.stage(), Stage::Closed);
+    onboarding.open();
+    assert_eq!(as_left(&onboarding), left);
+    assert!(onboarding.form().password.is_empty(), "the password is dropped on the way out");
+    assert!(onboarding.found().is_some());
+    // An account's form in between leaves the add form as it was.
+    filled(onboarding.form_mut());
+    onboarding.form_mut().address = "dave@example.org".to_owned();
+    onboarding.add(&mut mailbox);
+    onboarding.close();
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "", "an added account's form starts the next one empty");
+    onboarding.form_mut().address = "erin@example.org".to_owned();
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.form().address, "dave@example.org");
+    onboarding.close();
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "erin@example.org");
+    // Opened again while open, nothing changes.
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "erin@example.org");
+    // Cancel drops it.
+    onboarding.cancel();
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "");
+    assert!(onboarding.found().is_none());
+}
+
+#[test]
+fn detect_keeps_what_the_owner_typed_and_refills_what_it_put_there() {
+    let found = Proposal {
+        submission: vec![Suggestion {
+            host: "smtp.example.org".to_owned(),
+            port: 465,
+            security: Security::Tls,
+            username: String::new(),
+            source: Source::Srv,
+        }],
+        ..proposal(Source::Srv)
+    };
+    let mut onboarding = Onboarding::new(Arc::new(NoKeychain), Box::new(Proposed::new(found)));
+    onboarding.open();
+    let form = onboarding.form_mut();
+    form.address = "carol@example.org".to_owned();
+    form.host = "mail.typed.example".to_owned();
+    form.username = "carol.typed".to_owned();
+    onboarding.detect();
+    assert!(onboarding.poll());
+    let form = onboarding.form();
+    assert_eq!((form.host.as_str(), form.port.as_str(), form.security), ("mail.typed.example", "", None), "the typed row stays");
+    assert_eq!(form.username, "carol.typed");
+    assert_eq!((form.smtp_host.as_str(), form.smtp_port.as_str()), ("smtp.example.org", "465"), "the empty row is filled");
+    // Detect again: what it put there it may change; the owner's change to its row is kept.
+    onboarding.form_mut().smtp_port = "587".to_owned();
+    onboarding.detect();
+    assert!(onboarding.poll());
+    assert_eq!(onboarding.form().smtp_port, "587");
+    onboarding.form_mut().host.clear();
+    onboarding.form_mut().username.clear();
+    onboarding.detect();
+    assert!(onboarding.poll());
+    assert_eq!((onboarding.form().host.as_str(), onboarding.form().username.as_str()), ("imap.example.org", "carol@example.org"));
+}
+
+/// A Detect whose runs answer only when the test lets them: each start takes the next queued proposal, and
+/// [`Held::answer`] hands the oldest started run's answer over at the next poll.
+#[derive(Clone, Default)]
+struct Held {
+    queued: Arc<Mutex<std::collections::VecDeque<Proposal>>>,
+    started: Arc<Mutex<std::collections::VecDeque<(u64, Proposal)>>>,
+    ready: Arc<Mutex<std::collections::VecDeque<(u64, Proposal)>>>,
+}
+
+impl Held {
+    fn new(answers: Vec<Proposal>) -> Self {
+        let held = Self::default();
+        held.queued.lock().unwrap().extend(answers);
+        held
+    }
+
+    fn answer(&self) {
+        let next = self.started.lock().unwrap().pop_front().unwrap();
+        self.ready.lock().unwrap().push_back(next);
+    }
+}
+
+impl super::Detect for Held {
+    fn start(&mut self, run: u64, _address: &str, _ispdb: bool) {
+        let next = self.queued.lock().unwrap().pop_front().unwrap_or_default();
+        self.started.lock().unwrap().push_back((run, next));
+    }
+
+    fn finished(&mut self) -> Option<(u64, Proposal)> {
+        self.ready.lock().unwrap().pop_front()
+    }
+}
+
+/// What Detect finds at `host` (and `smtp`, when given) for the user `user`.
+fn found_at(host: &str, smtp: Option<&str>, user: &str) -> Proposal {
+    let suggestion =
+        |host: &str, port, security| Suggestion { host: host.to_owned(), port, security, username: user.to_owned(), source: Source::Autoconfig };
+    Proposal {
+        imap: vec![suggestion(host, 993, Security::Tls)],
+        submission: smtp.map(|host| vec![suggestion(host, 465, Security::Tls)]).unwrap_or_default(),
+        asked: vec!["dns MX example.org".to_owned()],
+        failed: vec![],
+    }
+}
+
+#[test]
+fn detect_s_late_answer_never_lands_in_an_account_s_form() {
+    let kept = Kept::default();
+    // An account with no outgoing server.
+    let mut mailbox = mailbox();
+    let mut first = onboarding(&kept);
+    filled(first.form_mut());
+    first.add(&mut mailbox);
+    assert_eq!(first.stage(), Stage::Checking(1), "{:?}", first.error());
+    let detect = Held::new(vec![found_at("imap.other.example.org", Some("smtp.other.example.org"), "x@other.example.org")]);
+    let mut onboarding = Onboarding::new(Arc::new(kept.clone()), Box::new(detect.clone()));
+    onboarding.open();
+    onboarding.form_mut().address = "x@other.example.org".to_owned();
+    onboarding.detect();
+    // The account's row is pressed before Detect answers.
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.stage(), Stage::Edit(1));
+    let before = (onboarding.form().host.clone(), onboarding.form().smtp_host.clone(), onboarding.form().username.clone());
+    detect.answer();
+    onboarding.poll();
+    let after = (onboarding.form().host.clone(), onboarding.form().smtp_host.clone(), onboarding.form().username.clone());
+    assert_eq!(after, before, "the account's form is as it was");
+    assert!(!onboarding.save_checks(), "nothing to save, no sign-in anywhere");
+    // Nor in the add form, once it is back: the page was left.
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "x@other.example.org");
+    assert_eq!(onboarding.form().host, "");
+    assert!(!onboarding.detecting());
+}
+
+#[test]
+fn detect_s_answer_after_the_page_was_left_is_thrown_away_and_the_next_one_counts() {
+    let detect = Held::new(vec![
+        found_at("imap.first.example.org", None, "carol@example.org"),
+        found_at("imap.second.example.org", None, "carol@example.org"),
+    ]);
+    let mut onboarding = Onboarding::new(Arc::new(NoKeychain), Box::new(detect.clone()));
+    onboarding.open();
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.detect();
+    onboarding.close();
+    onboarding.open();
+    assert!(!onboarding.detecting(), "Detect under way ended with the page");
+    onboarding.detect();
+    // The first run's answer comes now: it is the left page's, and thrown away.
+    detect.answer();
+    onboarding.poll();
+    assert_eq!(onboarding.form().host, "");
+    assert!(onboarding.detecting(), "the second run is still under way");
+    detect.answer();
+    assert!(onboarding.poll());
+    assert_eq!(onboarding.form().host, "imap.second.example.org");
+    assert!(!onboarding.detecting());
+}
+
+#[test]
+fn detect_s_answer_for_an_address_no_longer_in_the_form_is_thrown_away() {
+    let detect = Held::new(vec![found_at("imap.first.example.org", None, "a@first.example.org")]);
+    let mut onboarding = Onboarding::new(Arc::new(NoKeychain), Box::new(detect.clone()));
+    onboarding.open();
+    onboarding.form_mut().address = "a@first.example.org".to_owned();
+    onboarding.detect();
+    onboarding.form_mut().address = "b@second.example.org".to_owned();
+    detect.answer();
+    onboarding.poll();
+    assert_eq!((onboarding.form().host.as_str(), onboarding.form().username.as_str()), ("", ""));
+    assert!(onboarding.found().is_none());
+    assert!(!onboarding.detecting());
+}
+
+/// Onboarding open on the add form over a Detect that answers `answers` in turn, at once.
+fn detecting(answers: Vec<Proposal>) -> (Onboarding, Held) {
+    let detect = Held::new(answers);
+    let mut onboarding = Onboarding::new(Arc::new(NoKeychain), Box::new(detect.clone()));
+    onboarding.open();
+    (onboarding, detect)
+}
+
+/// Runs Detect for `address` and takes its answer.
+fn detect_now(onboarding: &mut Onboarding, detect: &Held, address: &str) {
+    onboarding.form_mut().address = address.to_owned();
+    onboarding.detect();
+    detect.answer();
+    assert!(onboarding.poll());
+}
+
+#[test]
+fn a_detect_that_finds_nothing_clears_what_an_earlier_detect_filled_and_keeps_what_was_typed() {
+    let first = found_at("imap.first.example.org", Some("smtp.first.example.org"), "a@first.example.org");
+    let (mut onboarding, detect) = detecting(vec![first.clone(), Proposal::default(), first, Proposal::default()]);
+    detect_now(&mut onboarding, &detect, "a@first.example.org");
+    assert_eq!(onboarding.form().host, "imap.first.example.org");
+    detect_now(&mut onboarding, &detect, "b@second.example.org");
+    let form = onboarding.form();
+    assert_eq!(
+        (form.host.as_str(), form.port.as_str(), form.security, form.username.as_str()),
+        ("", "", None, ""),
+        "the first domain's IMAP row and user name are gone"
+    );
+    assert_eq!((form.smtp_host.as_str(), form.smtp_port.as_str(), form.smtp_security), ("", "", None), "and its SMTP row");
+    let found = onboarding.found().unwrap();
+    assert_eq!((found.source, found.outgoing.as_ref()), (None, None), "the note says nothing was found, and nothing is in the form");
+    // What the owner typed stays: the user name and the SMTP port here.
+    detect_now(&mut onboarding, &detect, "a@first.example.org");
+    onboarding.form_mut().username = "a.typed".to_owned();
+    onboarding.form_mut().smtp_port = "587".to_owned();
+    detect_now(&mut onboarding, &detect, "b@second.example.org");
+    let form = onboarding.form();
+    assert_eq!((form.host.as_str(), form.username.as_str()), ("", "a.typed"));
+    assert_eq!((form.smtp_host.as_str(), form.smtp_port.as_str()), ("", "587"));
+}
+
+#[test]
+fn a_security_picked_before_detect_never_keeps_the_host_from_being_filled() {
+    let (mut onboarding, detect) = detecting(vec![found_at("imap.example.org", Some("smtp.example.org"), "a@example.org")]);
+    onboarding.form_mut().security = Some(Security::StartTls);
+    onboarding.form_mut().smtp_security = Some(Security::Tls);
+    detect_now(&mut onboarding, &detect, "a@example.org");
+    let form = onboarding.form();
+    assert_eq!(form.host, "imap.example.org");
+    assert_eq!(form.smtp_host, "smtp.example.org");
+    assert_eq!((form.port.as_str(), form.security), ("993", Some(Security::Tls)), "the encryption goes with Detect's port");
+    let found = onboarding.found().unwrap();
+    assert_eq!(found.source, Some(Source::Autoconfig), "the note's server is the form's");
+}
+
+#[test]
+fn a_host_cleared_by_hand_in_a_row_detect_filled_is_filled_again() {
+    let answer = found_at("imap.example.org", None, "a@example.org");
+    let (mut onboarding, detect) = detecting(vec![answer.clone(), answer]);
+    detect_now(&mut onboarding, &detect, "a@example.org");
+    onboarding.form_mut().host.clear();
+    detect_now(&mut onboarding, &detect, "a@example.org");
+    assert_eq!(onboarding.form().host, "imap.example.org");
+}
+
+#[test]
+fn a_server_the_owner_typed_stays_and_the_note_says_so() {
+    let (mut onboarding, detect) = detecting(vec![found_at("imap.example.org", Some("smtp.example.org"), "a@example.org")]);
+    onboarding.form_mut().host = "mail.typed.example".to_owned();
+    onboarding.form_mut().smtp_host = "out.typed.example".to_owned();
+    detect_now(&mut onboarding, &detect, "a@example.org");
+    let form = onboarding.form();
+    assert_eq!((form.host.as_str(), form.smtp_host.as_str()), ("mail.typed.example", "out.typed.example"));
+    let found = onboarding.found().unwrap();
+    assert_eq!((found.source, found.outgoing.as_ref()), (None, None), "Detect put no server into the form");
+    assert_eq!((found.kept_imap.as_deref(), found.kept_outgoing.as_deref()), (Some("imap.example.org"), Some("smtp.example.org")));
+}
+
+#[test]
+fn after_change_settings_detect_still_knows_what_it_filled() {
+    let kept = Kept::default();
+    let mut mailbox = mailbox();
+    let detect =
+        Held::new(vec![found_at("imap.example.org", None, "carol@example.org"), found_at("imap.new.example.org", None, "carol@new.example.org")]);
+    let mut onboarding = Onboarding::new(Arc::new(kept), Box::new(detect.clone()));
+    onboarding.open();
+    onboarding.form_mut().password = Secret::new(PASSWORD);
+    detect_now(&mut onboarding, &detect, "carol@example.org");
+    onboarding.add(&mut mailbox);
+    assert!(matches!(onboarding.stage(), Stage::Checking(_)), "{:?}", onboarding.error());
+    onboarding.change(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Form);
+    detect_now(&mut onboarding, &detect, "carol@new.example.org");
+    assert_eq!((onboarding.form().host.as_str(), onboarding.form().username.as_str()), ("imap.new.example.org", "carol@new.example.org"));
+}
+
+#[test]
+fn an_account_s_form_that_cannot_open_leaves_the_add_form_as_it_was() {
+    let mut mailbox = mailbox();
+    let mut onboarding = onboarding(&Kept::default());
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.form_mut().host = "imap.example.org".to_owned();
+    onboarding.edit(&mut mailbox, 4242);
+    assert_eq!(onboarding.stage(), Stage::Form);
+    assert!(onboarding.error().is_some(), "it says why");
+    assert_eq!((onboarding.form().address.as_str(), onboarding.form().host.as_str()), ("carol@example.org", "imap.example.org"));
+    onboarding.close();
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "carol@example.org");
+}
+
+/// Accounts 1 (carol) and 2 (dave) added over `kept`, onboarding closed.
+fn two_added(kept: &Kept) -> (Mailbox, Onboarding) {
+    let (mut mailbox, mut onboarding) = added(kept);
+    onboarding.open();
+    filled(onboarding.form_mut());
+    onboarding.form_mut().address = "dave@example.org".to_owned();
+    onboarding.add(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Checking(2), "{:?}", onboarding.error());
+    onboarding.close();
+    (mailbox, onboarding)
+}
+
+#[test]
+fn an_account_s_form_keeps_what_was_typed_on_every_way_out_and_back_but_cancel() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = two_added(&kept);
+    let typed = |onboarding: &mut Onboarding| {
+        onboarding.form_mut().host = "imap.typed.example.org".to_owned();
+        onboarding.form_mut().label = "Allotment".to_owned();
+        onboarding.form_mut().password = Secret::new(PASSWORD);
+    };
+    let as_typed = |onboarding: &Onboarding| {
+        let form = onboarding.form();
+        assert_eq!((form.host.as_str(), form.label.as_str()), ("imap.typed.example.org", "Allotment"));
+        assert!(form.password.is_empty(), "the password is dropped on the way out");
+        assert!(onboarding.save_checks(), "the changed server is still a change");
+    };
+    // Add account in between.
+    onboarding.edit(&mut mailbox, 1);
+    typed(&mut onboarding);
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "", "the add form");
+    onboarding.edit(&mut mailbox, 1);
+    as_typed(&onboarding);
+    // Another account's form in between.
+    typed(&mut onboarding);
+    onboarding.edit(&mut mailbox, 2);
+    assert_eq!((onboarding.form().address.as_str(), onboarding.form().host.as_str()), ("dave@example.org", "imap.example.org"));
+    onboarding.edit(&mut mailbox, 1);
+    as_typed(&onboarding);
+    // Esc, Back, another page.
+    typed(&mut onboarding);
+    onboarding.close();
+    onboarding.edit(&mut mailbox, 1);
+    as_typed(&onboarding);
+    // The store is as it was all along.
+    assert_eq!(listed(&mut mailbox)["imap"]["host"], json!("imap.example.org"));
+    // Cancel drops it, and only it.
+    onboarding.open();
+    onboarding.form_mut().address = "erin@example.org".to_owned();
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.cancel();
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.form().host, "imap.example.org");
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "erin@example.org", "the add form is still kept");
+}
+
+#[test]
+fn a_saved_account_s_form_opens_as_the_account_now_stands() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().label = "Allotment".to_owned();
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Closed);
+    assert!(onboarding.kept_edits.is_empty(), "a saved form is not kept as typed: the account holds it now");
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.form().label, "Allotment");
+    assert!(!onboarding.save_checks());
+    onboarding.form_mut().label = "Shed".to_owned();
+    onboarding.form_mut().display_name.clear();
+    onboarding.save(&mut mailbox);
+    assert_eq!(listed(&mut mailbox)["label"], json!("Shed"));
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.form().label, "Shed");
+}
+
+#[test]
+fn every_missing_or_wrong_field_is_named_at_one_press() {
+    let mut mailbox = mailbox();
+    let mut onboarding = onboarding(&Kept::default());
+    onboarding.form_mut().port = "99999".to_owned();
+    onboarding.add(&mut mailbox);
+    let named: Vec<Slot> = onboarding.field_errors().iter().map(|(slot, _)| *slot).collect();
+    assert_eq!(named, [Slot::Address, Slot::Password, Slot::Host, Slot::Port]);
+    assert_eq!((onboarding.error(), onboarding.error_slot()), (Some("Enter the address."), Some(Slot::Address)), "the first leads");
+    assert_eq!(onboarding.page_error(), None, "each error is its field's");
+    // Typing in one field takes its error alone away.
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.edited(Slot::Address);
+    let named: Vec<Slot> = onboarding.field_errors().iter().map(|(slot, _)| *slot).collect();
+    assert_eq!(named, [Slot::Password, Slot::Host, Slot::Port]);
+    // An account's form names its missing server and its wrong port at once.
+    let (mut mailbox, mut onboarding) = added(&Kept::default());
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().host.clear();
+    onboarding.form_mut().smtp_port = "smtp".to_owned();
+    onboarding.save(&mut mailbox);
+    let named: Vec<Slot> = onboarding.field_errors().iter().map(|(slot, _)| *slot).collect();
+    assert_eq!(named, [Slot::Host, Slot::SmtpPort]);
+}
+
+#[test]
+fn detect_s_lines_are_capped_and_matched_once_when_they_come() {
+    let many = Proposal {
+        asked: (0..10_000).map(|n| format!("dns MX {n}.example.org")).collect(),
+        failed: (0..10_000).map(|n| format!("dns MX {n}.example.org: timed out")).chain(["https://example.org: refused".to_owned()]).collect(),
+        ..Proposal::default()
+    };
+    let (mut onboarding, detect) = detecting(vec![many]);
+    detect_now(&mut onboarding, &detect, "carol@example.org");
+    let found = onboarding.found().unwrap();
+    assert_eq!(found.asked_count(), 10_000, "the count says all of them");
+    assert!(found.asked.len() <= super::MOST_LINES && found.failed.len() <= super::MOST_LINES, "{} {}", found.asked.len(), found.failed.len());
+    let column = found.column();
+    assert!(column.len() <= super::MOST_LINES);
+    assert_eq!(column[0], ("dns MX 0.example.org".to_owned(), Some("timed out".to_owned())), "each question with why it failed");
+    assert_eq!(found.alone(), ["https://example.org: refused"], "a lookup that failed for no question, however far down");
+}
+
+#[test]
+fn detect_says_when_it_replaced_an_encryption_the_owner_picked() {
+    let (mut onboarding, detect) = detecting(vec![found_at("imap.example.org", Some("smtp.example.org"), "a@example.org")]);
+    onboarding.form_mut().security = Some(Security::StartTls);
+    onboarding.form_mut().smtp_security = Some(Security::Tls);
+    detect_now(&mut onboarding, &detect, "a@example.org");
+    let found = onboarding.found().unwrap();
+    assert_eq!(found.encryption_set, [Some(Security::Tls), None], "the IMAP pick was replaced; the outgoing one was Detect's already");
 }
