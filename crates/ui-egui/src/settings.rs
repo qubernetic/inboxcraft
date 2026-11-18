@@ -7,8 +7,9 @@
 //! was not done.
 //!
 //! The sheet has one open state: every way out (its Close button, Escape, a press beside it, a rail button or a key
-//! that shows another place) goes through [`Settings::close`], which forgets everything the open sheet held, so it
-//! opens clean the next time.
+//! that shows another place) goes through [`Settings::close`], which forgets what the open sheet held (the key waited
+//! for, the text that narrows the Shortcuts page, the notes), so it opens clean the next time. What was typed into a
+//! setting is never lost that way: a signature typed and not saved stays until it is saved.
 //!
 //! Every other control of the page runs its `ui.*.set` command at once.
 
@@ -120,7 +121,8 @@ pub struct Settings {
     find: String,
     /// What giving the last key changed, on the Shortcuts page.
     keys_note: Option<String>,
-    /// The signatures as typed on the Sending page, by account; an account not in it shows the one it has.
+    /// The signatures as typed on the Sending page and not saved yet, by account, kept while the sheet is closed; an
+    /// account not in it shows the one it has.
     signatures: BTreeMap<u64, String>,
     /// Why the last change of starting with the computer was not done, on the Notifications page.
     login_note: Option<String>,
@@ -151,13 +153,12 @@ impl Settings {
         self.section = section;
     }
 
-    /// Forgets what the open sheet held: the notes, the text on the Shortcuts page, the action waiting for a key and
-    /// the signatures typed and not saved.
+    /// Forgets what the open sheet held: the notes, the text on the Shortcuts page and the action waiting for a key.
+    /// The signatures typed and not saved stay: what a person wrote is never lost on the way out.
     fn forget(&mut self) {
         self.capturing = None;
         self.find.clear();
         self.keys_note = None;
-        self.signatures.clear();
         self.login_note = None;
     }
 

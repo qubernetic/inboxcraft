@@ -438,3 +438,42 @@ fn the_box_to_ask_mozilla_s_list_ticks_by_pointer_and_by_space() {
     harness.run();
     assert!(!ticked(&harness), "Space takes the tick off");
 }
+
+#[test]
+fn the_typed_form_outlasts_every_way_out_of_the_sheet() {
+    for way in ["Escape", "Close", "beside", "Appearance", "back", "rail"] {
+        let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
+        open_form(&mut harness);
+        type_in(&mut harness);
+        match way {
+            "Escape" => harness.key_press(Key::Escape),
+            "Close" => on_sheet(&harness, "Close").click(),
+            "beside" => {
+                let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+                let at = egui::pos2(sheet.left() / 2.0, sheet.center().y);
+                harness.hover_at(at);
+                harness.run();
+                for pressed in [true, false] {
+                    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+                }
+            }
+            "Appearance" => harness.get_by_label("Appearance, settings page").click(),
+            "back" => harness.get_by_label("Back to the accounts").click(),
+            _ => harness.state_mut().run_action(&egui::Context::default(), crate::keymap::CALENDAR),
+        }
+        harness.run();
+        assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "{way}: the form is left");
+        harness.state_mut().open_accounts();
+        harness.run();
+        on_sheet(&harness, "Add account").click();
+        harness.run();
+        let onboarding = harness.state().onboarding();
+        assert_eq!(onboarding.stage(), Stage::Form, "{way}");
+        assert_eq!(onboarding.form().address, "carol@example.org", "{way}: the address as typed");
+        assert!(!onboarding.form().password.is_empty(), "{way}: the password as typed, in memory only");
+        // Cancel on the form itself lets it go: the next form is empty.
+        harness.state_mut().onboarding_mut().0.close();
+        harness.state_mut().onboarding_mut().0.open();
+        assert_eq!(harness.state().onboarding().form().address, "", "{way}");
+    }
+}

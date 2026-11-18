@@ -620,9 +620,9 @@ impl InboxApp {
         }
     }
 
-    /// Opens the settings sheet on Shortcuts, closing the add-account form.
+    /// Opens the settings sheet on Shortcuts, leaving the add-account form as it is typed.
     pub fn open_shortcuts(&mut self) {
-        self.onboarding.close();
+        self.onboarding.park();
         self.settings.open_at(Section::Shortcuts);
     }
 
@@ -734,9 +734,9 @@ impl InboxApp {
         &mut self.settings
     }
 
-    /// Opens the settings sheet on Appearance, closing the add-account form.
+    /// Opens the settings sheet on Appearance, leaving the add-account form as it is typed.
     pub fn open_settings(&mut self) {
-        self.onboarding.close();
+        self.onboarding.park();
         self.settings.open();
     }
 
@@ -745,9 +745,9 @@ impl InboxApp {
         self.settings.open_at(Section::Accounts);
     }
 
-    /// Closes the settings sheet and the add-account form on it.
+    /// Closes the settings sheet and leaves the add-account form on it as it is typed.
     pub fn close_settings(&mut self) {
-        self.onboarding.close();
+        self.onboarding.park();
         self.settings.close();
     }
 
@@ -1806,12 +1806,12 @@ impl InboxApp {
             settings::Asked::ReduceMotion(reduce) => self.set_reduce_motion(reduce),
             settings::Asked::Frame(frame) => self.set_frame(frame),
             settings::Asked::Section(section) => {
-                self.onboarding.close();
+                self.onboarding.park();
                 self.settings.show(section);
             }
             settings::Asked::Add => self.onboarding.open(),
             settings::Asked::Edit(account) => self.onboarding.edit(&mut self.mailbox, account),
-            settings::Asked::Back => self.onboarding.close(),
+            settings::Asked::Back => self.onboarding.park(),
             settings::Asked::Page(asked) => self.apply_page(asked),
             settings::Asked::Capture(action) => self.settings.capture(action),
             settings::Asked::Unbind(action) => self.keymap.unbind(action),

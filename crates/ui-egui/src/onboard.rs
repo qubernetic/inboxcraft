@@ -625,6 +625,9 @@ pub struct Onboarding {
     /// The account being edited as it stood: set from [`Onboarding::edit`] until [`Onboarding::close`], through the
     /// check a save starts, so "Change settings" comes back here and removes nothing.
     held: Option<Held>,
+    /// The form a way out of the settings sheet left ([`Onboarding::park`]), as it was typed, until Add account or the
+    /// same account's row brings it back.
+    parked: Option<Stage>,
 }
 
 impl fmt::Debug for Onboarding {
@@ -655,11 +658,17 @@ impl Onboarding {
             stored: BTreeSet::new(),
             detect,
             held: None,
+            parked: None,
         }
     }
 
-    /// Opens an empty form.
+    /// Opens an empty form; or the add form a way out of the sheet left, as it was typed.
     pub fn open(&mut self) {
+        if self.parked == Some(Stage::Form) {
+            self.resume();
+            return;
+        }
+        self.parked = None;
         self.form = Form::default();
         self.found = None;
         self.error = None;
@@ -668,9 +677,32 @@ impl Onboarding {
         self.stage = Stage::Form;
     }
 
-    /// Closes onboarding; a password typed and not used is forgotten. An added account stays, and an edited one
-    /// stays as it was unless it was saved.
+    /// Leaves the form as it is typed, password included (in memory only), on a way out of the settings sheet: Add
+    /// account, or the same account's row, brings it back ([`Onboarding::open`], [`Onboarding::edit`]). A check that
+    /// runs or ran is closed as [`Onboarding::close`] closes it.
+    pub fn park(&mut self) {
+        match self.stage {
+            Stage::Form | Stage::Edit(_) => {
+                self.parked = Some(self.stage);
+                self.detecting = false;
+                self.stage = Stage::Closed;
+            }
+            Stage::Checking(_) => self.close(),
+            Stage::Closed => {}
+        }
+    }
+
+    /// Brings back the form [`Onboarding::park`] left.
+    fn resume(&mut self) {
+        if let Some(stage) = self.parked.take() {
+            self.stage = stage;
+        }
+    }
+
+    /// Closes onboarding; a password typed and not used is forgotten, and so is a form a way out left. An added account
+    /// stays, and an edited one stays as it was unless it was saved.
     pub fn close(&mut self) {
+        self.parked = None;
         self.form.password.clear();
         self.detecting = false;
         self.held = None;
@@ -680,6 +712,11 @@ impl Onboarding {
     /// Opens the form of the account `id` with everything `account.list` shows of it. The password is not among
     /// it: the field starts empty, and an empty field keeps the stored one.
     pub fn edit(&mut self, mailbox: &mut Mailbox, id: u64) {
+        if self.parked == Some(Stage::Edit(id)) {
+            self.resume();
+            return;
+        }
+        self.parked = None;
         self.error = None;
         let answer = match mailbox.run("account.list", &json!({})) {
             Ok(answer) => answer,
