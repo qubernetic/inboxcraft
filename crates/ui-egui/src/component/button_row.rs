@@ -22,10 +22,15 @@ pub struct ButtonLines {
 
 /// The lines `buttons` stand on in `room` points, `gap` apart.
 pub fn button_lines(ui: &Ui, theme: &Theme, keymap: &Keymap, buttons: &[TextButton<'_>], room: f32, gap: f32) -> ButtonLines {
-    let mut lines = Vec::with_capacity(buttons.len());
+    let widths: Vec<f32> = buttons.iter().map(|button| button.width(ui, theme, keymap)).collect();
+    lines_of(theme, &widths, room, gap)
+}
+
+/// [`button_lines`] for buttons measured already: `widths`, in order.
+pub fn lines_of(theme: &Theme, widths: &[f32], room: f32, gap: f32) -> ButtonLines {
+    let mut lines = Vec::with_capacity(widths.len());
     let (mut line, mut used) = (0_usize, 0.0_f32);
-    for button in buttons {
-        let wide = button.width(ui, theme, keymap);
+    for &wide in widths {
         if used > 0.0 && used + gap + wide > room {
             line = line.saturating_add(1);
             used = 0.0;
@@ -33,7 +38,7 @@ pub fn button_lines(ui: &Ui, theme: &Theme, keymap: &Keymap, buttons: &[TextButt
         used += if used > 0.0 { gap + wide } else { wide };
         lines.push(line);
     }
-    let count = if buttons.is_empty() { 0.0 } else { line as f32 + 1.0 };
+    let count = if widths.is_empty() { 0.0 } else { line as f32 + 1.0 };
     let side = super::control_side(theme);
     ButtonLines { lines, height: count * side + (count - 1.0).max(0.0) * gap }
 }

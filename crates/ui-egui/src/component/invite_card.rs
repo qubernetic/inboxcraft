@@ -23,7 +23,7 @@ use crate::theme::{Font, Theme};
 use crate::tr;
 
 use super::button::TextButton;
-use super::button_row::{ButtonLines, button_lines, show_lines};
+use super::button_row::{ButtonLines, lines_of, show_lines};
 
 /// The event a card is about, as the card writes it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -197,10 +197,11 @@ pub fn invite_card_with(
     // The buttons, measured once: on the info column's lines, or across the card under the day where the widest is
     // wider than the column (a narrow reader), so none is cut.
     let buttons = card_buttons(state, keep, primary);
-    let widest = buttons.iter().map(|button| button.width(ui, theme, keymap)).fold(0.0, f32::max);
+    let widths: Vec<f32> = buttons.iter().map(|button| button.width(ui, theme, keymap)).collect();
+    let widest = widths.iter().copied().fold(0.0, f32::max);
     let spread = widest > room;
     let lower_room = if spread { width - PAD_X * 2.0 } else { room };
-    let placed = button_lines(ui, theme, keymap, &buttons, lower_room, BUTTON_GAP);
+    let placed = lines_of(theme, &widths, lower_room, BUTTON_GAP);
     let answered = if let CardState::Answered { answer } = state { Some(answered_row(ui, theme, keymap, answer, lower_room)) } else { None };
     let part = match state {
         CardState::Request { .. } => placed.height + GAP + goes_high,
