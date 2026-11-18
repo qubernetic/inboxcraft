@@ -479,7 +479,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
         ui.horizontal(|ui| {
             name(ui, theme, tr!("Subject"), theme.fonts.body.size * NAMES, 0.0);
-            let response = field::plain_line(ui, theme, subject_id(), composer.subject_mut(), tr!("Subject"));
+            let response = field::plain_line(ui, theme, subject_id(), composer.subject_mut(), tr!("Subject"), field::Cap::Bytes(crate::compose::MAX_SUBJECT_BYTES));
             if response.changed() {
                 asked.push(Asked::Edited);
             }

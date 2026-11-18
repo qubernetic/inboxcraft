@@ -401,11 +401,10 @@ impl Composer {
         &mut self.text
     }
 
-    /// The subject or the text changed in their field: they are cut to what the engine keeps, and kept at the next
-    /// [`Composer::save`].
+    /// The subject or the text changed in their field: they are kept at the next [`Composer::save`]. Their fields hold
+    /// them to what the engine keeps (the subject [`MAX_SUBJECT_BYTES`], the text 1 MiB, under [`MAX_TEXT_BYTES`]),
+    /// refusing whole what would pass it, so nothing is cut here.
     pub fn edited(&mut self) {
-        cut(&mut self.subject, MAX_SUBJECT_BYTES);
-        cut(&mut self.text, MAX_TEXT_BYTES);
         self.changed = true;
     }
 

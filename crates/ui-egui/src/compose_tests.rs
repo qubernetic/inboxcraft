@@ -319,13 +319,15 @@ fn discard_removes_the_draft() {
 }
 
 #[test]
-fn what_does_not_fit_is_cut_to_what_the_engine_keeps() {
+fn a_recipient_that_does_not_fit_is_cut_and_an_edit_is_never_cut() {
     let mut mailbox = mailbox();
     let mut composer = Composer::start(&mut mailbox).unwrap();
-    *composer.subject_mut() = format!("a{}", "ő".repeat(MAX_SUBJECT_BYTES));
+    // The subject's field refuses whole what would pass what the engine keeps: an edit is never cut after it.
+    let long = format!("a{}", "ő".repeat(MAX_SUBJECT_BYTES));
+    *composer.subject_mut() = long.clone();
     composer.edited();
-    assert!(composer.subject().len() <= MAX_SUBJECT_BYTES);
-    assert!(composer.subject().chars().skip(1).all(|c| c == 'ő'), "cut at a character's start");
+    assert_eq!(composer.subject(), long);
+    *composer.subject_mut() = "a".to_owned();
     let long = format!("{}@example.org", "a".repeat(MAX_RECIPIENT_BYTES * 2));
     let many: Vec<String> = (0..MAX_RECIPIENTS + 5).map(|n| format!("p{n}@example.org")).collect();
     type_in(&mut composer, &mut mailbox, Line::To, &format!("{long},{},", many.join(",")));

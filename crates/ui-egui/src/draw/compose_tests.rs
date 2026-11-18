@@ -384,3 +384,46 @@ fn a_draft_over_the_cap_opens_whole_and_is_edited_down_and_kept() {
     let id = harness.state().composer().unwrap().draft();
     assert_eq!(kept(&mut harness, id)["text"].as_str().map(str::len), Some(shorter.len()), "and kept as it now is");
 }
+
+/// Frames enough for egui's undo history to keep the edit before them.
+fn pause(harness: &mut Harness<'static, InboxApp>) {
+    for _ in 0..90 {
+        harness.step();
+    }
+    harness.run();
+}
+
+fn subject(harness: &Harness<'static, InboxApp>) -> String {
+    harness.state().composer().map(|composer| composer.subject().to_owned()).unwrap_or_default()
+}
+
+#[test]
+fn the_subject_refuses_whole_what_would_pass_998_bytes_and_undo_still_works() {
+    let mut harness = composing(egui::Theme::Light);
+    let start = "é".repeat(490);
+    type_into(&mut harness, "Subject", &start);
+    pause(&mut harness);
+    harness.get_by_role_and_label(Role::TextInput, "Subject").type_text("!");
+    harness.run();
+    pause(&mut harness);
+    let was = format!("{start}!");
+    assert_eq!(subject(&harness), was);
+    // 981 bytes: twenty more of two bytes, or twenty-one of one, would pass 998.
+    for (case, event) in [("a paste", egui::Event::Paste("ő".repeat(10))), ("typing", egui::Event::Text("abcdefghijklmnopqrstu".to_owned()))] {
+        harness.event(event);
+        harness.run();
+        assert_eq!(subject(&harness), was, "{case}: refused whole, nothing cut");
+        assert!(harness.query_by_label_contains("Too long: this text holds at most 998 bytes").is_some(), "{case}: and said");
+    }
+    // What still fits is taken.
+    harness.event(egui::Event::Paste("ő".repeat(8)));
+    harness.run();
+    assert_eq!(subject(&harness).len(), 997, "up to the cap");
+    pause(&mut harness);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(subject(&harness), was, "Ctrl Z undoes the last edit taken");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(subject(&harness), start, "and the one before it");
+}

@@ -945,10 +945,9 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
 }
 
 /// A plain one-line edit without a box, filling the width `ui` offers: the composer's subject until the composer is
-/// restyled. Its text is `body` in `ink`; `name` is its screen-reader name. It holds at most [`MAX_LINE`] characters;
-/// what would pass them is refused whole, and a line under it says so.
-pub fn plain_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, name: &str) -> Response {
-    let cap = Cap::Chars(MAX_LINE);
+/// restyled. Its text is `body` in `ink`; `name` is its screen-reader name. It holds at most `cap` (the subject what
+/// the engine keeps of one, 998 bytes); what would pass it is refused whole, and a line under it says so.
+pub fn plain_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, name: &str, cap: Cap) -> Response {
     let guarded = guard(ui, id, text, cap);
     let said = guarded.said;
     let mut buffer = capped(text, &guarded, true, false);
