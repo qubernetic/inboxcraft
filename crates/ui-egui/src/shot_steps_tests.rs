@@ -3,11 +3,13 @@
 
 //! The script steps of `ui_shot`: what a line may ask, what a junk line gets, and what a step does to the window.
 
-use egui::{Key, KeyboardShortcut, Modifiers, vec2};
+use std::cell::Cell;
+
+use egui::{Key, KeyboardShortcut, Modifiers, Rect, pos2, vec2};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::{
-    Do, MAX_LINE, MAX_NAME, MAX_NTH, MAX_SCRIPT, MAX_SHOTS, MAX_STEPS, MAX_TIMES, Picture, Pointer, SHOT_TIME, parse_script, render_steps, shoot,
+    Do, MAX_LINE, MAX_NAME, MAX_NTH, MAX_SCRIPT, MAX_SHOTS, MAX_STEPS, MAX_TIMES, Picture, Pointer, Run, SHOT_TIME, parse_script, render_steps, shoot,
 };
 use crate::keymap;
 use crate::mailbox::Mailbox;
@@ -193,4 +195,58 @@ fn a_key_goes_through_the_keymap_so_a_rebinding_is_honoured() {
     draw(&mut app).unwrap();
     assert_ne!(app.mailbox().messages().iter().filter(|row| row.flagged).count(), flagged, "Delete flags now");
     assert_eq!(app.mailbox().refused(), None);
+}
+
+/// A bare window of 400 by 300 points with its AccessKit tree, no frame drawn yet.
+fn bare() -> Run {
+    let run = Run::new(vec2(400.0, 300.0), 1.0, Mode::Light).unwrap();
+    run.ctx.enable_accesskit();
+    run
+}
+
+#[test]
+fn a_step_settles_the_window_until_nothing_moves() {
+    let mut run = bare();
+    let (on, value) = (Cell::new(false), Cell::new(0.0_f32));
+    let mut draw = |ui: &mut egui::Ui| value.set(ui.ctx().animate_bool_with_time(egui::Id::unique("slide"), on.get(), 0.5));
+    run.frame(Vec::new(), &mut draw);
+    on.set(true);
+    run.frame(Vec::new(), &mut draw);
+    assert!(value.get() < 1.0, "half a second to go");
+    run.settle(&mut draw).unwrap();
+    assert!((value.get() - 1.0).abs() < f32::EPSILON, "settled where the motion ends: {}", value.get());
+}
+
+/// "Go" at `left` until the pointer comes into `zone`, then at `right`.
+fn moving_button(ui: &mut egui::Ui, zone: Rect, pressed: &Cell<bool>) {
+    let inside = ui.ctx().pointer_hover_pos().is_some_and(|at| zone.contains(at));
+    let at = if inside { Rect::from_min_size(pos2(300.0, 30.0), vec2(60.0, 40.0)) } else { Rect::from_min_size(pos2(20.0, 30.0), vec2(60.0, 40.0)) };
+    if ui.put(at, egui::Button::new("Go")).clicked() {
+        pressed.set(true);
+    }
+}
+
+#[test]
+fn a_press_aims_again_when_the_pointer_moves_its_target() {
+    let mut run = bare();
+    let pressed = Cell::new(false);
+    // A row that shows its action at the right while the pointer is over it, as a hover action does.
+    let mut draw = |ui: &mut egui::Ui| moving_button(ui, Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 100.0)), &pressed);
+    run.settle(&mut draw).unwrap();
+    let mut pointer = None;
+    run.step(&Do::Press { name: "Go".to_owned(), nth: None }, &mut pointer, &mut draw).unwrap();
+    assert!(pressed.get(), "pressed where it was laid out under the pointer");
+    assert_eq!(pointer, Some(pos2(330.0, 50.0)));
+}
+
+#[test]
+fn a_target_that_flees_the_pointer_is_an_error_after_a_few_tries() {
+    let mut run = bare();
+    let pressed = Cell::new(false);
+    // Over the left place it goes right; over the right place it goes left.
+    let mut draw = |ui: &mut egui::Ui| moving_button(ui, Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 100.0)), &pressed);
+    run.settle(&mut draw).unwrap();
+    let error = run.step(&Do::Press { name: "Go".to_owned(), nth: None }, &mut None, &mut draw).unwrap_err();
+    assert_eq!(error, "\"Go\" moved each time the pointer came over it");
+    assert!(!pressed.get());
 }
