@@ -656,9 +656,11 @@ fn the_list_is_440_wide_beside_the_reader() {
         }
         assert_eq!(harness.get_by_label(ODILE_READ).rect().width(), 440.0, "{percent_high}: the edge does not move");
     }
-    // A width a person once dragged the list to, kept in egui's memory, is not read.
+    // A width a person once dragged the list to, kept in egui's memory under the list panel's id, is not read.
     let mut harness = beside_the_reader();
-    let id = egui::Id::unique("list");
+    let id = harness.ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::unique("list-panel-id"))).unwrap();
+    let kept = harness.ctx.data_mut(|data| data.get_persisted::<egui::containers::panel::PanelState>(id));
+    assert!(kept.is_some(), "the panel keeps its state under that id: the planted width is where a panel reads it");
     harness.ctx.data_mut(|data| {
         data.insert_persisted(
             id,

@@ -1490,6 +1490,9 @@ impl InboxApp {
             (header, clicked, acted, out, review, done_all, outboxed, screener_mode, gained) = if !list_shown {
                 (list::Header::default(), None, None, true, false, None, None, None, None)
             } else if !single && (self.reader.open_id().is_some() || docked) {
+                // Where the panel keeps the width a drag gave it (egui's `PanelState`): the tests plant one there.
+                #[cfg(test)]
+                ui.data_mut(|data| data.insert_temp(egui::Id::unique("list-panel-id"), ui.scope_id().with_salt(egui::IdSalt::new("list"))));
                 // The list keeps its 440 beside the reader: no splitter, and a width a person once dragged to is
                 // not read.
                 Panel::left("list")
