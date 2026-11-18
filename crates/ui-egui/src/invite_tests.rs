@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 
-use super::{Invite, Method, Rsvp};
+use super::{Invite, MOST_REPLIES, Method, Rsvp};
 
 /// What `invite.show` answers for the update of a lunch moved from 11:00 to 12:30, answered Going before.
 fn update() -> Value {
@@ -130,6 +130,17 @@ fn a_cancel_and_a_reply_read_their_own_parts() {
     );
 }
 
+/// A reply naming thousands of guests keeps the first `MOST_REPLIES` answers where it is read, and counts the rest.
+#[test]
+fn a_reply_keeps_its_first_guests_and_counts_the_rest() {
+    let guests: Vec<Value> = (0..5000).map(|n| json!({ "address": format!("g{n}@example.org"), "name": null, "status": "accepted" })).collect();
+    let invite = Invite::read(10, &json!({ "invite": { "method": "reply", "replies": guests } })).unwrap();
+    assert_eq!((invite.replies.len(), invite.more_replies), (MOST_REPLIES, 5000 - MOST_REPLIES));
+    let few =
+        Invite::read(10, &json!({ "invite": { "method": "reply", "replies": [{ "address": "a@example.org", "status": "declined" }] } })).unwrap();
+    assert_eq!((few.replies.len(), few.more_replies), (1, 0));
+}
+
 /// The organiser's text is hostile: what the card shows of it has no line breaks or invisible marks.
 #[test]
 fn hostile_text_is_shown_flat() {
@@ -155,4 +166,23 @@ fn a_body_that_only_says_what_the_card_says_is_a_restatement() {
     assert!(invite.restates(""));
     assert!(!invite.restates("Lunch with Odile at The Gull café. Bring the keys to the shed, please."), "their own words stay on screen");
     assert!(!invite.restates(&"Lunch ".repeat(1000)), "too long to be a generated line");
+}
+
+#[test]
+fn the_card_says_when_as_the_design_writes_it() {
+    let mut answer = update();
+    let invite = Invite::read(7, &answer).unwrap();
+    assert_eq!((invite.weekday(), invite.card_when()), ("SAT".to_owned(), "12:30 – 13:30  ·  Sat 7 Nov".to_owned()));
+    answer["invite"]["all_day"] = json!(true);
+    answer["invite"]["local_start"] = json!("2026-11-07T00:00:00+01:00");
+    answer["invite"]["local_end"] = json!("2026-11-08T00:00:00+01:00");
+    assert_eq!(Invite::read(7, &answer).unwrap().card_when(), "all day  ·  Sat 7 Nov");
+    answer["invite"]["local_end"] = json!("2026-11-10T00:00:00+01:00");
+    assert_eq!(Invite::read(7, &answer).unwrap().card_when(), "Sat 7 Nov – Mon 9 Nov");
+    answer["invite"]["all_day"] = json!(false);
+    answer["invite"]["local_end"] = Value::Null;
+    assert_eq!(Invite::read(7, &answer).unwrap().card_when(), "00:00  ·  Sat 7 Nov");
+    answer["invite"]["local_start"] = Value::Null;
+    let invite = Invite::read(7, &answer).unwrap();
+    assert_eq!((invite.weekday(), invite.card_when()), (String::new(), String::new()));
 }

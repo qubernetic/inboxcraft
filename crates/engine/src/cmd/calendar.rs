@@ -17,7 +17,8 @@
 //! owner's answer and the event in the owner's calendar; a body kept before invitations were read is marked then. `invite.answer` (`owner`: mail leaves the computer) sends the
 //! owner's answer to the organiser at once, through the path `mail.send` takes, and puts the event in the account's
 //! first calendar (going or maybe; the copy held is changed in place) or takes it out (not going). `invite.remove`
-//! (`owner`) takes a cancelled event out of the calendar as `event.delete` does, with its undo window.
+//! (`owner`) takes a cancelled event out of the calendar as `event.delete` does, with its undo window. An invitation from a
+//! sender the screener holds cannot be answered until the owner lets them in: an answer is mail to them.
 
 use std::time::Duration;
 
@@ -30,6 +31,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::arrive::invite::{self, Owner};
+use crate::arrive::screener;
 use crate::calendar::{self, Details, Edit, EditError, Repeat, Times};
 use crate::undo::{Act, EventUndo, Inverse, Step};
 use crate::params::{NoParams, decode, decode_quietly, parse_date};
@@ -585,6 +587,8 @@ struct Card {
     held: Option<CalendarEvent>,
     /// The mark was read just now, from a body kept before: the card keeps it.
     fresh: bool,
+    /// The screener holds its sender: nobody has let them in yet, so no answer goes to them.
+    screened: bool,
 }
 
 impl Card {
@@ -622,6 +626,7 @@ impl Card {
             ItipMethod::Cancel => "the event is cancelled",
             ItipMethod::Reply | ItipMethod::Other => "it asks for no answer",
             ItipMethod::Request if self.latest().is_some() => "a later invitation came",
+            ItipMethod::Request if self.screened => "the sender is not let in yet",
             ItipMethod::Request => {
                 let Some(event) = self.event() else { return Some("the text of the message is not here yet") };
                 let Some(organizer) = &event.organizer else { return Some("it names no organiser") };
@@ -649,10 +654,10 @@ fn card(context: &Context<'_>, entry: &Entry) -> Result<Option<Card>, EngineErro
     let store = context.store();
     let message = entry.message().clone();
     let object = store.body(message.id())?.and_then(|body| invite::read(body.source()));
+    let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
     let (mark, fresh) = match store.message_state(message.id())?.invitation {
         Some(mark) => (*mark, false),
         None => {
-            let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
             match object.as_ref().filter(|_| role != Some(inboxcraft_model::Role::Blocked)).and_then(|object| invite::mark(object, context.offsets())) {
                 Some(mark) => (mark, true),
                 None => return Ok(None),
@@ -669,7 +674,8 @@ fn card(context: &Context<'_>, entry: &Entry) -> Result<Option<Card>, EngineErro
         }
     }
     let held = held_copy(context, message.account(), &mark.uid)?;
-    Ok(Some(Card { message, account, mark, object, versions, held, fresh }))
+    let screened = screener::is_new(store, context.state().screener, role, &store.accounts()?, &message)?;
+    Ok(Some(Card { message, account, mark, object, versions, held, fresh, screened }))
 }
 
 /// The event `uid` in the calendars of `account`: the first that holds it as its series.

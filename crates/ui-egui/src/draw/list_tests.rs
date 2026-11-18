@@ -2721,9 +2721,11 @@ fn the_pills_line_beside_the_reader_never_wraps_and_leaves_out_what_does_not_fit
         }
         let line = harness.get_by_role_and_label(Role::Button, "Show done").rect();
         // Every part of the line stands on it: none wraps under it.
+        // The reader's own parts beside the list (its why line is coming soon too) are not the list's line.
+        let reader = super::reader_rect(&harness.ctx);
         for node in harness.query_all_by_label_contains("coming soon").chain(harness.query_all_by_role_and_label(Role::Button, "Select")) {
             let rect = node.rect();
-            if rect.top() > line.bottom() + 40.0 {
+            if rect.top() > line.bottom() + 40.0 || reader.is_some_and(|reader| reader.contains_rect(rect)) {
                 continue;
             }
             assert!(rect.top() < line.bottom() && rect.bottom() > line.top(), "{width} open {open}: {rect:?} wraps under {line:?}");
@@ -3207,13 +3209,10 @@ fn in_one_pane_a_held_messages_head_starts_with_back_to_the_list_and_the_focus_o
     assert_eq!(rows(&harness), 0, "the held message stands in the list's place");
     let back = harness.get_by_role_and_label(Role::Button, "Back to the list").rect();
     assert_eq!(focused_rect(&harness), Some(back), "a press put the focus on the head's first tool");
-    // It stands on the middle of the head's avatar, the square right of it.
-    let avatar = flat_shapes(&harness)
-        .into_iter()
-        .map(|shape| shape.visual_bounding_rect())
-        .find(|rect| rect.left() > back.right() && rect.left() < back.right() + 20.0 && rect.width() >= 30.0 && rect.top() < back.bottom())
-        .unwrap();
-    assert!((back.center().y - avatar.center().y).abs() < 0.5, "{back:?} on the middle of the avatar {avatar:?}");
+    // It stands on the middle of the head's first line, 8 before its next tool: the reader's head has no avatar.
+    let more = harness.get_by_role_and_label(Role::Button, "More").rect();
+    assert!((back.center().y - more.center().y).abs() < 0.5, "{back:?} on the middle of the head's line {more:?}");
+    assert_eq!(more.left() - back.right(), 8.0, "{back:?} 8 before {more:?}");
     harness.get_by_role_and_label(Role::Button, "Back to the list").click();
     harness.run();
     harness.run();

@@ -921,3 +921,30 @@ fn a_link_s_underline_covers_its_row_as_the_design_s_four_samples_a_pixel_do() {
         }
     }
 }
+
+#[test]
+fn a_text_button_s_width_is_the_width_it_is_drawn() {
+    for scale in [TextScale::default(), TextScale::ALL[4]] {
+        let theme = Theme::new(Mode::Dark, scale);
+        let buttons = [
+            ("Reply", TextButton::new("Reply").primary().arrow()),
+            ("Reply all", TextButton::new("Reply all").secondary()),
+            ("Archive", TextButton::new("Archive").icon(IconId::Done).action(crate::keymap::ARCHIVE).key(true)),
+        ];
+        for (name, button) in buttons {
+            let measured = std::rc::Rc::new(std::cell::Cell::new(0.0_f32));
+            let kept = measured.clone();
+            let harness = staged(
+                theme,
+                |p| p.surface,
+                egui::vec2(600.0, 100.0),
+                move |ui, theme| {
+                    kept.set(button.width(ui, theme, &Keymap::default()));
+                    button.show(ui, theme, &Keymap::default());
+                },
+            );
+            let drawn = harness.get_by_label(name).rect().width();
+            assert!((drawn - measured.get()).abs() < 0.01, "{name} {scale:?}: measured {} drawn {drawn}", measured.get());
+        }
+    }
+}

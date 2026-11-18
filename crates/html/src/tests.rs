@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use super::{
-    Block, Cell, Document, Image, ImageSource, LinkTarget, MAX_BLOCKS, MAX_DEPTH, MAX_IMAGES, MAX_INPUT, MAX_LINKS, MAX_TABLE_COLUMNS,
+    Block, Cell, Document, Image, ImageSource, LinkTarget, MAX_BLOCKS, MAX_DEPTH, MAX_IMAGES, MAX_INPUT, MAX_LINKS, MAX_SIDE, MAX_TABLE_COLUMNS,
     MAX_TABLE_DEPTH, MAX_TABLE_ROWS, MAX_URL, Marker, Options, RemoteContent, Span, TextKind, display, truncate,
 };
 
@@ -457,8 +457,28 @@ fn link_text_is_capped() {
 fn remote_pictures_are_blocked_by_default() {
     let d = doc(r#"<img src="https://t.example/pixel.gif?id=42" alt="Logo"><img src=http://t.example/b.png>"#);
     assert_eq!(d.remote_blocked, 2);
-    assert_eq!(image(&d.blocks[0]), Some(&Image { alt: "Logo".into(), source: ImageSource::Blocked, link: None }));
+    assert_eq!(image(&d.blocks[0]), Some(&Image { alt: "Logo".into(), source: ImageSource::Blocked, link: None, size: None }));
     assert!(!format!("{d:?}").contains("t.example"));
+}
+
+/// A picture's size as its tag gives it, so a blocked one keeps its place: whole pixels only, bounded, both or none.
+#[test]
+fn a_picture_keeps_the_size_its_tag_gives() {
+    let sizes: Vec<Option<(u32, u32)>> = [
+        r#"<img src=https://t.example/a.png width=600 height="240">"#,
+        r#"<img src=https://t.example/a.png width="600px" height=" 240 ">"#,
+        r#"<img src=https://t.example/a.png width=600>"#,
+        r#"<img src=https://t.example/a.png width=50% height=20>"#,
+        r#"<img src=https://t.example/a.png width=0 height=20>"#,
+        r#"<img src=https://t.example/a.png width=99999999999999999999 height=20>"#,
+        r#"<img src=https://t.example/a.png width=-5 height=20>"#,
+        r#"<img src=https://t.example/a.png width=1e3 height=20>"#,
+        r#"<img src=https://t.example/a.png width=40000 height=20>"#,
+    ]
+    .iter()
+    .map(|html| image(&doc(html).blocks[0]).and_then(|image| image.size))
+    .collect();
+    assert_eq!(sizes, [Some((600, 240)), Some((600, 240)), None, None, None, None, None, None, Some((MAX_SIDE, 20))]);
 }
 
 #[test]

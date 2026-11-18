@@ -61,6 +61,9 @@ pub const MAX_LINKS: usize = 10_000;
 /// Most pictures one document keeps; further pictures are dropped.
 pub const MAX_IMAGES: usize = 5_000;
 
+/// The widest or highest a picture's tag may say it is, in pixels; a larger size is taken as this.
+pub const MAX_SIDE: u32 = 4_096;
+
 /// Most tables inside one another; a deeper table's cells become plain paragraphs of the outer cell.
 pub const MAX_TABLE_DEPTH: usize = 8;
 

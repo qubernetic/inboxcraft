@@ -96,6 +96,10 @@ pub const COMPOSE: &str = "ui.compose.new";
 /// Send the message being written (`mail.send`).
 pub const SEND: &str = "ui.compose.send";
 
+/// After the open message left the list, open the message the next-message rule names (the next or the previous
+/// one). No key of its own: the palette runs it.
+pub const OPEN_HELD: &str = "ui.reader.open_held";
+
 /// Move the list's focused row a page down: by the rows in sight.
 pub const PAGE_DOWN: &str = "ui.list.page_down";
 
@@ -123,10 +127,11 @@ pub const UP: &str = "ui.list.up";
 /// Open the list's keyed message and hand the keyboard to the reader; `Esc` there gives it back to the list.
 pub const OPEN: &str = "ui.list.open";
 
-/// Open the group menu of the list's keyed row.
+/// Open the menu of what has the keyboard: the group menu of the list's keyed row, or the menu of the reader's
+/// focused line or subject.
 pub const MENU: &str = "ui.list.menu";
 
-/// The group menu by the keyboard's Menu key: [`MENU`]'s second key.
+/// The same menu by the keyboard's Menu key: [`MENU`]'s second key.
 pub const MENU_KEY: &str = "ui.list.menu_key";
 
 /// The actions of the list's keys: they run only while the list has the keyboard (a row was pressed or keyed last
@@ -160,6 +165,7 @@ pub fn actions() -> Vec<Action> {
         action(COMPOSE, tr!("New message"), IconId::Compose),
         action(SEND, tr!("Send the message"), IconId::Send),
         action(CALENDAR, tr!("Show the calendar"), IconId::Calendar),
+        action(OPEN_HELD, tr!("Open the message the rule names"), IconId::Mail),
         action(DONE, tr!("Done"), IconId::Done),
         action(ARCHIVE, tr!("Archive"), IconId::Archive),
         action(SNOOZE, tr!("Snooze or remind me"), IconId::Snooze),
@@ -171,8 +177,8 @@ pub fn actions() -> Vec<Action> {
         action(DOWN, tr!("The next message of the list (the arrow)"), IconId::Caret),
         action(UP, tr!("The message before in the list (the arrow)"), IconId::Caret),
         action(OPEN, tr!("Open the list's message and read it"), IconId::Mail),
-        action(MENU, tr!("The group menu of the list's message"), IconId::More),
-        action(MENU_KEY, tr!("The group menu of the list's message (the Menu key)"), IconId::More),
+        action(MENU, tr!("The menu of the list's row, the reader's line or its subject"), IconId::More),
+        action(MENU_KEY, tr!("The menu of the list's row, the reader's line or its subject (the Menu key)"), IconId::More),
         action(PAGE_DOWN, tr!("A page down the list"), IconId::Caret),
         action(PAGE_UP, tr!("A page up the list"), IconId::Caret),
         action(FIRST, tr!("The first message of the list"), IconId::Caret),

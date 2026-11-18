@@ -400,14 +400,20 @@ fn an_attachment_is_saved_through_the_save_the_app_handed_in() {
     let files = &reader.opened(logo).unwrap().files;
     assert_eq!(files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["sketch-1.png", "sketch-2.png", "sketch-3.png"]);
     let size = files[1].size;
+    assert_eq!(reader.saved(logo, 1), None, "nothing saved yet");
     reader.save(&mut mailbox, logo, 1);
-    assert_eq!(reader.notice(), Some("Saved sketch-2.png to /downloads/sketch-2.png"));
+    // The box says where it went; the notice stays quiet.
+    assert_eq!(reader.saved(logo, 1), Some(Ok("saved to /downloads/sketch-2.png")));
+    assert_eq!(reader.notice(), None);
     let saved = kept.0.lock().unwrap().clone();
     assert_eq!(saved[0].0, "sketch-2.png");
     assert_eq!(Some(saved[0].1.len() as u64), size);
     assert!(crate::picture::decode(&saved[0].1).is_ok());
     reader.save(&mut mailbox, logo, 7);
-    assert!(reader.notice().unwrap().contains("there is no attachment 7"), "{:?}", reader.notice());
+    assert!(reader.saved(logo, 7).is_some_and(|said| said.is_err_and(|why| why.contains("there is no attachment 7"))), "{:?}", reader.saved(logo, 7));
+    // Opening a message again forgets how its saves went.
+    reader.open(&mut mailbox, Some(logo));
+    assert_eq!(reader.saved(logo, 1), None);
     reader.dismiss_notice();
     assert_eq!(reader.notice(), None);
     reader.set_notice("Link copied".to_owned());
@@ -505,4 +511,87 @@ fn sizes_read_as_people_say_them() {
     assert_eq!(size_text(Some(900)), "900 bytes");
     assert_eq!(size_text(Some(13_000)), "13 KB");
     assert_eq!(size_text(Some(3_565_158)), "3.4 MB");
+}
+
+#[test]
+fn try_again_asks_a_failed_picture_once_more_and_nothing_else() {
+    const URL: &str = "https://track.example.net/open.png?id=4417";
+    let fetch = Recorder { fail: true, ..Recorder::default() };
+    let kept = Kept::default();
+    let mut mailbox = mailbox();
+    let junk = id_of(&mut mailbox, "You have won a lighthouse");
+    let mut reader = reader(&fetch, &kept);
+    reader.open(&mut mailbox, Some(junk));
+    // Nothing to try before the owner let the pictures load: a blocked picture stays blocked.
+    reader.retry(&mut mailbox, junk, URL);
+    assert!(fetch.asked.lock().unwrap().is_empty(), "nothing asked before consent");
+    reader.allow_once(&mut mailbox, junk);
+    reader.poll();
+    assert!(matches!(reader.picture(URL), Some(PictureState::Failed(_))));
+    reader.retry(&mut mailbox, junk, URL);
+    assert_eq!(fetch.asked.lock().unwrap().len(), 2, "asked once more");
+    assert!(matches!(reader.picture(URL), Some(PictureState::Waiting)));
+    // A picture that did not fail, or a key the message does not hold, is not asked again.
+    reader.retry(&mut mailbox, junk, URL);
+    reader.retry(&mut mailbox, junk, "https://other.example.org/x.png");
+    assert_eq!(fetch.asked.lock().unwrap().len(), 2);
+}
+
+/// Two messages of one thread from Odile, both naming `url` in their HTML: the older (`answers` none) and its reply.
+fn a_thread_naming(url: &str) -> Mailbox {
+    use inboxcraft_mime::{Mailbox as Sender, MessageBuilder};
+    use inboxcraft_model::{AccountId, Address, EmailAddress, Envelope, FolderId, Message, MessageId, MessageRef, Summary, Uid};
+    use inboxcraft_store::{Batch, Body, Change, Storage as _};
+    let now = Timestamp::from_unix(1_793_869_200, 0).unwrap();
+    let mut store = sample::mailbox(now).unwrap();
+    let mut batch = Batch::new();
+    for (id, subject, answers, age) in [(980_u64, "Club logo", None, 1200), (981, "Re: Club logo", Some(980_u64), 600)] {
+        let own = format!("{id}@example.org");
+        let html = format!("<p>The logo, again.</p><img src=\"{url}\" alt=\"The logo\">");
+        let mut builder = MessageBuilder::new()
+            .from(Sender::named("Odile Brannock", "odile@example.org"))
+            .to(Sender::new("mira@example.org"))
+            .subject(subject)
+            .message_id(&own)
+            .text("The logo, again.")
+            .html(&html);
+        if let Some(answers) = answers {
+            builder = builder.in_reply_to(&format!("{answers}@example.org"));
+        }
+        let raw = builder.build().unwrap();
+        let received = Timestamp::from_unix(1_793_869_200 - age, 0);
+        let from = Address::new(Some("Odile Brannock"), EmailAddress::new("odile@example.org").unwrap());
+        let mut envelope = Envelope::new(subject).with_from(vec![from]).with_date(received).with_message_id(MessageRef::new(&own));
+        if let Some(answers) = answers {
+            envelope = envelope.with_in_reply_to(MessageRef::new(&format!("{answers}@example.org")).into_iter().collect());
+        }
+        let summary = Summary::new(Uid::new(u32::try_from(id).unwrap()).unwrap(), envelope).with_received(received);
+        batch.push(Change::PutMessage(Message::new(MessageId::new(id), AccountId::new(1), FolderId::new(1), summary)));
+        batch.push(Change::PutBody(MessageId::new(id), Body::new(raw, "The logo, again.").unwrap()));
+    }
+    store.apply(&batch).unwrap();
+    Mailbox::new(sample::session_over(store, clock()).unwrap(), clock())
+}
+
+/// Two unfolded messages of a thread share a picture that failed: `try again` in either asks for it once more, not
+/// only in the one that asked for it last.
+#[test]
+fn try_again_works_in_every_open_message_that_shows_the_picture() {
+    const URL: &str = "https://pictures.example.org/club-logo.png";
+    let fetch = Recorder { fail: true, ..Recorder::default() };
+    let kept = Kept::default();
+    let mut mailbox = a_thread_naming(URL);
+    let (older, newer) = (id_of(&mut mailbox, "Club logo"), id_of(&mut mailbox, "Re: Club logo"));
+    let mut reader = reader(&fetch, &kept);
+    reader.open(&mut mailbox, Some(newer));
+    reader.expand(&mut mailbox, older);
+    assert!(reader.opened(older).is_some() && reader.opened(newer).is_some(), "both unfolded");
+    // The older one's pictures first, then the newer one's: the newer asked for the picture last.
+    reader.allow_once(&mut mailbox, older);
+    reader.allow_once(&mut mailbox, newer);
+    reader.poll();
+    assert_eq!(fetch.asked.lock().unwrap().len(), 1, "one fetch for the shared picture");
+    assert!(matches!(reader.picture(URL), Some(PictureState::Failed(_))));
+    reader.retry(&mut mailbox, older, URL);
+    assert_eq!(fetch.asked.lock().unwrap().len(), 2, "try again in the older message asks once more");
 }

@@ -40,6 +40,7 @@ pub mod desk;
 mod draw;
 mod error;
 pub mod fetch;
+mod fitted_text;
 pub mod i18n;
 pub mod icons;
 pub mod iconset;

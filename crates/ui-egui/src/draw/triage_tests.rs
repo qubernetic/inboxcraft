@@ -105,12 +105,14 @@ fn a_held_message_opens_as_a_preview_that_asks_whether_to_let_the_sender_in() {
     harness.get_by_label("Let Harbour Swim Club in?");
     harness.get_by_label("Preview · nothing is accepted yet");
     assert!(harness.query_by_label("In People").is_none(), "held mail is in no group yet");
-    harness.get_by_label("club@example.org · first mail 06:00 · 1 message waiting");
+    harness.get_by_label("club@example.org  ·  first mail 06:00  ·  1 message waiting");
+    harness.get_by_label("No group chosen: InboxCraft sorts their mail itself.");
     harness.get_by_label("Winter swim at the harbour steps");
     assert!(harness.query_by_role_and_label(Role::Button, "Reply").is_none(), "the preview has no Reply");
-    assert!(harness.query_by_role_and_label(Role::Button, "Snooze").is_none(), "the sender stands in place of the toolbar");
-    harness.get_by_role_and_label(Role::Button, "Details");
-    for name in ["People", "Notifications", "Newsletters", "Accept", "Accept and open", "Block"] {
+    assert!(harness.query_by_role_and_label(Role::Button, "Snooze").is_none(), "the preview decides nothing: no acts");
+    harness.get_by_role_and_label(Role::Button, "More");
+    harness.get_by_label("New sender");
+    for name in ["People", "Notifications", "Newsletters", "Accept", "Accept and reply", "Block"] {
         harness.get_by_role_and_label(Role::Button, name);
     }
     assert!(harness.query_by_role_and_label(Role::Button, "Invitations").is_none(), "no Invitations group to let a sender into");
@@ -125,7 +127,8 @@ fn accept_with_a_group_lets_the_sender_in_and_undo_holds_them_again() {
     harness.get_by_role_and_label(Role::Button, "Notifications").click();
     harness.run();
     assert_eq!(harness.get_by_role_and_label(Role::Button, "Notifications").accesskit_node().toggled(), Some(Toggled::True));
-    harness.get_by_role_and_label(Role::Button, "Accept").click();
+    harness.get_by_label("Their mail goes to Notifications.");
+    harness.get_by_role_and_label(Role::Button, "Accept into Notifications").click();
     harness.run();
     harness.get_by_label("Accepted Harbour Swim Club into Notifications");
     assert_eq!(harness.state().mailbox().waiting().len(), 1);
@@ -137,9 +140,9 @@ fn accept_with_a_group_lets_the_sender_in_and_undo_holds_them_again() {
 }
 
 #[test]
-fn accept_and_open_shows_the_message_in_the_inbox() {
+fn accept_and_reply_lets_the_sender_in_and_opens_a_reply() {
     let mut harness = previewing();
-    harness.get_by_role_and_label(Role::Button, "Accept and open").click();
+    harness.get_by_role_and_label(Role::Button, "Accept and reply").click();
     harness.run();
     harness.run();
     harness.get_by_label("Accepted Harbour Swim Club");
@@ -148,6 +151,33 @@ fn accept_and_open_shows_the_message_in_the_inbox() {
     let open = mailbox.selected().unwrap();
     assert!(mailbox.messages().iter().any(|row| row.id == open && row.subject == "Winter swim at the harbour steps" && row.seen));
     assert!(harness.query_by_label("Let Harbour Swim Club in?").is_none(), "let in, so no longer held");
+    // The reply is the owner's to write: the composer opens over it, nothing is sent.
+    assert_eq!(harness.state().composer().map(|composer| composer.title()), Some("Re: Winter swim at the harbour steps".to_owned()));
+}
+
+#[test]
+fn the_let_in_card_stands_between_the_tags_and_the_subject_with_the_cyan_edge() {
+    let harness = previewing();
+    let question = harness.get_by_label("Let Harbour Swim Club in?").rect();
+    let more = harness.get_by_role_and_label(Role::Button, "More").rect();
+    let subject = harness.get_by_label("Winter swim at the harbour steps").rect();
+    assert!(more.bottom() < question.top() && question.bottom() < subject.top(), "{more:?} {question:?} {subject:?}");
+    let look = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    fn walk(shape: &egui::Shape, colour: egui::Color32, found: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, colour, found)),
+            egui::Shape::Rect(rect) if rect.stroke.color == colour && rect.stroke.width > 0.0 => found.push(rect.rect),
+            _ => {}
+        }
+    }
+    let mut edges = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, look.palette.cyan_edge, &mut edges));
+    // 14 above the question and 16 left of it.
+    let card = edges.iter().find(|edge| edge.contains_rect(question));
+    assert!(
+        card.is_some_and(|card| (question.top() - card.top() - 14.0).abs() <= 1.0 && (question.left() - card.left() - 16.0).abs() <= 1.0),
+        "{card:?} {question:?}"
+    );
 }
 
 #[test]
