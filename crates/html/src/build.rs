@@ -643,7 +643,8 @@ impl<'o> Builder<'o> {
         }
         self.flush();
         let quote = self.quote_depth();
-        self.emit(Block::Image { quote, image: Image { alt, source, link: self.link } });
+        let size = side(tag.attr("width").as_deref()).zip(side(tag.attr("height").as_deref()));
+        self.emit(Block::Image { quote, image: Image { alt, source, link: self.link, size } });
     }
 
     fn close(&mut self, name: &str) {
@@ -763,4 +764,15 @@ fn is_hidden(tag: &Tag<'_>) -> bool {
         let d = d.trim_end_matches("!important");
         d == "display:none" || d == "visibility:hidden"
     })
+}
+
+/// A picture's side as its tag writes it (`600`, `600px`): a whole number of pixels above 0, at most
+/// [`crate::MAX_SIDE`]; `None` for anything else (a share, a sign, a fraction, an empty value).
+fn side(value: Option<&str>) -> Option<u32> {
+    let value = value?.trim();
+    let digits = value.strip_suffix("px").unwrap_or(value);
+    if digits.is_empty() || digits.len() > 9 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse::<u32>().ok().filter(|side| *side > 0).map(|side| side.min(crate::MAX_SIDE))
 }

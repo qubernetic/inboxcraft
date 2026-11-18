@@ -137,6 +137,9 @@ pub struct Image {
     pub source: ImageSource,
     /// The link it belongs to, an index into [`Document::links`].
     pub link: Option<usize>,
+    /// Its width and height in pixels as its tag gives them (both whole numbers, each at most
+    /// [`crate::MAX_SIDE`]), so a picture not loaded keeps its place; `None` when the tag does not give both.
+    pub size: Option<(u32, u32)>,
 }
 
 /// Where a picture comes from.
