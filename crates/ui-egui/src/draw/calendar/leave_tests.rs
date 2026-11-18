@@ -8,7 +8,7 @@
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, pos2, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::{Queryable as _, by};
+use egui_kittest::kittest::{NodeT as _, Queryable as _, by};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use crate::calendar::View;
@@ -219,7 +219,7 @@ fn changing_the_view_or_the_day_keeps_the_typing() {
     let month = harness.get_by_role_and_label(Role::RadioButton, "Month").rect().center();
     let next = harness.get_by_role_and_label(Role::Button, "Next week").rect().center();
     typed(&mut harness, "Kiln");
-    // A press on Month or Next week is a press outside the editor: it warns, and the view may change under it.
+    // A press on Month or Next week is a press outside the editor: it warns, and reaches nothing under it.
     for at in [month, next, month, next] {
         press_at(&mut harness, at.x, at.y);
     }
@@ -243,4 +243,109 @@ fn cancel_throws_the_typing_away_at_once() {
     harness.get_by_role_and_label(Role::Button, "Cancel").click();
     harness.run();
     assert!(summary(&harness).is_none());
+}
+
+/// Twelve more events at 09:00 on Thursday 5 November, past what the week shows side by side: a "+N more" link.
+fn crowded(harness: &mut Harness<'static, InboxApp>) {
+    use crate::calendar::{Day, EventRow, Moment};
+    let thursday = Day::new(2026, 11, 5).unwrap();
+    let mut events: Vec<EventRow> = harness.state().calendar().events().cloned().collect();
+    let model = events.iter().find(|event| !event.all_day).cloned().unwrap();
+    for index in 0..12_u64 {
+        let mut event = model.clone();
+        event.id = 40_000 + index;
+        event.summary = format!("Crowd {index}");
+        event.start = Moment { day: thursday, minute: 540 };
+        event.end = Moment { day: thursday, minute: 600 };
+        (event.first, event.last, event.all_day, event.repeat) = (thursday, thursday, false, None);
+        events.push(event);
+    }
+    harness.state_mut().calendar_mut().0.set_events(events);
+    harness.run();
+}
+
+/// The centre of the first button whose name holds `label`.
+fn centre(harness: &Harness<'static, InboxApp>, label: &str) -> egui::Pos2 {
+    harness.query_all(by().role(Role::Button).label_contains(label)).next().unwrap().rect().center()
+}
+
+/// What a press under the editor could change: the day, the view, the pick, the day's float, the events listed.
+fn under(harness: &Harness<'static, InboxApp>) -> (crate::calendar::Day, View, Option<crate::calendar::Picked>, Option<crate::calendar::Day>, usize) {
+    let calendar = harness.state().calendar();
+    (calendar.focus(), calendar.view(), calendar.picked().map(crate::calendar::EventRow::key), calendar.more(), calendar.events().count())
+}
+
+#[test]
+fn a_press_outside_the_editor_reaches_nothing_under_it() {
+    let mut harness = window();
+    // A day of this week other than today, so that Today would change it.
+    {
+        let (calendar, mailbox) = harness.state_mut().calendar_mut();
+        calendar.go_to(mailbox, crate::calendar::Day::new(2026, 11, 3).unwrap());
+    }
+    harness.run();
+    crowded(&mut harness);
+    let month = harness.get_by_role_and_label(Role::RadioButton, "Month").rect().center();
+    let next = harness.get_by_role_and_label(Role::Button, "Next week").rect().center();
+    let today = harness.get_by_role_and_label(Role::Button, "Today").rect().center();
+    let day = centre(&harness, "Friday");
+    let event = centre(&harness, "Studio stand-up");
+    let more = harness
+        .query_all(by().role(Role::Button))
+        .find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with('+')))
+        .unwrap()
+        .rect()
+        .center();
+    typed(&mut harness, "Kiln");
+    let before = under(&harness);
+    for (name, at) in [("Next week", next), ("Today", today), ("Month", month), ("a day", day), ("an event", event), ("+N more", more)] {
+        press_at(&mut harness, at.x, at.y);
+        harness.run();
+        assert_eq!(under(&harness), before, "a press on {name} outside the editor changes nothing under it");
+        assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "and keeps the typing ({name})");
+        assert!(warns(&harness), "it only warns ({name})");
+    }
+    // New event, the editor's own anchor: the typing stays and nothing else opens.
+    let new = harness.get_by_role_and_label(Role::Button, "New event").rect().center();
+    press_at(&mut harness, new.x, new.y);
+    harness.run();
+    assert_eq!(summary(&harness).as_deref(), Some("Kiln"));
+    assert!(harness.state().calendar().editor().is_some_and(|editor| editor.id().is_none()));
+    // An editor with nothing typed closes on the press, and the release presses nothing under it.
+    harness.state_mut().calendar_mut().0.close_editor();
+    harness.run();
+    for (name, at) in [("Month", month), ("an event", event), ("New event", new)] {
+        harness.get_by_role_and_label(Role::Button, "New event").click();
+        harness.run();
+        assert!(harness.state().calendar().editor().is_some());
+        let before = under(&harness);
+        press_at(&mut harness, at.x, at.y);
+        harness.run();
+        assert!(harness.state().calendar().editor().is_none(), "nothing typed: a press on {name} closes the editor");
+        assert_eq!(under(&harness), before, "and does nothing else ({name})");
+    }
+    // The editor's own controls still take the pointer.
+    typed(&mut harness, "Kiln");
+    let cancel = harness.get_by_role_and_label(Role::Button, "Cancel").rect().center();
+    press_at(&mut harness, cancel.x, cancel.y);
+    harness.run();
+    assert!(summary(&harness).is_none(), "a press on Cancel inside the editor is Cancel's");
+}
+
+#[test]
+fn a_press_on_delete_beside_the_editor_never_deletes_the_event_edited() {
+    let mut harness = window();
+    harness.query_all(by().role(Role::Button).label_contains("Studio stand-up")).next().unwrap().click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    let id = harness.state().calendar().editor().and_then(crate::calendar::Editor::id).unwrap();
+    type_more(&mut harness, " moved");
+    let delete = harness.get_by_role_and_label(Role::Button, "Delete").rect().center();
+    press_at(&mut harness, delete.x, delete.y);
+    harness.run();
+    assert!(harness.state().calendar().events().any(|event| event.id == id), "the event edited is still there");
+    assert!(harness.state().calendar().picked().is_some_and(|event| event.id == id), "and still picked");
+    assert!(summary(&harness).is_some_and(|summary| summary.ends_with(" moved")));
+    assert!(warns(&harness));
 }

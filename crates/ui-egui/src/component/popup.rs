@@ -169,6 +169,16 @@ enum Mode {
     Held { quiet: bool },
 }
 
+/// The ground under a held float, over the window's panes (as the palette's and the settings sheet's dim ground): a
+/// press outside the float lands on it, from the press to the release, and reaches nothing under it. It paints
+/// nothing and takes no keyboard. The window's own controls and the toasts stand over it, as over those grounds.
+fn backdrop(ctx: &Context, float: Id) {
+    let screen = ctx.content_rect();
+    Area::new(float.with("backdrop")).order(Order::Middle).fixed_pos(screen.min).constrain(false).fade_in(false).show(ctx, |ui| {
+        ui.allocate_exact_size(screen.size(), Sense::CLICK | Sense::DRAG);
+    });
+}
+
 /// Shows `float` with `add` drawing its rows, as the module says; what `add` gave, or `None` once `Esc` or a press
 /// outside it closed it (the caller then forgets it is open). The first frame it shows, the keyboard leaves the
 /// control it opened from: the first `Tab` lands on its first row.
@@ -177,7 +187,8 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
 }
 
 /// A float that holds what a person typed (the event editor): `Esc` and a press outside it close nothing, they come
-/// back as [`Leave`] and the caller decides. It closes when the caller stops drawing it, and the caller gives the
+/// back as [`Leave`] and the caller decides. A press outside it reaches nothing under it (a ground of its own lies
+/// between them). It closes when the caller stops drawing it, and the caller gives the
 /// keyboard back. While `quiet` another surface lies over it (the palette, the settings sheet): it takes neither key
 /// nor press, and is not modal, so that surface has them. What `add` gave (always there), and how it was asked to close.
 pub fn held<R>(ctx: &Context, theme: &Theme, float: &Float, quiet: bool, add: impl FnOnce(&mut Ui) -> R) -> Option<(R, Option<Leave>)> {
@@ -239,6 +250,9 @@ fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl F
     let parent = ctx.data(|data| data.get_temp::<LayerId>(showing_id()));
     if let Some(parent) = parent.filter(|parent| *parent != mine) {
         ctx.memory_mut(|memory| memory.areas_mut().set_sublayer(parent, mine));
+    }
+    if mode == (Mode::Held { quiet: false }) {
+        backdrop(ctx, float.id);
     }
     if !quiet {
         // Only the float takes the keyboard and the pointer while it is open: Tab goes round its rows.

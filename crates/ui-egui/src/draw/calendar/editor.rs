@@ -8,7 +8,7 @@
 //! with guests the question whether to tell them; then why the last save was refused, and Cancel and Save. The fields
 //! are the project's field components with their input caps. Esc or a press outside comes back as [`Asked::Leave`]:
 //! the editor closes when nothing was typed; else it stays and says how to keep or throw away the typing (Save; Cancel
-//! or a second Esc), and a press outside never closes it.
+//! or a second Esc), and a press outside never closes it. A press outside reaches nothing under the editor.
 
 use egui::{Context, Id, Rect, Response, Ui, pos2, vec2};
 
