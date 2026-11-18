@@ -20,9 +20,14 @@
 # (#233).
 {"out": "docs/images/reader-more-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service", "menu": "more"}
 {"out": "docs/images/reader-more-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "menu": "more"}
-# The reader after Done (#237): the next row selected in the list, nothing open, the bare empty state in the pane.
+# The reader after Done (#237): no row selected in the list, nothing open, the bare empty state in the pane.
 {"out": "docs/images/reader-nothing-open-light.png", "mode": "light", "size": [1440, 900], "select": "Allotment rota for November", "act": "done"}
 {"out": "docs/images/reader-nothing-open-dark.png", "mode": "dark", "size": [1440, 900], "select": "Allotment rota for November", "act": "done"}
+# The reader's Move menu hung by its button's right edge, and a narrow reader at 130 % with its acts on two lines (#237).
+{"out": "docs/images/reader-move-light.png", "mode": "light", "size": [1440, 900], "select": "Photos from the coast walk", "menu": "move"}
+{"out": "docs/images/reader-move-dark.png", "mode": "dark", "size": [1440, 900], "select": "Photos from the coast walk", "menu": "move"}
+{"out": "docs/images/reader-narrow-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "select": "Draft logo for the bakery"}
+{"out": "docs/images/reader-narrow-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "select": "Draft logo for the bakery"}
 # The error banner over the panes, one line between them (#233).
 {"out": "docs/images/error-banner-light.png", "mode": "light", "open": {"folder": 4242}}
 {"out": "docs/images/error-banner-dark.png", "mode": "dark", "open": {"folder": 4242}}
