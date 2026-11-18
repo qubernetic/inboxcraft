@@ -242,6 +242,19 @@ fn injection_into_the_subject_is_stripped() {
     }
 }
 
+/// A subject with a word too long to fold is written as encoded words throughout, past the encoder that drops breaks
+/// on its own: CR, LF and NUL are dropped before, so none is in the words for a reader to find again.
+#[test]
+fn injection_into_a_subject_with_a_long_word_is_stripped() {
+    let long = "w".repeat(90);
+    for evil in BREAKS {
+        let subject = format!("Hi {long}{evil}{long}");
+        let bytes = MessageBuilder::new().subject(&subject).build().unwrap();
+        assert_no_injection(&bytes);
+        assert_eq!(parse(&bytes).unwrap().headers().text("subject"), Some(subject.replace(['\r', '\n', '\0'], "")), "{evil:?}");
+    }
+}
+
 #[test]
 fn injection_into_a_custom_field_value_is_stripped() {
     for evil in BREAKS {

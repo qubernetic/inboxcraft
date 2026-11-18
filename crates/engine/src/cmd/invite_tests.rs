@@ -568,22 +568,66 @@ fn an_answer_goes_at_once_without_the_hold() {
     assert!(bad(session.run("mail.unsend", &json!({ "id": sent.draft.get() }))));
 }
 
-/// The organiser's title is hostile: escaped line breaks, a control character and a header in it never reach the
-/// answer's header lines.
+/// The header lines of a sent message, and its Subject as a reader decodes it.
+fn head_and_subject(raw: &str) -> (Vec<String>, String) {
+    let head = raw.split("\r\n\r\n").next().unwrap_or_default();
+    let subject = inboxcraft_mime::parse(raw.as_bytes()).unwrap().headers().text("subject").unwrap_or_default();
+    (head.split("\r\n").map(str::to_owned).collect(), subject)
+}
+
+/// What a hostile invitation must never do to the answer: a header line from its words, a control character in a
+/// header line or in the Subject a reader decodes, a line of the reply's calendar object from its words, or a
+/// recipient but the organiser.
+fn assert_clean(sent: &Out, at: &str) {
+    let (head, subject) = head_and_subject(&sent.raw);
+    for line in &head {
+        assert!(!line.starts_with("Bcc:") && !line.starts_with("X-Evil:"), "{at}: a header from the invitation: {line:?} in {head:?}");
+        assert!(!line.contains(['\n', '\r', '\u{0}', '\u{7}']), "{at}: a control character in a header line: {line:?}");
+    }
+    assert!(!subject.contains(['\n', '\r', '\u{0}']), "{at}: a break in the decoded subject: {subject:?}");
+    // Each break stands right before a header's name in the title: dropped, the name is glued to the word before it.
+    // A reader shows a break that reached the Subject as a space.
+    assert!(!subject.contains(" Bcc:") && !subject.contains(" X-Evil:"), "{at}: a break reached the Subject: {subject:?}");
+    for line in itip(&sent.raw).split("\r\n") {
+        let upper = line.to_ascii_uppercase();
+        assert!(!upper.starts_with("ATTENDEE:MAILTO:EVIL") && !upper.starts_with("BCC") && !upper.starts_with("X-EVIL"), "{at}: {line:?}");
+        assert!(!line.contains(['\n', '\r', '\u{0}']), "{at}: a control character in a calendar line: {line:?}");
+    }
+    assert_eq!(sent.recipients, ["odile@example.org"], "{at}: the answer goes only to the organiser");
+}
+
+/// The organiser's words are hostile: CR, LF and NUL (escaped and raw) and a header or a calendar line after them in
+/// the title (short, and with a word too long to fold, which takes another way to the Subject line), the UID, and the
+/// organiser's name and address. None reaches a header line, the decoded Subject or a line of the reply; an address
+/// that is no address is refused, and nothing is sent.
 #[test]
 fn a_hostile_title_never_reaches_a_header_line_of_the_answer() {
-    let mut session = session();
-    let hostile = "SUMMARY:Lunch\\nBcc: evil@example.org\\r\\nX-Evil: 1\u{7}\u{202e}fdp.exe";
-    let calendar = object("REQUEST", "evil@example.org", 0, REQUEST_AT, "").replace("SUMMARY:Lunch with Odile", hostile);
-    let id = arrive(&mut session, 41, "evil@example.org", &calendar);
-    answer(&mut session, id, "accepted").unwrap();
-    let sent = out(&mut session);
-    let head = sent.raw.split("\r\n\r\n").next().unwrap_or_default();
-    for line in head.split("\r\n") {
-        assert!(!line.starts_with("Bcc:") && !line.starts_with("X-Evil:"), "a header from the title: {line:?} in {head}");
-        assert!(!line.contains(['\n', '\r', '\u{0}', '\u{7}']), "a control character in a header line: {line:?}");
+    let long = "w".repeat(90);
+    let evils = ["\\nBcc: evil@example.org\\r\\nX-Evil: 1\u{7}\u{202e}fdp.exe", "\rBcc: evil@example.org", "\u{0}Bcc: evil@example.org"];
+    let mut n = 50;
+    for evil in evils {
+        for title in [format!("Lunch{evil}"), format!("Lunch {long}{evil}{long}")] {
+            n += 1;
+            let mut session = session();
+            let uid = format!("u{n}@example.org{evil}\\nATTENDEE:mailto:evil@example.org");
+            let calendar = object("REQUEST", &uid, 0, REQUEST_AT, "")
+                .replace("SUMMARY:Lunch with Odile", &format!("SUMMARY:{title}"))
+                .replace("ORGANIZER;CN=Odile:", &format!("ORGANIZER;CN=\"Odile^nBcc: evil@example.org^nX-Evil: 1{}\":", evil.replace('\\', "")));
+            let id = arrive(&mut session, n, &format!("h{n}@example.org"), &calendar);
+            assert_eq!(show(&mut session, id)["can_answer"], json!(true), "{title:?}: the invitation is read");
+            answer(&mut session, id, "accepted").unwrap();
+            assert_clean(&out(&mut session), &format!("{title:?}"));
+        }
+        n += 1;
+        let mut session = session();
+        let calendar = object("REQUEST", &format!("a{n}@example.org"), 0, REQUEST_AT, "")
+            .replace("mailto:odile@example.org", &format!("mailto:odile@example.org{evil}"));
+        let id = arrive(&mut session, n, &format!("h{n}@example.org"), &calendar);
+        match answer(&mut session, id, "accepted") {
+            Ok(_) => assert_clean(&out(&mut session), &format!("address {evil:?}")),
+            Err(_) => assert!(!session.take_jobs().iter().any(|job| matches!(job.kind, JobKind::Send { .. })), "a refused answer sends nothing"),
+        }
     }
-    assert_eq!(sent.recipients, ["odile@example.org"], "the answer goes only to the organiser");
 }
 
 /// An invitation from a sender the screener holds cannot be answered: an answer would be mail to someone the owner
