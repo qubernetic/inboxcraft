@@ -213,7 +213,7 @@ const MENU_WIDTH: f32 = 18.0;
 pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>, address: &str) -> Option<Act> {
     let mut chosen = None;
     crate::component::label(ui, theme.fonts.label, tr!("Group"), theme.palette.muted);
-    for kind in GroupKind::ALL {
+    for kind in GroupKind::SHOWN {
         if popup::choice(ui, theme, kind.text(), current == Some(kind)).clicked() {
             chosen = Some(Act::Group(Some(kind)));
         }

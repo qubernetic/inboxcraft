@@ -199,8 +199,24 @@ pub enum GroupKind {
 }
 
 impl GroupKind {
-    /// Every group, in the order the inbox shows them.
+    /// Every group the engine names.
     pub const ALL: [Self; 4] = [Self::People, Self::Updates, Self::Newsletters, Self::Invitations];
+
+    /// The groups the inbox shows and a sender can be put in, in their order. Invitations is not one of them: an
+    /// invitation stands with its sender's mail ([`GroupKind::shown_for`]).
+    pub const SHOWN: [Self; 3] = [Self::People, Self::Updates, Self::Newsletters];
+
+    /// The group the inbox shows a message of group `kind` from `address` in: an invitation is grouped by who sent
+    /// it, People for a person and Updates for a system (an address no one answers from, or a delivery report's, as
+    /// the engine tells them apart); every other group is itself.
+    #[must_use]
+    pub fn shown_for(kind: Self, address: &str) -> Self {
+        match kind {
+            Self::Invitations if from_a_system(address) => Self::Updates,
+            Self::Invitations => Self::People,
+            kind => kind,
+        }
+    }
 
     /// Its name in the engine's commands.
     #[must_use]
@@ -240,6 +256,15 @@ impl GroupKind {
             Self::Invitations => IconId::Calendar,
         }
     }
+}
+
+/// Whether `address` is a system's: its local part, without `-`, `_` and `.` and in small letters, starts with
+/// `noreply` or `donotreply`, or is `mailerdaemon` or `postmaster` (the engine's rule for the senders no person
+/// answers from).
+fn from_a_system(address: &str) -> bool {
+    let local = address.rsplit_once('@').map_or(address, |(local, _)| local);
+    let local: String = local.chars().filter(|c| !matches!(c, '-' | '_' | '.')).flat_map(char::to_lowercase).take(64).collect();
+    ["noreply", "donotreply"].iter().any(|start| local.starts_with(start)) || ["mailerdaemon", "postmaster"].contains(&local.as_str())
 }
 
 /// How the unified inbox shows its groups.
@@ -981,7 +1006,8 @@ impl Mailbox {
 
     /// The groups the list shows: in the unified inbox without a search, unless the view is the simple list; the
     /// showcase's while it has any, else each group of the engine's that holds a row, in the order of
-    /// [`GroupKind::ALL`]. The rows no group holds are left out.
+    /// [`GroupKind::SHOWN`], an invitation in its sender's ([`GroupKind::shown_for`]). The rows no group holds are left
+    /// out.
     #[must_use]
     pub fn groups(&self) -> Vec<Group> {
         if self.place != Place::View(Role::Inbox) || !self.query.is_empty() || self.inbox_view == InboxView::List {
@@ -990,12 +1016,17 @@ impl Mailbox {
         if !self.showcase.groups.is_empty() {
             return self.showcase.groups.clone();
         }
-        GroupKind::ALL
+        GroupKind::SHOWN
             .into_iter()
             .map(|kind| Group {
                 icon: kind.icon(),
                 name: kind.text().to_owned(),
-                messages: self.messages.iter().filter(|row| row.group == Some(kind)).map(|row| row.id).collect(),
+                messages: self
+                    .messages
+                    .iter()
+                    .filter(|row| row.group.is_some_and(|group| GroupKind::shown_for(group, &row.address) == kind))
+                    .map(|row| row.id)
+                    .collect(),
             })
             .filter(|group| !group.messages.is_empty())
             .collect()

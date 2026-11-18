@@ -88,9 +88,10 @@ fn a_held_message_opens_as_a_preview_that_asks_whether_to_let_the_sender_in() {
     assert!(harness.query_by_role_and_label(Role::Button, "Reply").is_none(), "the preview has no Reply");
     assert!(harness.query_by_role_and_label(Role::Button, "Snooze").is_none(), "the sender stands in place of the toolbar");
     harness.get_by_role_and_label(Role::Button, "Details");
-    for name in ["People", "Updates", "Newsletters", "Invitations", "Accept", "Accept and open", "Block"] {
+    for name in ["People", "Updates", "Newsletters", "Accept", "Accept and open", "Block"] {
         harness.get_by_role_and_label(Role::Button, name);
     }
+    assert!(harness.query_by_role_and_label(Role::Button, "Invitations").is_none(), "no Invitations group to let a sender into");
     let app = harness.state();
     assert_eq!(app.mailbox().last_run(), Some("mail.read"), "read as a preview, not opened");
     assert!(!app.mailbox().can_undo(), "the preview decides nothing");

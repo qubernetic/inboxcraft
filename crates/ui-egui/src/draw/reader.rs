@@ -1162,7 +1162,7 @@ fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id:
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = s.s1;
             crate::component::label(ui, theme.fonts.label, tr!("Into"), p.muted);
-            for kind in GroupKind::ALL {
+            for kind in GroupKind::SHOWN {
                 if pill(ui, theme, kind.text(), into == Some(kind)).clicked() {
                     into = if into == Some(kind) { None } else { Some(kind) };
                     ui.data_mut(|data| data.insert_temp(chosen_id, into));

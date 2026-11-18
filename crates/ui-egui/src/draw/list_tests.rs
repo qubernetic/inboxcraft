@@ -824,8 +824,7 @@ thread_local! {
     pub(super) static ACTIONS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// The sample mailbox over a list of 10 000 messages in four groups (People, Updates, Newsletters, Invitations, in
-/// turn), longer than the engine lists, in `view`.
+/// The sample mailbox over a list of 10 000 messages in three groups (People, Updates, Newsletters, in turn), longer than the engine lists, in `view`.
 fn ten_thousand_mailbox(view: InboxView) -> Mailbox {
     use crate::mailbox::GroupKind;
     let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
@@ -835,7 +834,7 @@ fn ten_thousand_mailbox(view: InboxView) -> Mailbox {
         .map(|n| crate::mailbox::MessageRow {
             id: 1_000_000 + n,
             subject: format!("Message {n}"),
-            group: GroupKind::ALL.get(usize::try_from(n % 4).unwrap()).copied(),
+            group: GroupKind::SHOWN.get(usize::try_from(n % 3).unwrap()).copied(),
             ..model.clone()
         })
         .collect();
@@ -940,7 +939,7 @@ fn ten_thousand_messages_build_only_the_rows_in_sight() {
 fn a_group_opening_or_folding_above_the_viewport_keeps_the_first_message_in_sight() {
     let mut harness = pane(InboxView::Smart);
     // The last group opens; the list scrolls into its middle.
-    harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("Invitations"), true));
+    harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("Newsletters"), true));
     harness.run();
     pane_wheel(&mut harness, 70_000.0);
     let first = super::list::first_in_sight(&harness.ctx).unwrap();
@@ -1010,8 +1009,8 @@ fn the_keyed_row_is_scrolled_into_sight_though_it_was_not_built() {
         harness.run();
         assert!(row_rect(&harness, 1_005_000).is_none(), "{view:?}: not built");
         if view == InboxView::Smart {
-            // On cards a group shows its first rows: the next row's group (5 001 is in Updates) shows all of them.
-            harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("Updates"), true));
+            // Smart shows a group's first rows: the next row's group (5 001 is in People) shows all of them.
+            harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("People"), true));
             harness.run();
         }
         harness.key_press(Key::ArrowDown);
@@ -1127,7 +1126,7 @@ fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale
         let theme = Theme::new(Mode::Light, TextScale::from_percent(percent).unwrap());
         for view in [InboxView::List, InboxView::Grouped, InboxView::Smart] {
             let grouped = mailbox.groups();
-            assert_eq!(grouped.len(), 4);
+            assert_eq!(grouped.len(), 3);
             let listing = super::list::lines(&theme, mailbox, view, &grouped, &other, true, &|_| true, None);
             let rows = listing.lines.iter().filter(|line| matches!(line, super::list::Line::Mail(_))).count();
             assert_eq!(rows, 10_000, "{percent} {view:?}: every message a line");
@@ -1208,9 +1207,9 @@ fn a_keyed_row_scrolled_away_from_stays_away_when_mail_arrives_above() {
 #[test]
 fn a_keyed_row_scrolled_away_from_stays_away_when_a_group_opens_or_folds_above() {
     let mut harness = ten_thousand(InboxView::Smart);
-    harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("Invitations"), true));
+    harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("Newsletters"), true));
     harness.run();
-    // 5 003 is in Invitations, the last group, open.
+    // 5 003 is in Newsletters, the last group, open.
     key(&mut harness, 1_005_003);
     wheel(&mut harness, 20_000.0);
     let before = first_place(&harness);
@@ -1220,12 +1219,12 @@ fn a_keyed_row_scrolled_away_from_stays_away_when_a_group_opens_or_folds_above()
         harness.run();
         assert_eq!(first_place(&harness), before, "the first message in sight stays where it was, People open: {open}");
     }
-    // Down four times: 5 004 to 5 006 are in folded groups, 5 007 in Invitations.
-    for _ in 0..4 {
+    // Down three times: 5 004 and 5 005 are in folded groups, 5 006 in Newsletters.
+    for _ in 0..3 {
         harness.key_press(Key::ArrowDown);
         harness.run();
     }
-    assert_eq!(harness.state().mailbox().selected(), Some(1_005_007));
+    assert_eq!(harness.state().mailbox().selected(), Some(1_005_006));
     assert!(selected_in_sight(&harness), "the newly keyed row comes into sight");
 }
 
@@ -1739,4 +1738,48 @@ fn the_hover_actions_of_a_row_are_found_by_their_message() {
     // The fourth action, Snooze: what a picker anchors to.
     let found = harness.ctx.read_response(super::list::actions_id(rota).with(3_usize)).map(|response| response.rect);
     assert_eq!(found, Some(snooze));
+}
+
+#[test]
+fn an_invitation_is_grouped_by_its_sender() {
+    use crate::mailbox::{GroupKind, MessageRow};
+    let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
+    mailbox.set_inbox_view(InboxView::Grouped);
+    let model = mailbox.messages().first().unwrap().clone();
+    let row = |id: u64, sender: &str, address: &str, group: GroupKind| MessageRow {
+        id,
+        sender: sender.to_owned(),
+        address: address.to_owned(),
+        subject: format!("Invitation {id}"),
+        group: Some(group),
+        ..model.clone()
+    };
+    mailbox.set_rows(vec![
+        row(1, "Marit Solheim", "marit@example.org", GroupKind::Invitations),
+        row(2, "Calendar", "no-reply@calendar.example.org", GroupKind::Invitations),
+        row(3, "Room booking", "Do.Not.Reply@rooms.example.org", GroupKind::Invitations),
+        row(4, "Pavel Hruska", "pavel@example.org", GroupKind::People),
+        row(5, "Forgehub", "notices@forge.example.org", GroupKind::Updates),
+    ]);
+    let groups: Vec<(String, Vec<u64>)> = mailbox.groups().into_iter().map(|group| (group.name, group.messages)).collect();
+    // No Invitations group: a person's invitation stands with People, a system's with the system's mail.
+    assert_eq!(groups, [("People".to_owned(), vec![1, 4]), ("Updates".to_owned(), vec![2, 3, 5])]);
+    // The list draws them so: two heads, every row under its sender's.
+    let mut app = InboxApp::new(mailbox);
+    app.set_reduce_motion(true);
+    let harness = harness_of(app);
+    assert!(harness.query_by_label_contains("Invitations").is_none(), "no Invitations head");
+    let head = |name: &str| harness.get_by_label_contains(name).rect().top();
+    let row_top = |subject: &str| harness.get_by_label_contains(subject).rect().top();
+    let (people, updates) = (head("People, "), head("Updates, "));
+    assert!(people < row_top("Invitation 1") && row_top("Invitation 1") < updates);
+    for subject in ["Invitation 2", "Invitation 3"] {
+        assert!(row_top(subject) > updates, "{subject} under Updates");
+    }
+    // The group menu offers the groups a sender can be put in: no Invitations there either.
+    assert_eq!(GroupKind::SHOWN, [GroupKind::People, GroupKind::Updates, GroupKind::Newsletters]);
+    // A hostile address cuts nothing and says person.
+    assert_eq!(GroupKind::shown_for(GroupKind::Invitations, "@@@"), GroupKind::People);
+    assert_eq!(GroupKind::shown_for(GroupKind::Invitations, &"noreply".repeat(10_000)), GroupKind::Updates);
+    assert_eq!(GroupKind::shown_for(GroupKind::Newsletters, "no-reply@example.org"), GroupKind::Newsletters);
 }

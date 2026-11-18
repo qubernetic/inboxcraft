@@ -180,7 +180,13 @@ fn the_triage_choices_are_kept_beside_the_appearance_and_come_back() {
     assert_eq!(KeepFile::new(path.clone()).load_triage(), Some(chosen));
     let kept = dir.path().join("nested").join(TRIAGE_FILE);
     let text = std::fs::read_to_string(&kept).unwrap();
-    assert!(text.contains("\"screener\": \"inside\"") && text.contains("\"view\": \"list\"") && text.contains("\"inbox_view\": \"grouped\"") && text.contains("\"keep_pins\": true"), "{text}");
+    assert!(
+        text.contains("\"screener\": \"inside\"")
+            && text.contains("\"view\": \"list\"")
+            && text.contains("\"inbox_view\": \"grouped\"")
+            && text.contains("\"keep_pins\": true"),
+        "{text}"
+    );
     assert!(text.contains("\"hold_seconds\": 30"), "{text}");
     // Damaged, huge and wrong: the defaults or nothing.
     std::fs::write(&kept, b"{ \"screener\": 3, \"view\": \"tiles\", \"keep_pins\": \"yes\", \"hold_seconds\": 600 }").unwrap();

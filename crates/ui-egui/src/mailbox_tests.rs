@@ -810,7 +810,8 @@ fn the_old_view_ids_read_as_the_new_views() {
     // Today's key wins over the earlier one: today's `list` is List, never the old grouped list.
     assert_eq!(Triage::from_value(&json!({ "inbox_view": "list", "view": "list" })).view, InboxView::List);
     // Hostile and unknown ids: no view of theirs, the default one, no panic.
-    for hostile in [json!("tiles"), json!(""), json!("\u{0}"), json!("CARDS"), json!(7), json!(null), json!({ "x": [] }), json!("x".repeat(100_000))] {
+    for hostile in [json!("tiles"), json!(""), json!("\u{0}"), json!("CARDS"), json!(7), json!(null), json!({ "x": [] }), json!("x".repeat(100_000))]
+    {
         assert_eq!(Triage::from_value(&json!({ "inbox_view": hostile.clone() })).view, InboxView::Smart, "{hostile}");
         assert_eq!(Triage::from_value(&json!({ "view": hostile.clone() })).view, InboxView::Smart, "{hostile}");
         if let Some(text) = hostile.as_str() {
