@@ -2565,8 +2565,39 @@ fn a_step_in_the_pass_the_list_shrinks_scrolls_by_that_passs_viewport() {
     harness.key_press(Key::J);
     harness.step();
     harness.run();
-    let (shrunk, _, row) = harness.state().1.iter().find(|(view, keyed, _)| *keyed == Some(next) && view.top() > 200.0).copied().unwrap();
+    let (shrunk, _, row) =
+        harness.state().1.iter().find(|(shown, keyed, _)| *keyed == Some(next) && shown.top() > view.top() + 1.0).copied().unwrap();
     assert!(shrunk.height() < view.height(), "the list's room shrank in that pass: {shrunk:?} from {view:?}");
     let row = row.expect("the keyed row is built in the pass it was keyed in");
     assert!(row.top() >= shrunk.top() - 0.01 && row.bottom() <= shrunk.bottom() + 0.01, "whole in that pass's viewport: {row:?} in {shrunk:?}");
+}
+
+#[test]
+fn the_pills_line_beside_the_reader_never_wraps_and_leaves_out_what_does_not_fit() {
+    for (width, open) in [(1440.0, true), (1440.0, false), (1100.0, true), (1300.0, true)] {
+        let mut harness = Harness::builder()
+            .with_size(vec2(width, 900.0))
+            .with_context_setup(install_fonts)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(true));
+        harness.run();
+        if open {
+            let first = harness.state().mailbox().messages().first().map(|row| row.id);
+            harness.state_mut().mailbox_mut().select(first);
+            harness.run();
+            harness.run();
+        }
+        let line = harness.get_by_role_and_label(Role::Button, "Show done").rect();
+        // Every part of the line stands on it: none wraps under it.
+        for node in harness.query_all_by_label_contains("coming soon").chain(harness.query_all_by_role_and_label(Role::Button, "Select")) {
+            let rect = node.rect();
+            if rect.top() > line.bottom() + 40.0 {
+                continue;
+            }
+            assert!(rect.top() < line.bottom() && rect.bottom() > line.top(), "{width} open {open}: {rect:?} wraps under {line:?}");
+        }
+        if !open {
+            // With the whole width, the planned Select shows with its mark.
+            harness.get_by_role_and_label(Role::Button, "Select");
+        }
+    }
 }

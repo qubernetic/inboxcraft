@@ -132,11 +132,17 @@ fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) {
                 asked.open = Some(Place::Later(Pile::Parked));
             }
             // Several messages at once (the rows' check boxes and the bulk bar) are planned: the way in is drawn,
-            // coming soon, its mark once.
-            crate::component::soon::soon(ui, theme, |ui| {
-                let _ = pill(ui, theme, tr!("Select"), false);
-            });
-            let _ = crate::component::soon::soon_tag(ui, theme);
+            // coming soon, its mark once. A part that does not fit the line is left out whole, as the design's widths
+            // say: beside the reader the line keeps to one line and the planned Select gives way.
+            let gap = theme.spacing.s2;
+            let need =
+                gap + crate::component::pill::width(ui, theme, tr!("Select")) + gap + crate::component::tag::width(ui, theme, tr!("coming soon"));
+            if ui.available_size_before_wrap().x >= need {
+                crate::component::soon::soon(ui, theme, |ui| {
+                    let _ = pill(ui, theme, tr!("Select"), false);
+                });
+                let _ = crate::component::soon::soon_tag(ui, theme);
+            }
         });
     });
 }
