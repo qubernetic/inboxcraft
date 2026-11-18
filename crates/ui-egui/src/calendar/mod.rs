@@ -806,11 +806,12 @@ impl Calendar {
     }
 
     /// Esc (`escape`) or a press outside the editor. With nothing typed it closes. With typing, the typing is thrown
-    /// away only by an act that says so: a second Esc with nothing changed since the editor said so; a press outside
-    /// never closes it, however often, and says how to keep or throw away the typing.
+    /// away only by an act that says so: an Esc after the warning an Esc raised, with nothing changed since. A press
+    /// outside never closes it, however often, and says how to keep or throw away the typing; the first Esc after
+    /// that warning (or New event's or Edit's) warns as Esc does.
     pub fn leave_editor(&mut self, escape: bool) {
         match self.editor.as_mut() {
-            Some(editor) if editor.edited() && !(escape && editor.warned()) => editor.warn(),
+            Some(editor) if editor.edited() && !(escape && editor.warned_by_escape()) => editor.warn(escape),
             _ => self.editor = None,
         }
     }
@@ -819,7 +820,7 @@ impl Calendar {
     fn keeps_typing(&mut self) -> bool {
         match self.editor.as_mut() {
             Some(editor) if editor.edited() => {
-                editor.warn();
+                editor.warn(false);
                 true
             }
             _ => false,

@@ -83,9 +83,9 @@ pub struct Editor {
     problem: Option<String>,
     /// The list of choices open in the form, when one is.
     menu: Option<Menu>,
-    /// The form and the guests' answer as they were when Esc asked whether to throw the typing away: a second Esc with
-    /// nothing changed since throws it away; any change asks again.
-    warned: Option<(Form, bool)>,
+    /// The form and the guests' answer as they were when the editor said the typing is not saved, and whether Esc made
+    /// it say so: an Esc after Esc's warning, with nothing changed since, throws the typing away; any change asks again.
+    warned: Option<(Form, bool, bool)>,
 }
 
 /// A list of choices of the form that opens over it.
@@ -228,17 +228,23 @@ impl Editor {
         self.form != self.was
     }
 
-    /// Whether the editor said that what was typed is not saved, and nothing changed since: a second Esc now throws
-    /// the typing away.
+    /// Whether the editor said that what was typed is not saved, and nothing changed since.
     #[must_use]
     pub fn warned(&self) -> bool {
-        self.warned.as_ref().is_some_and(|(form, notify)| *form == self.form && *notify == self.notify)
+        self.warned.as_ref().is_some_and(|(form, notify, _)| *form == self.form && *notify == self.notify)
     }
 
-    /// Esc or a press outside with something typed: the editor stays open and says how to keep or throw away the
-    /// typing. The warning holds until the form changes.
-    pub(crate) fn warn(&mut self) {
-        self.warned = Some((self.form.clone(), self.notify));
+    /// Whether Esc made the editor say that what was typed is not saved, and nothing changed since: an Esc now throws
+    /// the typing away.
+    #[must_use]
+    pub fn warned_by_escape(&self) -> bool {
+        self.warned() && self.warned.as_ref().is_some_and(|(_, _, escape)| *escape)
+    }
+
+    /// Esc (`escape`), a press outside, New event or Edit with something typed: the editor stays open and says how to
+    /// keep or throw away the typing. The warning holds until the form changes; only one Esc raised arms the next Esc.
+    pub(crate) fn warn(&mut self, escape: bool) {
+        self.warned = Some((self.form.clone(), self.notify, escape));
         self.problem = None;
     }
 

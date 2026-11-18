@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The ways out of the event editor with something typed: what was typed is thrown away only by an act that says so
-//! (Cancel, or a second Esc with nothing changed since the editor said so). A press outside, however often, another
-//! New event or Edit, and a change of view or day keep it.
+//! (Cancel, or an Esc after the warning an Esc raised, with nothing changed since). A press outside, however often,
+//! another New event or Edit, and a change of view or day keep it; their warning is not Esc's.
 
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, pos2, vec2};
@@ -115,15 +115,40 @@ fn typing_after_the_warning_asks_again_before_esc_throws_it_away() {
 }
 
 #[test]
-fn after_the_warning_of_a_press_outside_esc_is_the_act_that_says_so() {
+fn after_the_warning_of_a_press_new_event_or_edit_the_first_esc_warns_as_esc_does() {
+    // A press outside.
     let mut harness = window();
     typed(&mut harness, "Kiln");
     press_at(&mut harness, 1300.0, 700.0);
     harness.run();
-    assert!(warns(&harness), "the warning names Esc as the way to throw the typing away");
+    assert!(warns(&harness));
     harness.key_press(Key::Escape);
     harness.run();
-    assert!(summary(&harness).is_none(), "Esc after the warning, nothing changed since: thrown away as the warning said");
+    assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "the first Esc after a press's warning keeps the typing");
+    assert!(warns(&harness), "and warns as Esc does");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(summary(&harness).is_none(), "the second Esc, nothing changed since, throws it away");
+    // New event and Edit, asked while typing is held.
+    for way in ["new", "edit"] {
+        typed(&mut harness, "Kiln");
+        let (calendar, _) = harness.state_mut().calendar_mut();
+        if way == "new" {
+            calendar.new_event();
+        } else {
+            let other = calendar.events().next().map(crate::calendar::EventRow::key);
+            calendar.pick(other);
+            calendar.edit_picked();
+        }
+        harness.run();
+        assert!(warns(&harness), "{way} warns");
+        harness.key_press(Key::Escape);
+        harness.run();
+        assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "the first Esc after the warning of {way} keeps the typing");
+        harness.key_press(Key::Escape);
+        harness.run();
+        assert!(summary(&harness).is_none(), "the second Esc after {way} throws it away");
+    }
 }
 
 #[test]
