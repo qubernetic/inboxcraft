@@ -131,3 +131,111 @@ fn a_hostile_cell_stays_in_its_column() {
     let cut = texts(&paint).into_iter().find(|text| text.1.starts_with('9')).unwrap_or_else(|| panic!("{paint:#?}"));
     assert!(cut.1.ends_with('…') && cut.0.width() <= 72.0 && cut.0.right() <= rect.right() - 12.0 + 1.0, "{cut:?}");
 }
+
+/// A table of `columns` × `rows` cells, each its own words, `width` points of room in a harness `high` high.
+fn huge(theme: Theme, columns: usize, rows: usize, width: f32, high: f32) -> Harness<'static> {
+    let heads: &'static [&'static str] =
+        Box::leak((0..columns).map(|c| &*Box::leak(format!("head {c}").into_boxed_str())).collect::<Vec<&str>>().into_boxed_slice());
+    let widths: &'static [f32] = Box::leak(vec![48.0; columns.saturating_sub(1)].into_boxed_slice());
+    let cells: &'static [&'static [&'static str]] = Box::leak(
+        (0..rows)
+            .map(|r| &*Box::leak((0..columns).map(|c| &*Box::leak(format!("r{r}c{c}").into_boxed_str())).collect::<Vec<&str>>().into_boxed_slice()))
+            .collect::<Vec<&[&str]>>()
+            .into_boxed_slice(),
+    );
+    staged(
+        theme,
+        |p| p.surface,
+        vec2(width + 48.0, high),
+        move |ui, theme| {
+            ui.set_width(width);
+            hairline_table(ui, theme, &Table { heads, widths, rows: cells, total: None });
+        },
+    )
+}
+
+#[test]
+fn a_table_of_500_columns_and_200_rows_lays_out_a_bounded_number_of_lines() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let harness = huge(theme, 500, 200, 560.0, 400.0);
+    let laid = harness.ctx.fonts(|fonts| fonts.num_galleys_in_cache());
+    // Every row's first cell (its height), the heads and the cells in sight: not 100 000.
+    assert!(laid <= 2_000, "{laid} lines laid out");
+    // What is left out is said, never silently dropped.
+    harness.get_by_label_contains("more columns are not shown");
+}
+
+#[test]
+fn hostile_heads_and_widths_are_cleaned_bounded_and_kept_in_the_box() {
+    let theme = Theme::new(Mode::Dark, TextScale::ALL[4]);
+    let head: &'static str = Box::leak(format!("\u{202E}Price\nper{}", "Ż".repeat(3000)).into_boxed_str());
+    let harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(608.0, 300.0),
+        move |ui, theme| {
+            ui.set_width(560.0);
+            let row: &[&str] = &["Teapot", "1", "2", "3", "4"];
+            let heads: &[&str] = &[head, head, head, head, head];
+            let widths: &[f32] = &[f32::NAN, -5.0, 1.0e9, f32::INFINITY];
+            hairline_table(ui, theme, &Table { heads, widths, rows: &[row], total: None });
+        },
+    );
+    let table = harness.get_by_role(egui::accesskit::Role::Group);
+    let label = egui_kittest::kittest::NodeT::accesskit_node(&table).label().unwrap_or_default();
+    assert!(!label.contains('\u{202E}') && !label.contains('\n'), "the heads heard clean");
+    let viewport = Rect::from_min_size(egui::pos2(24.0, 24.0), vec2(560.0, 252.0));
+    let paint = crate::component::tests::painted_in(&harness, &label, viewport.intersect(table.rect()));
+    for (rect, text, ..) in texts(&paint) {
+        let short: String = text.chars().take(40).collect();
+        assert!(!text.contains('\u{202E}') && !text.contains('\n'), "{short:?}");
+        assert!(text.chars().count() <= 400, "a head is capped before it is laid out");
+        let _ = rect;
+    }
+    for shape in &paint.shapes {
+        assert!(shape.inside || shape.clipped, "nothing paints past the table's box: {:?}", shape.rect);
+    }
+}
+
+#[test]
+fn a_table_wider_than_the_pane_scrolls_sideways_inside_itself() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(300.0 + 48.0, 300.0),
+        move |ui, theme| {
+            ui.set_width(300.0);
+            let row: &[&str] = &["Teapot", "1", "38.00"];
+            hairline_table(ui, theme, &Table { heads: &HEADS, widths: &[200.0, 200.0], rows: &[row], total: None });
+        },
+    );
+    let row: &[&str] = &["Teapot", "1", "38.00"];
+    let name = spoken(&Table { heads: &HEADS, widths: &[200.0, 200.0], rows: &[row], total: None });
+    let table = harness.get_by_label(&name).rect();
+    assert!(table.width() > 300.0, "the table keeps its columns: {table:?}");
+    // The price, past the pane's right edge, is clipped there; a scroll sideways brings it in.
+    // The price as painted, and the clip it is painted in.
+    let price = |harness: &Harness<'static>| {
+        harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.job.text == "38.00" => Some((text.galley.rect.translate(text.pos.to_vec2()), clipped.clip_rect)),
+            _ => None,
+        })
+    };
+    let (before, clip) = price(&harness).unwrap_or_else(|| panic!("the price"));
+    assert!(before.left() > 324.0, "past the pane: {before:?}");
+    assert!(clip.right() <= 324.0 + 0.5, "clipped at the pane's edge: {clip:?}");
+    harness.hover_at(egui::pos2(100.0, 60.0));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(-400.0, 0.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+    });
+    for _ in 0..4 {
+        harness.run();
+    }
+    let (after, _) = price(&harness).unwrap_or_else(|| panic!("the price"));
+    assert!(after.left() < before.left() - 100.0, "the table scrolled sideways: {before:?} {after:?}");
+}
