@@ -83,25 +83,18 @@ pub fn paint(painter: &Painter, theme: &Theme, strip: Rect, thumb: Rangef, bar: 
 /// none, or showed it over the content): the strip egui senses, the thumb where egui's drag puts it. Only the
 /// vertical bar: a horizontal one is not painted.
 pub fn bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>) {
-    paint_bar(ui, theme, output, false);
+    paint_bar(ui, theme, output);
 }
 
-/// [`bar`], over the content's right edge when `over`, beside it otherwise.
-fn paint_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, over: bool) {
+/// [`bar`]: beside the content.
+fn paint_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>) {
     let id = output.id.with(1);
     let Some(strip) = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(id).map(|widget| widget.rect)) else { return };
     // egui starts showing a bar a frame before it gives it room beside the content: until the strip stands clear of
     // the content, nothing is painted, so no frame has the bar over a row.
-    if !over && strip.left() < output.inner_rect.right() - 0.01 {
+    if strip.left() < output.inner_rect.right() - 0.01 {
         return;
     }
-    // Over the content, the strip is the content's right 12, whatever width egui gives a floating bar in between.
-    let strip = if over {
-        let width = theme.sizes.scrollbar;
-        Rect::from_x_y_ranges(Rangef::new(output.inner_rect.right() - width, output.inner_rect.right()), strip.y_range())
-    } else {
-        strip
-    };
     let (inner, content) = (output.inner_rect.height(), output.content_size.y);
     let length = strip.height();
     if !(content > inner && inner > 0.0 && length > 0.0 && content.is_finite()) {
@@ -136,17 +129,61 @@ pub fn show_viewport<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl 
 }
 
 /// [`show_viewport`] with the bar over the content's right edge, not beside it: the content keeps the area's whole
-/// width whether it scrolls or not (the mail list's 440 rows). A row's focus edge the thumb passes is painted again
-/// over the thumb ([`super::row::Row::finish`]), so the thumb never covers it.
+/// width whether it scrolls or not (the mail list's 440 rows). egui shows no bar of its own here: only the thumb takes
+/// the pointer, so a press in the strip beside it reaches the row under it ([`over_bar`]). A row's focus edge the
+/// thumb passes is painted again over the thumb ([`super::row::Row::finish`]), so the thumb never covers it.
 pub fn show_viewport_over<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui, Rect) -> R) -> ScrollAreaOutput<R> {
-    let kept = ui.spacing().scroll;
-    ui.spacing_mut().scroll.floating_allocated_width = 0.0;
     super::row::forget_focus_edge(ui.ctx());
+    // Where a drag of the thumb put the content in the last frame.
+    let dragged = ui.scope_id().with("scroll-over-dragged");
+    let mut area = area.scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+    if let Some(offset) = ui.data_mut(|data| data.remove_temp::<f32>(dragged)) {
+        area = area.vertical_scroll_offset(offset);
+    }
     let output = area.show_viewport(ui, add);
-    ui.spacing_mut().scroll = kept;
-    paint_bar(ui, theme, &output, true);
+    if let Some(offset) = over_bar(ui, theme, &output) {
+        ui.data_mut(|data| data.insert_temp(dragged, offset));
+    }
     super::row::repaint_focus_edge(ui, theme, output.inner_rect);
     output
+}
+
+/// The bar of [`show_viewport_over`], over the content's right 12: the thumb alone senses the pointer, registered
+/// after the content so it wins over a row there, and a drag on it moves the content as egui's bar does; the strip
+/// shows its hover while the pointer is over it. Nothing when the content fits. The offset a drag asks for, which the
+/// next frame takes.
+fn over_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>) -> Option<f32> {
+    let inner = output.inner_rect;
+    let (length, content) = (inner.height(), output.content_size.y);
+    if !(content > length && length > 0.0 && content.is_finite()) {
+        return None;
+    }
+    let strip = Rect::from_x_y_ranges(Rangef::new(inner.right() - theme.sizes.scrollbar, inner.right()), inner.y_range());
+    let size = (length / content * length).max(ui.spacing().scroll.handle_min_length).min(length);
+    let (most, travel) = (content - length, length - size);
+    let offset = output.state.clamped_offset().y;
+    let share = (offset / most).clamp(0.0, 1.0);
+    let top = strip.top() + share * travel;
+    let thumb = Rect::from_x_y_ranges(strip.x_range(), Rangef::new(top, top + size));
+    let response = ui.interact(thumb, output.id.with("over-thumb"), egui::Sense::drag());
+    let mut asked = None;
+    if response.dragged() && travel > 0.0 {
+        let moved = offset + response.drag_delta().y * most / travel;
+        if moved.is_finite() && moved != offset {
+            asked = Some(moved.clamp(0.0, most));
+            ui.ctx().request_repaint();
+        }
+    }
+    let over_strip = ui.ctx().pointer_hover_pos().is_some_and(|at| strip.contains(at));
+    let bar = if response.dragged() || response.is_pointer_button_down_on() {
+        Bar::Dragging
+    } else if response.hovered() || over_strip {
+        Bar::Hover
+    } else {
+        Bar::Rest
+    };
+    paint(ui.painter(), theme, strip, Rangef::new(top, top + size), bar);
+    asked
 }
 
 #[cfg(test)]

@@ -2838,3 +2838,36 @@ fn in_one_pane_the_docked_composer_swaps_with_the_list_and_keeps_what_is_written
     assert_eq!(rows(&harness), 0, "the composer is back in the list's place");
     assert_eq!(harness.state().composer().map(crate::compose::Composer::text), Some("Dear Odile"));
 }
+
+#[test]
+fn in_the_lists_bar_only_the_thumb_takes_a_press() {
+    let mut harness = ten_thousand(InboxView::List);
+    let view = super::list::view_rect(&harness.ctx).unwrap();
+    let order = super::list::order(&harness.ctx);
+    // A row well below the thumb (at the top, 32 high): a press in the bar's strip over its right end opens it.
+    let row_id = *order.iter().find(|id| row_rect(&harness, **id).is_some_and(|rect| rect.top() > view.top() + 200.0)).unwrap();
+    let row = row_rect(&harness, row_id).unwrap();
+    let at = egui::pos2(row.right() - 6.0, row.center().y);
+    let before = row_rect(&harness, order[0]).map(|rect| rect.top());
+    harness.hover_at(at);
+    harness.run();
+    harness.drag_at(at);
+    harness.run();
+    harness.drop_at(at);
+    harness.run();
+    assert_eq!(row_rect(&harness, order[0]).map(|rect| rect.top()), before, "the list did not scroll");
+    assert_eq!(harness.state().mailbox().selected(), Some(row_id), "the row under the press took it");
+    // The thumb itself still drags the list (beside the reader now).
+    let view = super::list::view_rect(&harness.ctx).unwrap();
+    let thumb = egui::pos2(view.right() - 6.0, view.top() + 10.0);
+    harness.hover_at(thumb);
+    harness.run();
+    harness.drag_at(thumb);
+    harness.run();
+    let to = egui::pos2(thumb.x, thumb.y + 200.0);
+    harness.hover_at(to);
+    harness.run();
+    harness.drop_at(to);
+    harness.run();
+    assert!(row_rect(&harness, order[0]).is_none(), "dragging the thumb scrolled the list");
+}
