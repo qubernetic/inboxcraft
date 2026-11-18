@@ -371,7 +371,7 @@ fn drag_folders(harness: &mut Harness<'static, InboxApp>, by: f32) {
 
 #[test]
 fn the_folder_pane_the_owner_widened_comes_back_to_the_pixel_when_the_composer_closes() {
-    for (width, by) in [(1000.0, 300.0), (720.0, 120.0)] {
+    for (width, by) in [(720.0, 120.0), (1000.0, 300.0)] {
         let mut harness = window(width, 100);
         let before = harness.get_by_label("Accounts").rect().right();
         drag_folders(&mut harness, by);

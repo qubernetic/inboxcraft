@@ -1405,11 +1405,11 @@ impl InboxApp {
     }
 
     /// Opens the selected message in the reader, or closes it, when the selection changed. A preview never floats a
-    /// docked composer, in one pane or two: a selection the focus or the list's keys made (Tab, the arrows, J and K),
-    /// or the walk-on after an act, only moves the list's selection; the composer keeps the reader's place and the
+    /// docked composer, in one pane or two: a selection the focus made (Tab, Shift Tab), in one pane with the list over
+    /// the composer the list's keys too (the arrows, J and K; in two panes they rest beside it), the walk-on after an
+    /// act or an Undo's selection only moves the list's selection; the composer keeps the reader's place and the
     /// message opens behind it as a preview, not read. Only the owner's open floats it: a press on a row, Enter, the
-    /// held-back message opened ([`InboxApp::float_behind`] where the selection stays), or a message selected from
-    /// outside.
+    /// held-back message opened as a press opens it ([`InboxApp::float_behind`]), or a message selected from outside.
     ///
     /// When the owner's own act takes the open message out of the list (done, snoozed, moved), the list walks on to the
     /// row the next-message rule selects; when the server takes it away, the reader shows nothing open and that row is
