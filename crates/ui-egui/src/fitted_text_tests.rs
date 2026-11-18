@@ -42,6 +42,11 @@ fn a_message_of_deep_quotes_and_many_lines_builds_no_more_than_the_cap() {
     let table = format!("{}<table>{}</table>", "<blockquote>".repeat(255), format!("<tr>{}</tr>", "<td>cell".repeat(100)).repeat(1_000));
     let nested = format!("{}<table>{}</table>", "<table><tr><td>".repeat(7), "<tr><td>a<td>b</tr>".repeat(1_000));
     for html in [deep, table, nested] {
+        // What is built before the last cut: the cap holds line by line and cell by cell, a few bytes past it at most.
+        let document = inboxcraft_html::display(&html, &inboxcraft_html::Options::default());
+        let mut built = String::new();
+        super::blocks(&document, &document.blocks, 0, &mut built, cap);
+        assert!(built.len() <= cap + 16, "{} bytes built", built.len());
         let text = of(&html);
         assert!(text.len() <= cap, "{} bytes", text.len());
         // A quote shows at most four marks, as the fitted view draws at most four levels.
