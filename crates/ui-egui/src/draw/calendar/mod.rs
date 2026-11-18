@@ -51,8 +51,11 @@ const VIEW_LEAST: f32 = 600.0;
 /// The room left and right in the toolbar, in points.
 const TOOLBAR_PAD: f32 = 16.0;
 
-/// Between the toolbar's controls, in points; the groups stand twice as far apart.
+/// Between the toolbar's controls, in points.
 const TOOLBAR_GAP: f32 = 8.0;
+
+/// Between the toolbar's groups (the steps, the views, New event), in points, as the design draws it.
+const GROUP_GAP: f32 = 24.0;
 
 /// From the toolbar's title to its note (the week's number, the agenda's days), in points, as the design draws it.
 const NOTE_GAP: f32 = 20.0;
@@ -234,11 +237,11 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
         if ui.ctx().data(|data| data.get_temp::<(Id, bool)>(opener_id())).is_none() {
             opened_from(ui.ctx(), new.id);
         }
-        ui.add_space(TOOLBAR_GAP);
+        ui.add_space(GROUP_GAP - TOOLBAR_GAP);
         if let Some(view) = segmented(ui, theme, &views, calendar.view()) {
             asked.push(Asked::View(view));
         }
-        ui.add_space(TOOLBAR_GAP);
+        ui.add_space(GROUP_GAP - TOOLBAR_GAP);
         if IconButton::new(IconId::Next, on).show(ui, theme, keymap).clicked() {
             asked.push(Asked::Step(true));
         }

@@ -82,6 +82,22 @@ fn the_toolbar_s_note_stands_20_after_the_title() {
 }
 
 #[test]
+fn the_toolbar_s_groups_stand_24_apart_and_their_controls_8() {
+    let harness = window(View::Week);
+    let rect = |role, name| harness.get_by_role_and_label(role, name).rect();
+    let back = rect(Role::Button, "Previous week");
+    let today = rect(Role::Button, "Today");
+    let on = rect(Role::Button, "Next week");
+    let views = rect(Role::RadioGroup, "Day / Week / Month / Agenda");
+    let new = rect(Role::Button, "New event");
+    // As the frame: step back 391, Today 431..494, step on 502..534, the views 558..801, New event 825.
+    assert_eq!(today.left() - back.right(), 8.0, "{back:?} {today:?}");
+    assert_eq!(on.left() - today.right(), 8.0, "{today:?} {on:?}");
+    assert_eq!(views.left() - on.right(), 24.0, "{on:?} {views:?}");
+    assert_eq!(new.left() - views.right(), 24.0, "{views:?} {new:?}");
+}
+
+#[test]
 fn the_day_s_float_counts_its_events_with_the_number_alone() {
     let mut harness = window(View::Month);
     let thursday = Day::new(2026, 11, 5).unwrap();
