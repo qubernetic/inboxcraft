@@ -30,8 +30,9 @@
 //!
 //! The folder syncs the worker takes while none is waiting make a round: it tells how far the round has come
 //! ([`EventKind::SyncProgress`], done of all) when it starts and as each of its folders ends, synced or failed, and
-//! when the last one ended and every one was synced, that the account was current ([`EventKind::SyncFinished`]); so
-//! does a resync of the watched folder outside a round. A round counts what the worker knows already: the jobs it
+//! when the last one ended and no job or connection failed during the round, that the account was current
+//! ([`EventKind::SyncFinished`]). A resync of the watched folder outside a round tells the same, unless something
+//! failed since the last sign-in or the last round that ended so. A round counts what the worker knows already: the jobs it
 //! holds, no request to the server.
 //!
 //! After each sign-in the worker tells what the server can do as far as the engine chooses by it
@@ -190,7 +191,7 @@ fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credenti
         account,
         settings,
         credentials,
-        out: Out { account: account.id(), events, listening: true, reported: None, states: HashMap::new() },
+        out: Out { account: account.id(), events, listening: true, reported: None, states: HashMap::new(), failures: 0 },
         connection: None,
         halted: None,
         submission_halted: None,
@@ -204,6 +205,7 @@ fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credenti
         sign_in_lost: false,
         tries: HashMap::new(),
         round: Round::default(),
+        current: 0,
     };
     while run.turn(queue) {}
     if let Some(open) = run.connection {
@@ -221,6 +223,8 @@ struct Out<'a> {
     reported: Option<ConnectionState>,
     /// The state of each folder as the last sync left it, for the resync of a watched folder.
     states: HashMap<FolderId, FolderState>,
+    /// The failures told so far ([`EventKind::Failed`]), to tell whether one came since a point.
+    failures: u64,
 }
 
 impl Out<'_> {
@@ -233,6 +237,7 @@ impl Out<'_> {
             EventKind::UidValidityReset { folder, .. } => {
                 self.states.remove(folder);
             }
+            EventKind::Failed { .. } => self.failures = self.failures.saturating_add(1),
             _ => {}
         }
         self.listening &= self.events.send(event).is_ok();
@@ -262,10 +267,12 @@ struct Round {
     done: u32,
     /// The folder syncs of the round.
     of: u32,
-    /// One of them failed.
-    failed: bool,
     /// The progress told last.
     told: Option<(u32, u32)>,
+    /// The failures told before the round started.
+    start: u64,
+    /// One of its folder syncs failed.
+    failed: bool,
 }
 
 /// The folder an Idle job asked to watch.
@@ -308,6 +315,9 @@ struct Run<'a> {
     tries: HashMap<JobId, u32>,
     /// The folder syncs of the round under way.
     round: Round,
+    /// The failures told when the account was last current: at the last sign-in, or the last round that ended with
+    /// nothing failed in it.
+    current: u64,
 }
 
 impl Run<'_> {
@@ -345,7 +355,7 @@ impl Run<'_> {
 
     /// Tells the round's progress when it moved, and its end once every folder sync of it ended.
     fn tell_round(&mut self) {
-        let Round { done, of, failed, told } = self.round;
+        let Round { done, of, told, start, failed } = self.round;
         if of == 0 {
             return;
         }
@@ -354,7 +364,8 @@ impl Run<'_> {
             self.out.say(None, EventKind::SyncProgress { done, of });
         }
         if done >= of {
-            if !failed {
+            if !failed && self.out.failures == start {
+                self.current = self.out.failures;
                 let at = self.settings.connector.tls().clock().now();
                 self.out.say(None, EventKind::SyncFinished { at });
             }
@@ -362,7 +373,7 @@ impl Run<'_> {
         }
     }
 
-    /// Counts a folder sync of the round as ended.
+    /// Counts a folder sync of the round as ended; its failure, if any, was told before.
     fn ended_sync(&mut self, synced: bool) {
         self.round.done = self.round.done.saturating_add(1);
         self.round.failed |= !synced;
@@ -396,6 +407,9 @@ impl Run<'_> {
             self.out.failed(&job, &NetError::new(ErrorKind::TooLarge, "the offline queue is full"));
         } else {
             if matches!(job.kind, JobKind::SyncFolder { .. }) {
+                if self.round.of == 0 {
+                    self.round.start = self.out.failures;
+                }
                 self.round.of = self.round.of.saturating_add(1);
             }
             self.pending.push_back(job);
@@ -489,10 +503,10 @@ impl Run<'_> {
 
     fn fail_pending(&mut self, error: &NetError) {
         for job in std::mem::take(&mut self.pending) {
+            self.out.failed(&job, error);
             if matches!(job.kind, JobKind::SyncFolder { .. }) {
                 self.ended_sync(false);
             }
-            self.out.failed(&job, error);
         }
     }
 
@@ -507,6 +521,7 @@ impl Run<'_> {
                 self.stale = self.watch.is_some();
                 self.idle_refused = false;
                 self.sign_in_lost = false;
+                self.current = self.out.failures;
                 self.out.report(ConnectionState::Online);
                 self.out.say(None, EventKind::Abilities { uid_expunge });
                 return true;
@@ -584,9 +599,7 @@ impl Run<'_> {
         let out = &mut self.out;
         let done = sync::run(open, &job, &self.settings.sync, now, &mut |event| out.emit(event));
         let tried = self.tries.remove(&job.id).unwrap_or(0).saturating_add(1);
-        if folder_sync {
-            self.ended_sync(done.is_ok());
-        }
+        let synced = done.is_ok();
         match done {
             Ok(()) => self.attempt = 0,
             Err(error) => {
@@ -603,6 +616,9 @@ impl Run<'_> {
                     self.pending.push_front(job);
                 }
             }
+        }
+        if folder_sync {
+            self.ended_sync(synced);
         }
     }
 
@@ -632,7 +648,8 @@ impl Run<'_> {
         sync::run(open, &job, &self.settings.sync, now, &mut |event| out.emit(event))?;
         self.stale = false;
         self.attempt = 0;
-        if self.round.of == 0 {
+        // After a failure, only a whole round that ends clean, or a new sign-in, makes the account current again.
+        if self.round.of == 0 && self.out.failures == self.current {
             self.out.say(None, EventKind::SyncFinished { at: now });
         }
         Ok(())

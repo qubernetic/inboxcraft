@@ -405,3 +405,40 @@ fn a_resync_of_the_watched_folder_tells_that_the_account_is_current() -> Result 
     run.finish()?;
     Ok(())
 }
+
+#[test]
+fn after_a_failed_round_the_watched_folder_tells_no_end_until_a_round_ends_clean() -> Result {
+    let mut run = Run::sample()?;
+    run.job(JobKind::Idle { folder: INBOX, path: path("INBOX")? })?;
+    run.rounds(|kind| matches!(kind, EventKind::SyncFinished { .. }))?;
+    run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
+    sync(&mut run, 99, "Nowhere")?;
+    // The round fails; the watched folder is synced again after it, and tells no end.
+    let events = run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
+    assert_eq!(told(&events), [Some((0, 1)), Some((1, 1))], "{events:?}");
+    assert!(events.iter().any(|kind| matches!(kind, EventKind::FolderSynced { folder, .. } if *folder == INBOX)), "{events:?}");
+    sync(&mut run, 11, "Sent")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::SyncFinished { .. }))?;
+    assert_eq!(told(&events), [Some((0, 1)), Some((1, 1)), None], "{events:?}");
+    run.finish()?;
+    Ok(())
+}
+
+#[test]
+fn a_round_with_any_job_that_failed_in_it_tells_no_end() -> Result {
+    let mut run = Run::sample()?;
+    run.job(JobKind::Idle { folder: INBOX, path: path("INBOX")? })?;
+    run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
+    // Sent while the worker waits in IDLE: one round of two folder syncs, with a body fetch from a folder that is
+    // gone between them.
+    sync(&mut run, 11, "Sent")?;
+    run.job(JobKind::FetchBody { folder: FolderId::new(99), path: path("Nowhere")?, uid_validity: validity(7)?, uid: uid(1)? })?;
+    sync(&mut run, 12, "Lists/Rust")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::SyncProgress { done: 2, of: 2 }))?;
+    assert!(events.iter().any(|kind| matches!(kind, EventKind::Failed { .. })), "{events:?}");
+    // The watched folder's resync after it tells no end either.
+    let events = run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
+    assert_eq!(told(&events), [], "{events:?}");
+    run.finish()?;
+    Ok(())
+}
