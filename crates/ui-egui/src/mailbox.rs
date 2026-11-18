@@ -656,6 +656,10 @@ pub struct Mailbox {
     runs: u64,
     /// The id of the last command run through [`Mailbox::run`].
     last: Option<&'static str>,
+    /// Who the window's commands run for: the owner, or an agent while a picture's script steps drive the window.
+    caller: Caller,
+    /// The first command [`Mailbox::run`] refused for [`Mailbox::caller`].
+    refused: Option<&'static str>,
 }
 
 impl std::fmt::Debug for Mailbox {
@@ -885,6 +889,8 @@ impl Mailbox {
             error: None,
             runs: 0,
             last: None,
+            caller: Caller::Owner,
+            refused: None,
         };
         mailbox.refresh();
         mailbox
@@ -1496,7 +1502,23 @@ impl Mailbox {
     pub(crate) fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
         self.runs = self.runs.saturating_add(1);
         self.last = Some(command);
-        Ok(self.session.run(command, params)?)
+        let answer = self.session.run_as(self.caller, command, params);
+        if let Err(EngineError::NotAllowed { command, .. }) = &answer {
+            self.refused = self.refused.or(Some(*command));
+        }
+        Ok(answer?)
+    }
+
+    /// Lets the window's commands run for `caller` from now on: [`Caller::Agent`] lets only a `safe` command run, as
+    /// while a picture's script steps drive the window.
+    pub(crate) fn set_caller(&mut self, caller: Caller) {
+        self.caller = caller;
+    }
+
+    /// The first command refused because it was not for the window's caller ([`Mailbox::set_caller`]).
+    #[must_use]
+    pub(crate) fn refused(&self) -> Option<&'static str> {
+        self.refused
     }
 
     /// Runs the command `id` with `params` for an agent (the control channel): only a `safe` command runs. The list is

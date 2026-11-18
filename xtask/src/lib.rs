@@ -18,6 +18,7 @@ mod cov;
 mod error;
 mod flatpak;
 mod layers;
+mod shots;
 mod side_by_side;
 mod spdx;
 mod stats;
@@ -67,6 +68,8 @@ pub struct Context {
     pub runner: Box<dyn Runner>,
     /// Where `cov` writes the lcov report; `None` is `lcov.info` in the root.
     pub lcov: Option<PathBuf>,
+    /// Where `shots` has `ui_shot` draw the scenes; `None` is `shots/` in the target directory.
+    pub shots: Option<PathBuf>,
 }
 
 impl Context {
@@ -74,7 +77,7 @@ impl Context {
     /// and real processes.
     #[must_use]
     pub fn from_env() -> Self {
-        Self { root: default_root(), cargo: cargo_or_default(std::env::var_os("CARGO")), runner: Box::new(ProcessRunner), lcov: None }
+        Self { root: default_root(), cargo: cargo_or_default(std::env::var_os("CARGO")), runner: Box::new(ProcessRunner), lcov: None, shots: None }
     }
 }
 

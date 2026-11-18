@@ -91,7 +91,7 @@ pub fn empty_report(args: &[&str]) {
     }
 }
 
-/// A runner that starts nothing and passes every tool; `cargo llvm-cov` reports no lines into a directory of its
+/// A runner that starts nothing and passes every tool, printing nothing; `cargo llvm-cov` reports no lines into a directory of its
 /// own, so no test touches the `lcov.info` of the workspace.
 pub struct Passing {
     _report: tempfile::TempDir,
@@ -102,6 +102,28 @@ impl Runner for Passing {
         empty_report(args);
         Ok(true)
     }
+
+    fn output(&mut self, _: &OsStr, args: &[&str], dir: &Path) -> Result<Option<Vec<u8>>, Error> {
+        Ok(Some(draw_committed(args, dir)))
+    }
+}
+
+/// What `ui_shot` would print run in `dir` with `args`: every picture committed in `dir/docs/images`, each written
+/// under the `--out-dir` as it is committed, so the shots gate finds them equal.
+pub fn draw_committed(args: &[&str], dir: &Path) -> Vec<u8> {
+    let renders = args.iter().position(|arg| *arg == "--out-dir").and_then(|at| args.get(at + 1)).map(PathBuf::from).unwrap();
+    let mut printed = String::new();
+    let Ok(entries) = std::fs::read_dir(dir.join("docs/images")) else { return Vec::new() };
+    for entry in entries {
+        let name = format!("docs/images/{}", entry.unwrap().file_name().to_str().unwrap());
+        if name.ends_with(".png") {
+            std::fs::create_dir_all(renders.join("docs/images")).unwrap();
+            std::fs::copy(dir.join(&name), renders.join(&name)).unwrap();
+            printed.push_str(&name);
+            printed.push('\n');
+        }
+    }
+    printed.into_bytes()
 }
 
 #[test]
@@ -114,7 +136,7 @@ fn passing_passes_every_tool() {
 pub fn context(root: PathBuf) -> Context {
     let report = tempfile::tempdir().unwrap();
     let lcov = Some(report.path().join("lcov.info"));
-    Context { root, cargo: OsString::from("cargo"), runner: Box::new(Passing { _report: report }), lcov }
+    Context { root, cargo: OsString::from("cargo"), runner: Box::new(Passing { _report: report }), lcov, shots: None }
 }
 
 /// Runs xtask with `args` against this workspace and returns the exit code, stdout and stderr.

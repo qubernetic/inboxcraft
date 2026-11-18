@@ -161,8 +161,6 @@
 # typed time, and the reminder picker over a sent message.
 {"out": "docs/images/later-snoozed-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "later": "snoozed", "select": "Your ferry booking is confirmed"}
 {"out": "docs/images/later-snoozed-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "later": "snoozed", "select": "Your ferry booking is confirmed"}
-{"out": "docs/images/later-pins-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "later": "pins"}
-{"out": "docs/images/later-pins-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "later": "pins"}
 {"out": "docs/images/show-done-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "show_done": true, "view": "list"}
 {"out": "docs/images/show-done-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "show_done": true, "view": "list"}
 {"out": "docs/images/snooze-picker-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
@@ -238,3 +236,9 @@
 {"out": "docs/images/reader-plain-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "html_view": "plain"}
 {"out": "docs/images/reader-fitted-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "select": "Your bike is due for a service"}
 {"out": "docs/images/reader-fitted-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "select": "Your bike is due for a service"}
+{"out": "docs/images/list-focus-thumb-light.png", "mode": "light", "size": [1200, 560], "view": "list", "steps": [{"focus": "Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged"}]}
+{"out": "docs/images/list-focus-thumb-dark.png", "mode": "dark", "size": [1200, 560], "view": "list", "steps": [{"focus": "Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged"}]}
+{"out": "docs/images/accounts-open-light.png", "mode": "light", "size": [1400, 860], "steps": [{"press": "Accounts"}]}
+{"out": "docs/images/accounts-open-dark.png", "mode": "dark", "size": [1400, 860], "steps": [{"press": "Accounts"}]}
+{"out": "docs/images/row-snooze-picker-light.png", "mode": "light", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}
+{"out": "docs/images/row-snooze-picker-dark.png", "mode": "dark", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}

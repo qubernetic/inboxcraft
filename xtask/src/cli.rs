@@ -8,13 +8,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::side_by_side::{self, Options};
-use crate::{Context, Error, FAILED, OK, USAGE, assets, cache_prune, changes, ci, cov, flatpak, layers, spdx, stats, test_files, wasm};
+use crate::{Context, Error, FAILED, OK, USAGE, assets, cache_prune, changes, ci, cov, flatpak, layers, shots, spdx, stats, test_files, wasm};
 
 const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
-  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, changes, layers, flatpak-sources-check, doctests, cov --check (the one test run), wasm, deny, stats
+  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, changes, layers, flatpak-sources-check, doctests, cov --check (the one test run), wasm, deny, shots, stats
   assets        every asset file has a row in ATTRIBUTION.md; pinned files match .config/assets.toml
   cache-prune   delete from target/ all but third-party deps, build and .fingerprint entries (CI, before the cache save)
   changes [--fold]
@@ -27,6 +27,10 @@ commands:
   side-by-side [--script <file>] [--mood <dir>] [--out <dir>]
                 every ui_shot picture next to the mood sketch of its preset and mode, at the same height
                 (script crates/ui-egui/shots.jsonl, sketches plan/mood, pairs plan/side-by-side; plan/ is gitignored)
+  shots [--check | --fix]
+                every scene of crates/ui-egui/shots.jsonl drawn by ui_shot equals its committed picture, byte for
+                byte; every scene has one and every PNG beside them belongs to a scene (--check, the default);
+                --fix writes the renders over them and deletes the pictures of no scene
   spdx [--fix]  every Rust file starts with the SPDX lines; --fix adds the missing ones
   stats         Rust files, code lines and test lines per crate
   test-files    no inline `mod tests { ... }`: tests live in files of their own
@@ -50,6 +54,7 @@ pub(crate) enum Command {
     Help,
     Layers,
     SideBySide(Options),
+    Shots { fix: bool },
     Spdx { fix: bool },
     Stats,
     TestFiles,
@@ -82,6 +87,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
         Some("flatpak-sources-check") => Command::FlatpakSources { check: true },
         Some("layers") => Command::Layers,
         Some("side-by-side") => Command::SideBySide(Options::default()),
+        Some("shots") => Command::Shots { fix: false },
         Some("spdx") => Command::Spdx { fix: false },
         Some("stats") => Command::Stats,
         Some("test-files") => Command::TestFiles,
@@ -96,8 +102,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
                 invocation.root = Some(PathBuf::from(dir));
             }
             "--fix" => match &mut invocation.command {
-                Command::Spdx { fix } => *fix = true,
-                _ => return Err("`--fix` only goes with `spdx`".to_owned()),
+                Command::Spdx { fix } | Command::Shots { fix } => *fix = true,
+                _ => return Err("`--fix` only goes with `spdx` or `shots`".to_owned()),
             },
             "--fold" => match &mut invocation.command {
                 Command::Changes { fold } => *fold = true,
@@ -105,7 +111,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
             },
             "--check" => match &mut invocation.command {
                 Command::Cov { check } => *check = true,
-                _ => return Err("`--check` only goes with `cov`".to_owned()),
+                Command::Shots { fix: false } => {}
+                _ => return Err("`--check` only goes with `cov` or `shots` without `--fix`".to_owned()),
             },
             "--script" | "--mood" | "--out" => {
                 let Command::SideBySide(options) = &mut invocation.command else { return Err(format!("`{arg}` only goes with `side-by-side`")) };
@@ -160,6 +167,7 @@ fn dispatch(command: &Command, ctx: &mut Context, out: &mut dyn Write) -> Result
         }
         Command::Layers => layers::gate(&ctx.root, out),
         Command::SideBySide(options) => side_by_side::gate(&ctx.root, options, out),
+        Command::Shots { fix } => shots::gate(ctx, *fix, out),
         Command::Spdx { fix } => spdx::gate(&ctx.root, *fix, out),
         Command::Stats => stats::gate(&ctx.root, out),
         Command::TestFiles => test_files::gate(&ctx.root, out),
