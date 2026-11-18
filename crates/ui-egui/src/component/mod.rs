@@ -39,6 +39,7 @@ pub mod button;
 pub mod card;
 pub mod check_step;
 pub mod checkbox;
+pub mod content_bar;
 pub mod empty;
 pub mod facts;
 pub mod field;

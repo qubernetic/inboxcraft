@@ -27,6 +27,9 @@ const WIDTH: f32 = 2400.0;
 /// The page's height, in points: the tallest column and its margins.
 const HEIGHT: f32 = 2560.0;
 
+/// The room between two boards, in points.
+const BOARD_GAP: f32 = 24.0;
+
 /// What draws a column of the page.
 type Draw = fn(&mut Ui, &Theme, &Keymap);
 
@@ -50,9 +53,39 @@ fn why_lines(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// The content bar's board: text, HTML, list, invitation, pictures held, trackers removed and plain text, 720 wide,
+/// with the design board's words.
+fn content_bars(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    use super::banner::BannerLink;
+    use super::content_bar::{BarKind, ContentBar, View, content_bar};
+    title(ui, theme, tr!("Content bar"));
+    let unsubscribe = [BannerLink { name: tr!("unsubscribe"), id: "unsubscribe" }];
+    let pictures = [BannerLink { name: tr!("load once"), id: "once" }, BannerLink { name: tr!("always"), id: "always" }];
+    type State<'a> = (&'a str, BarKind, View, &'a str, bool, &'a [BannerLink<'a>]);
+    let states: [State<'_>; 7] = [
+        (tr!("text"), BarKind::Text, View::Fitted, tr!("plain text, shown as sent"), false, &[]),
+        (tr!("html"), BarKind::Html, View::Fitted, tr!("nothing held back"), false, &[]),
+        (tr!("list"), BarKind::List, View::Fitted, "craft-dev@lists.example.org", false, &unsubscribe),
+        (tr!("invite"), BarKind::Invite, View::Fitted, tr!("read into the card below"), false, &[]),
+        (tr!("pictures-held"), BarKind::Html, View::Fitted, "6 pictures held back", true, &pictures),
+        (tr!("trackers-removed"), BarKind::Html, View::Fitted, "2 trackers removed · 6 pictures loaded once", false, &[]),
+        (tr!("plain-text"), BarKind::Html, View::Plain, tr!("as a text-only program shows it"), false, &[]),
+    ];
+    for (state, kind, view, held, waiting, links) in states {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                ui.set_width(720.0);
+                content_bar(ui, theme, keymap, &ContentBar { kind, view, views: true, held, waiting, links });
+            });
+        });
+    }
+}
+
 /// The left column.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     why_lines(ui, theme, keymap);
+    ui.add_space(BOARD_GAP);
+    content_bars(ui, theme, keymap);
 }
 
 /// The middle column.
