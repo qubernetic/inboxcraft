@@ -966,3 +966,46 @@ fn a_refused_press_takes_the_keyboard_to_the_first_faulty_field_which_says_its_e
         assert!(!harness.get_by_label("IMAP server").is_focused(), "{theme:?}");
     }
 }
+
+/// The top of the field `label` with its label over it: 24 over its box (a 16-high label and 8).
+fn field_top(harness: &Harness<'static, InboxApp>, label: &str) -> f32 {
+    harness.get_by_label(label).rect().top() - 24.0
+}
+
+#[test]
+fn the_head_and_the_form_are_spaced_as_the_frames_give_them() {
+    const HELP: &str = "IMAP for the mail. Detect proposes the servers from the address; nothing is sent until you have seen them.";
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        // The add form: the title 1 down in a 32-high row, the help 6 under the row, the first field 16 under the help.
+        let harness = scene("detected", theme);
+        let title = harness.get_by_label("Add an account").rect();
+        let help = harness.get_by_label(HELP).rect();
+        assert_eq!(help.top() - title.top(), 37.0, "{theme:?}: title to help");
+        assert_eq!(field_top(&harness, "Address") - help.bottom(), 16.0, "{theme:?}: help to the form");
+        // The column stands 40 right of the form's fields (600 from their left at the form's full 560): the form's 16 at
+        // its right, and 24.
+        let column = harness.get_by_label_contains("What Detect asked").rect();
+        let detect = harness.get_by_label("Detect").rect();
+        assert_eq!(column.left() - detect.right(), 40.0, "{theme:?}: the column");
+        assert_eq!(column.top(), field_top(&harness, "Address"), "{theme:?}: the column's label beside the address's");
+        // The check: the sentence 16 under the title's row, 17 under its text.
+        let harness = scene("running", theme);
+        let title = harness.get_by_label("Checking carol@example.org").rect();
+        let sentence = harness.get_by_label("Each step is printed as it starts and gets its answer as it ends.").rect();
+        assert_eq!(sentence.top() - title.top(), 47.0, "{theme:?}: title to sentence");
+        assert_eq!(sentence.top() - title.bottom(), 17.0, "{theme:?}");
+    }
+}
+
+#[test]
+fn an_account_s_form_starts_16_under_its_title_s_row() {
+    let mut harness = form_open(egui::Theme::Dark, FakeWorkers::passing());
+    let (onboarding, mailbox) = harness.state_mut().onboarding_mut();
+    crate::onboard::tests::filled(onboarding.form_mut());
+    onboarding.add(mailbox);
+    onboarding.edit(mailbox, 1);
+    harness.run();
+    harness.run();
+    let title = harness.get_by_label("Account settings").rect();
+    assert_eq!(field_top(&harness, "Address") - title.top(), 47.0, "1 down in a 32-high row, then 16");
+}

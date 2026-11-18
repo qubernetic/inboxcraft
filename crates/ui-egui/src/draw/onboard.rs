@@ -4,9 +4,9 @@
 //! The add-account page and the window with no account, as the design draws them.
 //!
 //! The form stands in text fields, a password field and selects (Security: TLS or STARTTLS; there is no unencrypted
-//! choice), 560 wide, 12 between its rows; a field's error stands 6 under its field, under the whole row for a field in
-//! a row. Beside it, 24 to its right, an always-open column says what Detect asked and where, once it ran; on a page
-//! too narrow for both it stands under the form. Detect's answer stands over the form's fields as a note (or a careful
+//! choice), 560 wide, 12 between its rows, 16 under the head; a field's errors stand 6 under its field, under the whole
+//! row for a field in a row. Beside it, 40 to its right (the form's own 16 and 24), an always-open column says what
+//! Detect asked and where, once it ran; on a page too narrow for both it stands under the form. Detect's answer stands over the form's fields as a note (or a careful
 //! one, for a guess or an unencrypted redirect); while Detect runs, a progress line stands there and the server rows
 //! wait, disabled.
 //!
@@ -66,6 +66,10 @@ const COLUMN_MIN: f32 = 200.0;
 /// The room between the form and the column, in points.
 const COLUMNS_GAP: f32 = 24.0;
 
+/// The room the form keeps at its right, before the room to the column, in points: the design's form is 592 wide with
+/// 16 on each side, and its left 16 is the page's.
+const FORM_RIGHT: f32 = 16.0;
+
 /// The room between the form's rows, and between the fields of a row, in points.
 const GAP: f32 = 12.0;
 
@@ -79,9 +83,13 @@ const SECURITY: f32 = 132.0;
 /// The narrowest a host field gets in its row, in points.
 const HOST_MIN: f32 = 120.0;
 
-/// The room between the title and the words under it, and between the head and the form, in points.
+/// The height of the title's row, and how far down in it the title stands, in points.
+const TITLE_ROW: f32 = 32.0;
+const TITLE_DOWN: f32 = 1.0;
+
+/// The room between the title's row and the words under it, and between the head and the form, in points.
 const HEAD_GAP: f32 = 6.0;
-const HEAD_BELOW: f32 = 40.0;
+const HEAD_BELOW: f32 = 16.0;
 
 /// The widest the check gets, and the room between its parts, in points.
 const CHECK: f32 = 640.0;
@@ -122,20 +130,16 @@ fn words(ui: &mut Ui, text: &str, font: Font, colour: Color32, width: f32) -> Re
     rect
 }
 
-/// `text` in `font` and `colour` on one line `width` wide, cut with one ellipsis, read whole by a screen reader.
-fn one_line(ui: &mut Ui, text: &str, font: Font, colour: Color32, width: f32) {
-    let width = width.max(1.0);
-    let shown = component::plain(text);
-    let galley = component::cut(ui, &shown, font, colour, width);
-    let (rect, _) = ui.allocate_exact_size(vec2(width, font.line), Sense::hover());
-    said(ui, rect.min, width, galley, colour, &shown);
-}
-
-/// The page's head: its title on one line and, when there are any, the words under it in `muted`.
+/// The page's head: its title on one line, 1 down in a 32-high row, and, when there are any, the words under it in
+/// `muted`.
 fn head(ui: &mut Ui, theme: &Theme, title: &str, under: Option<&str>, width: f32) {
     let f = &theme.fonts;
     ui.spacing_mut().item_spacing.y = HEAD_GAP;
-    one_line(ui, title, f.title, theme.palette.ink, width);
+    let width = width.max(1.0);
+    let shown = component::plain(title);
+    let galley = component::cut(ui, &shown, f.title, theme.palette.ink, width);
+    let (rect, _) = ui.allocate_exact_size(vec2(width, TITLE_ROW.max(f.title.line + TITLE_DOWN)), Sense::hover());
+    said(ui, rect.min + vec2(0.0, TITLE_DOWN), width, galley, theme.palette.ink, &shown);
     if let Some(under) = under {
         words(ui, under, f.body, theme.palette.muted, width);
     }
@@ -444,11 +448,12 @@ fn asked_column(ui: &mut Ui, theme: &Theme, found: Option<&Found>, width: f32) {
     }
 }
 
-/// The widths of the form and the column in `room`, and whether the column stands beside the form.
+/// The widths of the form and the column in `room`, and whether the column stands beside the form (the form's room at
+/// its right and the gap between them).
 fn columns(room: f32) -> (f32, f32, bool) {
     let room = if room.is_finite() { room.max(1.0) } else { FORM };
-    let column = (room - FORM - COLUMNS_GAP).clamp(COLUMN_MIN, COLUMN);
-    let form = (room - COLUMNS_GAP - column).min(FORM);
+    let column = (room - FORM - FORM_RIGHT - COLUMNS_GAP).clamp(COLUMN_MIN, COLUMN);
+    let form = (room - FORM_RIGHT - COLUMNS_GAP - column).min(FORM);
     if form >= FORM_MIN { (form, column, true) } else { (room.min(FORM), room.min(FORM), false) }
 }
 
@@ -520,7 +525,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
     };
     if beside {
         ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = COLUMNS_GAP;
+            ui.spacing_mut().item_spacing.x = FORM_RIGHT + COLUMNS_GAP;
             part(ui, width, &mut form_part);
             part(ui, column, |ui| asked_column(ui, theme, found.as_ref(), column));
         });
@@ -715,7 +720,7 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
         Outcome::Passed | Outcome::Failed => tr!("Checked {address}", address = address),
     };
     head(ui, theme, &title, None, width);
-    ui.add_space(CHECK_GAP);
+    ui.add_space(CHECK_GAP - HEAD_GAP);
     part(ui, width, |ui| {
         ui.spacing_mut().item_spacing.y = CHECK_GAP;
         outcome_line(ui, theme, onboarding, width);
