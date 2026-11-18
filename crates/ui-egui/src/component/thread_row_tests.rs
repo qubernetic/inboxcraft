@@ -214,30 +214,87 @@ fn in_a_narrow_row_nothing_paints_outside_its_box_and_the_date_stays_whole() {
     }
 }
 
+/// The row `room` wide on the reader's `surface` at `ppp` pixels per point.
+fn narrow_at(theme: Theme, line: ThreadLine<'static>, room: f32, ppp: f32) -> Harness<'static> {
+    let mut harness = crate::component::tests::builder().with_size(vec2(room + 48.0, 100.0)).with_pixels_per_point(ppp).build_ui(move |ui| {
+        crate::motion::set_reduced(ui.ctx(), true);
+        crate::component::tests::stage(ui, theme.palette.surface, |ui| {
+            ui.set_width(room);
+            thread_row_with(ui, &theme, &Keymap::default(), &line, Some(Shown::Rest));
+        });
+    });
+    harness.run();
+    harness
+}
+
 #[test]
-fn a_narrow_row_gives_way_first_the_words_then_details_then_the_sender() {
-    let theme = Theme::new(Mode::Dark, TextScale::default());
-    let painted_texts = |room: f32, line: ThreadLine<'static>| -> (Vec<String>, bool) {
-        let harness = narrow(theme, line, room);
-        let paint = painted(&harness, &spoken(&line));
-        let texts = paint
-            .shapes
-            .iter()
-            .filter_map(|shape| match &shape.look {
-                Look::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .collect();
-        (texts, harness.query_by_label("details ▾").is_some())
-    };
-    // Wide: the sender whole, the address and to whom, details and the date.
-    let (texts, details) = painted_texts(640.0, OPEN);
-    assert!(texts.iter().any(|text| text == "Marit Solheim") && texts.iter().any(|text| text.starts_with("marit@")) && details, "{texts:?}");
-    // The address goes first; details and the sender's 152 stay while they fit.
-    let (texts, details) = painted_texts(360.0, OPEN);
-    assert!(!texts.iter().any(|text| text.starts_with("marit@")) && details && texts.iter().any(|text| text == "Marit Solheim"), "{texts:?}");
-    // Then details; the sender is cut last, the date never.
-    let (texts, details) = painted_texts(230.0, OPEN);
-    assert!(!details, "details gives way before the sender is cut: {texts:?}");
-    assert!(texts.iter().any(|text| text.starts_with("Mar")) && texts.iter().any(|text| text == "13:40"), "{texts:?}");
+fn every_room_up_to_400_cuts_the_words_then_the_sender_and_leaves_details_out_last() {
+    const LONG: &str = "Odile Brannock-Harbourmaster";
+    let lines = [("folded", ThreadLine { sender: LONG, ..FOLDED }), ("open", ThreadLine { sender: LONG, ..OPEN }), ("open, short sender", OPEN)];
+    for scale in [TextScale::default(), TextScale::ALL[4]] {
+        let theme = Theme::new(Mode::Dark, scale);
+        for ppp in [1.0_f32, 1.5] {
+            for (state, line) in lines {
+                let first = |text: &str, of: &str| text.chars().next().is_some() && text.chars().next() == of.chars().next();
+                // What stood in the room before, from the widest down: once a part has given way, it never comes back
+                // in a narrower room. The sender as it stands in its whole column, at 400.
+                let (mut had_details, mut had_words, mut had_sender) = (true, true, true);
+                let mut column: Option<String> = None;
+                for room in (180..=400).rev().step_by(2) {
+                    let room = room as f32;
+                    let harness = narrow_at(theme, line, room, ppp);
+                    let name = spoken(&line);
+                    let rect = harness.get_by_label(&name).rect();
+                    let paint = painted(&harness, &name);
+                    let at = format!("{scale:?} {ppp}x {state} room {room}");
+                    let texts: Vec<(Rect, String)> = paint
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.look {
+                            Look::Text { text, .. } => Some((shape.rect, text.clone())),
+                            _ => None,
+                        })
+                        .collect();
+                    for (shape, text) in &texts {
+                        assert!(rect.expand(0.01).contains_rect(*shape), "{text:?} at {shape:?} paints past the row {rect:?}: {at}");
+                        assert!(text.trim() != "…", "a lone ellipsis: {at}");
+                    }
+                    for (index, (one, text)) in texts.iter().enumerate() {
+                        for (other, word) in texts.iter().skip(index + 1) {
+                            assert!(one.intersect(*other).area() <= 0.5 || one.width() < 1.0, "{text:?} runs over {word:?}: {at}");
+                        }
+                    }
+                    assert!(texts.iter().any(|(_, text)| text == line.date), "the date whole: {texts:?} {at}");
+                    let sender = texts.iter().find(|(_, text)| first(text, line.sender) && text.chars().count() > 2).map(|(_, text)| text.clone());
+                    let words = texts.iter().any(|(_, text)| first(text, line.preview));
+                    let details = harness.query_by_label("details ▾").is_some();
+                    if let Some(link) = harness.query_by_label("details ▾") {
+                        assert!(rect.expand(0.01).contains_rect(link.rect()), "details at {:?} in {rect:?}: {at}", link.rect());
+                    }
+                    // The words give way first: they stand only beside the whole sender, and on an open line only with
+                    // `details ▾`.
+                    if column.is_none() {
+                        column.clone_from(&sender);
+                    }
+                    if words {
+                        assert!(sender == column, "words beside a sender cut below its column {sender:?}: {at}");
+                        assert!(!line.open || details, "the words stand without details: {at}");
+                    }
+                    // `details ▾` leaves last of all: an open line without it holds no sender and no words.
+                    if line.open && !details {
+                        assert!(sender.is_none() && !words, "details left before the sender {sender:?}: {at}");
+                    }
+                    if room == 400.0 {
+                        // At 130 % the words already have no room left at 400.
+                        let words_fit = scale == TextScale::default();
+                        assert!(sender.is_some() && (words || !words_fit) && (details || !line.open), "every part stands at 400: {texts:?} {at}");
+                    }
+                    assert!(had_details || !details, "details came back: {at}");
+                    assert!(had_words || !words, "the words came back: {at}");
+                    assert!(had_sender || sender.is_none(), "the sender came back: {at}");
+                    (had_details, had_words, had_sender) = (details || !line.open, words, sender.is_some());
+                }
+            }
+        }
+    }
 }

@@ -10,8 +10,11 @@
 //! and the address are data: plain words on one line, cut between grapheme clusters with one ellipsis; a screen reader
 //! hears them whole. Nothing moves: the row opens and folds at once (the design gives the fold no timing).
 //!
-//! A row narrower than its parts gives way by the design's widths rule: the words (the row's fill) first, then
-//! `details ▾` whole, then the sender is cut below its 152; the date is never cut. Nothing paints past the row.
+//! A row narrower than its parts gives way by the design's widths rule, text cut before a control is left out: the
+//! words (the row's fill) are cut first and left out, then the sender is cut below its 152 and left out once only
+//! its ellipsis would stand, and `details ▾` is left out last of all. The words never stand beside a cut sender, nor
+//! on an open line without `details ▾`. While the row holds the avatar and the date, the date is never cut. Nothing
+//! paints past the row.
 
 use egui::{Align, Layout, Rect, Response, Role, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
@@ -103,15 +106,20 @@ pub(crate) fn thread_row_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, line:
     // The date keeps whole: it may take all the room after the avatar.
     let date = super::fitted(ui, line.date, f.mono_s, date_ink, (date_right - sender_left).max(1.0));
     let date_left = date_right - paint::run_box(date.size().x);
-    // The room the sender, the words and `details ▾` share. The words give way first, then `details ▾` whole, then the
-    // sender below its column's width.
+    // The room the sender, the words and `details ▾` share. The words give way first, then the sender, and `details ▾`
+    // last of all: an open line keeps the link while it fits, and the sender and the words only in what it leaves.
     let shared = (date_left - GAP - sender_left).max(0.0);
     let link_words = tr!("details");
-    let link = if line.open { link_caret_width(ui, theme, link_words) + GAP } else { 0.0 };
-    let linked = line.open && shared >= SENDER + link;
-    let sender_room = if linked { SENDER } else { SENDER.min(shared) };
+    let link_width = link_caret_width(ui, theme, link_words);
+    let linked = line.open && shared >= link_width;
+    let text_room = match (line.open, linked) {
+        (false, _) => shared,
+        (true, true) => shared - link_width - GAP,
+        (true, false) => 0.0,
+    };
+    let sender_room = SENDER.min(text_room);
     let preview_left = sender_left + SENDER + GAP;
-    let preview_right = date_left - GAP - if linked { link } else { 0.0 };
+    let preview_right = sender_left + text_room;
     if ui.is_rect_visible(rect) {
         // Below the least the row holds (the avatar and the date), what does not fit is clipped at the row's edge.
         let painter = &ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
@@ -129,11 +137,19 @@ pub(crate) fn thread_row_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, line:
         let face = Rect::from_min_size(pos2(avatar_left, (middle - side / 2.0).round()), vec2(side, side));
         paint_on(painter, theme, face, line.sender, line.address, if lit.hover { p.surface } else { p.stage });
         let top = |high: f32| (middle - high / 2.0).round();
+        // A part cut to its ellipsis alone is left out whole.
+        let shows = |galley: &egui::Galley| !galley.job.text.trim().is_empty() && galley.job.text.trim() != "…";
         let sender = super::fitted(ui, line.sender, sender_font, p.ink, sender_room);
-        paint::run_at(painter, pos2(sender_left, top(sender.size().y)), sender, p.ink);
-        if preview_right > preview_left {
+        // The words stand only beside the sender's whole column.
+        let whole = sender_room >= SENDER;
+        if shows(&sender) {
+            paint::run_at(painter, pos2(sender_left, top(sender.size().y)), sender, p.ink);
+        }
+        if whole && preview_right > preview_left {
             let preview = super::fitted(ui, line.preview, preview_font, preview_ink, preview_right - preview_left);
-            paint::run_at(painter, pos2(preview_left, top(preview.size().y)), preview, preview_ink);
+            if shows(&preview) {
+                paint::run_at(painter, pos2(preview_left, top(preview.size().y)), preview, preview_ink);
+            }
         }
         paint::run_right(painter, date_right, top(date.size().y), date, date_ink);
         if lit.focus {
@@ -143,7 +159,7 @@ pub(crate) fn thread_row_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, line:
     }
     let mut details = false;
     if linked {
-        let link_rect = Rect::from_min_max(pos2(date_left - link, rect.top()), pos2(date_left - GAP, rect.bottom()));
+        let link_rect = Rect::from_min_max(pos2(date_left - GAP - link_width, rect.top()), pos2(date_left - GAP, rect.bottom()));
         let mut child = ui.new_child(UiBuilder::new().max_rect(link_rect).layout(Layout::left_to_right(Align::Center)));
         details = link_caret(&mut child, theme, keymap, link_words, Caret::Down).clicked();
     }

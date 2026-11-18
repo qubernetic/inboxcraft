@@ -1607,3 +1607,26 @@ fn the_message_the_rule_names_opens_from_the_palette_and_a_bound_key_and_only_af
     settle(&mut harness);
     assert_eq!(open_subject(&harness).as_deref(), Some(behind.as_str()), "its key opens the message the rule names");
 }
+
+#[test]
+fn an_older_unfolded_message_keeps_its_details_at_every_width_the_design_draws() {
+    for percent in [100, 130] {
+        for ppp in [1.0, 1.5] {
+            let fetch = Recorder::default();
+            let mut harness = opened_in(&fetch, Some(3), "Re: Allotment rota for November", 1100.0, percent, ppp);
+            harness.get_by_label_contains("Odile Brannock, 08:35, folded").click();
+            settle(&mut harness);
+            let at = format!("1100 {percent}% {ppp}x");
+            let open: Vec<egui::Rect> = harness
+                .query_all_by_role(Role::Button)
+                .filter(|node| node.accesskit_node().label().is_some_and(|label| label.contains(", open: ")))
+                .map(|node| node.rect())
+                .collect();
+            assert_eq!(open.len(), 2, "the older message unfolded beside the open one: {at}");
+            for row in &open {
+                let details = harness.query_all_by_label("details ▾").filter(|link| row.contains_rect(link.rect())).count();
+                assert_eq!(details, 1, "an open line at {row:?} keeps its way to the full header: {at}");
+            }
+        }
+    }
+}
