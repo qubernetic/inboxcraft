@@ -187,16 +187,30 @@ pub(crate) fn rows_at(painter: &Painter, at: Pos2, width: f32, galley: Arc<Galle
     let clip = painter.clip_rect();
     // A row's top as the design has it: the line heights of the rows over it (egui rounds each).
     let mut top = 0.0_f32;
-    for row in &galley.rows {
+    // How many characters of the text the rows over this one hold.
+    let mut before = 0_usize;
+    let count = galley.rows.len();
+    for (index, row) in galley.rows.iter().enumerate() {
         let row_top = top;
         let high = row.glyphs.first().map_or(row.size.y, |glyph| glyph.line_height);
         top += high;
+        let first_char = before;
+        before = before.saturating_add(row.char_count_including_newline().into());
         let (upper, lower) = (at.y + row_top, at.y + row_top + high.max(row.size.y));
-        if lower < clip.top() || upper > clip.bottom() {
+        if upper > clip.bottom() {
+            break;
+        }
+        if lower < clip.top() {
             continue;
         }
-        // The row's words as egui broke them: its glyphs' characters, in the written order.
-        let words: String = row.glyphs.iter().map(|glyph| glyph.chr).collect();
+        // The row's words as egui broke them: its glyphs' characters, in the written order. The last row of a cut
+        // text is the rest of the text, cut again in the row's width (its glyphs end in egui's own ellipsis).
+        let words: String = if galley.elided && index + 1 == count {
+            let text = galley.job.text.as_str();
+            text.char_indices().nth(first_char).and_then(|(start, _)| text.get(start..)).unwrap_or_default().to_owned()
+        } else {
+            row.glyphs.iter().map(|glyph| glyph.chr).collect()
+        };
         let mut job = LayoutJob::single_section(words.trim_end().to_owned(), section.format.clone());
         job.wrap = TextWrapping { max_width: width.max(1.0), max_rows: 1, ..galley.job.wrap.clone() };
         job.break_on_newline = false;

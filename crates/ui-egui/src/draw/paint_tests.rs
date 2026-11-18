@@ -767,3 +767,83 @@ fn a_wrapped_run_paints_only_the_rows_in_sight() {
     assert!((5..=7).contains(&shapes), "{shapes} text shapes painted");
     assert_eq!(rows, shapes, "one row each");
 }
+
+/// The rows of a wrapped run as `rows_at` painted them before it left out the rows outside the clip: each row's words
+/// cut from the job's text, the last row the rest of it (so a cut text is cut again in the row's width).
+fn rows_at_as_before(painter: &egui::Painter, at: egui::Pos2, width: f32, galley: std::sync::Arc<egui::Galley>, colour: egui::Color32) {
+    use egui::text::{LayoutJob, TextWrapping};
+    let align = galley.job.halign;
+    let Some(section) = galley.job.sections.first() else { return };
+    let text = galley.job.text.as_str();
+    let mut start = 0_usize;
+    let mut top = 0.0_f32;
+    let count = galley.rows.len();
+    for (index, row) in galley.rows.iter().enumerate() {
+        let row_top = top;
+        top += row.glyphs.first().map_or(row.size.y, |glyph| glyph.line_height);
+        let end = if index + 1 == count {
+            text.len()
+        } else {
+            let chars: usize = row.char_count_including_newline().into();
+            text.get(start..).and_then(|rest| rest.char_indices().nth(chars)).map_or(text.len(), |(at, _)| start + at)
+        };
+        let words = text.get(start..end).unwrap_or_default().trim_end();
+        start = end;
+        let mut job = LayoutJob::single_section(words.to_owned(), section.format.clone());
+        job.wrap = TextWrapping { max_width: width.max(1.0), max_rows: 1, ..galley.job.wrap.clone() };
+        job.break_on_newline = false;
+        let one = super::on_baseline(painter.layout_job(job));
+        let wide = one.size().x;
+        let x = match align {
+            egui::Align::Center => at.x + (width - wide) / 2.0,
+            egui::Align::Max => at.x + width - wide,
+            egui::Align::Min => at.x,
+        };
+        super::run_at(painter, pos2(x, at.y + row_top), one, colour);
+    }
+}
+
+#[test]
+fn rows_in_sight_are_painted_as_before_also_where_the_text_is_cut() {
+    // The callers that cap a run's rows (a popup, an empty state, a settings row's help) paint what they did.
+    let samples = [
+        ("wrapped", "A help line under a settings row that wraps onto a second row and a third.", 120.0, usize::MAX, egui::Align::LEFT),
+        ("cut", "A long line that is cut with an ellipsis after two rows of words, more and more words.", 120.0, 2, egui::Align::LEFT),
+        ("cut centred", "An empty state's words, centred, wrapping onto rows and cut after the second of them.", 140.0, 2, egui::Align::Center),
+        ("tabs", "Tab\there and\tthere, CR\r\nLF\nend", 90.0, usize::MAX, egui::Align::LEFT),
+        ("combining", "e\u{301}e\u{301}e\u{301} zero\u{200B}width and \u{202E}bidi\u{202C} words that wrap", 80.0, usize::MAX, egui::Align::Max),
+        ("one word", "Averyveryverylongwordthatcannotbreakanywhereatallandmore", 60.0, 3, egui::Align::LEFT),
+    ];
+    for (name, text, width, rows, align) in samples {
+        for ppp in [1.0_f32, 1.5] {
+            let mut painted = Vec::new();
+            for before in [true, false] {
+                let theme = Theme::new(Mode::Dark, TextScale::default());
+                let mut harness = egui_kittest::Harness::builder()
+                    .with_size(vec2(400.0, 300.0))
+                    .with_pixels_per_point(ppp)
+                    .with_context_setup(crate::theme::install_fonts)
+                    .build_ui(move |ui| {
+                        let galley = crate::component::wrapped(ui, text, theme.fonts.body, theme.palette.ink, width, rows, align);
+                        if before {
+                            rows_at_as_before(ui.painter(), pos2(10.0, 10.0), width, galley, theme.palette.ink);
+                        } else {
+                            super::rows_at(ui.painter(), pos2(10.0, 10.0), width, galley, theme.palette.ink);
+                        }
+                    });
+                harness.run();
+                fn walk(shape: &Shape, out: &mut Vec<String>) {
+                    match shape {
+                        Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+                        Shape::Text(text) => out.push(format!("{:?} {:?} {:?}", text.pos, text.galley.text(), text.galley.size())),
+                        _ => {}
+                    }
+                }
+                let mut found = Vec::new();
+                harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+                painted.push(found);
+            }
+            assert_eq!(painted.first(), painted.get(1), "{name} at ppp {ppp}");
+        }
+    }
+}
