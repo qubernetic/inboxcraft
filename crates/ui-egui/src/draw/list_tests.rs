@@ -2097,6 +2097,7 @@ fn a_keyed_step_at_the_edge_scrolls_the_least_and_a_partly_shown_row_comes_whole
     harness.key_press(Key::J);
     harness.run();
     let next = order[at + 1];
+    let view = super::list::view_rect(&harness.ctx).unwrap();
     let shown = row_rect(&harness, next).unwrap();
     assert!(in_sight(&harness, next), "the row past the edge comes into sight");
     assert!((shown.bottom() - view.bottom()).abs() < 0.01, "the least scroll: {shown:?} in {view:?}");
@@ -2113,6 +2114,7 @@ fn a_keyed_step_at_the_edge_scrolls_the_least_and_a_partly_shown_row_comes_whole
     wheel(&mut harness, 84.0);
     let first = super::list::first_in_sight(&harness.ctx).unwrap();
     let partly = row_rect(&harness, first).unwrap();
+    let view = super::list::view_rect(&harness.ctx).unwrap();
     assert!(partly.top() < view.top(), "partly above: {partly:?}");
     for _ in 0..4 {
         if harness.state().mailbox().selected() == Some(first) {
@@ -2122,6 +2124,7 @@ fn a_keyed_step_at_the_edge_scrolls_the_least_and_a_partly_shown_row_comes_whole
         harness.run();
     }
     assert_eq!(harness.state().mailbox().selected(), Some(first));
+    let view = super::list::view_rect(&harness.ctx).unwrap();
     let whole = row_rect(&harness, first).unwrap();
     assert!((whole.top() - view.top()).abs() < 0.01, "its top on the viewport's: {whole:?} in {view:?}");
 }
@@ -2152,4 +2155,31 @@ fn a_keyed_row_scrolls_into_sight_by_this_frames_viewport_and_when_first_shown()
     assert!(selected_in_sight(&harness), "in sight in the smaller window");
     let view = super::list::view_rect(&harness.ctx).unwrap();
     assert!(view.height() < 500.0, "{view:?}");
+}
+
+#[test]
+fn the_planned_parts_of_the_lists_are_drawn_coming_soon() {
+    use inboxcraft_model::Role as MailRole;
+    let mut harness = harness(true);
+    // Several messages at once: the way in is there, disabled, with the mark.
+    let select = harness.get_by_role_and_label(Role::Button, "Select");
+    assert!(select.accesskit_node().is_disabled());
+    assert!(harness.query_all_by_label("coming soon").count() >= 1);
+    // Searching in the text of messages.
+    harness.state_mut().search("rota");
+    harness.run();
+    let text = harness.get_by_label("in message text");
+    assert!(text.accesskit_node().is_disabled());
+    // Drafts: its rows drawn from the mail there, the list coming soon.
+    harness.state_mut().search("");
+    harness.state_mut().mailbox_mut().open(Place::View(MailRole::Drafts));
+    harness.run();
+    harness.get_by_label("coming soon");
+    let drafts = harness.state().mailbox().messages().len();
+    let disabled = harness
+        .root()
+        .children_recursive()
+        .filter(|node| node.accesskit_node().is_disabled() && node.accesskit_node().label().is_some_and(|label| label.contains(", ")))
+        .count();
+    assert!(drafts == 0 || disabled >= 1, "{drafts} drafts, {disabled} drawn coming soon");
 }

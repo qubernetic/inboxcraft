@@ -37,6 +37,7 @@ use inboxcraft_model::Role;
 
 use inboxcraft_engine::ScreenerMode;
 
+use crate::component::draft_row::{DraftRow, draft_row};
 use crate::component::group_head::{GroupHead, group_head};
 use crate::component::hover::Action;
 use crate::component::later_row::{LaterRow, Pile as LaterPile, later_row};
@@ -87,7 +88,11 @@ fn view_switch() -> [(InboxView, &'static str); 3] {
 /// The pills under the header: the piles in "Later"; elsewhere "Show done" and the park pile, after the view switch
 /// over a wide unified inbox with groups to show. Not while searching.
 fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) {
-    if !mailbox.query().is_empty() || matches!(mailbox.place(), Place::Senders | Place::Outbox) {
+    if !mailbox.query().is_empty() {
+        search_head(ui, theme, mailbox);
+        return;
+    }
+    if matches!(mailbox.place(), Place::Senders | Place::Outbox) {
         return;
     }
     ui.add_space(theme.spacing.s3);
@@ -114,6 +119,11 @@ fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) {
                     asked.view = Some(view);
                 }
             }
+            if mailbox.place() == Place::View(Role::Drafts) {
+                // The list of drafts is planned: its rows are drawn, coming soon.
+                let _ = crate::component::soon::soon_tag(ui, theme);
+                return;
+            }
             if pill(ui, theme, tr!("Show done"), mailbox.show_done()).clicked() {
                 asked.show_done = Some(!mailbox.show_done());
             }
@@ -121,7 +131,28 @@ fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) {
             if parked > 0 && pill(ui, theme, &tr!("Parked ({count})", count = parked), false).clicked() {
                 asked.open = Some(Place::Later(Pile::Parked));
             }
+            // Several messages at once (the rows' check boxes and the bulk bar) are planned: the way in is drawn,
+            // coming soon, its mark once.
+            crate::component::soon::soon(ui, theme, |ui| {
+                let _ = pill(ui, theme, tr!("Select"), false);
+            });
+            let _ = crate::component::soon::soon_tag(ui, theme);
         });
+    });
+}
+
+/// The search's head under the list's head: what was searched and where, and the planned search in the text of
+/// messages, coming soon.
+fn search_head(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) {
+    ui.add_space(theme.spacing.s3);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = theme.spacing.s3;
+        let said = tr!("“{query}” in subjects, senders and recipients", query = mailbox.query());
+        ui.add(egui::Label::new(theme.fonts.mono_s.rich(&said).color(theme.palette.muted)).truncate());
+        crate::component::soon::soon(ui, theme, |ui| {
+            let _ = button::link_sized(ui, theme, &Keymap::empty(), tr!("in message text"), button::LinkSize::Small);
+        });
+        let _ = crate::component::soon::soon_tag(ui, theme);
     });
 }
 
@@ -847,6 +878,8 @@ pub(super) enum Line<'a> {
     HeadLeaving(&'a Group, HeadState, Gone),
     /// A message's row.
     Mail(&'a MessageRow),
+    /// A draft's row in Drafts: drawn coming soon until the list of drafts is wired (stage I-2.9).
+    Draft(&'a MessageRow),
     /// The row of a message that has just left the list, and how far it has gone.
     Leaving(&'a MessageRow, Gone),
     /// The screener card, while senders wait.
@@ -898,6 +931,7 @@ pub(super) fn line_height(theme: &Theme, line: &Line<'_>) -> f32 {
         Line::Head(..) => boxes.group_head,
         Line::HeadLeaving(_, _, gone) => even(boxes.group_head * open(gone)),
         Line::Mail(_) => boxes.mail_row,
+        Line::Draft(_) => Theme::size(theme, crate::component::draft_row::HEIGHT),
         Line::Leaving(_, gone) => even(boxes.mail_row * open(gone)),
         Line::Send(row) if matches!(row.state, SendState::Refused { .. }) => Theme::size(theme, crate::component::outbox_row::REFUSED_HEIGHT),
         Line::Send(_) => Theme::size(theme, crate::component::outbox_row::HEIGHT),
@@ -1051,9 +1085,14 @@ pub(super) fn lines<'a>(
     if wait {
         stack.push(Line::Card(mailbox.waiting()));
     }
+    // Drafts: the design's draft rows, coming soon.
+    let drafts = mailbox.place() == Place::View(Role::Drafts) && mailbox.query().is_empty();
     if view == InboxView::List || groups.is_empty() {
         for (line, _) in listed(mailbox, leaving) {
-            stack.push(line);
+            stack.push(match line {
+                Line::Mail(message) if drafts => Line::Draft(message),
+                line => line,
+            });
         }
         return stack.finish();
     }
@@ -1156,6 +1195,7 @@ fn salt(line: &Line<'_>) -> Id {
         Line::Head(group, _) => Id::unique("list-head").with(&group.name),
         Line::HeadLeaving(group, ..) => Id::unique("list-head-leaving").with(&group.name),
         Line::Mail(message) => Id::unique("list-mail").with(message.id),
+        Line::Draft(message) => Id::unique("list-draft").with(message.id),
         Line::Leaving(message, _) => Id::unique("list-leaving-line").with(message.id),
         Line::Card(_) => Id::unique("list-screener"),
         Line::Send(row) => Id::unique("list-send").with(row.draft),
@@ -1178,6 +1218,16 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, slot: Slot) {
         }
         Line::HeadLeaving(group, state, gone) => leaving_head(ui, theme, keymap, group, *state, *gone),
         Line::Mail(message) => rows.mail(ui, message, slot),
+        Line::Draft(message) => {
+            let subject = (!message.subject.is_empty()).then_some(message.subject.as_str());
+            let spoken = mailbox.spoken(message);
+            let when = tr!("edited {when}", when = mailbox.row_date(message));
+            let to = if message.sender.is_empty() { tr!("no recipient yet").to_owned() } else { tr!("to {whom}", whom = message.sender) };
+            let row = DraftRow { id: Id::unique("list-draft-row").with(message.id), spoken: &spoken, subject, to: &to, when: &when, last: false };
+            crate::component::soon::soon(ui, theme, |ui| {
+                let _ = draft_row(ui, theme, keymap, &row, false, None);
+            });
+        }
         Line::Leaving(message, gone) => leaving_row(ui, theme, keymap, mailbox, message, rows.account_marker, *gone),
         Line::Card(waiting) => {
             if screener(ui, theme, keymap, waiting) {
