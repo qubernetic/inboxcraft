@@ -103,6 +103,12 @@ pub fn fade(ctx: &Context, id: Id, on: bool, seconds: f32) -> f32 {
 /// How far `id` has appeared over `seconds` since the first frame it was shown in, eased, 0 to 1; something that
 /// missed a frame appears again. A repaint is asked for until it has.
 pub fn appear(ctx: &Context, id: Id, seconds: f32) -> f32 {
+    easing::cubic_out(elapsed(ctx, id, seconds))
+}
+
+/// The share of `seconds` gone since the first frame `id` was shown in, at an even pace, 0 to 1; something that missed
+/// a frame starts again. A repaint is asked for until it is 1; with reduced motion it is 1 at once.
+pub fn elapsed(ctx: &Context, id: Id, seconds: f32) -> f32 {
     let now = ctx.input(|input| input.time);
     let pass = ctx.cumulative_pass_nr();
     let key = id.with("appear");
@@ -123,7 +129,34 @@ pub fn appear(ctx: &Context, id: Id, seconds: f32) -> f32 {
     if shown < 1.0 {
         ctx.request_repaint();
     }
-    easing::cubic_out(shown)
+    shown
+}
+
+/// The design's one curve, `cubic-bezier(.2, .7, .2, 1)`: how far a movement has come at `share` of its time (0 to
+/// 1; below 0 or not a number counts as 0, above 1 as 1). The curve's time is found by halving its interval a fixed
+/// number of times (its x rises from 0 to 1), so it always ends.
+#[must_use]
+pub fn ease(share: f32) -> f32 {
+    let share = if share.is_nan() { 0.0 } else { f64::from(share.clamp(0.0, 1.0)) };
+    // The ends exactly: a movement starts where it was and lands where it goes.
+    if share <= 0.0 {
+        return 0.0;
+    }
+    if share >= 1.0 {
+        return 1.0;
+    }
+    let bezier = |p1: f64, p2: f64, t: f64| 3.0 * (1.0 - t) * (1.0 - t) * t * p1 + 3.0 * (1.0 - t) * t * t * p2 + t * t * t;
+    let (mut low, mut high) = (0.0_f64, 1.0_f64);
+    for _ in 0..48 {
+        let middle = (low + high) / 2.0;
+        if bezier(0.2, 0.2, middle) < share {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    // A share of 0 to 1: the cast loses nothing that shows.
+    (bezier(0.7, 1.0, (low + high) / 2.0) as f32).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
