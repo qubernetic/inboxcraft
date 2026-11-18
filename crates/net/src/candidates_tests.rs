@@ -1,0 +1,161 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+use std::num::NonZeroU16;
+
+use inboxcraft_model::{EmailAddress, Host, Security, Server};
+
+use super::{Candidates, Lookups, MAX_CANDIDATES, MAX_MX, Reached, SrvName, candidates, provider_domains, usable_host};
+use crate::autoconfig::{Autoconfig, Offer};
+use crate::detect::Source;
+use crate::dns::Srv;
+
+fn address() -> EmailAddress {
+    EmailAddress::new("ada@example.org").unwrap()
+}
+
+fn host(name: &str) -> Host {
+    Host::new(name).unwrap()
+}
+
+fn server(name: &str, port: u16, security: Security) -> Server {
+    Server::new(host(name), NonZeroU16::new(port).unwrap(), security)
+}
+
+fn srv(name: &str, port: u16) -> Srv {
+    Srv { host: host(name), port: NonZeroU16::new(port).unwrap(), priority: 0, weight: 0 }
+}
+
+fn offer(name: &str, port: u16, security: Security) -> Offer {
+    Offer { server: server(name, port, security), username: "ada".to_owned() }
+}
+
+/// Each candidate as `server source`.
+fn rows(list: &Candidates) -> (Vec<String>, Vec<String>) {
+    let row =
+        |candidates: &[crate::detect::Candidate]| candidates.iter().map(|candidate| format!("{} {:?}", candidate.server, candidate.source)).collect();
+    (row(&list.imap), row(&list.submission))
+}
+
+/// The order and the de-duplication of the list, as a table: every source, a server repeated in a later source, a
+/// relay port and a provider that is the address's own domain.
+#[test]
+fn the_list_is_ordered_and_without_repeats() {
+    let mut lookups = Lookups::default();
+    lookups.set_mx([host("mx1.privateemail.com"), host("mx2.privateemail.com"), host("mx.example.org")]);
+    lookups.add_file(
+        Source::Autoconfig,
+        Autoconfig {
+            imap: vec![offer("imap.example.org", 993, Security::Tls)],
+            submission: vec![offer("smtp.example.org", 25, Security::StartTls), offer("smtp.example.org", 587, Security::StartTls)],
+        },
+    );
+    lookups.add_srv(SrvName::Imaps, [srv("imap.example.org", 993), srv("IMAP.srv.example.net", 993)]);
+    lookups.add_srv(SrvName::Imap, [srv("imap.srv.example.net", 143)]);
+    lookups.add_srv(SrvName::Submissions, []);
+    lookups.add_srv(SrvName::Submission, [srv("mail.privateemail.com", 587)]);
+    lookups
+        .add_provider_file("privateemail.com", Autoconfig { imap: vec![offer("imap.privateemail.com", 993, Security::Tls)], submission: Vec::new() });
+    lookups.reach(Reached::Own);
+    let (imap, submission) = rows(&candidates(&address(), &lookups));
+    let want_imap = [
+        "imap.example.org:993 (TLS) Autoconfig",
+        "imap.srv.example.net:993 (TLS) Srv",
+        "imap.srv.example.net:143 (STARTTLS) Srv",
+        "imap.privateemail.com:993 (TLS) ProviderAutoconfig",
+        "mail.privateemail.com:993 (TLS) Provider",
+        "mail.privateemail.com:143 (STARTTLS) Provider",
+        "imap.privateemail.com:143 (STARTTLS) Provider",
+        "mail.example.org:993 (TLS) Guess",
+        "mail.example.org:143 (STARTTLS) Guess",
+        "imap.example.org:143 (STARTTLS) Guess",
+    ];
+    assert_eq!(imap, want_imap);
+    let want_submission = [
+        "smtp.example.org:587 (STARTTLS) Autoconfig",
+        "mail.privateemail.com:587 (STARTTLS) Srv",
+        "mail.privateemail.com:465 (TLS) Provider",
+        "smtp.privateemail.com:465 (TLS) Provider",
+        "smtp.privateemail.com:587 (STARTTLS) Provider",
+        "mail.example.org:465 (TLS) Guess",
+        "mail.example.org:587 (STARTTLS) Guess",
+        "smtp.example.org:465 (TLS) Guess",
+    ];
+    assert_eq!(submission, want_submission);
+}
+
+#[test]
+fn the_list_holds_only_the_sources_reached() {
+    let mut lookups = Lookups::default();
+    lookups.set_mx([host("mx1.privateemail.com")]);
+    lookups.add_srv(SrvName::Imaps, [srv("imap.srv.example.net", 993)]);
+    assert!(candidates(&address(), &lookups).imap.is_empty());
+    lookups.reach(Reached::Srv);
+    assert_eq!(rows(&candidates(&address(), &lookups)).0, ["imap.srv.example.net:993 (TLS) Srv"]);
+    lookups.reach(Reached::Providers);
+    assert_eq!(candidates(&address(), &lookups).imap.len(), 5);
+    lookups.reach(Reached::Own);
+    assert_eq!(candidates(&address(), &lookups).imap.len(), 9);
+    // Never back.
+    lookups.reach(Reached::Files);
+    assert_eq!(candidates(&address(), &lookups).imap.len(), 9);
+}
+
+#[test]
+fn every_list_is_capped_where_it_is_built() {
+    let mut lookups = Lookups::default();
+    lookups.set_mx((0..10_000).map(|n| host(&format!("mx{n}.example.net"))));
+    assert_eq!(lookups.mx().len(), MAX_MX);
+    let offers = (0..100).map(|n| offer(&format!("imap{n}.file.example.net"), 993, Security::Tls)).collect();
+    lookups.add_file(Source::Autoconfig, Autoconfig { imap: offers, submission: Vec::new() });
+    lookups.add_srv(SrvName::Imaps, (0..10_000).map(|n| srv(&format!("imap{n}.example.net"), 993)));
+    lookups.reach(Reached::Own);
+    let list = candidates(&address(), &lookups);
+    assert_eq!(list.imap.len(), MAX_CANDIDATES);
+    for n in 0..20 {
+        lookups.add_file(Source::Autoconfig, Autoconfig::default());
+        lookups.add_provider_file(&format!("p{n}.example.net"), Autoconfig::default());
+    }
+    assert_eq!(lookups.files.len() + lookups.provider_files.len(), super::MAX_FILES);
+}
+
+#[test]
+fn provider_domains_drop_the_first_label_never_above_the_mx_domain() {
+    let domains = |hosts: &[&str]| provider_domains(&hosts.iter().map(|name| host(name)).collect::<Vec<_>>(), "example.org");
+    assert_eq!(domains(&["mx1.privateemail.com", "mx2.privateemail.com"]), ["privateemail.com"]);
+    assert_eq!(domains(&["aspmx.l.example.com"]), ["l.example.com", "example.com"]);
+    assert_eq!(domains(&["mx.example.co.uk"]), ["example.co.uk"]);
+    assert_eq!(domains(&["Provider.Example.NET"]), ["example.net"]);
+    assert_eq!(domains(&["example.net"]), ["example.net"]);
+    assert_eq!(domains(&["mx.example.org"]), Vec::<String>::new());
+    assert_eq!(domains(&["localhost"]), Vec::<String>::new());
+    assert_eq!(domains(&["a.b.c.one.example.net", "mx.two.example.net", "mx.three.example.net"]).len(), super::MAX_PROVIDERS);
+}
+
+#[test]
+fn only_plain_names_are_usable_hosts() {
+    assert_eq!(usable_host("Mail.Example.ORG").map(|host| host.as_str().to_owned()).as_deref(), Some("mail.example.org"));
+    assert!(usable_host("_imaps.example.org").is_some());
+    let long = format!("{}.example.org", "a".repeat(300));
+    let too_long = format!("{}example.org", "abcdefghi.".repeat(25));
+    for name in [
+        long.as_str(),
+        too_long.as_str(),
+        "a\0b.example.org",
+        "a\rb.example.org",
+        "a\nb.example.org",
+        "a b.example.org",
+        "mail.\u{0435}xample.org",
+        "[192.0.2.1]",
+        "[::1]",
+        "192.0.2.1",
+        "localhost",
+        "",
+        ".",
+        "a..example.org",
+        "-a.example.org",
+        "a\\000b.example.org",
+    ] {
+        assert_eq!(usable_host(name), None, "{name:?}");
+    }
+}

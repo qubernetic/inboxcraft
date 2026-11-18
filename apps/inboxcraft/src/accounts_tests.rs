@@ -227,8 +227,14 @@ fn a_detected_proposal_reads_as_the_form_shows_it() {
         candidate.source = source;
     }
     every.imap.push(Candidate { source: Where::Srv, ..every.imap[0].clone() });
+    every.imap.push(Candidate { source: Where::ProviderAutoconfig, ..every.imap[0].clone() });
+    every.imap.push(Candidate { source: Where::Provider, ..every.imap[0].clone() });
     let sources: Vec<onboard::Source> = proposal(&every).imap.iter().map(|suggestion| suggestion.source).collect();
-    assert_eq!(sources, [onboard::Source::AutoconfigRedirect, onboard::Source::Ispdb, onboard::Source::Srv]);
+    // What the MX record pointed to is a guess the owner confirms.
+    assert_eq!(
+        sources,
+        [onboard::Source::AutoconfigRedirect, onboard::Source::Ispdb, onboard::Source::Srv, onboard::Source::Guess, onboard::Source::Guess]
+    );
 }
 
 #[test]

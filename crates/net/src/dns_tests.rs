@@ -245,3 +245,19 @@ fn the_system_configuration_is_read_where_there_is_one() {
         Err(error) => assert_eq!(error.kind(), ErrorKind::HostNotFound),
     }
 }
+
+#[test]
+fn a_target_with_a_nul_or_a_line_break_is_no_host() {
+    let query = Message::query();
+    let bad = |label: &[u8]| Name::from_labels([label, b"example".as_slice(), b"org".as_slice()]).unwrap();
+    let records = vec![
+        Record::from_rdata(name("example.org."), 300, RData::MX(MX::new(10, bad(b"mx\0evil")))),
+        Record::from_rdata(name("example.org."), 300, RData::MX(MX::new(20, bad(b"mx\r\nevil")))),
+        Record::from_rdata(name("example.org."), 300, RData::MX(MX::new(30, bad(b"mx evil")))),
+        mx(40, "mx.example.org."),
+    ];
+    let bytes = reply(&query, ResponseCode::NoError, records).to_vec().unwrap();
+    assert_eq!(hosts(&read_mx(&bytes).unwrap()), ["mx.example.org"]);
+    let records = vec![Record::from_rdata(name("_imaps._tcp.example.org."), 300, RData::SRV(SRV::new(0, 0, 993, bad(b"imap\0"))))];
+    assert_eq!(read_srv(&reply(&query, ResponseCode::NoError, records).to_vec().unwrap()).unwrap(), []);
+}
