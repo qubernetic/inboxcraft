@@ -218,3 +218,44 @@ fn the_keyboard_in_the_list_when_it_goes_moves_to_the_composer() {
     assert!(search_box(&harness).is_none());
     assert!(super::compose::has_keys(&harness.ctx), "the keys went with the list");
 }
+
+/// Drags the folder pane's edge, 12 right of its Accounts box (its card's pad), 800 to the right.
+fn widen_folders(harness: &mut Harness<'static, InboxApp>) {
+    let edge = harness.get_by_label("Accounts").rect().right() + 12.0;
+    let mut at = egui::pos2(edge - 1.0, 400.0);
+    harness.event(egui::Event::PointerMoved(at));
+    harness.step();
+    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    harness.step();
+    for _ in 0..16 {
+        at.x += 50.0;
+        harness.event(egui::Event::PointerMoved(at));
+        harness.step();
+    }
+    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    harness.run();
+}
+
+#[test]
+fn a_folder_pane_dragged_wide_leaves_the_composer_its_send_whole() {
+    for percent in [100, 130] {
+        for width in [720.0, 800.0, 1100.0] {
+            let mut harness = composing(width, percent);
+            let accounts = harness.get_by_label("Accounts").rect().right();
+            widen_folders(&mut harness);
+            let at = format!("{percent} % {width}");
+            if width >= 1100.0 {
+                assert!(harness.get_by_label("Accounts").rect().right() > accounts + 40.0, "{at}: the pane was dragged wider");
+            }
+            let composer = super::compose::drawn_rect(&harness.ctx).unwrap();
+            assert!(composer.right() <= width, "{at}: {composer:?} in the window");
+            for label in ["Send", "Send later", "Discard the draft"] {
+                let rect = harness.get_by_label(label).rect();
+                assert!(composer.contains_rect(rect) && rect.right() <= width, "{at}: {label} {rect:?} in {composer:?}");
+            }
+            for text in texts(&harness) {
+                assert!(text.0.right() <= width + 0.5, "{at}: {text:?} past the window");
+            }
+        }
+    }
+}

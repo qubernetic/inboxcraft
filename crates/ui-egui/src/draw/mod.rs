@@ -210,9 +210,9 @@ fn margin(points: f32) -> Margin {
     Margin::same(points.clamp(0.0, 100.0) as i8)
 }
 
-/// A pane's frame: no fill, `left` and `right` of its pane and `gap` above and below it.
-/// The widest the list beside the reader gets in `ui`: with the composer `docked` in the reader's place, what leaves
-/// the composer its least width and the card's 8 beside it, so in a narrow window the list gives way to it.
+/// The widest a pane at the left of the reader's place (the folders, the list) gets in `ui`: with the composer `docked`
+/// there, what leaves the composer its least width and the card's 8 beside it, so in a narrow window the pane gives way
+/// to it. A width that is not a number counts as 1.
 fn list_widest(ui: &Ui, theme: &Theme, docked: bool) -> f32 {
     if docked { (ui.available_width() - compose::least_width(ui, theme) - theme.spacing.s2).max(1.0) } else { f32::INFINITY }
 }
@@ -252,6 +252,7 @@ enum ListPlace {
     Whole,
 }
 
+/// A pane's frame: no fill, `left` and `right` of its pane and `gap` above and below it.
 fn around(left: f32, right: f32, gap: f32) -> Frame {
     // Distances are a few points; the clamp keeps the casts inside i8.
     let side = |points: f32| points.clamp(0.0, 100.0) as i8;
@@ -1536,7 +1537,7 @@ impl InboxApp {
             add = self.welcome(ui, &theme, &mut layers);
         } else if !full {
             let left;
-            (asked, left) = self.folders(ui, &theme, &mut layers);
+            (asked, left) = self.folders(ui, &theme, &mut layers, docked);
             let place = list_place(ui, &theme, &self.mailbox, &self.search, self.reader.open_id().is_some(), docked, left);
             let panel = list_panel(ui, &theme, &self.mailbox, &self.search, docked, left);
             let (mailbox, search, keymap) = (&self.mailbox, &mut self.search, &self.keymap);
@@ -1796,7 +1797,8 @@ impl InboxApp {
 
     /// The folder pane on a card at the left, when there is an account: without one it would hold only the app's
     /// name. What was asked on it, and how far right of it the next card starts (a full gap from the rail without it).
-    fn folders(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes) -> (pane::Asked, f32) {
+    /// Beside the `docked` composer it is never wider than [`list_widest`].
+    fn folders(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, docked: bool) -> (pane::Asked, f32) {
         let s = theme.spacing;
         if self.mailbox.accounts().is_empty() {
             return (pane::Asked::default(), 0.0);
@@ -1804,6 +1806,8 @@ impl InboxApp {
         let shown = Panel::left("folders")
             .resizable(true)
             .default_size(FOLDER_PANE)
+            // However far its edge is dragged, the docked composer keeps its least width beside it.
+            .max_size(list_widest(ui, theme, docked))
             .show_separator_line(false)
             .frame(around(0.0, 0.0, 0.0))
             .show(ui, |ui| layers.card(ui, margin(s.s3), |ui| pane::show(ui, theme, &self.keymap, &self.mailbox)));
