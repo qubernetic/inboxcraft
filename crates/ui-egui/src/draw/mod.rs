@@ -566,6 +566,8 @@ impl InboxApp {
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
             // The search field is the list's: hidden, it is not there to take the keys.
             keymap::FIND => !self.list_hidden,
+            // In one pane only, where it brings the list back in front: the list hidden beside a composer in two panes
+            // has no Back.
             keymap::BACK => self.screen == Screen::Mail && self.single == Some(true) && self.in_place_of_list(),
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
@@ -2558,6 +2560,9 @@ mod reader_tests;
 #[cfg(test)]
 #[path = "reply_tests.rs"]
 mod reply_tests;
+#[cfg(test)]
+#[path = "rests_tests.rs"]
+mod rests_tests;
 #[cfg(test)]
 #[path = "settings_tests.rs"]
 mod settings_tests;
