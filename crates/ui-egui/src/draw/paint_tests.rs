@@ -301,6 +301,32 @@ fn panes_that_meet_share_one_line_side_by_side_and_stacked() {
 }
 
 #[test]
+fn a_lone_pane_s_edges_end_at_its_corners() {
+    for ppp in [1.0_f32, 1.5, 2.0] {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0))), ..Default::default() };
+        input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
+        let theme = Theme::new(Mode::Dark, TextScale::default());
+        let card = egui::Rect::from_min_max(pos2(40.0, 30.0), pos2(360.0, 270.0));
+        let mut output = ctx.run_ui(input, |ui| {
+            let mut panes = super::Panes::begin(ui.painter());
+            ui.scope_builder(egui::UiBuilder::new().max_rect(card), |ui| panes.card(ui, egui::Margin::ZERO, |_| ()));
+            panes.finish(ui.painter(), &theme);
+        });
+        output.textures_delta.clear();
+        let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
+        let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
+        let mut lines = Vec::new();
+        for clipped in tessellator.tessellate_shapes(output.shapes) {
+            let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
+            lines.extend(mesh.vertices.iter().filter(|vertex| vertex.color == theme.palette.line).map(|vertex| vertex.pos));
+        }
+        // The four edges lie inside the pane: no line runs a pixel past a corner.
+        assert_eq!(egui::Rect::from_points(&lines), card, "{ppp}");
+    }
+}
+
+#[test]
 fn a_text_box_hugs_its_run_rounded_up_to_a_whole_point() {
     assert_eq!(super::run_box(6.6), 7.0);
     assert_eq!(super::run_box(13.2), 14.0);

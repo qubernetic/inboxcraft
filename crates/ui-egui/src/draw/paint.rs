@@ -379,6 +379,24 @@ fn hairline_shape(a: Pos2, b: Pos2, colour: Color32, ppp: f32) -> Shape {
     Shape::line_segment([pos2(snap(a.x), snap(a.y)), pos2(snap(b.x), snap(b.y))], Stroke::new(pixels / ppp, colour))
 }
 
+/// The shape of a pane's edge from `a` to `b`, level or upright, at `ppp`: a [`hairline`]'s pixels across, and along
+/// from the pixel boundary nearest `a` to the one nearest `b`, so an edge ends at the pane's corner and never a pixel
+/// past it. A filled band, not a line: egui puts the ends of a level or upright line on pixel centres, half a pixel
+/// past a corner.
+fn edge_shape(a: Pos2, b: Pos2, colour: Color32, ppp: f32) -> Shape {
+    let (ppp, pixels) = line_pixels(ppp);
+    let across = |at: f32| ((at * ppp).floor() / ppp, ((at * ppp).floor() + pixels) / ppp);
+    let along = |from: f32, to: f32| ((from * ppp).round() / ppp, (to * ppp).round() / ppp);
+    let band = if (a.y - b.y).abs() < f32::EPSILON {
+        let ((left, right), (top, bottom)) = (along(a.x, b.x), across(a.y));
+        Rect::from_min_max(pos2(left, top), pos2(right, bottom))
+    } else {
+        let ((left, right), (top, bottom)) = (across(a.x), along(a.y, b.y));
+        Rect::from_min_max(pos2(left, top), pos2(right, bottom))
+    };
+    Shape::rect_filled(band, 0.0, colour)
+}
+
 /// A line one point wide (whole physical pixels, at least one) in `colour` from `a` to `b`, on whole pixels.
 pub(crate) fn hairline(painter: &Painter, a: Pos2, b: Pos2, colour: Color32) {
     painter.add(hairline_shape(a, b, colour, painter.pixels_per_point()));
@@ -441,22 +459,22 @@ impl Panes {
             // A strip's own edge is the line between it and this pane.
             let beside_edge = self.edged.iter().any(|strip| near(strip.right(), rect.left()));
             if !near(rect.left(), window.left()) && !beside_edge {
-                shapes.push(hairline_shape(pos2(left, top), pos2(left, rect.bottom()), colour, ppp));
+                shapes.push(edge_shape(pos2(left, top), pos2(left, rect.bottom()), colour, ppp));
             }
             // The next pane's left edge is this one's right edge: drawn once, by the next.
             let followed = self.rects.iter().any(|other| near(other.left(), rect.right()));
             if !near(rect.right(), window.right()) && !followed {
-                shapes.push(hairline_shape(pos2(right, top), pos2(right, rect.bottom()), colour, ppp));
+                shapes.push(edge_shape(pos2(right, top), pos2(right, rect.bottom()), colour, ppp));
             }
             // A strip's own bottom edge is the line between it and this pane.
             let under_cap = self.capped.iter().any(|strip| near(strip.bottom(), rect.top()));
             if !near(rect.top(), window.top()) && !under_cap {
-                shapes.push(hairline_shape(pos2(left, top), pos2(rect.right(), top), colour, ppp));
+                shapes.push(edge_shape(pos2(left, top), pos2(rect.right(), top), colour, ppp));
             }
             // The pane under this one starts at its bottom: that pane's top line is the one line between them.
             let stacked = self.rects.iter().any(|other| near(other.top(), rect.bottom()));
             if !near(rect.bottom(), window.bottom()) && !stacked {
-                shapes.push(hairline_shape(pos2(left, bottom), pos2(rect.right(), bottom), colour, ppp));
+                shapes.push(edge_shape(pos2(left, bottom), pos2(rect.right(), bottom), colour, ppp));
             }
         }
         painter.set(self.slot, Shape::Vec(shapes));
