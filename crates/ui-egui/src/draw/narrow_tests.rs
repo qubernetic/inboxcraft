@@ -389,6 +389,39 @@ fn the_folder_pane_the_owner_widened_comes_back_to_the_pixel_when_the_composer_c
 }
 
 #[test]
+fn the_folder_pane_the_owner_widened_comes_back_to_the_pixel_after_a_slow_window_resize() {
+    // A window edge dragged slowly moves the cap by less than half a point a frame: one physical pixel at 300 %, or
+    // a quarter point; the squeezed pane follows the cap, and none of it is the owner's.
+    for (scale, steps) in [(3.0, vec![1.0 / 3.0; 30]), (1.0, [vec![-0.25; 40], vec![0.25; 40]].concat())] {
+        let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+        app.set_text_scale(crate::theme::TextScale::from_percent(100).unwrap());
+        let mut harness = Harness::builder()
+            .with_size(vec2(1000.0, 800.0))
+            .with_pixels_per_point(scale)
+            .with_max_steps(12)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        harness.run();
+        drag_folders(&mut harness, 300.0);
+        let widened = harness.get_by_label("Accounts").rect().right();
+        harness.get_by_role_and_label(Role::Button, "New message").click();
+        harness.run();
+        let squeezed = harness.get_by_label("Accounts").rect().right();
+        assert!(squeezed < widened, "{scale}: the composer's least width squeezes the pane: {widened} then {squeezed}");
+        let mut width = 1000.0_f32;
+        for step in steps {
+            width += step;
+            harness.set_size(vec2(width, 800.0));
+            harness.step();
+        }
+        harness.run();
+        harness.get_by_label("Close; the draft is kept").click();
+        harness.run();
+        harness.run();
+        assert_eq!(harness.get_by_label("Accounts").rect().right(), widened, "{scale}: the owner's width back, to the pixel");
+    }
+}
+
+#[test]
 fn the_folder_pane_the_cap_squeezes_can_still_be_narrowed_and_keeps_that_width() {
     // At 720 the squeezed pane stands 42 above the least its folders take (egui gives a pane its content's width back
     // on release), so the drag there is 30; at 1000 it is 80.
