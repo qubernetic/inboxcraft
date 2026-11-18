@@ -288,7 +288,15 @@ pub(super) fn row_height(theme: &Theme) -> f32 {
     theme.boxes().mail_row
 }
 
-/// The hover actions of `message`: Done (or "Not done" for a done one), mark read or unread, Delete, Snooze.
+/// Where each of a row's hover actions ([`actions`]) stands: an action's id is `actions_id(id).with(place)`, and the
+/// place is what [`act`] reads (Snooze's, what its time picker hangs from).
+const DONE_ACTION: usize = 0;
+const READ_ACTION: usize = 1;
+const DELETE_ACTION: usize = 2;
+pub(crate) const SNOOZE_ACTION: usize = 3;
+
+/// The hover actions of `message`, in their places: Done (or "Not done" for a done one), mark read or unread, Delete,
+/// Snooze.
 fn actions(message: &MessageRow) -> [Action<'static>; 4] {
     #[cfg(test)]
     super::list_tests::ACTIONS_BUILT.with(|built| built.set(built.get().saturating_add(1)));
@@ -446,11 +454,11 @@ fn snooze_picker(ctx: &egui::Context, theme: &Theme, mailbox: &Mailbox) -> Optio
 /// What the hover action at `index` of [`actions`] does to `message` at once (Snooze asks for a time first).
 fn act(message: &MessageRow, index: usize) -> Option<Act> {
     match index {
-        0 if message.done => Some(Act::Undone),
-        0 => Some(Act::Done),
-        1 if message.seen => Some(Act::Unread),
-        1 => Some(Act::Read),
-        2 => Some(Act::Delete),
+        DONE_ACTION if message.done => Some(Act::Undone),
+        DONE_ACTION => Some(Act::Done),
+        READ_ACTION if message.seen => Some(Act::Unread),
+        READ_ACTION => Some(Act::Read),
+        DELETE_ACTION => Some(Act::Delete),
         _ => None,
     }
 }
@@ -846,9 +854,6 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow,
     }
     acted
 }
-
-/// Where Snooze stands among a row's hover actions ([`actions`]): its id is `actions_id(id).with(SNOOZE_ACTION)`.
-pub(crate) const SNOOZE_ACTION: usize = 3;
 
 /// The id of the hover action group of message `id`'s row: its n-th action is `actions_id(id).with(n)` (Snooze's
 /// [`SNOOZE_ACTION`]), what a picker opened from an action anchors to.

@@ -3419,3 +3419,26 @@ fn a_picker_pushed_out_of_sight_by_a_smaller_window_closes_and_leaves_no_keyboar
     harness.run_steps(3);
     assert!(harness.query_by_label("Snooze until").is_none(), "and stays closed");
 }
+
+#[test]
+fn the_rows_snooze_picker_hangs_from_the_button_its_one_id_and_place_name() {
+    let mut harness = still();
+    let odile = id_with(&harness, "Allotment rota for November");
+    // Another message open beside the list, so that the list is 440 wide and the picker has room under the button.
+    harness.get_by_label(TEODOR).click();
+    harness.run();
+    let row = harness.get_by_label(ODILE).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    let snooze = on_row(&harness, row, "Snooze");
+    // One id, one place: the button they name is the row's Snooze.
+    let named = harness.ctx.read_response(super::list::actions_id(odile).with(super::list::SNOOZE_ACTION)).map(|response| response.rect);
+    assert_eq!(named, Some(snooze), "actions_id and SNOOZE_ACTION name the row's Snooze");
+    harness.hover_at(snooze.center());
+    harness.run();
+    harness.query_all_by_role_and_label(Role::Button, "Snooze").find(|node| node.rect() == snooze).unwrap().click();
+    harness.run();
+    // The picker hangs from that button: 4 under it, its left edge on the button's.
+    let float = harness.ctx.memory(|memory| memory.area_rect(super::list::snooze_popup(odile))).unwrap();
+    assert!((float.left() - snooze.left()).abs() < 0.5 && (float.top() - (snooze.bottom() + 4.0)).abs() < 0.5, "{float:?} under {snooze:?}");
+}
