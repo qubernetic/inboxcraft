@@ -162,3 +162,42 @@ fn a_quote_s_lines_are_cleaned_but_kept() {
     // Other controls become spaces and overrides go; the breaks stay.
     assert_eq!(super::super::plain_lines("a\u{202E}b\tc\r\nd\0e"), "ab c \nd e");
 }
+
+#[test]
+fn an_open_quote_keeps_its_edge_when_its_head_has_scrolled_away() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let line = theme.palette.line;
+    let text = "Quoted words of a long message, kept with their line breaks.\n".repeat(300);
+    let mut harness =
+        Harness::builder().with_size(vec2(800.0, 600.0)).with_max_steps(64).with_context_setup(crate::theme::install_fonts).build_ui(move |ui| {
+            crate::component::scroll::show(ui, &theme, egui::ScrollArea::vertical().auto_shrink([false, false]), |ui| {
+                quote_fold(ui, &theme, 300, true, Some(SAID), &text);
+            });
+        });
+    harness.run();
+    // The 2 px `line` edges painted in the last frame.
+    let edges = |harness: &Harness<'_>| {
+        fn walk(shape: &egui::Shape, line: egui::Color32, out: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, line, out)),
+                egui::Shape::Rect(rect) if rect.fill == line && rect.rect.width() == 2.0 => out.push(rect.rect),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, line, &mut found));
+        found
+    };
+    assert!(!edges(&harness).is_empty(), "the edge at the top");
+    harness.hover_at(egui::pos2(300.0, 300.0));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -2_000.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run();
+    let after = edges(&harness);
+    assert!(after.iter().any(|edge| edge.top() < 0.0 && edge.bottom() > 600.0), "the open quote's edge runs on past its head: {after:?}");
+}

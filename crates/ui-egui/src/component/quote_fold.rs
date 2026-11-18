@@ -119,12 +119,19 @@ pub(crate) fn fold_line(
     let response = ui.interact(head, id, Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, spoken(lines, open)));
     let lit = lit(ui, theme, &response, true, shown, Hover::AtOnce);
+    // The edge runs down beside what the open fold shows, also once the line itself has scrolled out of sight.
+    let edge = Rect::from_min_max(head.min, pos2(head.left() + EDGE, edge_foot.max(head.bottom())));
     if ui.is_rect_visible(head) {
         let painter = ui.painter();
         if lit.hover {
             painter.rect_filled(head, 0.0, p.stage);
         }
-        painter.rect_filled(Rect::from_min_max(head.min, pos2(head.left() + EDGE, edge_foot.max(head.bottom()))), 0.0, p.line);
+    }
+    if ui.is_rect_visible(edge) {
+        ui.painter().rect_filled(edge, 0.0, p.line);
+    }
+    if ui.is_rect_visible(head) {
+        let painter = ui.painter();
         let ink = if lit.hover { p.ink } else { p.muted };
         let left = head.left() + PAD;
         let middle = head.center().y;
