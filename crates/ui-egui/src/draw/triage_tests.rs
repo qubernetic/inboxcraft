@@ -414,7 +414,8 @@ fn an_answered_card_takes_its_answers_colour_fades_and_the_next_steps_up() {
         assert!(!edges(&harness).iter().any(|colour| minus.contains(colour)), "the answered card is no longer drawn");
         harness.run_steps(12);
         assert_eq!(let_in_tops(&harness), vec![first], "by 440 ms the next card stands in the answered one's place");
-        harness.run_steps(40);
+        // The card that stepped up under the pointer takes its hover in the next two frames; then it rests.
+        harness.run_steps(2);
         assert!(crate::component::tests::rests(&mut harness, 4), "and it rests");
     }
 }
