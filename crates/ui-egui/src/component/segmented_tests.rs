@@ -5,7 +5,7 @@ use egui::accesskit::{Role, Toggled};
 use egui::{Align, Color32, Layout, Rect, vec2};
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::{segmented, segmented_for, segmented_with, width};
+use super::{segmented, segmented_but, segmented_for, segmented_with, width};
 use crate::component::Shown;
 use crate::component::press_tests::{Part, keys_press_as_the_pointer};
 use crate::component::tests::{Look, Own, bring, builder, keyboard_walk, own, painted, staged, theme};
@@ -433,3 +433,44 @@ fn the_long_label_s_cut_words_are_painted_as_they_were_cut_off_the_pixel_grid() 
 
 /// The widest an option's words run before they are cut.
 const WIDEST_TEXT: f32 = 136.0;
+
+#[test]
+fn an_unavailable_option_takes_no_press_and_the_arrows_pass_it_by() {
+    let theme = theme();
+    let mut harness = builder().build_ui_state(
+        move |ui, current: &mut u8| {
+            motion::set_reduced(ui.ctx(), true);
+            crate::component::tests::stage(ui, theme.palette.surface, |ui| {
+                if let Some(picked) = segmented_but(ui, &theme, &options(theme.fonts.button), *current, None, &[1]) {
+                    *current = picked;
+                }
+            });
+        },
+        0,
+    );
+    harness.run();
+    let week = harness.get_by_role_and_label(Role::RadioButton, "Week");
+    assert!(week.accesskit_node().is_disabled(), "Week cannot be chosen");
+    assert!(!harness.get_by_role_and_label(Role::RadioButton, "Day").accesskit_node().is_disabled());
+    harness.get_by_role_and_label(Role::RadioButton, "Week").click();
+    harness.run();
+    assert_eq!(*harness.state(), 0, "a press on Week chooses nothing");
+    harness.get_by_label("Day / Week / Month").focus();
+    harness.run();
+    harness.key_press(egui::Key::ArrowRight);
+    harness.run();
+    assert_eq!(*harness.state(), 2, "the arrow passes Week by");
+    harness.key_press(egui::Key::ArrowLeft);
+    harness.run();
+    assert_eq!(*harness.state(), 0, "and back");
+    // Its word is `muted` and it takes no fill under the pointer.
+    let p = theme.palette;
+    harness.hover_at(harness.get_by_role_and_label(Role::RadioButton, "Week").rect().center());
+    harness.run();
+    let week = painted(&harness, "Week");
+    assert!(week.rects().all(|shape| !matches!(shape.look, Look::Rect { fill, .. } if fill == p.stage || fill == p.cyan_muted)), "no fill");
+    assert!(
+        week.shapes.iter().any(|shape| matches!(&shape.look, Look::Text { text, colour, .. } if text == "Week" && *colour == p.muted)),
+        "Week in muted"
+    );
+}

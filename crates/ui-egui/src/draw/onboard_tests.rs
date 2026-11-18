@@ -438,3 +438,195 @@ fn the_box_to_ask_mozilla_s_list_ticks_by_pointer_and_by_space() {
     harness.run();
     assert!(!ticked(&harness), "Space takes the tick off");
 }
+
+#[test]
+fn the_typed_form_outlasts_every_way_out_of_the_sheet() {
+    for way in ["Escape", "Close", "beside", "Appearance", "back", "rail", "palette"] {
+        let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
+        open_form(&mut harness);
+        type_in(&mut harness);
+        match way {
+            "Escape" => harness.key_press(Key::Escape),
+            "Close" => on_sheet(&harness, "Close").click(),
+            "beside" => {
+                let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+                let at = egui::pos2(sheet.left() / 2.0, sheet.center().y);
+                harness.hover_at(at);
+                harness.run();
+                for pressed in [true, false] {
+                    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+                }
+            }
+            "Appearance" => harness.get_by_label("Appearance, settings page").click(),
+            "back" => harness.get_by_label("Back to the accounts").click(),
+            "palette" => harness.key_press_modifiers(Modifiers::COMMAND, Key::K),
+            _ => harness.state_mut().run_action(&egui::Context::default(), crate::keymap::CALENDAR),
+        }
+        harness.run();
+        assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "{way}: the form is left");
+        assert!(harness.state().onboarding().form().password.is_empty(), "{way}: the parked form holds no password");
+        if way == "palette" {
+            assert!(!harness.state().settings().is_open(), "the palette closed the sheet");
+            harness.key_press(Key::Escape);
+            harness.run();
+        }
+        harness.state_mut().open_accounts();
+        harness.run();
+        on_sheet(&harness, "Add account").click();
+        harness.run();
+        let onboarding = harness.state().onboarding();
+        assert_eq!(onboarding.stage(), Stage::Form, "{way}");
+        assert_eq!(onboarding.form().address, "carol@example.org", "{way}: the address as typed");
+        assert!(onboarding.form().password.is_empty(), "{way}: the password is dropped on the way out and typed again");
+        // Cancel on the form itself lets it go: the next form is empty.
+        harness.state_mut().onboarding_mut().0.close();
+        harness.state_mut().onboarding_mut().0.open();
+        assert_eq!(harness.state().onboarding().form().address, "", "{way}");
+    }
+}
+
+/// Adds an account at `address` through the form, as Add account and Save would.
+fn add_account(harness: &mut Harness<'static, InboxApp>, address: &str) {
+    let (onboarding, mailbox) = harness.state_mut().onboarding_mut();
+    onboarding.open();
+    filled(onboarding.form_mut());
+    onboarding.form_mut().address = address.to_owned();
+    onboarding.add(mailbox);
+    onboarding.close();
+    harness.state_mut().pump();
+}
+
+/// Leaves the form on the sheet by Escape, then opens the sheet on Accounts again.
+fn leave_and_come_back(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "the form is left");
+    harness.state_mut().open_accounts();
+    harness.run();
+}
+
+#[test]
+fn add_account_over_a_parked_edit_brings_the_edit_back_as_typed() {
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
+    add_account(&mut harness, "carol@example.org");
+    harness.state_mut().open_accounts();
+    harness.run();
+    harness.get_by_label("carol@example.org, carol@example.org").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(1));
+    harness.state_mut().onboarding_mut().0.form_mut().label = "Typed label".to_owned();
+    leave_and_come_back(&mut harness);
+    on_sheet(&harness, "Add account").click();
+    harness.run();
+    let onboarding = harness.state().onboarding();
+    assert_eq!(onboarding.stage(), Stage::Edit(1), "the parked edit comes back, not an empty add form");
+    assert_eq!(onboarding.form().label, "Typed label");
+}
+
+#[test]
+fn an_account_s_row_over_a_parked_add_form_brings_the_add_form_back_as_typed() {
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
+    add_account(&mut harness, "carol@example.org");
+    harness.state_mut().open_accounts();
+    harness.run();
+    on_sheet(&harness, "Add account").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    harness.state_mut().onboarding_mut().0.form_mut().address = "dana@example.org".to_owned();
+    leave_and_come_back(&mut harness);
+    harness.get_by_label("carol@example.org, carol@example.org").click();
+    harness.run();
+    let onboarding = harness.state().onboarding();
+    assert_eq!(onboarding.stage(), Stage::Form, "the parked add form comes back, not carol's edit");
+    assert_eq!(onboarding.form().address, "dana@example.org");
+}
+
+#[test]
+fn another_account_s_row_over_a_parked_edit_brings_that_edit_back_as_typed() {
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
+    add_account(&mut harness, "carol@example.org");
+    add_account(&mut harness, "dana@example.org");
+    harness.state_mut().open_accounts();
+    harness.run();
+    harness.get_by_label("carol@example.org, carol@example.org").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(1));
+    harness.state_mut().onboarding_mut().0.form_mut().label = "Typed label".to_owned();
+    leave_and_come_back(&mut harness);
+    harness.get_by_label("dana@example.org, dana@example.org").click();
+    harness.run();
+    let onboarding = harness.state().onboarding();
+    assert_eq!(onboarding.stage(), Stage::Edit(1), "carol's parked edit comes back, not dana's");
+    assert_eq!(onboarding.form().label, "Typed label");
+    // Cancelled on purpose, the other account's form opens.
+    harness.state_mut().onboarding_mut().0.close();
+    harness.state_mut().open_accounts();
+    harness.run();
+    harness.get_by_label("dana@example.org, dana@example.org").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(2));
+}
+
+#[test]
+fn add_account_stands_at_the_right_end_of_the_accounts_title() {
+    for accounts in [false, true] {
+        let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
+        if accounts {
+            add_account(&mut harness, "carol@example.org");
+        }
+        harness.state_mut().open_accounts();
+        harness.run();
+        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        let add = on_sheet(&harness, "Add account").rect();
+        let title = harness.get_by_role_and_label(Role::Heading, "Accounts").rect();
+        // The page's column ends 40 in from the sheet's edge, its words 16 further in.
+        assert!((add.right() - (sheet.right() - 1.0 - 40.0 - 16.0)).abs() <= 0.5, "{accounts}: {add:?} in {sheet:?}");
+        assert!((add.center().y - title.center().y).abs() <= 1.0, "{accounts}: on the title's line: {add:?} {title:?}");
+    }
+}
+
+/// The line over a form that came back in place of the one asked for.
+const INSTEAD: &str = "You left this form unfinished, so it came back in place of the one you asked for: Cancel it to open that one.";
+
+#[test]
+fn a_form_that_comes_back_in_place_of_the_one_asked_for_says_so() {
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
+    add_account(&mut harness, "carol@example.org");
+    add_account(&mut harness, "dana@example.org");
+    harness.state_mut().open_accounts();
+    harness.run();
+    // Carol's edit, left and asked for again: the same form, nothing to say.
+    harness.get_by_label("carol@example.org, carol@example.org").click();
+    harness.run();
+    assert!(harness.query_by_label(INSTEAD).is_none(), "a form asked for says nothing");
+    leave_and_come_back(&mut harness);
+    harness.get_by_label("carol@example.org, carol@example.org").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(1));
+    assert!(harness.query_by_label(INSTEAD).is_none(), "the form asked for came back: nothing to say");
+    // Dana's row, and Add account, over carol's left edit: carol's comes back and says why.
+    for ask in ["dana@example.org, dana@example.org", "Add account"] {
+        leave_and_come_back(&mut harness);
+        if ask == "Add account" {
+            on_sheet(&harness, ask).click()
+        } else {
+            harness.get_by_label(ask).click()
+        }
+        harness.run();
+        assert_eq!(harness.state().onboarding().stage(), Stage::Edit(1), "{ask}");
+        harness.get_by_label(INSTEAD);
+    }
+    // Cancel lets it go; then the form asked for opens, and says nothing.
+    harness.get_by_label("Cancel").click();
+    harness.run();
+    on_sheet(&harness, "Add account").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    assert!(harness.query_by_label(INSTEAD).is_none(), "the add form asked for says nothing");
+    // The add form left, and carol's row asked for: the add form comes back and says why.
+    leave_and_come_back(&mut harness);
+    harness.get_by_label("carol@example.org, carol@example.org").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    harness.get_by_label(INSTEAD);
+}

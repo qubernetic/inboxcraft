@@ -7,30 +7,107 @@
 //! was not done.
 //!
 //! The sheet has one open state: every way out (its Close button, Escape, a press beside it, a rail button or a key
-//! that shows another place) goes through [`Settings::close`], which forgets everything the open sheet held, so it
-//! opens clean the next time.
+//! that shows another place) goes through [`Settings::close`], which forgets what the open sheet held (the key waited
+//! for, the text that narrows the Shortcuts page, the notes), so it opens clean the next time. What was typed into a
+//! setting is never lost that way: a signature typed and not saved stays until it is saved.
 //!
 //! Every other control of the page runs its `ui.*.set` command at once.
 
 use std::collections::BTreeMap;
 
-/// A page of the settings sheet that is built.
+/// A page of the settings sheet.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Section {
-    /// Mode, window frame, text size and motion.
+    /// Look (mode, motion, text size) and Layout (the inbox view, where a message opens and is written, the window
+    /// frame).
     #[default]
     Appearance,
     /// The accounts, and adding one.
     Accounts,
-    /// Every action of the window with its key, to give it another.
-    Shortcuts,
-    /// The signature of each account's new messages.
-    Sending,
-    /// The screener's mode, how the inbox shows its groups, and each account's grouping.
-    Triage,
     /// Which new mail of each account notifies, returned snoozes and reminders, running in the background and
     /// starting with the computer.
     Notifications,
+    /// The screener's mode, pins on done mail, and each account's grouping.
+    Triage,
+    /// Undo send, the signature of each account's new messages, the templates and the scheduled list.
+    Sending,
+    /// The calendar's alerts and each account's calendars; coming soon.
+    Calendar,
+    /// Every action of the window with its key, to give it another.
+    Shortcuts,
+    /// The senders whose remote pictures always load; coming soon.
+    Privacy,
+    /// The program, its licences and its makers; coming soon.
+    About,
+    /// A model that summarises and drafts; planned, coming soon.
+    Ai,
+    /// Plugins; planned, coming soon.
+    Plugins,
+}
+
+impl Section {
+    /// Every section, in the order the sheet lists them: the nine of the design, then the two planned ones.
+    pub const ALL: [Self; 11] = [
+        Self::Appearance,
+        Self::Accounts,
+        Self::Notifications,
+        Self::Triage,
+        Self::Sending,
+        Self::Calendar,
+        Self::Shortcuts,
+        Self::Privacy,
+        Self::About,
+        Self::Ai,
+        Self::Plugins,
+    ];
+
+    /// Its name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Appearance => crate::tr!("Appearance"),
+            Self::Accounts => crate::tr!("Accounts"),
+            Self::Notifications => crate::tr!("Notifications"),
+            Self::Triage => crate::tr!("Triage"),
+            Self::Sending => crate::tr!("Sending"),
+            Self::Calendar => crate::tr!("Calendar"),
+            Self::Shortcuts => crate::tr!("Shortcuts"),
+            Self::Privacy => crate::tr!("Privacy"),
+            Self::About => crate::tr!("About"),
+            Self::Ai => crate::tr!("AI"),
+            Self::Plugins => crate::tr!("Plugins"),
+        }
+    }
+
+    /// Its name in scripts (the `ui_shot` examples): `appearance`, `accounts` … `ai`, `plugins`.
+    #[must_use]
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Appearance => "appearance",
+            Self::Accounts => "accounts",
+            Self::Notifications => "notifications",
+            Self::Triage => "triage",
+            Self::Sending => "sending",
+            Self::Calendar => "calendar",
+            Self::Shortcuts => "shortcuts",
+            Self::Privacy => "privacy",
+            Self::About => "about",
+            Self::Ai => "ai",
+            Self::Plugins => "plugins",
+        }
+    }
+
+    /// The section [`Section::id`] calls `name`.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|section| section.id() == name)
+    }
+
+    /// Whether the whole section is planned and not built: its page carries the coming-soon mark on its head.
+    #[must_use]
+    pub fn planned(self) -> bool {
+        matches!(self, Self::About | Self::Ai | Self::Plugins)
+    }
 }
 
 /// The settings sheet.
@@ -44,7 +121,8 @@ pub struct Settings {
     find: String,
     /// What giving the last key changed, on the Shortcuts page.
     keys_note: Option<String>,
-    /// The signatures as typed on the Sending page, by account; an account not in it shows the one it has.
+    /// The signatures as typed on the Sending page and not saved yet, by account, kept while the sheet is closed; an
+    /// account not in it shows the one it has.
     signatures: BTreeMap<u64, String>,
     /// Why the last change of starting with the computer was not done, on the Notifications page.
     login_note: Option<String>,
@@ -75,13 +153,12 @@ impl Settings {
         self.section = section;
     }
 
-    /// Forgets what the open sheet held: the notes, the text on the Shortcuts page, the action waiting for a key and
-    /// the signatures typed and not saved.
+    /// Forgets what the open sheet held: the notes, the text on the Shortcuts page and the action waiting for a key.
+    /// The signatures typed and not saved stay: what a person wrote is never lost on the way out.
     fn forget(&mut self) {
         self.capturing = None;
         self.find.clear();
         self.keys_note = None;
-        self.signatures.clear();
         self.login_note = None;
     }
 

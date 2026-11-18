@@ -167,7 +167,7 @@ fn without_a_desk_the_background_switches_say_they_are_not_available_here() {
     let mut harness = on_the_page(app());
     assert!(disabled(&harness, "Run in the background"));
     assert!(disabled(&harness, "Start with the computer"));
-    assert!(harness.query_all_by_label("Not available in this window").count() >= 1);
+    assert!(harness.query_all_by_label_contains("Not available in this window").count() >= 1, "said in the rows' help");
     harness.get_by_role_and_label(Role::Switch, "Run in the background").click();
     harness.run();
     assert!(harness.state().settings().is_open());
@@ -185,14 +185,14 @@ fn the_background_switch_asks_the_desk_and_turning_it_off_ends_starting_with_the
     assert_eq!(desk.calls(), ["background false", "login false"]);
     assert_eq!(toggled(&harness, Role::Switch, "Run in the background"), Some(Toggled::False));
     harness.run();
-    harness.get_by_label("Waiting for the desktop's answer…");
+    assert!(harness.query_all_by_label_contains("Waiting for the desktop's answer…").next().is_some());
     desk.0.lock().unwrap().login = Some(false);
     desk.0.lock().unwrap().answer = Some(Ok(()));
     harness.run();
     harness.run();
-    assert!(harness.query_by_label("Waiting for the desktop's answer…").is_none());
+    assert!(harness.query_all_by_label_contains("Waiting for the desktop's answer…").next().is_none());
     assert!(disabled(&harness, "Start with the computer"), "starting with the computer needs the background");
-    harness.get_by_label("Turn on Run in the background first: a start at login opens no window.");
+    assert!(harness.query_all_by_label_contains("Turn on Run in the background first: a start at login opens no window.").next().is_some());
     harness.get_by_role_and_label(Role::Switch, "Run in the background").click();
     harness.run();
     assert_eq!(desk.calls().last().map(String::as_str), Some("background true"));
@@ -207,12 +207,12 @@ fn starting_with_the_computer_waits_for_the_desktop_and_says_why_it_was_not_done
     harness.run();
     assert_eq!(desk.calls(), ["login true"]);
     harness.run();
-    harness.get_by_label("Waiting for the desktop's answer…");
+    assert!(harness.query_all_by_label_contains("Waiting for the desktop's answer…").next().is_some());
     assert!(disabled(&harness, "Start with the computer"), "one question at a time");
     desk.0.lock().unwrap().answer = Some(Err("the desktop did not allow InboxCraft to start at login".to_owned()));
     harness.run();
     harness.run();
-    harness.get_by_label("Not changed: the desktop did not allow InboxCraft to start at login.");
+    assert!(harness.query_all_by_label_contains("Not changed: the desktop did not allow InboxCraft to start at login.").next().is_some());
     assert_eq!(toggled(&harness, Role::Switch, "Start with the computer"), Some(Toggled::False));
     // The note goes with the sheet.
     harness.state_mut().close_settings();

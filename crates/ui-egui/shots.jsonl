@@ -73,6 +73,23 @@
 # The appearance settings page (E1.16b).
 {"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true}
 {"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true}
+# The settings pages (#238): the sections not shot elsewhere, dark and light; Appearance and Shortcuts at 130 %.
+{"out": "docs/images/settings-accounts-light.png", "mode": "light", "size": [1200, 820], "section": "accounts"}
+{"out": "docs/images/settings-accounts-dark.png", "mode": "dark", "size": [1200, 820], "section": "accounts"}
+{"out": "docs/images/settings-calendar-light.png", "mode": "light", "size": [1200, 820], "section": "calendar"}
+{"out": "docs/images/settings-calendar-dark.png", "mode": "dark", "size": [1200, 820], "section": "calendar"}
+{"out": "docs/images/settings-privacy-light.png", "mode": "light", "size": [1200, 820], "section": "privacy"}
+{"out": "docs/images/settings-privacy-dark.png", "mode": "dark", "size": [1200, 820], "section": "privacy"}
+{"out": "docs/images/settings-about-light.png", "mode": "light", "size": [1200, 820], "section": "about"}
+{"out": "docs/images/settings-about-dark.png", "mode": "dark", "size": [1200, 820], "section": "about"}
+{"out": "docs/images/settings-ai-light.png", "mode": "light", "size": [1200, 820], "section": "ai"}
+{"out": "docs/images/settings-ai-dark.png", "mode": "dark", "size": [1200, 820], "section": "ai"}
+{"out": "docs/images/settings-plugins-light.png", "mode": "light", "size": [1200, 820], "section": "plugins"}
+{"out": "docs/images/settings-plugins-dark.png", "mode": "dark", "size": [1200, 820], "section": "plugins"}
+{"out": "docs/images/settings-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "section": "appearance"}
+{"out": "docs/images/settings-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "section": "appearance"}
+{"out": "docs/images/shortcuts-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
+{"out": "docs/images/shortcuts-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
 # The message list (E1.17a): the screener and group cards and the hover actions on the row selected by
 # keyboard, with invented data the app does not show yet.
 {"out": "docs/images/list-showcase-light.png", "mode": "light", "size": [1400, 860], "showcase": true, "step": 2}

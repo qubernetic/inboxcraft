@@ -21,8 +21,12 @@
 //! `calendar-agenda-5000`, each view holding 5 000 invented events put in place of what was read (more than the
 //! engine lists at once): hundreds at one hour, hundreds over the same days, the rest spread out.
 //!
+//! With `--settings` it runs the settings sheet's scenes instead, each at rest: Appearance, Shortcuts and Sending
+//! over the sample's accounts, and Sending and Notifications with 300 accounts more (a signature field, or a row, an
+//! account).
+//!
 //! ```text
-//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose] [--calendar]
+//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose | --calendar | --settings]
 //! ```
 
 use std::process::ExitCode;
@@ -33,6 +37,7 @@ use inboxcraft_time::{Clock, FakeClock, SystemClock, Timestamp};
 use inboxcraft_ui_egui::calendar::{Day, EventRow, Moment, View};
 use inboxcraft_ui_egui::mailbox::{InboxView, Mailbox};
 use inboxcraft_ui_egui::save::NoSave;
+use inboxcraft_ui_egui::settings::Section;
 use inboxcraft_ui_egui::{InboxApp, UiError, rows_built, sample};
 
 /// The messages in the grown sample.
@@ -51,6 +56,9 @@ const BUDGET_MS: f64 = 4.0;
 const PINNED_BUDGET_MS: f64 = 16.6;
 /// The time the sample is shown at: 2026-11-05T09:00:00Z, as `ui_shot` shows it.
 const TIME: i64 = 1_793_869_200;
+/// The accounts added to the sample's in the settings scenes that show one row or field an account.
+const MORE_ACCOUNTS: usize = 300;
+
 /// The HTML message the reader opens.
 const HTML_SUBJECT: &str = "Your bike is due for a service";
 
@@ -74,6 +82,8 @@ enum Scene {
     CalendarWeek,
     /// The calendar's `view` holding [`CROWD_EVENTS`] events, left alone.
     CalendarCrowd(View),
+    /// The settings sheet open on `section`, `more` accounts added to the sample's, left alone.
+    Settings { section: Section, more: usize },
 }
 
 impl Scene {
@@ -92,6 +102,17 @@ impl Scene {
         scenes
     }
 
+    /// The settings sheet's scenes.
+    fn settings() -> Vec<Self> {
+        vec![
+            Self::Settings { section: Section::Appearance, more: 0 },
+            Self::Settings { section: Section::Shortcuts, more: 0 },
+            Self::Settings { section: Section::Sending, more: 0 },
+            Self::Settings { section: Section::Sending, more: MORE_ACCOUNTS },
+            Self::Settings { section: Section::Notifications, more: MORE_ACCOUNTS },
+        ]
+    }
+
     fn name(self) -> String {
         match self {
             Self::DefaultRest => "inbox-default-rest".to_owned(),
@@ -103,6 +124,10 @@ impl Scene {
             Self::Compose { kib, typing, accesskit } => {
                 format!("compose-{kib}k-{}{}", if typing { "typing" } else { "rest" }, if accesskit { "-ak" } else { "" })
             }
+            Self::Settings { section, more } => {
+                let more = if more > 0 { format!("-{more}more") } else { String::new() };
+                format!("settings-{}{more}-rest", section.id())
+            }
         }
     }
 
@@ -110,7 +135,7 @@ impl Scene {
     fn view(self) -> Option<InboxView> {
         match self {
             Self::ListRest | Self::ListScroll => Some(InboxView::List),
-            Self::DefaultRest | Self::ReaderHtml | Self::Compose { .. } | Self::CalendarWeek | Self::CalendarCrowd(_) => None,
+            Self::DefaultRest | Self::ReaderHtml | Self::Compose { .. } | Self::CalendarWeek | Self::CalendarCrowd(_) | Self::Settings { .. } => None,
         }
     }
 }
@@ -140,11 +165,24 @@ fn app(scene: Scene) -> Result<InboxApp, UiError> {
     if scene == Scene::CalendarWeek {
         week_of_events(&mut session)?;
     }
+    if let Scene::Settings { more, .. } = scene {
+        for n in 0..more {
+            let account = serde_json::json!({
+                "address": format!("bench{n}@example.org"),
+                "label": format!("Bench account {n}"),
+                "imap": { "host": "imap.example.org", "security": "tls" },
+            });
+            session.run("account.add", &account).map_err(UiError::Engine)?;
+        }
+    }
     let mailbox = Mailbox::new(session, Box::new(clock));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
     app.set_reduce_motion(true);
     if let Some(view) = scene.view() {
         app.mailbox_mut().set_inbox_view(view);
+    }
+    if let Scene::Settings { section, .. } = scene {
+        app.settings_mut().open_at(section);
     }
     if scene == Scene::ReaderHtml {
         let id = app.mailbox().messages().iter().find(|row| row.subject == HTML_SUBJECT).map(|row| row.id);
@@ -375,10 +413,13 @@ fn main() -> ExitCode {
         println!("governor: {governor}");
     }
     let clock = SystemClock::new();
-    let scenes = if std::env::args().any(|arg| arg == "--compose") {
+    let asked = |flag: &str| std::env::args().any(|arg| arg == flag);
+    let scenes = if asked("--compose") {
         Scene::compose()
-    } else if std::env::args().any(|arg| arg == "--calendar") {
+    } else if asked("--calendar") {
         vec![Scene::CalendarWeek, Scene::CalendarCrowd(View::Week), Scene::CalendarCrowd(View::Month), Scene::CalendarCrowd(View::Agenda)]
+    } else if asked("--settings") {
+        Scene::settings()
     } else {
         Scene::ALL.to_vec()
     };

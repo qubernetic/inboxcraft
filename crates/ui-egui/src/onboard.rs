@@ -625,6 +625,11 @@ pub struct Onboarding {
     /// The account being edited as it stood: set from [`Onboarding::edit`] until [`Onboarding::close`], through the
     /// check a save starts, so "Change settings" comes back here and removes nothing.
     held: Option<Held>,
+    /// The form a way out of the settings sheet left ([`Onboarding::park`]), as it was typed, until Add account or an
+    /// account's row brings it back.
+    parked: Option<Stage>,
+    /// Whether the form shown came back in place of another one asked for: it says so.
+    instead: bool,
 }
 
 impl fmt::Debug for Onboarding {
@@ -655,11 +660,19 @@ impl Onboarding {
             stored: BTreeSet::new(),
             detect,
             held: None,
+            parked: None,
+            instead: false,
         }
     }
 
-    /// Opens an empty form.
+    /// Opens an empty form; or, while a way out of the sheet left a form (this one or an account's), that form as it
+    /// was typed: a typed form is never dropped by asking for another one, the owner cancels it to start another.
     pub fn open(&mut self) {
+        if self.parked.is_some() {
+            self.resume(Stage::Form);
+            return;
+        }
+        self.instead = false;
         self.form = Form::default();
         self.found = None;
         self.error = None;
@@ -668,9 +681,42 @@ impl Onboarding {
         self.stage = Stage::Form;
     }
 
-    /// Closes onboarding; a password typed and not used is forgotten. An added account stays, and an edited one
-    /// stays as it was unless it was saved.
+    /// Leaves the form as it is typed, all but the password, on a way out of the settings sheet: Add
+    /// account, or any account's row, brings it back ([`Onboarding::open`], [`Onboarding::edit`]). A check that
+    /// runs or ran is closed as [`Onboarding::close`] closes it.
+    pub fn park(&mut self) {
+        match self.stage {
+            Stage::Form | Stage::Edit(_) => {
+                self.parked = Some(self.stage);
+                // The password is not kept past the form: it is typed again when the form comes back.
+                self.form.password.clear();
+                self.detecting = false;
+                self.stage = Stage::Closed;
+            }
+            Stage::Checking(_) => self.close(),
+            Stage::Closed => {}
+        }
+    }
+
+    /// Brings back the form [`Onboarding::park`] left, where `asked` was asked for.
+    fn resume(&mut self, asked: Stage) {
+        if let Some(stage) = self.parked.take() {
+            self.stage = stage;
+            self.instead = stage != asked;
+        }
+    }
+
+    /// Whether the form shown came back in place of the one asked for (a form left unfinished comes back first).
+    #[must_use]
+    pub fn came_back_instead(&self) -> bool {
+        self.instead && matches!(self.stage, Stage::Form | Stage::Edit(_))
+    }
+
+    /// Closes onboarding; a password typed and not used is forgotten, and so is a form a way out left. An added account
+    /// stays, and an edited one stays as it was unless it was saved.
     pub fn close(&mut self) {
+        self.parked = None;
+        self.instead = false;
         self.form.password.clear();
         self.detecting = false;
         self.held = None;
@@ -679,7 +725,14 @@ impl Onboarding {
 
     /// Opens the form of the account `id` with everything `account.list` shows of it. The password is not among
     /// it: the field starts empty, and an empty field keeps the stored one.
+    /// While a way out of the sheet left a form, that form comes back as it was typed instead, whichever account's
+    /// row was pressed.
     pub fn edit(&mut self, mailbox: &mut Mailbox, id: u64) {
+        if self.parked.is_some() {
+            self.resume(Stage::Edit(id));
+            return;
+        }
+        self.instead = false;
         self.error = None;
         let answer = match mailbox.run("account.list", &json!({})) {
             Ok(answer) => answer,
