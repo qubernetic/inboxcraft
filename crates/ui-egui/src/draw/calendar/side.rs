@@ -6,8 +6,8 @@
 //! on `cyan`), the calendars by account (the account's bar and name, then a box per calendar that shows or hides its
 //! events), and the details of the picked event: its title beside its account's bar, both dates with the times, the
 //! event's own zone when its clock differs from the computer's, the place, the description, the calendar, busy or
-//! free, private and the repeat as tags, the guests with their answers, and Edit and Delete. At the foot the sync
-//! line, coming soon.
+//! free, private and the repeat as tags, the guests with their answers, and Edit and Delete; every text whole, the
+//! panel scrolling to the rest. At the foot the sync line, coming soon.
 
 use egui::{Rect, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
@@ -33,6 +33,10 @@ const SYNC: f32 = 40.0;
 
 /// Between the panel's parts, in points.
 const GAP: f32 = 12.0;
+
+/// The most rows a text of the details lays out: more than its longest text takes, so nothing is cut; the panel
+/// scrolls to the rest.
+const WHOLE: usize = 4096;
 
 /// The most guests the details list by name.
 const GUESTS: usize = 8;
@@ -261,8 +265,15 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
     };
     // The head: the title beside its account's bar, Close at the right.
     let close_side = theme.boxes().button;
-    let title =
-        crate::component::wrapped(ui, &event.summary, theme.fonts.heading, p.ink, (width - close_side - 8.0 - 11.0).max(1.0), 3, egui::Align::Min);
+    let title = crate::component::wrapped(
+        ui,
+        &event.summary,
+        theme.fonts.heading,
+        p.ink,
+        (width - close_side - 8.0 - 11.0).max(1.0),
+        WHOLE,
+        egui::Align::Min,
+    );
     let rows = title.rows.len().max(1) as f32;
     let head_height = (rows * theme.fonts.heading.line + 10.0).max(close_side);
     let (head, head_response) = ui.allocate_exact_size(vec2(width, head_height), Sense::hover());
@@ -286,18 +297,18 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
     ui.add_space(8.0);
     // One day's times on a line of their own, under the day, as the design breaks them.
     let when = if !event.all_day && event.first == event.last { event.when().replacen(", ", ",\n", 1) } else { event.when() };
-    wrapped(ui, &when, theme.fonts.body, p.ink, 4);
+    wrapped(ui, &when, theme.fonts.body, p.ink, WHOLE);
     if let Some(zone) = event.zone_line() {
         ui.add_space(8.0);
-        wrapped(ui, &zone, theme.fonts.caption, p.muted, 3);
+        wrapped(ui, &zone, theme.fonts.caption, p.muted, WHOLE);
     }
     if !event.location.is_empty() {
         ui.add_space(8.0);
-        wrapped(ui, &event.location, theme.fonts.body, p.muted, 3);
+        wrapped(ui, &event.location, theme.fonts.body, p.muted, WHOLE);
     }
     if !event.description.is_empty() {
         ui.add_space(8.0);
-        wrapped(ui, &event.description, theme.fonts.caption, p.muted, 6);
+        wrapped(ui, &event.description, theme.fonts.caption, p.muted, WHOLE);
     }
     ui.add_space(8.0);
     ui.horizontal_wrapped(|ui| {

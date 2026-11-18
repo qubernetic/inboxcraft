@@ -323,3 +323,13 @@ fn an_alert_says_when_its_occurrence_is() {
     assert_eq!(super::alert_when(true, at(-9 * 3600), at(2 * 86_400 - 9 * 3600), utc), "Thursday 5 November – Friday 6 November");
     assert_eq!(super::alert_when(false, at(3600), at(0), utc), "Thursday 5 November, 10:00 – 10:00", "an end before the start");
 }
+
+#[test]
+fn a_description_keeps_its_lines_and_its_length_up_to_its_cap() {
+    let long = "Agenda point. ".repeat(100);
+    let read = super::paragraphs(&format!("Dial in\r\n{long}\u{202E}evil\u{0007}\n end"));
+    assert!(read.starts_with("Dial in\n"), "a line break stays one");
+    assert!(read.contains(&long), "far past a line's 300 characters");
+    assert!(read.ends_with("evil \n end"), "bidi controls go, other controls are spaces: {:?}", &read[read.len() - 12..]);
+    assert_eq!(super::paragraphs(&"x".repeat(super::MAX_DESCRIPTION + 50)).chars().count(), super::MAX_DESCRIPTION);
+}

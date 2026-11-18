@@ -276,7 +276,7 @@ impl EventRow {
             untitled: summary.trim().is_empty(),
             summary: if summary.trim().is_empty() { tr!("(No title)").to_owned() } else { summary },
             location: text("location"),
-            description: text("description"),
+            description: paragraphs(value.get("description").and_then(Value::as_str).unwrap_or_default()),
             start,
             end,
             first,
@@ -850,6 +850,20 @@ impl Calendar {
             Err(error) => mailbox.fail(error),
         }
     }
+}
+
+/// The longest description read, in characters: a dial-in with its agenda fits many times over.
+pub const MAX_DESCRIPTION: usize = 10_000;
+
+/// A description from a server fit to be read as text: its line breaks kept, every other control character a space,
+/// the bidi controls that could reorder it gone, cut to [`MAX_DESCRIPTION`] characters.
+fn paragraphs(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .chars()
+        .filter(|c| !matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}'))
+        .map(|c| if c.is_control() && c != '\n' { ' ' } else { c })
+        .take(MAX_DESCRIPTION)
+        .collect()
 }
 
 fn calendar_row(value: &Value) -> Option<CalendarRow> {

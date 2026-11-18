@@ -377,3 +377,41 @@ fn a_key_shared_with_another_screen_s_action_works_on_each_screen() {
     harness.run();
     assert_ne!(harness.state().mailbox().selected(), before, "on the mail ArrowDown moves the list");
 }
+
+#[test]
+fn the_details_show_the_whole_text_and_scroll_to_the_rest() {
+    let thursday = Day::new(2026, 11, 5).unwrap();
+    let words = "Dial in from the studio, then the agenda: glaze tests, kiln schedule, the open day's stand. ";
+    let mut long = event(9100, &words.repeat(3), (thursday, 600), (thursday, 660), false);
+    let paragraphs: Vec<String> = (1..=30).map(|line| format!("Agenda point {line}: {words}")).collect();
+    long.description = paragraphs.join("\n");
+    long.location = format!("Room 3, {}", words.repeat(2));
+    let mut harness = window(1.0, 100, View::Week);
+    let mut events: Vec<EventRow> = harness.state().calendar().events().cloned().collect();
+    events.push(long.clone());
+    harness.state_mut().calendar_mut().0.set_events(events);
+    harness.state_mut().calendar_mut().0.pick(Some(long.key()));
+    harness.run();
+    // The side panel's text, row by row in paint order (each row is painted on its own).
+    let side = 1440.0 - 252.0;
+    let rows: Vec<(String, bool)> = harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.pos.x >= side => Some((text.galley.text().to_owned(), text.galley.elided)),
+            _ => None,
+        })
+        .collect();
+    assert!(rows.iter().all(|(_, elided)| !elided), "nothing in the details is cut");
+    let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let shown = words(&rows.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" "));
+    for whole in [long.summary.as_str(), long.location.as_str(), long.description.as_str()] {
+        assert!(shown.contains(&words(whole)), "the details show the whole text: {whole:.40}");
+    }
+    let edit = harness.get_by_role_and_label(Role::Button, "Edit");
+    edit.scroll_to_me();
+    harness.run();
+    let edit = harness.get_by_role_and_label(Role::Button, "Edit").rect();
+    assert!(edit.bottom() <= 900.0 && edit.top() >= 0.0, "Edit scrolls into sight: {edit:?}");
+}
