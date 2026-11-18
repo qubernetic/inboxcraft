@@ -210,6 +210,11 @@ fn detect_add_and_a_passing_check_show_every_step_with_its_server() {
     harness.get_by_label("Certificate: passed");
     let list = harness.get_by_label("Certificate: passed").rect();
     assert!(texts_in(harness.output(), list).iter().any(|text| text == "certificate · issued by Example Test CA"), "the issuer on its line");
+    // And a screen reader hears where each step went and who vouched for the server, as the line shows it.
+    let said = harness.get_by_label("imap.example.org:993 · issued by Example Test CA").rect();
+    assert!(said.intersects(list), "said on the certificate's line: {said:?} {list:?}");
+    let connection = harness.get_by_label("Connection (TCP): passed").rect();
+    assert!(harness.get_all_by_label("imap.example.org:993").any(|node| node.rect().intersects(connection)), "the connection's server and port");
     harness.get_by_label("SMTP sign-in: no server");
     harness.check_accessibility();
     press(&mut harness, "Done");

@@ -641,7 +641,8 @@ pub(super) fn printed(steps: &[StepRow], running: bool) -> Vec<(&StepRow, check_
 }
 
 /// One step's line: its short name, what it checks and where, a note at the right, and under it, when it failed, the
-/// engine's sentence; a screen reader hears its whole name and how it stands.
+/// engine's sentence; a screen reader hears its whole name and how it stands, then the server and port it reached and
+/// the certificate's issuer.
 fn step(ui: &mut Ui, theme: &Theme, row: &StepRow, state: check_step::StepState) {
     let ran = !matches!(row.state, StepState::Skipped | StepState::NotSet | StepState::NotBuilt | StepState::Held);
     let mut detail = checks(row).to_owned();
@@ -659,7 +660,21 @@ fn step(ui: &mut Ui, theme: &Theme, row: &StepRow, state: check_step::StepState)
         check_step::StepState::Waiting | check_step::StepState::Passed | check_step::StepState::Failed => "",
     };
     let spoken = check_step::spoken(row.name(), state);
+    let at = ui.cursor().min;
     check_step_named(ui, theme, short(row), &spoken, &detail, note, state, row.message.as_deref());
+    // Where the step went and who vouched for the server, for a screen reader: the server and port, and the
+    // certificate's issuer, which the line prints in short.
+    let reached: Vec<String> = [row.server.clone(), row.issuer.as_ref().map(|issuer| tr!("issued by {issuer}", issuer = issuer))]
+        .into_iter()
+        .flatten()
+        .filter(|_| ran)
+        .collect();
+    if !reached.is_empty() {
+        let line = Rect::from_min_max(at, pos2(ui.max_rect().right(), ui.min_rect().bottom()));
+        let response = ui.interact(line, ui.scope_id().with(("step-reached", row.id.as_str())), Sense::hover());
+        let text = reached.join(" · ");
+        response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &text));
+    }
 }
 
 /// The sentence over the steps: how the check stands, or the failing step's sentence whole.
