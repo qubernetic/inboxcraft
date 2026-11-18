@@ -443,14 +443,13 @@ struct RowText {
     back: bool,
 }
 
-/// The rows' words kept between frames: for which list of rows (its serial, place, search and the minute, since a
-/// date is said from now), and each message's.
+/// The rows' words kept between frames: for which list of rows (its serial, place, search, the minute and the
+/// wall clock's offset, since a date is said from now, where the owner is), and each message's with the pass it was
+/// last used in.
 #[derive(Debug, Default)]
 struct RowTexts {
-    key: (u64, Option<Place>, String, i64),
+    key: (u64, Option<Place>, String, i64, i16),
     texts: std::collections::HashMap<u64, (u64, std::sync::Arc<RowText>)>,
-    /// The frame the store was last read in, so a text not used for a while can go.
-    pass: u64,
 }
 
 /// The most rows whose words are kept; past it, those not used in the last frames go.
@@ -463,13 +462,12 @@ fn row_text(ctx: &egui::Context, mailbox: &Mailbox, message: &MessageRow) -> std
     let store: Store = ctx.data_mut(|data| data.get_temp_mut_or_default::<Store>(Id::unique("list-row-texts")).clone());
     let mut kept = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let minute = mailbox.now().unix_seconds().div_euclid(60);
-    let key = (mailbox.rows_serial(), Some(mailbox.place()), mailbox.query().to_owned(), minute);
+    let key = (mailbox.rows_serial(), Some(mailbox.place()), mailbox.query().to_owned(), minute, mailbox.offset().minutes());
     if kept.key != key {
         kept.key = key;
         kept.texts.clear();
     }
     let pass = ctx.cumulative_pass_nr();
-    kept.pass = pass;
     if let Some((used, text)) = kept.texts.get_mut(&message.id) {
         *used = pass;
         return text.clone();
@@ -1443,17 +1441,30 @@ struct Asker<'a> {
 
 /// The senders New senders holds, one for each address in the order their newest mail came (the list's order), at
 /// most [`QUEUE_MOST`].
-fn askers(mailbox: &Mailbox) -> Vec<Asker<'_>> {
-    let mut found: Vec<Asker<'_>> = Vec::new();
-    for message in mailbox.messages() {
-        let address = message.address.to_lowercase();
-        if let Some(asker) = found.iter_mut().find(|asker| asker.newest.address.to_lowercase() == address) {
-            asker.more = asker.more.saturating_add(1);
-        } else if found.len() < QUEUE_MOST {
-            found.push(Asker { newest: message, more: 0 });
+/// Worked out once for a list of rows (its serial, place and search) and kept: which rows are the senders' newest and
+/// how many more each sent.
+fn askers<'a>(ctx: &egui::Context, mailbox: &'a Mailbox) -> Vec<Asker<'a>> {
+    type Kept = ((u64, Option<Place>, String), std::sync::Arc<[(usize, usize)]>);
+    let key = (mailbox.rows_serial(), Some(mailbox.place()), mailbox.query().to_owned());
+    let id = Id::unique("queue-askers");
+    let kept = ctx.data(|data| data.get_temp::<Kept>(id)).filter(|(kept, _)| *kept == key).map(|(_, found)| found);
+    let found = kept.unwrap_or_else(|| {
+        let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut found: Vec<(usize, usize)> = Vec::new();
+        for (index, message) in mailbox.messages().iter().enumerate() {
+            let address = message.address.to_lowercase();
+            if let Some(asker) = at.get(&address).and_then(|place| found.get_mut(*place)) {
+                asker.1 = asker.1.saturating_add(1);
+            } else if found.len() < QUEUE_MOST {
+                at.insert(address, found.len());
+                found.push((index, 0));
+            }
         }
-    }
-    found
+        let found: std::sync::Arc<[(usize, usize)]> = found.into();
+        ctx.data_mut(|data| data.insert_temp::<Kept>(id, (key, found.clone())));
+        found
+    });
+    found.iter().filter_map(|(index, more)| mailbox.messages().get(*index).map(|newest| Asker { newest, more: *more })).collect()
 }
 
 /// The most senders the queue shows a card for at once; the rest come as those are answered.
@@ -1472,7 +1483,7 @@ const CARD_WIDE: f32 = 900.0;
 fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
     let (theme, keymap, mailbox) = (rows.theme, rows.keymap, rows.mailbox);
     let (p, f) = (&theme.palette, &theme.fonts);
-    let askers = askers(mailbox);
+    let askers = askers(ui.ctx(), mailbox);
     let mut mode = None;
     let room = ui.available_rect_before_wrap();
     ui.painter().rect_filled(room, 0.0, p.bg);
@@ -1833,18 +1844,20 @@ fn leaving(ctx: &egui::Context, theme: &Theme, left: &Leaving) -> Gone {
     }
 }
 
-/// The messages of the list no group of `groups` holds, kept for the list of rows, its place, search and `view`.
-fn rest_of(ctx: &egui::Context, mailbox: &Mailbox, view: InboxView, groups: &[Group]) -> std::sync::Arc<[u64]> {
-    type Kept = ((u64, Option<Place>, String, InboxView, usize), std::sync::Arc<[u64]>);
+/// "Other": the messages of the list no group of `groups` holds, kept for the list of rows, its place, search and
+/// `view`, so a frame copies nothing.
+fn other_of(ctx: &egui::Context, mailbox: &Mailbox, view: InboxView, groups: &[Group]) -> std::sync::Arc<Group> {
+    type Kept = ((u64, Option<Place>, String, InboxView, usize), std::sync::Arc<Group>);
     let key = (mailbox.rows_serial(), Some(mailbox.place()), mailbox.query().to_owned(), view, groups.len());
     let id = Id::unique("list-rest");
-    if let Some((_, rest)) = ctx.data(|data| data.get_temp::<Kept>(id)).filter(|(kept, _)| *kept == key) {
-        return rest;
+    if let Some((_, other)) = ctx.data(|data| data.get_temp::<Kept>(id)).filter(|(kept, _)| *kept == key) {
+        return other;
     }
     let held: HashSet<u64> = groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
-    let rest: std::sync::Arc<[u64]> = mailbox.messages().iter().map(|message| message.id).filter(|id| !held.contains(id)).collect();
-    ctx.data_mut(|data| data.insert_temp::<Kept>(id, (key, rest.clone())));
-    rest
+    let messages = mailbox.messages().iter().map(|message| message.id).filter(|id| !held.contains(id)).collect();
+    let other = std::sync::Arc::new(Group { icon: IconId::Inbox, name: tr!("Other").to_owned(), messages });
+    ctx.data_mut(|data| data.insert_temp::<Kept>(id, (key, other.clone())));
+    other
 }
 
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
@@ -1883,15 +1896,19 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     };
     // "Other" stands over the messages no group holds: its "done all" marks those, built or not. Worked out once for a
     // list of rows and its view.
-    let other = Group { icon: IconId::Inbox, name: tr!("Other").to_owned(), messages: rest_of(ui.ctx(), mailbox, view, &groups).to_vec() };
+    let other = other_of(ui.ctx(), mailbox, view, &groups);
     let open = |group: &Group| ui.data(|data| data.get_temp::<bool>(group_open_id(&group.name))).unwrap_or(false);
     // How far the row that left has gone (with motion off, at once); once gone it is let go.
     let gone = mailbox.left_row().map(|left| leaving(ui.ctx(), theme, left));
     let went = gone.is_none_or(|gone| gone.faded >= 1.0);
     let listing = if outbox { sends(theme, mailbox) } else { lines(theme, mailbox, view, &groups, &other, wait, &open, gone.filter(|_| !went)) };
-    let order: std::sync::Arc<[u64]> =
-        listing.lines.iter().filter_map(|line| if let Line::Mail(message) = line { Some(message.id) } else { None }).collect();
-    ui.data_mut(|data| data.insert_temp(order_id(), order));
+    // The drawn order, kept as it was while it is the same: a frame at rest allocates nothing for it.
+    let drawn = || listing.lines.iter().filter_map(|line| if let Line::Mail(message) = line { Some(message.id) } else { None });
+    let same = ui.data(|data| data.get_temp::<std::sync::Arc<[u64]>>(order_id())).is_some_and(|kept| kept.iter().copied().eq(drawn()));
+    if !same {
+        let order: std::sync::Arc<[u64]> = drawn().collect();
+        ui.data_mut(|data| data.insert_temp(order_id(), order));
+    }
     let mut screener_mode = None;
     let built = if outbox {
         show_lines(ui, &rows, &listing, "outbox-list")

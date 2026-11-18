@@ -2601,3 +2601,19 @@ fn the_pills_line_beside_the_reader_never_wraps_and_leaves_out_what_does_not_fit
         }
     }
 }
+
+#[test]
+fn a_frame_at_rest_keeps_the_lists_order_as_it_was() {
+    let mut harness = ten_thousand(InboxView::Grouped);
+    let before = super::list::order(&harness.ctx);
+    harness.ctx.request_repaint();
+    harness.run();
+    let after = super::list::order(&harness.ctx);
+    assert!(std::sync::Arc::ptr_eq(&before, &after), "the same order is kept, not built again");
+    // A change of the drawn order is taken.
+    harness.state_mut().mailbox_mut().set_inbox_view(InboxView::List);
+    harness.run();
+    let list = super::list::order(&harness.ctx);
+    assert_ne!(*after, *list, "the list by time is drawn in another order than the grouped one");
+    assert_eq!(list.first().copied(), Some(1_000_000), "and the new order is the one kept");
+}
