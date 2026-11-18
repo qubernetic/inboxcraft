@@ -336,3 +336,58 @@ fn a_link_name_is_capped_before_it_is_laid_out() {
     });
     assert!(text.is_some_and(|text| text.chars().count() <= crate::component::MOST + 1), "the drawn link is capped");
 }
+
+/// Every text the last frame painted: its rect and its words.
+fn texts_of(harness: &Harness<'static>) -> Vec<(Rect, String)> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<(Rect, String)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Text(text) => found.push((Rect::from_min_size(text.pos, text.galley.size()), text.galley.job.text.clone())),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+    found
+}
+
+#[test]
+fn links_that_do_not_fit_on_one_line_stand_whole_on_lines_of_their_own() {
+    const SHORT: &str = "load once";
+    const LONG: &str = "always for news@brightshelf.example.org";
+    for scale in [TextScale::default(), TextScale::ALL[4]] {
+        let theme = Theme::new(Mode::Dark, scale);
+        for room in [640.0_f32, 520.0, 420.0, 380.0] {
+            let mut harness = builder().with_size(vec2(room + 60.0, 240.0)).build_ui(move |ui| {
+                motion::set_reduced(ui.ctx(), true);
+                stage(ui, theme.palette.surface, |ui| {
+                    ui.set_width(room);
+                    let links = [BannerLink { name: SHORT, id: "once" }, BannerLink { name: LONG, id: "always" }];
+                    banner(ui, &theme, &Keymap::default(), BannerKind::RemotePictures, "1 remote picture is not shown.", &links);
+                });
+            });
+            harness.run();
+            let at = format!("{scale:?} {room}");
+            let whole = harness.get_by_label_contains("Pictures:").rect();
+            let short = harness.get_by_label(SHORT).rect();
+            let long = harness.get_by_label(LONG).rect();
+            for (name, rect) in [(SHORT, short), (LONG, long)] {
+                assert!(whole.contains_rect(rect), "{name} at {rect:?} stands in the banner {whole:?}: {at}");
+            }
+            assert!(!short.intersects(long), "the links stand apart: {at}");
+            // Each link is drawn whole, on a line of its own when the two do not fit on one; an address wider than the
+            // room is cut only where it stands alone on its line.
+            let texts = texts_of(&harness);
+            assert!(texts.iter().any(|(_, text)| text == SHORT), "{SHORT} drawn whole: {texts:?} {at}");
+            if !texts.iter().any(|(_, text)| text == LONG) {
+                assert!(long.top() > short.bottom() && (long.right() - (whole.right() - 12.0)).abs() <= 8.0, "cut only alone: {texts:?} {at}");
+            }
+            if room == 640.0 && scale == TextScale::default() {
+                assert!((short.center().y - long.center().y).abs() < 0.5, "one line where they fit: {at}");
+            }
+            if long.top() > short.bottom() {
+                assert!((long.left() - short.left()).abs() < 0.5, "a new line starts under the first link: {at}");
+            }
+        }
+    }
+}

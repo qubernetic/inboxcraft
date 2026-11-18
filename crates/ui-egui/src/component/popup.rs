@@ -910,6 +910,15 @@ pub fn menu_up<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width
     menu_at(ctx, theme, opener, anchor, id, width, add)
 }
 
+/// [`menu`] hung with its right edge on `opener`'s right edge, as the reader's More and Move do; still kept 3 in from
+/// the window's edges.
+pub fn menu_right<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
+    toggle(ctx, opener, id);
+    let edge = opener.rect.right();
+    let anchor = Rect::from_min_max(pos2(edge - sane(width), opener.rect.top()), pos2(edge, opener.rect.bottom()));
+    menu_at(ctx, theme, opener, anchor, id, width, add)
+}
+
 /// A menu that a secondary press on `row` opens where the pointer is (a row's context menu), as [`menu`] shows it.
 pub fn context_menu<R>(ctx: &Context, theme: &Theme, row: &Response, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
     refocus(ctx, row, id);

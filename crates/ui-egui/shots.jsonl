@@ -18,8 +18,16 @@
 {"out": "docs/images/reader-full-dark.png", "mode": "dark", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
 # The reader's More menu open, its dividers between the groups of rows; the service mail ends with a rule (<hr>)
 # (#233).
-{"out": "docs/images/reader-more-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service", "click": [961, 37]}
-{"out": "docs/images/reader-more-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "click": [961, 37]}
+{"out": "docs/images/reader-more-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service", "menu": "more"}
+{"out": "docs/images/reader-more-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "menu": "more"}
+# The reader after Done (#237): no row selected in the list, nothing open, the bare empty state in the pane.
+{"out": "docs/images/reader-nothing-open-light.png", "mode": "light", "size": [1440, 900], "select": "Allotment rota for November", "act": "removed"}
+{"out": "docs/images/reader-nothing-open-dark.png", "mode": "dark", "size": [1440, 900], "select": "Allotment rota for November", "act": "removed"}
+# The reader's Move menu hung by its button's right edge, and a narrow reader at 130 % with its acts on two lines (#237).
+{"out": "docs/images/reader-move-light.png", "mode": "light", "size": [1440, 900], "select": "Photos from the coast walk", "menu": "move"}
+{"out": "docs/images/reader-move-dark.png", "mode": "dark", "size": [1440, 900], "select": "Photos from the coast walk", "menu": "move"}
+{"out": "docs/images/reader-narrow-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "select": "Draft logo for the bakery"}
+{"out": "docs/images/reader-narrow-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "select": "Draft logo for the bakery"}
 # The error banner over the panes, one line between them (#233).
 {"out": "docs/images/error-banner-light.png", "mode": "light", "open": {"folder": 4242}}
 {"out": "docs/images/error-banner-dark.png", "mode": "dark", "open": {"folder": 4242}}
@@ -80,6 +88,10 @@
 # The calendar's sets (#238): the event block and the mini month.
 {"out": "docs/images/components-calendar-light.png", "mode": "light", "calendar_sets": true}
 {"out": "docs/images/components-calendar-dark.png", "mode": "dark", "calendar_sets": true}
+# The reader's sets (#237): thread row, content bar, why line, attachment, quote fold, hairline table, invitation card,
+# on a page of their own.
+{"out": "docs/images/components-reader-light.png", "mode": "light", "reader": true}
+{"out": "docs/images/components-reader-dark.png", "mode": "dark", "reader": true}
 # The mail lists' rows (#236): mail row, group head, outbox row, later row, draft row, on a page of their own.
 {"out": "docs/images/components-lists-light.png", "mode": "light", "lists": true}
 {"out": "docs/images/components-lists-dark.png", "mode": "dark", "lists": true}
@@ -247,6 +259,21 @@
 # The Accounts page with no account: one box in the middle of the page, Add account in it (settings-accounts/empty).
 {"out": "docs/images/settings-accounts-empty-light.png", "mode": "light", "size": [1200, 820], "first": true, "accounts": true}
 {"out": "docs/images/settings-accounts-empty-dark.png", "mode": "dark", "size": [1200, 820], "first": true, "accounts": true}
+# The reader's banners, cards and states (#237): remote pictures held back with their boxes, a held sender's let-in
+# card, an invitation that asks and a narrow reader at 130 % with an invitation and a held sender.
+{"out": "docs/images/reader-remote-light.png", "mode": "light", "size": [1440, 900], "open": {"folder": 5}, "select": "You have won a lighthouse"}
+{"out": "docs/images/reader-remote-dark.png", "mode": "dark", "size": [1440, 900], "open": {"folder": 5}, "select": "You have won a lighthouse"}
+{"out": "docs/images/reader-held-light.png", "mode": "light", "size": [1440, 900], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/reader-held-dark.png", "mode": "dark", "size": [1440, 900], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/reader-invite-narrow-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "invitations": true, "select": "Updated invitation: Lunch with Odile"}
+{"out": "docs/images/reader-invite-narrow-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "invitations": true, "select": "Updated invitation: Lunch with Odile"}
+{"out": "docs/images/reader-held-narrow-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/reader-held-narrow-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+# A fitted HTML message (#237): the reader's plain-text view of it, and the fitted view at 130 % in a narrow window.
+{"out": "docs/images/reader-plain-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service", "html_view": "plain"}
+{"out": "docs/images/reader-plain-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "html_view": "plain"}
+{"out": "docs/images/reader-fitted-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "select": "Your bike is due for a service"}
+{"out": "docs/images/reader-fitted-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "select": "Your bike is due for a service"}
 {"out": "docs/images/list-focus-thumb-light.png", "mode": "light", "size": [1200, 560], "view": "list", "steps": [{"focus": "Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged"}]}
 {"out": "docs/images/list-focus-thumb-dark.png", "mode": "dark", "size": [1200, 560], "view": "list", "steps": [{"focus": "Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged"}]}
 {"out": "docs/images/accounts-open-light.png", "mode": "light", "size": [1400, 860], "steps": [{"press": "Accounts"}]}

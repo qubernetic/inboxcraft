@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Safe HTML display on any text, with and without consent for remote pictures: it never panics, stays within its
-//! caps, keeps every link index in range, shows no remote picture without consent, and its text holds no control
-//! character but the line break and tab and no invisible format character but the joiners. A link text that reads as
-//! `bank.example` once invisible characters are dropped and full-stop look-alikes are read as dots is flagged when
-//! the link goes to another host, and not flagged when it goes to `bank.example`.
+//! caps, keeps every link index in range, shows no remote picture without consent, gives a picture's size only when
+//! both sides are above nought and within `MAX_SIDE`, and its text holds no control character but the line break and
+//! tab and no invisible format character but the joiners. A link text that reads as `bank.example` once invisible
+//! characters are dropped and full-stop look-alikes are read as dots is flagged when the link goes to another host,
+//! and not flagged when it goes to `bank.example`.
 
 #![no_main]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use inboxcraft_html::{Block, Document, ImageSource, MAX_BLOCKS, MAX_LINKS, Options, RemoteContent, display};
+use inboxcraft_html::{Block, Document, ImageSource, MAX_BLOCKS, MAX_LINKS, MAX_SIDE, Options, RemoteContent, display};
 use libfuzzer_sys::fuzz_target;
 
 /// A character display text must not hold: a control character other than the line break and the tab, a bidi
@@ -60,6 +61,7 @@ fn check(blocks: &[Block], doc: &Document, consent: bool) {
             Block::Image { image, .. } => {
                 assert!(image.link.is_none_or(|i| i < doc.links.len()));
                 assert!(consent || !matches!(image.source, ImageSource::Remote(_)));
+                assert!(image.size.is_none_or(|(w, h)| w > 0 && h > 0 && w <= MAX_SIDE && h <= MAX_SIDE), "{:?}", image.size);
             }
             Block::Table { rows, .. } => rows.iter().flatten().for_each(|cell| check(&cell.blocks, doc, consent)),
             Block::Rule { .. } => {}

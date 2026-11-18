@@ -622,6 +622,9 @@ pub struct Mailbox {
     opening: Option<u64>,
     /// The row that just left the list, while its gap closes.
     leaving: Option<Leaving>,
+    /// The message the owner's own act took out of the list last (Done, Archive, Delete, Snooze, Move: never a Read or
+    /// a Flag, never the server), until [`Mailbox::take_taken`] reads it.
+    taken: Option<u64>,
     /// The act the toast shows.
     undo: Option<Undo>,
     acts: u64,
@@ -650,6 +653,8 @@ pub struct Mailbox {
     /// The engine's notices since [`Mailbox::take_notices`] was last called.
     notices: Vec<Notice>,
     after: After,
+    /// Where the selected message stood when it last left the list: the rows from there on followed it.
+    gap: Option<usize>,
     error: Option<String>,
     runs: u64,
     /// Counts the reads and changes of what the list's head and cards show (the rows, the place, the folders, the
@@ -872,6 +877,7 @@ impl Mailbox {
             inbox_view: InboxView::default(),
             opening: None,
             leaving: None,
+            taken: None,
             undo: None,
             acts: 0,
             history: 0,
@@ -886,6 +892,7 @@ impl Mailbox {
             late: Vec::new(),
             notices: Vec::new(),
             after: After::Next,
+            gap: None,
             error: None,
             runs: 0,
             revision: 0,
@@ -908,6 +915,7 @@ impl Mailbox {
             .and_then(|()| self.load_outbox())
             .and_then(|()| self.load_list(self.place));
         if let (Some(at), None) = (was, self.selected) {
+            self.gap = Some(at);
             let last = self.messages.len().checked_sub(1);
             let pick = match self.after {
                 After::Next => last.map(|last| at.min(last)),
@@ -917,6 +925,13 @@ impl Mailbox {
             self.selected = pick.and_then(|at| self.messages.get(at)).map(|row| row.id);
         }
         self.settle(result);
+    }
+
+    /// Where the selected message stood in the list when it last left it: the rows from there on are the ones that
+    /// followed it, the rows before it the ones above. At either end the rule picks the row on the other side.
+    #[must_use]
+    pub fn gap(&self) -> Option<usize> {
+        self.gap
     }
 
     /// The next-message rule.
@@ -1083,6 +1098,7 @@ impl Mailbox {
         if result.is_ok() || self.history != before {
             self.refresh();
         }
+        self.note_taken(Some(id));
         match result {
             Ok(text) => {
                 self.acts = self.acts.saturating_add(1);
@@ -1098,6 +1114,7 @@ impl Mailbox {
     pub fn done_all(&mut self, ids: &[u64]) {
         let Some(first) = ids.first().copied() else { return };
         let (before, selected) = (self.history, self.selected.is_some_and(|id| ids.contains(&id)));
+        let was = self.selected.filter(|id| ids.contains(id));
         let mut result = Ok(());
         for id in ids {
             if let Err(error) = self.acted(*id, Act::Done) {
@@ -1108,6 +1125,7 @@ impl Mailbox {
         if self.history != before {
             self.refresh();
         }
+        self.note_taken(was);
         match result {
             Ok(()) => {
                 self.acts = self.acts.saturating_add(1);
@@ -1300,6 +1318,19 @@ impl Mailbox {
         if let (Some(row), Some(at), true) = (row, at, gone) {
             self.leaving = Some(Leaving { row, at, group, act });
         }
+    }
+
+    /// Notes that the owner's act took message `id` out of the list, when it did: an act that left its row in place
+    /// (a Read, a Flag, a refusal, a done row "Show done" keeps) notes nothing.
+    fn note_taken(&mut self, id: Option<u64>) {
+        if let Some(id) = id.filter(|id| !self.messages.iter().any(|row| row.id == *id)) {
+            self.taken = Some(id);
+        }
+    }
+
+    /// The message the owner's own act took out of the list last, once: it is forgotten as it is read.
+    pub fn take_taken(&mut self) -> Option<u64> {
+        self.taken.take()
     }
 
     /// The message whose row has just left the list and the act done to it, while its gap closes.

@@ -3,7 +3,8 @@
 
 //! The banner over a message or a page: a label in capitals in the kind's colour, the words in `caption` and `ink`
 //! beside it, and under them the small links that answer it, on the `panel` fill in a 1 px edge of the kind's colour.
-//! 8 above and below, 12 left and right and between the label and the words, 16 between the links. Its text is data:
+//! 8 above and below, 12 left and right and between the label and the words, 16 between the links; links that do not
+//! fit on one line stand on lines of their own, 4 apart, in order, and the banner grows to hold them. Its text is data:
 //! drawn as plain words (every control character a space, no bidi override), on one line, cut between grapheme clusters
 //! with one ellipsis; a link's words are cut so too, and a screen reader hears them whole. A link gives back the id the
 //! caller gave it, never words from the text.
@@ -110,7 +111,11 @@ pub(crate) fn banner_in(
     let words = words(ui, theme, &super::plain(text), room);
     let words_high = words.size().y.max(f.caption.line);
     let link_high = theme.boxes().row_link;
-    let column = if links.is_empty() { words_high } else { words_high + UNDER + link_high };
+    // The links, measured once: on one line where they fit, else as many on a line as fit, in order.
+    let placed = link_lines(ui, theme, links, room);
+    let lines = placed.iter().map(|(line, _)| *line).max().map_or(0, |last| last.saturating_add(1));
+    let links_high = lines as f32 * link_high + lines.saturating_sub(1) as f32 * UNDER;
+    let column = if links.is_empty() { words_high } else { words_high + UNDER + links_high };
     // The label's box is a caption line high, so a banner of one line is as high as its words; on whole points, so its
     // edge lies on whole pixels at every text scale.
     let high = (PAD_Y + column.max(f.caption.line) + PAD_Y).ceil();
@@ -134,27 +139,50 @@ pub(crate) fn banner_in(
     if links.is_empty() {
         return (None, rect);
     }
-    let row = Rect::from_min_size(pos2(rect.left() + left, rect.top() + PAD_Y + words_high + UNDER), vec2(room, link_high));
-    let mut child = ui.new_child(UiBuilder::new().max_rect(row).layout(Layout::left_to_right(Align::Center)));
-    child.spacing_mut().item_spacing.x = LINK_GAP;
+    let first = rect.top() + PAD_Y + words_high + UNDER;
     let mut pressed = None;
-    let mut left = room;
-    for link in links {
-        // A link's words are data too (an address): without bidi controls, cut with one ellipsis to the room left.
-        let whole = super::spoken(link.name);
-        let name = cut_name(ui, theme, &whole, left);
-        if name.is_empty() {
-            break;
+    let mut line_ui: Option<(usize, Ui)> = None;
+    for (link, (line, name)) in links.iter().zip(placed) {
+        if line_ui.as_ref().is_none_or(|(at, _)| *at != line) {
+            let top = first + line as f32 * (link_high + UNDER);
+            let row = Rect::from_min_size(pos2(rect.left() + left, top), vec2(room, link_high));
+            let mut child = ui.new_child(UiBuilder::new().max_rect(row).layout(Layout::left_to_right(Align::Center)));
+            child.spacing_mut().item_spacing.x = LINK_GAP;
+            line_ui = Some((line, child));
         }
-        let response = link_sized(&mut child, theme, keymap, &name, LinkSize::Small);
+        let Some((_, child)) = line_ui.as_mut() else { continue };
+        // A link's words are data too (an address): without bidi controls, cut with one ellipsis to the room.
+        let whole = super::spoken(link.name);
+        let response = link_sized(child, theme, keymap, &name, LinkSize::Small);
         // A screen reader hears the whole name, not the cut one.
         response.widget_info(|| WidgetInfo::labeled(Role::Button, response.enabled(), &whole));
-        left -= response.rect.width() + LINK_GAP;
         if response.clicked() {
             pressed = Some(link.id.to_owned());
         }
     }
     (pressed, rect)
+}
+
+/// The line each of `links` stands on in `room` points and the words it shows: all on one line where they fit; else, as
+/// the reader's answers do, as many on a line as fit, in order, so none is cut beside another. A link wider than the
+/// room alone is cut to it; one with not even its ellipsis is left out.
+fn link_lines(ui: &Ui, theme: &Theme, links: &[BannerLink<'_>], room: f32) -> Vec<(usize, String)> {
+    let mut placed = Vec::with_capacity(links.len());
+    let (mut line, mut used) = (0_usize, 0.0_f32);
+    for link in links {
+        let name = cut_name(ui, theme, &super::spoken(link.name), room);
+        if name.is_empty() {
+            break;
+        }
+        let wide = paint::run_box(super::galley(ui, &name, theme.fonts.mono_s, theme.palette.ink).size().x);
+        if used > 0.0 && used + LINK_GAP + wide > room {
+            line = line.saturating_add(1);
+            used = 0.0;
+        }
+        used += if used > 0.0 { LINK_GAP + wide } else { wide };
+        placed.push((line, name));
+    }
+    placed
 }
 
 /// The banner's words `text` laid out in `room` points: one line, cut between grapheme clusters with one ellipsis (at

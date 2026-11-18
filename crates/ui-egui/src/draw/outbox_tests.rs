@@ -268,7 +268,7 @@ fn a_bounced_message_is_marked_in_its_row_and_its_reader_says_why() {
         harness.run();
         harness.get_by_label_contains("not delivered").click();
         harness.run();
-        harness.get_by_label_contains("Not delivered: petra@example.org: 550 5.1.1");
+        harness.get_by_label_contains("Not delivered: This message did not arrive: petra@example.org: 550 5.1.1");
     }
 }
 

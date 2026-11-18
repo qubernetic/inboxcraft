@@ -166,6 +166,15 @@ const PAD: f32 = 12.0;
 /// The room between a text button's parts (icon, label, arrow, key), in points.
 const GAP: f32 = 8.0;
 
+/// What a text button lays out before it is drawn.
+struct Laid {
+    label: std::sync::Arc<egui::Galley>,
+    arrow: Option<std::sync::Arc<egui::Galley>>,
+    chip: Option<Chip>,
+    label_width: f32,
+    width: f32,
+}
+
 /// A text button: its name, an optional icon before it, a trailing arrow, its key, and its tone.
 #[derive(Debug, Clone, Copy)]
 pub struct TextButton<'a> {
@@ -178,7 +187,10 @@ pub struct TextButton<'a> {
     arrow: bool,
     key: bool,
     shown: Option<Shown>,
-    widest: f32,
+    /// The widest its label gets ([`Self::widest`]).
+    label_widest: f32,
+    /// The widest the whole button gets ([`Self::within`]).
+    widest: Option<f32>,
 }
 
 impl<'a> TextButton<'a> {
@@ -195,7 +207,8 @@ impl<'a> TextButton<'a> {
             arrow: false,
             key: false,
             shown: None,
-            widest: LABEL_WIDEST,
+            label_widest: LABEL_WIDEST,
+            widest: None,
         }
     }
 
@@ -262,7 +275,7 @@ impl<'a> TextButton<'a> {
     #[must_use]
     pub fn widest(mut self, points: f32) -> Self {
         if points.is_finite() {
-            self.widest = points.clamp(1.0, LABEL_WIDEST);
+            self.label_widest = points.clamp(1.0, LABEL_WIDEST);
         }
         self
     }
@@ -295,6 +308,59 @@ impl<'a> TextButton<'a> {
         self
     }
 
+    /// At most `widest` points wide, its label cut with one `…` where the whole would not fit (its name is still heard
+    /// whole): a button in a room narrower than its words never runs past the room.
+    #[must_use]
+    pub fn within(mut self, widest: f32) -> Self {
+        self.widest = Some(widest);
+        self
+    }
+
+    /// How wide it is drawn in `ui`, in points: what a row of buttons measures before it places them.
+    #[must_use]
+    pub fn width(&self, ui: &Ui, theme: &Theme, keymap: &Keymap) -> f32 {
+        let soon = soon::is_soon(ui);
+        let enabled = self.enabled && self.note.is_none() && !soon && ui.is_enabled();
+        self.lay_out(ui, theme, keymap, enabled, soon).width
+    }
+
+    /// Its label, arrow and key chip laid out, and the width of its box.
+    fn lay_out(&self, ui: &Ui, theme: &Theme, keymap: &Keymap, enabled: bool, soon: bool) -> Laid {
+        let action = self.action.filter(|_| !soon);
+        let key = action.filter(|_| self.key).and_then(|action| keymap.chip(ui.ctx(), action));
+        let font = theme.fonts.button;
+        // Laid out before the state is known: the colour is the painter's, given when it is painted.
+        let arrow = self.arrow.then(|| super::galley(ui, "→", font, Color32::PLACEHOLDER));
+        let chip_state = match (enabled, self.tone) {
+            (false, _) => ChipState::Disabled,
+            (true, Tone::Primary) => ChipState::OnCyan,
+            (true, _) => ChipState::Default,
+        };
+        let chip = key.map(|key| Chip::new(ui, theme, &key, chip_state));
+        // The label's room: its widest ([`Self::widest`]), or less, what `within` leaves it beside the other parts and
+        // the pads.
+        let others =
+            [self.icon.map(|_| theme.icon_side()), arrow.as_ref().map(|arrow| arrow.size().x.ceil()), chip.as_ref().map(|chip| chip.size().x)];
+        let beside = others.iter().flatten().map(|wide| wide + GAP).sum::<f32>();
+        let room = self
+            .widest
+            .filter(|widest| widest.is_finite())
+            .map_or(self.label_widest, |widest| self.label_widest.min(widest - beside - PAD * 2.0))
+            .floor()
+            .max(1.0);
+        let label = super::cut(ui, self.name, font, Color32::PLACEHOLDER, room);
+        // A label cut at its widest takes all of it, as the design's does.
+        let label_width = if label.elided { room } else { label.size().x.ceil() };
+        let parts = [
+            self.icon.map(|_| theme.icon_side()),
+            Some(label_width),
+            arrow.as_ref().map(|arrow| arrow.size().x.ceil()),
+            chip.as_ref().map(|chip| chip.size().x),
+        ];
+        let inner = parts.iter().flatten().sum::<f32>() + GAP * (parts.iter().flatten().count().saturating_sub(1) as f32);
+        Laid { label, arrow, chip, label_width, width: inner + PAD * 2.0 }
+    }
+
     /// Draws it into `ui`; its response is clicked when it was pressed.
     pub fn show(self, ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Response {
         let p = &theme.palette;
@@ -305,29 +371,10 @@ impl<'a> TextButton<'a> {
         }
         // Coming soon, its key would do nothing: neither the chip nor the tooltip shows it.
         let action = self.action.filter(|_| !soon);
-        let key = action.filter(|_| self.key).and_then(|action| keymap.chip(ui.ctx(), action));
-        let font = theme.fonts.button;
-        // Laid out before the state is known: the colour is the painter's, given when it is painted.
-        let label = super::cut(ui, self.name, font, Color32::PLACEHOLDER, self.widest);
-        let arrow = self.arrow.then(|| super::galley(ui, "→", font, Color32::PLACEHOLDER));
-        // A label cut at its widest takes all of it, as the design's does.
-        let label_width = if label.elided { self.widest } else { label.size().x.ceil() };
+        let Laid { label, arrow, chip, label_width, width } = self.lay_out(ui, theme, keymap, enabled, soon);
         let icon_side = theme.icon_side();
-        let chip_state = match (enabled, self.tone) {
-            (false, _) => ChipState::Disabled,
-            (true, Tone::Primary) => ChipState::OnCyan,
-            (true, _) => ChipState::Default,
-        };
-        let chip = key.map(|key| Chip::new(ui, theme, &key, chip_state));
-        let parts = [
-            self.icon.map(|_| icon_side),
-            Some(label_width),
-            arrow.as_ref().map(|arrow| arrow.size().x.ceil()),
-            chip.as_ref().map(|chip| chip.size().x),
-        ];
-        let inner = parts.iter().flatten().sum::<f32>() + GAP * (parts.iter().flatten().count().saturating_sub(1) as f32);
         let sense = if enabled { Sense::click() } else { Sense::hover() };
-        let (rect, response) = ui.allocate_exact_size(vec2(inner + PAD * 2.0, control_side(theme)), sense);
+        let (rect, response) = ui.allocate_exact_size(vec2(width, control_side(theme)), sense);
         response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, self.name));
         let lit = lit(ui, theme, &response, enabled, self.shown, Hover::Fades);
         if ui.is_rect_visible(rect) {
@@ -453,6 +500,8 @@ pub(crate) enum Caret {
     Down,
     /// `▴`: closes.
     Up,
+    /// `▸`: folded (a thread's message, a quote).
+    Right,
 }
 
 impl Caret {
@@ -461,6 +510,7 @@ impl Caret {
         match self {
             Self::Down => '▾',
             Self::Up => '▴',
+            Self::Right => '▸',
         }
     }
 }
@@ -469,6 +519,34 @@ impl Caret {
 /// from another face, a triangle half the size wide and high (measured on the design's board): how far the next text
 /// would stand, its left and right, and its top and foot over the baseline.
 const CARET: (f32, f32, f32, f32, f32) = (0.502, 0.003, 0.499, 0.509, 0.011);
+
+/// The width a caret takes in `font`: as far as the next text would stand.
+pub(crate) fn caret_width(font: crate::theme::Font) -> f32 {
+    CARET.0 * font.size
+}
+
+/// The design's baseline of a line of `font` whose box is centred on `centre_y`: the box of the line height in the
+/// middle, half the leading over the ascent (not the hinted one egui puts the letters on, a fraction of a pixel lower).
+pub(crate) fn baseline(font: crate::theme::Font, centre_y: f32) -> f32 {
+    let (ascent, descent) = font.face.extent();
+    centre_y - font.line / 2.0 + (font.line - (ascent + descent) * font.size) / 2.0 + ascent * font.size
+}
+
+/// Paints `caret` in `font`'s size as the design draws it, a triangle standing `after` the text before it, its foot
+/// on `baseline`, in `colour`.
+pub(crate) fn paint_caret(painter: &egui::Painter, font: crate::theme::Font, after: f32, baseline: f32, caret: Caret, colour: Color32) {
+    let (_, left, right, high, low) = CARET;
+    let s = font.size;
+    let (top, foot) = (baseline - high * s, baseline - low * s);
+    let (left, right) = (after + left * s, after + right * s);
+    let middle = (left + right) / 2.0;
+    let points = match caret {
+        Caret::Down => vec![egui::pos2(left, top), egui::pos2(right, top), egui::pos2(middle, foot)],
+        Caret::Up => vec![egui::pos2(left, foot), egui::pos2(middle, top), egui::pos2(right, foot)],
+        Caret::Right => vec![egui::pos2(left, top), egui::pos2(right, (top + foot) / 2.0), egui::pos2(left, foot)],
+    };
+    painter.add(egui::Shape::convex_polygon(points, colour, Stroke::NONE));
+}
 
 /// A small link of `words` followed by `caret`, drawn as the design draws it: the words, a space, and the caret's
 /// triangle; a screen reader hears the words and the caret's sign.
@@ -526,8 +604,7 @@ fn link_drawn(
         let top = (rect.center().y - galley.size().y / 2.0).round();
         // The baseline is the design's text box's (the box of the line height in the middle, half the leading over the
         // ascent), not the hinted one egui puts the letters on, which lies a fraction of a pixel lower.
-        let (ascent, descent) = font.face.extent();
-        let baseline = rect.center().y - font.line / 2.0 + (font.line - (ascent + descent) * font.size) / 2.0 + ascent * font.size;
+        let baseline = baseline(font, rect.center().y);
         // The underline, under the pointer and while pressed: the font's own, as the sheet's text decoration draws it,
         // its thickness and its place under the baseline from the face, so its edges may fall between pixels.
         if lit.pressed || lit.hover {
@@ -540,16 +617,7 @@ fn link_drawn(
         let after = text_left + galley.size().x;
         painter.galley(egui::pos2(text_left, top), galley, ink);
         if let Some((_, caret)) = caret {
-            let (_, left, right, high, low) = CARET;
-            let s = font.size;
-            let (top, foot) = (baseline - high * s, baseline - low * s);
-            let (left, right) = (after + left * s, after + right * s);
-            let middle = (left + right) / 2.0;
-            let points = match caret {
-                Caret::Down => vec![egui::pos2(left, top), egui::pos2(right, top), egui::pos2(middle, foot)],
-                Caret::Up => vec![egui::pos2(left, foot), egui::pos2(middle, top), egui::pos2(right, foot)],
-            };
-            painter.add(egui::Shape::convex_polygon(points, ink, Stroke::NONE));
+            paint_caret(painter, font, after, baseline, caret, ink);
         }
         if lit.focus {
             paint::focus_ring(painter, theme, rect, Ring::Outside);

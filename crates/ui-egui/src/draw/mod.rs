@@ -46,6 +46,7 @@ pub(crate) mod paint;
 mod palette;
 mod pane;
 mod reader;
+pub(crate) use reader::fitted_board;
 mod settings;
 
 pub use list::rows_built;
@@ -118,6 +119,17 @@ struct Keys {
 const ROW_ACTS: [(&str, Act); 5] =
     [(keymap::DONE, Act::Done), (keymap::ARCHIVE, Act::Archive), (keymap::READ, Act::Read), (keymap::FLAG, Act::Flag), (keymap::DELETE, Act::Delete)];
 
+/// What the reader keeps when the open message left the list: the row the next-message rule named, and whether it
+/// followed the gap (the rule's row stands on the gap's other side at either end of the list).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Held {
+    pick: u64,
+    below: bool,
+    /// The row the keyboard landed on after the server took the open message away: a step from it still starts from
+    /// the gap.
+    land: Option<u64>,
+}
+
 /// Which list is shown: its place, the account it is narrowed to (none: all), its search.
 type ListOf = (Place, Option<u64>, String);
 
@@ -127,6 +139,15 @@ pub struct InboxApp {
     reader: Reader,
     textures: reader::Textures,
     hover: Option<String>,
+    /// The row the next-message rule names when the open message left the list, and which side of the gap it stands
+    /// on: the reader shows nothing open and the list selects no row until the owner opens a message; an arrow opens
+    /// the row beside the gap, and "Open the message the rule names" opens the rule's row.
+    held_back: Option<Held>,
+    /// The row the keyboard goes to when the list is next drawn: the next one after the list's own act walked on, or,
+    /// once the server took the open message away, the row that took its place (or the last), without opening it.
+    land_held: Option<u64>,
+    /// The row landed on for [`InboxApp::land_held`]: its focus opens no preview.
+    landed: Option<u64>,
     /// The message whose row of the list has the keyboard's focus, as this frame began: the list's keys act on it.
     list_row: Option<u64>,
     /// A row of the list was pressed or keyed last, not the reader: with nothing else focused the list has the keyboard
@@ -140,6 +161,11 @@ pub struct InboxApp {
     list_over_composer: bool,
     /// In one pane, the reader takes the focus once it is drawn: `Enter` or a press opened a message into it.
     focus_reader: bool,
+    /// An act from the reader walked on to the next message: the keyboard stays in the reader, on the reader's first
+    /// tool where it would be on nothing.
+    focus_walked: bool,
+    /// The last act on a row came by a key (or the palette), not by a press: the keyboard is in the window.
+    act_by_key: bool,
     /// Whether the window held one pane in the last frame drawn; `None` before the first.
     single: Option<bool>,
     /// Whether the list was shown in the last frame drawn.
@@ -357,11 +383,16 @@ impl InboxApp {
             reader: Reader::new(fetch, save),
             textures: reader::Textures::new(),
             hover: None,
+            held_back: None,
+            land_held: None,
+            landed: None,
             list_row: None,
             list_keys: true,
             reading: false,
             list_over_composer: false,
             focus_reader: false,
+            focus_walked: false,
+            act_by_key: false,
             single: None,
             list_was_shown: true,
             left: None,
@@ -577,6 +608,33 @@ impl InboxApp {
         &mut self.palette
     }
 
+    /// Steps the list's keyed row `rows` below (`forward`) or above through `order`, the rows as the list shows them.
+    /// After the open message left, a step of one row starts from the gap it left: down picks the row that followed it,
+    /// up the row before it, whichever side of the gap the next-message rule's row stands on; at an end of the list,
+    /// where no row stands on that side, the key picks nothing.
+    fn step_list(&mut self, order: &[u64], forward: bool, rows: usize) {
+        let held = self.held_back.take().filter(|held| rows == 1 && (self.list_row.is_none() || self.list_row == held.land));
+        let Some(held) = held else {
+            self.mailbox.step_in(order, forward, rows);
+            return;
+        };
+        let listed = self.mailbox.messages();
+        let Some(at) = listed.iter().position(|row| row.id == held.pick) else {
+            // The rule's row left too: the step starts from the top.
+            self.mailbox.step_in(order, forward, rows);
+            return;
+        };
+        // The first row after the gap.
+        let after = if held.below { at } else { at.saturating_add(1) };
+        let to = if forward { Some(after) } else { after.checked_sub(1) };
+        match to.and_then(|to| listed.get(to)).map(|row| row.id) {
+            // Picked by a key, as a step picks.
+            Some(id) => self.mailbox.select_keyed(id),
+            // Nothing on that side: still nothing open, the gap kept.
+            None => self.held_back = Some(held),
+        }
+    }
+
     /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row.
     fn row_act(&self, action: &str) -> Option<(u64, Act)> {
         let row = self.mailbox.selected().and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
@@ -600,6 +658,9 @@ impl InboxApp {
             keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => !self.list_hidden && self.row_act(id).is_some(),
             keymap::UNDO => !self.list_hidden && self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
+            // The held-back message opens as a press on its row does (it floats a docked composer); with the list
+            // hidden it rests, as every command of the list does.
+            keymap::OPEN_HELD => self.screen == Screen::Mail && !self.list_hidden && self.held_back.is_some(),
             // The search field is the list's: hidden, it is not there to take the keys.
             keymap::FIND => !self.list_hidden,
             // In one pane only, where it brings the list back in front: the list hidden beside a composer in two panes
@@ -658,6 +719,11 @@ impl InboxApp {
                 self.search.clear();
             }
             keymap::SNOOZE => self.open_picker(""),
+            keymap::OPEN_HELD => {
+                if let Some(held) = self.held_back.take() {
+                    self.mailbox.select(Some(held.pick));
+                }
+            }
             keymap::CALENDAR => self.show_calendar(),
             keymap::COMPOSE => {
                 self.compose();
@@ -704,6 +770,7 @@ impl InboxApp {
             _ if keymap::LIST_KEYS.contains(&id) => self.move_in_list(ctx, id),
             _ => {
                 if let Some((row, act)) = self.row_act(id) {
+                    self.act_by_key = true;
                     self.mailbox.start(row, act);
                 }
             }
@@ -723,10 +790,11 @@ impl InboxApp {
             _ => (false, usize::MAX),
         };
         // The focused row is the keyed one; a selection made by the pointer counts from where it is.
-        if let Some(from) = self.list_row.filter(|from| self.mailbox.selected() != Some(*from)) {
+        let landed = self.held_back.and_then(|held| held.land);
+        if let Some(from) = self.list_row.filter(|from| self.mailbox.selected() != Some(*from) && landed != Some(*from)) {
             self.mailbox.select_keyed(from);
         }
-        self.mailbox.step_in(&list::order(ctx), forward, rows);
+        self.step_list(&list::order(ctx), forward, rows);
         // In one pane a message in front stays in front as the keys read on; behind the list (the composer's too),
         // they only walk it.
         let hidden = one_pane(ctx) && (self.docked() || !self.message_in_front());
@@ -805,7 +873,12 @@ impl InboxApp {
                 ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(focused)));
             }
         }
-        if let Some(id) = gained.filter(|id| self.mailbox.selected() != Some(*id) && clicked != Some(*id)) {
+        // The row the keyboard landed on after the server took the open message away has the keyboard, not opened.
+        if gained.is_some() && gained == self.landed {
+            self.landed = None;
+            self.list_keys = true;
+        } else if let Some(id) = gained.filter(|id| self.mailbox.selected() != Some(*id) && clicked != Some(*id)) {
+            self.landed = None;
             self.mailbox.select_by_focus(id);
             self.list_keys = true;
             // A row the focus walked to is a preview: in one pane it stays behind the list.
@@ -847,6 +920,10 @@ impl InboxApp {
         }
         if self.screen != Screen::Mail {
             return;
+        }
+        // The list's act walked on, or the server took the open message away: the keyboard lands on the row asked.
+        if let Some(id) = self.land_held.take() {
+            list::land(ctx, id);
         }
         let free = ctx.memory(|memory| memory.focused().is_none()) || list::focused_row(ctx).is_some();
         if crossed && single && message && free {
@@ -892,7 +969,8 @@ impl InboxApp {
     /// A message opened into the one pane: the focus goes to the reader's first tool, not nowhere.
     fn focus_reader_tool(&mut self, ctx: &egui::Context) {
         let back = reader::take_back_id(ctx);
-        if std::mem::take(&mut self.focus_reader)
+        let walked = std::mem::take(&mut self.focus_walked) && ctx.memory(|memory| memory.focused().is_none());
+        if (std::mem::take(&mut self.focus_reader) || walked)
             && let Some(back) = back
         {
             ctx.memory_mut(|memory| memory.request_focus(back));
@@ -1319,25 +1397,72 @@ impl InboxApp {
     /// Opens the selected message in the reader, or closes it, when the selection changed; a message selected while
     /// the composer has the reader's place sends the composer to its floating panel, unless the list stands over the
     /// composer in one pane and the person only walks it.
+    ///
+    /// When the owner's own act takes the open message out of the list (done, snoozed, moved), the list walks on to the
+    /// row the next-message rule selects; when the server takes it away, the reader shows nothing open and that row is
+    /// not opened by itself, only when the owner picks a message.
     fn sync(&mut self) {
-        if self.reader.open_id() != self.mailbox.selected() {
-            let selected = self.mailbox.selected();
+        let open = self.reader.open_id();
+        let gone = open.is_some_and(|id| !self.mailbox.messages().iter().any(|row| row.id == id));
+        // The owner's own act that took the open message away (Done, Archive, Delete, Snooze, Move, from the list or
+        // the reader, by key or by button) walks on to the rule's row, as the lists do; in one pane an act from the
+        // reader brings the list back in front with the keyboard on that row. The server, another device, a sync or a
+        // rule taking it away opens nothing: the keyboard goes to the row that took its place.
+        let taken = self.mailbox.take_taken();
+        let owner = gone && taken.is_some() && taken == open;
+        let from_list = self.list_keys || self.list_row == open;
+        let walking = owner && (from_list || self.single != Some(true));
+        if walking && from_list {
+            // The keyboard stays on the list: on the row walked on to.
+            self.land_held = self.mailbox.selected();
+        }
+        if walking && !from_list && std::mem::take(&mut self.act_by_key) {
+            // The keyboard stays in the reader: on the widget it was on, else (a key acted with nothing focused) on the
+            // reader's first tool, never on nothing.
+            self.focus_walked = true;
+        }
+        // Read by the first sync after the act, which sees what it took away: it counts once.
+        self.act_by_key = false;
+        // Only where the list is the one the message was opened from: another account, place or search is no removal.
+        let same_list = self.left.as_ref().is_some_and(|(left, from)| Some(*left) == open && *from == self.list_of());
+        if gone && !owner && same_list {
+            let at = self.mailbox.gap().unwrap_or(usize::MAX);
+            let rows = self.mailbox.messages();
+            self.land_held = rows.get(at).or_else(|| rows.last()).map(|row| row.id);
+            self.landed = self.land_held;
+        }
+        if let (true, false, Some(pick)) = (gone, walking, self.mailbox.selected()) {
+            // The rule's row is kept, not selected: no act lands on a message that is not shown.
+            let at = self.mailbox.messages().iter().position(|row| row.id == pick);
+            let below = match (at, self.mailbox.gap()) {
+                (Some(at), Some(gap)) => at >= gap,
+                _ => self.mailbox.after() != crate::mailbox::After::Previous,
+            };
+            self.held_back = Some(Held { pick, below, land: self.land_held });
+            self.mailbox.select(None);
+            // Nothing is open to read on: the list's keys (the arrows) step from the gap.
+            self.list_keys = true;
+        } else if self.mailbox.selected().is_some() {
+            self.held_back = None;
+        }
+        let opening = self.mailbox.selected();
+        if open != opening {
             let walked = self.list_over_composer && !self.reading;
             // In one pane with the list in front the reader is not shown: a message selected there (the next one after
             // an act on the keyed row, from the keys, the pointer, a notification or the engine) opens as a preview,
             // not marked read.
-            if let Some(id) = selected
+            if let Some(id) = opening
                 && self.list_in_front()
             {
                 self.mailbox.select_by_focus(id);
             }
-            if selected.is_some()
+            if opening.is_some()
                 && !walked
                 && let Some(composer) = &mut self.composer
             {
                 composer.set_floating(true);
             }
-            self.reader.open(&mut self.mailbox, selected);
+            self.reader.open(&mut self.mailbox, opening);
             self.hover = None;
         }
     }
@@ -1678,6 +1803,36 @@ impl InboxApp {
         }
     }
 
+    /// The reader on a card `left` from the list: the open message, or nothing open; what was asked in it.
+    fn reader_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, left: f32) -> reader::Drawn {
+        let gap = 0.0;
+        if self.reader.open_id().is_none() {
+            CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| {
+                layers.card(ui, Margin::ZERO, |ui| reader::nothing_open(ui, theme, &self.keymap));
+            });
+            return reader::Drawn::default();
+        }
+        let hover = self.hover.take();
+        let shown = CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| {
+            layers
+                .card(ui, Margin::ZERO, |ui| reader::show(ui, theme, &self.keymap, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref()))
+        });
+        // A press in the reader: someone reads there, and the list's keys rest until a row is pressed or keyed.
+        let reader = shown.response.rect;
+        self.focus_reader_tool(ui.ctx());
+        #[cfg(test)]
+        ui.data_mut(|data| data.insert_temp(egui::Id::unique("reader-rect"), reader));
+        if ui.input(|input| input.pointer.any_pressed() && input.pointer.press_origin().is_some_and(|at| reader.contains(at))) {
+            self.list_keys = false;
+        }
+        let mut drawn = shown.inner;
+        if drawn.hover != hover {
+            ui.ctx().request_repaint();
+        }
+        self.hover = drawn.hover.take();
+        drawn
+    }
+
     /// The composer on a card in the reader's place; what was asked in it.
     fn composer_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, left: f32) -> Vec<compose::Asked> {
         let (keymap, mailbox) = (&self.keymap, &self.mailbox);
@@ -1889,11 +2044,15 @@ impl InboxApp {
         if self.reader.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
         }
+        // What the engine's events changed is settled before this frame's keys: when the open message left with them,
+        // no key acts on the row the rule picked, which nobody has seen selected.
+        self.sync();
         self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
         self.frame = ui.ctx().cumulative_frame_nr();
         let Keys { mut ran, escape, typing, quiet } = self.keys(ui.ctx());
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };
+        self.act_by_key |= keyed.is_some();
         self.follow_adding();
         let adding = self.onboarding.stage() != Stage::Closed;
         // One Esc closes one surface: `escape` is the window's only while no float (a menu, a picker, a select) is open
@@ -1960,7 +2119,10 @@ impl InboxApp {
             let left;
             (asked, left) = self.folders(ui, &theme, &mut layers, docked);
             let (widest, least) = (list_widest(ui, &theme, docked), self.list_least(ui, &theme, docked, left));
-            let place = list_place(list_shown, !single && (self.reader.open_id().is_some() || docked), docked, widest, least);
+            // The list stands beside the reader while a message is open, and stays, with nothing open, when the open
+            // message left the list (held back); and beside the docked composer.
+            let reading = self.reader.open_id().is_some() || self.held_back.is_some();
+            let place = list_place(list_shown, !single && (reading || docked), docked, widest, least);
             // The list is hidden where the composer stands in its place: beside a composer too narrow for it, and in
             // one pane with the composer in front. Nothing of it acts then.
             let hidden = place == ListPlace::Hidden || (place == ListPlace::Away && self.composer_in_front());
@@ -2008,27 +2170,8 @@ impl InboxApp {
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
         if docked && reader_shown {
             composed = self.composer_card(ui, &theme, &mut layers, composer_left);
-        } else if self.screen == Screen::Mail && self.reader.open_id().is_some() && reader_shown && !docked {
-            let hover = self.hover.take();
-            let left = if full { gap } else { half };
-            let shown = CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| {
-                layers.card(ui, Margin::ZERO, |ui| {
-                    reader::show(ui, &theme, &self.keymap, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref())
-                })
-            });
-            // A press in the reader: someone reads there, and the list's keys rest until a row is pressed or keyed.
-            let reader = shown.response.rect;
-            self.focus_reader_tool(ui.ctx());
-            #[cfg(test)]
-            ui.data_mut(|data| data.insert_temp(egui::Id::unique("reader-rect"), reader));
-            if ui.input(|input| input.pointer.any_pressed() && input.pointer.press_origin().is_some_and(|at| reader.contains(at))) {
-                self.list_keys = false;
-            }
-            drawn = shown.inner;
-            if drawn.hover != hover {
-                ui.ctx().request_repaint();
-            }
-            self.hover = drawn.hover.take();
+        } else if self.screen == Screen::Mail && (self.reader.open_id().is_some() || self.held_back.is_some()) && reader_shown && !docked {
+            drawn = self.reader_card(ui, &theme, &mut layers, if full { gap } else { half });
         }
         layers.finish(ui.painter(), &theme);
         // A row's menu whose row this pass did not draw closes; an ask no row took is dropped.
@@ -2105,6 +2248,9 @@ impl InboxApp {
             self.mailbox.dismiss_error();
         }
         self.go(&asked, header, review);
+        if clicked.is_some() {
+            self.held_back = None;
+        }
         self.follow_list(ui.ctx(), clicked, gained);
         self.composed(ui.ctx(), clicked.is_some(), composed);
         ran.extend(asked.compose.then_some(keymap::COMPOSE));
@@ -2330,7 +2476,7 @@ impl InboxApp {
             self.mailbox.left();
         }
         if let Some((id, act)) = acted {
-            self.mailbox.start(id, act);
+            start(&mut self.reader, &mut self.mailbox, id, act);
         }
         if undone {
             self.undo();
@@ -2528,7 +2674,9 @@ impl InboxApp {
             reader::Asked::Expand(id) => reader.expand(mailbox, id),
             reader::Asked::Details(id) => reader.toggle_details(id),
             reader::Asked::Quotes(id) => reader.toggle_quotes(id),
+            reader::Asked::View(id, view) => reader.set_plain(id, view == crate::component::content_bar::View::Plain),
             reader::Asked::Once(id) => reader.allow_once(mailbox, id),
+            reader::Asked::Retry(id, key) => reader.retry(mailbox, id, &key),
             reader::Asked::Always(id) => reader.allow_always(mailbox, id),
             reader::Asked::Save(id, index) => reader.save(mailbox, id, index),
             reader::Asked::FullWidth(full) => reader.set_full_width(full),
@@ -2538,8 +2686,12 @@ impl InboxApp {
                 reader.set_notice(tr!("Link copied: {url}", url = crate::mailbox::shown(&url)));
                 ui.ctx().copy_text(url);
             }
+            reader::Asked::CopySubject(subject) => {
+                reader.set_notice(tr!("Subject copied").to_owned());
+                ui.ctx().copy_text(subject);
+            }
             reader::Asked::Dismiss => reader.dismiss_notice(),
-            reader::Asked::Act(id, act) => mailbox.start(id, act),
+            reader::Asked::Act(id, act) => start(reader, mailbox, id, act),
             reader::Asked::Presets => mailbox.load_presets(),
             reader::Asked::Invite(id, invite::Ask::Answer(answer)) => reader.answer_invite(mailbox, id, answer),
             reader::Asked::Invite(id, invite::Ask::Change) => reader.change_answer(id),
@@ -2547,6 +2699,15 @@ impl InboxApp {
             reader::Asked::Answer(..) => {}
             reader::Asked::Back => {}
         }
+    }
+}
+
+/// Starts `act` on message `id`. Letting a sender in or blocking them reads the reader's invitation cards again:
+/// whether an invitation can be answered hangs on it, and the message may stay open.
+fn start(reader: &mut Reader, mailbox: &mut Mailbox, id: u64, act: Act) {
+    mailbox.start(id, act);
+    if matches!(act, Act::Accept { .. } | Act::Block) {
+        reader.refresh_invites(mailbox);
     }
 }
 
@@ -2592,6 +2753,9 @@ mod palette_tests;
 #[cfg(test)]
 #[path = "pane_tests.rs"]
 mod pane_tests;
+#[cfg(test)]
+#[path = "reader_html_tests.rs"]
+mod reader_html_tests;
 #[cfg(test)]
 #[path = "reader_tests.rs"]
 mod reader_tests;

@@ -1175,3 +1175,36 @@ fn a_screen_reader_s_press_opens_a_menu_from_the_keyboard() {
     let focused = focused_node(&harness).and_then(|(_, name, _)| name);
     assert_eq!(focused.as_deref(), Some("Actions"), "the keyboard is back on the opener, as after Enter");
 }
+
+#[test]
+fn a_menu_hung_by_its_right_edge_stays_in_the_window() {
+    // A button near the window's left edge: hung by its right edge the menu would start left of the window, so it
+    // stands 3 in; a button far right hangs it with the two right edges on one line.
+    for (left, wanted) in [(8.0, None), (400.0, Some(()))] {
+        let theme = theme();
+        let keymap = Keymap::default();
+        let mut harness = builder().with_size(egui::vec2(600.0, 400.0)).build_ui_state(
+            move |ui, _: &mut ()| {
+                motion::set_reduced(ui.ctx(), true);
+                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(pos2(left, 8.0), egui::vec2(32.0, 32.0))));
+                let button = crate::component::button::TextButton::new("Actions").show(&mut child, &theme, &keymap);
+                super::menu_right(ui.ctx(), &theme, &button, Id::unique("actions"), 240.0, |ui| {
+                    super::entry(ui, &theme, &keymap, "Archive", None);
+                    ((), false)
+                });
+            },
+            (),
+        );
+        harness.run_ok();
+        let button = harness.get_by_label("Actions").rect();
+        harness.get_by_label("Actions").click();
+        harness.run_ok();
+        let row = harness.get_by_label("Archive").rect();
+        // A row runs at most 1 in from the menu's edge.
+        match wanted {
+            Some(_) => assert!((row.right() - button.right()).abs() <= 1.5, "{row:?} {button:?}"),
+            None => assert!(row.left() >= 3.0 && row.left() <= 4.5, "3 in from the window's left edge: {row:?}"),
+        }
+        assert!(row.left() >= 3.0 && row.right() <= 597.0, "{row:?}");
+    }
+}

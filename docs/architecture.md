@@ -273,7 +273,8 @@ times, repeat rule and place, and the owner's answer); mail in the Blocked folde
 is read when its card is first asked for. Marks with the same `UID` and `RECURRENCE-ID` in one account are versions of
 one event, the later one the higher `SEQUENCE`, then the later `DTSTAMP`. `invite.show` (`safe`) gives the card: the
 version before and what changed since, whether a later version made it out of date, the answer given, the event in
-the owner's calendars by its `UID`, and whether it can be answered. `invite.answer` (`owner`) builds the owner's
+the owner's calendars by its `UID`, and whether it can be answered (not while the screener holds its sender: an
+answer is mail to them). `invite.answer` (`owner`) builds the owner's
 `METHOD:REPLY` (only the owner among the attendees, with `PARTSTAT`) into a draft with the iTIP object as its
 `text/calendar; method=REPLY` part beside the text (`Draft::calendar`, `MessageBuilder::calendar`), sends it at once
 with the checks `mail.send` makes but without its hold (`cmd::send::sending`; the answer is taken back by changing

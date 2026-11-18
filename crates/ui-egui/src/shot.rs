@@ -45,7 +45,8 @@
 //! ([`crate::component::gallery_blocks`]), `fields` set to `true` the page of the fields, pickers and menus
 //! ([`crate::component::gallery_fields`]), `screens` set to `true` the page of the screens' own sets
 //! ([`crate::component::gallery_screens`]), `calendar_sets` set to `true` the page of the calendar's sets
-//! ([`crate::component::gallery_calendar`]), `lists` set to `true` the page of the mail lists' rows
+//! ([`crate::component::gallery_calendar`]), `reader` set to `true` the page of the reader's sets
+//! ([`crate::component::gallery_reader`]), `lists` set to `true` the page of the mail lists' rows
 //! ([`crate::component::gallery_lists`]). The typeface and the icons are fixed, so a script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
@@ -213,7 +214,8 @@ pub struct Shot {
     #[serde(default)]
     pub step: Option<u8>,
     /// An act on the selected row: `read`, `unread`, `flag`, `unflag`, `done`, `archive` or `delete`; for its sender
-    /// `accept` (into Updates), `accept_open`, `block` or `newsletters` (their group); the toast shows after it.
+    /// `accept` (into Updates), `accept_open`, `block` or `newsletters` (their group); the toast shows after it. `removed`
+    /// takes the row away as another device would: no act of the owner's, so nothing walks on.
     #[serde(default)]
     pub act: Option<String>,
     /// Whether `act` (`done` or `delete`) is caught with its row sliding out, before the toast.
@@ -237,6 +239,9 @@ pub struct Shot {
     /// The page of the calendar's sets (event block, mini month) instead of the window.
     #[serde(default)]
     pub calendar_sets: Option<bool>,
+    /// The page of the reader's sets instead of the window.
+    #[serde(default)]
+    pub reader: Option<bool>,
     /// The page of the mail lists' rows instead of the window.
     #[serde(default)]
     pub lists: Option<bool>,
@@ -269,6 +274,9 @@ pub struct Shot {
     /// picked) or `bounce` (the bounced message open).
     #[serde(default)]
     pub outbox: Option<String>,
+    /// How the selected HTML message shows: `fitted` (the default) or `plain` (as a text-only program shows it).
+    #[serde(default)]
+    pub html_view: Option<String>,
     /// What a person does to the window once the scene is set, in order ([`Step`]); none when left out.
     #[serde(default)]
     pub steps: Option<Vec<Step>>,
@@ -464,6 +472,17 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     let Some(name) = &shot.act else {
         return if shot.slide.is_some() { Err(bad(format!("{}: slide needs an act", shot.out))) } else { Ok(()) };
     };
+    // Taken away by another device (a sync, the server): no act of the owner's, so nothing walks on.
+    if name == "removed" {
+        if shot.slide.is_some() {
+            return Err(bad(format!("{}: only done, archive and delete slide out", shot.out)));
+        }
+        let Some(id) = app.mailbox().selected() else { return Err(bad(format!("{}: removed needs a selected row", shot.out))) };
+        let (_, mailbox) = app.reader_mut();
+        mailbox.run("mail.done", &serde_json::json!({ "id": id, "done": true }))?;
+        mailbox.refresh();
+        return Ok(());
+    }
     let act = match name.as_str() {
         "read" => Act::Read,
         "unread" => Act::Unread,
@@ -478,7 +497,7 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
         "newsletters" => Act::Group(Some(GroupKind::Newsletters)),
         other => {
             return Err(bad(format!(
-                "{}: act {other:?} is not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block or newsletters",
+                "{}: act {other:?} is not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block, newsletters or removed",
                 shot.out
             )));
         }
@@ -777,9 +796,13 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.menu.is_some()
         || shot.outbox.is_some()
         || shot.steps.is_some()
-        || [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.lists].iter().filter(|page| **page == Some(true)).count() > 1
+        || [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists]
+            .iter()
+            .filter(|page| **page == Some(true))
+            .count()
+            > 1
         || (shot.calendar_sets == Some(true)
-            && [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.lists].contains(&Some(true)));
+            && [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists].contains(&Some(true)));
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
     }
@@ -860,6 +883,21 @@ fn blocks_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
         crate::component::gallery_blocks::page(ui, &theme, &keymap);
+    })
+}
+
+/// The page of the reader's sets of `shot` in `mode`.
+fn reader_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of the reader's sets")?;
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = gallery::keymap();
+    let mut fonts = true;
+    paint(crate::component::gallery_reader::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_reader::page(ui, &theme, &keymap);
     })
 }
 
@@ -1464,6 +1502,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if shot.calendar_sets == Some(true) {
         return calendar_gallery(shot, mode);
     }
+    if shot.reader == Some(true) {
+        return reader_gallery(shot, mode);
+    }
     if shot.lists == Some(true) {
         return lists_gallery(shot, mode);
     }
@@ -1569,6 +1610,11 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         }
         if shot.quotes == Some(true) {
             reader.toggle_quotes(id);
+        }
+        match shot.html_view.as_deref() {
+            Some("plain") => reader.set_plain(id, true),
+            Some("fitted") | None => {}
+            Some(other) => return Err(bad(format!("{}: html_view {other:?} is not fitted or plain", shot.out))),
         }
     } else if shot.pictures.is_some() || shot.full_width.is_some() || shot.details.is_some() || shot.quotes.is_some() {
         return Err(bad(format!("{}: the reader settings need a selected row", shot.out)));

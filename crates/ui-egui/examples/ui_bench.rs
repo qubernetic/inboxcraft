@@ -5,7 +5,12 @@
 //! messages, of which the list shows the engine's `MAX_LIST` (1 000). Four scenes of 300 frames each:
 //! `inbox-default-rest` (the inbox in the view a new owner sees, today the cards), `inbox-list-rest` and
 //! `inbox-list-scroll` (the grouped list, every listed row laid out, scrolling 40 points a frame: the stress case)
-//! and `reader-html` (the reader open on an HTML message beside the default view). A frame is the window's `ui` and the tessellation of what it painted, on the CPU;
+//! and `reader-html` (the reader open on an HTML message beside the default view); with `--large`, `reader-large-rest`
+//! and `reader-large-scroll` instead: the reader open on an HTML message of two megabytes (as large as the cleaner
+//! takes), left alone and scrolling 40 points a frame; then `reader-paragraph-*`, a message of one paragraph of two
+//! megabytes, and `reader-links-*`, a message of one paragraph of as many links as the cleaner keeps (10 000), each at
+//! rest and scrolling. A frame is the window's `ui` and the tessellation of what it
+//! painted, on the CPU;
 //! nothing is drawn on a GPU. Per scene it prints the median and the 95th percentile in milliseconds, the shapes and
 //! the list rows the last frame built, and the budget's verdict: p95 at most 4 ms, or with `--pinned` (run under
 //! `taskset -c 0` by `just bench-ui`) at most 16.6 ms, one frame at 60 Hz. A scene that misses either is a miss. It
@@ -26,7 +31,7 @@
 //! account).
 //!
 //! ```text
-//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose | --calendar | --settings]
+//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose | --calendar | --settings | --large]
 //! ```
 
 use std::process::ExitCode;
@@ -62,6 +67,84 @@ const MORE_ACCOUNTS: usize = 300;
 /// The HTML message the reader opens.
 const HTML_SUBJECT: &str = "Your bike is due for a service";
 
+/// The subject of the HTML message of two megabytes the large scenes open.
+const LARGE_SUBJECT: &str = "The allotment minutes, every one of them";
+
+/// What a large message is made of.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Large {
+    /// Paragraphs with links and bold words, a table now and then and an open quote at its end.
+    Paragraphs,
+    /// One paragraph of two megabytes.
+    Paragraph,
+    /// One paragraph of as many links as the cleaner keeps.
+    Links,
+}
+
+impl Large {
+    const ALL: [Self; 3] = [Self::Paragraphs, Self::Paragraph, Self::Links];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Paragraphs => "large",
+            Self::Paragraph => "paragraph",
+            Self::Links => "links",
+        }
+    }
+
+    /// The message's HTML, just under the cleaner's input cap.
+    fn html(self) -> String {
+        let room = inboxcraft_html::MAX_INPUT - 4096;
+        match self {
+            Self::Paragraphs => {
+                let paragraph = "<p>The minutes of the meeting, read again for those who were not there: the <b>water butts</b> are \
+                                 emptied before the frost, and <a href=\"https://allotments.example.org/rota\">the rota</a> is on the site.</p>";
+                let table = "<table><tr><th>Week</th><th>Who</th><th>Plot</th></tr><tr><td>1</td><td>Odile Brannock</td><td>14</td></tr></table>";
+                let mut html = String::new();
+                while html.len() < room {
+                    html.push_str(paragraph);
+                    if html.len() % 40 < 2 {
+                        html.push_str(table);
+                    }
+                }
+                html.push_str("<blockquote><p>The earlier minutes.</p></blockquote>");
+                html
+            }
+            Self::Paragraph => {
+                let words = "The minutes of the allotment meeting, read again. ";
+                format!("<p>{}</p>", words.repeat(room / words.len()))
+            }
+            Self::Links => format!("<p>{}</p>", "<a href=\"https://allotments.example.org/rota\">rota</a> ".repeat(inboxcraft_html::MAX_LINKS)),
+        }
+    }
+}
+
+/// Puts into `store` an HTML message of two megabytes made as `large` says.
+fn put_large(store: &mut inboxcraft_store::Memory, time: Timestamp, large: Large) -> Result<(), UiError> {
+    use inboxcraft_mime::{Mailbox as Sender, MessageBuilder};
+    use inboxcraft_model::{AccountId, Address, EmailAddress, Envelope, FolderId, Message, MessageId, Summary, Uid};
+    use inboxcraft_store::{Batch, Body, Change, Storage as _};
+    let bad = |error: &dyn std::fmt::Display| UiError::Shot(error.to_string());
+    let html = large.html();
+    let id = 99_000_u64;
+    let raw = MessageBuilder::new()
+        .from(Sender::named("Odile Brannock", "odile@example.org"))
+        .to(Sender::new("mira@example.org"))
+        .subject(LARGE_SUBJECT)
+        .text("The minutes.")
+        .html(&html)
+        .build()
+        .map_err(|error| bad(&error))?;
+    let from = Address::new(Some("Odile Brannock"), EmailAddress::new("odile@example.org").map_err(|error| bad(&error))?);
+    let envelope = Envelope::new(LARGE_SUBJECT).with_from(vec![from]).with_date(Some(time));
+    let uid = Uid::new(99_000).ok_or_else(|| UiError::Shot("no uid".to_owned()))?;
+    let summary = Summary::new(uid, envelope).with_received(Some(time));
+    let message = Message::new(MessageId::new(id), AccountId::new(1), FolderId::new(1), summary);
+    let body = Body::new(raw, "The minutes.").map_err(|error| bad(&error))?;
+    let batch = Batch::new().with(Change::PutMessage(message)).with(Change::PutBody(MessageId::new(id), body));
+    store.apply(&batch).map_err(|error| bad(&error))
+}
+
 /// The sizes of the composer's message text its scenes measure, in KiB.
 const BODIES_KIB: [usize; 4] = [16, 64, 256, 1024];
 
@@ -76,6 +159,8 @@ enum Scene {
     ListScroll,
     /// The reader open on an HTML message, the inbox in the default view beside it.
     ReaderHtml,
+    /// The reader open on an HTML message of two megabytes made as `large` says; `scrolling` 40 points a frame.
+    ReaderLarge { large: Large, scrolling: bool },
     /// The composer with a message text of `kib` KiB, focused; `typing` a character a frame; `accesskit` on.
     Compose { kib: usize, typing: bool, accesskit: bool },
     /// The calendar's week holding [`WEEK_EVENTS`] events, left alone.
@@ -121,6 +206,7 @@ impl Scene {
             Self::ReaderHtml => "reader-html".to_owned(),
             Self::CalendarWeek => "calendar-week-200".to_owned(),
             Self::CalendarCrowd(view) => format!("calendar-{}-{CROWD_EVENTS}", format!("{view:?}").to_lowercase()),
+            Self::ReaderLarge { large, scrolling } => format!("reader-{}-{}", large.name(), if scrolling { "scroll" } else { "rest" }),
             Self::Compose { kib, typing, accesskit } => {
                 format!("compose-{kib}k-{}{}", if typing { "typing" } else { "rest" }, if accesskit { "-ak" } else { "" })
             }
@@ -135,7 +221,13 @@ impl Scene {
     fn view(self) -> Option<InboxView> {
         match self {
             Self::ListRest | Self::ListScroll => Some(InboxView::Grouped),
-            Self::DefaultRest | Self::ReaderHtml | Self::Compose { .. } | Self::CalendarWeek | Self::CalendarCrowd(_) | Self::Settings { .. } => None,
+            Self::DefaultRest
+            | Self::ReaderHtml
+            | Self::ReaderLarge { .. }
+            | Self::Compose { .. }
+            | Self::CalendarWeek
+            | Self::CalendarCrowd(_)
+            | Self::Settings { .. } => None,
         }
     }
 }
@@ -160,7 +252,10 @@ fn count(shape: &Shape) -> usize {
 fn app(scene: Scene) -> Result<InboxApp, UiError> {
     let time = Timestamp::from_unix(TIME, 0).ok_or_else(|| UiError::Shot("no time".to_owned()))?;
     let clock = FakeClock::new(time);
-    let store = sample::grown(time, MESSAGES)?;
+    let mut store = sample::grown(time, MESSAGES)?;
+    if let Scene::ReaderLarge { large, .. } = scene {
+        put_large(&mut store, time, large)?;
+    }
     let mut session = sample::session_over(store, Box::new(clock.clone()))?;
     if scene == Scene::CalendarWeek {
         week_of_events(&mut session)?;
@@ -201,6 +296,11 @@ fn app(scene: Scene) -> Result<InboxApp, UiError> {
         let (calendar, mailbox) = app.calendar_mut();
         calendar.set_view(mailbox, view);
         calendar.set_events(crowd()?);
+    }
+    if let Scene::ReaderLarge { .. } = scene {
+        let id = app.mailbox().messages().iter().find(|row| row.subject == LARGE_SUBJECT).map(|row| row.id);
+        let Some(id) = id else { return Err(UiError::Shot(format!("no row {LARGE_SUBJECT:?}"))) };
+        app.mailbox_mut().select(Some(id));
     }
     if let Scene::Compose { kib, .. } = scene {
         app.compose();
@@ -320,8 +420,8 @@ fn measure(scene: Scene) -> Result<Measured, UiError> {
         press = Some(message_text(&output).ok_or_else(|| UiError::Shot("no message text".to_owned()))?);
     }
     let before = app.composer().map(|composer| composer.text().len());
-    // Over the list, left of the reader and right of the folders.
-    let over_list = pos2(WINDOW.x * 0.35, WINDOW.y * 0.6);
+    // Over the list, left of the reader and right of the folders; for the large message, over its text.
+    let over_list = if let Scene::ReaderLarge { .. } = scene { pos2(WINDOW.x * 0.8, WINDOW.y * 0.6) } else { pos2(WINDOW.x * 0.35, WINDOW.y * 0.6) };
     let clock = SystemClock::new();
     let mut times = Vec::with_capacity(FRAMES);
     let (mut shapes, mut rows) = (0, None);
@@ -341,7 +441,7 @@ fn measure(scene: Scene) -> Result<Measured, UiError> {
         {
             events.push(Event::Text("a".to_owned()));
         }
-        if scene == Scene::ListScroll && frame >= WARM_UP {
+        if matches!(scene, Scene::ListScroll | Scene::ReaderLarge { scrolling: true, .. }) && frame >= WARM_UP {
             events.push(Event::MouseWheel {
                 unit: MouseWheelUnit::Point,
                 delta: vec2(0.0, -SCROLL),
@@ -368,6 +468,28 @@ fn measure(scene: Scene) -> Result<Measured, UiError> {
         && after.zip(before).is_none_or(|(after, before)| after != before + FRAMES)
     {
         return Err(UiError::Shot(format!("typing took {before:?} to {after:?} bytes")));
+    }
+    // A large scene that showed no large message measured nothing.
+    if let Scene::ReaderLarge { large, .. } = scene {
+        let shown = app.reader().open_id().and_then(|id| app.reader().opened(id)).map_or((0, 0, 0), |opened| match &opened.content {
+            inboxcraft_ui_egui::reader::Content::Html(document) => {
+                let letters = document.blocks.iter().map(|block| match block {
+                    inboxcraft_html::Block::Text { spans, .. } => spans.iter().map(|span| span.text.len()).sum(),
+                    _ => 0,
+                });
+                (document.blocks.len(), letters.max().unwrap_or(0), document.links.len())
+            }
+            _ => (0, 0, 0),
+        });
+        let (blocks, longest, links) = shown;
+        let enough = match large {
+            Large::Paragraphs => blocks >= 1_000,
+            Large::Paragraph => longest >= 1_000_000,
+            Large::Links => links >= inboxcraft_html::MAX_LINKS,
+        };
+        if !enough {
+            return Err(UiError::Shot(format!("the large message shows {blocks} blocks, {longest} bytes at most, {links} links")));
+        }
     }
     times.sort_by(f64::total_cmp);
     Ok(Measured { median_ms: percentile(&times, 0.5), p95_ms: percentile(&times, 0.95), shapes, rows_built: rows })
@@ -420,6 +542,8 @@ fn main() -> ExitCode {
         vec![Scene::CalendarWeek, Scene::CalendarCrowd(View::Week), Scene::CalendarCrowd(View::Month), Scene::CalendarCrowd(View::Agenda)]
     } else if asked("--settings") {
         Scene::settings()
+    } else if asked("--large") {
+        Large::ALL.into_iter().flat_map(|large| [false, true].map(|scrolling| Scene::ReaderLarge { large, scrolling })).collect()
     } else {
         Scene::ALL.to_vec()
     };

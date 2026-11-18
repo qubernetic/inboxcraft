@@ -38,13 +38,16 @@
 //! [`gallery`] draws every one of them on one page for `ui_shot`, [`gallery_fields`] the fields, pickers and menus on a
 //! second, [`gallery_screens`] the screens' own sets on another.
 
+pub mod attachment;
 pub mod avatar;
 pub mod badge;
 pub mod banner;
 pub mod button;
+pub mod button_row;
 pub mod card;
 pub mod check_step;
 pub mod checkbox;
+pub mod content_bar;
 pub mod draft_file;
 pub mod draft_row;
 pub mod empty;
@@ -55,18 +58,23 @@ pub mod gallery_blocks;
 pub mod gallery_calendar;
 pub mod gallery_fields;
 pub mod gallery_lists;
+pub mod gallery_reader;
 pub mod gallery_screens;
 pub mod group_head;
+pub mod hairline_table;
 pub mod hover;
 pub mod icon;
+pub mod invite_card;
 pub mod key;
 pub mod label;
 pub mod later_row;
 pub mod mail_row;
 pub mod outbox_row;
+pub mod picture_box;
 pub mod pill;
 pub mod popup;
 pub mod progress;
+pub mod quote_fold;
 pub mod recipient;
 pub mod row;
 pub mod scroll;
@@ -77,10 +85,12 @@ pub mod slider;
 pub mod soon;
 pub mod switch;
 pub mod tag;
+pub mod thread_row;
 pub mod time_picker;
 pub mod toast;
 pub mod tooltip;
 pub mod typed_time;
+pub mod why_line;
 
 use std::sync::Arc;
 
@@ -227,6 +237,17 @@ pub(crate) fn wrapped(ui: &Ui, text: &str, font: Font, colour: egui::Color32, wi
 pub(crate) fn plain(text: &str) -> std::borrow::Cow<'_, str> {
     if text.chars().any(|c| c.is_control() || bidi_override(c)) {
         std::borrow::Cow::Owned(text.chars().filter(|c| !bidi_override(*c)).map(|c| if c.is_control() { ' ' } else { c }).collect())
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
+/// [`plain`] for text of many lines (a quote, a signature): its line breaks stay, every other control character is put
+/// as a space and every bidi override is left out. Text that holds nothing else is borrowed, not copied.
+pub(crate) fn plain_lines(text: &str) -> std::borrow::Cow<'_, str> {
+    let other = |c: char| (c.is_control() && c != '\n') || bidi_override(c);
+    if text.chars().any(other) {
+        std::borrow::Cow::Owned(text.chars().filter(|c| !bidi_override(*c)).map(|c| if c.is_control() && c != '\n' { ' ' } else { c }).collect())
     } else {
         std::borrow::Cow::Borrowed(text)
     }

@@ -143,6 +143,9 @@ pub fn elapsed(ctx: &Context, id: Id, seconds: f32) -> f32 {
 /// halving its interval a fixed number of times (its x rises from 0 to 1), so it always ends.
 #[must_use]
 pub fn ease(share: f32) -> f32 {
+    if share.is_nan() {
+        return 1.0;
+    }
     cubic_bezier([0.2, 0.7, 0.2, 1.0], share)
 }
 
