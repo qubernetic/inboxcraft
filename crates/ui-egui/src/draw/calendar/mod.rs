@@ -557,3 +557,7 @@ mod look_tests;
 #[cfg(test)]
 #[path = "compose_tests.rs"]
 mod compose_tests;
+
+#[cfg(test)]
+#[path = "sheet_tests.rs"]
+mod sheet_tests;
