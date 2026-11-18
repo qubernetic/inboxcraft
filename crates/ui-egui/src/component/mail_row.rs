@@ -205,8 +205,14 @@ fn content(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &MailRow<'_>, drawn
     let text = super::fitted(ui, row.line, f.caption, words, right - left);
     paint::run_at(ui.painter(), pos2(left, two), text, words);
     // Last, so the group stands over whatever of the row lies under it.
-    let shown = hover::actions(ui, theme, keymap, row.id.with("actions"), actions_line.unwrap_or(line), reach, actions);
+    let shown = hover::actions(ui, theme, keymap, actions_id(row.id), actions_line.unwrap_or(line), reach, actions);
     shown.clicked
+}
+
+/// The id of the hover action group of the row `row`: its n-th action is `actions_id(row).with(n)`.
+#[must_use]
+pub fn actions_id(row: Id) -> Id {
+    row.with("actions")
 }
 
 /// The check box of a checked row in the first column: bulk select is drawn and coming soon in this stage.

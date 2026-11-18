@@ -1728,3 +1728,15 @@ fn while_a_row_closes_no_line_is_doubled_and_the_row_above_keeps_its_own() {
         }
     }
 }
+
+#[test]
+fn the_hover_actions_of_a_row_are_found_by_their_message() {
+    let mut harness = harness(false);
+    let rota = harness.state().mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id).unwrap();
+    harness.get_by_label(ODILE).hover();
+    harness.run();
+    let snooze = harness.get_by_role_and_label(Role::Button, "Snooze").rect();
+    // The fourth action, Snooze: what a picker anchors to.
+    let found = harness.ctx.read_response(super::list::actions_id(rota).with(3_usize)).map(|response| response.rect);
+    assert_eq!(found, Some(snooze));
+}

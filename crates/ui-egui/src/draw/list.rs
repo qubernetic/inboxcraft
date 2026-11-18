@@ -372,6 +372,12 @@ fn later(
     Drawn { clicked: response.clicked(), acted: drawn.link.then_some(Act::Unsnooze), focused: response.has_focus() }
 }
 
+/// The id of the hover action group of message `id`'s row: its n-th action (Snooze is the fourth, index 3) is
+/// `actions_id(id).with(n)`, what a picker opened from an action anchors to.
+pub(crate) fn actions_id(id: u64) -> Id {
+    crate::component::mail_row::actions_id(row_id(id))
+}
+
 /// The id of message `id`'s row: its focus and its context menu, wherever it is built.
 pub(super) fn row_id(id: u64) -> Id {
     Id::unique("list-row").with(id)
@@ -440,7 +446,7 @@ fn leaving_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, m
 
 /// What follows a row's subject: a dash and the preview, as the design's line two, or nothing without one.
 pub(super) fn after_subject(preview: &str) -> String {
-    if preview.trim().is_empty() { String::new() } else { format!(" — {preview}") }
+    if preview.trim().is_empty() { String::new() } else { tr!(" — {preview}", preview = preview) }
 }
 
 /// A square card across `ui`'s width with `add` drawn inside; `edge` rings it with the accent's edge.
