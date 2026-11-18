@@ -97,7 +97,9 @@ pub fn bar_with_ends<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, en
         return;
     }
     let (inner, content) = (output.inner_rect.height(), output.content_size.y);
-    let ends = if ends.is_finite() { ends.clamp(0.0, strip.height() / 4.0) } else { 0.0 };
+    // max then min, never `clamp`: a bound from a rect's height may be negative or NaN, and `min` and `max` keep the
+    // other number then.
+    let ends = if ends.is_finite() { ends.max(0.0).min(strip.height().max(0.0) / 4.0) } else { 0.0 };
     let length = strip.height() - ends * 2.0;
     if !(content > inner && inner > 0.0 && length > 0.0 && content.is_finite()) {
         return;
@@ -142,7 +144,7 @@ pub fn show_thin<R>(
 ) -> ScrollAreaOutput<R> {
     let output = area.scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, add);
     let (inner, content) = (output.inner_rect, output.content_size.y);
-    let ends = if inset[1].is_finite() { inset[1].clamp(0.0, inner.height() / 4.0) } else { 0.0 };
+    let ends = if inset[1].is_finite() { inset[1].max(0.0).min(inner.height().max(0.0) / 4.0) } else { 0.0 };
     let room = inner.height() - ends * 2.0;
     if content > inner.height() && room > 0.0 && content.is_finite() {
         let length = thumb[1].min(room);
