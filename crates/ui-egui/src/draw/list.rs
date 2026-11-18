@@ -1536,27 +1536,35 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
                 }
             });
             ui.spacing_mut().item_spacing.y = CARD_GAP;
-            // The card just answered, while it leaves (M11): its place in the queue and how far it has gone.
-            let leaving = answered(ui.ctx(), &askers).map(|left| {
-                let gone = answer_gone(ui.ctx(), theme, &left);
-                (left, gone)
-            });
-            let holding = leaving.as_ref().is_some_and(|(_, gone)| gone.closed <= 0.0);
+            // The cards just answered, while they leave (M11): each at its place in the queue, as far as it has gone.
+            let leaving: Vec<(Answered, Gone, f32)> = answered(ui.ctx(), &askers)
+                .into_iter()
+                .map(|left| {
+                    let (gone, tint) = answer_gone(ui.ctx(), theme, &left);
+                    (left, gone, tint)
+                })
+                .collect();
+            let still: Vec<Answered> = leaving.iter().filter(|(_, gone, _)| gone.closed < 1.0).map(|(left, ..)| left.clone()).collect();
+            ui.data_mut(|data| data.insert_temp(answered_id(), still));
+            let holding = leaving.iter().any(|(left, gone, _)| left.at == 0 && gone.closed <= 0.0);
+            let mut answers = Vec::new();
             for index in 0..=askers.len() {
-                if let Some((left, gone)) = leaving.as_ref().filter(|(left, _)| left.at.min(askers.len()) == index) {
-                    leaving_card(ui, theme, keymap, mailbox, left, *gone);
+                for (left, gone, tint) in leaving.iter().filter(|(left, ..)| left.at.min(askers.len()) == index) {
+                    leaving_card(ui, theme, keymap, mailbox, left, *gone, *tint);
                 }
                 let Some(asker) = askers.get(index) else { break };
                 // The next card becomes the current one when the answered one has faded.
-                let current = index == 0 && !(holding && leaving.as_ref().is_some_and(|(left, _)| left.at == 0));
+                let current = index == 0 && !holding;
                 let (act, high) = sender_card(ui, theme, keymap, mailbox, asker, current, None);
                 if let Some(act) = act {
                     rows.acted.set(Some((asker.newest.id, act)));
                     if !motion::reduced(ui.ctx()) {
-                        let left = Answered { row: asker.newest.clone(), more: asker.more, at: index, keep_out: act == Act::Block, high };
-                        ui.data_mut(|data| data.insert_temp(answered_id(), left));
+                        answers.push(Answered { row: asker.newest.clone(), more: asker.more, at: index, keep_out: act == Act::Block, high, current });
                     }
                 }
+            }
+            if !answers.is_empty() {
+                ui.data_mut(|data| data.get_temp_mut_or_default::<Vec<Answered>>(answered_id()).extend(answers));
             }
             if let Some(id) = ui.data_mut(|data| data.remove_temp::<u64>(Id::unique("new-sender-opened"))) {
                 rows.clicked.set(Some(id));
@@ -1579,45 +1587,52 @@ struct Answered {
     keep_out: bool,
     /// The card's height, in points.
     high: f32,
+    /// It was the current card (its edge `cyan_edge`, from which the answer's colour eases in).
+    current: bool,
 }
 
-/// Where [`Answered`] is kept.
+/// Where the [`Answered`] cards still leaving are kept.
 fn answered_id() -> Id {
     Id::unique("queue-answered")
+}
+
+/// Forgets the cards still leaving: the queue is not shown, so they never play their motion again later.
+fn forget_answered(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<Vec<Answered>>(answered_id()));
 }
 
 /// How long a card answered shows its answer's colour before it fades, in seconds (the presentation's 160 ms).
 const ANSWER_HOLD: f32 = 0.16;
 
-/// The card answered and still leaving, unless its sender still waits (the answer failed): it is not drawn twice.
-fn answered(ctx: &egui::Context, askers: &[Asker<'_>]) -> Option<Answered> {
-    let left = ctx.data(|data| data.get_temp::<Answered>(answered_id()))?;
-    let address = left.row.address.to_lowercase();
-    if askers.iter().any(|asker| asker.newest.address.to_lowercase() == address) {
-        ctx.data_mut(|data| data.remove::<Answered>(answered_id()));
-        return None;
-    }
-    Some(left)
+/// The cards answered and still leaving, but those whose sender still waits (the answer failed): none is drawn twice.
+fn answered(ctx: &egui::Context, askers: &[Asker<'_>]) -> Vec<Answered> {
+    let left = ctx.data(|data| data.get_temp::<Vec<Answered>>(answered_id())).unwrap_or_default();
+    left.into_iter()
+        .filter(|left| {
+            let address = left.row.address.to_lowercase();
+            !askers.iter().any(|asker| asker.newest.address.to_lowercase() == address)
+        })
+        .collect()
 }
 
-/// How far the answered card has gone in this frame: it holds its answer's colour for [`ANSWER_HOLD`], fades over
-/// `fast` at an even pace, then its place closes over `row_collapse` on the design's curve. Gone, it is forgotten;
-/// repaints are asked for until then.
-fn answer_gone(ctx: &egui::Context, theme: &Theme, left: &Answered) -> Gone {
-    let (hold, fade, close) = (ANSWER_HOLD, theme.motion.fast, theme.motion.row_collapse);
+/// How far the answered card has gone in this frame, as the presentation plays M11 at the reduced level: its edge
+/// eases to the answer's colour over `fast` (CSS's `ease`) and holds it until [`ANSWER_HOLD`], it fades over `fast` at
+/// an even pace, then its place closes over `fast` on the design's curve. Repaints are asked for until it has gone.
+/// The share of the edge's colour comes with it.
+fn answer_gone(ctx: &egui::Context, theme: &Theme, left: &Answered) -> (Gone, f32) {
+    let (hold, fade, close) = (ANSWER_HOLD, theme.motion.fast, theme.motion.fast);
     let whole = hold + fade + close;
     let id = Id::unique("queue-leaving").with(left.row.address.to_lowercase());
     let at = motion::elapsed(ctx, id, whole) * whole;
-    if at >= whole {
-        ctx.data_mut(|data| data.remove::<Answered>(answered_id()));
-    }
     let share = |from: f32, span: f32| if span > 0.0 { ((at - from) / span).clamp(0.0, 1.0) } else { 1.0 };
-    Gone { faded: share(hold, fade), closed: motion::ease(share(hold + fade, close)) }
+    let tint = motion::css_ease(share(0.0, theme.motion.fast));
+    (Gone { faded: share(hold, fade), closed: motion::ease(share(hold + fade, close)) }, tint)
 }
 
 /// Draws the card `left` answered as far as it has `gone`: whole in its answer's colour, fading, then only the room it
-/// leaves, closing. What is pressed on it does nothing: it was answered.
-fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, left: &Answered, gone: Gone) {
+/// leaves, closing. What is pressed on it does nothing: it was answered. `tint`: how far its edge has eased from its
+/// own colour to the answer's.
+fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, left: &Answered, gone: Gone, tint: f32) {
     if gone.closed > 0.0 {
         // The card's place and the gap under it close together; the next card steps up into them.
         let room = (left.high + CARD_GAP) * (1.0 - gone.closed);
@@ -1626,11 +1641,14 @@ fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, 
         }
         return;
     }
-    let edge = if left.keep_out { theme.palette.minus } else { theme.palette.plus };
+    let p = &theme.palette;
+    let answer = if left.keep_out { p.minus } else { p.plus };
+    let from = if left.current { p.cyan_edge } else { p.line };
+    let edge = if tint >= 1.0 { answer } else { from.lerp_to_gamma(answer, tint.clamp(0.0, 1.0)) };
     let asker = Asker { newest: &left.row, more: left.more };
     ui.scope(|ui| {
         ui.multiply_opacity(1.0 - gone.faded);
-        let _ = sender_card(ui, theme, keymap, mailbox, &asker, left.at == 0, Some(edge));
+        let _ = sender_card(ui, theme, keymap, mailbox, &asker, left.current, Some(edge));
     });
 }
 
@@ -1651,6 +1669,7 @@ fn sender_card(
     current: bool,
     edge: Option<egui::Color32>,
 ) -> (Option<Act>, f32) {
+    let live = edge.is_none();
     let (p, f, s) = (&theme.palette, &theme.fonts, &theme.spacing);
     let message = asker.newest;
     let wide = ui.available_width().min(CARD_WIDE).floor();
@@ -1685,11 +1704,14 @@ fn sender_card(
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 10.0;
                             let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
-                            // The subject opens the message as a preview in the reader, which asks the same and more.
-                            let opened =
-                                ui.add(egui::Label::new(RichText::new(subject).font(f.body.id()).color(p.ink)).truncate().sense(Sense::click()));
-                            let spoken = mailbox.spoken(message);
-                            opened.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Link, true, &spoken));
+                            // The subject opens the message as a preview in the reader, which asks the same and more; on a
+                            // card answered and leaving it is plain text.
+                            let sense = if live { Sense::click() } else { Sense::hover() };
+                            let opened = ui.add(egui::Label::new(RichText::new(subject).font(f.body.id()).color(p.ink)).truncate().sense(sense));
+                            if live {
+                                let spoken = mailbox.spoken(message);
+                                opened.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Link, true, &spoken));
+                            }
                             if opened.clicked() {
                                 *open = true;
                             }
@@ -1741,7 +1763,7 @@ fn sender_card(
         ui.painter().set(slot, egui::Shape::Vec(card));
         rect.height()
     });
-    if opened {
+    if opened && live {
         ui.data_mut(|data| data.insert_temp(Id::unique("new-sender-opened"), message.id));
     }
     (answer, inner.inner)
@@ -1892,11 +1914,17 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     ui.add_space(1.0);
     #[cfg(test)]
     ui.data_mut(|data| data.remove::<Rect>(Id::unique("list-view-rect")));
+    if mailbox.place() != Place::Senders {
+        forget_answered(ui.ctx());
+    }
     let outbox = mailbox.place() == Place::Outbox && mailbox.query().is_empty();
     let none = if outbox { mailbox.outbox().is_empty() } else { mailbox.messages().is_empty() };
     // A list with nothing in it, the inbox with senders waiting aside: its empty state.
     let waits = mailbox.place() == Place::View(Role::Inbox) && mailbox.query().is_empty() && !mailbox.waiting().is_empty();
-    if none && !waits && mailbox.left_row().is_none() {
+    // The last sender answered in New senders: their card leaves before the queue's empty state shows.
+    let answering =
+        mailbox.place() == Place::Senders && ui.data(|data| data.get_temp::<Vec<Answered>>(answered_id())).is_some_and(|left| !left.is_empty());
+    if none && !waits && mailbox.left_row().is_none() && !answering {
         ui.data_mut(|data| data.insert_temp::<std::sync::Arc<[u64]>>(order_id(), std::sync::Arc::from(Vec::new())));
         empty_list(ui, theme, keymap, mailbox);
         return Asked { out: true, ..Asked::default() };
