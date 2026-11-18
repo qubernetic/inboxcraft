@@ -16,8 +16,8 @@
 //! point (1 to 4, 1 when left out), `text_scale` the text scale in per cent (90 to 130 in steps of 10, 100 when left
 //! out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
-//! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
-//! (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
+//! sample: `empty`, `form` (typed by hand), `invalid` (a port and a CalDAV address typed wrong), `detected` (after
+//! Detect), `checking` (the third step under way), `passed` or `failed` (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
 //! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page,
 //! `shortcuts` set to `true` the Shortcuts page, where `capture` names the action waiting for a key
 //! (`ui.calendar.show`), `sending` set to `true` the Sending page, `triage` set to `true` the Triage page,
@@ -136,7 +136,8 @@ pub struct Shot {
     /// Whether the selected message shows its quotes.
     #[serde(default)]
     pub quotes: Option<bool>,
-    /// The add-account page: `form`, `detected`, `checking`, `passed` or `failed`.
+    /// The add-account page: `empty`, `form`, `invalid` (a port and a CalDAV address typed wrong), `detected`,
+    /// `checking` (at its third step), `passed` or `failed`.
     #[serde(default)]
     pub onboard: Option<String>,
     /// Whether the appearance settings page is open.
@@ -286,26 +287,33 @@ fn pictured_proposal() -> Proposal {
 fn onboard(app: InboxApp, out: &str, state: &str) -> Result<InboxApp, UiError> {
     let passed = |step| (step, StepStatus::Passed);
     let workers = match state {
-        "form" | "detected" | "passed" => Scripted::passing(),
-        "checking" => Scripted::answering(&[passed(CheckStep::Dns), passed(CheckStep::Tcp), passed(CheckStep::Tls)]).unfinished(),
+        "empty" | "form" | "invalid" | "detected" | "passed" => Scripted::passing(),
+        "checking" => Scripted::answering(&[passed(CheckStep::Dns), passed(CheckStep::Tcp)]).unfinished(),
         "failed" => Scripted::answering(&[
             passed(CheckStep::Dns),
             passed(CheckStep::Tcp),
             passed(CheckStep::Tls),
             (CheckStep::Certificate, StepStatus::Failed(ErrorKind::CertificateExpired)),
         ]),
-        other => return Err(bad(format!("{out}: onboard {other:?} is not form, detected, checking, passed or failed"))),
+        other => return Err(bad(format!("{out}: onboard {other:?} is not empty, form, invalid, detected, checking, passed or failed"))),
     };
     let mut app = app.with_accounts(Arc::new(Pictured), Box::new(Proposed::new(pictured_proposal())), Box::new(workers));
     let (onboarding, mailbox) = app.onboarding_mut();
     onboarding.open();
+    if state == "empty" {
+        return Ok(app);
+    }
     let form = onboarding.form_mut();
     form.address = "robin@example.org".to_owned();
     form.display_name = "Robin Example".to_owned();
     form.password = Secret::new("invented-pass");
-    if state == "form" {
+    if state == "form" || state == "invalid" {
         form.host = "mail.example.org".to_owned();
         form.security = Some(Security::StartTls);
+        if state == "invalid" {
+            form.port = "99999".to_owned();
+            form.caldav = "http://dav.example.org/robin/".to_owned();
+        }
         return Ok(app);
     }
     onboarding.detect();

@@ -1147,13 +1147,6 @@ fn the_scroll_scan_sees_an_area_shown_without_the_component() {
     assert!(scan("crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {});").is_empty());
 }
 
-/// The raw widgets a view may still use, each until the slice that replaces it: the details on adding an account fold
-/// under an egui collapsing header (the gaps line "The details on adding an account still fold under an egui
-/// collapsing header", #233). Its import and its one use.
-fn admitted(file: &Path, what: &str) -> bool {
-    file == Path::new("src/draw/onboard.rs") && what == "CollapsingHeader"
-}
-
 #[test]
 fn no_view_uses_a_raw_egui_widget() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1173,7 +1166,7 @@ fn no_view_uses_a_raw_egui_widget() {
         // Only the scroll bar's own code shows a scroll area; components may use egui's widgets, views may not.
         let mut sites = if *file == scroll { Vec::new() } else { bare_scroll_areas(&code) };
         if !file.starts_with(&components) {
-            sites.extend(raw_widgets(&code).into_iter().filter(|(_, what)| !admitted(file.strip_prefix(root).unwrap(), what)));
+            sites.extend(raw_widgets(&code));
         }
         for (at, what) in sites {
             let line = code[..at].chars().count();

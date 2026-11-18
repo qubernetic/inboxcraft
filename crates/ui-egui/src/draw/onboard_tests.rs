@@ -14,11 +14,9 @@ use inboxcraft_model::{CheckStep, ErrorKind, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
-use super::tests::drew_icon;
-use crate::iconset::IconId;
 use crate::mailbox::Mailbox;
 use crate::onboard::tests::{FakeWorkers, Kept, PASSWORD, filled, mailbox, proposal};
-use crate::onboard::{MAX_PASSWORD_CHARS, Proposed, Secret, Source, Stage};
+use crate::onboard::{MAX_PASSWORD_CHARS, Proposed, Secret, Security, Source, Stage, StepState};
 use crate::sample;
 use crate::settings::Section;
 
@@ -53,6 +51,14 @@ fn open_form(harness: &mut Harness<'static, InboxApp>) {
     harness.run();
 }
 
+/// Presses the control called `label`, scrolled into view first, as a person would.
+fn press(harness: &mut Harness<'static, InboxApp>, label: &str) {
+    harness.get_by_label(label).scroll_to_me();
+    harness.run();
+    harness.get_by_label(label).click();
+    harness.run();
+}
+
 /// The button called `label` on the settings sheet: the window under it may hold one of the same name, and the sheet
 /// comes after it in the tree.
 fn on_sheet<'h>(harness: &'h Harness<'static, InboxApp>, label: &'h str) -> egui_kittest::Node<'h> {
@@ -82,8 +88,7 @@ fn the_empty_window_offers_add_account_which_opens_settings_on_accounts_where_th
     assert!(sheet.contains_rect(harness.get_by_label("Add an account").rect()), "the form is on the sheet");
     harness.get_by_label("Password");
     harness.check_accessibility();
-    harness.get_by_label("Cancel").click();
-    harness.run();
+    press(&mut harness, "Cancel");
     assert_eq!(harness.state().onboarding().stage(), Stage::Closed);
     assert_eq!(harness.state().settings().section(), Section::Accounts, "Cancel leads back to the list");
     on_sheet(&harness, "Add account").click();
@@ -196,21 +201,18 @@ fn detect_add_and_a_passing_check_show_every_step_with_its_server() {
     assert_eq!(harness.state().onboarding().form().host, "imap.example.org");
     // After Detect the form ends below the 780-point sheet (its fields and labels follow Plex's taller line): the
     // button is scrolled into view first, as a person would.
-    harness.get_by_label("Check and add").scroll_to_me();
-    harness.run();
-    harness.get_by_label("Check and add").click();
-    harness.run();
+    press(&mut harness, "Check and add");
     harness.run();
     assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some(PASSWORD));
-    harness.get_by_label("Checking carol@example.org");
+    harness.get_by_label("Checked carol@example.org");
     harness.get_by_label("Signed in. InboxCraft now fetches the folders and the mail.");
     harness.get_by_label("IMAP sign-in: passed");
     harness.get_by_label("Certificate: passed");
-    harness.get_by_label("imap.example.org:993 · issued by Example Test CA");
-    harness.get_by_label("SMTP sign-in: no server set");
+    let list = harness.get_by_label("Certificate: passed").rect();
+    assert!(texts_in(harness.output(), list).iter().any(|text| text == "certificate · issued by Example Test CA"), "the issuer on its line");
+    harness.get_by_label("SMTP sign-in: no server");
     harness.check_accessibility();
-    harness.get_by_label("Done").click();
-    harness.run();
+    press(&mut harness, "Done");
     assert_eq!(harness.state().onboarding().stage(), Stage::Closed);
     harness.get_by_label("carol@example.org, carol@example.org");
 }
@@ -223,25 +225,24 @@ fn a_failed_step_offers_to_check_again_or_change_the_settings() {
     open_form(&mut harness);
     type_in(&mut harness);
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
-    harness.get_by_label("Check and add").click();
-    harness.run();
+    press(&mut harness, "Check and add");
     harness.run();
     // The reason stands under the title, as the design has it.
     let reason = harness.get_by_label(&format!("Connection (TCP) failed: {}", ErrorKind::MailPortsBlocked)).rect();
-    let title = harness.get_by_label("Checking carol@example.org").rect();
+    let title = harness.get_by_label("Checked carol@example.org").rect();
     assert!(reason.top() >= title.bottom() - 1.0 && reason.top() - title.bottom() < 40.0, "{reason:?} under {title:?}");
     harness.get_by_label("Connection (TCP): failed");
-    harness.get_by_label(&ErrorKind::MailPortsBlocked.to_string());
+    let line = harness.get_by_label("Connection (TCP): failed").rect();
+    assert!(texts_in(harness.output(), line).iter().any(|text| *text == ErrorKind::MailPortsBlocked.to_string()), "the sentence under its line");
     harness.get_by_label("Encryption (TLS): skipped");
-    for id in [IconId::Done, IconId::Failed, IconId::Skipped] {
-        assert!(drew_icon(harness.output(), id), "{id:?}");
+    let painted = texts_in(harness.output(), egui::Rect::EVERYTHING);
+    for mark in ["[ ok ]", "[fail]", "[skip]"] {
+        assert!(painted.iter().any(|text| text == mark), "{mark}");
     }
     harness.check_accessibility();
-    harness.get_by_label("Check again").click();
-    harness.run();
+    press(&mut harness, "Check again");
     harness.get_by_label("Connection (TCP): failed");
-    harness.get_by_label("Change settings").click();
-    harness.run();
+    press(&mut harness, "Change settings");
     assert_eq!(harness.state().onboarding().stage(), Stage::Form);
     assert!(kept.passwords.lock().unwrap().is_empty());
     harness.get_by_label("Add an account");
@@ -289,14 +290,14 @@ fn every_control_of_the_form_has_a_name_in_both_modes() {
         harness.state_mut().onboarding_mut().0.open();
         harness.run();
         harness.check_accessibility();
-        // The IMAP server's row comes first; the outgoing server's has its own pair.
-        harness.get_all_by_label("STARTTLS").next().unwrap().click();
+        // The IMAP server's row has its own select; the outgoing server's has another.
+        press(&mut harness, "IMAP security");
+        harness.get_by_role_and_label(Role::MenuItemRadio, "STARTTLS").click();
         harness.run();
         assert_eq!(harness.state().onboarding().form().security, Some(crate::onboard::Security::StartTls));
         assert_eq!(harness.state().onboarding().form().smtp_security, None);
-        // An error shows above the form.
-        harness.get_by_label("Check and add").click();
-        harness.run();
+        // The error stands under its field.
+        press(&mut harness, "Check and add");
         harness.get_by_label("Enter the address.");
     }
 }
@@ -330,11 +331,9 @@ fn undo_brings_no_password_back_after_change_settings() {
     harness.run();
     type_password(&mut harness, PASSWORD);
     assert_eq!(harness.state().onboarding().form().password.expose(), PASSWORD);
-    harness.get_by_label("Check and add").click();
+    press(&mut harness, "Check and add");
     harness.run();
-    harness.run();
-    harness.get_by_label("Change settings").click();
-    harness.run();
+    press(&mut harness, "Change settings");
     assert_eq!(harness.state().onboarding().stage(), Stage::Form);
     undo_in_password(&mut harness);
     assert!(harness.state().onboarding().form().password.is_empty(), "undo restored the password");
@@ -350,11 +349,9 @@ fn undo_brings_no_password_of_an_earlier_account_into_the_next() {
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
     harness.run();
     type_password(&mut harness, PASSWORD);
-    harness.get_by_label("Check and add").click();
+    press(&mut harness, "Check and add");
     harness.run();
-    harness.run();
-    harness.get_by_label("Done").click();
-    harness.run();
+    press(&mut harness, "Done");
     harness.state_mut().onboarding_mut().0.open();
     harness.run();
     harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
@@ -362,8 +359,7 @@ fn undo_brings_no_password_of_an_earlier_account_into_the_next() {
     harness.run();
     undo_in_password(&mut harness);
     assert!(harness.state().onboarding().form().password.is_empty(), "undo restored the first account's password");
-    harness.get_by_label("Check and add").click();
-    harness.run();
+    press(&mut harness, "Check and add");
     harness.get_by_label("Enter the password.");
     assert_eq!(kept.passwords.lock().unwrap().get(&2), None, "no password for the second account");
 }
@@ -395,8 +391,7 @@ fn closing_the_window_forgets_the_password_of_every_account_added_in_it() {
             harness.state_mut().onboarding_mut().0.form_mut().address = address.to_owned();
             harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
             harness.run();
-            harness.get_by_label("Check and add").click();
-            harness.run();
+            press(&mut harness, "Check and add");
             harness.run();
             let close = if harness.query_by_label("Done").is_some() { "Done" } else { "Back to the accounts" };
             harness.get_by_label(close).click();
@@ -417,12 +412,10 @@ fn a_password_the_store_did_not_forget_in_change_settings_is_forgotten_at_exit()
     type_in(&mut harness);
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
     harness.run();
-    harness.get_by_label("Check and add").click();
-    harness.run();
+    press(&mut harness, "Check and add");
     harness.run();
     kept.refuse_forget.store(true, Ordering::SeqCst);
-    harness.get_by_label("Change settings").click();
-    harness.run();
+    press(&mut harness, "Change settings");
     assert!(harness.state().onboarding().error().unwrap().starts_with("The password could not be removed"));
     assert_eq!(kept.passwords.lock().unwrap().len(), 1);
     kept.refuse_forget.store(false, Ordering::SeqCst);
@@ -479,4 +472,284 @@ fn the_box_to_ask_mozilla_s_list_ticks_by_pointer_and_by_space() {
     harness.key_press(Key::Space);
     harness.run();
     assert!(!ticked(&harness), "Space takes the tick off");
+}
+
+/// The add form open over a window without accounts.
+fn form_open(theme: egui::Theme, workers: FakeWorkers) -> Harness<'static, InboxApp> {
+    let mut harness = harness(app(&Kept::default(), workers), theme);
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    harness
+}
+
+#[test]
+fn a_field_s_error_stands_under_its_field() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = form_open(theme, FakeWorkers::passing());
+        // A port typed wrong says so at once, 6 under its row, from the row's left; nothing at the page's top.
+        harness.state_mut().onboarding_mut().0.form_mut().port = "99999".to_owned();
+        harness.run();
+        let host = harness.get_by_label("IMAP server").rect();
+        let port = harness.get_all_by_label("Port").next().unwrap().rect();
+        let error = harness.get_by_label("The port is a number from 1 to 65535.").rect();
+        assert_eq!((error.top(), error.left()), (port.bottom() + 6.0, host.left()), "{theme:?}: {error:?} under {port:?}");
+        assert!(harness.query_by_label_contains("Error:").is_none(), "{theme:?}: no error banner for a field's error");
+        // A CalDAV address the app does not take, under its field.
+        harness.state_mut().onboarding_mut().0.form_mut().caldav = "http://dav.example.org/".to_owned();
+        harness.run();
+        let caldav = harness.get_by_label("CalDAV address, for calendars").rect();
+        let said = harness.get_by_label("The CalDAV address starts with https:// and holds no user name.").rect();
+        assert_eq!((said.top(), said.left()), (caldav.bottom() + 6.0, caldav.left()), "{theme:?}");
+        // What is missing says so under its field when the form is sent, and goes when the field is typed in.
+        press(&mut harness, "Check and add");
+        let address = harness.get_by_label("Address").rect();
+        let missing = harness.get_by_label("Enter the address.").rect();
+        assert_eq!((missing.top(), missing.left()), (address.bottom() + 6.0, address.left()), "{theme:?}");
+        harness.get_by_label("Address").focus();
+        harness.run();
+        harness.get_by_label("Address").type_text("carol@example.org");
+        harness.run();
+        harness.run();
+        assert!(harness.query_by_label("Enter the address.").is_none(), "{theme:?}: typing takes the error away");
+        assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    }
+}
+
+#[test]
+fn the_check_shows_steps_up_to_the_running_one() {
+    let workers = FakeWorkers::answering(&[(CheckStep::Dns, StepStatus::Passed), (CheckStep::Tcp, StepStatus::Passed)]).unfinished();
+    let mut harness = form_open(egui::Theme::Dark, workers);
+    type_in(&mut harness);
+    harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
+    harness.run();
+    press(&mut harness, "Check and add");
+    harness.run();
+    harness.get_by_label("Checking carol@example.org");
+    harness.get_by_label("Each step is printed as it starts and gets its answer as it ends.");
+    harness.get_by_label("Name lookup (DNS): passed");
+    harness.get_by_label("Connection (TCP): passed");
+    harness.get_by_label("Encryption (TLS): running");
+    for later in ["Certificate", "IMAP sign-in", "SMTP sign-in", "CalDAV calendars"] {
+        assert!(harness.query_by_label_contains(later).is_none(), "{later} is not printed before it starts");
+    }
+    let painted = texts_in(harness.output(), egui::Rect::EVERYTHING);
+    assert!(painted.iter().any(|text| text == "[ .. ]") && painted.iter().filter(|text| *text == "[ ok ]").count() == 2, "{painted:?}");
+    assert!(harness.query_by_label("Check again").is_none() && harness.query_by_label("Done").is_none(), "no button while it runs");
+}
+
+#[test]
+fn printed_steps_end_at_the_one_under_way_and_a_check_that_ended_shows_all() {
+    let row = |id: &str, state| crate::onboard::StepRow { id: id.to_owned(), state, server: None, issuer: None, message: None };
+    let steps = [row("dns", StepState::Passed), row("tcp", StepState::Pending), row("tls", StepState::Pending)];
+    let running = super::onboard::printed(&steps, true);
+    assert_eq!(
+        running.iter().map(|(row, state)| (row.id.as_str(), *state)).collect::<Vec<_>>(),
+        [("dns", crate::component::check_step::StepState::Passed), ("tcp", crate::component::check_step::StepState::Running)]
+    );
+    let ended = super::onboard::printed(&steps, false);
+    assert_eq!(ended.len(), 3);
+    assert_eq!(ended[2].1, crate::component::check_step::StepState::Waiting);
+    assert!(super::onboard::printed(&[], true).is_empty());
+}
+
+#[test]
+fn no_control_offers_an_unencrypted_sign_in() {
+    // There are two encryptions, and no third.
+    for security in [Security::Tls, Security::StartTls] {
+        match security {
+            Security::Tls | Security::StartTls => {}
+        }
+    }
+    let kept = Kept::default();
+    let mut harness = harness(app(&kept, FakeWorkers::passing()), egui::Theme::Light);
+    {
+        let (onboarding, mailbox) = harness.state_mut().onboarding_mut();
+        onboarding.open();
+        filled(onboarding.form_mut());
+        onboarding.add(mailbox);
+        onboarding.close();
+    }
+    harness.state_mut().pump();
+    for stage in ["add", "edit"] {
+        if stage == "add" {
+            harness.state_mut().onboarding_mut().0.open();
+        } else {
+            let (onboarding, mailbox) = harness.state_mut().onboarding_mut();
+            onboarding.edit(mailbox, 1);
+        }
+        harness.run();
+        for select in ["IMAP security", "Outgoing security"] {
+            press(&mut harness, select);
+            let mut offered: Vec<String> = harness.query_all_by_role(Role::MenuItemRadio).filter_map(|node| node.accesskit_node().label()).collect();
+            offered.sort();
+            assert_eq!(offered, ["STARTTLS", "TLS"], "{stage}: {select}");
+            harness.get_by_role_and_label(Role::MenuItemRadio, "TLS").click();
+            harness.run();
+        }
+        let controls =
+            [Role::Button, Role::CheckBox, Role::RadioButton, Role::MenuItemRadio, Role::MenuItem, Role::ComboBox, Role::Link, Role::ListBoxOption];
+        for node in harness.root().children_recursive().filter(|node| controls.contains(&node.accesskit_node().role())) {
+            let name = node.accesskit_node().label().unwrap_or_default().to_lowercase();
+            for way_round in ["unencrypted", "no encryption", "without encryption", "plain", "insecure", "none"] {
+                assert!(!name.contains(way_round), "{stage}: {name}");
+            }
+        }
+    }
+}
+
+/// Every property of every node of the AccessKit tree, in words.
+fn tree(harness: &Harness<'static, InboxApp>) -> String {
+    harness.root().children_recursive().map(|node| format!("{:?}", node.accesskit_node().data())).collect::<Vec<_>>().join("\n")
+}
+
+#[test]
+fn a_password_is_never_in_the_accesskit_tree() {
+    let failed = FakeWorkers::answering(&[(CheckStep::Tcp, StepStatus::Failed(ErrorKind::MailPortsBlocked))]);
+    let mut harness = form_open(egui::Theme::Dark, failed);
+    harness.state_mut().onboarding_mut().0.form_mut().address = "carol@example.org".to_owned();
+    harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
+    harness.run();
+    type_password(&mut harness, PASSWORD);
+    assert_eq!(harness.state().onboarding().form().password.expose(), PASSWORD, "typed");
+    // Typed, with an error under the field, sent and checked, and back on the form: never in the tree.
+    for step in ["typed", "error", "checked", "changed"] {
+        match step {
+            "error" => {
+                harness.state_mut().onboarding_mut().0.form_mut().port = "0".to_owned();
+                harness.run();
+            }
+            "checked" => {
+                harness.state_mut().onboarding_mut().0.form_mut().port.clear();
+                harness.run();
+                press(&mut harness, "Check and add");
+                harness.run();
+            }
+            "changed" => press(&mut harness, "Change settings"),
+            _ => {}
+        }
+        let tree = tree(&harness);
+        assert!(!tree.contains(PASSWORD) && !tree.contains("Meadow"), "{step}: the password is in the tree");
+        assert!(step == "checked" || tree.contains("Password"), "{step}: the field is there, by name");
+    }
+}
+
+#[test]
+fn hostile_text_never_panics_and_nothing_is_cut_silently() {
+    let mut harness = form_open(egui::Theme::Light, FakeWorkers::passing());
+    {
+        let form = harness.state_mut().onboarding_mut().0.form_mut();
+        form.address = format!("{}@example.org", "\u{0}\r\n\t\u{202e}x".repeat(700));
+        form.host = format!("{}.example.org", "h".repeat(4000));
+        form.label = "é".repeat(3000);
+        form.port = "70000".to_owned();
+        form.smtp_port = "-1".to_owned();
+        form.caldav = format!("https://{}", "d".repeat(4000));
+    }
+    harness.run();
+    assert_eq!(harness.query_all_by_label("The port is a number from 1 to 65535.").count(), 2, "under each server row");
+    // A host past what a field takes, typed: refused whole, with the field's sentence.
+    harness.state_mut().onboarding_mut().0.form_mut().host.clear();
+    harness.run();
+    harness.get_by_label("IMAP server").focus();
+    harness.run();
+    harness.get_by_label("IMAP server").type_text(&"h".repeat(crate::component::field::MAX_LINE + 1));
+    harness.run();
+    assert!(harness.state().onboarding().form().host.is_empty(), "refused whole");
+    assert!(harness.query_by_label_contains("Too long").is_some(), "and said so");
+    // An engine's sentence of any length under a failed step: drawn wrapped, whole for a screen reader.
+    let long = "the server said no ".repeat(600);
+    let row = |id: &str, state, message: Option<&str>| crate::onboard::StepRow {
+        id: id.to_owned(),
+        state,
+        server: Some(format!("{}:993", "h".repeat(3000))),
+        issuer: Some("\u{202e}Example\u{0} CA".repeat(100)),
+        message: message.map(str::to_owned),
+    };
+    let steps = vec![row("dns", StepState::Passed, None), row("certificate", StepState::Passed, None), row("tcp", StepState::Failed, Some(&long))];
+    // On a page of its own: the form's scroll would keep the top of the check out of sight.
+    let mut harness = form_open(egui::Theme::Light, FakeWorkers::passing());
+    harness.state_mut().onboarding_mut().0.show_check(1, steps, false);
+    harness.run();
+    harness.run();
+    let whole = format!("Connection (TCP) failed: {}", long.trim_end());
+    // A label's words are its value in the tree.
+    let labels: Vec<String> = harness
+        .query_all_by_label_contains("the server said no")
+        .filter_map(|node| node.accesskit_node().label().or_else(|| node.accesskit_node().value()))
+        .collect();
+    assert!(
+        labels.iter().any(|label| label.starts_with(&whole)),
+        "{:?}",
+        labels.iter().map(|label| label.chars().take(80).collect::<String>()).collect::<Vec<_>>()
+    );
+}
+
+/// The page in `scene`: `welcome`, `form`, `error` (a port typed wrong), `detected`, `running` (the check at its third
+/// step), `failed` or `passed`.
+fn scene(name: &str, theme: egui::Theme) -> Harness<'static, InboxApp> {
+    let passed = |step| (step, StepStatus::Passed);
+    let workers = match name {
+        "running" => FakeWorkers::answering(&[passed(CheckStep::Dns), passed(CheckStep::Tcp)]).unfinished(),
+        "failed" => FakeWorkers::answering(&[passed(CheckStep::Dns), (CheckStep::Tcp, StepStatus::Failed(ErrorKind::MailPortsBlocked))]),
+        _ => FakeWorkers::passing(),
+    };
+    let mut harness = harness(app(&Kept::default(), workers), theme);
+    if name == "welcome" {
+        return harness;
+    }
+    harness.state_mut().onboarding_mut().0.open();
+    type_in(&mut harness);
+    match name {
+        "error" => harness.state_mut().onboarding_mut().0.form_mut().port = "99999".to_owned(),
+        "detected" => {
+            harness.state_mut().onboarding_mut().0.detect();
+            harness.run();
+        }
+        "running" | "failed" | "passed" => {
+            harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
+            let (onboarding, mailbox) = harness.state_mut().onboarding_mut();
+            onboarding.add(mailbox);
+            harness.state_mut().pump();
+        }
+        _ => {}
+    }
+    harness.run();
+    harness.run();
+    harness
+}
+
+#[test]
+fn every_scene_of_the_page_rests_and_tab_reaches_its_controls() {
+    for name in ["welcome", "form", "error", "detected", "running", "failed", "passed"] {
+        for reduce in [false, true] {
+            let mut harness = scene(name, egui::Theme::Dark);
+            harness.state_mut().set_reduce_motion(reduce);
+            harness.run();
+            assert!(crate::component::tests::rests(&mut harness, 8), "{name}: asks for frames at rest (reduced motion {reduce})");
+        }
+        let mut harness = scene(name, egui::Theme::Light);
+        // The page's own controls: on the sheet, or the welcome's box.
+        let place = harness
+            .query_by_role_and_label(Role::Dialog, "Settings")
+            .or_else(|| harness.query_by_role_and_label(Role::Group, "Welcome"))
+            .map(|node| node.rect())
+            .unwrap();
+        let own: Vec<String> = harness
+            .root()
+            .children_recursive()
+            .filter(|node| {
+                let inside = node.accesskit_node().bounding_box().is_some_and(|at| {
+                    let at = egui::Rect::from_min_max(egui::pos2(at.x0 as f32, at.y0 as f32), egui::pos2(at.x1 as f32, at.y1 as f32));
+                    place.contains_rect(at)
+                });
+                inside && node.accesskit_node().role() != Role::Label
+            })
+            .filter(|node| node.accesskit_node().data().supports_action(egui::accesskit::Action::Focus) && !node.accesskit_node().is_disabled())
+            .filter_map(|node| node.accesskit_node().label())
+            .collect();
+        assert!(!own.is_empty(), "{name}");
+        let missed = crate::component::tests::keyboard_walk(&mut harness);
+        let missed: Vec<&String> = missed.iter().filter(|label| own.contains(label)).collect();
+        assert!(missed.is_empty(), "{name}: Tab never reaches {missed:?}");
+    }
 }

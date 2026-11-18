@@ -1850,6 +1850,7 @@ impl InboxApp {
             onboard::Asked::CheckAgain => onboarding.check_again(mailbox),
             onboard::Asked::Change => onboarding.change(mailbox),
             onboard::Asked::Close => onboarding.close(),
+            onboard::Asked::Cancel => onboarding.cancel(),
         }
         // The new account's jobs go out in this frame.
         self.pump();

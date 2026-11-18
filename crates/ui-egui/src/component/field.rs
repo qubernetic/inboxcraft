@@ -462,6 +462,20 @@ pub(crate) fn refusal(ctx: &egui::Context, id: Id) -> Option<(String, bool)> {
         .map(|kept| (Cap::Chars(MAX_LINE).sentence(), fresh(ctx, kept.since)))
 }
 
+/// The tag of a `Ui` whose fields say their errors through their caller ([`quietly`]).
+const QUIET: &str = "inboxcraft-field-quiet";
+
+/// Draws `add` with the one-line fields in it marking an error by their edge alone: the caller says the error, under
+/// a row of fields. What a field refuses itself (text past its cap) it still says under itself.
+pub fn quietly<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope_builder(UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag(QUIET)), add).inner
+}
+
+/// Whether `ui` lies inside [`quietly`].
+fn is_quiet(ui: &Ui) -> bool {
+    ui.stack().iter().any(|frame| frame.tags().contains(QUIET))
+}
+
 /// The kind of a one-line field.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Line {
@@ -708,7 +722,8 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
         let guarded = guard(ui, id, text, cap);
         let said = guarded.said;
         let refusal = said.map(|_| cap.sentence());
-        let bring = said == Some(Refusal::Fresh) && field.error.is_none();
+        let quiet = is_quiet(ui);
+        let bring = said == Some(Refusal::Fresh) && (field.error.is_none() || quiet);
         let field = &Field { error: field.error.or(refusal.as_deref()), ..*field };
         let seen = seen(ui, id, rect, field, shown);
         let (fill, edge, dashed) = box_look(theme, field, seen);
@@ -787,7 +802,7 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
             crate::iconset::paint_glyph(&painter, at, glyph, ink);
         }
         let note = (stored && !disabled_password).then_some(tr!("The stored password is in your system's credential store and is never shown."));
-        under(ui, theme, field.error, note, width, bring);
+        under(ui, theme, if quiet { refusal.as_deref() } else { field.error }, note, width, bring);
         response
     })
     .inner

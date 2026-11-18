@@ -78,6 +78,13 @@ pub(crate) fn spoken(step: &str, state: StepState) -> String {
 /// A step of the check across `ui`'s width: `step`, what it checks (`detail`), `note` at the right end, in `state`;
 /// `message` under it when it failed.
 pub fn check_step(ui: &mut Ui, theme: &Theme, step: &str, detail: &str, note: &str, state: StepState, message: Option<&str>) {
+    check_step_named(ui, theme, step, &spoken(step, state), detail, note, state, message);
+}
+
+/// [`check_step`] that a screen reader hears as `name` (the step's whole name and how it stands) where the line prints
+/// a short one.
+#[allow(clippy::too_many_arguments)]
+pub fn check_step_named(ui: &mut Ui, theme: &Theme, step: &str, name: &str, detail: &str, note: &str, state: StepState, message: Option<&str>) {
     let f = &theme.fonts;
     let p = &theme.palette;
     let (mark, [mark_ink, step_ink, detail_ink]) = look(theme, state);
@@ -87,7 +94,7 @@ pub fn check_step(ui: &mut Ui, theme: &Theme, step: &str, detail: &str, note: &s
     let high = if message.is_some() { line + MESSAGE_LINE } else { line };
     let (_, rect) = ui.allocate_space(vec2(width, high));
     let response = ui.interact(rect, ui.scope_id().with("check-step").with(step).with(detail), Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, spoken(step, state)));
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, name));
     if !ui.is_rect_visible(rect) {
         return;
     }

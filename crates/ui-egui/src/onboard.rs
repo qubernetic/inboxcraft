@@ -1224,6 +1224,14 @@ impl Onboarding {
         };
     }
 
+    /// Shows the check of the account `id` with `steps`, `running` or not: a test's way to any check at all.
+    #[cfg(test)]
+    pub(crate) fn show_check(&mut self, id: u64, steps: Vec<StepRow>, running: bool) {
+        self.stage = Stage::Checking(id);
+        self.steps = steps;
+        self.running = running;
+    }
+
     /// Removes from the credential store the password of every account added here, for the end of a window over a
     /// store that is not kept, whose accounts the passwords would outlive. A window over a kept store does not call it:
     /// a password stays until its account is removed. One the credential store refuses again stays behind.

@@ -35,8 +35,15 @@
 # The window with no account yet (#238): the welcome box in the middle, with Add account and where it leads.
 {"out": "docs/images/welcome-light.png", "mode": "light", "size": [1200, 820], "first": true}
 {"out": "docs/images/welcome-dark.png", "mode": "dark", "size": [1200, 820], "first": true}
-# Adding an account (E1.11), over the sample: the form typed by hand, after Detect, the check under way, passed, and
+# Adding an account (E1.11, #238), over the sample: the form empty, typed by hand, with a port and a CalDAV address
+# typed wrong, at 130 % text, after Detect (what it asked beside the form), the check at its third step, passed, and
 # failed at the certificate. The check is scripted; nothing connects.
+{"out": "docs/images/onboard-empty-light.png", "mode": "light", "size": [1200, 820], "onboard": "empty"}
+{"out": "docs/images/onboard-empty-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "empty"}
+{"out": "docs/images/onboard-invalid-light.png", "mode": "light", "size": [1200, 820], "onboard": "invalid"}
+{"out": "docs/images/onboard-invalid-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "invalid"}
+{"out": "docs/images/onboard-form-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "onboard": "form"}
+{"out": "docs/images/onboard-form-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "onboard": "form"}
 {"out": "docs/images/onboard-form-light.png", "mode": "light", "size": [1200, 820], "onboard": "form"}
 {"out": "docs/images/onboard-form-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "form"}
 {"out": "docs/images/onboard-detected-light.png", "mode": "light", "size": [1200, 820], "onboard": "detected"}
