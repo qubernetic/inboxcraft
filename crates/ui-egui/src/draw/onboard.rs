@@ -102,9 +102,6 @@ const STEP_GAP: f32 = 2.0;
 /// The room between the column's entries, in points.
 const ASKED_GAP: f32 = 10.0;
 
-/// The most lines of what Detect asked, and of what failed, the column shows.
-const MOST_ASKED: usize = 32;
-
 /// The most lines a sentence of the page wraps onto before its end is cut with one ellipsis. A sentence from the engine
 /// or a server is at most [`crate::mailbox::MAX_SHOWN`] characters, so it never comes near.
 const MOST_ROWS: usize = 64;
@@ -381,7 +378,7 @@ fn domain(address: &str) -> &str {
 fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding, faults: &Faults, width: f32) -> (bool, bool) {
     let f = &theme.fonts;
     let detecting = onboarding.detecting();
-    let found = onboarding.found().cloned();
+    let found = onboarding.found_shared();
     let form = onboarding.form_mut();
     let (mut detect, mut edited) = (false, false);
     let name = if detecting { tr!("Detecting…") } else { tr!("Detect") };
@@ -427,23 +424,20 @@ fn asked_column(ui: &mut Ui, theme: &Theme, found: Option<&Found>, width: f32) {
     let p = &theme.palette;
     let f = &theme.fonts;
     ui.spacing_mut().item_spacing.y = ASKED_GAP;
-    component::label(ui, f.label, &tr!("What Detect asked ({count})", count = found.asked.len()), p.muted);
-    let answer =
-        |question: &str| found.failed.iter().find_map(|line| line.strip_prefix(question).and_then(|rest| rest.strip_prefix(": "))).map(str::to_owned);
-    for question in found.asked.iter().take(MOST_ASKED) {
+    component::label(ui, f.label, &tr!("What Detect asked ({count})", count = found.asked_count()), p.muted);
+    for (question, cause) in found.column() {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             words(ui, question, f.mono_s, p.ink, width);
-            if let Some(answer) = answer(question) {
-                words(ui, &answer, f.mono_s, p.muted, width);
+            if let Some(cause) = cause {
+                words(ui, cause, f.mono_s, p.muted, width);
             }
         });
     }
     if found.asked.is_empty() {
         words(ui, tr!("Nothing left this computer."), f.mono_s, p.muted, width);
     }
-    let alone = found.failed.iter().filter(|line| !found.asked.iter().any(|question| line.starts_with(&format!("{question}: "))));
-    for line in alone.take(MOST_ASKED) {
+    for line in found.alone() {
         words(ui, line, f.mono_s, p.muted, width);
     }
 }
@@ -488,7 +482,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
     );
     ui.add_space(HEAD_BELOW - HEAD_GAP);
     let faults = Faults::of(onboarding);
-    let found = onboarding.found().cloned();
+    let found = onboarding.found_shared();
     let mut edited = Vec::new();
     let mut form_part = |ui: &mut Ui| {
         ui.spacing_mut().item_spacing.y = GAP;
@@ -527,12 +521,12 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = FORM_RIGHT + COLUMNS_GAP;
             part(ui, width, &mut form_part);
-            part(ui, column, |ui| asked_column(ui, theme, found.as_ref(), column));
+            part(ui, column, |ui| asked_column(ui, theme, found.as_deref(), column));
         });
     } else {
         part(ui, width, &mut form_part);
         ui.add_space(COLUMNS_GAP);
-        part(ui, column, |ui| asked_column(ui, theme, found.as_ref(), column));
+        part(ui, column, |ui| asked_column(ui, theme, found.as_deref(), column));
     }
     for slot in edited {
         onboarding.edited(slot);
@@ -550,8 +544,8 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     head(ui, theme, tr!("Account settings"), None, width);
     ui.add_space(HEAD_BELOW - HEAD_GAP);
     let faults = Faults::of(onboarding);
-    let note = onboarding.sign_in_note();
-    let label = if onboarding.save_checks() { tr!("Save and check") } else { tr!("Save") };
+    let (checks, note) = onboarding.save_summary();
+    let label = if checks { tr!("Save and check") } else { tr!("Save") };
     let mut edited = Vec::new();
     part(ui, width, |ui| {
         ui.spacing_mut().item_spacing.y = GAP;

@@ -306,6 +306,9 @@ impl Detect for Proposed {
     }
 }
 
+/// The most lines of what Detect asked, and of what failed, the form keeps and shows.
+pub const MOST_LINES: usize = 32;
+
 /// The most answers of Detect [`Onboarding::poll`] takes in one call.
 const MOST_ANSWERS: usize = 8;
 
@@ -672,6 +675,9 @@ pub enum Outcome {
     Failed,
 }
 
+/// A question Detect asked, with why it failed when it did.
+pub type AskedLine = (String, Option<String>);
+
 /// What Detect last found, as the form shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
@@ -683,10 +689,54 @@ pub struct Found {
     pub kept_imap: Option<String>,
     /// The outgoing server Detect found and left out, because the owner typed another.
     pub kept_outgoing: Option<String>,
-    /// What Detect asked: what left the computer.
+    /// What Detect asked: what left the computer; the first [`MOST_LINES`].
     pub asked: Vec<String>,
-    /// The lookups that failed.
+    /// The lookups that failed; the first [`MOST_LINES`].
     pub failed: Vec<String>,
+    /// How many questions Detect asked, all of them.
+    asked_count: usize,
+    /// Each question shown, with why it failed when it did: matched once, when the answer came.
+    column: Vec<AskedLine>,
+    /// The lookups that failed for no question asked, the first [`MOST_LINES`].
+    alone: Vec<String>,
+}
+
+impl Found {
+    /// How many questions Detect asked, all of them.
+    #[must_use]
+    pub fn asked_count(&self) -> usize {
+        self.asked_count
+    }
+
+    /// The questions to show, each with why it failed when it did.
+    #[must_use]
+    pub fn column(&self) -> &[AskedLine] {
+        &self.column
+    }
+
+    /// The lookups that failed for no question asked.
+    #[must_use]
+    pub fn alone(&self) -> &[String] {
+        &self.alone
+    }
+
+    /// What Detect asked and what failed, cleaned for the screen, kept to [`MOST_LINES`] each and matched once.
+    fn lines(asked: &[String], failed: &[String]) -> (Vec<String>, Vec<String>, Vec<AskedLine>, Vec<String>) {
+        let clean = |lines: &[String]| lines.iter().take(MOST_LINES).map(|line| shown(line)).collect::<Vec<_>>();
+        let questions: BTreeSet<&str> = asked.iter().map(String::as_str).collect();
+        // Whether a failed line names a question: its text before one of its ": " is a question asked.
+        let named = |line: &str| line.match_indices(": ").any(|(at, _)| line.get(..at).is_some_and(|question| questions.contains(question)));
+        let column = asked
+            .iter()
+            .take(MOST_LINES)
+            .map(|question| {
+                let cause = failed.iter().find_map(|line| line.strip_prefix(question.as_str()).and_then(|rest| rest.strip_prefix(": ")));
+                (shown(question), cause.map(shown))
+            })
+            .collect();
+        let alone = failed.iter().filter(|line| !named(line)).take(MOST_LINES).map(|line| shown(line)).collect();
+        (clean(asked), clean(failed), column, alone)
+    }
 }
 
 /// What Detect last put into the form, to tell it from what the owner typed: a server row as host, port and encryption,
@@ -703,7 +753,7 @@ struct Detected {
 #[derive(Debug, Default)]
 struct Kept {
     form: Form,
-    found: Option<Found>,
+    found: Option<Arc<Found>>,
     detected: Detected,
 }
 
@@ -762,7 +812,7 @@ pub struct Onboarding {
     asking: Option<(u64, String)>,
     /// The number of Detect's last run.
     runs: u64,
-    found: Option<Found>,
+    found: Option<Arc<Found>>,
     detected: Detected,
     /// The add form as the owner left it, while another form or none is open.
     kept: Option<Kept>,
@@ -981,14 +1031,28 @@ impl Onboarding {
     /// Whether saving the form starts the account's check: a server or the user name changed, or a new password was typed.
     #[must_use]
     pub fn save_checks(&self) -> bool {
+        self.checks_with(&self.changes())
+    }
+
+    /// [`Self::save_checks`] and [`Self::sign_in_note`] from one look at what changed: for the page, each frame.
+    #[must_use]
+    pub fn save_summary(&self) -> (bool, Option<String>) {
         let changes = self.changes();
+        (self.checks_with(&changes), self.note_with(changes))
+    }
+
+    fn checks_with(&self, changes: &Changes) -> bool {
         changes.sign_in || changes.caldav || !self.form.password.is_empty()
     }
 
     /// What the form says before it is saved: which server the sign-in will go to, when it goes anywhere new.
     #[must_use]
     pub fn sign_in_note(&self) -> Option<String> {
-        let goes_to = self.changes().goes_to;
+        self.note_with(self.changes())
+    }
+
+    fn note_with(&self, changes: Changes) -> Option<String> {
+        let goes_to = changes.goes_to;
         let new_password = !self.form.password.is_empty();
         if !goes_to.is_empty() {
             let servers = shown(&goes_to.join(", "));
@@ -1119,7 +1183,13 @@ impl Onboarding {
     /// What Detect last found.
     #[must_use]
     pub fn found(&self) -> Option<&Found> {
-        self.found.as_ref()
+        self.found.as_deref()
+    }
+
+    /// What Detect last found, shared: for the page to hold while it draws the form.
+    #[must_use]
+    pub fn found_shared(&self) -> Option<Arc<Found>> {
+        self.found.clone()
     }
 
     /// The steps of the check.
@@ -1246,9 +1316,9 @@ impl Onboarding {
         let kept_imap = best.filter(|_| imap == Filled::Owner).map(|best| shown(&best.host));
         let in_form = outgoing_best.filter(|_| outgoing == Filled::Detect).map(|best| (shown(&best.host), best.source));
         let kept_outgoing = outgoing_best.filter(|_| outgoing == Filled::Owner).map(|best| shown(&best.host));
-        let clean = |lines: Vec<String>| lines.iter().map(|line| shown(line)).collect();
-        self.found =
-            Some(Found { source, outgoing: in_form, kept_imap, kept_outgoing, asked: clean(proposal.asked), failed: clean(proposal.failed) });
+        let (asked, failed, column, alone) = Found::lines(&proposal.asked, &proposal.failed);
+        let asked_count = proposal.asked.len();
+        self.found = Some(Arc::new(Found { source, outgoing: in_form, kept_imap, kept_outgoing, asked, failed, asked_count, column, alone }));
     }
 
     /// Adds the account in the form through `mailbox` and keeps its password in the credential store; the check

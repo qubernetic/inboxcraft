@@ -1228,3 +1228,21 @@ fn every_missing_or_wrong_field_is_named_at_one_press() {
     let named: Vec<Slot> = onboarding.field_errors().iter().map(|(slot, _)| *slot).collect();
     assert_eq!(named, [Slot::Host, Slot::SmtpPort]);
 }
+
+#[test]
+fn detect_s_lines_are_capped_and_matched_once_when_they_come() {
+    let many = Proposal {
+        asked: (0..10_000).map(|n| format!("dns MX {n}.example.org")).collect(),
+        failed: (0..10_000).map(|n| format!("dns MX {n}.example.org: timed out")).chain(["https://example.org: refused".to_owned()]).collect(),
+        ..Proposal::default()
+    };
+    let (mut onboarding, detect) = detecting(vec![many]);
+    detect_now(&mut onboarding, &detect, "carol@example.org");
+    let found = onboarding.found().unwrap();
+    assert_eq!(found.asked_count(), 10_000, "the count says all of them");
+    assert!(found.asked.len() <= super::MOST_LINES && found.failed.len() <= super::MOST_LINES, "{} {}", found.asked.len(), found.failed.len());
+    let column = found.column();
+    assert!(column.len() <= super::MOST_LINES);
+    assert_eq!(column[0], ("dns MX 0.example.org".to_owned(), Some("timed out".to_owned())), "each question with why it failed");
+    assert_eq!(found.alone(), ["https://example.org: refused"], "a lookup that failed for no question, however far down");
+}
