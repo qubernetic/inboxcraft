@@ -507,3 +507,39 @@ fn shift_tab_round_a_page_with_many_accounts_reaches_the_last_account() {
     let before = format!("Signature of {}", harness.state().mailbox().accounts().iter().rev().nth(1).unwrap().label);
     assert_eq!(focused(&harness).map(|(label, _)| label), Some(before));
 }
+
+/// The sample with 40 more accounts, on the Sending page at `percent` in a window `size`.
+fn many_on_sending(size: egui::Vec2, percent: u16) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    for n in 0..40 {
+        let account = serde_json::json!({ "address": format!("many{n}@example.org"), "imap": { "host": "imap.example.org", "security": "tls" } });
+        app.mailbox_mut().run("account.add", &account).unwrap();
+    }
+    app.mailbox_mut().refresh();
+    app.set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+    let mut harness = Harness::builder().with_size(size).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.state_mut().settings_mut().open_at(Section::Sending);
+    harness.run();
+    harness
+}
+
+/// Where the last account's signature stands: below every other row, laid out or not.
+fn last_signature_top(harness: &Harness<'static, InboxApp>) -> f32 {
+    let last = format!("Signature of {}", harness.state().mailbox().accounts().last().unwrap().label);
+    harness.get_by_role_and_label(Role::MultilineTextInput, &last).rect().top()
+}
+
+#[test]
+fn rows_out_of_sight_take_their_new_height_after_a_change_of_text_size_or_width() {
+    let wide = vec2(1200.0, 900.0);
+    let narrow = vec2(700.0, 900.0);
+    for (size, percent) in [(wide, 130), (narrow, 100)] {
+        let mut changed = many_on_sending(wide, 100);
+        changed.state_mut().set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+        changed.set_size(size);
+        changed.run();
+        changed.run();
+        let fresh = many_on_sending(size, percent);
+        assert_eq!(last_signature_top(&changed), last_signature_top(&fresh), "{size:?} at {percent} %: the rows above keep stale heights");
+    }
+}

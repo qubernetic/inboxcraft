@@ -32,7 +32,7 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
         let count = mailbox.accounts().len();
         for (index, account) in mailbox.accounts().iter().enumerate() {
             let ends = index == 0 || index.saturating_add(1) == count;
-            super::culled(ui, egui::Id::unique("settings-calendars").with(account.id), ends, |ui| calendars(ui, theme, keymap, account));
+            super::culled(ui, theme, egui::Id::unique("settings-calendars").with(account.id), ends, |ui| calendars(ui, theme, keymap, account));
         }
         group(ui, theme, "C", tr!("Week"), None);
         settings_row(ui, theme, tr!("Week starts on"), Some(tr!("Fixed: it cannot be changed yet.")), |ui| {

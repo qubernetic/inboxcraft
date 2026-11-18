@@ -358,12 +358,13 @@ pub(super) fn body<R>(ui: &mut Ui, theme: &Theme, salt: &str, add: impl FnOnce(&
 /// then scrolls to. Elsewhere the row takes the height it last had and lays nothing out: a page with hundreds of
 /// accounts builds the rows in sight only. The first time a row is drawn it is laid out wherever it is. A row at one
 /// of the run's `ends` is always laid out, so `Tab` and `Shift+Tab` coming round the sheet reach the first and the last
-/// account.
-pub(super) fn culled(ui: &mut Ui, id: Id, ends: bool, add: impl FnOnce(&mut Ui)) {
+/// account. A height kept at another width or text size is dropped: the row is laid out again.
+pub(super) fn culled(ui: &mut Ui, theme: &Theme, id: Id, ends: bool, add: impl FnOnce(&mut Ui)) {
     let width = ui.available_width();
     let top = ui.cursor().top();
-    let known = ui.ctx().data(|data| data.get_temp::<f32>(id));
-    if let Some(height) = known.filter(|_| !ends) {
+    let laid = Laid { width, text: theme.fonts.body.size, height: 0.0 };
+    let known = ui.ctx().data(|data| data.get_temp::<Laid>(id)).filter(|kept| kept.width == laid.width && kept.text == laid.text);
+    if let Some(height) = known.map(|kept| kept.height).filter(|_| !ends) {
         let clip = ui.clip_rect();
         let near = clip.expand2(vec2(0.0, clip.height()));
         let row = Rect::from_min_size(pos2(ui.max_rect().left(), top), vec2(width, height));
@@ -374,9 +375,20 @@ pub(super) fn culled(ui: &mut Ui, id: Id, ends: bool, add: impl FnOnce(&mut Ui))
     }
     add(ui);
     let height = (ui.cursor().top() - top).max(0.0);
-    if known != Some(height) {
-        ui.ctx().data_mut(|data| data.insert_temp(id, height));
+    if known.is_none_or(|kept| kept.height != height) {
+        ui.ctx().data_mut(|data| data.insert_temp(id, Laid { height, ..laid }));
     }
+}
+
+/// A row's height as [`culled`] last laid it out, with the width and the text size it was laid out at.
+#[derive(Debug, Clone, Copy)]
+struct Laid {
+    /// The room's width, in points.
+    width: f32,
+    /// The body text's size, in points.
+    text: f32,
+    /// The row's height, in points.
+    height: f32,
 }
 
 /// The Appearance page: Look, then Layout.
@@ -763,7 +775,7 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
         for (index, pair) in mailbox.accounts().chunks(2).enumerate() {
             let first = pair.first().map_or(0, |account| account.id);
             let ends = index == 0 || index.saturating_add(1) == pairs;
-            culled(ui, Id::unique("settings-signatures").with(first), ends, |ui| {
+            culled(ui, theme, Id::unique("settings-signatures").with(first), ends, |ui| {
                 ui.add_space(INSET);
                 inset(ui, |ui| {
                     let column = ((ui.available_width() - SIGNATURE_GAP) / 2.0).floor().max(1.0);
@@ -836,7 +848,7 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
         let count = mailbox.accounts().len();
         for (index, account) in mailbox.accounts().iter().enumerate() {
             let ends = index == 0 || index.saturating_add(1) == count;
-            culled(ui, Id::unique("settings-grouped").with(account.id), ends, |ui| {
+            culled(ui, theme, Id::unique("settings-grouped").with(account.id), ends, |ui| {
                 let name = tr!("Group the inbox of {account}", account = account.label);
                 settings_row(ui, theme, &name, Some(&account.address), |ui| {
                     if switch(ui, theme, &name, account.grouped).clicked() {
@@ -873,7 +885,7 @@ fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Setti
         let count = mailbox.accounts().len();
         for (index, account) in mailbox.accounts().iter().enumerate() {
             let ends = index == 0 || index.saturating_add(1) == count;
-            culled(ui, Id::unique("settings-level").with(account.id), ends, |ui| {
+            culled(ui, theme, Id::unique("settings-level").with(account.id), ends, |ui| {
                 let title = tr!("{account} · {address}", account = account.label, address = account.address);
                 settings_row(ui, theme, &title, None, |ui| {
                     if let Some(level) = segmented_for(ui, theme, &levels, mailbox.notify_level(account.id), Some(&account.label)) {
