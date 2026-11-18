@@ -1421,6 +1421,8 @@ impl InboxApp {
             ui.ctx().input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Escape));
         }
         let setting = self.settings.is_open();
+        // The sheet or the palette coming over the window closes the lists, menus and pickers open under it.
+        crate::component::popup::covered(ui.ctx(), setting || self.palette.is_open());
         self.calendar_before(ui.ctx(), setting);
         let left_full = escape && !left_settings && self.screen == Screen::Mail && self.reader.full_width();
         if left_full {
@@ -2035,6 +2037,9 @@ mod appearance_tests;
 #[cfg(test)]
 #[path = "compose_tests.rs"]
 mod compose_tests;
+#[cfg(test)]
+#[path = "cover_tests.rs"]
+mod cover_tests;
 #[cfg(test)]
 #[path = "fit_tests.rs"]
 mod fit_tests;

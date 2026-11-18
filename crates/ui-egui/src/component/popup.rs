@@ -88,12 +88,35 @@ fn showing_id() -> Id {
     Id::unique("popup-showing-float")
 }
 
-/// What a float keeps from one frame to the next: when it opened, the pass it was last drawn in, and its rect.
+/// What a float keeps from one frame to the next: when it opened, the pass it was last drawn in, its rect, and how
+/// many times a surface had come over the window when it was drawn ([`covered`]).
 #[derive(Clone, Copy)]
 struct Kept {
     opened: f64,
     pass: u64,
     rect: Rect,
+    cover: u64,
+}
+
+/// Where [`covered`] keeps whether a surface lies over the window, and how many times one came over it.
+fn cover_id() -> Id {
+    Id::unique("inboxcraft-float-cover")
+}
+
+/// How many times the settings sheet or the palette came over the window.
+fn covers(ctx: &Context) -> u64 {
+    ctx.data(|data| data.get_temp::<(bool, u64)>(cover_id())).map_or(0, |(_, count)| count)
+}
+
+/// Says, each frame before the floats are drawn, whether the settings sheet or the palette lies over the window. The
+/// frame one of them comes over it, every [`float`] open under it closes: it picks nothing, and asks for no keyboard
+/// back (the surface over it has the keyboard), so nothing under that surface stands over it, holds the modal layer,
+/// keeps `Tab` or takes its Esc. A [`held`] float (the event editor) stays as it is, quiet; a float opened afterwards
+/// (a list on the sheet) is not touched.
+pub fn covered(ctx: &Context, covered: bool) {
+    let (was, count) = ctx.data(|data| data.get_temp::<(bool, u64)>(cover_id())).unwrap_or((false, 0));
+    let count = if covered && !was { count.saturating_add(1) } else { count };
+    ctx.data_mut(|data| data.insert_temp(cover_id(), (covered, count)));
 }
 
 /// How far the next row of the float being drawn has come in, 0 to 1 (1 outside a float); a row that takes a press
@@ -205,6 +228,13 @@ fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl F
     let pass = ctx.cumulative_pass_nr();
     let now = ctx.input(|input| input.time);
     let kept = ctx.data(|data| data.get_temp::<Kept>(key)).filter(|kept| kept.pass.saturating_add(1) >= pass);
+    let cover = covers(ctx);
+    if mode == Mode::Closes && kept.is_some_and(|kept| kept.cover != cover) {
+        // The settings sheet or the palette came over it ([`covered`]): it closes, choosing nothing, and leaves the
+        // keyboard to that surface.
+        ctx.data_mut(|data| data.remove::<Kept>(key));
+        return None;
+    }
     let opening = kept.is_none();
     // Never larger than the window less its 3 px of ground: past that its rows scroll.
     let screen = ctx.content_rect();
@@ -289,7 +319,7 @@ fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl F
             data.remove::<LayerId>(showing_id());
         }
     });
-    ctx.data_mut(|data| data.insert_temp(key, Kept { opened, pass, rect: shown.response.rect }));
+    ctx.data_mut(|data| data.insert_temp(key, Kept { opened, pass, rect: shown.response.rect, cover }));
     let (inner, rows) = shown.inner;
     // Home and End go to the first and the last row, from a row (a field in the float keeps them for its text).
     let focused = ctx.memory(|memory| memory.focused());
@@ -334,6 +364,7 @@ pub fn show<R>(ctx: &Context, theme: &Theme, id: Id, anchor: Pos2, width: f32, a
     let pass = ctx.cumulative_pass_nr();
     let now = ctx.input(|input| input.time);
     let kept = ctx.data(|data| data.get_temp::<Kept>(key)).filter(|kept| kept.pass.saturating_add(1) >= pass);
+    let cover = covers(ctx);
     let width = sane(width);
     let opened = kept.map_or(now, |kept| kept.opened);
     let size = kept.map_or(vec2(width, 0.0), |kept| kept.rect.size());
@@ -344,7 +375,7 @@ pub fn show<R>(ctx: &Context, theme: &Theme, id: Id, anchor: Pos2, width: f32, a
         .fixed_pos(at)
         .fade_in(false)
         .show(ctx, |ui| unfolding(ui, theme, width, opened, add));
-    ctx.data_mut(|data| data.insert_temp(key, Kept { opened, pass, rect: shown.response.rect }));
+    ctx.data_mut(|data| data.insert_temp(key, Kept { opened, pass, rect: shown.response.rect, cover }));
     shown.inner.0
 }
 
