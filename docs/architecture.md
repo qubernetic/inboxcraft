@@ -285,8 +285,10 @@ its own.
 
 Drafts (`engine::draft`) are kept in the store as they change: the composer runs `compose.update` at once for a chip,
 a template or a field left, and at most once a second while a field of it has the keys (each keep writes the whole
-draft on the window's thread), so a kill loses at most the last second typed; closing, sending, the window's close
-and the end of the app keep it at once. `compose.new` starts
+draft on the window's thread), so a kill loses at most the last second typed in its recipient lines, subject and
+text; closing, sending, the window's close and the end of the app keep it at once. What is typed in the field that
+fills a template's blank is not part of the draft: it lives in the composer only, and closing it, answering, opening
+another draft or quitting drops it. `compose.new` starts
 one from the account that last sent (the newest message in a Sent folder, else the first account) with that
 account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft at once;
 `compose.show` and `compose.list` read them; `compose.discard` removes one here and its copy on the server where
