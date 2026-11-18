@@ -123,8 +123,13 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
             let top = content.top();
             let at = |minute: u16| snap(top + f32::from(minute) / 60.0 * z.hour, ppp);
             let painter = ui.painter().clone();
+            // An hour line at the top of what is in sight would double the `line` over the hours: the design has none.
+            let sight = ui.clip_rect().top() + line;
             for hour in 1..24_u16 {
                 let y = at(hour * 60);
+                if y < sight {
+                    continue;
+                }
                 painter.rect_filled(Rect::from_min_max(pos2(cols.line(0), y), pos2(cols.line(days), y + line)), 0.0, p.panel_line);
             }
             for index in 0..=days {

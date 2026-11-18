@@ -98,6 +98,24 @@ fn the_toolbar_s_groups_stand_24_apart_and_their_controls_8() {
 }
 
 #[test]
+fn one_line_stands_between_the_heads_or_the_all_day_lane_and_the_hours() {
+    let p = Palette::of(Mode::Dark);
+    for view in [View::Week, View::Day] {
+        let harness = window(view);
+        let found = rects(&harness);
+        let across = |colour: Color32| -> Vec<Rect> {
+            found.iter().filter(|(rect, fill)| *fill == colour && rect.width() > 400.0 && rect.height() <= 1.0).map(|(rect, _)| *rect).collect()
+        };
+        let lines = across(p.line);
+        // The frame: the `line` under the heads (or the lane), then the hours' `surface`; the first hour line 48 lower.
+        for under in &lines {
+            let doubled = across(p.panel_line).into_iter().find(|hour| (hour.top() - under.bottom()).abs() < 0.01);
+            assert!(doubled.is_none(), "{view:?}: {doubled:?} right under {under:?}");
+        }
+    }
+}
+
+#[test]
 fn the_day_s_float_counts_its_events_with_the_number_alone() {
     let mut harness = window(View::Month);
     let thursday = Day::new(2026, 11, 5).unwrap();
