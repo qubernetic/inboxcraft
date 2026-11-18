@@ -276,6 +276,106 @@ pub(crate) const MOST: usize = 400;
 /// `text` as it fits on one line of `room` points in `font` ([`fit`]), of which at most [`MOST`] characters are laid out
 /// at all: a value as long as a header costs no more than a line. A cut at the cap ends with the ellipsis too.
 pub(crate) fn fit_capped(ui: &Ui, text: &str, font: Font, room: f32) -> String {
+    let ppp = ui.ctx().pixels_per_point();
+    // Keyed by what the cut reads: at most `MOST` characters, and whether there were more.
+    let (kept, was_capped) = capped(text, MOST);
+    let key = FitKey { text: kept.to_owned(), capped: was_capped, room: room.to_bits(), font: font_key(font), ppp: ppp.to_bits() };
+    let hash = {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut hasher);
+        hasher.finish()
+    };
+    let pass = ui.ctx().cumulative_pass_nr();
+    let found = ui.ctx().data_mut(|data| {
+        let store = data.get_temp_mut_or_default::<FitStore>(fit_store_id());
+        store.prune(pass);
+        store.entries.get_mut(&hash).filter(|entry| entry.key == key).map(|entry| {
+            entry.used = pass;
+            entry.cut.clone()
+        })
+    });
+    if let Some(cut) = found {
+        return cut;
+    }
+    let cut = fit_uncached(ui, text, font, room);
+    ui.ctx().data_mut(|data| {
+        let store = data.get_temp_mut_or_default::<FitStore>(fit_store_id());
+        if store.entries.len() < FIT_STORE {
+            store.entries.insert(hash, FitEntry { key, cut: cut.clone(), used: pass });
+        }
+    });
+    cut
+}
+
+/// The most cut lines [`fit_capped`] keeps: a few frames of the lines in sight. Lines not used in the last frame go
+/// once the store is half full; a full store keeps no more until then.
+pub(crate) const FIT_STORE: usize = 512;
+
+/// What a cut line is told apart by: its text, its room, its style and the scale.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct FitKey {
+    text: String,
+    capped: bool,
+    room: u32,
+    font: (crate::theme::Face, [u32; 3], bool),
+    ppp: u32,
+}
+
+/// The parts of `font` a cut depends on.
+fn font_key(font: Font) -> (crate::theme::Face, [u32; 3], bool) {
+    (font.face, [font.size.to_bits(), font.line.to_bits(), font.tracking.to_bits()], font.caps)
+}
+
+/// A cut line kept, and the pass it was last used in.
+#[derive(Debug, Clone)]
+struct FitEntry {
+    key: FitKey,
+    cut: String,
+    used: u64,
+}
+
+/// The cut lines [`fit_capped`] keeps between frames, by the hash of their [`FitKey`].
+#[derive(Debug, Clone, Default)]
+struct FitStore {
+    pass: u64,
+    entries: std::collections::HashMap<u64, FitEntry>,
+}
+
+impl FitStore {
+    /// At the first use in a new pass: once the store is half full, the lines not used in the last pass go.
+    fn prune(&mut self, pass: u64) {
+        if self.pass == pass {
+            return;
+        }
+        self.pass = pass;
+        if self.entries.len() > FIT_STORE / 2 {
+            self.entries.retain(|_, entry| entry.used.saturating_add(1) >= pass);
+        }
+    }
+}
+
+/// Where [`FitStore`] lives in the context's memory.
+fn fit_store_id() -> egui::Id {
+    egui::Id::unique("component-fit-store")
+}
+
+/// How many cut lines the store keeps now.
+#[cfg(test)]
+pub(crate) fn fit_store_len(ctx: &egui::Context) -> usize {
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<FitStore>(fit_store_id()).entries.len())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many lines [`fit_uncached`] cut: the test of the store counts them.
+    pub(crate) static FITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// [`fit_capped`] without the store.
+fn fit_uncached(ui: &Ui, text: &str, font: Font, room: f32) -> String {
+    #[cfg(test)]
+    FITS.with(|fits| fits.set(fits.get().saturating_add(1)));
     let (kept, capped) = capped(text, MOST);
     let shown = fit(ui, kept, font, room);
     if capped && !shown.ends_with('…') {

@@ -649,3 +649,28 @@ fn a_cut_line_ends_its_last_word_with_the_ellipsis_and_no_space_before_it() {
     assert_eq!(shown[1], "Keep a copy", "a name that fits is not touched");
     assert!(shown[2].chars().count() <= 2, "{:?}", shown[2]);
 }
+
+#[test]
+fn a_line_is_cut_once_while_its_text_and_room_stay_and_the_store_stays_small() {
+    let theme = theme();
+    let long = "Minutes of the quarterly studio planning meeting, with the kiln rota and the open day plan".repeat(4);
+    let mut harness = builder().build_ui_state(
+        move |ui, frame: &mut usize| {
+            let font = theme.fonts.caption;
+            // The same line twice a frame, and a line of its own each frame.
+            let one = super::fitted(ui, &long, font, theme.palette.ink, 200.0);
+            let two = super::fitted(ui, &long, font, theme.palette.ink, 200.0);
+            assert_eq!(one.job.text, two.job.text);
+            let _ = super::fitted(ui, &format!("{long} {frame}"), font, theme.palette.ink, 150.0);
+            *frame += 1;
+        },
+        0,
+    );
+    harness.run_steps(1);
+    let before = super::FITS.with(std::cell::Cell::get);
+    harness.run_steps(400);
+    let cut = super::FITS.with(std::cell::Cell::get) - before;
+    assert_eq!(cut, 400, "only each frame's new line is cut again: {cut}");
+    let kept = super::fit_store_len(&harness.ctx);
+    assert!(kept <= super::FIT_STORE, "the store stays bounded: {kept}");
+}
