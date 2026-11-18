@@ -1932,3 +1932,78 @@ fn more_opens_4_under_its_button_with_archive_and_its_key_first() {
     let keys = painted_texts(&harness);
     assert!(keys.iter().any(|(at, text)| text == "A" && rect.contains_rect(*at)), "the row shows its key: {keys:?}");
 }
+
+/// Every text the last frame painted with the rect it was clipped to.
+fn clipped_texts(harness: &Harness<'static, InboxApp>) -> Vec<(egui::Rect, String, egui::Rect)> {
+    fn walk(shape: &egui::Shape, clip: egui::Rect, found: &mut Vec<(egui::Rect, String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, clip, found)),
+            egui::Shape::Text(text) if !text.galley.job.text.trim().is_empty() => {
+                found.push((egui::Rect::from_min_size(text.pos, text.galley.size()), text.galley.job.text.clone(), clip));
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, clipped.clip_rect, &mut found));
+    found
+}
+
+/// Checks that every button of the reader's pane (right of `left`) stands whole in the window and its words in it.
+fn keeps_inside(harness: &Harness<'static, InboxApp>, left: f32, width: f32, at: &str) {
+    let texts = clipped_texts(harness);
+    for node in harness.query_all_by_role(Role::Button) {
+        let rect = node.rect();
+        if rect.left() < left || !rect.is_positive() {
+            continue;
+        }
+        let name = node.accesskit_node().label().unwrap_or_default();
+        assert!(rect.right() <= width + 0.5, "{name:?} at {rect:?} runs past the window: {at}");
+        for (text_rect, text, clip) in texts.iter().filter(|(text_rect, _, _)| rect.contains_rect(*text_rect)) {
+            assert!(
+                clip.left() <= text_rect.left() + 0.5 && text_rect.right() <= clip.right() + 0.5,
+                "{text:?} in {name:?} is clipped at the side: {at}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_reader_s_banners_and_cards_keep_inside_a_narrow_window() {
+    for (width, percent) in [(1024.0, 100), (1024.0, 130), (1100.0, 100), (1100.0, 130)] {
+        let scale = crate::theme::TextScale::from_percent(percent).unwrap();
+        let at = |scene: &str| format!("{scene} {width} {percent}%");
+        // Remote pictures and a careful link.
+        let fetch = Recorder::default();
+        let mut harness = opened_in(&fetch, Some(5), "You have won a lighthouse", width, percent, 1.0);
+        let left = harness.get_by_label("You have won a lighthouse").rect().left() - 1.0;
+        keeps_inside(&harness, left, width, &at("pictures"));
+        let banner = harness.get_by_label_contains("Pictures: ").rect();
+        assert!(banner.right() <= width + 0.5 && banner.left() >= left, "{banner:?}: {}", at("pictures"));
+        // The held sender's card.
+        let mut app = app_with(&fetch);
+        app.set_text_scale(scale);
+        let mut held = Harness::builder()
+            .with_size(vec2(width, 900.0))
+            .with_theme(egui::Theme::Dark)
+            .with_max_steps(12)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        settle(&mut held);
+        held.get_by_role_and_label(Role::Button, "Review").click();
+        held.run();
+        held.get_by_label_contains("Harbour Swim Club, Winter swim at the harbour steps").click();
+        settle(&mut held);
+        let question = held.get_by_label("Let Harbour Swim Club in?").rect();
+        keeps_inside(&held, question.left() - 20.0, width, &at("held"));
+        for name in ["Accept", "Accept and reply", "Block"] {
+            let rect = held.get_by_role_and_label(Role::Button, name).rect();
+            assert!(rect.left() >= question.left() - 0.5 && rect.right() <= width - 40.0 + 0.5, "{name} at {rect:?}: {}", at("held"));
+        }
+        // A note in the text's place.
+        harness.state_mut().reader_mut().0.set_notice("Subject copied".to_owned());
+        harness.run();
+        let note = harness.get_by_label("Note: Subject copied").rect();
+        assert!(note.right() <= width + 0.5, "{note:?}: {}", at("notice"));
+        keeps_inside(&harness, left, width, &at("notice"));
+    }
+}

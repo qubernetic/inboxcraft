@@ -23,6 +23,7 @@ use crate::theme::{Font, Theme};
 use crate::tr;
 
 use super::button::TextButton;
+use super::button_row::{ButtonLines, button_lines, show_lines};
 
 /// The event a card is about, as the card writes it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -184,11 +185,19 @@ pub fn invite_card_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, event: &Car
     } else {
         None
     };
+    // The buttons, measured once: on the info column's lines, or across the card under the day where the widest is
+    // wider than the column (a narrow reader), so none is cut.
+    let buttons = card_buttons(state, keep);
+    let widest = buttons.iter().map(|button| button.width(ui, theme, keymap)).fold(0.0, f32::max);
+    let spread = widest > room;
+    let lower_room = if spread { width - PAD_X * 2.0 } else { room };
+    let placed = button_lines(ui, theme, keymap, &buttons, lower_room, BUTTON_GAP);
+    let answered = if let CardState::Answered { answer } = state { Some(answered_row(ui, theme, keymap, answer, lower_room)) } else { None };
     let part = match state {
-        CardState::Request { .. } => button + GAP + goes_high,
-        CardState::Changed { .. } | CardState::Clash { .. } => boxed + GAP + button + GAP + goes_high,
-        CardState::Answered { .. } => button,
-        CardState::Cancelled { remove, .. } => boxed + if *remove { GAP + button } else { 0.0 },
+        CardState::Request { .. } => placed.height + GAP + goes_high,
+        CardState::Changed { .. } | CardState::Clash { .. } => boxed + GAP + placed.height + GAP + goes_high,
+        CardState::Answered { .. } => answered.as_ref().map_or(button, |row| if row.split { button * 2.0 + GAP } else { button }),
+        CardState::Cancelled { remove, .. } => boxed + if *remove { GAP + placed.height } else { 0.0 },
         CardState::Replies { replies } => {
             let count = replies.len() as f32;
             count * fact_line + (count - 1.0).max(0.0) * REPLY_GAP
@@ -204,7 +213,9 @@ pub fn invite_card_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, event: &Car
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, p.panel);
-        paint::hairline(painter, pos2(rect.left() + DAY, rect.top()), pos2(rect.left() + DAY, rect.bottom() - 1.0), p.line);
+        // The day's hairline; it ends over the buttons where they span the card.
+        let foot = if spread { rect.top() + PAD_Y + f.heading.line + GAP + facts_high + GAP / 2.0 } else { rect.bottom() } - 1.0;
+        paint::hairline(painter, pos2(rect.left() + DAY, rect.top()), pos2(rect.left() + DAY, foot.round()), p.line);
         // The day: weekday, day and month centred in the column.
         let column = Rect::from_min_size(rect.min, vec2(DAY, high));
         let mut top = rect.top() + PAD_Y;
@@ -243,8 +254,10 @@ pub fn invite_card_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, event: &Car
         }
     }
     let part_top = rect.top() + PAD_Y + f.heading.line + GAP + facts_high + GAP;
-    let part_rect = Rect::from_min_max(pos2(info_left, part_top), pos2(rect.right() - PAD_X, rect.bottom() - PAD_Y));
-    let asked = lower(ui, theme, keymap, part_rect, state, why, keep);
+    let part_left = if spread { rect.left() + PAD_X } else { info_left };
+    let part_rect = Rect::from_min_max(pos2(part_left, part_top), pos2(rect.right() - PAD_X, rect.bottom() - PAD_Y));
+    let lower_part = Lower { rect: part_rect, buttons, placed, answered, why, keep };
+    let asked = lower(ui, theme, keymap, state, lower_part);
     // The edge last, over the fills and the hairline.
     if ui.is_rect_visible(rect) {
         ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, edge(theme, state)), StrokeKind::Inside);
@@ -258,18 +271,55 @@ fn box_high(theme: &Theme) -> f32 {
     (BOX_Y + f.mono_s.line.max(f.label.line) + BOX_Y).ceil()
 }
 
-/// The part of a card under its facts, in `rect`; what was pressed.
-fn lower(
-    ui: &mut Ui,
-    theme: &Theme,
-    keymap: &Keymap,
+/// The buttons of a card in `state`, in order: Going (the card's one primary), Maybe, No and, while the owner changes
+/// an answer, Keep my answer; Change answer; or Remove from calendar.
+fn card_buttons(state: &CardState<'_>, keep: bool) -> Vec<TextButton<'static>> {
+    match state {
+        CardState::Request { .. } | CardState::Changed { .. } | CardState::Clash { .. } => {
+            let mut buttons =
+                vec![TextButton::new(tr!("Going")).primary(), TextButton::new(tr!("Maybe")).secondary(), TextButton::new(tr!("No")).secondary()];
+            if keep {
+                buttons.push(TextButton::new(tr!("Keep my answer")).secondary());
+            }
+            buttons
+        }
+        CardState::Answered { .. } => vec![TextButton::new(tr!("Change answer")).secondary()],
+        CardState::Cancelled { remove: true, .. } => vec![TextButton::new(tr!("Remove from calendar")).secondary()],
+        _ => Vec::new(),
+    }
+}
+
+/// How the answer given stands: its words cut to the room, and whether Change answer goes on a line of its own.
+struct AnsweredRow {
+    words: std::sync::Arc<egui::Galley>,
+    split: bool,
+}
+
+/// The row of the answer given in `room`: the check, the words and Change answer, 12 apart, on one line where they fit.
+fn answered_row(ui: &Ui, theme: &Theme, keymap: &Keymap, answer: &str, room: f32) -> AnsweredRow {
+    let side = theme.mark_side();
+    let words = super::fitted(ui, answer, theme.fonts.body, theme.palette.ink, (room - side - LABEL_GAP).max(1.0));
+    let change = TextButton::new(tr!("Change answer")).secondary().width(ui, theme, keymap);
+    let split = side + LABEL_GAP + paint::run_box(words.size().x) + LABEL_GAP + change > room;
+    AnsweredRow { words, split }
+}
+
+/// The part of a card under its facts: where it stands, its buttons measured, the answer given and why it cannot be
+/// answered, and whether Keep my answer stands.
+struct Lower {
     rect: Rect,
-    state: &CardState<'_>,
+    buttons: Vec<TextButton<'static>>,
+    placed: ButtonLines,
+    answered: Option<AnsweredRow>,
     why: Option<std::sync::Arc<egui::Galley>>,
     keep: bool,
-) -> Option<CardAsked> {
+}
+
+/// The part of a card under its facts; what was pressed.
+fn lower(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &CardState<'_>, part: Lower) -> Option<CardAsked> {
     let p = &theme.palette;
     let f = &theme.fonts;
+    let Lower { rect, buttons, placed, answered, why, keep } = part;
     let button = super::control_side(theme);
     let mut top = rect.top();
     let mut asked = None;
@@ -286,25 +336,19 @@ fn lower(
                 .layout(Layout::left_to_right(Align::Center)),
         )
     };
+    let lines_at = |top: f32| Rect::from_min_size(pos2(rect.left(), top), vec2(rect.width(), placed.height));
     match state {
         CardState::Request { goes_to } | CardState::Changed { goes_to, .. } | CardState::Clash { goes_to, .. } => {
             if let CardState::Changed { changed: words, .. } | CardState::Clash { clash: words, .. } = state {
                 let label = if matches!(state, CardState::Changed { .. }) { tr!("Changed") } else { tr!("Clash") };
                 top += warning(ui, theme, rect, top, label, words, p.warn) + GAP;
             }
-            let mut child = row(ui, top);
-            child.spacing_mut().item_spacing.x = BUTTON_GAP;
-            for (index, word) in [tr!("Going"), tr!("Maybe"), tr!("No")].into_iter().enumerate() {
-                let button = TextButton::new(word);
-                let button = if index == 0 { button.primary() } else { button.secondary() };
-                if button.show(&mut child, theme, keymap).clicked() {
-                    asked = Some(CardAsked::Answer(index));
-                }
-            }
-            if keep && TextButton::new(tr!("Keep my answer")).secondary().show(&mut child, theme, keymap).clicked() {
-                asked = Some(CardAsked::Keep);
-            }
-            goes(ui, top + button + GAP, goes_to);
+            asked = match show_lines(ui, theme, keymap, buttons, &placed, lines_at(top), BUTTON_GAP) {
+                Some(3) if keep => Some(CardAsked::Keep),
+                Some(index) => Some(CardAsked::Answer(index)),
+                None => None,
+            };
+            goes(ui, top + placed.height + GAP, goes_to);
         }
         CardState::Answered { answer } => {
             let mut child = row(ui, top);
@@ -312,21 +356,22 @@ fn lower(
             let side = theme.mark_side();
             let (mark, _) = child.allocate_exact_size(vec2(side, side), Sense::hover());
             iconset::paint_glyph(child.painter(), mark, CHECK, p.plus);
-            let words = super::fitted(&child, answer, f.body, p.ink, rect.width() / 2.0);
-            let (spot, said) = child.allocate_exact_size(vec2(paint::run_box(words.size().x), f.body.line), Sense::hover());
-            said.widget_info(|| WidgetInfo::labeled(Role::Label, true, super::spoken(answer)));
-            paint::run_at(child.painter(), spot.min, words, p.ink);
-            if TextButton::new(tr!("Change answer")).secondary().show(&mut child, theme, keymap).clicked() {
+            if let Some(row) = &answered {
+                let words = row.words.clone();
+                let (spot, said) = child.allocate_exact_size(vec2(paint::run_box(words.size().x), f.body.line), Sense::hover());
+                said.widget_info(|| WidgetInfo::labeled(Role::Label, true, super::spoken(answer)));
+                paint::run_at(child.painter(), spot.min, words, p.ink);
+            }
+            let split = answered.as_ref().is_some_and(|row| row.split);
+            let mut place = if split { row(ui, top + button + GAP) } else { child };
+            if TextButton::new(tr!("Change answer")).secondary().show(&mut place, theme, keymap).clicked() {
                 asked = Some(CardAsked::Change);
             }
         }
         CardState::Cancelled { line, remove } => {
             top += warning(ui, theme, rect, top, tr!("Cancelled"), line, p.minus);
-            if *remove {
-                let mut child = row(ui, top + GAP);
-                if TextButton::new(tr!("Remove from calendar")).secondary().show(&mut child, theme, keymap).clicked() {
-                    asked = Some(CardAsked::Remove);
-                }
+            if *remove && show_lines(ui, theme, keymap, buttons, &placed, lines_at(top + GAP), BUTTON_GAP).is_some() {
+                asked = Some(CardAsked::Remove);
             }
         }
         CardState::Replies { replies } => {

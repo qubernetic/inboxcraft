@@ -37,6 +37,7 @@ pub mod avatar;
 pub mod badge;
 pub mod banner;
 pub mod button;
+pub mod button_row;
 pub mod card;
 pub mod check_step;
 pub mod checkbox;

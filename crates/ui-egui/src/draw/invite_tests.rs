@@ -373,3 +373,58 @@ fn hostile_invitation_text_is_drawn_flat_and_never_crashes() {
     // The guests past the first 20 are counted, not listed.
     assert!(holds(&harness, "1980 more guests answered."));
 }
+
+/// A text painted: where, its words, and the rect it was clipped to.
+type Painted = (egui::Rect, String, egui::Rect);
+
+/// Every button and every text the last frame painted: rects and words.
+fn buttons_and_texts(harness: &Harness<'static, InboxApp>) -> (Vec<(String, egui::Rect)>, Vec<Painted>) {
+    use egui_kittest::kittest::NodeT as _;
+    let buttons = harness.query_all_by_role(Role::Button).map(|node| (node.accesskit_node().label().unwrap_or_default(), node.rect())).collect();
+    fn walk(shape: &egui::Shape, clip: egui::Rect, found: &mut Vec<Painted>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, clip, found)),
+            egui::Shape::Text(text) if !text.galley.job.text.trim().is_empty() => {
+                found.push((egui::Rect::from_min_size(text.pos, text.galley.size()), text.galley.job.text.clone(), clip));
+            }
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, clipped.clip_rect, &mut texts));
+    (buttons, texts)
+}
+
+#[test]
+fn an_invitation_card_keeps_its_buttons_whole_in_a_narrow_reader() {
+    for (width, percent) in [(1024.0, 100), (1024.0, 130), (1100.0, 100), (1100.0, 130)] {
+        let mut harness = sending(message(905, "Invitation: Board game night", "REQUEST", ORGANISED_BY_ODILE));
+        harness.state_mut().set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+        harness.set_size(vec2(width, 900.0));
+        open(&mut harness, "Invitation: Board game night");
+        harness.run();
+        let at = format!("{width} {percent}%");
+        let card = harness
+            .query_all_by_role(Role::Group)
+            .find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("Invitation: Board game night, ")))
+            .unwrap()
+            .rect();
+        assert!(card.right() <= width + 0.5, "the card stands in the window: {card:?} {at}");
+        let (buttons, texts) = buttons_and_texts(&harness);
+        let mut answers = Vec::new();
+        for name in ["Going", "Maybe", "No"] {
+            let rect = buttons.iter().find(|(label, _)| label == name).map(|(_, rect)| *rect).unwrap_or_else(|| panic!("{name}: {at}"));
+            assert!(card.contains_rect(rect), "{name} at {rect:?} stands in the card {card:?}: {at}");
+            // Its word whole inside it, not clipped away at the side (it may stand under the fold, scrolled out of sight).
+            let whole = |text_rect: &egui::Rect, clip: &egui::Rect| clip.left() <= text_rect.left() + 0.5 && text_rect.right() <= clip.right() + 0.5;
+            assert!(
+                texts.iter().any(|(text_rect, text, clip)| text == name && rect.contains_rect(*text_rect) && whole(text_rect, clip)),
+                "{name} reads whole: {texts:?} {at}"
+            );
+            for other in &answers {
+                assert!(!rect.intersects(*other), "{name} runs over another answer: {at}");
+            }
+            answers.push(rect);
+        }
+    }
+}

@@ -5,13 +5,15 @@
 //! `cyan_edge`, 14 above and below and 16 at the sides, 12 between its parts, asks "Let <sender> in?" (in `heading`,
 //! over their address, when their first mail came and how many wait, in `mono_s` and `muted`), offers the groups to
 //! let them into (`Into` and a pill each, 6 apart, then where their mail goes), Accept (or Accept into the group
-//! chosen, the card's one primary button), Accept and reply, and Block, and says what Block does. Under it a label
+//! chosen, the card's one primary button), Accept and reply, and Block (on lines of their own where the card is
+//! narrower than they are), and says what Block does. Under it a label
 //! says the message is only a preview. The sender's name and address are data: plain words on one line, cut between
 //! grapheme clusters with one ellipsis, heard whole.
 
 use egui::{Rect, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, vec2};
 
 use crate::component::button::TextButton;
+use crate::component::button_row::{button_lines, show_lines};
 use crate::component::pill::pill;
 use crate::compose::Answer;
 use crate::draw::paint;
@@ -91,24 +93,25 @@ pub(super) fn let_in(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
             };
             line(ui, &goes, f.caption, p.muted, room);
         });
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(CHOICE_GAP, CHOICE_GAP);
-            let accept = match into {
-                Some(kind) => tr!("Accept into {group}", group = kind.text()),
-                None => tr!("Accept").to_owned(),
-            };
-            if TextButton::new(&accept).primary().show(ui, theme, keymap).clicked() {
-                drawn.asked.push(Asked::Act(id, Act::Accept { group: into, open: false }));
-            }
-            if TextButton::new(tr!("Accept and reply")).secondary().show(ui, theme, keymap).clicked() {
+        // The choices, measured once: on one line where they fit, else on lines of their own, in order.
+        let accept = match into {
+            Some(kind) => tr!("Accept into {group}", group = kind.text()),
+            None => tr!("Accept").to_owned(),
+        };
+        let choices =
+            || vec![TextButton::new(&accept).primary(), TextButton::new(tr!("Accept and reply")).secondary(), TextButton::new(tr!("Block")).danger()];
+        let placed = button_lines(ui, theme, keymap, &choices(), room, CHOICE_GAP);
+        let (_, place) = ui.allocate_space(vec2(room.max(1.0), placed.height));
+        match show_lines(ui, theme, keymap, choices(), &placed, place, CHOICE_GAP) {
+            Some(0) => drawn.asked.push(Asked::Act(id, Act::Accept { group: into, open: false })),
+            Some(1) => {
                 // Let in and opened, then answered: the reply is the owner's to write and send.
                 drawn.asked.push(Asked::Act(id, Act::Accept { group: into, open: true }));
                 drawn.asked.push(Asked::Answer(id, Answer::Reply));
             }
-            if TextButton::new(tr!("Block")).danger().show(ui, theme, keymap).clicked() {
-                drawn.asked.push(Asked::Act(id, Act::Block));
-            }
-        });
+            Some(_) => drawn.asked.push(Asked::Act(id, Act::Block)),
+            None => {}
+        }
         let note = tr!("Blocked mail never loads remote content and never notifies.");
         ui.add(egui::Label::new(f.caption.rich(note).color(p.muted)).wrap());
     });
