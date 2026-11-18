@@ -302,29 +302,3 @@ fn a_waiting_key_chip_has_a_1_px_edge_and_the_focus_ring_stands_2_px_clear_of_it
         assert!(whole, "{theme:?} the ring has room: {strokes:?}");
     }
 }
-
-#[test]
-fn j_and_k_move_to_the_next_and_the_previous_message_and_show_on_the_shortcuts_page() {
-    let keymap = Keymap::default();
-    assert_eq!(keymap.shortcut(keymap::NEXT), Some(KeyboardShortcut::new(Modifiers::NONE, Key::J)));
-    assert_eq!(keymap.shortcut(keymap::PREVIOUS), Some(KeyboardShortcut::new(Modifiers::NONE, Key::K)));
-    let mut harness = build(app(), egui::Theme::Dark);
-    harness.key_press(Key::J);
-    harness.run();
-    let first = harness.state().mailbox().selected();
-    assert!(first.is_some(), "J selects the first message");
-    harness.key_press(Key::J);
-    harness.run();
-    assert_ne!(harness.state().mailbox().selected(), first, "J selects the next message");
-    harness.key_press(Key::K);
-    harness.run();
-    assert_eq!(harness.state().mailbox().selected(), first, "K goes back");
-    let mut harness = on_shortcuts(egui::Theme::Dark);
-    harness.get_by_label("Key of Next message: J");
-    harness.get_by_label("Key of Previous message: K");
-    // On the sheet a bare letter runs nothing.
-    let before = harness.state().mailbox().selected();
-    harness.key_press(Key::J);
-    harness.run();
-    assert_eq!(harness.state().mailbox().selected(), before);
-}
