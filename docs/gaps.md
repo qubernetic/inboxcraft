@@ -397,20 +397,20 @@ time from the code as it is, not measured.
   view of `triage.json`, never the screener's mode) and nothing else. A file kept by
   an older version that names an accent, a typeface or an icon set loads, and those fields are dropped at the next
   write. Two windows open at once each keep their own last change; the later write wins.
-- Message list (#88, #134): the screener card and the grouped inbox show the engine's data (#134); "Done all" on a
-  group card marks the whole group done with one Undo, but none for a group that takes more than the 100 acts the
+- Message list (#88, #134): the screener card and the grouped inbox show the engine's data (#134); "done all" on a
+  group's head marks the whole group done with one Undo, but none for a group that takes more than the 100 acts the
   undo history holds (#135). In the grouped inbox (cards or grouped list) the arrow keys still step through
   the list in date order, not in the order of the groups, a card shows its first three rows while the keys can select
   one hidden under "Show all", and every row is drawn each frame (the simple list draws only the rows in view). The
   group menu is a right click on a row or the reader's More menu; it has no key. The rail
   holds Mail, the calendar and the settings; the other places of the brief (the owner's own avatar) come with
-  their features. A row shows the first sender's avatar from initials only.
+  their features.
 - Hover actions (#89, #131): Done, read or unread and Delete act on a real account as on the sample, through the
   engine's commands (#131). Done marks the message read and done (`mail.done`, #135); on a done row under "Show
   done" it is "Not done". Flag and Archive have keys (S, A) but no hover button: the design's hover group is Done,
   read, Delete and Snooze, and the hover Snooze stays disabled ("Open the message to snooze it") because the time
-  picker opens from the reader only (#135). The leaving row slides out but the rows below jump up rather than
-  close the gap smoothly. The keys (D, A, R, S, Delete, Ctrl+Z) can be changed on the Shortcuts page (#130).
+  picker opens from the reader only (#135). The act lands at once and the leaving row's gap closes over 180 ms
+  (#236). The keys (D, A, R, S, Delete, Ctrl+Z) can be changed on the Shortcuts page (#130).
 - Reader (#90, #131): Done, Archive, Delete and Move to a folder act on the open message, flag and read or unread
   from More (#131); Reply, Reply all and Forward open the composer filled in (#133). Snooze (H) and Pin act on the
   open message (#135). More also holds Full width,
