@@ -1243,26 +1243,26 @@ fn an_account_s_form_starts_16_under_its_title_s_row() {
     assert_eq!(field_top(&harness, "Address") - title.top(), 47.0, "1 down in a 32-high row, then 16");
 }
 
-/// The add form on a sheet that makes itself the modal layer every frame, as the settings sheet may, with a password
-/// typed; the IMAP security's list open when `list` is on.
-fn modal_sheet(list: bool) -> Harness<'static, InboxApp> {
-    let sheet = egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("settings-sheet"));
-    let app = app(&Kept::default(), FakeWorkers::passing());
-    let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(
-        move |ui, app: &mut InboxApp| {
-            app.ui(ui);
-            if app.settings().is_open() {
-                ui.ctx().memory_mut(|memory| memory.set_modal_layer(sheet));
-            }
-        },
-        app,
-    );
+/// The add form on the settings sheet, which makes itself the modal layer every frame, with a password typed; the
+/// IMAP security's list open when `list` is on. With `own` the app draws its own frame (the strip with the window's
+/// controls).
+fn modal_sheet_in(list: bool, own: bool) -> Harness<'static, InboxApp> {
+    let mut app = app(&Kept::default(), FakeWorkers::passing());
+    if own {
+        app.set_own_frame(true);
+        app.set_frame(inboxcraft_engine::appearance::WindowFrame::Strip);
+    }
+    let mut harness = Harness::builder()
+        .with_size(vec2(1100.0, 900.0))
+        .with_context_setup(crate::theme::install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness.state_mut().onboarding_mut().0.open();
     harness.run();
     harness.state_mut().onboarding_mut().0.form_mut().password = Secret::new(PASSWORD);
     harness.run();
     harness.run();
+    assert!(harness.ctx.memory(|memory| memory.top_modal_layer()).is_some(), "the sheet is a modal layer itself");
     if list {
         harness.get_by_label("IMAP security").click();
         harness.run();
@@ -1270,6 +1270,10 @@ fn modal_sheet(list: bool) -> Harness<'static, InboxApp> {
         assert!(harness.query_by_label("STARTTLS").is_some(), "the list is open");
     }
     harness
+}
+
+fn modal_sheet(list: bool) -> Harness<'static, InboxApp> {
+    modal_sheet_in(list, false)
 }
 
 /// A press of the pointer beside the sheet, down and up.
@@ -1310,6 +1314,27 @@ fn on_a_modal_sheet_esc_and_a_press_beside_close_only_the_open_list() {
     press_beside(&mut harness);
     assert!(harness.query_by_label("STARTTLS").is_none(), "a press beside closed the list");
     assert!(harness.state().settings().is_open(), "and only the list");
+}
+
+/// While the sheet or a list on it keeps the keyboard, `Tab` goes round them and never on to the window's controls.
+#[test]
+fn tab_never_reaches_the_window_s_controls_while_the_sheet_or_a_list_on_it_is_open() {
+    for list in [false, true] {
+        let mut harness = modal_sheet_in(list, true);
+        harness.get_by_role_and_label(Role::Button, "Minimise");
+        for step in 0..40 {
+            harness.key_press(Key::Tab);
+            harness.run();
+            let focused = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused());
+            let label = focused.and_then(|node| node.accesskit_node().label()).unwrap_or_default();
+            assert!(!["Minimise", "Maximise", "Restore", "Close the window"].contains(&label.as_str()), "list {list}, Tab {step} reached {label}");
+        }
+        if list {
+            assert!(harness.query_by_label("STARTTLS").is_some(), "Tab kept to the list");
+        }
+        assert!(harness.state().settings().is_open());
+        assert!(!harness.state().onboarding().form().password.is_empty(), "list {list}: nothing typed is dropped");
+    }
 }
 
 #[test]
