@@ -275,3 +275,48 @@ fn after_the_toast_ctrl_z_still_takes_an_event_s_change_back() {
     harness.run();
     assert!(shows(&harness, "Dentist"), "the history's Undo reads the calendar again");
 }
+
+/// Every filled rect of the last frame and its fill.
+fn flat_rects(harness: &Harness<'static, InboxApp>) -> Vec<(egui::Rect, egui::Color32)> {
+    fn open(shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Color32)>) {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, out)),
+            egui::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, &mut out));
+    out
+}
+
+/// The sample's Allotment work party (one guest) open in the editor by Edit.
+fn editing_the_party(theme: egui::Theme) -> Harness<'static, InboxApp> {
+    let mut harness = on_calendar(theme);
+    pick(&mut harness, "Allotment work party");
+    press(&mut harness, "Edit");
+    // The editor stands where it was measured the frame before.
+    harness.run();
+    harness
+}
+
+#[test]
+fn the_edit_editor_stands_over_the_details_at_the_card_s_bottom_right() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let p = crate::theme::Palette::of(if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light });
+        let harness = editing_the_party(theme);
+        let found = flat_rects(&harness);
+        // The card: the `line` down between the view and the side panel runs its height; the panel is 252 wide.
+        let (edge, _) = found
+            .iter()
+            .copied()
+            .filter(|(rect, fill)| *fill == p.line && rect.width() == 1.0 && rect.height() > 500.0 && rect.left() > 600.0)
+            .min_by(|a, b| a.0.left().total_cmp(&b.0.left()))
+            .unwrap();
+        let card = egui::Rect::from_min_max(egui::pos2(edge.right(), edge.top()), egui::pos2(edge.right() + 252.0, edge.bottom()));
+        let (editor, _) = found.iter().copied().find(|(rect, fill)| *fill == p.surface && rect.width() == 432.0).unwrap();
+        // The frame: its right edge 3 inside the card's, its bottom on the card's bottom edge.
+        assert_eq!(editor.right(), card.right() - 3.0, "{editor:?} in {card:?}");
+        assert_eq!(editor.bottom(), card.bottom() + 1.0, "{editor:?} in {card:?}");
+    }
+}

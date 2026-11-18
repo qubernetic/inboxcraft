@@ -24,12 +24,16 @@ fn clock() -> Box<FakeClock> {
 
 /// The sample window on the calendar's week.
 fn window() -> Harness<'static, InboxApp> {
+    window_sized(vec2(1440.0, 900.0))
+}
+
+/// [`window`] at `size`.
+fn window_sized(size: egui::Vec2) -> Harness<'static, InboxApp> {
     let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.show_calendar();
     let (calendar, mailbox) = app.calendar_mut();
     calendar.set_view(mailbox, View::Week);
-    let mut harness =
-        Harness::builder().with_size(vec2(1440.0, 900.0)).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    let mut harness = Harness::builder().with_size(size).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness
 }
@@ -160,7 +164,8 @@ fn a_save_refused_after_the_warning_shows_its_reason() {
     harness.run();
     let id = harness.state().calendar().editor().and_then(crate::calendar::Editor::id).unwrap();
     type_more(&mut harness, " moved");
-    press_at(&mut harness, 1300.0, 700.0);
+    // Outside the editor, which stands over the details at the card's bottom right: on the hours.
+    press_at(&mut harness, 600.0, 700.0);
     harness.run();
     assert!(warns(&harness), "the press outside warns");
     // The event goes under the editor (another device deleted it), then Save is refused.
@@ -362,7 +367,8 @@ fn a_press_outside_the_editor_reaches_nothing_under_it() {
 
 #[test]
 fn a_press_on_delete_beside_the_editor_never_deletes_the_event_edited() {
-    let mut harness = window();
+    // Tall enough that the editor, standing at the card's bottom, leaves Delete in the details beside it.
+    let mut harness = window_sized(vec2(1440.0, 1400.0));
     harness.query_all(by().role(Role::Button).label_contains("Studio stand-up")).next().unwrap().click();
     harness.run();
     harness.get_by_role_and_label(Role::Button, "Edit").click();

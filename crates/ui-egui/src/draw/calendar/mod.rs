@@ -9,11 +9,12 @@
 //!
 //! The day and week views lay the hours out on a grid of `panel_line` hairlines under a lane of bands over whole days
 //! (`hours`), the month view the six weeks of the month (`month`), the agenda the days that hold events (`agenda`).
-//! Every event is a cell on its grid ([`grid`]): its edges take the pixels of the grid's lines. Every event is a
-//! button named after its summary and its days and times; pressing it picks it, and the keyboard's focus and the
-//! picked event are one thing ([`keys`]). Drawing only reads the [`Calendar`]; what was pressed comes back as
-//! [`Asked`] and is applied after the frame. New event, and Edit under the picked event's details, open the event
-//! editor (`editor`) as a float hanging from New event; "+N more" opens the day's events in a float (`more`).
+//! Every event is a cell on its grid ([`grid`]): its edges take the pixels of the grid's lines. Every event is a button
+//! named after its summary and its days and times; pressing it picks it, and the keyboard's focus and the picked event
+//! are one thing ([`keys`]). Drawing only reads the [`Calendar`]; what was pressed comes back as [`Asked`] and is
+//! applied after the frame. New event, and Edit under the picked event's details, open the event editor (`editor`) as a
+//! float (a new event's hanging from New event, an edit's over the details); "+N more" opens the day's events in a
+//! float (`more`).
 
 mod agenda;
 mod editor;
@@ -154,6 +155,7 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
     CentralPanel::no_frame().frame(Frame::NONE).show(ui, |ui| {
         layers.card(ui, Margin::ZERO, |ui| {
             let all = ui.max_rect();
+            ui.ctx().data_mut(|data| data.insert_temp(card_id(), all));
             let ppp = ui.pixels_per_point();
             let line = line_width(ppp);
             let with_side = all.width() - SIDE - line >= VIEW_LEAST;
@@ -206,6 +208,11 @@ fn view_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, o
 /// Where the editor hangs from: New event's rect, kept from the toolbar for the float drawn after the screen.
 pub(super) fn new_event_id() -> Id {
     Id::unique("calendar-new-event-button")
+}
+
+/// Where the editor of an existing event stands: the calendar card's room, kept from the screen for the float.
+fn card_id() -> Id {
+    Id::unique("calendar-card-room")
 }
 
 /// Where the control that opened the editor is kept (New event, or Edit), and whether the editor was open last frame.
@@ -520,7 +527,8 @@ fn stroke(painter: &egui::Painter, rect: Rect, line: f32, colour: Color32) {
     }
 }
 
-/// The event editor over the screen while it is open, hanging from New event; what was pressed in it.
+/// The event editor over the screen while it is open, hanging from New event (an edit: over the details, at the card's
+/// bottom right); what was pressed in it.
 /// While `quiet` another surface lies over it and has the keys.
 /// The frame after it closed, the keyboard goes back to the control that opened it; when that is gone (Edit hidden by
 /// a narrow window, or with its event deleted), to the grid's picked day (the month's number, the week's head), and
@@ -543,7 +551,8 @@ pub(super) fn editor(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, calend
         }
         ctx.data_mut(|data| data.insert_temp(opener_id(), (opener, open)));
     }
-    calendar.editor_mut().map(|editor| editor::show(ctx, theme, keymap, editor, anchor, quiet)).unwrap_or_default()
+    let card = ctx.data(|data| data.get_temp::<Rect>(card_id()));
+    calendar.editor_mut().map(|editor| editor::show(ctx, theme, keymap, editor, (anchor, card), quiet)).unwrap_or_default()
 }
 
 #[cfg(test)]
