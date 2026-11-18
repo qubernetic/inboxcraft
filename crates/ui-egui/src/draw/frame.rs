@@ -54,11 +54,15 @@ fn maximised(ctx: &Context) -> bool {
     ctx.input(|input| input.viewport().maximized.unwrap_or(false))
 }
 
-/// One control: its lines in the text colour, a hover fill (the error colour behind Close).
+/// One control: its lines in the text colour, a hover fill (the error colour behind Close). While a surface that keeps
+/// the keyboard is open (the settings sheet, a popup), the controls stand above it for the pointer only: `Tab` goes
+/// round that surface's controls, not on to the window's.
 fn control(ui: &mut Ui, theme: &Theme, keymap: &Keymap, which: Control) -> Response {
     let p = &theme.palette;
     let maximised = maximised(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(CONTROL[0], CONTROL[1]), Sense::click());
+    let kept = ui.ctx().memory(|memory| memory.top_modal_layer()).is_some();
+    let sense = if kept { Sense::CLICK } else { Sense::click() };
+    let (rect, response) = ui.allocate_exact_size(vec2(CONTROL[0], CONTROL[1]), sense);
     let name = which.name(maximised);
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
     if ui.is_rect_visible(rect) {

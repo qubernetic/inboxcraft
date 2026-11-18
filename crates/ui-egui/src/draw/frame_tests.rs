@@ -327,3 +327,38 @@ fn over_the_settings_sheet_the_window_controls_stand_clear_and_do_what_they_do()
         assert!(harness.state().settings().is_open(), "{frame:?}: the press on a window control closed the sheet");
     }
 }
+
+#[test]
+fn tab_in_the_settings_sheet_stays_in_it_in_the_app_s_own_frame() {
+    for frame in [WindowFrame::Strip, WindowFrame::TopRow] {
+        let mut harness = harness_with(frame, InboxApp::open_settings);
+        let mut stops = 0;
+        for _ in 0..80 {
+            harness.key_press(egui::Key::Tab);
+            harness.run();
+            if let Some(node) = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()) {
+                stops += 1;
+                let label = node.accesskit_node().label().unwrap_or_default();
+                let control = ["Minimise", "Maximise", "Close the window"].contains(&label.as_str());
+                assert!(!control, "{frame:?}: Tab left the sheet for {label}");
+            }
+        }
+        assert!(stops > 40, "{frame:?}: Tab goes round the sheet's controls");
+        // Away from the sheet, Tab reaches the window controls again.
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        harness.run();
+        assert!(!harness.state().settings().is_open());
+        let mut controls = false;
+        for _ in 0..200 {
+            harness.key_press(egui::Key::Tab);
+            harness.run();
+            let on = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused());
+            if on.is_some_and(|node| node.accesskit_node().label().is_some_and(|label| label == "Minimise")) {
+                controls = true;
+                break;
+            }
+        }
+        assert!(controls, "{frame:?}: without a sheet, Tab reaches Minimise");
+    }
+}
