@@ -154,6 +154,29 @@ fn attachments(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// The hairline table's board: the default and a long cell, 560 wide, with the design board's words.
+fn tables(ui: &mut Ui, theme: &Theme) {
+    use super::hairline_table::{Table, hairline_table};
+    title(ui, theme, tr!("Hairline table"));
+    let heads = [tr!("Item"), tr!("Qty"), "EUR"];
+    let widths = [40.0, 72.0];
+    let total = [tr!("Total"), "", "61.90"];
+    let short: [&[&str]; 3] = [&["Stoneware teapot", "1", "38.00"], &["Loose leaf Assam 250 g", "2", "19.00"], &["Delivery", "", "4.90"]];
+    let long: [&[&str]; 3] = [
+        &["Stoneware teapot", "1", "38.00"],
+        &["Loose leaf Assam, second flush, from the Halmari estate, 250 g in a tin that can be sent back for a refill.", "2", "19.00"],
+        &["Delivery", "", "4.90"],
+    ];
+    for (state, rows) in [(tr!("default"), &short), (tr!("long-cell"), &long)] {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                ui.set_width(560.0);
+                hairline_table(ui, theme, &Table { heads: &heads, widths: &widths, rows: rows.as_slice(), total: Some(&total) });
+            });
+        });
+    }
+}
+
 /// The left column.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     why_lines(ui, theme, keymap);
@@ -168,6 +191,8 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
 /// The middle column.
 fn middle(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     attachments(ui, theme, keymap);
+    ui.add_space(BOARD_GAP);
+    tables(ui, theme);
 }
 
 /// The right column.

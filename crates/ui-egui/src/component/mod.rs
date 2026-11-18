@@ -48,6 +48,7 @@ pub mod gallery;
 pub mod gallery_blocks;
 pub mod gallery_fields;
 pub mod gallery_reader;
+pub mod hairline_table;
 pub mod hover;
 pub mod icon;
 pub mod key;
