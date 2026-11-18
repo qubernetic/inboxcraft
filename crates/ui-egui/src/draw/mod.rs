@@ -252,6 +252,34 @@ fn list_widest(ui: &Ui, theme: &Theme, docked: bool) -> f32 {
     if docked { (ui.available_width() - compose::least_width(ui, theme) - theme.spacing.s2).max(1.0) } else { f32::INFINITY }
 }
 
+/// Keeps the width the owner gave the resizable pane `id` apart from what `widest` squeezes it to (egui keeps the
+/// squeezed width as the pane's own, also between runs): while the cap bites, the owner's width is kept; once it lets
+/// go (the composer closed or floating, the window wider), the pane is given back the owner's width, as far as the cap
+/// allows. A width the owner drags to while the cap does not bite is the owner's. Both are kept with the pane's own.
+fn keep_owners_width(ctx: &egui::Context, id: egui::Id, widest: f32) {
+    let Some(mut state) = egui::containers::panel::PanelState::load(ctx, id) else { return };
+    let width = state.outer_rect.width();
+    if !width.is_finite() {
+        return;
+    }
+    let key = id.with("owners-width");
+    let (owner, squeezed) = ctx.data_mut(|data| data.get_persisted::<(f32, bool)>(key)).unwrap_or((width, false));
+    let biting = width >= widest - 0.5;
+    let kept = if biting {
+        (owner, true)
+    } else if squeezed {
+        let to = owner.min(widest);
+        if to.is_finite() && to > width + 0.5 {
+            state.outer_rect.set_width(to);
+            ctx.data_mut(|data| data.insert_persisted(id, state));
+        }
+        (owner, owner > widest + 0.5)
+    } else {
+        (width, false)
+    };
+    ctx.data_mut(|data| data.insert_persisted(key, kept));
+}
+
 /// Where the list stands: not drawn in one pane while something stands in its place (`shown` false); beside the
 /// reader or the composer (`beside`), but not drawn while the composer `docked` beside it would leave it (`widest`,
 /// [`list_widest`]) narrower than its heads need (`least`, [`InboxApp::list_least`]); else over the whole middle.
@@ -2200,11 +2228,13 @@ impl InboxApp {
         if self.mailbox.accounts().is_empty() {
             return (pane::Asked::default(), 0.0);
         }
+        let widest = list_widest(ui, theme, docked);
+        keep_owners_width(ui.ctx(), ui.scope_id().with_salt(egui::IdSalt::new("folders")), widest);
         let shown = Panel::left("folders")
             .resizable(true)
             .default_size(FOLDER_PANE)
             // However far its edge is dragged, the docked composer keeps its least width beside it.
-            .max_size(list_widest(ui, theme, docked))
+            .max_size(widest)
             .show_separator_line(false)
             .frame(around(0.0, 0.0, 0.0))
             .show(ui, |ui| layers.card(ui, margin(s.s3), |ui| pane::show(ui, theme, &self.keymap, &self.mailbox)));

@@ -350,3 +350,40 @@ fn where_the_list_stands_at_its_least_a_group_s_head_hovered_stands_whole() {
         }
     }
 }
+
+/// Drags the folder pane's edge `by` points to the right, in steps of 10.
+fn drag_folders(harness: &mut Harness<'static, InboxApp>, by: f32) {
+    let edge = harness.get_by_label("Accounts").rect().right() + 12.0;
+    let mut at = egui::pos2(edge - 1.0, 400.0);
+    harness.event(egui::Event::PointerMoved(at));
+    harness.step();
+    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    harness.step();
+    let steps = (by / 10.0).round() as u32;
+    for _ in 0..steps {
+        at.x += 10.0;
+        harness.event(egui::Event::PointerMoved(at));
+        harness.step();
+    }
+    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    harness.run();
+}
+
+#[test]
+fn the_folder_pane_the_owner_widened_comes_back_to_the_pixel_when_the_composer_closes() {
+    for (width, by) in [(720.0, 120.0), (1000.0, 300.0)] {
+        let mut harness = window(width, 100);
+        let before = harness.get_by_label("Accounts").rect().right();
+        drag_folders(&mut harness, by);
+        let widened = harness.get_by_label("Accounts").rect().right();
+        assert!(widened > before + by / 2.0, "{width}: the pane was dragged wider: {before} then {widened}");
+        harness.get_by_role_and_label(Role::Button, "New message").click();
+        harness.run();
+        let squeezed = harness.get_by_label("Accounts").rect().right();
+        assert!(squeezed < widened, "{width}: the composer's least width squeezes the pane: {squeezed}");
+        harness.get_by_label("Close; the draft is kept").click();
+        harness.run();
+        harness.run();
+        assert_eq!(harness.get_by_label("Accounts").rect().right(), widened, "{width}: the owner's width back, to the pixel");
+    }
+}
