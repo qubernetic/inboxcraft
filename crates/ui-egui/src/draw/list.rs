@@ -600,7 +600,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     if message.group.is_some() {
         acted = acted.or(menu(ui, theme, response, message, selected));
     }
-    Drawn { clicked: response.clicked(), acted, focused: response.has_focus(), gained: response.gained_focus(), presets }
+    // The focus its menu gives back on closing is not a walk to the row: it selects nothing.
+    let gained = response.gained_focus() && !returned_to(ui.ctx(), message.id);
+    Drawn { clicked: response.clicked(), acted, focused: response.has_focus(), gained, presets }
 }
 
 /// What a mail row says, worked out once for a list of rows and kept while it stays ([`row_text`]).
@@ -791,12 +793,31 @@ fn menu_shown_id() -> Id {
     Id::unique("list-menu-shown")
 }
 
+/// Where the row whose menu just closed is kept, with the pass it closed in: the focus the menu gives back to it is
+/// not a walk to it ([`returned_to`]).
+fn menu_closed_id() -> Id {
+    Id::unique("list-menu-closed")
+}
+
+/// How many passes after its menu closed a row's gained focus is the menu giving it back.
+const RETURN_PASSES: u64 = 2;
+
+/// Whether message `id`'s row gains the focus from its menu, which just closed: it gives the row the keyboard, and a
+/// menu closing never changes the message shown, so that row is not selected by the focus.
+fn returned_to(ctx: &egui::Context, id: u64) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<(u64, u64)>(menu_closed_id())).is_some_and(|(row, at)| row == id && pass <= at.saturating_add(RETURN_PASSES))
+}
+
 /// Settles the rows' menus after a pass: an ask ([`ask_menu`]) no row took in a whole pass is dropped (its row was not
 /// drawn: its message gone), so it never opens later, away from the moment it was asked for; a menu the keyboard
 /// opened that is no longer open has ended, whatever closed it (a menu whose row this pass did not draw closes, as
 /// every float not shown), so it gives the focus back to nothing later.
 pub(super) fn settle_menus(ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
+    if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_closed_id())).is_some_and(|(_, at)| pass > at.saturating_add(RETURN_PASSES)) {
+        ctx.data_mut(|data| data.remove::<(u64, u64)>(menu_closed_id()));
+    }
     if let Some((id, _)) = ctx.data(|data| data.get_temp::<(u64, u64)>(menu_shown_id())).filter(|(_, at)| *at < pass) {
         popup::set_open(ctx, group_menu_id(id), false);
         ctx.data_mut(|data| data.remove::<(u64, u64)>(menu_shown_id()));
@@ -836,14 +857,17 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow,
     let by_keys = ctx.data(|data| data.get_temp::<(u64, Id)>(by_keys_id())).is_some_and(|(id, popup)| id == message.id && popup == popup_id);
     let first = ctx.data_mut(|data| data.remove_temp::<bool>(first_id)).unwrap_or(false);
     let width = theme.fonts.body.size * MENU_WIDTH;
+    let was_open = popup::is_open(&ctx, popup_id);
     let acted = popup::context_menu(&ctx, theme, response, popup_id, width, |ui| {
         let chosen = group_menu(ui, theme, message.group, &message.address, first);
         (chosen, chosen.is_some())
     })
     .flatten();
+    let pass = ctx.cumulative_pass_nr();
     if popup::is_open(&ctx, popup_id) {
-        let pass = ctx.cumulative_pass_nr();
         ctx.data_mut(|data| data.insert_temp(menu_shown_id(), (message.id, pass)));
+    } else if was_open {
+        ctx.data_mut(|data| data.insert_temp(menu_closed_id(), (message.id, pass)));
     }
     if by_keys && !popup::is_open(&ctx, popup_id) {
         ctx.data_mut(|data| data.remove::<(u64, Id)>(by_keys_id()));

@@ -524,4 +524,8 @@ fn a_row_s_context_menu_keeps_tab_inside_and_esc_gives_the_row_the_keyboard() {
     harness.run();
     let role = harness.get_by_label(ODILE).accesskit_node().role();
     crate::component::popup::tests::walk_an_open_menu(&mut harness, (role, ODILE));
+    // A menu closing never changes the message shown: nothing was open, and nothing is.
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), None, "the row the menu was on is not selected");
+    assert_eq!(harness.state().reader().open_id(), None, "nor opened");
 }

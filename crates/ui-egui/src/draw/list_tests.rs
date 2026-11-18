@@ -3442,3 +3442,39 @@ fn the_rows_snooze_picker_hangs_from_the_button_its_one_id_and_place_name() {
     let float = harness.ctx.memory(|memory| memory.area_rect(super::list::snooze_popup(odile))).unwrap();
     assert!((float.left() - snooze.left()).abs() < 0.5 && (float.top() - (snooze.bottom() + 4.0)).abs() < 0.5, "{float:?} under {snooze:?}");
 }
+
+/// Opens the group menu of the row `label` with the pointer, then closes it with Esc.
+fn menu_then_esc(harness: &mut Harness<'static, InboxApp>, label: &str) {
+    harness.get_by_label(label).click_secondary();
+    harness.run();
+    assert!(crate::component::popup::any_open(&harness.ctx), "the row's menu opens");
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(!crate::component::popup::any_open(&harness.ctx), "Esc closes it");
+}
+
+#[test]
+fn beside_the_reader_esc_from_a_rows_pointer_menu_gives_it_the_keyboard_and_shows_the_same_message() {
+    let mut harness = wide(1300.0);
+    harness.get_by_label(TEODOR).click();
+    harness.run();
+    let teodor = harness.state().reader().open_id().unwrap();
+    let odile = id_with(&harness, "Allotment rota for November");
+    menu_then_esc(&mut harness, ODILE);
+    assert!(harness.ctx.memory(|memory| memory.has_focus(super::list::row_id(odile))), "the row has the keyboard");
+    assert_eq!(harness.state().mailbox().selected(), Some(teodor), "the row the menu was on is not selected");
+    assert_eq!(harness.state().reader().open_id(), Some(teodor), "the reader shows the same message");
+    assert!(!seen(&harness, odile), "and the row's message is not read");
+}
+
+#[test]
+fn in_one_pane_esc_from_a_rows_pointer_menu_gives_it_the_keyboard_and_opens_nothing() {
+    let (mut harness, keyed, next) = keyed_over_an_unread_row();
+    let label = row_label(&harness, next);
+    menu_then_esc(&mut harness, &label);
+    assert!(harness.ctx.memory(|memory| memory.has_focus(super::list::row_id(next))), "the row has the keyboard");
+    assert_eq!(harness.state().mailbox().selected(), Some(keyed), "the row the menu was on is not keyed");
+    assert!(rows(&harness) > 0 && super::reader_rect(&harness.ctx).is_none(), "the list stays in front");
+    assert!(!seen(&harness, next), "and the row's message is not read");
+}
