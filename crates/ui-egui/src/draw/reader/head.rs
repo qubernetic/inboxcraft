@@ -85,7 +85,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         }
         paint::rule(ui, p.line);
         if row.group.is_some()
-            && let Some(act) = crate::draw::list::group_menu(ui, theme, row.group, &row.address)
+            && let Some(act) = crate::draw::list::group_menu(ui, theme, row.group, &row.address, false)
         {
             drawn.asked.push(Asked::Act(row.id, act));
         }
@@ -340,8 +340,10 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
     let held = open.is_some_and(|id| mailbox.held(id));
     let width = ui.available_width();
     let line = |count: f32| count * side + (count - 1.0).max(0.0) * TOOL_GAP;
-    let shown = if held { 1.0 } else { ACTS };
-    if !held && line(ACTS) > width {
+    // In one pane the way back to the list is the first tool, 8 before the acts.
+    let back = if crate::draw::one_pane(ui.ctx()) { 1.0 } else { 0.0 };
+    let shown = if held { 1.0 } else { ACTS } + back;
+    if !held && line(ACTS + back) > width {
         let mut per = 1.0_f32;
         while per < ACTS && line(per + 1.0) <= width {
             per += 1.0;
@@ -351,6 +353,11 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
             lines += 1.0;
         }
         let high = lines * side + (lines - 1.0) * TOOL_GAP;
+        // In one pane the way back to the list leads, on a line of its own above the acts.
+        // The way back to the list on a line of its own above the acts.
+        if back > 0.0 {
+            ui.horizontal(|ui| super::back_to_list(ui, theme, keymap, drawn));
+        }
         let (_, whole) = ui.allocate_space(vec2(width.max(0.0), high));
         let mut top = whole.top();
         let mut first = 0_usize;
@@ -390,6 +397,7 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
             let drawn_tag = tag(&mut child, theme, &words, kind);
             drawn_tag.widget_info(|| WidgetInfo::labeled(Spoken::Label, true, crate::component::spoken(&spoken)));
         }
+        super::back_to_list(ui, theme, keymap, drawn);
         if held {
             act(ui, theme, keymap, mailbox, reader, drawn, ACT_COUNT - 1);
         } else {
@@ -484,7 +492,7 @@ fn subject(ui: &mut Ui, theme: &Theme, keymap: &Keymap, opened: Option<&Opened>,
     }
     // Enter opens the menu a secondary press opens (the menu key and Shift+F10 do too), so the copy is the keyboard's.
     if response.clicked() && !response.clicked_by(egui::PointerButton::Primary) {
-        popup::open_by_key(ui.ctx(), &response, subject_menu());
+        popup::open_under(ui.ctx(), subject_menu());
     }
     let copied = popup::context_menu(ui.ctx(), theme, &response, subject_menu(), MOVE_WIDTH, |ui| {
         let copy = popup::entry(ui, theme, keymap, tr!("Copy the subject"), None).clicked();

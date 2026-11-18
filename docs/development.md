@@ -9,7 +9,7 @@ binary the container built. The `justfile` is the one command surface over both,
 ## The two layers
 | Layer | Where | What runs there |
 |---|---|---|
-| Container | the `rust` service in `docker-compose.yml`, image from `Dockerfile` | `cargo`, `rustc`, clippy, rustfmt, nextest, cargo-deny, cargo-llvm-cov, `cargo xtask` |
+| Container | the `rust` service in `docker-compose.yml`, image from `Dockerfile` | `cargo`, `rustc` (through sccache), clippy, rustfmt, nextest, cargo-deny, cargo-llvm-cov, `cargo xtask` |
 | Host | your desktop session | the built `inboxcraft` binary from `target/`, through `just run` and `just run-sample` |
 
 The working copy is bind-mounted at `/workspace`, so `target/` is shared: what the container builds, the host runs.
@@ -62,6 +62,42 @@ prerequisites and `libdbus-1-dev`), plus the toolchain components, the `wasm32-u
 tools pinned there. As of 2026-11-04 it has them (cargo 1.98.0, nextest 0.9.150, cargo-deny 0.20.2, cargo-llvm-cov
 0.9.1), and `AGENT_HORDE=1 just ci` runs green in it.
 
+## The compile cache (sccache)
+Every worktree, and every agent working beside another, builds in a target dir of its own
+(`CARGO_TARGET_DIR=target/wt-<name>`), and without help each of them compiles every third-party dependency again. In
+the dev container every `rustc` call goes through [sccache](https://github.com/mozilla/sccache), which keeps the
+compiled crates in one cache that all target dirs share.
+
+- **Where it is set.** The image sets `RUSTC_WRAPPER=/usr/local/cargo/bin/sccache-wrap`,
+  `SCCACHE_DIR=/workspace/target/sccache` and `SCCACHE_CACHE_SIZE=40G` (`Dockerfile`). Nothing in
+  `.cargo/config.toml` names it, so native mode (`AGENT_HORDE=1`) and the GitHub workflow build without it and need
+  no sccache installed.
+- **Why the wrapper.** sccache puts every `CARGO_*` variable into the key of an entry, `CARGO_TARGET_DIR` too, so two
+  target dirs would never share one. `sccache-wrap` drops `CARGO_TARGET_DIR` and `CARGO_BUILD_TARGET_DIR` and runs
+  sccache; rustc gets its output dir as an argument and needs neither. Measured on 2026-11-18 with
+  `cargo build -p inboxcraft-ui-egui` in two fresh target dirs on a busy machine: without the wrapper the second dir
+  had 1 cache hit in 168 compile requests; with it the first dir took 97 s (83 misses) and the second 37 s (72 hits,
+  11 misses). The wrapper is a bash script: `sh` (dash) drops the variables whose names are not shell names, such as
+  `CARGO_BIN_EXE_inboxcraft-web`, and the tests that read them with `env!` no longer compile. When
+  `CARGO_INCREMENTAL` is on, which sccache refuses, it runs rustc without sccache; `cargo xtask cov` sets it, so the
+  coverage run takes nothing from the cache.
+- **Where it lies.** `target/sccache` in the working copy, on the bind mount, so it outlives the container and needs
+  no volume of its own. It never grows past 40 GiB; the oldest entries go first.
+- **Looking at it.** `just shell`, then `sccache --show-stats` (hits, misses and why a call was not cacheable;
+  `sccache --zero-stats` starts the counts again). The sccache server starts with the first build and stops after
+  10 idle minutes; the counts start again with it.
+- **Emptying it.** While nobody is building (every build in the container shares the one server):
+  `sccache --stop-server` in the container, then `rm -rf target/sccache`. `just clean` deletes it
+  with the rest of `target/`, and so does a `cargo clean` without `CARGO_TARGET_DIR` (it removes `target/` whole); a
+  `cargo clean` in a target dir of its own leaves it alone.
+- **What it does not cache.** Crates built incrementally, which are the workspace's own crates in the dev profile:
+  they still compile in every target dir, and the gain is the dependencies (egui, winit, wgpu and the rest). Binary
+  crates (`bin`) and linking are not cached either, and the first build after the cache is emptied fills it and is
+  no faster.
+- **After a change to it.** The settings live in the image: a `Dockerfile` change reaches the running container only
+  after `just rebuild`, `just down` and `just dev`, which start it again on the new image. Builds running in the
+  container at that moment are lost, so do it when nobody is building.
+
 ## The workspace
 | Directory | What is in it |
 |---|---|
@@ -86,9 +122,9 @@ try:
 - the reader: a reply with its quote, a thread, a newsletter whose remote pictures load only when asked (the sample
   draws them in code), attachments to save into the downloads folder;
 - the hover actions on a row, or on the row selected with the arrow keys: Done (D) marks it read and files it as done
-  in its account's Archive ("Show done" over the list shows it there again, dimmed), R marks it read or unread, Delete moves it to Trash; A archives it and S flags it. The reader's
+  in its account's Archive ("Show done" over the list shows it there again, with a tick), R marks it read or unread, Delete moves it to Trash; A archives it and S flags it. The reader's
   toolbar adds Archive and Move to a folder, its More menu flag and read or unread. A row that leaves the list
-  slides out; a toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was, and
+  does so at once and its gap closes; a toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was, and
   Ctrl+Z after it walks back through the earlier acts;
 - the appearance settings (the gear on the rail, Ctrl+Comma): mode, window frame, text scale and reduced
   motion, kept in `inboxcraft/appearance.json` in the owner's config folder as in the normal window.
@@ -101,9 +137,9 @@ try:
   the sample has none, and saving one (`template.save`, `owner`) has no place in the window yet.
 - the screener and the grouped inbox: the screener is on (before the inbox) and holds two invented new senders;
   Review on the screener card opens New senders, where a message is a preview with Accept (into a group), Accept and
-  open, and Block. The inbox shows People and Updates as cards; a right click on a row (or the reader's More menu)
-  puts its sender in another group. Settings, Triage changes the screener's mode, the inbox view (cards, grouped
-  list, simple list) and each account's grouping. Each act has a toast with Undo.
+  open, and Block. The inbox shows People and Notifications under their heads (Smart: the first three rows of each); a right click on a
+  row (or the reader's More menu) puts its sender in another group. Settings, Triage changes the screener's mode,
+  the inbox view (Grouped, Smart, List) and each account's grouping. Each act has a toast with Undo.
 - done, park, pin, snooze and reminders: Snooze (H) in the reader opens the time picker; on a message in Sent the
   same button sets a "Remind me if no reply" reminder. Pin pins the open message, More parks it. Later on the rail
   lists the snoozed mail, the pins and the park pile. "Done all" on a group card files the group.
@@ -569,7 +605,8 @@ releases at least 7 days old) and `actions` (prefix `ci(deps)`).
 - **Fuzzing:** `FUZZ_TOOLCHAIN` and `CARGO_FUZZ_VERSION` in `.github/workflows/fuzz.yml`.
 - **Actions:** Dependabot bumps the SHA and the tag comment together.
 
-After a `Dockerfile` change, run `just rebuild`.
+After a `Dockerfile` change, run `just rebuild`, then `just down` and `just dev` to start the container on the new
+image.
 
 ## Revision history
 | Date | Change | Summary |

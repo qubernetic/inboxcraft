@@ -292,11 +292,22 @@ fn the_next_message_rule_is_picked_in_the_more_menu_and_arrows_step_through_the_
     harness.get_by_label("Go back to the list").click();
     harness.run();
     assert_eq!(harness.state().mailbox().after(), After::List);
+    // The More menu was the reader's: the list's keys rest until a row is pressed or keyed. A press on the open row
+    // gives the list the keyboard.
+    let before = harness.state().mailbox().selected();
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), before, "the arrows rest while the reader has the keyboard");
+    harness.query_all_by_label_contains("Allotment rota for November").next().unwrap().click();
+    harness.run();
+    // The next row as the list shows it.
+    let order = super::list::order(&harness.ctx);
+    let before = harness.state().mailbox().selected().unwrap();
+    let next = order.iter().position(|id| *id == before).and_then(|at| order.get(at + 1)).copied();
     harness.key_press(Key::ArrowDown);
     harness.run();
     let selected = harness.state().mailbox().selected();
-    let row = harness.state().mailbox().messages().iter().find(|row| Some(row.id) == selected).unwrap();
-    assert_eq!(row.subject, "Draft logo for the bakery");
+    assert_eq!(selected, next);
     assert_eq!(harness.state().reader().open_id(), selected, "the reader follows");
     harness.key_press(Key::ArrowUp);
     harness.run();

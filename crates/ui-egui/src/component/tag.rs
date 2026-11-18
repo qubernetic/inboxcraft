@@ -49,7 +49,7 @@ pub(crate) fn coming_soon(ui: &mut Ui, theme: &Theme, text: &str) -> Response {
     draw(ui, theme, text, theme.palette.muted, theme.palette.muted, true)
 }
 
-/// How wide a tag of `text` is drawn.
+/// How wide a tag with `text` is, in points: what a line measures before it lays one down.
 pub(crate) fn width(ui: &Ui, theme: &Theme, text: &str) -> f32 {
     super::cut(ui, text, theme.fonts.mono_s, theme.palette.muted, WIDEST).size().x.ceil().min(WIDEST) + PAD * 2.0
 }

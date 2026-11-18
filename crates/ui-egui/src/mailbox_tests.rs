@@ -406,7 +406,7 @@ fn the_sample_showcase_groups_people_and_updates_and_leaves_one_row_out() {
     let mailbox = mailbox();
     let showcase = sample::showcase(&mailbox);
     let names: Vec<&str> = showcase.groups.iter().map(|group| group.name.as_str()).collect();
-    assert_eq!(names, ["People", "Updates"]);
+    assert_eq!(names, ["People", "Notifications"]);
     let grouped: Vec<u64> = showcase.groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
     assert_eq!(grouped.len(), mailbox.messages().len() - 1);
     let left: Vec<&str> = mailbox.messages().iter().filter(|row| !grouped.contains(&row.id)).map(|row| row.sender.as_str()).collect();
@@ -602,18 +602,21 @@ fn a_move_to_another_account_s_folder_is_refused_and_shown() {
 }
 
 #[test]
-fn acts_that_take_the_row_out_slide_first_and_a_new_act_finishes_the_sliding_one() {
+fn acts_that_take_the_row_out_act_at_once_and_keep_the_row_while_its_gap_closes() {
     assert!([Act::Done, Act::Archive, Act::Delete, Act::Move(7)].iter().all(|act| act.slides()));
     assert!(![Act::Read, Act::Unread, Act::Flag, Act::Unflag].iter().any(|act| act.slides()));
     let mut mailbox = mailbox();
     let (rota, photos) = (id_of(&mailbox, ROTA), id_of(&mailbox, PHOTOS));
+    let at = mailbox.messages().iter().position(|row| row.id == rota);
     mailbox.start(rota, Act::Done);
+    assert_eq!(listed(&mailbox, rota), None, "done at once");
+    assert!(mailbox.undoable().is_some(), "its toast at once");
     assert_eq!(mailbox.leaving(), Some((rota, Act::Done)));
-    assert_eq!(listed(&mailbox, rota), Some(false), "still in the list while it slides");
-    assert_eq!(mailbox.undoable(), None);
+    let left = mailbox.left_row().cloned().unwrap();
+    assert_eq!((left.row.subject.as_str(), Some(left.at)), (ROTA, at), "the row as it stood, where it stood");
     mailbox.start(photos, Act::Delete);
-    assert_eq!(listed(&mailbox, rota), None, "done before the next one starts");
-    assert_eq!(mailbox.leaving(), Some((photos, Act::Delete)));
+    assert_eq!(listed(&mailbox, photos), None);
+    assert_eq!(mailbox.leaving(), Some((photos, Act::Delete)), "the next one lets the first go");
     mailbox.left();
     assert_eq!(listed(&mailbox, photos), None);
     assert_eq!(mailbox.leaving(), None);
@@ -779,4 +782,41 @@ fn an_agents_read_keeps_the_windows_undo() {
     mailbox.run_for_agent("mail.list", &json!({})).unwrap();
     assert!(mailbox.undoable().is_some());
     assert!(mailbox.can_undo());
+}
+
+#[test]
+fn the_old_view_ids_read_as_the_new_views() {
+    use super::InboxView;
+    use crate::keep::Triage;
+
+    // Today's ids name today's views; Smart is the default.
+    let ids: Vec<&str> = InboxView::ALL.iter().map(|view| view.id()).collect();
+    assert_eq!(ids, ["grouped", "smart", "list"]);
+    assert_eq!(InboxView::default(), InboxView::Smart);
+    // The ids kept before: the cards are Smart, the list under headings Grouped, the simple list List.
+    assert_eq!(InboxView::named_before("cards"), Some(InboxView::Smart));
+    assert_eq!(InboxView::named_before("list"), Some(InboxView::Grouped));
+    assert_eq!(InboxView::named_before("simple"), Some(InboxView::List));
+    // A keep file of then, under its `view` key: each choice survives the rename.
+    for (old, now) in [("cards", InboxView::Smart), ("list", InboxView::Grouped), ("simple", InboxView::List)] {
+        let kept = Triage::from_value(&json!({ "screener": "off", "view": old }));
+        assert_eq!(kept.view, now, "{old}");
+        // Written again and read back, it stays; the earlier key keeps the earlier id for an earlier InboxCraft.
+        let written = kept.to_value();
+        assert_eq!(written["inbox_view"], json!(now.id()));
+        assert_eq!(written["view"], json!(old));
+        assert_eq!(Triage::from_value(&written).view, now);
+    }
+    // Today's key wins over the earlier one: today's `list` is List, never the old grouped list.
+    assert_eq!(Triage::from_value(&json!({ "inbox_view": "list", "view": "list" })).view, InboxView::List);
+    // Hostile and unknown ids: no view of theirs, the default one, no panic.
+    for hostile in [json!("tiles"), json!(""), json!("\u{0}"), json!("CARDS"), json!(7), json!(null), json!({ "x": [] }), json!("x".repeat(100_000))]
+    {
+        assert_eq!(Triage::from_value(&json!({ "inbox_view": hostile.clone() })).view, InboxView::Smart, "{hostile}");
+        assert_eq!(Triage::from_value(&json!({ "view": hostile.clone() })).view, InboxView::Smart, "{hostile}");
+        if let Some(text) = hostile.as_str() {
+            assert_eq!(InboxView::named(text), None);
+            assert_eq!(InboxView::named_before(text), None);
+        }
+    }
 }

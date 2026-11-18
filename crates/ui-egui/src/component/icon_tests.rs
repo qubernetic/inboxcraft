@@ -76,7 +76,7 @@ fn icon_in(mode: Mode, scale: TextScale, id: IconId, label: &'static str) -> (eg
 
 #[test]
 fn the_sheet_holds_every_icon_once_in_the_codes_order() {
-    assert_eq!(SHEET.map(|(_, id, _)| id), IconId::ALL);
+    assert_eq!(SHEET.map(|(_, id, _)| id).as_slice(), &IconId::ALL[..IconId::SHEET]);
     for (state, id, _) in SHEET {
         assert_eq!(name(id), state, "the sheet's name of {id:?}");
     }

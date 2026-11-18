@@ -274,6 +274,13 @@ pub fn hairline(ui: &mut Ui, theme: &Theme) {
 /// A float's title row: 28 high on `panel`, `label` in the `label` style and `count` in `mono_s` at its right end,
 /// both `muted`; a hairline under it.
 pub fn title(ui: &mut Ui, theme: &Theme, label: &str, count: Option<&str>) {
+    head(ui, theme, label, count);
+    hairline(ui, theme);
+}
+
+/// A float's title row as [`title`] draws it, with no hairline under it: the design's group menu, whose choices stand
+/// straight under its head.
+pub fn head(ui: &mut Ui, theme: &Theme, label: &str, count: Option<&str>) {
     let p = &theme.palette;
     let s = &theme.spacing;
     let height = theme.boxes().float_title;
@@ -289,7 +296,6 @@ pub fn title(ui: &mut Ui, theme: &Theme, label: &str, count: Option<&str>) {
             paint::run_right(painter, rect.right() - s.s3, rect.center().y - count.size().y / 2.0, count, p.muted);
         }
     }
-    hairline(ui, theme);
 }
 
 /// What a float says when it has no rows: `text` in `body` and `muted`, 12 in on every side.
@@ -618,15 +624,24 @@ pub fn clicked(ctx: &Context, response: &Response, id: Id) -> bool {
 /// keyboard that frame and the next.
 const REFOCUS_FRAMES: u8 = 3;
 
-/// Gives the keyboard back to `opener` while the menu `id` closed on a choice asks for it.
+/// Asks for the keyboard back for the opener of the menu `id` for [`REFOCUS_FRAMES`] passes from this one.
+fn ask_refocus(ctx: &Context, id: Id) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(id.with("refocus"), (REFOCUS_FRAMES, pass)));
+}
+
+/// Gives the keyboard back to `opener` while the menu `id` closed on a choice asks for it. The ask lapses
+/// [`REFOCUS_FRAMES`] passes after it was made, whether or not `opener` was drawn in them: an opener drawn again later
+/// takes no keyboard.
 fn refocus(ctx: &Context, opener: &Response, id: Id) {
     let key = id.with("refocus");
-    if let Some(left) = ctx.data(|data| data.get_temp::<u8>(key)) {
-        if opener.has_focus() || left == 0 || is_open(ctx, id) {
-            ctx.data_mut(|data| data.remove::<u8>(key));
+    if let Some((left, asked)) = ctx.data(|data| data.get_temp::<(u8, u64)>(key)) {
+        let old = ctx.cumulative_pass_nr().saturating_sub(asked) > u64::from(REFOCUS_FRAMES);
+        if opener.has_focus() || left == 0 || old || is_open(ctx, id) {
+            ctx.data_mut(|data| data.remove::<(u8, u64)>(key));
         } else {
             opener.request_focus();
-            ctx.data_mut(|data| data.insert_temp(key, left.saturating_sub(1)));
+            ctx.data_mut(|data| data.insert_temp(key, (left.saturating_sub(1), asked)));
         }
     }
 }
@@ -660,7 +675,6 @@ fn toggle(ctx: &Context, opener: &Response, id: Id) {
     }
 }
 
-/// A menu that a secondary press on `row` opens where the pointer is (a row's context menu), as [`menu`] shows it.
 /// [`menu`] hung with its right edge on `opener`'s right edge, as the reader's More and Move do; still kept 3 in from
 /// the window's edges.
 pub fn menu_right<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
@@ -670,18 +684,10 @@ pub fn menu_right<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, wi
     menu_at(ctx, theme, opener, anchor, id, width, add)
 }
 
-/// The menu key and Shift+F10 on a focused `row` open its menu, as a secondary press does, under the row's left edge.
+/// A menu that a secondary press on `row` opens where the pointer is (a row's context menu), as [`menu`] shows it.
 pub fn context_menu<R>(ctx: &Context, theme: &Theme, row: &Response, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
     refocus(ctx, row, id);
     let at = id.with("at");
-    let keyed = row.has_focus()
-        && !is_open(ctx, id)
-        && ctx.input_mut(|input| {
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Menu) || input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10)
-        });
-    if keyed {
-        open_by_key(ctx, row, id);
-    }
     if row.secondary_clicked() {
         let pointer = row.interact_pointer_pos().unwrap_or(row.rect.left_bottom());
         ctx.data_mut(|data| data.insert_temp(at, pointer));
@@ -692,11 +698,13 @@ pub fn context_menu<R>(ctx: &Context, theme: &Theme, row: &Response, id: Id, wid
     menu_at(ctx, theme, row, anchor, id, width, add)
 }
 
-/// Opens the context menu `id` of `row` from the keyboard: under the row's left edge, the first Tab on its first row,
-/// the keyboard going back to `row` when it closes.
-pub fn open_by_key(ctx: &Context, row: &Response, id: Id) {
-    ctx.data_mut(|data| data.insert_temp(id.with("at"), row.rect.left_bottom()));
-    ctx.data_mut(|data| data.insert_temp(by_key_id(id), true));
+/// Opens the [`context_menu`] `id` from the keyboard (the Menu key, `Shift F10`): it hangs under its row, not where a
+/// pointer last opened it, and, as every menu the keyboard opened, gives its row the keyboard back however it closes.
+pub fn open_under(ctx: &Context, id: Id) {
+    ctx.data_mut(|data| {
+        data.remove::<Pos2>(id.with("at"));
+        data.insert_temp(by_key_id(id), true);
+    });
     set_open(ctx, id, true);
 }
 
@@ -719,10 +727,13 @@ fn menu_at<R>(
         None => {
             set_open(ctx, id, false);
             // The float gave the opener the keyboard; a press outside a menu the pointer opened takes it away again
-            // (Esc leaves it there).
+            // (Esc leaves it there). A menu the keyboard opened keeps it given back for a few frames: the press that
+            // closed it may land on the ground, which takes the focus from everything.
             let beside = ctx.data(|data| data.get_temp::<()>(id.with("closing-press"))).is_some();
             if beside && !by_key {
                 ctx.memory_mut(|memory| memory.surrender_focus(opener.id));
+            } else if beside {
+                ask_refocus(ctx, id);
             }
             None
         }
@@ -731,12 +742,18 @@ fn menu_at<R>(
                 set_open(ctx, id, false);
                 if by_key {
                     opener.request_focus();
-                    ctx.data_mut(|data| data.insert_temp(id.with("refocus"), REFOCUS_FRAMES));
+                    ask_refocus(ctx, id);
                 }
             }
             Some(inner)
         }
     }
+}
+
+/// Whether a float (or a popup of egui's) is open: the keys of what lies under it rest.
+#[must_use]
+pub fn any_open(ctx: &Context) -> bool {
+    ctx.memory(|memory| memory.top_modal_layer().is_some()) || egui::Popup::is_any_open(ctx)
 }
 
 /// Whether `Esc` was pressed for a control under the floats: false while a float is open, which takes it.

@@ -184,3 +184,50 @@ fn every_animation_goes_through_the_motion_module() {
     }
     assert!(found.is_empty(), "animations read the reduced-motion flag in motion.rs:\n{}", found.join("\n"));
 }
+
+#[test]
+fn the_design_curve_runs_from_0_to_1_as_cubic_bezier_2_7_2_1() {
+    use super::ease;
+    assert_eq!(ease(0.0), 0.0);
+    assert_eq!(ease(1.0), 1.0);
+    // Measured apart from the code: x(t) sampled at two million points and inverted by interpolation.
+    for (share, wanted) in [(0.1, 0.359_123), (0.25, 0.727_373), (0.5, 0.929_579), (0.75, 0.987_468), (0.9, 0.998_287)] {
+        assert!((ease(share) - wanted).abs() < 1e-4, "{share}: {} for {wanted}", ease(share));
+    }
+    // Rising, and safe with what is not a share.
+    let mut last = 0.0;
+    for step in 0..=100 {
+        let at = ease(step as f32 / 100.0);
+        assert!(at >= last && (0.0..=1.0).contains(&at), "{step}: {at}");
+        last = at;
+    }
+    assert_eq!((ease(-1.0), ease(2.0), ease(f32::NAN), ease(f32::INFINITY)), (0.0, 1.0, 0.0, 1.0));
+}
+
+#[test]
+fn css_ease_runs_from_0_to_1_as_cubic_bezier_25_1_25_1() {
+    use super::css_ease;
+    assert_eq!((css_ease(0.0), css_ease(1.0)), (0.0, 1.0));
+    // Measured apart from the code: x(t) inverted by halving 80 times in double precision.
+    for (share, wanted) in [(0.1, 0.094_796), (0.25, 0.408_511), (0.5, 0.802_403), (0.75, 0.960_459), (0.9, 0.994_316)] {
+        assert!((css_ease(share) - wanted).abs() < 1e-4, "{share}: {} for {wanted}", css_ease(share));
+    }
+    let mut last = 0.0;
+    for step in 0..=100 {
+        let at = css_ease(step as f32 / 100.0);
+        assert!(at >= last && (0.0..=1.0).contains(&at), "{step}: {at}");
+        last = at;
+    }
+    assert_eq!((css_ease(-1.0), css_ease(2.0), css_ease(f32::NAN), css_ease(f32::NEG_INFINITY)), (0.0, 1.0, 0.0, 0.0));
+}
+
+#[test]
+fn the_elapsed_share_runs_evenly_and_lands() {
+    use super::elapsed;
+    let ctx = Context::default();
+    let id = Id::unique("elapsed-test");
+    let shares: Vec<f32> = (0..20).map(|n| frame(&ctx, 1.0 + n as f64 * FRAME, |ctx| elapsed(ctx, id, 0.18))).collect();
+    assert_eq!(shares[0], 0.0);
+    assert!((shares[3] - (3.0 * FRAME as f32 / 0.18)).abs() < 1e-3, "{shares:?}");
+    assert_eq!(shares.last().copied(), Some(1.0));
+}

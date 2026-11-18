@@ -81,7 +81,7 @@ fn windows(mut desktop: Desktop, shown: &Shown) -> ExitCode {
             .with_title("InboxCraft")
             .with_app_id("io.github.qubernetic.inboxcraft")
             .with_inner_size([1200.0, 760.0])
-            .with_min_inner_size([720.0, 480.0])
+            .with_min_inner_size([800.0, 480.0])
             // See-through where the app paints nothing: the corners of its own frame.
             .with_transparent(true)
             // The app draws its own frame unless the owner chose the desktop's title bar (`ui.frame.set`).

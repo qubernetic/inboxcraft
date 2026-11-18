@@ -49,8 +49,10 @@ use std::collections::HashMap;
 use egui::{Area, Frame, Id, Margin, Order, Rect, ScrollArea, Stroke, TextureHandle, Ui, vec2};
 
 use super::margin;
+use crate::component::button::IconButton;
 use crate::compose::Answer;
 use crate::draw::paint;
+use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, After, Mailbox};
 use crate::reader::Reader;
@@ -122,6 +124,8 @@ pub(super) enum Asked {
     Presets,
     /// Something asked on the invitation card of a message.
     Invite(u64, super::invite::Ask),
+    /// Back to the list (one pane).
+    Back,
 }
 
 /// What the reader drew: what was asked for, and the status of the link under the pointer.
@@ -236,6 +240,33 @@ fn status(ui: &Ui, theme: &Theme, room: Rect, text: &str) {
             paint::hairline(painter, rect.left_top(), egui::pos2(rect.right() - 1.0, rect.top()), p.panel_line);
         },
     );
+}
+
+/// "Back to the list", the design's first tool of the reader when the window holds one pane: the arrow left, the action
+/// [`keymap::BACK`]; a press asks for [`Asked::Back`]. Its id is kept for [`take_back_id`]. Whether it was drawn.
+pub(super) fn back_to_list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, drawn: &mut Drawn) -> bool {
+    if !super::one_pane(ui.ctx()) {
+        return false;
+    }
+    let response = IconButton::new(IconId::Back, tr!("Back to the list")).action(keymap::BACK).show(ui, theme, keymap);
+    ui.data_mut(|data| data.insert_temp(back_kept_id(), response.id));
+    if response.clicked() {
+        drawn.asked.push(Asked::Back);
+    }
+    true
+}
+
+/// Where the id of the "Back to the list" drawn in this pass is kept.
+fn back_kept_id() -> egui::Id {
+    egui::Id::unique("reader-back")
+}
+
+/// Takes the id of the "Back to the list" the reader drew since the last take: where the focus goes when a message is
+/// opened into the one pane.
+pub(super) fn take_back_id(ctx: &egui::Context) -> Option<egui::Id> {
+    let id = ctx.data(|data| data.get_temp::<egui::Id>(back_kept_id()));
+    ctx.data_mut(|data| data.remove::<egui::Id>(back_kept_id()));
+    id
 }
 
 /// The reader with no message open: the bare empty state in the middle of the pane, 40 from its sides.

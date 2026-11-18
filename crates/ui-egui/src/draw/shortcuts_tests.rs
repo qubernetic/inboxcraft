@@ -73,6 +73,19 @@ fn the_shortcuts_page_lists_every_action_with_its_key() {
         harness.get_by_label("Key of Command palette: Ctrl K");
         harness.get_by_label("Key of Search mail: Ctrl F");
         harness.get_by_label("Show sent mail has no key");
+        // The list's keys, each with its own: J and K, the arrows, the page keys, Enter, Shift F10 and the Menu key.
+        let keymap = crate::keymap::Keymap::default();
+        for id in crate::keymap::LIST_KEYS {
+            let action = crate::keymap::action(id).unwrap();
+            let words = crate::component::key::key_words(&keymap.shortcut(id).unwrap());
+            harness.get_by_label(&format!("Key of {}: {words}", action.name));
+        }
+        // The inbox's three views, actions without a key of their own.
+        for name in ["Inbox view: Grouped", "Inbox view: Smart", "Inbox view: List", "Back to the list"] {
+            harness.get_by_label(&format!("{name} has no key"));
+        }
+        harness.get_by_label("Key of The next message of the list: J");
+        harness.get_by_label("Key of The message before in the list: K");
         harness.get_by_role_and_label(Role::TextInput, "Find a command");
         harness.get_by_role_and_label(Role::Button, "Reset all keys");
         harness.get_by_role_and_label(Role::Button, "Remove the key of Command palette");
@@ -301,4 +314,22 @@ fn a_waiting_key_chip_has_a_1_px_edge_and_the_focus_ring_stands_2_px_clear_of_it
         assert!(near(ring, rect.expand(3.0)) && ring_width == 1.0, "{theme:?} the ring is outside, 2 px clear: {strokes:?} {rect:?}");
         assert!(whole, "{theme:?} the ring has room: {strokes:?}");
     }
+}
+
+#[test]
+fn the_inbox_views_are_actions_the_palette_runs_and_a_key_can_take() {
+    use crate::mailbox::InboxView;
+    let mut harness = build(app(), egui::Theme::Light);
+    for (id, view) in [(keymap::VIEW_GROUPED, InboxView::Grouped), (keymap::VIEW_LIST, InboxView::List), (keymap::VIEW_SMART, InboxView::Smart)] {
+        assert!(harness.state().can_run(id), "{id}");
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, id);
+        harness.run();
+        assert_eq!(harness.state().mailbox().inbox_view(), view, "{id}");
+    }
+    // Rebindable: a key given to one runs it.
+    harness.state_mut().keymap_mut().bind(keymap::VIEW_LIST, KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::L));
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::L);
+    harness.run();
+    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::List);
 }

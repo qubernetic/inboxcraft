@@ -377,18 +377,29 @@ pub(crate) fn keyboard_walk<State>(harness: &mut Harness<'_, State>) -> Vec<Stri
             None => {}
         }
     }
-    // A radio button without a Tab stop of its own is reached through its group (a segmented control's option: the
-    // group takes the focus and the arrow keys move the choice).
+    // A radio button in a group Tab reached is reached through it (a segmented control's option: the group takes the
+    // focus and the arrow keys move the choice): the group holds it in the tree, or its options stand inside its box.
+    let groups: Vec<Rect> = harness
+        .root()
+        .children_recursive()
+        .filter(|node| node.accesskit_node().role() == accesskit::Role::RadioGroup && reached.contains(&node.accesskit_node().locate().0))
+        .filter_map(|node| node.accesskit_node().bounding_box())
+        .map(|b| Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32)).expand(0.5))
+        .collect();
     let through_group: Vec<NodeId> = harness
         .root()
         .children_recursive()
         .filter(|node| {
             let data = node.accesskit_node();
+            let inside = data.bounding_box().is_some_and(|b| {
+                let rect = Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32));
+                groups.iter().any(|group| group.contains_rect(rect))
+            });
             data.role() == accesskit::Role::RadioButton
-                && !data.data().supports_action(accesskit::Action::Focus)
-                && std::iter::successors(node.parent(), |up| up.parent())
-                    .find(|up| up.accesskit_node().role() == accesskit::Role::RadioGroup)
-                    .is_some_and(|group| reached.contains(&group.accesskit_node().locate().0))
+                && (inside
+                    || std::iter::successors(node.parent(), |up| up.parent())
+                        .find(|up| up.accesskit_node().role() == accesskit::Role::RadioGroup)
+                        .is_some_and(|group| reached.contains(&group.accesskit_node().locate().0)))
         })
         .map(|node| node.accesskit_node().locate().0)
         .collect();
@@ -658,6 +669,31 @@ fn a_cut_line_ends_its_last_word_with_the_ellipsis_and_no_space_before_it() {
 }
 
 #[test]
+fn a_line_is_cut_once_while_its_text_and_room_stay_and_the_store_stays_small() {
+    let theme = theme();
+    let long = "Minutes of the quarterly studio planning meeting, with the kiln rota and the open day plan".repeat(4);
+    let mut harness = builder().build_ui_state(
+        move |ui, frame: &mut usize| {
+            let font = theme.fonts.caption;
+            // The same line twice a frame, and a line of its own each frame.
+            let one = super::fitted(ui, &long, font, theme.palette.ink, 200.0);
+            let two = super::fitted(ui, &long, font, theme.palette.ink, 200.0);
+            assert_eq!(one.job.text, two.job.text);
+            let _ = super::fitted(ui, &format!("{long} {frame}"), font, theme.palette.ink, 150.0);
+            *frame += 1;
+        },
+        0,
+    );
+    harness.run_steps(1);
+    let before = super::FITS.with(std::cell::Cell::get);
+    harness.run_steps(400);
+    let cut = super::FITS.with(std::cell::Cell::get) - before;
+    assert_eq!(cut, 400, "only each frame's new line is cut again: {cut}");
+    let kept = super::fit_store_len(&harness.ctx);
+    assert!(kept <= super::FIT_STORE, "the store stays bounded: {kept}");
+}
+
+#[test]
 fn a_cut_line_is_never_wider_than_its_box_however_egui_rounds_its_letters() {
     let theme = theme();
     let mut harness = builder().build_ui_state(
@@ -681,4 +717,37 @@ fn a_cut_line_is_never_wider_than_its_box_however_egui_rounds_its_letters() {
     assert_eq!(found[0].0, "Bakery on the corner…", "{found:?}");
     assert_eq!(found[1].0, "orders-and-deli…", "{found:?}");
     assert!(found[0].1 <= 144.0 && found[1].1 <= 112.0, "{found:?}");
+}
+
+#[test]
+fn a_fitted_line_is_cut_by_the_one_rule_never_wider_than_its_room() {
+    let theme = theme();
+    let texts = [
+        ("Bakery on the corner, orders and deliveries", theme.fonts.body),
+        ("orders-and-deliveries@bakery-on-the-corner.example.org", theme.fonts.mono_s),
+        ("Minutes of the quarterly studio planning meeting, with the kiln rota", theme.fonts.caption),
+        ("Odile Brannock, Teodor Lisk and the allotment committee", theme.fonts.strong),
+    ];
+    let mut harness = builder().build_ui_state(
+        move |ui, found: &mut Vec<(String, f32, f32)>| {
+            found.clear();
+            for (text, font) in texts {
+                // Every room from 40 to 300 in quarter points: the cut cache's line never reaches past its room.
+                for quarter in 160..1200_u16 {
+                    let room = f32::from(quarter) / 4.0;
+                    let fitted = super::fitted(ui, text, font, theme.palette.ink, room);
+                    let kept: String = fitted.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+                    let wide: f32 = fitted.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum();
+                    // The rule's slack: what adding up the advances in `f32` drifts by.
+                    if wide - room > 0.001 {
+                        found.push((kept, wide, room));
+                    }
+                }
+            }
+        },
+        Vec::new(),
+    );
+    harness.run();
+    let found = harness.state();
+    assert!(found.is_empty(), "{} lines past their room: {:?}", found.len(), found.iter().take(5).collect::<Vec<_>>());
 }

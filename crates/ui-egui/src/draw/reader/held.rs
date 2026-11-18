@@ -80,7 +80,7 @@ pub(super) fn let_in(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
                 ui.spacing_mut().item_spacing = vec2(PILL_GAP, PILL_GAP);
                 crate::component::label(ui, f.caption, tr!("Into"), p.muted);
                 ui.add_space(2.0);
-                for kind in GroupKind::ALL {
+                for kind in GroupKind::SHOWN {
                     if pill(ui, theme, kind.text(), into == Some(kind)).clicked() {
                         into = if into == Some(kind) { None } else { Some(kind) };
                         ui.data_mut(|data| data.insert_temp(chosen_id, into));
