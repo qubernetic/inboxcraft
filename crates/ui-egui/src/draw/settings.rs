@@ -429,8 +429,8 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool, vi
             segmented_for(ui, theme, &places, 0, Some(tr!("Write a message")));
         });
         // The design's two frames: InboxCraft's own (the top row or the strip, whichever is on; Own from the desktop's
-        // turns on the top row) and the desktop's title bar.
-        let own = if current.frame == WindowFrame::System { WindowFrame::TopRow } else { current.frame };
+        // brings back the one last on, the strip at first) and the desktop's title bar.
+        let own = Appearance::own_of(current.frame, Some(current.own_frame));
         let frames = [(own, tr!("Own"), f.button), (WindowFrame::System, tr!("System"), f.button)];
         let frame_help = tr!("InboxCraft's own frame, or the desktop's title bar above it.");
         settings_row(ui, theme, tr!("Window frame"), Some(frame_help), |ui| {

@@ -219,7 +219,15 @@ fn the_window_frame_row_runs_ui_frame_set() {
     assert_eq!(press(&mut harness, "System"), "ui.frame.set");
     assert_eq!(harness.state().appearance().frame, WindowFrame::System);
     assert_eq!(press(&mut harness, "Own"), "ui.frame.set");
-    assert_eq!(harness.state().appearance().frame, WindowFrame::TopRow);
+    assert_eq!(harness.state().appearance().frame, WindowFrame::Strip, "Own brings back the strip, the own frame last on");
+    // With the top row on (set by its command), the desktop's frame and back bring back the top row: no own frame a
+    // person had is out of reach.
+    harness.state_mut().set_frame(WindowFrame::TopRow);
+    harness.run();
+    assert!(selected(&harness, "Own"), "the top row is the app's own frame");
+    assert_eq!(press(&mut harness, "System"), "ui.frame.set");
+    assert_eq!(press(&mut harness, "Own"), "ui.frame.set");
+    assert_eq!(harness.state().appearance().frame, WindowFrame::TopRow, "Own brings back the top row, the own frame last on");
 }
 
 #[test]
