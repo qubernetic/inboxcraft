@@ -2192,8 +2192,8 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
         theme,
         keymap,
         mailbox,
-        // Whose each row is shows in the list by time of more than one account; the grouped views leave it out.
-        account_marker: view == InboxView::List && mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
+        // Whose each row is shows in every view of more than one account, as the design file's rows show it.
+        account_marker: mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
         clicked: Cell::new(None),
         acted: Cell::new(None),
         presets: Cell::new(false),

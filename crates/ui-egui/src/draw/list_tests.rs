@@ -506,9 +506,15 @@ fn stripes(harness: &Harness<'_, InboxApp>) -> usize {
 }
 
 #[test]
-fn the_account_stripe_marks_the_rows_of_the_simple_list_only() {
+fn the_account_stripe_marks_the_rows_of_every_inbox_view() {
+    // The design file's rows carry the bar 8 after the sender in Grouped and Smart as in List, two accounts shown.
     assert!(stripes(&harness(false)) > 0, "the simple list of two accounts shows whose each row is");
-    assert_eq!(stripes(&harness(true)), 0, "the grouped inbox's cards show no stripes");
+    for view in [InboxView::Grouped, InboxView::Smart, InboxView::List] {
+        let mut harness = harness(true);
+        harness.state_mut().mailbox_mut().set_inbox_view(view);
+        harness.run();
+        assert!(stripes(&harness) > 0, "{view:?} shows whose each row is");
+    }
 }
 
 /// The text `wanted` of the last frame: where it is drawn and its colour.
