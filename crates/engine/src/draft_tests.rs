@@ -91,6 +91,39 @@ fn a_draft_goes_up_once_it_has_been_still_for_a_while() {
     assert!(session.take_jobs().is_empty(), "the same version goes up once");
 }
 
+/// What is typed in the recipient lines and not a recipient stays here: the Drafts copy has none of it, and a change
+/// of it alone sends no new copy.
+#[test]
+fn typed_text_is_never_in_the_drafts_copy_and_alone_sends_none() {
+    let (mut session, clock) = session();
+    let id = typed(&mut session);
+    let typed = ["Typed To <typed.to@example.org>", "typed.cc@example.org, Quill", "typed.bcc@example.org"];
+    session.run("compose.update", &json!({ "id": id.get(), "typed": typed })).unwrap();
+    wait(&clock, UPLOAD_AFTER.as_secs());
+    let (job, raw) = upload(&mut session);
+    let raw = raw.to_lowercase();
+    for word in ["typed", "quill"] {
+        assert!(!raw.contains(word), "{word} in {raw}");
+    }
+    appended(&mut session, job.id, Some(30));
+    session.take_jobs();
+    // The recipient lines' typed text changes, and nothing else: the copy on the server is still the draft's.
+    session.run("compose.update", &json!({ "id": id.get(), "typed": ["bel", "", ""] })).unwrap();
+    session
+        .run("compose.update", &json!({ "id": id.get(), "to": ["Béla <bela@example.org>", "not an address"], "typed": ["béla", "", ""] }))
+        .unwrap();
+    assert_eq!(draft(&session, id).typed[0], "béla", "kept here");
+    assert_eq!(session.next_due().unwrap(), None);
+    wait(&clock, UPLOAD_AFTER.as_secs());
+    session.tick().unwrap();
+    assert!(session.take_jobs().is_empty(), "no new copy for typed text alone");
+    // A change the copy holds still sends one.
+    session.run("compose.update", &json!({ "id": id.get(), "subject": "Budget 2027", "typed": ["", "", ""] })).unwrap();
+    wait(&clock, UPLOAD_AFTER.as_secs());
+    let (_, raw) = upload(&mut session);
+    assert!(raw.contains("Budget 2027"), "{raw}");
+}
+
 #[test]
 fn each_new_copy_replaces_the_one_before() {
     let (mut session, clock) = session();

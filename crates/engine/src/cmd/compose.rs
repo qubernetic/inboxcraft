@@ -241,6 +241,7 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         return Err(EngineError::bad_params(UPDATE.id, "the text is too long"));
     }
     let mut draft = changeable_draft(context, UPDATE.id, params.id)?;
+    let before = draft.clone();
     let mut outcome = Outcome::new(Value::Null);
     draft.to = params.to.unwrap_or(draft.to);
     draft.cc = params.cc.unwrap_or(draft.cc);
@@ -264,7 +265,12 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         draft.unnamed = false;
         draft.account = to.id();
     }
+    // The server's copy holds nothing of the typed text: a copy that was up to date stays so when only that changed.
+    let copy_unchanged = before.synced == Some(before.saved) && Draft { typed: before.typed.clone(), ..draft.clone() } == before;
     draft.saved = context.now();
+    if copy_unchanged {
+        draft.synced = Some(draft.saved);
+    }
     *outcome.value_mut() = draft_json(context.store(), &draft)?;
     Ok(outcome.with_change(Change::PutDraft(draft)))
 }

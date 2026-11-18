@@ -285,3 +285,22 @@ fn a_send_cut_off_by_a_restart_can_be_sent_again() {
     send_now(&mut again, &clock, "mail.send", id);
     assert_eq!(sent_job(&mut again).0, DraftId::new(id));
 }
+
+/// What is typed in the recipient lines and not a recipient never leaves the machine: not in the envelope, not in a
+/// header, not in the body.
+#[test]
+fn typed_text_is_never_in_the_sent_message() {
+    let (mut session, clock) = session();
+    let id = draft(&mut session);
+    let typed = ["Typed To <typed.to@example.org>", "typed.cc@example.org, Quill", "typed.bcc@example.org"];
+    session.run("compose.update", &json!({ "id": id, "typed": typed })).unwrap();
+    session.take_jobs();
+    send_now(&mut session, &clock, "mail.send", id);
+    let (_, _, recipients, raw) = sent_job(&mut session);
+    let to: Vec<&str> = recipients.iter().map(EmailAddress::as_str).collect();
+    assert_eq!(to, ["bela@example.org", "cili@example.net", "dora@example.org"]);
+    let text = String::from_utf8_lossy(&raw).to_lowercase();
+    for word in ["typed", "quill"] {
+        assert!(!text.contains(word), "{word} in {text}");
+    }
+}
