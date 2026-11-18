@@ -259,7 +259,7 @@ pub(super) fn message(
             crate::draw::invite::card(ui, theme, keymap, reader, invite, drawn);
         }
         body(ui, theme, reader, opened, textures, drawn);
-        files(ui, theme, keymap, opened.id, &opened.files, drawn);
+        files(ui, theme, keymap, reader, opened.id, &opened.files, drawn);
     };
     if bare {
         ui.scope(|ui| {

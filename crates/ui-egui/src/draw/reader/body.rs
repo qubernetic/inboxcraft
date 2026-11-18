@@ -390,8 +390,8 @@ fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segmen
 }
 
 /// The attachments, side by side as far as they fit, 8 apart, each as wide as what it holds ([`attachment`]): Enter
-/// or `save` saves it. Opening a file is not built yet: the strip ends with the `coming soon` tag once.
-pub(super) fn files(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, files: &[File], drawn: &mut Drawn) {
+/// or `save` saves it, and the box then says where it went, or why not with `try again`. Opening a file is not built yet: the strip ends with the `coming soon` tag once.
+pub(super) fn files(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, id: u64, files: &[File], drawn: &mut Drawn) {
     if files.is_empty() {
         return;
     }
@@ -399,7 +399,13 @@ pub(super) fn files(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, files:
         ui.spacing_mut().item_spacing = vec2(STRIP_GAP, STRIP_GAP);
         for file in files {
             let size = size_text(file.size);
-            let (_, asked) = attachment(ui, theme, keymap, &file.name, &size, FileState::Ready);
+            // Where saving it went, from the save's outcome.
+            let state = match reader.saved(id, file.index) {
+                None => FileState::Ready,
+                Some(Ok(place)) => FileState::Saved(place),
+                Some(Err(why)) => FileState::Failed(why),
+            };
+            let (_, asked) = attachment(ui, theme, keymap, &file.name, &size, state);
             if asked == Some(FileAsked::Save) {
                 drawn.asked.push(Asked::Save(id, file.index));
             }

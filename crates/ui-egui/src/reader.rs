@@ -284,6 +284,8 @@ pub struct Reader {
     notice: Option<String>,
     /// Whether the notice says something failed.
     failed: bool,
+    /// How the attachments saved since the message opened went, by message and index.
+    saves: BTreeMap<(u64, u64), Result<String, String>>,
     /// The invitations whose answer the owner is changing: their card offers the three answers again.
     changing: BTreeSet<u64>,
 }
@@ -316,6 +318,7 @@ impl Reader {
             owners: BTreeMap::new(),
             notice: None,
             failed: false,
+            saves: BTreeMap::new(),
             changing: BTreeSet::new(),
         }
     }
@@ -330,6 +333,7 @@ impl Reader {
         self.quotes.clear();
         self.once.clear();
         self.changing.clear();
+        self.saves.clear();
         self.notice = None;
         let Some(id) = id else {
             self.full_width = false;
@@ -578,17 +582,27 @@ impl Reader {
         }
     }
 
-    /// Saves attachment `index` of message `id` through the save the app handed in; the result shows as a notice.
+    /// Saves attachment `index` of message `id` through the save the app handed in; the attachment's box says where it
+    /// went or why not.
     pub fn save(&mut self, mailbox: &mut Mailbox, id: u64, index: u64) {
         let saved = mailbox.run("mail.attachment", &json!({ "id": id, "index": index })).map_err(|error| error.to_string()).and_then(|answer| {
             let name = answer.get("name").and_then(Value::as_str).unwrap_or(tr!("attachment")).to_owned();
             let bytes =
                 answer.get("data").and_then(Value::as_str).and_then(unbase64).ok_or_else(|| tr!("The attachment could not be read.").to_owned())?;
-            self.save.save(&name, &bytes).map(|place| tr!("Saved {name} to {place}", name = shown(&name), place = shown(&place)))
+            self.save.save(&name, &bytes)
         });
-        self.notice = Some(match saved {
-            Ok(text) | Err(text) => text,
-        });
+        let said = match saved {
+            Ok(place) => Ok(tr!("saved to {place}", place = shown(&place))),
+            Err(why) => Err(tr!("not saved: {why}", why = shown(&why))),
+        };
+        self.saves.insert((id, index), said);
+    }
+
+    /// How saving attachment `index` of message `id` went, as its box says it: where it went, or why not; `None`
+    /// before it was saved.
+    #[must_use]
+    pub fn saved(&self, id: u64, index: u64) -> Option<Result<&str, &str>> {
+        self.saves.get(&(id, index)).map(|said| said.as_ref().map(String::as_str).map_err(String::as_str))
     }
 
     /// Takes in the pictures the fetch brought since the last call; `true` when there were any.

@@ -224,14 +224,42 @@ fn quotes_fold_and_the_older_message_unfolds_on_a_click() {
     harness.run();
 }
 
+/// A save that keeps nothing and says it went to the downloads.
+struct Kept;
+
+impl crate::save::Save for Kept {
+    fn save(&mut self, name: &str, _bytes: &[u8]) -> Result<String, String> {
+        Ok(format!("Downloads/{name}"))
+    }
+}
+
 #[test]
-fn saving_an_attachment_says_where_it_went_or_why_not() {
+fn saving_an_attachment_says_where_it_went_or_why_not_on_its_box() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Draft logo for the bakery");
     assert!(super::tests::drew_icon(harness.output(), IconId::File), "the tile shows the file icon");
     harness.get_by_label("Save sketch-2.png").click();
     harness.run();
-    harness.get_by_label("Saving attachments is not available in this window.");
+    // The box says why not, in its own words, and offers to try again; the reader's notice stays quiet.
+    let failed = harness.get_by_label_contains("sketch-2.png, ").accesskit_node().label().unwrap_or_default();
+    assert!(failed.ends_with("not saved: Saving attachments is not available in this window."), "{failed}");
+    assert_eq!(harness.state().reader().notice(), None);
+    harness.get_by_label("Save sketch-2.png again").click();
+    harness.run();
+    harness.get_by_label("Save sketch-2.png again");
+    // A save that works says where the file went.
+    let mut app = InboxApp::with_outside(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(Kept));
+    let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").unwrap().id;
+    app.mailbox_mut().select(Some(id));
+    let mut harness = harness_with(app, egui::Theme::Light);
+    settle(&mut harness);
+    harness.get_by_label("Save sketch-2.png").click();
+    harness.run();
+    let saved = harness.get_by_label_contains("sketch-2.png, ").accesskit_node().label().unwrap_or_default();
+    assert!(saved.ends_with("saved to Downloads/sketch-2.png"), "{saved}");
+    assert!(harness.query_by_label("Save sketch-2.png").is_none(), "saved: no save link");
+    // The other box is untouched.
+    assert!(harness.query_by_label("Save sketch-1.png").is_some());
 }
 
 #[test]

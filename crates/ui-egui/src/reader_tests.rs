@@ -400,14 +400,20 @@ fn an_attachment_is_saved_through_the_save_the_app_handed_in() {
     let files = &reader.opened(logo).unwrap().files;
     assert_eq!(files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["sketch-1.png", "sketch-2.png", "sketch-3.png"]);
     let size = files[1].size;
+    assert_eq!(reader.saved(logo, 1), None, "nothing saved yet");
     reader.save(&mut mailbox, logo, 1);
-    assert_eq!(reader.notice(), Some("Saved sketch-2.png to /downloads/sketch-2.png"));
+    // The box says where it went; the notice stays quiet.
+    assert_eq!(reader.saved(logo, 1), Some(Ok("saved to /downloads/sketch-2.png")));
+    assert_eq!(reader.notice(), None);
     let saved = kept.0.lock().unwrap().clone();
     assert_eq!(saved[0].0, "sketch-2.png");
     assert_eq!(Some(saved[0].1.len() as u64), size);
     assert!(crate::picture::decode(&saved[0].1).is_ok());
     reader.save(&mut mailbox, logo, 7);
-    assert!(reader.notice().unwrap().contains("there is no attachment 7"), "{:?}", reader.notice());
+    assert!(reader.saved(logo, 7).is_some_and(|said| said.is_err_and(|why| why.contains("there is no attachment 7"))), "{:?}", reader.saved(logo, 7));
+    // Opening a message again forgets how its saves went.
+    reader.open(&mut mailbox, Some(logo));
+    assert_eq!(reader.saved(logo, 1), None);
     reader.dismiss_notice();
     assert_eq!(reader.notice(), None);
     reader.set_notice("Link copied".to_owned());
