@@ -1090,3 +1090,32 @@ fn the_subject_is_a_tab_stop_with_a_ring_and_enter_or_the_menu_key_copies_it() {
         assert!(harness.query_by_label("Copy the subject").is_none(), "{key:?}: the menu closed");
     }
 }
+
+/// The labels Tab gives the keyboard to, in order, from the first press until it comes back round.
+fn tab_order(harness: &mut Harness<'static, InboxApp>) -> Vec<String> {
+    let mut order: Vec<String> = Vec::new();
+    let mut seen = Vec::new();
+    for _ in 0..300 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        let Some(node) = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()) else { continue };
+        let id = node.accesskit_node().locate().0;
+        if seen.contains(&id) {
+            break;
+        }
+        seen.push(id);
+        order.push(node.accesskit_node().label().unwrap_or_default());
+    }
+    order
+}
+
+#[test]
+fn tab_goes_from_the_head_through_the_message_to_the_answers() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Draft logo for the bakery");
+    let order = tab_order(&mut harness);
+    let at = |label: &str| order.iter().position(|reached| reached.contains(label)).unwrap_or_else(|| panic!("{label} not reached: {order:?}"));
+    let (head, message, reply) = (at("More"), at("sketch-2.png"), at("Reply"));
+    assert!(head < message && message < reply, "head, then the message, then the answers: {order:?}");
+    assert!(at("Reply all") > message && at("Forward") > message, "{order:?}");
+}
