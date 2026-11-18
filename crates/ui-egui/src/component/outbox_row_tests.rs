@@ -147,3 +147,19 @@ fn an_outbox_row_is_the_scaled_height_at_130_percent() {
         }
     }
 }
+
+#[test]
+fn a_cut_recipient_keeps_its_whole_room() {
+    // The board's refused row: "to" cut in its box of 120 (44..164), the bar 8 after the box (172), a spacer of 2 and a
+    // gap before where it stands.
+    let state = send_states().into_iter().find(|state| state.standing == Standing::Refused).unwrap();
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let harness = harness(theme, state);
+        let name = send_spoken(&state);
+        let o = harness.get_by_label(&name).rect().min;
+        let paint = painted(&harness, &name);
+        let bar = paint.rects().find(|shape| shape.rect.size() == vec2(3.0, 12.0)).map(|shape| shape.rect);
+        assert_eq!(bar.map(|bar| bar.left() - o.x), Some(172.0), "{mode:?}");
+    }
+}

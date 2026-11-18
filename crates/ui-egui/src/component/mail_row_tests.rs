@@ -216,8 +216,15 @@ fn after_sender(seen: &Seen, theme: &Theme, state: &MailState, sender: Rect) {
     let at_ = places(theme);
     let bar_at = Rect::from_min_size(pos2(sender.left() + run_box(sender.width()) + 8.0, o.y + at_.bar), vec2(3.0, 12.0));
     let rects = fills(&seen.paint);
-    let barred = rects.iter().any(|(r, c)| (r.min - bar_at.min).length() < 0.51 && r.size() == bar_at.size() && *c == account);
+    // A cut name keeps its whole room, so its bar stands 8 after the room, not after the cut words: the place is
+    // `a_cut_sender_keeps_its_whole_room`'s; here, only that it is not nearer the words.
+    let cut = find(&texts(&seen.paint), state.sender).is_some_and(|t| t.1.ends_with('…'));
+    let barred = rects.iter().any(|(r, c)| {
+        let placed = if cut { r.min.x >= bar_at.min.x - 0.01 && (r.min.y - bar_at.min.y).abs() < 0.51 } else { (r.min - bar_at.min).length() < 0.51 };
+        placed && r.size() == bar_at.size() && *c == account
+    });
     assert!(barred, "the account bar: {at}");
+    let bar_at = rects.iter().find(|(r, c)| r.size() == bar_at.size() && *c == account).map_or(bar_at, |(r, _)| *r);
     if let Some((words, kind)) = state.tag {
         let tag = seen.harness.get_by_label(words).rect();
         assert_eq!((tag.left(), tag.top() - o.y, tag.height()), (bar_at.right() + 8.0, at_.tag, at_.chip), "{at}");
@@ -302,5 +309,32 @@ fn the_sender_of_the_long_row_is_cut_short_of_its_tag_with_one_ellipsis() {
         let line = words.iter().filter(|t| t.1.ends_with('…')).count();
         assert!(line >= 1, "the long line is cut: {words:?}");
         assert!(words.iter().all(|t| t.1.matches('…').count() <= 1), "one ellipsis a line: {words:?}");
+    }
+}
+
+#[test]
+fn a_cut_sender_keeps_its_whole_room() {
+    // The board's long row: the name cut in its box of 219 (34..253), the bar 8 after the box (261), the tag 8 after
+    // the bar (272); at any scale the tag ends a spacer (3) and two gaps before the mark.
+    let state = mail_states()[20];
+    assert_eq!(state.name, "long-text");
+    for (mode, scale) in [Mode::Dark, Mode::Light].into_iter().flat_map(|mode| [(mode, TextScale::default()), (mode, TextScale::ALL[4])]) {
+        let theme = Theme::new(mode, scale);
+        let harness = harness(theme, state);
+        let name = mail_spoken(&state);
+        let o = harness.get_by_label(&name).rect().min;
+        let paint = painted(&harness, &name);
+        let account = theme.account_colour(state.account);
+        let bar = fills(&paint).into_iter().find(|(r, c)| r.size() == vec2(3.0, 12.0) && *c == account).map(|(r, _)| r);
+        let bar = bar.unwrap_or_else(|| panic!("{mode:?} {scale:?}: the bar"));
+        let tag = harness.get_by_label("New sender").rect();
+        let glyph = texts(&paint).into_iter().find(|t| t.3 == icons() && t.4 > 0.0).map(|t| t.0);
+        let mark = theme.mark_side();
+        let mark_left = glyph.map_or(f32::NAN, |glyph| glyph.center().x - mark / 2.0);
+        assert!((tag.right() + 3.0 + 16.0 - mark_left).abs() < 0.51, "{mode:?} {scale:?}: {tag:?} before the mark at {mark_left}");
+        assert_eq!(tag.left(), bar.right() + 8.0, "{mode:?} {scale:?}");
+        if scale == TextScale::default() {
+            assert_eq!((bar.left() - o.x, tag.left() - o.x), (261.0, 272.0), "{mode:?}");
+        }
     }
 }

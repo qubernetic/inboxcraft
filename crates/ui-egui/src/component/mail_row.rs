@@ -253,6 +253,13 @@ pub struct Top<'a> {
 /// given (the hover actions' left edge less the gap), else at the line's right end; the name is cut short of what
 /// stands after it, the sheet's spacer (3) kept.
 pub fn top(ui: &mut Ui, theme: &Theme, line: Rect, top: &Top<'_>, end: Option<f32>) {
+    spaced(ui, theme, line, top, end, SPACER);
+}
+
+/// [`top`] with the least room `spacer` between the left part and the right one. A name cut short keeps its whole
+/// room, as the design's box at its greatest width does: the bar and the tag stand 8 after the room, not after the
+/// cut words.
+pub(crate) fn spaced(ui: &mut Ui, theme: &Theme, line: Rect, top: &Top<'_>, end: Option<f32>, spacer: f32) {
     let f = &theme.fonts;
     let painter = ui.painter().clone();
     let high = line.height();
@@ -275,9 +282,12 @@ pub fn top(ui: &mut Ui, theme: &Theme, line: Rect, top: &Top<'_>, end: Option<f3
     // before it either way, as the sheet's auto layout puts a gap after the spacer.
     let tag = top.tag.map(|(words, kind)| (words, kind, paint::run_box(super::galley(ui, words, f.mono_s, Color32::PLACEHOLDER).size().x) + 12.0));
     let after = top.account.map_or(0.0, |_| GAP + BAR.x) + tag.map_or(0.0, |(_, _, wide)| GAP + wide);
-    let room = (right - SPACER - GAP - line.left() - after).max(0.0);
-    let name = super::fitted(ui, top.name, top.font, top.ink, room);
-    let wide = paint::run_box(name.size().x);
+    let room = (right - spacer - GAP - line.left() - after).max(0.0);
+    let whole = super::plain(top.name);
+    let kept = super::fit_capped(ui, &whole, top.font, room);
+    let cut = kept != whole;
+    let name = super::galley(ui, &kept, top.font, top.ink);
+    let wide = if cut { room.floor() } else { paint::run_box(name.size().x) };
     paint::run_at(&painter, line.left_top(), name, top.ink);
     let mut x = line.left() + wide;
     if let Some(account) = top.account {

@@ -19,7 +19,7 @@ use crate::theme::Theme;
 
 use super::Shown;
 use super::button::TextButton;
-use super::mail_row::{Top, lines_top, top};
+use super::mail_row::{Top, lines_top, spaced};
 use super::row::{RowGround, row_with};
 
 /// The row's height at 100 % text, and a refused send's, in points.
@@ -160,7 +160,8 @@ pub fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &OutboxRow<'
     let left = rect.left() + TEXT_LEFT;
     let line = Rect::from_min_max(pos2(left, one), pos2(right.max(left), one + f.body.line));
     let first = Top { name: row.to, font: f.body, ink: p.ink, account: row.account, tag: None, marks: &[], time: Some((row.words, ink)) };
-    top(ui, theme, line, &first, None);
+    // The outbox board keeps a spacer of 2 before where the send stands (the mail row's is 3).
+    spaced(ui, theme, line, &first, None, 2.0);
     let subject = super::fitted(ui, row.subject, f.caption, p.muted, (right - left).max(0.0));
     paint::run_at(ui.painter(), pos2(left, two), subject, p.muted);
     if let Some(reply) = row.reply {
