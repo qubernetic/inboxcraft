@@ -160,6 +160,9 @@ pub struct Shot {
     /// Whether the settings sheet is open on Notifications.
     #[serde(default)]
     pub notifications: Option<bool>,
+    /// The settings sheet open on the section of this name (`appearance` … `plugins`, [`crate::settings::Section::id`]).
+    #[serde(default)]
+    pub section: Option<String>,
     /// How the unified inbox shows its groups: `cards` when left out, `list` or `simple`.
     #[serde(default)]
     pub view: Option<String>,
@@ -412,6 +415,10 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     if shot.shortcuts == Some(true) {
         app.open_shortcuts();
     }
+    if let Some(name) = &shot.section {
+        let section = crate::settings::Section::named(name).ok_or_else(|| bad(format!("{}: no settings section {name:?}", shot.out)))?;
+        app.settings_mut().open_at(section);
+    }
     if let Some(waiting) = &shot.capture {
         let Some(action) = crate::keymap::action(waiting).filter(|_| shot.shortcuts == Some(true)) else {
             return Err(bad(format!("{}: capture {waiting:?} is not an action on the Shortcuts page", shot.out)));
@@ -602,6 +609,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.sending.is_some()
         || shot.triage.is_some()
         || shot.notifications.is_some()
+        || shot.section.is_some()
         || shot.view.is_some()
         || shot.compose.is_some()
         || shot.capture.is_some()

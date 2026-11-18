@@ -1391,6 +1391,8 @@ impl InboxApp {
         }
         if setting {
             changed = self.settings_sheet(ui.ctx(), &theme);
+        } else {
+            settings::rest(ui.ctx());
         }
         let palette = if self.palette.is_open() {
             let runnable: Vec<&str> =

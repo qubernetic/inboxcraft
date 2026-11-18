@@ -14,23 +14,99 @@
 
 use std::collections::BTreeMap;
 
-/// A page of the settings sheet that is built.
+/// A page of the settings sheet.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Section {
-    /// Mode, window frame, text size and motion.
+    /// Look (mode, motion, text size) and Layout (the inbox view, where a message opens and is written, the window
+    /// frame).
     #[default]
     Appearance,
     /// The accounts, and adding one.
     Accounts,
-    /// Every action of the window with its key, to give it another.
-    Shortcuts,
-    /// The signature of each account's new messages.
-    Sending,
-    /// The screener's mode, how the inbox shows its groups, and each account's grouping.
-    Triage,
     /// Which new mail of each account notifies, returned snoozes and reminders, running in the background and
     /// starting with the computer.
     Notifications,
+    /// The screener's mode, pins on done mail, and each account's grouping.
+    Triage,
+    /// Undo send, the signature of each account's new messages, the templates and the scheduled list.
+    Sending,
+    /// The calendar's alerts and each account's calendars; coming soon.
+    Calendar,
+    /// Every action of the window with its key, to give it another.
+    Shortcuts,
+    /// The senders whose remote pictures always load; coming soon.
+    Privacy,
+    /// The program, its licences and its makers; coming soon.
+    About,
+    /// A model that summarises and drafts; planned, coming soon.
+    Ai,
+    /// Plugins; planned, coming soon.
+    Plugins,
+}
+
+impl Section {
+    /// Every section, in the order the sheet lists them: the nine of the design, then the two planned ones.
+    pub const ALL: [Self; 11] = [
+        Self::Appearance,
+        Self::Accounts,
+        Self::Notifications,
+        Self::Triage,
+        Self::Sending,
+        Self::Calendar,
+        Self::Shortcuts,
+        Self::Privacy,
+        Self::About,
+        Self::Ai,
+        Self::Plugins,
+    ];
+
+    /// Its name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Appearance => crate::tr!("Appearance"),
+            Self::Accounts => crate::tr!("Accounts"),
+            Self::Notifications => crate::tr!("Notifications"),
+            Self::Triage => crate::tr!("Triage"),
+            Self::Sending => crate::tr!("Sending"),
+            Self::Calendar => crate::tr!("Calendar"),
+            Self::Shortcuts => crate::tr!("Shortcuts"),
+            Self::Privacy => crate::tr!("Privacy"),
+            Self::About => crate::tr!("About"),
+            Self::Ai => crate::tr!("AI"),
+            Self::Plugins => crate::tr!("Plugins"),
+        }
+    }
+
+    /// Its name in scripts (the `ui_shot` examples): `appearance`, `accounts` … `ai`, `plugins`.
+    #[must_use]
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Appearance => "appearance",
+            Self::Accounts => "accounts",
+            Self::Notifications => "notifications",
+            Self::Triage => "triage",
+            Self::Sending => "sending",
+            Self::Calendar => "calendar",
+            Self::Shortcuts => "shortcuts",
+            Self::Privacy => "privacy",
+            Self::About => "about",
+            Self::Ai => "ai",
+            Self::Plugins => "plugins",
+        }
+    }
+
+    /// The section [`Section::id`] calls `name`.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|section| section.id() == name)
+    }
+
+    /// Whether the whole section is planned and not built: its page carries the coming-soon mark on its head.
+    #[must_use]
+    pub fn planned(self) -> bool {
+        matches!(self, Self::About | Self::Ai | Self::Plugins)
+    }
 }
 
 /// The settings sheet.

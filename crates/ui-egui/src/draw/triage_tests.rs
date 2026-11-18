@@ -182,17 +182,16 @@ fn settings_on_triage() -> Harness<'static, InboxApp> {
 }
 
 #[test]
-fn the_triage_page_changes_the_screener_the_view_and_the_grouping() {
+fn the_triage_page_changes_the_screener_and_the_grouping() {
     let mut harness = settings_on_triage();
     harness.get_by_label("Triage, settings page");
-    harness.get_by_label("Grouped inbox");
+    harness.get_by_label("[ C ] Grouped inbox");
     assert_eq!(harness.get_by_role_and_label(Role::RadioButton, "Before the inbox").accesskit_node().toggled(), Some(Toggled::True));
     harness.get_by_role_and_label(Role::RadioButton, "Inside, marked").click();
     harness.run();
     assert_eq!(harness.state().mailbox().screener_mode(), ScreenerMode::Inside);
-    harness.get_by_role_and_label(Role::RadioButton, "Grouped list").click();
-    harness.run();
-    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::List);
+    // The inbox view is on Appearance (settings_page_tests.rs).
+    assert!(harness.query_by_role_and_label(Role::RadioButton, "Grouped list").is_none());
     let switch = harness.get_by_label("Group the inbox of Personal");
     assert_eq!(switch.accesskit_node().toggled(), Some(Toggled::True));
     switch.click();

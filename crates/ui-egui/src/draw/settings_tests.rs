@@ -64,9 +64,8 @@ fn the_sheet_opens_over_the_dimmed_window_a_press_beside_it_or_close_or_escape_l
     let mut harness = opened();
     harness.get_by_role_and_label(Role::Dialog, "Settings");
     harness.get_by_label("Appearance");
-    harness.get_by_label("Preview");
-    // The sections not built yet are there, faded.
-    assert!(harness.get_by_label("Calendar, settings page").accesskit_node().is_disabled());
+    // Every section opens; those not built yet show their page as coming soon.
+    assert!(!harness.get_by_label("Calendar, settings page").accesskit_node().is_disabled());
     assert!(!harness.get_by_label("Accounts, settings page").accesskit_node().is_disabled());
     assert!(!harness.get_by_label("Appearance, settings page").accesskit_node().is_disabled());
     // The list lies under the sheet: a press there selects nothing, and the sheet stays.
@@ -133,7 +132,7 @@ fn the_appearance_page_has_no_accent_typeface_or_icon_choice() {
         assert!(harness.query_by_label(gone).is_none(), "{gone}");
     }
     for kept in ["Mode", "Text size", "Reduce motion", "Window frame"] {
-        assert!(harness.query_all_by_label(kept).count() > 0, "{kept}");
+        assert!(harness.query_all_by_label_contains(kept).count() > 0, "{kept}");
     }
     // The mode reads Auto, Dark, Light, left to right; Auto is the system's.
     let x = |label: &str| harness.get_by_role_and_label(Role::RadioButton, label).rect().center().x;
@@ -162,21 +161,21 @@ fn the_accounts_page_lists_every_account_with_its_address_and_the_nav_goes_back(
     harness.run();
     assert_eq!(harness.state().settings().section(), Section::Accounts);
     assert!(selected(&harness, "Accounts, settings page"));
-    harness.get_by_label("Your accounts");
+    harness.get_by_label("[ A ] Your accounts · 2");
     harness.get_by_label("The mail accounts this computer reads and sends from.");
     let accounts = harness.state().mailbox().accounts().to_vec();
     assert!(!accounts.is_empty());
     for account in &accounts {
         harness.get_by_label(&format!("{}, {}", account.label, account.address));
     }
-    assert!(harness.query_by_label("Mode").is_none(), "Appearance's rows are gone");
+    assert!(harness.query_all_by_label_contains("Mode. ").next().is_none(), "Appearance's rows are gone");
     // The sample window adds no account: it offers none.
     assert_eq!(harness.query_all_by_label("Add account").count(), 0);
     harness.check_accessibility();
     harness.get_by_label("Appearance, settings page").click();
     harness.run();
     assert_eq!(harness.state().settings().section(), Section::Appearance);
-    harness.get_by_label("Mode");
+    assert!(harness.query_all_by_label_contains("Mode. ").next().is_some());
 }
 
 #[test]

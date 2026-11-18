@@ -213,6 +213,25 @@ pub(super) fn beside<R>(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui) ->
     inner.inner
 }
 
+/// Where the window controls of the top row stand this frame, once the panes are drawn; `None` without the top row.
+/// A sheet over the window keeps clear of them.
+pub(super) fn controls_place(ctx: &Context, theme: &Theme) -> Option<Rect> {
+    let on = ctx.data(|data| data.get_temp::<bool>(on_id())).unwrap_or(false);
+    if !on {
+        return None;
+    }
+    let high = CONTROL[1] + 2.0 * (f32::from(FLOAT_MARGIN) + 1.0);
+    let place = ctx.data(|data| data.get_temp::<Option<Rect>>(place_id())).flatten();
+    Some(match place {
+        Some(place) => Rect::from_center_size(pos2(place.right() - float_width() / 2.0, place.center().y), vec2(float_width(), high)),
+        None => {
+            let gap = theme.spacing.s2 * 2.0;
+            let right = ctx.content_rect().right_top() + vec2(-gap, gap);
+            Rect::from_min_max(pos2(right.x - float_width(), right.y), pos2(right.x, right.y + high))
+        }
+    })
+}
+
 /// The width of the controls on their float.
 fn float_width() -> f32 {
     CONTROLS + 2.0 * (f32::from(FLOAT_MARGIN) + 1.0)
