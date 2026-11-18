@@ -58,6 +58,7 @@ pub mod sample;
 pub mod save;
 pub mod settings;
 pub mod shot;
+mod surface;
 pub mod theme;
 pub mod workers;
 

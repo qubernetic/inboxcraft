@@ -75,6 +75,7 @@ use crate::palette::Palette;
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
 use crate::settings::{Section, Settings};
+use crate::surface::{Facts, Surface, Surfaces};
 use crate::theme::{self, Look, ModePreference, TextScale, Theme};
 use crate::workers::{NoWorkers, Workers};
 use crate::{UiError, tr};
@@ -108,7 +109,10 @@ pub enum Screen {
 struct Keys {
     /// The actions whose keys were pressed.
     ran: Vec<&'static str>,
-    escape: bool,
+    /// The surface an Esc of this frame closes ([`Surfaces::escape`]).
+    escape: Option<Surface>,
+    /// An Esc of this frame that is the place's: the reader gives the list the keyboard back.
+    to_place: bool,
     /// Whether the mail's own keys rest.
     typing: bool,
     /// Whether a text field, the settings sheet, the palette or the composer has the keys: the toast's Undo key rests.
@@ -1021,21 +1025,28 @@ impl InboxApp {
         self.reading || !self.mailbox.keyed()
     }
 
-    /// Whether the list has the keyboard: a row has the focus, or a row was pressed or keyed last and nothing else has
-    /// the focus; never while the palette, the settings, the composer in the reader's place or the calendar hold the
-    /// keys, the list is hidden, or a popup is open.
-    fn list_has_keyboard(&self, ctx: &egui::Context) -> bool {
-        if self.screen != Screen::Mail
-            || self.palette.is_open()
-            || self.settings.is_open()
-            || self.settings.capturing().is_some()
-            || self.composer_in_front()
-            || self.list_hidden
-        {
-            return false;
-        }
-        // A menu open over the list (a row's own included) keeps the keys: its arrows are its own.
-        if crate::component::popup::any_open(ctx) {
+    /// What stands in front this frame, read before its keys ([`Surfaces`]).
+    fn surfaces(&self, ctx: &egui::Context) -> Surfaces {
+        let mail = self.screen == Screen::Mail;
+        Surfaces::new(Facts {
+            float: crate::component::popup::any_open(ctx),
+            palette: self.palette.is_open(),
+            capture: self.settings.capturing().is_some(),
+            sheet: self.settings.is_open(),
+            editor: self.screen == Screen::Calendar && self.calendar.editor().is_some(),
+            composer: self.composer_in_front(),
+            full_width: self.reader.full_width(),
+            one_pane_reader: mail && one_pane(ctx) && !self.docked() && self.message_in_front() && self.reader.open_id().is_some(),
+            mail,
+            list_hidden: self.list_hidden,
+        })
+    }
+
+    /// Whether the list has the keyboard: it may have the keys ([`Surfaces::list_has_keyboard`]: on the mail, shown,
+    /// nothing in front that takes them), and a row has the focus, or a row was pressed or keyed last and nothing else
+    /// has the focus.
+    fn list_has_keyboard(&self, ctx: &egui::Context, surfaces: &Surfaces) -> bool {
+        if !surfaces.list_has_keyboard() {
             return false;
         }
         if self.list_row.is_some() {
@@ -1219,67 +1230,48 @@ impl InboxApp {
         }
     }
 
-    /// The keys of the frame, read before its drawing. While the Shortcuts page waits for a key or the palette is open,
-    /// the keys are theirs; the settings sheet, the palette and the calendar lie over the list or in its place, so the
-    /// mail's keys (the arrows, the acts on a row) rest while they show.
-    fn keys(&mut self, ctx: &egui::Context) -> Keys {
+    /// The keys of the frame, read before its drawing, with `surfaces` in front ([`Surfaces`]). While the Shortcuts page
+    /// waits for a key or the palette is open, the keys are theirs; the settings sheet, the palette and the calendar lie
+    /// over the list or in its place, so the mail's keys (the arrows, the acts on a row) rest while they show.
+    fn keys(&mut self, ctx: &egui::Context, surfaces: &Surfaces) -> Keys {
         // Send's key acts only from inside the composer, open and not under the settings sheet: never from a field in
         // front of it or beside it.
-        self.composer_keys = !self.settings.is_open() && self.composer.as_ref().is_some_and(|composer| !composer.folded()) && compose::has_keys(ctx);
-        let held = self.settings.capturing().is_some() || self.palette.is_open();
+        self.composer_keys =
+            !surfaces.has(Surface::Sheet) && self.composer.as_ref().is_some_and(|composer| !composer.folded()) && compose::has_keys(ctx);
+        let held = surfaces.held();
         self.capture_key(ctx);
         // Read before anything returns: a row that lost the focus while the palette was open is not the list's row.
         self.list_row = if held { None } else { list::focused_row(ctx) };
         // A row with the focus is the list's keyed row: it quiets no key.
         let focused = ctx.memory(|memory| memory.focused().is_some()) && self.list_row.is_none();
-        // The composer in the reader's place hides the selected message: the keys that act on it rest.
-        let quiet = focused || held || self.settings.is_open() || self.composer_in_front();
+        // A field with the focus, or a surface whose fields the letters are for.
+        let quiet = focused || surfaces.quiet();
         let typing = quiet || self.screen == Screen::Calendar;
         if held {
-            return Keys { ran: Vec::new(), escape: false, typing, quiet };
+            return Keys { ran: Vec::new(), escape: None, to_place: false, typing, quiet };
         }
-        let listing = self.list_has_keyboard(ctx);
-        let ran = self.pressed(ctx, quiet, listing);
+        let listing = self.list_has_keyboard(ctx, surfaces);
+        let ran = self.pressed(ctx, surfaces, focused, listing);
         // Esc goes to the topmost surface only: a list of choices open over the window takes it, not what lies under.
-        let escape = crate::component::popup::escape(ctx);
-        Keys { ran, escape, typing, quiet }
+        let escape = surfaces.escape(ctx);
+        let to_place = escape.is_none() && ctx.input(|input| input.key_pressed(Key::Escape));
+        Keys { ran, escape, to_place, typing, quiet }
     }
 
-    /// The actions whose key was pressed in this frame, besides the acts on a row (the list takes those) and Undo while
-    /// a toast with Undo shows (the toast takes it). While `quiet` (a field has the focus, or the sheet is open) a key
-    /// without Command, Ctrl or Alt runs nothing, so a letter typed is typed, and Undo is the field's. While the
-    /// settings sheet is open only the keys of the sheet and of the window as a whole run, with a modifier too: Snooze,
-    /// New message, Send and Fold wait for it to close.
-    fn pressed(&self, ctx: &egui::Context, quiet: bool, listing: bool) -> Vec<&'static str> {
-        /// The keys of the settings sheet and of the window as a whole: the sheet's own, the palette, the mode and motion,
-        /// and the ways to a place of the window, which close the sheet first. None acts on what lies under the sheet.
-        const SHEET_KEYS: [&str; 13] = [
-            keymap::SETTINGS,
-            keymap::SHORTCUTS,
-            keymap::PALETTE,
-            keymap::LIGHT,
-            keymap::DARK,
-            keymap::SYSTEM_MODE,
-            keymap::MOTION,
-            keymap::MAIL,
-            keymap::SENT,
-            keymap::LATER,
-            keymap::CALENDAR,
-            keymap::FIND,
-            keymap::FULL_WIDTH,
-        ];
+    /// The actions whose key was pressed in this frame and that may run with `surfaces` in front
+    /// ([`Surfaces::allows`]), besides Undo while a toast with Undo shows (the toast takes it). While a text field is
+    /// `focused` a key without Command, Ctrl or Alt runs nothing, so a letter typed is typed, and Undo is the field's;
+    /// the list's keys run only while it has the keyboard (`listing`). A key that may not run is not taken.
+    fn pressed(&self, ctx: &egui::Context, surfaces: &Surfaces, focused: bool, listing: bool) -> Vec<&'static str> {
         let toasted = self.mailbox.undoable().is_some_and(|undo| undo.undoable) || self.counting().is_some();
         keymap::actions()
             .into_iter()
             .map(|action| action.id)
-            .filter(|id| !ROW_ACTS.iter().any(|(act, _)| act == id))
-            // The calendar's keys are taken by the calendar screen alone (`calendar::keys`).
-            .filter(|id| !keymap::CALENDAR_KEYS.contains(id))
-            .filter(|id| *id != keymap::UNDO || !(quiet || toasted))
+            // The acts on a row (the list takes those), the calendar's keys (`calendar::keys`), what the sheet, the
+            // palette, a capture or the composer in front keep from the window.
+            .filter(|id| surfaces.allows(id, &self.keymap))
+            .filter(|id| *id != keymap::UNDO || !(focused || toasted))
             .filter(|id| *id != keymap::SEND || self.composer_keys)
-            // Under the sheet only its own keys and the window's run, with a modifier or without: nothing of the mail,
-            // the reader, the composer or the calendar opens, sends or moves behind it.
-            .filter(|id| !self.settings.is_open() || SHEET_KEYS.contains(id))
             .filter(|id| {
                 // The list's keys run while the list has the keyboard, and never else: a field keeps its letters, its
                 // Home and End, the reader its open message.
@@ -1290,7 +1282,7 @@ impl InboxApp {
                     let held = key.modifiers;
                     !(held.command || held.ctrl || held.mac_cmd || held.alt)
                 });
-                !(quiet && bare) && self.keymap.pressed(ctx, id)
+                !(focused && bare) && self.keymap.pressed(ctx, id)
             })
             .filter(|id| !soon::blocked(ctx, id))
             .collect()
@@ -2116,14 +2108,16 @@ impl InboxApp {
         self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
         self.frame = ui.ctx().cumulative_frame_nr();
-        let Keys { mut ran, escape, typing, quiet } = self.keys(ui.ctx());
+        // What stands in front, once, before any key is read.
+        let surfaces = self.surfaces(ui.ctx());
+        let Keys { mut ran, escape, to_place, typing, quiet } = self.keys(ui.ctx(), &surfaces);
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };
         self.act_by_key |= keyed.is_some();
         self.follow_adding();
         let adding = self.onboarding.stage() != Stage::Closed;
-        // One Esc closes one surface: `escape` is the window's only while no float (a menu, a picker, a select) is open
-        // ([`crate::component::popup::escape`]); an open float takes it before anything under it.
-        let left_settings = escape && self.settings.is_open();
+        // One Esc closes one surface ([`Surfaces::escape`]): an open float (a menu, a picker, a select), the palette, a
+        // capture and the event editor take theirs before anything under them.
+        let left_settings = escape == Some(Surface::Sheet);
         if left_settings {
             self.close_settings();
             // The sheet on top took the Esc: nothing under it sees it (the calendar's pick, the editor).
@@ -2133,12 +2127,12 @@ impl InboxApp {
         // The sheet or the palette coming over the window closes the lists, menus and pickers open under it.
         crate::component::popup::covered(ui.ctx(), setting || self.palette.is_open());
         self.calendar_before(ui.ctx(), setting);
-        let left_full = escape && !left_settings && self.screen == Screen::Mail && self.reader.full_width();
+        let left_full = escape == Some(Surface::FullWidth);
         if left_full {
             self.reader.set_full_width(false);
         }
         // Esc that closes a menu or a picker in the reader closes only that: the keyboard stays the reader's.
-        let back_to_list = escape && !left_settings && !left_full && self.back_to_list(ui.ctx());
+        let back_to_list = (to_place || matches!(escape, Some(Surface::Composer | Surface::OnePaneReader))) && self.back_to_list(ui.ctx());
         // The window's ground first, under the error banner too; then the place for the panes, then everything else.
         // The panes touch; a hairline divides them.
         let corner = self.window_corner(ui.ctx());
