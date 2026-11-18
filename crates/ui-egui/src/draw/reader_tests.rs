@@ -1170,8 +1170,35 @@ fn stroked(harness: &Harness<'static, InboxApp>, colour: egui::Color32) -> Vec<e
     found
 }
 
+/// Puts the keyboard on the reader's first Tab stop, so a walk that means the open message starts there: Tab onto a
+/// row of the list opens that row's message (the lists' preview), so a walk from the window's first stop reaches the
+/// reader with another message open.
+pub(super) fn into_the_reader(harness: &mut Harness<'static, InboxApp>) {
+    let Some(reader) = super::reader_rect(&harness.ctx) else { return };
+    let first = harness
+        .root()
+        .children_recursive()
+        .filter(|node| {
+            let data = node.accesskit_node();
+            data.data().supports_action(egui::accesskit::Action::Focus)
+                && !data.is_hidden()
+                && data.role() != Role::Label
+                && data.role() != Role::ScrollBar
+                && reader.contains_rect(node.rect())
+        })
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()).then(a.rect().left().total_cmp(&b.rect().left())))
+        .map(|node| node.accesskit_node().locate().0);
+    if let Some(first) = first {
+        if let Some(node) = harness.root().children_recursive().find(|node| node.accesskit_node().locate().0 == first) {
+            node.focus();
+        }
+        harness.run();
+    }
+}
+
 /// Presses Tab until the node `label` has the keyboard; whether it got it.
 fn tab_to(harness: &mut Harness<'static, InboxApp>, label: &str) -> bool {
+    into_the_reader(harness);
     for _ in 0..80 {
         harness.key_press(Key::Tab);
         harness.run();
@@ -1213,6 +1240,7 @@ fn the_subject_is_a_tab_stop_with_a_ring_and_enter_or_the_menu_key_copies_it() {
 
 /// The labels Tab gives the keyboard to, in order, from the first press until it comes back round.
 fn tab_order(harness: &mut Harness<'static, InboxApp>) -> Vec<String> {
+    into_the_reader(harness);
     let mut order: Vec<String> = Vec::new();
     let mut seen = Vec::new();
     for _ in 0..300 {
@@ -1346,6 +1374,7 @@ fn the_why_line_is_coming_soon_and_says_no_reason_of_its_own() {
 
 /// Tab reaches every control of the scene, and the scene rests (asks for no repaint) once it is still.
 fn walks_and_rests(harness: &mut Harness<'static, InboxApp>, scene: &str) {
+    into_the_reader(harness);
     let mut missed = crate::component::tests::keyboard_walk(harness);
     // The toast's Undo (after Done) is its key's, Ctrl Z, while the toast shows: the toast is no Tab stop anywhere.
     missed.retain(|label| label != "Undo");
@@ -1419,6 +1448,7 @@ fn every_reader_scene_is_walked_by_the_keyboard_and_rests() {
     }
     // Loading: walked; its progress mark turns every 125 ms by design (M9), so it is no scene at rest.
     let mut harness = opened_as(&fetch, "Photos from the coast walk", crate::reader::Content::Loading, false);
+    into_the_reader(&mut harness);
     let missed = crate::component::tests::keyboard_walk(&mut harness);
     assert!(missed.is_empty(), "loading: Tab never reaches {missed:?}");
     // An attachment saved, and one that failed.
@@ -1459,6 +1489,10 @@ fn every_reader_scene_is_walked_by_the_keyboard_and_rests() {
     harness.get_by_label_contains("Odile Brannock, 08:35, folded").click();
     settle(&mut harness);
     walks_and_rests(&mut harness, "an older message unfolded");
+    // The walk went on round the window, through the list's rows, which open theirs: the scene again.
+    let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
+    harness.get_by_label_contains("Odile Brannock, 08:35, folded").click();
+    settle(&mut harness);
     harness.get_by_label_contains("Odile Brannock, 08:35, open: ").click_secondary();
     harness.run();
     harness.get_by_role_and_label(Role::MenuItem, "Show the full header");
@@ -1545,11 +1579,13 @@ fn a_thread_s_rows_keep_their_words_inside_them_in_a_narrow_reader() {
             let fetch = Recorder::default();
             let harness = opened_in(&fetch, folder, subject, width, percent, ppp);
             let at = format!("{subject} {width} {percent}% {ppp}x");
+            // The rows in sight: above the answers' foot, which the message scrolls under.
+            let foot = harness.query_all_by_role_and_label(Role::Button, "Reply").map(|node| node.rect().top()).fold(800.0_f32, f32::min);
             let rows: Vec<egui::Rect> = harness
                 .query_all_by_role(Role::Button)
                 .filter(|node| node.accesskit_node().label().is_some_and(|label| label.contains(", folded") || label.contains(", open: ")))
                 .map(|node| node.rect())
-                .filter(|rect| rect.is_positive() && rect.bottom() <= 800.0)
+                .filter(|rect| rect.is_positive() && rect.bottom() <= foot)
                 .collect();
             if folder.is_some() {
                 assert!(rows.len() > 1, "a thread shows its rows: {at}");
@@ -1758,7 +1794,24 @@ fn an_older_unfolded_message_keeps_its_details_at_every_width_the_design_draws()
             assert_eq!(open.len(), 2, "the older message unfolded beside the open one: {at}");
             for row in &open {
                 let details = harness.query_all_by_label("details ▾").filter(|link| row.contains_rect(link.rect())).count();
-                assert_eq!(details, 1, "an open line at {row:?} keeps its way to the full header: {at}");
+                if details == 1 {
+                    continue;
+                }
+                // The lists' 441 leave a line at 130 % no room for `details ▾`: its menu is its way to the full header.
+                assert_eq!((details, percent), (0, 130), "an open line at {row:?} keeps its way to the full header: {at}");
+                let line = harness
+                    .query_all_by_role(Role::Button)
+                    .find(|node| node.rect() == *row && node.accesskit_node().label().is_some_and(|label| label.contains(", open: ")))
+                    .map(|node| node.accesskit_node().locate().0);
+                if let Some(node) = harness.root().children_recursive().find(|node| Some(node.accesskit_node().locate().0) == line) {
+                    node.focus();
+                }
+                harness.run();
+                harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::F10);
+                harness.run();
+                assert!(harness.query_by_label("Show the full header").is_some(), "an open line at {row:?} keeps its menu: {at}");
+                harness.key_press(Key::Escape);
+                harness.run();
             }
         }
     }
@@ -1800,6 +1853,7 @@ fn widen_list(harness: &mut Harness<'static, InboxApp>, by: f32) {
 
 /// Presses Tab until a node whose label holds `label` has the keyboard; whether it got it.
 fn tab_to_containing(harness: &mut Harness<'static, InboxApp>, label: &str) -> bool {
+    into_the_reader(harness);
     for _ in 0..120 {
         harness.key_press(Key::Tab);
         harness.run();
@@ -2146,7 +2200,10 @@ fn the_reader_s_banners_and_cards_keep_inside_a_narrow_window() {
         keeps_inside(&held, question.left() - 20.0, width, &at("held"));
         for name in ["Accept", "Accept and reply", "Block"] {
             let rect = held.get_by_role_and_label(Role::Button, name).rect();
-            assert!(rect.left() >= question.left() - 0.5 && rect.right() <= width - 40.0 + 0.5, "{name} at {rect:?}: {}", at("held"));
+            // The lists' 441 leave the reader 279 at 1024: at 130 % "Accept and reply" is wider than the card's room, and
+            // keeps its words whole on a line of its own, into the card's inner edge and never past the window.
+            let room = if (width, percent) == (1024.0, 130) { width - 20.0 } else { width - 40.0 };
+            assert!(rect.left() >= question.left() - 0.5 && rect.right() <= room + 0.5, "{name} at {rect:?}: {}", at("held"));
         }
         // A note in the text's place.
         harness.state_mut().reader_mut().0.set_notice("Subject copied".to_owned());

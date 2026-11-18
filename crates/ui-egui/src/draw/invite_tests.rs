@@ -273,6 +273,7 @@ fn a_generated_body_gives_way_to_the_card_and_a_written_one_stays() {
 fn an_invitation_in_the_reader_is_walked_by_the_keyboard_and_rests() {
     let mut harness = sample_harness();
     open(&mut harness, "Updated invitation: Lunch with Odile");
+    super::reader_tests::into_the_reader(&mut harness);
     let missed = crate::component::tests::keyboard_walk(&mut harness);
     assert!(missed.is_empty(), "Tab never reaches {missed:?}");
     assert!(crate::component::tests::rests(&mut harness, 8), "it repaints at rest");
@@ -318,6 +319,7 @@ fn an_invitation_that_asks_has_one_primary_button_going() {
 fn a_focused_button_in_an_asking_card_keeps_its_own_ring() {
     let mut harness = sending(message(905, "Invitation: Board game night", "REQUEST", ORGANISED_BY_ODILE));
     open(&mut harness, "Invitation: Board game night");
+    super::reader_tests::into_the_reader(&mut harness);
     for name in ["Going", "Maybe", "No"] {
         let mut reached = false;
         for _ in 0..80 {
