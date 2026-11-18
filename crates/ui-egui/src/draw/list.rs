@@ -41,7 +41,7 @@ use inboxcraft_engine::ScreenerMode;
 use crate::component::hover::{self, Action};
 use crate::component::pill::pill;
 use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
-use crate::component::{avatar, badge, button, field, margin, popup, tooltip};
+use crate::component::{avatar, badge, button, field, galley, margin, popup, tooltip};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, Group, GroupKind, InboxView, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState};
@@ -139,11 +139,7 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.label(RichText::new(mailbox.title()).font(theme.fonts.title.id()).color(p.ink));
-            let line = match mailbox.outbox_summary().filter(|_| mailbox.place() == Place::Outbox && mailbox.query().is_empty()) {
-                Some(summary) => summary,
-                None => tr!("{whose} · {shown}", whose = mailbox.subtitle(), shown = mailbox.list_count()),
-            };
-            ui.label(theme.fonts.mono_s.rich(&line).color(p.muted));
+            ui.label(theme.fonts.mono_s.rich(&subtitle(mailbox)).color(p.muted));
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if !search.is_empty() && button::text(ui, theme, keymap, tr!("Clear"), None, false).clicked() {
@@ -165,6 +161,41 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
     let mut asked = Header { searched: changed, ..Header::default() };
     pills(ui, theme, mailbox, &mut asked);
     asked
+}
+
+/// The line under the list's title: whose mail and how much, or the outbox's summary.
+fn subtitle(mailbox: &Mailbox) -> String {
+    match mailbox.outbox_summary().filter(|_| mailbox.place() == Place::Outbox && mailbox.query().is_empty()) {
+        Some(summary) => summary,
+        None => tr!("{whose} · {shown}", whose = mailbox.subtitle(), shown = mailbox.list_count()),
+    }
+}
+
+/// The narrowest the list gets, its pane's left margin left out, with its own head (the title and the line under it
+/// beside the search field, and Clear while something is searched) and a group card's head (badge, name and unread
+/// count beside Done all) whole, as [`header`] and [`group_card`] lay them out: the head 16 in at each side, a card
+/// inside the rows' 12 at each side, the scroll bar's room and the card's 6 and 8 in. Never more than the list's
+/// default width: a head that does not fit there is not helped by hiding the list.
+pub(super) fn least_width(ui: &Ui, theme: &Theme, mailbox: &Mailbox, search: &str) -> f32 {
+    let s = &theme.spacing;
+    let p = &theme.palette;
+    let gap = ui.spacing().item_spacing.x;
+    let title = galley(ui, &mailbox.title(), theme.fonts.title, p.ink).size().x;
+    let under = galley(ui, &subtitle(mailbox), theme.fonts.mono_s, p.muted).size().x;
+    let clear = if search.is_empty() { 0.0 } else { button::text_width(ui, theme, tr!("Clear")) + gap };
+    let head = s.s4 * 2.0 + title.max(under).ceil() + gap + super::FOLDER_PANE * 0.75 + clear;
+    // The cards as `drawn_rows` chooses them: groups there, and the cards' view.
+    let cards = mailbox.inbox_view() == InboxView::Cards;
+    let done_all = button::text_width(ui, theme, tr!("Done all"));
+    let card = |group: &Group| {
+        let unread = members(mailbox, group).iter().filter(|message| !message.seen).count();
+        let unread = u64::try_from(unread).unwrap_or(u64::MAX);
+        let count = if unread > 0 { badge::count_width(ui, theme, unread) + s.s2 } else { 0.0 };
+        let name = galley(ui, &group.name, theme.fonts.heading, p.ink).size().x;
+        s.s3 * 2.0 + theme.sizes.scrollbar + (ROW_INSET + s.s2) * 2.0 + theme.fonts.heading.line * 1.4 + s.s1 + name + count + done_all
+    };
+    let groups = if cards { mailbox.groups().iter().map(card).fold(0.0, f32::max) } else { 0.0 };
+    head.max(groups).min(super::LIST_WIDTH)
 }
 
 fn empty(ui: &mut Ui, theme: &Theme, title: &str, detail: &str) {

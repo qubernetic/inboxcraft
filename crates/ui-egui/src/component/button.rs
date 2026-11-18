@@ -399,6 +399,14 @@ pub fn text(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Opt
     .show(ui, theme, keymap)
 }
 
+/// The width of a [`text`] button called `name`, with no icon, arrow or key: its words (cut at 240) and its 12 at each
+/// side.
+pub fn text_width(ui: &Ui, theme: &Theme, name: &str) -> f32 {
+    let label = super::cut(ui, name, theme.fonts.button, Color32::PLACEHOLDER, LABEL_WIDEST);
+    let words = if label.elided { LABEL_WIDEST } else { label.size().x.ceil() };
+    words + PAD * 2.0
+}
+
 /// A text button like [`text`] that cannot be pressed yet: drawn disabled, and its tooltip says why (`note`).
 pub fn unavailable(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, primary: bool, note: &str) -> Response {
     let button = TextButton::new(name).unavailable(note);

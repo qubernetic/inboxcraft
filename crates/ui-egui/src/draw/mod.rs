@@ -80,7 +80,7 @@ use crate::{UiError, tr};
 use paint::Panes;
 
 /// The width of the list beside the reader, in points.
-const LIST_WIDTH: f32 = 380.0;
+pub(super) const LIST_WIDTH: f32 = 380.0;
 
 /// The default width of the folder pane, in points.
 pub(super) const FOLDER_PANE: f32 = 240.0;
@@ -161,6 +161,11 @@ pub struct InboxApp {
     composer: Option<Composer>,
     /// Whether the keyboard focus was inside the composer at the start of this frame: Send's key acts only then.
     composer_keys: bool,
+    /// Whether the composer has taken the list's place this frame: too narrow for its heads beside it, the list is not
+    /// drawn, and no list key runs.
+    list_hidden: bool,
+    /// Where the list was drawn last, to tell whether the keyboard was in it when it goes.
+    list_rect: Option<Rect>,
     /// The frame being drawn; between frames, the next one.
     frame: u64,
     /// What the composer's last step says in a toast (the draft kept, the message on its way), and since when.
@@ -212,6 +217,41 @@ fn list_widest(ui: &Ui, theme: &Theme, docked: bool) -> f32 {
     if docked { (ui.available_width() - compose::least_width(ui, theme) - theme.spacing.s2).max(1.0) } else { f32::INFINITY }
 }
 
+/// Where the list stands beside the reader (`reading`) or the composer (`docked`), `left` its pane's left margin: not
+/// drawn while the composer beside it would leave it narrower than its heads need ([`list::least_width`]).
+fn list_place(ui: &Ui, theme: &Theme, mailbox: &Mailbox, search: &str, reading: bool, docked: bool, left: f32) -> ListPlace {
+    if docked && list_widest(ui, theme, docked) < list_least(ui, theme, mailbox, search, docked, left) {
+        ListPlace::Hidden
+    } else if reading || docked {
+        ListPlace::Beside
+    } else {
+        ListPlace::Whole
+    }
+}
+
+/// The narrowest the list beside the docked composer gets, `left` its pane's left margin; beside the reader, any.
+fn list_least(ui: &Ui, theme: &Theme, mailbox: &Mailbox, search: &str, docked: bool, left: f32) -> f32 {
+    if docked { left + list::least_width(ui, theme, mailbox, search) } else { 0.0 }
+}
+
+/// The list's pane at the left, resizable: beside the docked composer kept between its least width and what leaves
+/// the composer its own ([`list_widest`]).
+fn list_panel(ui: &Ui, theme: &Theme, mailbox: &Mailbox, search: &str, docked: bool, left: f32) -> Panel {
+    let panel = Panel::left("list").resizable(true).default_size(LIST_WIDTH).show_separator_line(false);
+    if docked { panel.size_range(list_least(ui, theme, mailbox, search, docked, left)..=list_widest(ui, theme, docked)) } else { panel }
+}
+
+/// Where the list stands in a frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ListPlace {
+    /// Not drawn: the composer in the reader's place has taken its place too.
+    Hidden,
+    /// At the left, beside the reader or the composer.
+    Beside,
+    /// Over the whole middle.
+    Whole,
+}
+
 fn around(left: f32, right: f32, gap: f32) -> Frame {
     // Distances are a few points; the clamp keeps the casts inside i8.
     let side = |points: f32| points.clamp(0.0, 100.0) as i8;
@@ -255,6 +295,8 @@ impl InboxApp {
             frame_applied: None,
             composer: None,
             composer_keys: false,
+            list_hidden: false,
+            list_rect: None,
             frame: 0,
             notice: None,
             picker: None,
@@ -461,6 +503,8 @@ impl InboxApp {
             keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => self.row_act(id).is_some(),
             keymap::UNDO => self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
+            // The search field is the list's: hidden, it is not there to take the keys.
+            keymap::FIND => !self.list_hidden,
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             keymap::FOLD => self.composer.is_some() && !self.docked(),
@@ -1197,6 +1241,22 @@ impl InboxApp {
         }
     }
 
+    /// Notes whether the list is `hidden` this frame. When it goes with the keyboard in it, the keyboard goes to the
+    /// composer that took its place: nothing of the hidden list keeps it.
+    fn hide_list(&mut self, ctx: &egui::Context, hidden: bool) {
+        self.list_hidden = hidden;
+        if !hidden {
+            return;
+        }
+        let list = self.list_rect.take();
+        let focused = ctx.memory(|memory| memory.focused()).and_then(|id| ctx.read_response(id));
+        if focused.is_some_and(|response| list.is_some_and(|list| list.contains_rect(response.rect))) {
+            ctx.memory_mut(|memory| memory.request_focus(compose::text_id()));
+            // Drawn again with the keys where they are now.
+            ctx.request_repaint();
+        }
+    }
+
     /// The composer on a card in the reader's place; what was asked in it.
     fn composer_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, left: f32) -> Vec<compose::Asked> {
         let (keymap, mailbox) = (&self.keymap, &self.mailbox);
@@ -1466,6 +1526,8 @@ impl InboxApp {
         layers.capped(banner);
         ran.extend(clicked_rail.actions());
         let mut on_calendar = Vec::new();
+        let mut composer_left = half;
+        self.list_hidden = false;
         if self.screen == Screen::Calendar {
             on_calendar = self.calendar_screen(ui, &theme, &mut layers);
         } else if self.mailbox.accounts().is_empty() {
@@ -1473,6 +1535,8 @@ impl InboxApp {
         } else if !full {
             let left;
             (asked, left) = self.folders(ui, &theme, &mut layers);
+            let place = list_place(ui, &theme, &self.mailbox, &self.search, self.reader.open_id().is_some(), docked, left);
+            let panel = list_panel(ui, &theme, &self.mailbox, &self.search, docked, left);
             let (mailbox, search, keymap) = (&self.mailbox, &mut self.search, &self.keymap);
             let mut list = |ui: &mut Ui, layers: &mut Panes| {
                 layers.card(ui, Margin::ZERO, |ui| {
@@ -1493,19 +1557,20 @@ impl InboxApp {
                     (searched, listed)
                 })
             };
-            (header, listed) = if self.reader.open_id().is_some() || docked {
-                let widest = list_widest(ui, &theme, docked);
-                Panel::left("list")
-                    .resizable(true)
-                    .default_size(LIST_WIDTH)
-                    .max_size(widest)
-                    .show_separator_line(false)
-                    .frame(around(left, half, gap))
-                    .show(ui, |ui| list(ui, &mut layers))
-                    .inner
-            } else {
-                CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| list(ui, &mut layers)).inner
-            };
+            match place {
+                ListPlace::Hidden => composer_left = left,
+                ListPlace::Beside => {
+                    let shown = panel.frame(around(left, half, gap)).show(ui, |ui| list(ui, &mut layers));
+                    self.list_rect = Some(shown.response.rect);
+                    (header, listed) = shown.inner;
+                }
+                ListPlace::Whole => {
+                    let shown = CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| list(ui, &mut layers));
+                    self.list_rect = Some(shown.response.rect);
+                    (header, listed) = shown.inner;
+                }
+            }
+            self.hide_list(ui.ctx(), place == ListPlace::Hidden);
         }
         let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, screener: screener_mode, presets } = listed;
         let mut drawn = reader::Drawn::default();
@@ -1513,7 +1578,7 @@ impl InboxApp {
         // A texture lives no longer than the picture the reader keeps for it.
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
         if docked {
-            composed = self.composer_card(ui, &theme, &mut layers, half);
+            composed = self.composer_card(ui, &theme, &mut layers, composer_left);
         } else if self.screen == Screen::Mail && self.reader.open_id().is_some() {
             let hover = self.hover.take();
             let left = if full { gap } else { half };
@@ -2063,6 +2128,9 @@ mod later_tests;
 #[cfg(test)]
 #[path = "list_tests.rs"]
 mod list_tests;
+#[cfg(test)]
+#[path = "narrow_tests.rs"]
+mod narrow_tests;
 #[cfg(test)]
 #[path = "notify_tests.rs"]
 mod notify_tests;
