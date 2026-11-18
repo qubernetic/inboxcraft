@@ -620,22 +620,27 @@ fn press_odile_in_the_middle(harness: &mut Harness<'static, InboxApp>, width: &s
 #[test]
 fn the_list_is_440_wide_beside_the_reader() {
     use crate::theme::TextScale;
-    for percent in [100, 130] {
+    // Tall enough that every row fits, and short enough that the list scrolls: the bar lies over the rows, which keep
+    // their 440 either way.
+    for (percent, high) in [(100, 1400.0), (130, 1400.0), (100, 500.0), (130, 500.0)] {
+        let percent_high = format!("{percent} % at {high}");
         let mut app = app(false);
         app.set_text_scale(TextScale::from_percent(percent).unwrap());
-        // Tall enough that every row fits: the scroll bar takes its 12 beside the rows only when they do not.
         let mut harness = Harness::builder()
-            .with_size(vec2(1300.0, 1400.0))
+            .with_size(vec2(1300.0, high))
             .with_context_setup(install_fonts)
             .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
         harness.run();
-        harness.query_all_by_label_contains("Photos from the coast walk").next().unwrap().click();
+        let teodor = harness.state().mailbox().messages().iter().find(|row| row.subject.contains("coast walk")).unwrap().id;
+        harness.state_mut().mailbox_mut().select(Some(teodor));
         harness.run();
         assert!(harness.state().reader().open_id().is_some(), "Teodor's message is open");
+        let last = *super::list::order(&harness.ctx).last().unwrap();
+        assert_eq!(in_sight(&harness, last), high > 1000.0, "{percent_high}: the list scrolls only in the short window");
         let row = harness.get_by_label(ODILE).rect();
-        assert_eq!(row.width(), 440.0, "{percent}: the rows are the design's 440 at every text size");
+        assert_eq!(row.width(), 440.0, "{percent_high}: the rows are the design's 440 at every text size");
         // A pointer press in its middle opens it and acts on nothing.
-        press_odile_in_the_middle(&mut harness, &format!("{percent}"));
+        press_odile_in_the_middle(&mut harness, &percent_high);
         // No splitter: dragging where the list's edge was leaves it 440.
         let y = row.center().y;
         for x in [0.0, 1.0, 2.0, 3.0] {
@@ -649,7 +654,7 @@ fn the_list_is_440_wide_beside_the_reader() {
             harness.drop_at(to);
             harness.run();
         }
-        assert_eq!(harness.get_by_label(ODILE_READ).rect().width(), 440.0, "{percent}: the edge does not move");
+        assert_eq!(harness.get_by_label(ODILE_READ).rect().width(), 440.0, "{percent_high}: the edge does not move");
     }
     // A width a person once dragged the list to, kept in egui's memory, is not read.
     let mut harness = beside_the_reader();
@@ -663,6 +668,59 @@ fn the_list_is_440_wide_beside_the_reader() {
     harness.run();
     harness.run();
     assert_eq!(harness.get_by_label(ODILE).rect().width(), 440.0, "a kept splitter width is left alone");
+}
+
+/// The shapes of the last frame, flattened, in paint order.
+fn flat_shapes(harness: &Harness<'_, InboxApp>) -> Vec<egui::Shape> {
+    fn leaves(shape: &egui::Shape, found: &mut Vec<egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| leaves(shape, found)),
+            shape => found.push(shape.clone()),
+        }
+    }
+    let mut flat = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| leaves(&clipped.shape, &mut flat));
+    flat
+}
+
+#[test]
+fn the_lists_scroll_bar_lies_over_its_rows_and_the_focus_edge_over_its_thumb() {
+    let mut harness = Harness::builder()
+        .with_size(vec2(1300.0, 500.0))
+        .with_context_setup(install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(false));
+    harness.run();
+    let order = super::list::order(&harness.ctx);
+    // The first row open and with the focus: at the top of the list, the thumb passes it.
+    harness.state_mut().mailbox_mut().select(Some(order[0]));
+    harness.run();
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(order[0])));
+    harness.run();
+    harness.run();
+    let view = super::list::view_rect(&harness.ctx).unwrap();
+    let row = row_rect(&harness, order[0]).unwrap();
+    assert_eq!(row.width(), 440.0, "the row keeps its 440 in a list that scrolls");
+    assert!((view.right() - row.right()).abs() < 0.01, "the rows reach the view's right edge: {view:?} {row:?}");
+    let strip = egui::Rect::from_x_y_ranges(view.right() - 12.0..=view.right(), view.y_range());
+    let shapes = flat_shapes(&harness);
+    let (thumb, thumb_rect) = shapes
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(at, shape)| match shape {
+            egui::Shape::Rect(rect)
+                if rect.fill.a() > 0 && rect.rect.width() < 12.0 && strip.expand(0.01).contains_rect(rect.rect) && rect.rect.height() >= 32.0 =>
+            {
+                Some((at, rect.rect))
+            }
+            _ => None,
+        })
+        .expect("a thumb over the rows' right edge");
+    assert!(thumb_rect.intersects(row), "the thumb passes the focused row: {thumb_rect:?} {row:?}");
+    let edge_after = shapes[thumb..].iter().any(|shape| {
+        matches!(shape, egui::Shape::Rect(rect) if rect.fill.a() == 0 && rect.stroke.width > 0.0 && rect.rect.intersects(strip) && row.contains_rect(rect.rect.shrink(0.5)))
+    });
+    assert!(edge_after, "the focus edge is painted over the thumb");
 }
 
 #[test]

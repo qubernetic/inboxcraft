@@ -230,3 +230,33 @@ fn a_viewport_area_hands_over_the_part_in_sight_and_paints_its_bar_beside_it() {
     assert_eq!(fills.len(), 1, "a thumb at rest: {fills:?}");
     assert!(strip.left() >= inner.right() - 0.01 && fills.iter().all(|(rect, _)| !rect.intersects(inner.shrink(0.01))), "beside the content");
 }
+
+#[test]
+fn the_over_variant_gives_the_content_the_whole_width_and_lays_its_bar_over_it() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let mut harness = builder().with_size(vec2(220.0, 160.0)).build_ui_state(
+        move |ui, seen: &mut (Rect, f32, f32)| {
+            ui.spacing_mut().scroll = style(&theme);
+            stage(ui, theme.palette.surface, |ui| {
+                let whole = ui.available_width();
+                let area = ScrollArea::vertical().id_salt("scroll-over").max_height(AREA).auto_shrink([false, true]);
+                let output = super::show_viewport_over(ui, &theme, area, |ui, _| {
+                    ui.set_min_height(AREA * 3.0);
+                    ui.available_width()
+                });
+                *seen = (output.inner_rect, output.inner, whole);
+                // The strip beside the content stays the rule for every other area.
+                assert_eq!(ui.spacing().scroll.floating_allocated_width, theme.sizes.scrollbar);
+            });
+        },
+        (Rect::NOTHING, 0.0, 0.0),
+    );
+    harness.run();
+    harness.run();
+    let (inner, content, whole) = *harness.state();
+    assert_eq!(content, whole, "the content keeps the area's whole width");
+    let over = Rect::from_x_y_ranges(inner.right() - 12.0..=inner.right(), inner.y_range());
+    let fills = fills(&harness, over);
+    assert_eq!(fills.len(), 1, "a thumb at rest over the content's right edge: {fills:?}");
+    assert!(rests(&mut harness, 4));
+}

@@ -116,6 +116,27 @@ impl Row {
         }
         let above = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - foot));
         paint::focus_ring(ui.painter(), theme, above, Ring::Inside);
+        // A scroll bar laid over the rows paints its thumb after them: it paints this edge again over the thumb.
+        ui.data_mut(|data| data.insert_temp(edge_id(), above));
+    }
+}
+
+/// Where the focus edge [`Row::finish`] painted in this pass is kept.
+fn edge_id() -> Id {
+    Id::unique("row-focus-edge")
+}
+
+/// Forgets the focus edge a row painted: called before the rows of a pass are drawn.
+pub(crate) fn forget_focus_edge(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<Rect>(edge_id()));
+}
+
+/// Paints the focus edge a row painted since [`forget_focus_edge`] again, as far as it lies `within`: over a scroll
+/// thumb laid over the rows, so the thumb never covers it.
+pub(crate) fn repaint_focus_edge(ui: &Ui, theme: &Theme, within: Rect) {
+    let Some(edge) = ui.data(|data| data.get_temp::<Rect>(edge_id())) else { return };
+    if within.intersects(edge) {
+        paint::focus_ring(&ui.painter().with_clip_rect(within.intersect(ui.clip_rect())), theme, edge, Ring::Inside);
     }
 }
 

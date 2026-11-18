@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The scroll bar: a strip 12 px wide beside what scrolls, never over it, so a thumb never covers a row or its focus
-//! edge. At rest it shows only a 4 px `muted` thumb in its middle; under the pointer the strip takes the `stage` fill
+//! edge. The mail list is the one exception ([`show_viewport_over`]): its rows keep the design's 440 whether they
+//! scroll or not, so its bar lies over their right edge, and a focus edge the thumb passes is painted over the thumb. At rest it shows only a 4 px `muted` thumb in its middle; under the pointer the strip takes the `stage` fill
 //! and the thumb grows to 8 px, 2 from each side; while dragged the thumb is `ink`. Square, no fade, no movement of
 //! its own: the presentation gives it none.
 //!
@@ -82,13 +83,25 @@ pub fn paint(painter: &Painter, theme: &Theme, strip: Rect, thumb: Rangef, bar: 
 /// none, or showed it over the content): the strip egui senses, the thumb where egui's drag puts it. Only the
 /// vertical bar: a horizontal one is not painted.
 pub fn bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>) {
+    paint_bar(ui, theme, output, false);
+}
+
+/// [`bar`], over the content's right edge when `over`, beside it otherwise.
+fn paint_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, over: bool) {
     let id = output.id.with(1);
     let Some(strip) = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(id).map(|widget| widget.rect)) else { return };
     // egui starts showing a bar a frame before it gives it room beside the content: until the strip stands clear of
     // the content, nothing is painted, so no frame has the bar over a row.
-    if strip.left() < output.inner_rect.right() - 0.01 {
+    if !over && strip.left() < output.inner_rect.right() - 0.01 {
         return;
     }
+    // Over the content, the strip is the content's right 12, whatever width egui gives a floating bar in between.
+    let strip = if over {
+        let width = theme.sizes.scrollbar;
+        Rect::from_x_y_ranges(Rangef::new(output.inner_rect.right() - width, output.inner_rect.right()), strip.y_range())
+    } else {
+        strip
+    };
     let (inner, content) = (output.inner_rect.height(), output.content_size.y);
     let length = strip.height();
     if !(content > inner && inner > 0.0 && length > 0.0 && content.is_finite()) {
@@ -119,6 +132,20 @@ pub fn show<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&m
 pub fn show_viewport<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui, Rect) -> R) -> ScrollAreaOutput<R> {
     let output = area.show_viewport(ui, add);
     bar(ui, theme, &output);
+    output
+}
+
+/// [`show_viewport`] with the bar over the content's right edge, not beside it: the content keeps the area's whole
+/// width whether it scrolls or not (the mail list's 440 rows). A row's focus edge the thumb passes is painted again
+/// over the thumb ([`super::row::Row::finish`]), so the thumb never covers it.
+pub fn show_viewport_over<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui, Rect) -> R) -> ScrollAreaOutput<R> {
+    let kept = ui.spacing().scroll;
+    ui.spacing_mut().scroll.floating_allocated_width = 0.0;
+    super::row::forget_focus_edge(ui.ctx());
+    let output = area.show_viewport(ui, add);
+    ui.spacing_mut().scroll = kept;
+    paint_bar(ui, theme, &output, true);
+    super::row::repaint_focus_edge(ui, theme, output.inner_rect);
     output
 }
 

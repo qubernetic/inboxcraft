@@ -1329,7 +1329,7 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
         area = area.vertical_scroll_offset(offset);
         ui.spacing_mut().scroll.kinetic.rubber_band = false;
     }
-    let output = crate::component::scroll::show_viewport(ui, theme, area, |ui, viewport| {
+    let output = crate::component::scroll::show_viewport_over(ui, theme, area, |ui, viewport| {
         ui.set_min_height(listing.height);
         let room = ui.max_rect();
         let at = |top: f32, bottom: f32| Rect::from_min_max(pos2(room.left(), room.top() + top), pos2(room.right(), room.top() + bottom));
