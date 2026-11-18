@@ -59,11 +59,27 @@ fn the_why_line_looks_as_its_sheet_says_in_every_state() {
             // The reasons 12 right of the label's box (59 wide), in mono_s and muted, on one line.
             let (words_at, words_ink, words_size) = text(&reasons[..12]).unwrap_or_else(|| panic!("reasons: {at}"));
             assert_eq!((words_at.x, words_ink, words_size), (83.0, p.muted, f.mono_s.size), "{at}");
-            // The log is not built: its link stands unavailable, with the coming-soon tag.
+            // The log is not built: its link stands unavailable at the right end, where the sheet puts it; the reasons
+            // keep their room up to 12 before it (467 wide), and the coming-soon tag stands only where the reasons
+            // leave it room, never over them.
             let link = harness.get_by_label("open log →");
             assert!(link.accesskit_node().is_disabled(), "{at}");
             assert_eq!(link.rect().right(), rect.right() - 12.0, "{at}");
-            assert_eq!(harness.query_all_by_label("coming soon").count(), 1, "{at}");
+            assert_eq!(link.rect().left() - rect.left(), 562.0, "{at}");
+            let words = harness.get_by_label(reasons).rect();
+            assert_eq!((words.left() - rect.left(), words.width()), (83.0, 467.0), "{at}");
+            let tags: Vec<egui::Rect> = harness.query_all_by_label("coming soon").map(|tag| tag.rect()).collect();
+            assert!(tags.len() <= 1, "{at}");
+            let (drawn, ..) = text(&reasons[..12]).map_or((0.0, p.muted, 0.0), |(at, colour, size)| (at.x, colour, size));
+            let words_end = paint
+                .shapes
+                .iter()
+                .filter(|shape| matches!(&shape.look, Look::Text { text, .. } if text.starts_with(&reasons[..12])))
+                .map(|shape| shape.rect.right())
+                .fold(rect.left() + drawn, f32::max);
+            for tag in tags {
+                assert!(tag.left() >= words_end + 12.0 - 0.5 && tag.right() <= link.rect().left() - 12.0 + 0.5, "{tag:?} {words_end}: {at}");
+            }
         }
     }
 }
@@ -99,4 +115,58 @@ fn hostile_reasons_stay_on_one_cut_line_and_are_heard_whole() {
     assert_eq!(drawn.len(), 1, "one run of the reasons");
     assert!(drawn.iter().all(|text| text.ends_with('…')), "cut with one ellipsis: {drawn:?}");
     assert!(words.right() <= rect.right(), "the reasons stay inside the line");
+}
+
+#[test]
+fn with_no_reason_yet_the_tag_stands_where_the_reasons_go() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let harness = harness(theme, "");
+        let rect = harness.get_by_label(&spoken("")).rect();
+        let tag = harness.get_by_label("coming soon").rect();
+        assert_eq!(tag.left() - rect.left(), 83.0, "{mode:?}: the tag in the reasons' place");
+        assert_eq!(harness.get_by_label("open log →").rect().right(), rect.right() - 12.0, "{mode:?}: the link where the sheet puts it");
+    }
+}
+
+#[test]
+fn in_a_narrow_line_the_link_gives_way_first_then_the_tag_and_nothing_overlaps() {
+    for scale in [TextScale::default(), TextScale::ALL[4]] {
+        let theme = Theme::new(Mode::Dark, scale);
+        for reasons in ["", STATES[3].1] {
+            for width in [640.0, 400.0, 300.0, 240.0, 160.0, 100.0, 1.0] {
+                let harness = staged(
+                    theme,
+                    |p| p.surface,
+                    vec2(width + 48.0, 100.0),
+                    move |ui, theme| {
+                        ui.set_width(width);
+                        why_line(ui, theme, &Keymap::default(), reasons);
+                    },
+                );
+                let at = format!("{scale:?} {width} {reasons:?}");
+                let rect = harness.get_by_label(&spoken(reasons)).rect();
+                let link = harness.query_by_label("open log →").map(|node| node.rect());
+                let tag = harness.query_by_label("coming soon").map(|node| node.rect());
+                // The link (unavailable) goes before the tag.
+                assert!(link.is_none() || tag.is_some() || !reasons.is_empty(), "the link stays only while the tag does: {at}");
+                for part in [link, tag].into_iter().flatten() {
+                    assert!(rect.contains_rect(part), "{part:?} inside {rect:?}: {at}");
+                }
+                if let (Some(link), Some(tag)) = (link, tag) {
+                    assert!(tag.right() <= link.left(), "{tag:?} {link:?}: {at}");
+                }
+                let paint = painted(&harness, &spoken(reasons));
+                for shape in &paint.shapes {
+                    if let Look::Text { text, .. } = &shape.look {
+                        assert!(shape.inside || shape.clipped, "{text:?} paints past the line: {at}");
+                        let ours = text.is_empty() || text.starts_with("coming") || text.starts_with("WHY") || text.starts_with("open");
+                        if let (Some(tag), false) = (tag, ours) {
+                            assert!(shape.rect.right() <= tag.left() + 0.5 || shape.rect.left() >= tag.right() - 0.5, "{text:?} under the tag: {at}");
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

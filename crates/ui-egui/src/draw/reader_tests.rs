@@ -1204,3 +1204,22 @@ fn delete_and_more_stay_in_a_narrow_reader_at_130_percent() {
         }
     }
 }
+
+#[test]
+fn the_why_line_is_coming_soon_and_says_no_reason_of_its_own() {
+    let fetch = Recorder::default();
+    let harness = opened(&fetch, None, "Photos from the coast walk");
+    // The engine will say why a message is here; until then the line is its row with the tag, and no reason.
+    let line = harness.get_by_label("Why here: coming soon").rect();
+    let tag = harness.query_all_by_label("coming soon").map(|node| node.rect()).find(|rect| line.contains_rect(*rect));
+    assert!(tag.is_some_and(|tag| tag.left() - line.left() == 83.0), "the tag in the reasons' place: {tag:?} {line:?}");
+    let said: Vec<String> = harness
+        .root()
+        .children_recursive()
+        .filter(|node| node.accesskit_node().bounding_box().is_some() && line.contains_rect(node.rect()))
+        .filter_map(|node| node.accesskit_node().label())
+        .collect();
+    for made_up in ["grouped as", "new sender", "held by the screener", "in INBOX"] {
+        assert!(said.iter().all(|label| !label.contains(made_up)), "{made_up}: {said:?}");
+    }
+}

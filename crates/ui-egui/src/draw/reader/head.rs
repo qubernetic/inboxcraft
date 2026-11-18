@@ -19,7 +19,7 @@ use crate::component::why_line::why_line;
 use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, After, GroupKind, Mailbox, MessageRow};
+use crate::mailbox::{Act, After, GroupKind, Mailbox};
 use crate::reader::{Content, Header, Opened, Person, Reader};
 use crate::theme::Theme;
 use crate::tr;
@@ -269,8 +269,10 @@ pub(super) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             paint::run_at(ui.painter(), rect.min, galley, p.muted);
         }
     }
-    if let Some(row) = open.and_then(|id| mailbox.messages().iter().find(|row| row.id == id)) {
-        why_line(ui, theme, keymap, &reasons(mailbox, row));
+    // Why the message is here is the engine's to say (`mail.why`, not built yet): the line stands with its tag and no
+    // reason the window makes up.
+    if open.is_some() {
+        why_line(ui, theme, keymap, "");
     }
     if let Some((kind, held)) = opened.and_then(|opened| holds(reader, opened)) {
         let bar = ContentBar { kind, view: View::Fitted, views: false, held: &held, waiting: false, links: &[] };
@@ -502,29 +504,6 @@ fn facts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
     if facts_of(ui, theme, keymap, &shown, open).clicked() {
         drawn.asked.push(Asked::Details(opened.id));
     }
-}
-
-/// Why `row` is here, in words from what the app knows of it: a new sender, its group, held by the screener, its folder.
-fn reasons(mailbox: &Mailbox, row: &MessageRow) -> String {
-    let mut parts = Vec::new();
-    if row.new_sender {
-        parts.push(tr!("new sender").to_owned());
-    }
-    if mailbox.held(row.id) {
-        parts.push(tr!("held by the screener").to_owned());
-    } else if let Some(group) = mailbox
-        .groups()
-        .into_iter()
-        .find(|group| group.messages.contains(&row.id))
-        .map(|group| group.name)
-        .or_else(|| row.group.map(|kind| kind.text().to_owned()))
-    {
-        parts.push(tr!("grouped as {group}", group = group));
-    }
-    if let Some(folder) = mailbox.folders_of(row.account).into_iter().find(|folder| folder.id == row.folder) {
-        parts.push(tr!("in {folder}", folder = folder.name));
-    }
-    parts.join("  ·  ")
 }
 
 /// What kind of message `opened` is and what was held back of it, for the content bar; nothing while its text is not
