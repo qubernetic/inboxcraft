@@ -205,6 +205,23 @@ fn the_design_curve_runs_from_0_to_1_as_cubic_bezier_2_7_2_1() {
 }
 
 #[test]
+fn css_ease_runs_from_0_to_1_as_cubic_bezier_25_1_25_1() {
+    use super::css_ease;
+    assert_eq!((css_ease(0.0), css_ease(1.0)), (0.0, 1.0));
+    // Measured apart from the code: x(t) inverted by halving 80 times in double precision.
+    for (share, wanted) in [(0.1, 0.094_796), (0.25, 0.408_511), (0.5, 0.802_403), (0.75, 0.960_459), (0.9, 0.994_316)] {
+        assert!((css_ease(share) - wanted).abs() < 1e-4, "{share}: {} for {wanted}", css_ease(share));
+    }
+    let mut last = 0.0;
+    for step in 0..=100 {
+        let at = css_ease(step as f32 / 100.0);
+        assert!(at >= last && (0.0..=1.0).contains(&at), "{step}: {at}");
+        last = at;
+    }
+    assert_eq!((css_ease(-1.0), css_ease(2.0), css_ease(f32::NAN), css_ease(f32::NEG_INFINITY)), (0.0, 1.0, 0.0, 0.0));
+}
+
+#[test]
 fn the_elapsed_share_runs_evenly_and_lands() {
     use super::elapsed;
     let ctx = Context::default();

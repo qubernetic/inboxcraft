@@ -649,8 +649,8 @@ pub(super) enum Line<'a> {
 }
 
 /// How far the row that left the list has gone, each from 0 to 1: how much of its height has closed, and how far it
-/// has faded. Done, Delete, Archive, Move and Park close the row over `row_collapse` on the design's curve, fading as
-/// it closes (the design's M5 at the reduced level, the presentation's `.row.gone`); Snooze fades it over `fast` in its
+/// has faded. Done, Delete, Archive, Move and Park close the row over `row_collapse` on the design's curve, fading on
+/// CSS's `ease` as it closes (the design's M5 at the reduced level, the presentation's `.row.gone`); Snooze fades it over `fast` in its
 /// place, and then it is gone (M6 at the reduced level).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Gone {
@@ -1317,7 +1317,8 @@ fn leaving(ctx: &egui::Context, theme: &Theme, left: &Leaving) -> Gone {
         Gone { closed: if faded >= 1.0 { 1.0 } else { 0.0 }, faded }
     } else {
         let share = motion::elapsed(ctx, id, theme.motion.row_collapse);
-        Gone { closed: motion::ease(share), faded: share }
+        // The presentation's `.row`: height on the design's curve, opacity on CSS's default `ease`.
+        Gone { closed: motion::ease(share), faded: motion::css_ease(share) }
     }
 }
 

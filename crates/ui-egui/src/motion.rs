@@ -137,6 +137,18 @@ pub fn elapsed(ctx: &Context, id: Id, seconds: f32) -> f32 {
 /// number of times (its x rises from 0 to 1), so it always ends.
 #[must_use]
 pub fn ease(share: f32) -> f32 {
+    cubic_bezier([0.2, 0.7, 0.2, 1.0], share)
+}
+
+/// CSS's `ease`, `cubic-bezier(.25, .1, .25, 1)`, the curve of a transition that names none: the presentation fades a
+/// leaving row's opacity on it beside its height on [`ease`]. Ends and nonsense as [`ease`].
+#[must_use]
+pub fn css_ease(share: f32) -> f32 {
+    cubic_bezier([0.25, 0.1, 0.25, 1.0], share)
+}
+
+/// The curve `cubic-bezier(x1, y1, x2, y2)` (x1 and x2 within 0 to 1) at `share` of its time.
+fn cubic_bezier([x1, y1, x2, y2]: [f64; 4], share: f32) -> f32 {
     let share = if share.is_nan() { 0.0 } else { f64::from(share.clamp(0.0, 1.0)) };
     // The ends exactly: a movement starts where it was and lands where it goes.
     if share <= 0.0 {
@@ -149,14 +161,14 @@ pub fn ease(share: f32) -> f32 {
     let (mut low, mut high) = (0.0_f64, 1.0_f64);
     for _ in 0..48 {
         let middle = (low + high) / 2.0;
-        if bezier(0.2, 0.2, middle) < share {
+        if bezier(x1, x2, middle) < share {
             low = middle;
         } else {
             high = middle;
         }
     }
     // A share of 0 to 1: the cast loses nothing that shows.
-    (bezier(0.7, 1.0, (low + high) / 2.0) as f32).clamp(0.0, 1.0)
+    (bezier(y1, y2, (low + high) / 2.0) as f32).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
