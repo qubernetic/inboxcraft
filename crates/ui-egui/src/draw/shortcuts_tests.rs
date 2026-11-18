@@ -302,3 +302,44 @@ fn a_waiting_key_chip_has_a_1_px_edge_and_the_focus_ring_stands_2_px_clear_of_it
         assert!(whole, "{theme:?} the ring has room: {strokes:?}");
     }
 }
+
+/// The page under the key scopes: it says a key runs one action per screen, lists Fold and the calendar's keys, takes
+/// a key only from an action whose scope meets the one given it, and names that action.
+#[test]
+fn the_page_lists_fold_and_the_calendar_s_keys_and_moves_a_key_only_where_scopes_meet() {
+    let mut harness = on_shortcuts(egui::Theme::Dark);
+    harness.get_by_label("Every action can have a key. One key runs one action per screen: giving a key takes it from its holder there.");
+    harness.get_by_label("Fold or open the floating draft has no key");
+    for name in ["left", "right"] {
+        let row = format!("Key of Calendar: pick to the {name}");
+        assert!(
+            harness.query_all_by_role(Role::Button).any(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with(&row))),
+            "{row}"
+        );
+    }
+    // Fold given the calendar's Enter: the window's and the calendar's scopes meet, so Open loses it, and the page says so.
+    let enter = KeyboardShortcut::new(Modifiers::NONE, Key::Enter);
+    press_chip(&mut harness, "Fold or open the floating draft has no key");
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().keymap().shortcut(keymap::FOLD), Some(enter));
+    assert_eq!(harness.state().keymap().shortcut(keymap::CALENDAR_OPEN), None, "one key runs one action where scopes meet");
+    assert!(harness.state().settings().keys_note().is_some_and(|note| note.contains("Calendar: open what is picked")));
+    // A key held only by the mail list's action stays the list's when a calendar key takes it: the two screens never
+    // show together, so nothing is taken and nothing is said.
+    let j = KeyboardShortcut::new(Modifiers::NONE, Key::J);
+    harness.state_mut().keymap_mut().bind("ui.list.down", j);
+    press_chip(&mut harness, "Key of Calendar: pick to the left");
+    harness.key_press(Key::J);
+    harness.run();
+    assert_eq!(harness.state().keymap().shortcut(keymap::CALENDAR_LEFT), Some(j));
+    assert_eq!(harness.state().keymap().shortcut("ui.list.down"), Some(j), "the list keeps its key");
+    assert_eq!(harness.state().settings().keys_note(), None);
+    // Within the calendar's scope one key still runs one action: Right given J takes it from Left.
+    press_chip(&mut harness, "Key of Calendar: pick to the right");
+    harness.key_press(Key::J);
+    harness.run();
+    assert_eq!(harness.state().keymap().shortcut(keymap::CALENDAR_LEFT), None);
+    assert_eq!(harness.state().keymap().shortcut("ui.list.down"), Some(j));
+    assert!(harness.state().settings().keys_note().is_some_and(|note| note.contains("Calendar: pick to the left")));
+}
