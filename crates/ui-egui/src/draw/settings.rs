@@ -491,9 +491,34 @@ fn section_row(ui: &mut Ui, theme: &Theme, section: Section, shown: bool) -> Res
     response
 }
 
-/// The list of sections: its head ("Settings", how many sections are built, and the sheet's Close at its right end), a
-/// `line` hairline, then a row per section, the one shown selected. The section pressed, or Close.
-fn nav(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: Section) -> Option<Asked> {
+/// The room between the section count and the sheet's Close in the sections' head, in points.
+const CLOSE_GAP: f32 = 8.0;
+
+/// "<n> sections": the design counts its nine; the two planned ones, AI and Plugins, come after them uncounted.
+fn section_count() -> String {
+    let nine = Section::ALL.iter().filter(|section| !matches!(section, Section::Ai | Section::Plugins)).count();
+    tr!("{count} sections", count = nine)
+}
+
+/// Whether the sheet's Close fits in the sections' head, `width` wide, beside "Settings" and the whole count. It does
+/// not at large text: the design's head has no Close, so Close gives way and the count stands whole.
+fn close_in_head(ui: &Ui, theme: &Theme, width: f32) -> bool {
+    let f = &theme.fonts;
+    let p = &theme.palette;
+    let title = crate::component::galley(ui, tr!("Settings"), f.heading, p.ink).size().x;
+    let count = crate::component::galley(ui, &section_count(), f.mono_s, p.muted).size().x;
+    INSET + title + 10.0 + count + CLOSE_GAP + crate::component::control_side(theme) + INSET <= width
+}
+
+/// The sheet's Close, which the design does not have (settings are a place of the window there).
+fn close_button(ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> bool {
+    IconButton::new(IconId::Close, tr!("Close")).show(ui, theme, keymap).clicked()
+}
+
+/// The list of sections: its head ("Settings", how many sections are built, and the sheet's Close at its right end
+/// when `close` and it fits), a `line` hairline, then a row per section, the one shown selected. The section pressed,
+/// or Close.
+fn nav(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: Section, close: bool) -> Option<Asked> {
     let p = &theme.palette;
     let f = &theme.fonts;
     let width = ui.available_width();
@@ -505,22 +530,22 @@ fn nav(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: Section) -> Option<As
         ui.add_space(INSET);
         crate::component::label(ui, f.heading, tr!("Settings"), p.ink);
         ui.add_space(10.0);
-        // The design counts its nine sections; the two planned ones, AI and Plugins, come after them uncounted.
-        let nine = Section::ALL.iter().filter(|section| !matches!(section, Section::Ai | Section::Plugins)).count();
-        let count = tr!("{count} sections", count = nine);
-        // Cut where large text leaves it no room beside Close.
-        let room = ui.available_width() - INSET - crate::component::control_side(theme) - 8.0;
+        let count = section_count();
+        // Cut only where even without Close there is no room (a window too narrow for the sheet).
+        let beside = if close { crate::component::control_side(theme) + CLOSE_GAP } else { 0.0 };
+        let room = ui.available_width() - INSET - beside;
         let words = crate::component::cut(ui, &count, f.mono_s, p.muted, room);
         let (at, said) = ui.allocate_exact_size(words.size(), Sense::hover());
         said.widget_info(|| WidgetInfo::labeled(Role::Label, true, &count));
         ui.painter().galley(at.min, words, p.muted);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.add_space(INSET);
-            // The sheet's Close, which the design does not have (settings are a place of the window there).
-            if IconButton::new(IconId::Close, tr!("Close")).show(ui, theme, keymap).clicked() {
-                asked = Some(Asked::Close);
-            }
-        });
+        if close {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(INSET);
+                if close_button(ui, theme, keymap) {
+                    asked = Some(Asked::Close);
+                }
+            });
+        }
     });
     rule_in(ui, p.line);
     ui.add_space(NAV_GAP);
@@ -1003,8 +1028,20 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
         paint::hairline(ui.painter(), pos2(divider, left.top()), pos2(divider, left.bottom() - 1.0), p.line);
         let shown = view.settings.section();
         let keymap = view.keymap;
+        // Where Close does not fit in the sections' head, it stands in the sheet's top right corner, over the page's
+        // top room.
+        // The corner's room is made either way, so the ids of what comes after it (the keyboard's focus among them)
+        // do not change when Close moves.
+        let in_head = close_in_head(ui, theme, nav_width);
+        let side = crate::component::control_side(theme);
+        let gap = theme.spacing.s2;
+        let at = Rect::from_min_size(pos2(inner.right() - gap - side, inner.top() + gap), vec2(side, side));
+        let corner = UiBuilder::new().max_rect(at).layout(Layout::left_to_right(Align::Min));
+        if ui.scope_builder(corner, |ui| !in_head && close_button(ui, theme, keymap)).inner {
+            asked = Some(Asked::Close);
+        }
         let pressed =
-            ui.scope_builder(UiBuilder::new().max_rect(left).layout(Layout::top_down(Align::Min)), |ui| nav(ui, theme, keymap, shown)).inner;
+            ui.scope_builder(UiBuilder::new().max_rect(left).layout(Layout::top_down(Align::Min)), |ui| nav(ui, theme, keymap, shown, in_head)).inner;
         if pressed.is_some() {
             asked = pressed;
         }

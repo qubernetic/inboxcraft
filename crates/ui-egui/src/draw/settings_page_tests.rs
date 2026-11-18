@@ -422,3 +422,60 @@ fn motion_s_full_carries_the_coming_soon_mark() {
     let mark = mark.unwrap_or_else(|| panic!("no coming-soon mark beside Full {full:?}: {marks:?}"));
     assert!(mark.right() <= full.left() && full.left() - mark.right() <= 12.0, "the mark {mark:?} stands just before Full {full:?}");
 }
+
+/// Every text painted on the sheet in the last frame, as it shows, with where it stands.
+fn painted_texts(harness: &Harness<'static, InboxApp>) -> Vec<(String, egui::Rect)> {
+    fn open(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, out)),
+            // The sheet's scrim over the whole window covers every text drawn before it.
+            egui::Shape::Rect(rect) if rect.rect.min == egui::Pos2::ZERO && rect.rect.width() > 500.0 && (1..255).contains(&rect.fill.a()) => {
+                out.clear();
+            }
+            // The letters shown, not the text laid out: a cut text shows fewer, and an ellipsis.
+            egui::Shape::Text(text) if !text.galley.is_empty() => {
+                let shown = text.galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+                out.push((shown, shape.visual_bounding_rect()));
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, &mut out));
+    out
+}
+
+#[test]
+fn at_every_text_size_the_section_count_stands_whole_and_close_gives_way() {
+    for percent in [90, 100, 110, 120, 130] {
+        for section in [Section::Appearance, Section::Accounts, Section::Shortcuts] {
+            let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+            let mut harness = Harness::builder()
+                .with_size(vec2(1200.0, 820.0))
+                .with_context_setup(crate::theme::install_fonts)
+                .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+            harness.state_mut().set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+            harness.state_mut().settings_mut().open_at(section);
+            harness.run();
+            let texts = painted_texts(&harness);
+            assert!(texts.iter().any(|(text, _)| text == "9 sections"), "{percent} %, {section:?}: the count is cut");
+            let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+            let close = harness.get_by_role_and_label(Role::Button, "Close").rect();
+            assert!(sheet.contains_rect(close), "{percent} %, {section:?}: Close {close:?} on the sheet {sheet:?}");
+            let under: Vec<&String> = texts
+                .iter()
+                .filter(|(_, rect)| rect.intersects(close) && sheet.contains_rect(*rect) && !close.contains(rect.center()))
+                .map(|(text, _)| text)
+                .collect();
+            assert!(under.is_empty(), "{percent} %, {section:?}: Close {close:?} lies over {under:?}");
+            // The controls on the sheet: those after it in the tree (the window's own lie under the dim).
+            let nodes: Vec<_> = harness.root().children_recursive().collect();
+            let first = nodes.iter().position(|node| node.accesskit_node().role() == Role::Dialog).unwrap();
+            for other in nodes.iter().skip(first + 1).filter(|node| node.accesskit_node().label().is_none_or(|label| label != "Close")) {
+                let data = other.accesskit_node();
+                let pressable = data.data().supports_action(egui::accesskit::Action::Click) && data.role() != Role::Label;
+                assert!(!pressable || !other.rect().intersects(close), "{percent} %, {section:?}: Close lies over {:?}", data.label());
+            }
+        }
+    }
+}
