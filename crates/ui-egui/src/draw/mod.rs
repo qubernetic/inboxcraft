@@ -253,9 +253,10 @@ fn list_widest(ui: &Ui, theme: &Theme, docked: bool) -> f32 {
 }
 
 /// Keeps the width the owner gave the resizable pane `id` apart from what `widest` squeezes it to (egui keeps the
-/// squeezed width as the pane's own, also between runs): while the cap bites, the owner's width is kept; once it lets
-/// go (the composer closed or floating, the window wider), the pane is given back the owner's width, as far as the cap
-/// allows. A width the owner drags to while the cap does not bite is the owner's. Both are kept with the pane's own.
+/// squeezed width as the pane's own, also between runs): while the cap bites, the owner's width is kept; once it
+/// lets go (the composer closed or floating, the window wider), the pane is given back the owner's width, as far as the
+/// cap allows. A width the owner drags to while the cap does not bite is the owner's, and so is a narrower one while
+/// it is squeezed: the width changed under a cap that did not move. Both are kept with the pane's own.
 fn keep_owners_width(ctx: &egui::Context, id: egui::Id, widest: f32) {
     let Some(mut state) = egui::containers::panel::PanelState::load(ctx, id) else { return };
     let width = state.outer_rect.width();
@@ -264,9 +265,16 @@ fn keep_owners_width(ctx: &egui::Context, id: egui::Id, widest: f32) {
     }
     let key = id.with("owners-width");
     let (owner, squeezed) = ctx.data_mut(|data| data.get_persisted::<(f32, bool)>(key)).unwrap_or((width, false));
+    // Last frame's cap: the same cap and a narrower pane is the owner's drag, not the cap letting go.
+    let cap = key.with("cap");
+    let last = ctx.data_mut(|data| data.get_temp::<f32>(cap));
+    ctx.data_mut(|data| data.insert_temp(cap, widest));
+    let same_cap = last.is_some_and(|last| last == widest || (last - widest).abs() < 0.5);
     let biting = width >= widest - 0.5;
     let kept = if biting {
         (owner, true)
+    } else if squeezed && same_cap {
+        (width, false)
     } else if squeezed {
         let to = owner.min(widest);
         if to.is_finite() && to > width + 0.5 {

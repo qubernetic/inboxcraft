@@ -371,7 +371,7 @@ fn drag_folders(harness: &mut Harness<'static, InboxApp>, by: f32) {
 
 #[test]
 fn the_folder_pane_the_owner_widened_comes_back_to_the_pixel_when_the_composer_closes() {
-    for (width, by) in [(720.0, 120.0), (1000.0, 300.0)] {
+    for (width, by) in [(1000.0, 300.0), (720.0, 120.0)] {
         let mut harness = window(width, 100);
         let before = harness.get_by_label("Accounts").rect().right();
         drag_folders(&mut harness, by);
@@ -385,5 +385,39 @@ fn the_folder_pane_the_owner_widened_comes_back_to_the_pixel_when_the_composer_c
         harness.run();
         harness.run();
         assert_eq!(harness.get_by_label("Accounts").rect().right(), widened, "{width}: the owner's width back, to the pixel");
+    }
+}
+
+#[test]
+fn the_folder_pane_the_cap_squeezes_can_still_be_narrowed_and_keeps_that_width() {
+    // At 720 the squeezed pane stands 42 above the least its folders take (egui gives a pane its content's width back
+    // on release), so the drag there is 30; at 1000 it is 80.
+    for (width, by, back) in [(720.0, 120.0, 3), (1000.0, 300.0, 8)] {
+        let mut harness = window(width, 100);
+        drag_folders(&mut harness, by);
+        harness.get_by_role_and_label(Role::Button, "New message").click();
+        harness.run();
+        let squeezed = harness.get_by_label("Accounts").rect().right();
+        // To the left, the button still held: where the pane stands then is where it is dropped.
+        let mut at = egui::pos2(squeezed + 11.0, 400.0);
+        harness.event(egui::Event::PointerMoved(at));
+        harness.step();
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        harness.step();
+        for _ in 0..back {
+            at.x -= 10.0;
+            harness.event(egui::Event::PointerMoved(at));
+            harness.step();
+        }
+        let held = harness.get_by_label("Accounts").rect().right();
+        assert!(held < squeezed - 20.0 && held > squeezed - 90.0, "{width}: the drag narrows the pane: {squeezed} then {held}");
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        harness.run();
+        harness.run();
+        assert_eq!(harness.get_by_label("Accounts").rect().right(), held, "{width}: the pane stays where it was dropped");
+        harness.get_by_label("Close; the draft is kept").click();
+        harness.run();
+        harness.run();
+        assert_eq!(harness.get_by_label("Accounts").rect().right(), held, "{width}: after Close, the width the owner dropped it at");
     }
 }
