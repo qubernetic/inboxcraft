@@ -6,9 +6,11 @@
 //! `ink`; the focus ring stands inside it. Open, the caret turns `▾` and the line says `hide quoted text`; under it the
 //! attribution in `caption` and the quoted text in `body`, both `muted`, 8 above its foot, the edge running down the
 //! whole height. The line is one stop for Tab and opens or folds the quote on Enter or a click. The quoted text is data:
-//! plain words, wrapped. Nothing moves: the quote opens and folds at once (the design gives the fold no timing).
+//! plain words, wrapped, its own line breaks kept. Nothing moves: the quote opens and folds at once (the design gives the fold no timing).
 
-use egui::{Rect, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
+use std::sync::Arc;
+
+use egui::{Galley, Rect, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint::{self, Ring};
 use crate::theme::Theme;
@@ -64,9 +66,9 @@ pub(crate) fn quote_fold_with(
     let width = ui.available_width().max(PAD + PAD_RIGHT + 1.0).floor();
     let [.., high] = theme.boxes().reader;
     let room = width - PAD - PAD_RIGHT;
-    let said =
-        attribution.filter(|_| open).map(|said| super::wrapped(ui, &super::plain(said), f.caption, p.muted, room, usize::MAX, egui::Align::LEFT));
-    let quoted = open.then(|| super::wrapped(ui, &super::plain(text), f.body, p.muted, room, usize::MAX, egui::Align::LEFT));
+    let slot = ui.next_auto_id();
+    let said = attribution.filter(|_| open).map(|said| kept_lines(ui, slot.with("said"), said, f.caption, p.muted, room));
+    let quoted = open.then(|| kept_lines(ui, slot.with("quoted"), text, f.body, p.muted, room));
     let below = said.as_ref().map_or(0.0, |said| said.size().y) + quoted.as_ref().map_or(0.0, |quoted| quoted.size().y);
     let total = if open { (high + below + FOOT).ceil() } else { high };
     let (id, whole) = ui.allocate_space(vec2(width, total));
@@ -111,6 +113,26 @@ pub(crate) fn quote_fold_with(
         top += galley.size().y;
     }
     response
+}
+
+/// `text` of many lines from outside, its line breaks kept ([`super::plain_lines`]), wrapped at `room`. The galley is
+/// kept under `slot` with what it was laid out from, so an open quote is not copied and laid out again every frame:
+/// only its words are hashed to see that they are the same.
+fn kept_lines(ui: &Ui, slot: egui::Id, text: &str, font: crate::theme::Font, colour: egui::Color32, room: f32) -> Arc<Galley> {
+    let key = {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (text, room.to_bits(), font.size.to_bits(), colour).hash(&mut hasher);
+        hasher.finish()
+    };
+    if let Some((kept, galley)) = ui.data(|data| data.get_temp::<(u64, Arc<Galley>)>(slot))
+        && kept == key
+    {
+        return galley;
+    }
+    let galley = super::wrapped(ui, &super::plain_lines(text), font, colour, room, usize::MAX, egui::Align::LEFT);
+    ui.data_mut(|data| data.insert_temp(slot, (key, galley.clone())));
+    galley
 }
 
 #[cfg(test)]

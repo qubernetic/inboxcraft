@@ -124,3 +124,41 @@ fn an_open_quote_s_words_reach_a_screen_reader_whole() {
     );
     assert!(folded.query_by_label(QUOTED).is_none(), "a folded quote says only how long it is");
 }
+
+#[test]
+fn an_open_quote_keeps_its_line_breaks() {
+    // A signature: three lines, each short enough to fit the line alone.
+    const LINES: &str = "Odile Brannock\n12 Example Street\nexample.org";
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(608.0, 200.0),
+        |ui, theme| {
+            ui.set_width(560.0);
+            quote_fold(ui, theme, 3, true, None, LINES);
+        },
+    );
+    let head = harness.get_by_label(&spoken(3, true)).rect();
+    let paint = painted_in(&harness, &spoken(3, true), egui::Rect::from_min_size(head.min, vec2(560.0, 150.0)));
+    let rows: Vec<(String, f32)> = paint
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.look {
+            Look::Text { text, .. } if !text.contains("quoted") => Some((text.clone(), shape.rect.top())),
+            _ => None,
+        })
+        .collect();
+    let words: Vec<&str> = rows.iter().map(|(text, _)| text.as_str()).collect();
+    assert_eq!(words, ["Odile Brannock", "12 Example Street", "example.org"], "{rows:?}");
+    assert!(rows.windows(2).all(|pair| pair[0].1 < pair[1].1), "one under the other: {rows:?}");
+}
+
+#[test]
+fn a_quote_s_lines_are_cleaned_but_kept() {
+    use std::borrow::Cow;
+    // A quote with only its line breaks is not copied.
+    assert!(matches!(super::super::plain_lines("one\ntwo"), Cow::Borrowed("one\ntwo")));
+    // Other controls become spaces and overrides go; the breaks stay.
+    assert_eq!(super::super::plain_lines("a\u{202E}b\tc\r\nd\0e"), "ab c \nd e");
+}

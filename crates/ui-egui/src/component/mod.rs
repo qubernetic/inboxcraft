@@ -225,6 +225,17 @@ pub(crate) fn plain(text: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
+/// [`plain`] for text of many lines (a quote, a signature): its line breaks stay, every other control character is put
+/// as a space and every bidi override is left out. Text that holds nothing else is borrowed, not copied.
+pub(crate) fn plain_lines(text: &str) -> std::borrow::Cow<'_, str> {
+    let other = |c: char| (c.is_control() && c != '\n') || bidi_override(c);
+    if text.chars().any(other) {
+        std::borrow::Cow::Owned(text.chars().filter(|c| !bidi_override(*c)).map(|c| if c.is_control() && c != '\n' { ' ' } else { c }).collect())
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
 /// `text` cut after at most `most` characters, between grapheme clusters (a letter with its marks, an emoji sequence
 /// is never split), and whether it was: a bound on what one line lays out, so a mail's 10 000 combining marks (which
 /// take no width and so are never cut by the line) cost no more than a line. One cluster longer than `most` is left out
