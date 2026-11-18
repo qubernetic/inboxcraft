@@ -758,7 +758,7 @@ fn every_line_of_text_stands_on_the_whole_pixel_nearest_the_designs_baseline() {
 
 #[test]
 fn a_lone_pane_s_edges_meet_at_every_corner_on_odd_points_too() {
-    for ppp in [1.0_f32, 1.5, 2.0] {
+    for ppp in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
         for card in [egui::Rect::from_min_max(pos2(40.0, 30.0), pos2(360.0, 270.0)), egui::Rect::from_min_max(pos2(41.0, 31.0), pos2(361.0, 271.0))] {
             let ctx = egui::Context::default();
             let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0))), ..Default::default() };
@@ -774,8 +774,12 @@ fn a_lone_pane_s_edges_meet_at_every_corner_on_odd_points_too() {
             let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
             // Each edge is a band of four corners, in physical pixels.
             let mut bands = Vec::new();
+            let mut fill = egui::Rect::NOTHING;
             for clipped in tessellator.tessellate_shapes(output.shapes) {
                 let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
+                for vertex in mesh.vertices.iter().filter(|vertex| vertex.color == theme.palette.surface) {
+                    fill.extend_with(pos2(vertex.pos.x * ppp, vertex.pos.y * ppp));
+                }
                 let lines: Vec<egui::Pos2> =
                     mesh.vertices.iter().filter(|vertex| vertex.color == theme.palette.line).map(|vertex| vertex.pos).collect();
                 bands.extend(
@@ -784,6 +788,12 @@ fn a_lone_pane_s_edges_meet_at_every_corner_on_odd_points_too() {
             }
             assert_eq!(bands.len(), 4, "{ppp} {card:?}");
             let outline = bands.iter().fold(egui::Rect::NOTHING, |all, band| all.union(*band));
+            // The fill stands on whole pixels, and the edges are its outermost pixels: no column or row of fill outside
+            // an edge, no edge running past the fill or past another edge.
+            let whole = |at: f32| (at - at.round()).abs() < 0.01;
+            assert!([fill.left(), fill.top(), fill.right(), fill.bottom()].into_iter().all(whole), "{ppp} {card:?}: fill {fill:?}");
+            let near = |a: egui::Rect, b: egui::Rect| (a.min - b.min).length() < 0.01 && (a.max - b.max).length() < 0.01;
+            assert!(near(outline, fill), "{ppp} {card:?}: edges {outline:?} against the fill {fill:?}");
             let covered = |x: f32, y: f32| bands.iter().any(|band| band.contains(pos2(x + 0.5, y + 0.5)));
             let (left, top, right, bottom) =
                 (outline.left().round(), outline.top().round(), outline.right().round() - 1.0, outline.bottom().round() - 1.0);
