@@ -1125,3 +1125,81 @@ fn an_account_s_form_that_cannot_open_leaves_the_add_form_as_it_was() {
     onboarding.open();
     assert_eq!(onboarding.form().address, "carol@example.org");
 }
+
+/// Accounts 1 (carol) and 2 (dave) added over `kept`, onboarding closed.
+fn two_added(kept: &Kept) -> (Mailbox, Onboarding) {
+    let (mut mailbox, mut onboarding) = added(kept);
+    onboarding.open();
+    filled(onboarding.form_mut());
+    onboarding.form_mut().address = "dave@example.org".to_owned();
+    onboarding.add(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Checking(2), "{:?}", onboarding.error());
+    onboarding.close();
+    (mailbox, onboarding)
+}
+
+#[test]
+fn an_account_s_form_keeps_what_was_typed_on_every_way_out_and_back_but_cancel() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = two_added(&kept);
+    let typed = |onboarding: &mut Onboarding| {
+        onboarding.form_mut().host = "imap.typed.example.org".to_owned();
+        onboarding.form_mut().label = "Allotment".to_owned();
+        onboarding.form_mut().password = Secret::new(PASSWORD);
+    };
+    let as_typed = |onboarding: &Onboarding| {
+        let form = onboarding.form();
+        assert_eq!((form.host.as_str(), form.label.as_str()), ("imap.typed.example.org", "Allotment"));
+        assert!(form.password.is_empty(), "the password is dropped on the way out");
+        assert!(onboarding.save_checks(), "the changed server is still a change");
+    };
+    // Add account in between.
+    onboarding.edit(&mut mailbox, 1);
+    typed(&mut onboarding);
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "", "the add form");
+    onboarding.edit(&mut mailbox, 1);
+    as_typed(&onboarding);
+    // Another account's form in between.
+    typed(&mut onboarding);
+    onboarding.edit(&mut mailbox, 2);
+    assert_eq!((onboarding.form().address.as_str(), onboarding.form().host.as_str()), ("dave@example.org", "imap.example.org"));
+    onboarding.edit(&mut mailbox, 1);
+    as_typed(&onboarding);
+    // Esc, Back, another page.
+    typed(&mut onboarding);
+    onboarding.close();
+    onboarding.edit(&mut mailbox, 1);
+    as_typed(&onboarding);
+    // The store is as it was all along.
+    assert_eq!(listed(&mut mailbox)["imap"]["host"], json!("imap.example.org"));
+    // Cancel drops it, and only it.
+    onboarding.open();
+    onboarding.form_mut().address = "erin@example.org".to_owned();
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.cancel();
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.form().host, "imap.example.org");
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "erin@example.org", "the add form is still kept");
+}
+
+#[test]
+fn a_saved_account_s_form_opens_as_the_account_now_stands() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().label = "Allotment".to_owned();
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Closed);
+    assert!(onboarding.kept_edits.is_empty(), "a saved form is not kept as typed: the account holds it now");
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.form().label, "Allotment");
+    assert!(!onboarding.save_checks());
+    onboarding.form_mut().label = "Shed".to_owned();
+    onboarding.form_mut().display_name.clear();
+    onboarding.save(&mut mailbox);
+    assert_eq!(listed(&mut mailbox)["label"], json!("Shed"));
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.form().label, "Shed");
+}

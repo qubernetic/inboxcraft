@@ -49,7 +49,7 @@ pub(super) enum Asked {
     CheckAgain,
     Change,
     Close,
-    /// Cancel: closes, and the add form forgets what it held.
+    /// Cancel: closes, and the form forgets what it held.
     Cancel,
 }
 
@@ -532,7 +532,7 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
                 asked = Some(Asked::Save);
             }
             if TextButton::new(tr!("Cancel")).plain().show(ui, theme, keymap).clicked() {
-                asked = Some(Asked::Close);
+                asked = Some(Asked::Cancel);
             }
         });
     });

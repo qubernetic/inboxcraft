@@ -21,9 +21,9 @@
 //! stores one, for the worker's next sign-in. The old password is never read: the [`Keychain`] has no way to. A changed server
 //! or user name, or a new password, runs the owner's check, and the form says first where the sign-in goes.
 //!
-//! What the owner typed in the add form is kept on every way out and back but Cancel: Back, Esc, another page or the
-//! window's welcome keep it ([`Onboarding::close`]), and the form opens with it again; only the password is dropped
-//! on the way out. Detect's answer belongs to the add form and the address that asked: one that comes after the page
+//! What the owner typed in the add form, or changed in an account's form and did not save, is kept on every way out
+//! and back but Cancel: Back, Esc, another page, the window's welcome, or the other form keep it
+//! ([`Onboarding::close`]), and the form opens with it again; only the password is dropped on the way out. Detect's answer belongs to the add form and the address that asked: one that comes after the page
 //! was left, or for an address no longer in the form, is thrown away. Detect fills a server row and the user name
 //! where the owner typed nothing, or kept what Detect put there before; a host the owner typed keeps the row theirs,
 //! and the note says Detect's server was left out. A Detect that finds nothing takes out what an earlier one put there.
@@ -33,7 +33,7 @@
 //! The password lives in a [`Secret`]: no `Display`, a `Debug` that hides it, and its bytes overwritten when it is
 //! cleared or dropped. It never goes into a command's parameters, an answer, an error or the store.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -758,6 +758,9 @@ pub struct Onboarding {
     detected: Detected,
     /// The add form as the owner left it, while another form or none is open.
     kept: Option<Kept>,
+    /// Each account's form the owner changed and left unsaved, with the account as it stood when the form opened; its
+    /// password is never kept.
+    kept_edits: BTreeMap<u64, (Form, Held)>,
     steps: Vec<StepRow>,
     running: bool,
     error: Option<String>,
@@ -796,6 +799,7 @@ impl Onboarding {
             found: None,
             detected: Detected::default(),
             kept: None,
+            kept_edits: BTreeMap::new(),
             steps: Vec::new(),
             running: false,
             error: None,
@@ -813,6 +817,7 @@ impl Onboarding {
         if self.stage == Stage::Form {
             return;
         }
+        self.keep();
         let Kept { form, found, detected } = self.kept.take().unwrap_or_default();
         self.form = form;
         self.found = found;
@@ -833,15 +838,35 @@ impl Onboarding {
         self.stage = Stage::Closed;
     }
 
-    /// Closes onboarding as [`Self::close`] does, and drops what the add form held: the owner's Cancel.
+    /// Closes onboarding as [`Self::close`] does, and drops what the form open held: the owner's Cancel.
     pub fn cancel(&mut self) {
+        let stage = self.stage;
         self.close();
-        self.kept = None;
+        match stage {
+            Stage::Edit(id) => {
+                self.kept_edits.remove(&id);
+            }
+            Stage::Form | Stage::Closed => self.kept = None,
+            Stage::Checking(_) => {}
+        }
     }
 
-    /// Keeps the add form as the owner left it while another form or none is open, its password forgotten: only from
-    /// the add form itself.
+    /// Keeps the form open as the owner left it while another form or none is open, its password forgotten: the add
+    /// form, or an account's form the owner changed.
     fn keep(&mut self) {
+        if let Stage::Edit(id) = self.stage {
+            self.form.password.clear();
+            let changes = self.changes();
+            match self.held.take() {
+                Some(held) if changes.settings || changes.caldav => {
+                    self.kept_edits.insert(id, (std::mem::take(&mut self.form), held));
+                }
+                _ => {
+                    self.kept_edits.remove(&id);
+                }
+            }
+            return;
+        }
         if self.stage != Stage::Form {
             return;
         }
@@ -877,6 +902,16 @@ impl Onboarding {
         };
         let security =
             |server: Option<&Value>| server.and_then(|server| server.get("security")).and_then(Value::as_str).and_then(Security::from_param);
+        // A form of an account no longer there is not kept.
+        self.kept_edits.retain(|kept, _| accounts.iter().any(|account| account.get("id").and_then(Value::as_u64) == Some(*kept)));
+        if let Some((form, held)) = self.kept_edits.remove(&id) {
+            self.form = form;
+            self.held = Some(held);
+            self.found = None;
+            self.steps.clear();
+            self.stage = Stage::Edit(id);
+            return;
+        }
         let (imap, submission) = (account.get("imap"), account.get("submission").filter(|server| !server.is_null()));
         self.form = Form {
             address: text(account.get("address")),
@@ -1026,6 +1061,8 @@ impl Onboarding {
             self.stage = Stage::Checking(id);
             self.load(mailbox);
         } else if self.error.is_none() {
+            // Saved: nothing of the form is left to keep.
+            self.held = None;
             self.close();
         }
     }
