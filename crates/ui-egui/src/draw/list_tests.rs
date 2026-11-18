@@ -868,7 +868,13 @@ fn row_rect(harness: &Harness<'static, InboxApp>, id: u64) -> Option<egui::Rect>
 /// Whether the selected row is built and wholly inside the window's list.
 fn selected_in_sight(harness: &Harness<'static, InboxApp>) -> bool {
     let Some(id) = harness.state().mailbox().selected() else { return false };
-    row_rect(harness, id).is_some_and(|rect| rect.top() >= 0.0 && rect.bottom() <= 900.0)
+    in_sight(harness, id)
+}
+
+/// Whether message `id`'s row is built and wholly inside the list's viewport.
+fn in_sight(harness: &Harness<'static, InboxApp>, id: u64) -> bool {
+    let Some(view) = super::list::view_rect(&harness.ctx) else { return false };
+    row_rect(harness, id).is_some_and(|rect| view.expand(0.01).contains_rect(rect))
 }
 
 /// The place of the selected row in the list.
@@ -1055,4 +1061,72 @@ fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale
             }
         }
     }
+}
+
+/// A row given by its message id is keyed: the selection moved there by the keyboard, from the row before it.
+fn key(harness: &mut Harness<'static, InboxApp>, id: u64) {
+    harness.state_mut().mailbox_mut().select(Some(id - 1));
+    harness.run();
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), Some(id));
+    assert!(selected_in_sight(harness), "keyed {id}, in sight");
+}
+
+/// Puts message `n` of [`ten_thousand`]'s list, in `group`, at the top of the list.
+fn arrive(harness: &mut Harness<'static, InboxApp>, id: u64, group: crate::mailbox::GroupKind) {
+    let mut rows = harness.state().mailbox().messages().to_vec();
+    let mut new = rows[0].clone();
+    new.id = id;
+    new.subject = format!("Arrived {id}");
+    new.group = Some(group);
+    rows.insert(0, new);
+    harness.state_mut().mailbox_mut().set_rows(rows);
+    harness.run();
+}
+
+/// The first message in sight and its row's rectangle.
+fn first_place(harness: &Harness<'static, InboxApp>) -> (u64, egui::Rect) {
+    let first = super::list::first_in_sight(&harness.ctx).unwrap();
+    (first, row_rect(harness, first).unwrap())
+}
+
+#[test]
+fn a_keyed_row_scrolled_away_from_stays_away_when_mail_arrives_above() {
+    use crate::mailbox::GroupKind;
+    let mut harness = ten_thousand(InboxView::List);
+    key(&mut harness, 1_005_001);
+    wheel(&mut harness, 20_000.0);
+    let before = first_place(&harness);
+    assert!(!in_sight(&harness, 1_005_001), "wheeled away from the keyed row");
+    arrive(&mut harness, 7, GroupKind::Updates);
+    assert_eq!(first_place(&harness), before, "the first message in sight stays where it was");
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), Some(1_005_002));
+    assert!(selected_in_sight(&harness), "the newly keyed row comes into sight");
+}
+
+#[test]
+fn a_keyed_row_scrolled_away_from_stays_away_when_a_group_opens_or_folds_above() {
+    let mut harness = ten_thousand(InboxView::Cards);
+    harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("Invitations"), true));
+    harness.run();
+    // 5 003 is in Invitations, the last group, open.
+    key(&mut harness, 1_005_003);
+    wheel(&mut harness, 20_000.0);
+    let before = first_place(&harness);
+    assert!(!in_sight(&harness, 1_005_003), "wheeled away from the keyed row");
+    for open in [true, false] {
+        harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("People"), open));
+        harness.run();
+        assert_eq!(first_place(&harness), before, "the first message in sight stays where it was, People open: {open}");
+    }
+    // Down four times: 5 004 to 5 006 are in folded groups, 5 007 in Invitations.
+    for _ in 0..4 {
+        harness.key_press(Key::ArrowDown);
+        harness.run();
+    }
+    assert_eq!(harness.state().mailbox().selected(), Some(1_005_007));
+    assert!(selected_in_sight(&harness), "the newly keyed row comes into sight");
 }

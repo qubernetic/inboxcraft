@@ -995,8 +995,9 @@ struct Kept {
     anchor: Option<(u64, i64)>,
     /// The viewport's top then, in hundredths of a point.
     offset: i64,
-    /// The keyed row last brought into sight, and its line.
-    keyed: Option<(u64, usize)>,
+    /// The keyed row's message last frame: a row is brought into sight when the keyed message changes (a key or a
+    /// press moved it) or the list is first shown, never because lines above it came or went.
+    keyed: Option<u64>,
 }
 
 /// Hundredths of a point, which [`Kept`] compares exactly.
@@ -1030,8 +1031,9 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
             area = area.vertical_scroll_offset(points(wanted).max(0.0));
         }
     }
-    let keyed = mailbox.selected().filter(|_| mailbox.keyed()).and_then(|id| Some((id, listing.find(id)?)));
-    let scroll_to = keyed.filter(|keyed| kept.as_ref().is_none_or(|kept| kept.keyed != Some(*keyed)));
+    let keyed = mailbox.selected().filter(|_| mailbox.keyed());
+    let moved = keyed.filter(|keyed| kept.as_ref().is_none_or(|kept| kept.keyed != Some(*keyed)));
+    let scroll_to = moved.and_then(|id| listing.find(id));
     // egui springs an offset past last frame's end back to it (rubber-banding); the offset that keeps a message in
     // place after the lines above it grew lies past that end, so the list's area does not rubber-band.
     let kinetic = ui.spacing().scroll.kinetic;
@@ -1080,7 +1082,7 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
                 draw_line(ui, rows, line, rank, listing.rows);
             });
         }
-        if let Some((_, index)) = scroll_to
+        if let Some(index) = scroll_to
             && let Some((top, bottom)) = listing.span(index)
         {
             ui.scroll_to_rect(at(top, bottom, 0.0), None);
@@ -1102,6 +1104,7 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
     let (built, anchor, offset) = output.inner;
     let kept = Kept { place: mailbox.place(), view: mailbox.inbox_view(), query: mailbox.query().to_owned(), anchor, offset, keyed };
     ui.data_mut(|data| {
+        data.insert_temp(Id::unique("list-view-rect"), output.inner_rect);
         data.insert_temp(kept_id, kept);
         if let Some((id, _)) = anchor {
             data.insert_temp(Id::unique("list-first-in-sight"), id);
@@ -1196,6 +1199,12 @@ pub(super) fn page(ctx: &egui::Context) -> usize {
 /// Where [`page`] is kept.
 fn page_id() -> Id {
     Id::unique("list-page")
+}
+
+/// The list's viewport on the screen in the last frame that drew one.
+#[cfg(test)]
+pub(super) fn view_rect(ctx: &egui::Context) -> Option<Rect> {
+    ctx.data(|data| data.get_temp::<Rect>(Id::unique("list-view-rect")))
 }
 
 /// What the list built in the last frame that drew one.
