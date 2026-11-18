@@ -409,6 +409,8 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             Stage::Checking(account) => checking(ui, theme, keymap, mailbox, onboarding, account),
             Stage::Closed => None,
         };
+        // The form scrolls to the control Tab comes to, as a settings page does.
+        super::settings::follow_focus(ui);
     });
     asked
 }

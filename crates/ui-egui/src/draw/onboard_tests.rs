@@ -630,3 +630,26 @@ fn a_form_that_comes_back_in_place_of_the_one_asked_for_says_so() {
     assert_eq!(harness.state().onboarding().stage(), Stage::Form);
     harness.get_by_label(INSTEAD);
 }
+
+/// The form scrolls itself to the control `Tab` comes to, as a settings page does: in a window too low for it, every
+/// stop is in sight on the sheet, the last ones included.
+#[test]
+fn tab_through_the_form_in_a_low_window_keeps_each_stop_in_sight() {
+    let app = app(&Kept::default(), FakeWorkers::passing());
+    let mut harness = Harness::builder().with_size(vec2(1100.0, 600.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    open_form(&mut harness);
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        let focused = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused());
+        if let Some(node) = focused {
+            let label = node.accesskit_node().label().unwrap_or_default();
+            assert!(sheet.contains_rect(node.rect()), "{label} {:?} has the keyboard out of sight of the sheet {sheet:?}", node.rect());
+            seen.push(label);
+        }
+    }
+    assert!(seen.iter().any(|label| label == "Check and add"), "Tab reaches the form's foot: {seen:?}");
+}

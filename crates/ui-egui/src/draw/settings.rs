@@ -340,17 +340,22 @@ pub(super) fn body<R>(ui: &mut Ui, theme: &Theme, salt: &str, add: impl FnOnce(&
         ui.spacing_mut().item_spacing.y = 0.0;
         ui.set_width(width);
         let given = on_page(ui, add);
-        // The keyboard just came to a control of the page: the page scrolls to it, wherever it was.
-        let ctx = ui.ctx().clone();
-        let arrived = ctx.memory(|memory| memory.focused().filter(|focused| !memory.had_focus_last_frame(*focused)));
-        if let Some(control) = arrived.and_then(|focused| ctx.read_response(focused)).filter(|control| ui.min_rect().contains_rect(control.rect)) {
-            ui.scroll_to_rect(control.rect, None);
-        }
+        follow_focus(ui);
         given
     })
     .inner;
     ui.advance_cursor_after_rect(child.min_rect());
     given
+}
+
+/// Called last inside a scrolled page: the keyboard just came to a control of it, so the page scrolls to it, wherever
+/// it was. Only on the frame the focus arrives, so it never fights the wheel.
+pub(super) fn follow_focus(ui: &mut Ui) {
+    let ctx = ui.ctx().clone();
+    let arrived = ctx.memory(|memory| memory.focused().filter(|focused| !memory.had_focus_last_frame(*focused)));
+    if let Some(control) = arrived.and_then(|focused| ctx.read_response(focused)).filter(|control| ui.min_rect().contains_rect(control.rect)) {
+        ui.scroll_to_rect(control.rect, None);
+    }
 }
 
 /// Draws `add`, one row of a page that has a row for every account, only where it is near enough to be seen: within a
