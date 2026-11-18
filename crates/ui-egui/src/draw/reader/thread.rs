@@ -8,6 +8,7 @@ use inboxcraft_html::Block;
 
 use crate::component::button::TextButton;
 use crate::component::facts::{Facts, facts_of};
+use crate::component::popup;
 use crate::component::thread_row::{ThreadLine, thread_row};
 use crate::compose::Answer;
 use crate::draw::margin;
@@ -101,7 +102,8 @@ pub(super) fn folded(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
 }
 
 /// The head of an unfolded message of a thread: its line open, the address and to whom in place of the first words,
-/// `details ▾` opening its facts. A click folds it again, but for the open message.
+/// `details ▾` opening its facts. A click folds it again, but for the open message. Its menu (see [`line_menu`])
+/// shows or hides the full header where the line has no room left for `details ▾`.
 fn head_line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, opened: &Opened, drawn: &mut Drawn) {
     let Some(row) = reader.thread().iter().find(|row| row.id == opened.id) else { return };
     let mut whom = names(&opened.header.to);
@@ -113,11 +115,28 @@ fn head_line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, rea
     let (date, line, preview) = line_of(mailbox, row, Some(&about));
     let line = ThreadLine { preview: &preview, date: &date, unread: false, ..line };
     let pressed = thread_row(ui, theme, keymap, &line);
-    if pressed.details {
+    let menu = line_menu(ui, theme, keymap, &pressed.row, opened.id, reader.shows_details(opened.id));
+    if pressed.details || menu {
         drawn.asked.push(Asked::Details(opened.id));
     } else if pressed.row.clicked() && Some(opened.id) != reader.open_id() {
         drawn.asked.push(Asked::Expand(opened.id));
     }
+}
+
+/// The width of an open line's menu, in points: the subject's menu's.
+const LINE_MENU_WIDTH: f32 = 256.0;
+
+/// The menu of the open line `row` of message `id` (the Menu key, Shift F10 or a secondary press), the way to its full
+/// header that needs no room on the line: whether "Show the full header" (or "Hide …", while `shown`) was chosen. The
+/// one place the line's menu opens.
+fn line_menu(ui: &Ui, theme: &Theme, keymap: &Keymap, row: &egui::Response, id: u64, shown: bool) -> bool {
+    let name = if shown { tr!("Hide the full header") } else { tr!("Show the full header") };
+    let menu = egui::Id::unique("reader-line-menu").with(id);
+    let chosen = popup::context_menu(ui.ctx(), theme, row, menu, LINE_MENU_WIDTH, |ui| {
+        let chosen = popup::entry(ui, theme, keymap, name, None).clicked();
+        (chosen, chosen)
+    });
+    chosen == Some(true)
 }
 
 /// `people` as the facts write them: each name with the address after two spaces, or the address alone.
