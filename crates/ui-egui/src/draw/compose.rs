@@ -785,26 +785,6 @@ fn body(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
 /// presentation opens it).
 const WIPE: f32 = 0.3;
 
-/// The design's `ease`, `cubic-bezier(.2, .7, .2, 1)`, at `t` (0 to 1): a curve local to the composer until the app
-/// has one of its own.
-pub(super) fn ease(t: f32) -> f32 {
-    const X: [f32; 2] = [0.2, 0.2];
-    const Y: [f32; 2] = [0.7, 1.0];
-    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 1.0 };
-    let bezier = |p: [f32; 2], s: f32| 3.0 * (1.0 - s) * (1.0 - s) * s * p[0] + 3.0 * (1.0 - s) * s * s * p[1] + s * s * s;
-    // The curve's parameter whose x is `t`, halved 20 times: x grows with it, so this finds it to a millionth.
-    let (mut low, mut high) = (0.0_f32, 1.0_f32);
-    for _ in 0..20 {
-        let mid = (low + high) / 2.0;
-        if bezier(X, mid) < t {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-    bezier(Y, (low + high) / 2.0)
-}
-
 /// How far the wipe of `id` has come, 0 to 1 over [`WIPE`] from the first frame it was drawn in (a frame missed
 /// starts it again), not eased; 1 with reduced motion. A key, typing, a press or the wheel during it ends it at once:
 /// the owner never waits. A repaint is asked for while it runs.
@@ -860,7 +840,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         composer.mark_painted(ui.ctx().cumulative_frame_nr());
         return asked;
     }
-    let edge = whole.top() + whole.height() * ease(shown);
+    let edge = whole.top() + whole.height() * crate::motion::ease(shown);
     // Drawn and working whole; what the wipe has not reached yet is covered by the ground it stands on.
     let asked = body(ui, theme, keymap, mailbox, composer, area, Place::Docked);
     let cover = Rect::from_min_max(pos2(whole.left(), edge), whole.max);

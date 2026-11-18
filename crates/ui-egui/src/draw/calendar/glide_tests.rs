@@ -5,8 +5,9 @@
 
 use egui::{Context, RawInput, Rect, pos2, vec2};
 
-use super::{css_ease, ease, glide};
+use super::glide;
 use crate::calendar::{Day, EventRow, Moment};
+use crate::motion::{css_ease, ease};
 
 fn event(repeat: Option<&str>) -> EventRow {
     let day = Day::new(2026, 11, 5).unwrap();

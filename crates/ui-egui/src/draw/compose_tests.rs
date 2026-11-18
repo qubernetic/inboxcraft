@@ -997,7 +997,7 @@ fn hostile_drafts_hold_their_layout() {
 
 #[test]
 fn the_design_ease_starts_fast_and_lands_without_overshooting() {
-    let ease = super::compose::ease;
+    let ease = crate::motion::ease;
     assert!(ease(0.0).abs() < 1e-4 && (ease(1.0) - 1.0).abs() < 1e-4);
     // cubic-bezier(.2, .7, .2, 1) at x = 0.5 is 0.92958 (worked out apart from the code).
     assert!((ease(0.5) - 0.92958).abs() < 1e-4, "{}", ease(0.5));

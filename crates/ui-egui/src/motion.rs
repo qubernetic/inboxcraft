@@ -132,6 +132,38 @@ pub fn appear(ctx: &Context, id: Id, seconds: f32) -> f32 {
     easing::cubic_out(shown)
 }
 
+/// The design's one curve, `cubic-bezier(.2, .7, .2, 1)`, at `t` (0 to 1): the share of the way at that share of the
+/// time; a `t` that is not a number is the end (1).
+#[must_use]
+pub fn ease(t: f32) -> f32 {
+    bezier(t, (0.2, 0.7, 0.2, 1.0))
+}
+
+/// CSS's `ease`, `cubic-bezier(.25, .1, .25, 1)`: the curve of a transition that names none, as the design's fade of
+/// an event's ground (`background var(--fast)`) does.
+#[must_use]
+pub fn css_ease(t: f32) -> f32 {
+    bezier(t, (0.25, 0.1, 0.25, 1.0))
+}
+
+/// The cubic Bézier from (0, 0) to (1, 1) through `(x1, y1, x2, y2)` at `t`, as CSS's `cubic-bezier` (x1 and x2
+/// between 0 and 1).
+fn bezier(t: f32, (x1, y1, x2, y2): (f32, f32, f32, f32)) -> f32 {
+    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 1.0 };
+    let bezier = |s: f32, a: f32, b: f32| 3.0 * (1.0 - s) * (1.0 - s) * s * a + 3.0 * (1.0 - s) * s * s * b + s * s * s;
+    // x grows with s on this curve: halving finds the s whose x is t, in a fixed count of steps.
+    let (mut low, mut high) = (0.0_f32, 1.0_f32);
+    for _ in 0..24 {
+        let middle = (low + high) / 2.0;
+        if bezier(middle, x1, x2) < t {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    bezier((low + high) / 2.0, y1, y2)
+}
+
 /// One turn of the caret's blink, in seconds (the `caret` token, 1 000 ms): on for the first half, off for the second.
 pub const CARET: f64 = 1.0;
 
