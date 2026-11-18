@@ -3663,3 +3663,27 @@ fn a_keyboard_menus_give_back_lapses_when_its_opener_is_not_drawn_again_in_time(
     let more = harness.get_by_role_and_label(Role::Button, "More");
     assert!(!more.accesskit_node().is_focused(), "the old ask took the keyboard: {:?}", harness.ctx.memory(|memory| memory.focused()));
 }
+
+#[test]
+fn the_group_menu_is_the_design_files_box() {
+    // 256 × 212: the head 28 under the 1 px edge with no line under it, the choices 32 each from +29, the note 54
+    // (8, two caption lines of 18, 10).
+    let mut harness = still();
+    harness.key_press(Key::J);
+    harness.run();
+    let keyed = harness.state().mailbox().selected().unwrap();
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
+    harness.run();
+    harness.run();
+    let menu = harness.ctx.memory(|memory| memory.area_rect(super::list::group_menu_id(keyed))).unwrap();
+    assert_eq!(menu.size(), vec2(256.0, 212.0), "{menu:?}");
+    let head = harness.query_all_by_label("Group").map(|node| node.rect()).find(|rect| menu.contains_rect(*rect)).unwrap();
+    assert_eq!((head.top() - menu.top(), head.height()), (1.0, 28.0));
+    let first = harness.query_all_by_label("People").map(|node| node.rect()).find(|rect| menu.contains_rect(*rect)).unwrap();
+    assert_eq!(first.top() - menu.top(), 29.0, "the first choice straight under the head");
+    let painted_line = harness.output().shapes.iter().any(|clipped| match &clipped.shape {
+        egui::Shape::Rect(rect) => rect.rect.height() == 1.0 && rect.rect.top() == head.bottom() && rect.rect.width() > 200.0,
+        _ => false,
+    });
+    assert!(!painted_line, "no hairline under the head");
+}

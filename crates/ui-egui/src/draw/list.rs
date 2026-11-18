@@ -468,14 +468,15 @@ pub(super) fn group_menu_id(id: u64) -> Id {
     Id::unique("list-group-menu").with(id)
 }
 
-/// The width of the group menu, in body text sizes.
-const MENU_WIDTH: f32 = 18.0;
+/// The width of the group menu, its edges included, as the design file has it.
+const MENU_WIDTH: f32 = 256.0;
 
 /// The group menu of a sender's mail: a choice for each group, the one it is in chosen, and "Let InboxCraft sort it";
 /// the act chosen. A line under them says that all the sender's mail moves, the kept and the future.
 pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>, address: &str, focus_first: bool) -> Option<Act> {
     let mut chosen = None;
-    popup::title(ui, theme, tr!("Group"), None);
+    // The choices stand straight under the head, no line between.
+    popup::head(ui, theme, tr!("Group"), None);
     for (index, kind) in GroupKind::SHOWN.into_iter().enumerate() {
         let choice = popup::choice(ui, theme, kind.text(), current == Some(kind));
         if focus_first && index == 0 {
@@ -489,10 +490,17 @@ pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>,
         chosen = Some(Act::Group(None));
     }
     let note = tr!("Moves all mail from {address}, kept and future.", address = address);
-    // 12 in, as a float's words stand (8 above, 10 below, as the time picker's note).
-    Frame::NONE.inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 10 }).show(ui, |ui| {
-        ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
-    });
+    // 12 in, as a float's words stand, on caption lines of 18: 8 above, 10 below.
+    let (top, side, bottom) = (8.0, 12.0, 10.0);
+    let width = ui.available_width();
+    let mut job = egui::text::LayoutJob::single_section(note.clone(), theme.fonts.caption.format(theme.palette.muted));
+    job.wrap.max_width = (width - side * 2.0).max(1.0);
+    let text = ui.painter().layout_job(job);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, top + text.size().y + bottom), egui::Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(AccessRole::Label, true, &note));
+    if ui.is_rect_visible(rect) {
+        super::paint::rows_at(ui.painter(), rect.min + vec2(side, top), width - side * 2.0, text, theme.palette.muted);
+    }
     chosen
 }
 
@@ -827,7 +835,7 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow)
         popup::open_under(&ctx, popup_id);
     }
     let first = ctx.data_mut(|data| data.remove_temp::<bool>(first_id)).unwrap_or(false);
-    let width = theme.fonts.body.size * MENU_WIDTH;
+    let width = MENU_WIDTH;
     let was_open = popup::is_open(&ctx, popup_id);
     let acted = popup::context_menu(&ctx, theme, response, popup_id, width, |ui| {
         let chosen = group_menu(ui, theme, message.group, &message.address, first);

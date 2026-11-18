@@ -274,6 +274,13 @@ pub fn hairline(ui: &mut Ui, theme: &Theme) {
 /// A float's title row: 28 high on `panel`, `label` in the `label` style and `count` in `mono_s` at its right end,
 /// both `muted`; a hairline under it.
 pub fn title(ui: &mut Ui, theme: &Theme, label: &str, count: Option<&str>) {
+    head(ui, theme, label, count);
+    hairline(ui, theme);
+}
+
+/// A float's title row as [`title`] draws it, with no hairline under it: the design's group menu, whose choices stand
+/// straight under its head.
+pub fn head(ui: &mut Ui, theme: &Theme, label: &str, count: Option<&str>) {
     let p = &theme.palette;
     let s = &theme.spacing;
     let height = theme.boxes().float_title;
@@ -289,7 +296,6 @@ pub fn title(ui: &mut Ui, theme: &Theme, label: &str, count: Option<&str>) {
             paint::run_right(painter, rect.right() - s.s3, rect.center().y - count.size().y / 2.0, count, p.muted);
         }
     }
-    hairline(ui, theme);
 }
 
 /// What a float says when it has no rows: `text` in `body` and `muted`, 12 in on every side.
