@@ -1522,6 +1522,8 @@ impl InboxApp {
             self.hover = drawn.hover.take();
         }
         layers.finish(ui.painter(), &theme);
+        // A row's menu whose row this pass did not draw closes; an ask no row took is dropped.
+        list::settle_menus(ui.ctx());
         if self.screen == Screen::Calendar {
             on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, ui.max_rect()));
         }

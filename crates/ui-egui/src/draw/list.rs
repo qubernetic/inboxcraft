@@ -549,7 +549,18 @@ fn menu_asked_id() -> Id {
 
 /// Asks for the group menu of message `id`'s row (`Shift F10`, the Menu key): its row opens it when drawn.
 pub(super) fn ask_menu(ctx: &egui::Context, id: u64) {
-    ctx.data_mut(|data| data.insert_temp(menu_asked_id(), id));
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(menu_asked_id(), (id, pass)));
+}
+
+/// Settles the rows' menus after a pass: an ask ([`ask_menu`]) no row took in a whole pass is dropped (its row was not
+/// drawn: out of sight, or its message gone), so it never opens later, away from the moment it was asked for. A menu
+/// already open whose row is not drawn in a pass is closed by egui, as every popup not shown.
+pub(super) fn settle_menus(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_asked_id())).is_some_and(|(_, at)| at < pass) {
+        ctx.data_mut(|data| data.remove::<(u64, u64)>(menu_asked_id()));
+    }
 }
 
 /// The group menu of `message`'s row `response`: by a right click at the pointer, or asked for by the keyboard
@@ -559,9 +570,9 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow)
     let popup_id = Popup::default_response_id(response);
     let by_keys_id = popup_id.with("by-keys");
     let first_id = popup_id.with("focus-first");
-    if ctx.data(|data| data.get_temp::<u64>(menu_asked_id())) == Some(message.id) {
+    if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_asked_id())).is_some_and(|(id, _)| id == message.id) {
         ctx.data_mut(|data| {
-            data.remove::<u64>(menu_asked_id());
+            data.remove::<(u64, u64)>(menu_asked_id());
             data.insert_temp(by_keys_id, true);
             data.insert_temp(first_id, true);
         });

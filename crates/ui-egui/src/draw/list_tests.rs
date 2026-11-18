@@ -2414,3 +2414,46 @@ fn every_scene_of_the_lists_is_walked_by_tab_and_rests() {
         assert!(crate::component::tests::rests(&mut harness, 4), "{name}: at rest");
     }
 }
+
+#[test]
+fn a_rows_menu_never_lingers_away_from_its_row() {
+    let open = |harness: &Harness<'static, InboxApp>| egui::Popup::is_any_open(&harness.ctx);
+    // Open by the keys, then the row scrolls out of the rows built: the menu closes, and the list's keys work again.
+    let mut harness = ten_thousand(InboxView::List);
+    harness.key_press(Key::J);
+    harness.run();
+    let keyed = harness.state().mailbox().selected().unwrap();
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
+    harness.run();
+    assert!(open(&harness), "Shift F10 opens the keyed row's menu");
+    wheel(&mut harness, 4000.0);
+    harness.run();
+    assert!(row_rect(&harness, keyed).is_none(), "the row is no longer built");
+    assert!(!open(&harness), "its menu closed with it");
+    wheel(&mut harness, -8000.0);
+    harness.run();
+    assert!(row_rect(&harness, keyed).is_some(), "the row is back");
+    assert!(!open(&harness), "and its menu does not come back");
+    // Asked for while the keyed row is out of sight: nothing opens, then or when the row comes back.
+    wheel(&mut harness, 4000.0);
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
+    harness.run();
+    harness.run();
+    assert!(!open(&harness), "no row took the ask");
+    wheel(&mut harness, -8000.0);
+    harness.run();
+    assert!(row_rect(&harness, keyed).is_some());
+    assert!(!open(&harness), "the ask did not linger until the row came back");
+    // Open, then the message goes: the menu closes.
+    harness.state_mut().mailbox_mut().select_keyed(keyed);
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(keyed)));
+    harness.run();
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
+    harness.run();
+    assert!(open(&harness));
+    let rest: Vec<crate::mailbox::MessageRow> = harness.state().mailbox().messages().iter().filter(|row| row.id != keyed).cloned().collect();
+    harness.state_mut().mailbox_mut().set_rows(rest);
+    harness.run();
+    harness.run();
+    assert!(!open(&harness), "the menu of a message gone closes");
+}
