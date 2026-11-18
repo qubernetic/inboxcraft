@@ -146,7 +146,7 @@ fn done_above_of_is_taken_as_of() {
     progress(&mut session, 1, 9, 4);
     progress(&mut session, 2, 1, 3);
     let answer = status(&mut session);
-    assert_eq!((answer["done"].clone(), answer["of"].clone()), (json!(5), json!(7)));
+    assert_eq!((answer["done"].clone(), answer["of"].clone()), (json!(1), json!(3)), "a round with nothing left is over");
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn the_sums_saturate_at_the_largest_count() {
     let mut session = session();
     online(&mut session);
     progress(&mut session, 1, u32::MAX - 1, u32::MAX);
-    progress(&mut session, 2, u32::MAX, u32::MAX);
+    progress(&mut session, 2, u32::MAX - 1, u32::MAX);
     let answer = status(&mut session);
     assert_eq!((answer["state"].clone(), answer["done"].clone(), answer["of"].clone()), (json!("syncing"), json!(u32::MAX), json!(u32::MAX)));
 }
@@ -283,4 +283,39 @@ fn a_body_fetch_that_failed_does_not_make_the_account_failing() {
     // Another job's failure still counts.
     session.apply(&Event::new(AccountId::new(1), Some(JobId::new(999)), gone)).unwrap();
     assert_eq!(status(&mut session)["failing_accounts"], 1);
+}
+
+#[test]
+fn a_round_that_ended_failed_counts_no_longer() {
+    let mut session = session();
+    current(&mut session);
+    progress(&mut session, 1, 1, 2);
+    progress(&mut session, 2, 1, 3);
+    failed(&mut session, 1);
+    progress(&mut session, 1, 2, 2);
+    let answer = status(&mut session);
+    assert_eq!((answer["done"].clone(), answer["of"].clone()), (json!(1), json!(3)), "{answer}");
+}
+
+#[test]
+fn a_new_worker_counts_from_its_own_first_progress() {
+    let mut session = session();
+    current(&mut session);
+    progress(&mut session, 1, 1, 5);
+    connection(&mut session, 1, ConnectionState::Offline);
+    connection(&mut session, 1, ConnectionState::Connecting);
+    connection(&mut session, 1, ConnectionState::Online);
+    assert_eq!(status(&mut session), json!({ "state": "synced", "done": 0, "of": 0, "last_synced": "2026-11-04T09:00:00Z", "failing_accounts": 0 }));
+    progress(&mut session, 1, 0, 3);
+    assert_eq!(state(&mut session), "syncing");
+}
+
+#[test]
+fn changed_settings_end_the_round_of_the_old_worker() {
+    let mut session = session();
+    current(&mut session);
+    progress(&mut session, 1, 1, 5);
+    session.run("account.update", &json!({ "account": 1, "recheck": true })).unwrap();
+    let answer = status(&mut session);
+    assert_eq!((answer["state"].clone(), answer["of"].clone()), (json!("synced"), json!(0)), "{answer}");
 }

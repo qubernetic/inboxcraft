@@ -323,8 +323,9 @@ pub(crate) struct AccountState {
     pub(crate) uid_expunge: bool,
     /// The last failure, until the account is online again or a sync round of it ends with every folder synced.
     pub(crate) failure: Option<(ErrorKind, Option<FolderId>)>,
-    /// The sync round as the worker last told it: folder syncs done (never above `of`) and of; `None` before the
-    /// first and after a round that ended with every folder synced.
+    /// The sync round under way as the worker last told it: folder syncs done (below `of`) and of; `None` before the
+    /// first, once the round ended (synced or failed), when the connection went offline and when the settings
+    /// changed.
     pub(crate) progress: Option<(u32, u32)>,
     /// When the account's last sync round ended with every folder synced, as its worker told.
     pub(crate) synced: Option<Timestamp>,
@@ -677,7 +678,10 @@ impl Session {
             self.state.writes.forget(account);
         }
         for account in resync {
-            self.state.accounts.entry(account).or_default().resync = true;
+            let held = self.state.accounts.entry(account).or_default();
+            held.resync = true;
+            // A new worker signs in with the new settings; the old one's round is over.
+            held.progress = None;
         }
         for (sender, allowed) in senders {
             if allowed {

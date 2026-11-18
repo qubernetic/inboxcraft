@@ -118,6 +118,10 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
         EventKind::Connection(connection) => {
             let held = plan.state.accounts.entry(account).or_default();
             held.connection = Some(*connection);
+            // The connection is gone: the round it served may never end, and the worker tells the next one afresh.
+            if *connection == inboxcraft_model::ConnectionState::Offline {
+                held.progress = None;
+            }
             if matches!(connection, inboxcraft_model::ConnectionState::Online | inboxcraft_model::ConnectionState::Watching) {
                 held.failure = None;
             }

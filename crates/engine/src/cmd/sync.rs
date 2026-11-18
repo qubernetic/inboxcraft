@@ -17,8 +17,9 @@
 //! - `syncing`: an account's sync round has folders left, or a signed-in account has not ended a round yet;
 //! - `synced`: none of these, and always with no account.
 //!
-//! `done` and `of` add up the last progress told of every account (each `done` at most its `of`, the sums saturate
-//! at `u32::MAX`); a round that ended with every folder synced counts no longer. `last_synced` is the newest end of a
+//! `done` and `of` add up the rounds under way of every account, as last told (each `done` at most its `of`, the sums
+//! saturate at `u32::MAX`); a round counts no longer once it ended, synced or failed, once its connection went
+//! offline, or once the account's settings changed, so a new worker counts from its own first progress. `last_synced` is the newest end of a
 //! sync round over all accounts in ISO 8601 UTC, `null` before one. `failing_accounts` counts the accounts with a
 //! failure, not the failures.
 //!
@@ -56,10 +57,11 @@ pub(crate) const STATUS: CommandSpec = CommandSpec {
     run: status,
 };
 
-/// Takes the progress a worker told of `account`'s sync round: `done` above `of` counts as `of`.
+/// Takes the progress a worker told of `account`'s sync round: a round with nothing left (`done` at or above `of`),
+/// synced or failed, is over and counts no longer, so what is kept always has `done` below `of`.
 pub(crate) fn progress(state: &mut State, account: AccountId, done: u32, of: u32) {
     if let Some(held) = state.accounts.get_mut(&account) {
-        held.progress = Some((done.min(of), of));
+        held.progress = (done < of).then_some((done, of));
     }
 }
 
@@ -123,7 +125,7 @@ fn status(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         if let Some((told, all)) = state.progress {
             done = done.saturating_add(told);
             of = of.saturating_add(all);
-            syncing |= told < all;
+            syncing = true;
         }
         if let Some(synced) = state.synced {
             last = Some(last.map_or(synced, |last| last.max(synced)));
