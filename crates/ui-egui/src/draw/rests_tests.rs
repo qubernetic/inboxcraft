@@ -162,7 +162,7 @@ fn with_the_list_hidden_its_keys_views_and_row_commands_rest_and_the_palette_sho
             ("Inbox view", "Inbox view: List"),
             ("Inbox view", "Inbox view: Grouped"),
             ("next message", "The next message of the list"),
-            ("group menu", "The group menu of the list's message"),
+            ("menu of the list", "The menu of the list's row, the reader's line or its subject"),
             ("Done", "Done"),
         ] {
             harness.state_mut().palette_mut().set_query(typed);

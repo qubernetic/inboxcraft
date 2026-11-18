@@ -455,22 +455,57 @@ fn the_details_show_the_whole_text_and_scroll_to_the_rest() {
     harness.state_mut().calendar_mut().0.set_events(events);
     harness.state_mut().calendar_mut().0.pick(Some(long.key()));
     harness.run();
-    // The side panel's text, row by row in paint order (each row is painted on its own).
+    // Each part's text, row by row as painted (each row is painted on its own, and only the rows in sight): the panel
+    // is scrolled through the part, and every row is kept by where it stands in the part.
     let side = 1440.0 - 252.0;
-    let rows: Vec<(String, bool)> = harness
-        .output()
-        .shapes
-        .iter()
-        .filter_map(|clipped| match &clipped.shape {
-            egui::Shape::Text(text) if text.pos.x >= side => Some((text.galley.text().to_owned(), text.galley.elided)),
-            _ => None,
-        })
-        .collect();
-    assert!(rows.iter().all(|(_, elided)| !elided), "nothing in the details is cut");
     let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let shown = words(&rows.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" "));
     for whole in [long.summary.as_str(), long.location.as_str(), long.description.as_str()] {
-        assert!(shown.contains(&words(whole)), "the details show the whole text: {whole:.40}");
+        let spoken = whole.replace('\n', " ");
+        let part = |harness: &Harness<'static, InboxApp>| harness.get_by_role_and_label(Role::Label, &spoken).rect();
+        harness.get_by_role_and_label(Role::Label, &spoken).scroll_to_me();
+        harness.run();
+        // The part's top in sight first.
+        let wheel = |harness: &mut Harness<'static, InboxApp>, by: f32| {
+            harness.hover_at(egui::pos2(side + 100.0, 600.0));
+            harness.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, by),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Wheel,
+            });
+            harness.run();
+        };
+        for _ in 0..60 {
+            if part(&harness).top() >= 23.0 {
+                break;
+            }
+            wheel(&mut harness, 300.0);
+        }
+        let mut rows: std::collections::BTreeMap<i64, (String, bool)> = std::collections::BTreeMap::new();
+        for _ in 0..60 {
+            let rect = part(&harness);
+            for clipped in &harness.output().shapes {
+                if let egui::Shape::Text(text) = &clipped.shape
+                    && text.pos.x >= side
+                    && rect.y_range().contains(text.pos.y)
+                    // In the panel's scrolling body (from 23 to 851), not its foot.
+                    && clipped.clip_rect.top() >= 23.0
+                    && clipped.clip_rect.y_range().contains(text.pos.y)
+                    // An icon (the head's Close) is no text.
+                    && !text.galley.text().chars().all(|c| ('\u{e000}'..='\u{f8ff}').contains(&c))
+                {
+                    rows.insert((text.pos.y - rect.top()).round() as i64, (text.galley.text().to_owned(), text.galley.elided));
+                }
+            }
+            if rect.bottom() <= 851.0 {
+                break;
+            }
+            wheel(&mut harness, -300.0);
+        }
+        assert!(rows.values().all(|(_, elided)| !elided), "nothing in the details is cut: {whole:.40}");
+        let shown = words(&rows.values().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" "));
+        assert_eq!(shown, words(whole), "the details show the whole text: {whole:.40}");
     }
     let edit = harness.get_by_role_and_label(Role::Button, "Edit");
     edit.scroll_to_me();
