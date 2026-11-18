@@ -9,8 +9,8 @@
 //! stand at the foot under a hairline, on lines of their own in a pane narrower than they are. More holds Archive
 //! (with its key), flag, read or unread and the rest of the acts on the open message, then what is not a mail action:
 //! full width, closing the reader and the next-message rule. Move to a folder opens a menu of the folders of the
-//! message's account. While the pointer is on a link, a float at the bottom says where it goes. Tab goes from the head
-//! through the message to the answers.
+//! message's account. While the pointer is on a link, a bar over the answers says where it goes (CAREFUL when its
+//! text names another place). Tab goes from the head through the message to the answers.
 //!
 //! Done, Delete, Move and the acts in More act on the open message as the hover actions of the list do, on a real
 //! account as on the sample; Reply, Reply all and Forward open the composer over a draft the engine filled in. More
@@ -45,11 +45,11 @@ mod thread;
 
 use std::collections::HashMap;
 
-use egui::{Align2, Area, Frame, Id, Margin, Order, Rect, RichText, ScrollArea, Shape, TextureHandle, Ui, vec2};
+use egui::{Area, Frame, Id, Margin, Order, Rect, ScrollArea, Stroke, TextureHandle, Ui, vec2};
 
 use super::margin;
 use crate::compose::Answer;
-use crate::draw::paint::{self, FloatEdge};
+use crate::draw::paint;
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, After, Mailbox};
 use crate::reader::Reader;
@@ -128,27 +128,105 @@ pub(super) struct Drawn {
 /// The textures of the pictures shown, by picture key.
 pub(super) type Textures = HashMap<String, TextureHandle>;
 
-/// Where the link under the pointer goes, on a float over the bottom left corner of `rect`. It takes no pointer, so
-/// the link under it stays hovered.
-fn status(ui: &Ui, theme: &Theme, rect: Rect, text: &str) {
+/// The room left and right of the link status's parts, and above and below a careful one, in points.
+const STATUS_SIDE: f32 = 40.0;
+const STATUS_PAD: f32 = 10.0;
+
+/// The room inside a careful link's box, above and below and at the sides, and between its parts, in points.
+const CAREFUL_Y: f32 = 8.0;
+const CAREFUL_X: f32 = 12.0;
+
+/// A text of the link status: laid out in `font` and `ink` to `room`, at `at`, heard as `words`.
+fn status_text(ui: &Ui, text: &str, font: crate::theme::Font, ink: egui::Color32, room: f32) -> std::sync::Arc<egui::Galley> {
+    crate::component::fitted(ui, text, font, ink, room.max(1.0))
+}
+
+/// Tells a screen reader `words` stand in `rect`.
+fn heard(ui: &Ui, rect: Rect, words: &str, salt: &str) {
+    let response = ui.interact(rect, ui.scope_id().with(("link-status", salt)), egui::Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, crate::component::spoken(words)));
+}
+
+/// Where the link under the pointer goes, on a bar at the foot of the message's `room`, over the answers: `LINK`, the
+/// address and what a click does on the `panel` fill under a `panel_line`; a link whose text names another place than
+/// it goes to stands in a careful box instead (CAREFUL in `minus`, what the text says, and the address whole on a line
+/// of its own). It takes no pointer, so the link under it stays hovered.
+fn status(ui: &Ui, theme: &Theme, room: Rect, text: &str) {
     let p = &theme.palette;
-    let s = &theme.spacing;
-    let colour = if text.starts_with(tr!("Careful")) { p.minus } else { p.ink };
-    Area::new(ui.scope_id().with("link-status"))
-        .order(Order::Foreground)
-        .interactable(false)
-        .pivot(Align2::LEFT_BOTTOM)
-        .fixed_pos(rect.left_bottom() + vec2(s.s3, -s.s3))
-        .fade_in(false)
-        .show(ui.ctx(), |ui| {
-            let slot = ui.painter().add(Shape::Noop);
-            let inner = Frame::new().inner_margin(margin(s.s2)).show(ui, |ui| {
-                ui.set_max_width((rect.width() - s.s3 * 2.0 - s.s2 * 2.0).max(1.0));
-                ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.caption.id()).color(colour)).truncate());
-            });
-            let shapes = paint::float_shapes(theme, inner.response.rect, FloatEdge::Quiet);
-            ui.painter().set(slot, Shape::Vec(shapes));
-        });
+    let f = &theme.fonts;
+    // The careful status says where the link goes after its last ": ".
+    let careful = text.strip_prefix(tr!("Careful: ")).and_then(|said| said.rsplit_once(": "));
+    let copies = !text.starts_with(tr!("This link is not followed"));
+    let note = tr!("a click copies it");
+    let high = match careful {
+        Some(_) => STATUS_PAD + CAREFUL_Y + f.caption.line + 2.0 + f.mono.line + CAREFUL_Y + STATUS_PAD,
+        None => theme.boxes().strip.max(28.0),
+    }
+    .ceil();
+    let rect = Rect::from_min_max(egui::pos2(room.left(), room.bottom() - high), room.max);
+    Area::new(ui.scope_id().with("link-status")).order(Order::Foreground).interactable(false).fixed_pos(rect.min).fade_in(false).show(
+        ui.ctx(),
+        |ui| {
+            ui.set_clip_rect(rect);
+            let painter = ui.painter();
+            let inner = rect.shrink2(vec2(STATUS_SIDE, 0.0));
+            let note_galley = copies.then(|| status_text(ui, note, f.mono_s, p.muted, inner.width()));
+            let note_width = note_galley.as_ref().map_or(0.0, |note| paint::run_box(note.size().x));
+            match careful {
+                Some((said, target)) => {
+                    painter.rect_filled(rect, 0.0, p.surface);
+                    let boxed =
+                        Rect::from_min_max(egui::pos2(inner.left(), rect.top() + STATUS_PAD), egui::pos2(inner.right(), rect.bottom() - STATUS_PAD));
+                    painter.rect(boxed, 0.0, p.panel, Stroke::new(1.0, p.minus), egui::StrokeKind::Inside);
+                    let label = crate::component::galley(ui, tr!("Careful"), f.label, p.minus);
+                    let label_width = paint::run_box(label.size().x);
+                    let top = boxed.top() + CAREFUL_Y;
+                    paint::run_at(
+                        painter,
+                        egui::pos2(boxed.left() + CAREFUL_X, (top + (f.caption.line - label.size().y) / 2.0).round()),
+                        label,
+                        p.minus,
+                    );
+                    let left = boxed.left() + CAREFUL_X + label_width + CAREFUL_X;
+                    let right = boxed.right() - CAREFUL_X - if copies { note_width + CAREFUL_X } else { 0.0 };
+                    let words = format!("{}:", crate::component::spoken(said));
+                    // The words as the design writes them: "The text says …", the first letter up.
+                    let mut chars = words.chars();
+                    let words: String = chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default();
+                    let said_galley = status_text(ui, &words, f.caption, p.ink, right - left);
+                    paint::run_at(painter, egui::pos2(left, top), said_galley, p.ink);
+                    let target_top = top + f.caption.line + 2.0;
+                    let target_galley = status_text(ui, target, f.mono, p.ink, right - left);
+                    paint::run_at(painter, egui::pos2(left, target_top), target_galley, p.ink);
+                    heard(ui, boxed, &format!("{}: {words}", tr!("Careful")), "careful");
+                    heard(ui, Rect::from_min_size(egui::pos2(left, target_top), vec2((right - left).max(1.0), f.mono.line)), target, "target");
+                    if let Some(note_galley) = note_galley {
+                        let at = egui::pos2(boxed.right() - CAREFUL_X - note_width, (top + (f.caption.line - note_galley.size().y) / 2.0).round());
+                        heard(ui, Rect::from_min_size(at, vec2(note_width, f.mono_s.line)), note, "note");
+                        paint::run_at(painter, at, note_galley, p.muted);
+                    }
+                }
+                None => {
+                    painter.rect_filled(rect, 0.0, p.panel);
+                    let label = crate::component::galley(ui, tr!("Link"), f.label, p.muted);
+                    let label_width = paint::run_box(label.size().x);
+                    let middle = rect.center().y;
+                    paint::run_at(painter, egui::pos2(inner.left(), (middle - label.size().y / 2.0).round()), label, p.muted);
+                    let left = inner.left() + label_width + CAREFUL_X;
+                    let right = inner.right() - if copies { note_width + CAREFUL_X } else { 0.0 };
+                    let target = status_text(ui, text, f.mono_s, p.ink, right - left);
+                    paint::run_at(painter, egui::pos2(left, (middle - target.size().y / 2.0).round()), target, p.ink);
+                    heard(ui, Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(right.max(left + 1.0), rect.bottom())), text, "target");
+                    if let Some(note_galley) = note_galley {
+                        let at = egui::pos2(inner.right() - note_width, (middle - note_galley.size().y / 2.0).round());
+                        heard(ui, Rect::from_min_size(at, vec2(note_width, f.mono_s.line)), note, "note");
+                        paint::run_at(painter, at, note_galley, p.muted);
+                    }
+                }
+            }
+            paint::hairline(painter, rect.left_top(), egui::pos2(rect.right() - 1.0, rect.top()), p.panel_line);
+        },
+    );
 }
 
 /// The reader with no message open: the bare empty state in the middle of the pane, 40 from its sides.
@@ -244,7 +322,7 @@ pub(super) fn show(
         paint::hairline(ui.painter(), rect.left_top(), egui::pos2(rect.right() - 1.0, rect.top()), p.panel_line);
     }
     if let Some(text) = hover {
-        status(ui, theme, whole, text);
+        status(ui, theme, message_room, text);
     }
     let shows = scan(time);
     if shows > 0.0 {

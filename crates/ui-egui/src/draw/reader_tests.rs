@@ -1897,3 +1897,20 @@ fn a_blocked_remote_picture_is_a_box_of_its_real_size_until_asked_for() {
     assert!(after.top() >= harness.get_by_label(label).rect().bottom());
     assert!(harness.state().is_empty(), "the box asks for nothing by itself");
 }
+
+#[test]
+fn a_careful_link_says_so_on_a_bar_over_the_answers() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");
+    let link = harness.get_by_label("https://bank.example.org/login").rect();
+    harness.hover_at(link.left_center() + vec2(8.0, 0.0));
+    harness.run();
+    // CAREFUL, what the text says and where the link goes, the address whole on its own line, and what a click does.
+    let bar = harness.get_by_label_contains("Careful: The text says “").rect();
+    harness.get_by_label("https://prize-desk.example.net/claim");
+    harness.get_by_label("a click copies it");
+    let reply = harness.get_by_role_and_label(Role::Button, "Reply").rect();
+    // Over the answers' hairline, 10 above and below and 40 in from the pane's sides.
+    assert!(bar.bottom() <= reply.top() - 12.0 - 10.0 + 0.5 && bar.bottom() >= reply.top() - 12.0 - 10.0 - 1.5, "{bar:?} {reply:?}");
+    assert!((bar.left() - reply.left()).abs() <= 0.5, "{bar:?} {reply:?}");
+}
