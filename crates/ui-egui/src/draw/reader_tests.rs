@@ -2467,3 +2467,45 @@ fn a_flag_from_the_list_does_not_turn_a_later_removal_into_a_walk_on() {
     taken_away(&mut harness);
     assert_eq!(harness.state().mailbox().selected(), None, "nothing is selected");
 }
+
+/// The owner flags the open message and the server takes it away before the window draws again: a Flag leaves its row
+/// in the list, so it notes nothing the removal could be taken for, and nothing walks on.
+#[test]
+fn a_flag_then_a_server_removal_does_not_walk_on() {
+    let fetch = Recorder::default();
+    let (mut harness, id, behind) = coast_walk_open(&fetch);
+    let unread = !read(&harness, behind);
+    // No frame between the two: the act's note is not read before the removal.
+    let mailbox = harness.state_mut().mailbox_mut();
+    mailbox.act(id, crate::mailbox::Act::Flag);
+    mailbox.run("mail.done", &json!({ "id": id, "done": true })).unwrap();
+    mailbox.refresh();
+    settle(&mut harness);
+    assert!(row_of(&harness, id).is_none(), "it left the list");
+    assert_eq!(harness.state().reader().open_id(), None, "nothing opens by itself");
+    assert_eq!(harness.state().mailbox().selected(), None, "nothing is selected");
+    assert_eq!(read(&harness, behind), !unread, "the next message is not read");
+}
+
+/// The owner's Done walks on, Undo brings the message back open, the owner reads it (R), then the server takes it
+/// away: the Done was noted once, when it took the row out, and its note does not outlive that frame.
+#[test]
+fn a_read_then_a_server_removal_does_not_walk_on() {
+    let fetch = Recorder::default();
+    let (mut harness, id, behind) = coast_walk_open(&fetch);
+    press_in_the_reader(&mut harness);
+    reader_done(&harness).click();
+    settle(&mut harness);
+    assert_eq!(harness.state().reader().open_id(), Some(behind), "the Done walked on");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    settle(&mut harness);
+    assert_eq!(harness.state().reader().open_id(), Some(id), "Undo brings it back open");
+    let was = read(&harness, id);
+    press_in_the_reader(&mut harness);
+    harness.key_press(Key::R);
+    settle(&mut harness);
+    assert_ne!(read(&harness, id), was, "R marked it");
+    assert!(row_of(&harness, id).is_some(), "a read leaves the row in the list");
+    taken_away(&mut harness);
+    assert_eq!(harness.state().mailbox().selected(), None, "nothing is selected");
+}
