@@ -32,18 +32,15 @@ use std::cell::Cell;
 use std::collections::HashSet;
 
 use egui::accesskit::Role as AccessRole;
-use egui::{
-    Align, Color32, Frame, Id, Key, Layout, Margin, Popup, Rect, RichText, Role as WidgetRole, ScrollArea, Sense, Shape, Stroke,
-    StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2,
-};
+use egui::{Align, Frame, Id, Key, Layout, Margin, Popup, Rect, RichText, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2};
 use inboxcraft_model::Role;
 
-use super::paint::line;
 use inboxcraft_engine::ScreenerMode;
 
 use crate::component::hover::Action;
 use crate::component::group_head::{GroupHead, group_head};
 use crate::component::mail_row::{Mark, MailRow, mail_row};
+use crate::component::outbox_row::{SendButton, OutboxRow as OutboxRowView, Standing, outbox_row as outbox_view};
 use crate::component::tag::TagKind;
 use crate::component::pill::pill;
 use crate::component::{avatar, button, field, margin, popup, tooltip};
@@ -172,31 +169,6 @@ fn empty(ui: &mut Ui, theme: &Theme, title: &str, detail: &str) {
         ui.add_space(theme.spacing.s1);
         ui.label(RichText::new(detail).font(theme.fonts.body.id()).color(theme.palette.muted));
     });
-}
-
-/// The two lines of a message row: the sender's with the date, and the subject's with the preview (both `caption`),
-/// each as high as its tallest style's line.
-fn row_lines(theme: &Theme) -> (f32, f32) {
-    let f = &theme.fonts;
-    let first = [f.body, f.strong, f.mono_s].map(|font| font.line).into_iter().fold(0.0, f32::max);
-    (first, f.caption.line)
-}
-
-/// Where a row's first line starts below its top: the two lines and their gap centred in the fixed row height.
-fn lines_top(theme: &Theme) -> f32 {
-    let (first, second) = row_lines(theme);
-    ((row_height(theme) - first - line_gap(theme) - second) / 2.0).max(0.0)
-}
-
-/// The side of a row's avatar: a little under its two lines.
-fn face_side(theme: &Theme) -> f32 {
-    let (first, second) = row_lines(theme);
-    (first + second - theme.spacing.s1 / 2.0).max(1.0)
-}
-
-/// The gap between a row's two lines.
-fn line_gap(theme: &Theme) -> f32 {
-    theme.spacing.s1 / 2.0
 }
 
 /// The height of a message row: the design's fixed mail row at the current text scale.
@@ -418,98 +390,63 @@ pub(super) enum Outbox {
     Retry,
 }
 
-/// The state of a send as its row shows it: the icon and the colour of its words.
-fn standing_look(theme: &Theme, state: &SendState) -> (IconId, Color32) {
-    match state {
-        SendState::Waiting(_) => (IconId::Snooze, theme.palette.muted),
-        SendState::Sending => (IconId::Send, theme.palette.muted),
-        SendState::Refused { .. } => (IconId::Failed, theme.palette.minus),
-    }
-}
-
-/// One send of the outbox across `ui`'s width: the first recipient's avatar, whom it goes to and the subject (with the
+/// One send of the outbox across `ui`'s width, the design's outbox row: whom it goes to and the subject (with the
 /// server's reply for a refused one), where it stands, and its buttons; the button pressed.
-fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, row: &OutboxRow, set: (usize, usize)) -> Option<Outbox> {
-    let s = &theme.spacing;
-    let p = &theme.palette;
-    let f = &theme.fonts;
-    let mut asked = None;
-    let (first, second) = row_lines(theme);
-    let height = row_height(theme);
-    let refused = match &row.state {
+fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, row: &OutboxRow, account_marker: bool, set: (usize, usize)) -> Option<Outbox> {
+    let subject = if row.subject.is_empty() { tr!("(no subject)") } else { row.subject.as_str() };
+    let left = mailbox.seconds_left(row.draft);
+    let standing = match (&row.state, left) {
+        (SendState::Waiting(_), Some(left)) => {
+            let hold = f32::from(mailbox.hold_seconds().max(1));
+            Standing::Countdown { share: (left as f32 / hold).clamp(0.0, 1.0) }
+        }
+        (SendState::Waiting(_), None) => Standing::Scheduled,
+        (SendState::Sending, _) => Standing::Sending,
+        (SendState::Refused { .. }, _) => Standing::Refused,
+    };
+    let reply = match &row.state {
         SendState::Refused { reply, .. } => Some(reply.as_str()),
         _ => None,
     };
-    let tall = height + if refused.is_some() { f.caption.line + s.s1 } else { 0.0 };
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), tall), Sense::hover());
+    let label = &row.subject;
+    let undo = tr!("Undo the send of “{subject}”", subject = label);
+    let take_back = tr!("Take “{subject}” back and edit it", subject = label);
+    let again = tr!("Send “{subject}” again", subject = label);
+    let edit = tr!("Edit “{subject}”", subject = label);
+    let (buttons, asks): (Vec<SendButton<'_>>, Vec<Outbox>) = match standing {
+        Standing::Countdown { .. } => (vec![SendButton { name: tr!("Undo"), spoken: &undo }], vec![Outbox::Unsend]),
+        Standing::Scheduled => (vec![SendButton { name: tr!("Edit"), spoken: &take_back }], vec![Outbox::Unsend]),
+        Standing::Sending => (Vec::new(), Vec::new()),
+        // An answer to an invitation changes only from the invitation.
+        Standing::Refused if row.invite_answer => (vec![SendButton { name: tr!("Send again"), spoken: &again }], vec![Outbox::Retry]),
+        Standing::Refused => {
+            (vec![SendButton { name: tr!("Send again"), spoken: &again }, SendButton { name: tr!("Edit"), spoken: &edit }], vec![Outbox::Retry, Outbox::Edit])
+        }
+    };
+    let to = tr!("To {whom}", whom = mailbox.recipients(row));
+    let words = mailbox.standing_shown(row);
     let spoken = mailbox.spoken_outbox(row);
-    response.widget_info(|| WidgetInfo::labeled(WidgetRole::ListItem, true, &spoken));
-    ui.ctx().accesskit_node_builder(response.id, |node| {
+    let account = account_marker.then(|| mailbox.account(row.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0)));
+    let shown = OutboxRowView {
+        id: Id::unique("list-send-row").with(row.draft),
+        spoken: &spoken,
+        to: &to,
+        account,
+        subject,
+        words: &words,
+        standing,
+        reply,
+        buttons: &buttons,
+        last: false,
+    };
+    let pressed = outbox_view(ui, theme, keymap, &shown, None);
+    // Its place among the outbox's sends: a screen reader says "2 of 3".
+    let id = shown.id;
+    ui.ctx().accesskit_node_builder(id, |node| {
         node.set_position_in_set(set.0);
         node.set_size_of_set(set.1);
     });
-    let side = face_side(theme);
-    // A send has no unread dot, so its avatar stands further out than a message's.
-    let indent = s.s3 + 2.0;
-    let face = Rect::from_min_size(pos2(rect.left() + indent, rect.top() + (height - side) / 2.0), vec2(side, side));
-    let whom = mailbox.recipients(row);
-    avatar::paint(ui.painter(), theme, face, row.to.first().map_or(whom.as_str(), String::as_str), &row.address);
-    let left = rect.left() + indent + side + s.s3;
-    let subject = if row.subject.is_empty() { tr!("(no subject)") } else { row.subject.as_str() };
-    let subject_label = row.subject.clone();
-    // The buttons and where it stands, from the right; the text takes what is left.
-    let mut right = rect.right() - s.s3;
-    let mut controls = ui.new_child(
-        UiBuilder::new()
-            .max_rect(Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.top() + height)))
-            .layout(Layout::right_to_left(Align::Center)),
-    );
-    controls.spacing_mut().item_spacing.x = s.s1;
-    let mut press = |ui: &mut Ui, name: &str, spoken: String, primary: bool, pressed: Outbox| {
-        let button = if primary { button::TextButton::new(name).primary() } else { button::TextButton::new(name).secondary() };
-        let response = button.show(ui, theme, keymap);
-        ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(spoken.as_str()));
-        if response.clicked() {
-            asked = Some(pressed);
-        }
-    };
-    match (&row.state, mailbox.seconds_left(row.draft)) {
-        (SendState::Waiting(_), Some(_)) => {
-            press(&mut controls, tr!("Undo"), tr!("Undo the send of “{subject}”", subject = subject_label), false, Outbox::Unsend);
-        }
-        (SendState::Waiting(_), None) => {
-            press(&mut controls, tr!("Edit"), tr!("Take “{subject}” back and edit it", subject = subject_label), false, Outbox::Unsend);
-        }
-        (SendState::Refused { .. }, _) => {
-            press(&mut controls, tr!("Send again"), tr!("Send “{subject}” again", subject = subject_label), true, Outbox::Retry);
-            // An answer to an invitation changes only from the invitation.
-            if !row.invite_answer {
-                press(&mut controls, tr!("Edit"), tr!("Edit “{subject}”", subject = subject_label), false, Outbox::Edit);
-            }
-        }
-        (SendState::Sending, _) => {}
-    }
-    let (icon, ink) = standing_look(theme, &row.state);
-    let standing = line(&controls, &[(&mailbox.standing(row), f.mono_s, ink)], f32::INFINITY);
-    let mark = f.mono_s.line;
-    let (chip, _) = controls.allocate_exact_size(vec2(standing.size().x + mark + s.s1 + s.s2 * 2.0, mark + s.s1 * 2.0), Sense::hover());
-    controls.painter().rect_filled(chip, 0.0, p.panel);
-    let at = Rect::from_min_size(pos2(chip.left() + s.s2, chip.center().y - mark / 2.0), vec2(mark, mark));
-    crate::iconset::paint(controls.painter(), at, icon, ink);
-    controls.painter().galley(pos2(at.right() + s.s1, chip.center().y - standing.size().y / 2.0), standing, ink);
-    right = right.min(controls.min_rect().left() - s.s3);
-    let top = rect.top() + lines_top(theme);
-    let to = tr!("To {whom}", whom = whom);
-    let to = line(ui, &[(&to, f.body, p.ink)], (right - left).max(1.0));
-    ui.painter().galley(pos2(left, top + (first - to.size().y) / 2.0), to, p.ink);
-    let second_top = top + first + line_gap(theme);
-    let subject = line(ui, &[(subject, f.caption, p.ink)], (right - left).max(1.0));
-    ui.painter().galley(pos2(left, second_top + (second - subject.size().y) / 2.0), subject, p.ink);
-    if let Some(reply) = refused {
-        let reply = line(ui, &[(reply, f.caption, p.minus)], (rect.right() - s.s3 - left).max(1.0));
-        ui.painter().galley(pos2(left, second_top + second + s.s1), reply, p.minus);
-    }
-    asked
+    pressed.and_then(|index| asks.get(index).copied())
 }
 
 /// What the lines of a list share, and what they asked for this frame.
@@ -635,8 +572,8 @@ pub(super) fn line_height(theme: &Theme, line: &Line<'_>) -> f32 {
         Line::Head(..) | Line::More(..) => boxes.group_head,
         Line::Mail(_) => boxes.mail_row,
         Line::Leaving(_, gone) => even(boxes.mail_row * (1.0 - gone.clamp(0.0, 1.0))),
-        Line::Send(row) if matches!(row.state, SendState::Refused { .. }) => boxes.mail_row + even(f.caption.line + s.s1),
-        Line::Send(_) => boxes.mail_row,
+        Line::Send(row) if matches!(row.state, SendState::Refused { .. }) => Theme::size(theme, crate::component::outbox_row::REFUSED_HEIGHT),
+        Line::Send(_) => Theme::size(theme, crate::component::outbox_row::HEIGHT),
         Line::Card(_) => {
             let faces = f.strong.line + s.s1 + f.caption.line;
             even(faces.max(boxes.button) + s.s1 * 2.0 + ROW_INSET * 2.0)
@@ -937,7 +874,7 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, rank: usize, size: u
             }
         }
         Line::Send(row) => {
-            if let Some(pressed) = outbox_row(ui, theme, keymap, mailbox, row, (rank, size)) {
+            if let Some(pressed) = outbox_row(ui, theme, keymap, mailbox, row, rows.account_marker, (rank, size)) {
                 rows.outbox.set(Some((row.draft, pressed)));
             }
         }

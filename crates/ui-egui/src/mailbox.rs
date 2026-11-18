@@ -1996,6 +1996,21 @@ impl Mailbox {
         }
     }
 
+    /// Where the send `row` stands, in the outbox row's own words: "sending in 4 s", "Sat 08:00", "sending…" or
+    /// "not sent".
+    #[must_use]
+    pub fn standing_shown(&self, row: &OutboxRow) -> String {
+        match &row.state {
+            SendState::Waiting(at) => match (self.seconds_left(row.draft), at) {
+                (Some(seconds), _) => tr!("sending in {seconds} s", seconds = seconds),
+                (None, Some(at)) if *at > self.clock.now() => crate::component::typed_time::short(*at, self.clock.now(), self.offset),
+                _ => tr!("sending…").to_owned(),
+            },
+            SendState::Sending => tr!("sending…").to_owned(),
+            SendState::Refused { .. } => tr!("not sent").to_owned(),
+        }
+    }
+
     /// The send `row` as a screen reader says it: whom it goes to, the subject, and where it stands, with the server's
     /// reply when it was refused.
     #[must_use]

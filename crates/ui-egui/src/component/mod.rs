@@ -21,6 +21,7 @@
 //! - [`scroll`]: the scroll bar, 12 wide beside what scrolls, and the style egui scrolls with.
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
 //! - [`group_head`]: a group's index, name and unread count over its rows, with "done all" while hovered.
+//! - [`outbox_row`]: a send of the outbox: its mark, whom it goes to, where it stands, its buttons and its hold.
 //! - [`mail_row`]: a message of a list: sender, account bar, tag, marks and time over its subject and preview.
 //! - [`toast`]: a message that rises from the bottom edge, with Undo and its key chip.
 //! - [`popup`]: a float with menu rows, over sharp text or content that fades.
@@ -50,6 +51,7 @@ pub mod hover;
 pub mod icon;
 pub mod key;
 pub mod label;
+pub mod outbox_row;
 pub mod mail_row;
 pub mod pill;
 pub mod popup;

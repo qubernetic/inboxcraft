@@ -18,6 +18,7 @@ use super::gallery::{cell, cells, title};
 use super::hover::Action;
 use super::group_head::{self, GroupHead};
 use super::mail_row::{self, Mark, MailRow};
+use super::outbox_row::{self, OutboxRow, SendButton, Standing};
 use super::margin;
 use super::tag::TagKind;
 
@@ -273,14 +274,88 @@ fn group_heads(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// One state of the outbox row's sheet.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SendState {
+    pub name: &'static str,
+    pub words: &'static str,
+    pub standing: Standing,
+    pub buttons: &'static [&'static str],
+    pub shown: Shown,
+}
+
+/// The outbox row's words on the boards.
+pub(crate) const SEND_TO: &str = "To Odette Marchand";
+pub(crate) const SEND_SUBJECT: &str = "Re: Estimate for the window lettering";
+pub(crate) const SEND_REPLY: &str = "550 5.1.1 The address odette@example.org does not exist.";
+
+/// The outbox row's states, in the sheet's order, with the sheet's words.
+pub(crate) fn send_states() -> [SendState; 6] {
+    let countdown =
+        SendState { name: "countdown", words: "sending in 4 s", standing: Standing::Countdown { share: 0.8 }, buttons: &["Undo"], shown: Shown::Rest };
+    [
+        countdown,
+        SendState { name: "scheduled", words: "Tue 08:00", standing: Standing::Scheduled, buttons: &["Edit"], shown: Shown::Rest },
+        SendState { name: "sending", words: "sending… [=====>  ]", standing: Standing::Sending, buttons: &[], shown: Shown::Rest },
+        SendState { name: "refused", words: "not sent", standing: Standing::Refused, buttons: &["Send again", "Edit"], shown: Shown::Rest },
+        SendState { name: "hover", shown: Shown::Hover, ..countdown },
+        SendState { name: "focus", shown: Shown::Focus, ..countdown },
+    ]
+}
+
+/// What a screen reader hears for the outbox row of `state`.
+pub(crate) fn send_spoken(state: &SendState) -> String {
+    format!("{SEND_TO}, {SEND_SUBJECT}, {}", state.words)
+}
+
+/// The outbox row of `state`, 440 wide, at `ui`'s cursor.
+pub(crate) fn send(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &SendState) {
+    let spoken = send_spoken(state);
+    let buttons: Vec<SendButton<'_>> = state.buttons.iter().map(|name| SendButton { name, spoken: name }).collect();
+    let row = OutboxRow {
+        id: Id::unique("gallery-outbox-row").with(state.name),
+        spoken: &spoken,
+        to: SEND_TO,
+        account: Some(1),
+        subject: SEND_SUBJECT,
+        words: state.words,
+        standing: state.standing,
+        reply: (state.standing == Standing::Refused).then_some(SEND_REPLY),
+        buttons: &buttons,
+        last: false,
+    };
+    let high = Theme::size(theme, outbox_row::height(state.standing));
+    ui.allocate_ui(vec2(ROW_WIDTH, high), |ui| {
+        ui.set_width(ROW_WIDTH);
+        let ground = Rect::from_min_size(ui.cursor().min, vec2(ROW_WIDTH, high));
+        ui.painter().rect_filled(ground, 0.0, theme.palette.surface);
+        let forced = (state.shown != Shown::Rest).then_some(state.shown);
+        outbox_row::outbox_row(ui, theme, keymap, &row, forced);
+    });
+}
+
+/// The outbox row's board: every state of its sheet, two to a line.
+fn sends(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Outbox row"));
+    for pair in send_states().chunks(2) {
+        cells(ui, theme, |ui| {
+            for state in pair {
+                cell(ui, theme, state.name, |ui| send(ui, theme, keymap, state));
+            }
+        });
+    }
+}
+
 /// The left column: the mail row.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     mail_rows(ui, theme, keymap);
 }
 
-/// The right column: the group head.
+/// The right column: the group head and the outbox row.
 fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     group_heads(ui, theme, keymap);
+    ui.add_space(BOARD_GAP);
+    sends(ui, theme, keymap);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.

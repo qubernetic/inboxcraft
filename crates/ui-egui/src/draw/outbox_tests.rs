@@ -331,3 +331,19 @@ fn each_send_of_the_outbox_tells_a_screen_reader_its_place_in_the_list() {
     places.sort();
     assert_eq!(places, [(Some(0), Some(2)), (Some(1), Some(2))]);
 }
+
+#[test]
+fn a_refused_send_is_the_outbox_rows_72_high_and_a_held_one_56() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Dark);
+    send(&mut harness, "Work party on Saturday");
+    harness.state_mut().mailbox_mut().open(Place::Outbox);
+    harness.run();
+    let held = harness.get_by_label("To Odile Brannock, Work party on Saturday, Sending in 5 s").rect();
+    assert_eq!(held.height(), 56.0, "{held:?}");
+    clock.advance(Duration::from_secs(6));
+    harness.state_mut().mailbox_mut().pump(&mut Scripted::default().refusing("550 5.1.1 No such user here"));
+    harness.run();
+    let refused = harness.get_by_label("To Odile Brannock, Work party on Saturday, Not sent: 550 5.1.1 No such user here").rect();
+    assert_eq!(refused.height(), 72.0, "{refused:?}");
+}
