@@ -466,6 +466,12 @@ impl Fonts {
         self.title.sized(self.title.size * 0.9)
     }
 
+    /// An event's title in a timed cell of the calendar's grid: Plex Sans SemiBold 13 on a line of 17.
+    #[must_use]
+    pub fn event_cell(&self) -> Font {
+        Font { face: Face::SansSemiBold, size: self.body.size * 13.0 / 14.0, line: self.body.size * 17.0 / 14.0, ..self.body }
+    }
+
     /// The mark of a ticked check box, `×`: Plex Mono SemiBold 14/16.
     #[must_use]
     pub fn check_mark(&self) -> Font {

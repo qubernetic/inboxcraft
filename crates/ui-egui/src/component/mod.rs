@@ -46,6 +46,7 @@ pub mod facts;
 pub mod field;
 pub mod gallery;
 pub mod gallery_blocks;
+pub mod gallery_calendar;
 pub mod gallery_fields;
 pub mod gallery_screens;
 pub mod hover;

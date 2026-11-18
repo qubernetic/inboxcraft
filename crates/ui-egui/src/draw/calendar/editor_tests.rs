@@ -131,7 +131,8 @@ fn an_edit_with_its_guests_told_says_so_in_the_toast() {
 fn the_form_s_controls_change_the_event() {
     let mut harness = on_calendar(egui::Theme::Light);
     press(&mut harness, "New event");
-    harness.get_by_role_and_label(Role::RadioButton, "Studio").click();
+    press_field(&mut harness, "Calendar");
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio").click();
     harness.run();
     press(&mut harness, "Free");
     choose_repeat(&mut harness, "Weekly");
@@ -146,6 +147,7 @@ fn the_form_s_controls_change_the_event() {
     harness.run();
     assert_eq!(harness.state().calendar().editor().unwrap().form().start, "2026-11-05 09:00");
     press(&mut harness, "Busy");
+    // Opened a second time, the list stands over the editor still.
     choose_repeat(&mut harness, "Never");
     let form = harness.state().calendar().editor().unwrap().form().clone();
     assert_eq!((form.repeat.as_str(), form.busy), ("none", true));
@@ -166,7 +168,7 @@ fn a_custom_repeat_shows_as_custom_and_cannot_be_picked() {
     harness.key_press(Key::Escape);
     harness.run();
     assert_eq!(harness.state().calendar().editor().unwrap().form().repeat, "custom");
-    assert!(harness.query_by_label("Studio").is_some_and(|node| node.accesskit_node().role() == Role::CheckBox), "an edit picks no calendar");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Calendar").is_none(), "an edit picks no calendar");
 }
 
 #[test]

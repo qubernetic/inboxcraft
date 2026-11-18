@@ -1,15 +1,16 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The event editor, floating over the calendar's top right as the design's Calendar page shows it: its title, the
-//! event's title, Starts and Ends side by side, All day and Private as check boxes, Repeat as a select with its popup
-//! and Show as busy or free as a segmented control beside it, the calendar for a new event as a segmented control (a
-//! select where the calendars do not fit side by side), the guests' addresses, and for an edit of an event with guests
-//! the question whether to tell them (Don't tell them, the default, or Send them the update); then why the last save
-//! was refused, and Cancel and Save. The fields and choices change the [`Editor`] as they are used; Save and Cancel
-//! come back as [`Asked`].
+//! The event editor, a float hanging from New event (also when Edit opened it) as the design's event-editor frames
+//! draw it, 432 wide, its right edge on New event's: its title with the Esc key, the event's title, Starts and Ends
+//! side by side, All day and Private, Repeat as a select with Show as busy or free beside it, "this event only" for a
+//! series (coming soon), the calendar of a new event as a select, the guests' addresses, and for an edit of an event
+//! with guests the question whether to tell them; then why the last save was refused, and Cancel and Save. The fields
+//! are the project's field components with their input caps. Esc or a press outside comes back as [`Asked::Leave`]:
+//! the editor closes when nothing was typed; else it stays and says how to keep or throw away the typing (Save; Cancel
+//! or a second Esc), and a press outside never closes it. A press outside reaches nothing under the editor.
 
-use egui::{Align, Align2, Area, Frame, Id, Layout, Order, Rect, Response, RichText, Ui, vec2};
+use egui::{Context, Id, Rect, Response, Ui, pos2, vec2};
 
 use super::Asked;
 use crate::calendar::Editor;
@@ -17,77 +18,72 @@ use crate::calendar::editor::{MAX_FIELD, MAX_GUESTS_TEXT, Menu, REPEATS, repeat_
 use crate::component::button::TextButton;
 use crate::component::checkbox::{checkbox, radio};
 use crate::component::field::{self, Field};
-use crate::component::margin;
-use crate::component::popup;
+use crate::component::key::{ChipState, key_chip};
+use crate::component::popup::{self, Float};
 use crate::component::segmented::{self, segmented};
 use crate::component::select::Select;
+use crate::component::soon::{soon, soon_tag};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
-use crate::theme::{Font, Theme};
+use crate::theme::Theme;
 use crate::tr;
 
-/// The editor's width, in points, as the design draws it.
-const WIDTH: f32 = 430.0;
+/// The editor's width, in points, its edge included, as the design draws it.
+const WIDTH: f32 = 432.0;
 
 /// Between the editor's rows, in points.
-const ROWS: f32 = 11.0;
+const ROWS: f32 = 12.0;
 
 /// From a label to its field, in points.
-const LABEL_GAP: f32 = 6.0;
+const LABEL_GAP: f32 = 8.0;
 
-/// Between Repeat and Show as, in points.
-const CHOICE_GAP: f32 = 14.0;
+/// Between two fields side by side, in points.
+const SIDE_GAP: f32 = 12.0;
 
-/// The editor over the top right of `screen`; what was pressed in it.
-pub(in crate::draw) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, editor: &mut Editor, screen: Rect) -> Vec<Asked> {
-    let s = &theme.spacing;
-    let width = WIDTH.min((screen.width() - s.s2 * 4.0).max(1.0));
-    let corner = screen.right_top() + vec2(-(s.s2 + s.s4), s.s2 * 6.0 + s.s1 + 3.0);
+/// The editor's float.
+fn float_id() -> Id {
+    Id::unique("event-editor")
+}
+
+/// The editor hanging from `new_event` (New event's rect, if it was drawn); what was pressed in it. While `quiet`
+/// another surface lies over it (the palette, the settings sheet) and has the keys and the pointer.
+pub(in crate::draw) fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, editor: &mut Editor, new_event: Option<Rect>, quiet: bool) -> Vec<Asked> {
+    let screen = ctx.content_rect();
+    let button = new_event.unwrap_or_else(|| Rect::from_min_size(pos2(screen.right() - 16.0, screen.top() + 48.0), vec2(0.0, 0.0)));
+    // Its right edge on New event's: the float hangs from a place as wide as it, ending where the button ends.
+    let anchor = Rect::from_min_max(pos2(button.right() - WIDTH, button.top()), button.max);
+    let float = Float { id: float_id(), anchor, width: WIDTH, returns_to: Id::NULL };
     let mut asked = Vec::new();
-    Area::new(Id::unique("event-editor")).order(Order::Foreground).pivot(Align2::RIGHT_TOP).fixed_pos(corner).show(ctx, |ui| {
-        popup::panel(ui, theme, width, |ui| {
-            Frame::new().inner_margin(margin(s.s3, s.s3)).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = ROWS;
-                form(ui, theme, keymap, editor, &mut asked);
-            });
+    let shown = popup::held(ctx, theme, &float, quiet, |ui| {
+        egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 16, top: 12, bottom: 16 }).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, ROWS);
+            form(ui, theme, keymap, editor, &mut asked);
         });
     });
+    if let Some((_, Some(leave))) = shown {
+        asked.push(Asked::Leave(leave));
+    }
     asked
 }
 
-/// A field's label: the `label` style (Plex Mono, capitals) in the muted colour.
-fn label(ui: &mut Ui, theme: &Theme, text: &str) -> Response {
-    crate::component::label(ui, theme.fonts.label, text, theme.palette.muted)
-}
-
-/// A field under its `label` (the caption in the muted colour); `add` draws the field.
-fn labelled(ui: &mut Ui, theme: &Theme, text: &str, width: f32, add: impl FnOnce(&mut Ui) -> Response) -> Response {
-    ui.vertical(|ui| {
-        ui.set_width(width);
-        ui.spacing_mut().item_spacing.y = LABEL_GAP;
-        let label = label(ui, theme, text);
-        add(ui).labelled_by(label.id)
-    })
-    .inner
-}
-
-/// A control under its `label` that speaks for itself; `add` draws the control.
-fn captioned(ui: &mut Ui, theme: &Theme, text: &str, width: f32, add: impl FnOnce(&mut Ui)) {
-    ui.vertical(|ui| {
-        ui.set_width(width);
-        ui.spacing_mut().item_spacing.y = LABEL_GAP;
-        label(ui, theme, text);
-        add(ui);
-    });
-}
-
-/// A one-line field `width` points wide under its `label`, holding `text` (at most `limit` characters), `hint` while it
-/// is empty.
+/// A one-line field `width` points wide with its `label`, holding `text` (at most `limit` characters), `hint` while
+/// it is empty.
 fn line(ui: &mut Ui, theme: &Theme, (salt, label): (&str, &str), text: &mut String, hint: &str, (width, limit): (f32, usize)) -> Response {
     ui.vertical(|ui| {
         ui.set_width(width);
         let id = ui.make_persistent_id(("event-editor", salt));
         field::text_field_limited(ui, theme, id, text, &Field::new(label, hint), limit)
+    })
+    .inner
+}
+
+/// A control under its `label`; `add` draws it.
+fn labelled<R>(ui: &mut Ui, theme: &Theme, text: &str, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.vertical(|ui| {
+        ui.set_width(width);
+        ui.spacing_mut().item_spacing.y = LABEL_GAP;
+        crate::component::label(ui, theme.fonts.label, text, theme.palette.muted);
+        add(ui)
     })
     .inner
 }
@@ -103,24 +99,29 @@ fn keep_menu(editor: &mut Editor, menu: Menu, open: bool) {
 
 fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
-    let s = &theme.spacing;
     let width = ui.available_width();
-    let title = theme.fonts.event_title();
-    ui.label(RichText::new(editor.title()).font(title.id()).color(p.ink));
+    let head = theme.boxes().button;
+    ui.allocate_ui_with_layout(vec2(width, head), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.set_min_height(head);
+        key_chip(ui, theme, tr!("Esc"), ChipState::Default);
+        ui.add_space(8.0);
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            crate::component::label(ui, theme.fonts.heading, editor.title(), p.ink);
+        });
+    });
     let hint = if editor.form().all_day { "2026-11-06" } else { "2026-11-06 13:00" };
     {
         let form = editor.form_mut();
         line(ui, theme, ("title", tr!("Title")), &mut form.summary, tr!("(No title)"), (width, MAX_FIELD));
-        let gap = 10.0;
-        let half = ((width - gap) / 2.0).max(1.0);
+        let half = ((width - SIDE_GAP) / 2.0).max(1.0);
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
+            ui.spacing_mut().item_spacing.x = SIDE_GAP;
             line(ui, theme, ("starts", tr!("Starts")), &mut form.start, hint, (half, MAX_FIELD));
             line(ui, theme, ("ends", tr!("Ends")), &mut form.end, hint, (half, MAX_FIELD));
         });
     }
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = s.s4;
+        ui.spacing_mut().item_spacing.x = 24.0;
         let all_day = editor.form().all_day;
         if checkbox(ui, theme, tr!("All day"), all_day).clicked() {
             editor.set_all_day(!all_day);
@@ -131,20 +132,33 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
         }
     });
     repeat_and_show_as(ui, theme, editor, width);
+    if editor.id().is_some() && editor.form().repeat != REPEATS[0] {
+        // Changing one occurrence of a series is not built yet: the whole series changes.
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            soon(ui, theme, |ui| {
+                checkbox(ui, theme, tr!("This event only"), false);
+                soon_tag(ui, theme);
+            });
+        });
+    }
     calendar_choice(ui, theme, editor, width);
     line(ui, theme, ("guests", tr!("Guests")), &mut editor.form_mut().guests, "name@example.org, …", (width, MAX_GUESTS_TEXT));
     if editor.asks_notify() {
         notify(ui, theme, editor);
     }
     if let Some(problem) = editor.problem() {
-        ui.add(egui::Label::new(RichText::new(problem).font(theme.fonts.caption.id()).color(p.ink)).wrap());
+        let galley = crate::component::wrapped(ui, problem, theme.fonts.caption, p.ink, width, 4, egui::Align::Min);
+        let (rect, response) = ui.allocate_exact_size(vec2(width, galley.size().y), egui::Sense::hover());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Label, true, problem));
+        crate::draw::paint::rows_at(ui.painter(), rect.min, width, galley, p.ink);
     }
-    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        ui.spacing_mut().item_spacing.x = s.s2;
+    ui.allocate_ui_with_layout(vec2(width, theme.boxes().button), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
         if TextButton::new(tr!("Save")).primary().show(ui, theme, keymap).clicked() {
             asked.push(Asked::Save);
         }
-        if TextButton::new(tr!("Cancel")).secondary().show(ui, theme, keymap).clicked() {
+        if TextButton::new(tr!("Cancel")).plain().show(ui, theme, keymap).clicked() {
             asked.push(Asked::Cancel);
         }
     });
@@ -155,28 +169,27 @@ fn repeat_and_show_as(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f3
     let font = theme.fonts.button;
     let shows = [(true, tr!("Busy"), font), (false, tr!("Free"), font)];
     let show_as = segmented::width(ui, theme, &shows).min(width);
-    let repeat = (width - show_as - CHOICE_GAP).max(1.0);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = CHOICE_GAP;
+    let repeat = (width - show_as - SIDE_GAP).max(1.0);
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = SIDE_GAP;
         let mut open = editor.menu() == Some(Menu::Repeat);
         let names = REPEATS.map(repeat_text);
         let options: Vec<(usize, &str)> = names.iter().copied().enumerate().collect();
         let current = REPEATS.iter().position(|id| *id == editor.form().repeat);
         // A repeat the presets do not name stays as it is until a preset is picked.
         let shown = repeat_text(&editor.form().repeat);
-        let mut chosen = None;
-        labelled(ui, theme, tr!("Repeat"), repeat, |ui| {
-            let (field, taken) =
+        let chosen = labelled(ui, theme, tr!("Repeat"), repeat, |ui| {
+            let (_, taken) =
                 Select { name: tr!("Repeat"), shown, options: &options, current, icon: IconId::Changed, width: repeat }.show(ui, theme, &mut open);
-            chosen = taken;
-            field
+            taken
         });
         keep_menu(editor, Menu::Repeat, open);
         if let Some(id) = chosen.and_then(|index| REPEATS.get(index)) {
             (*id).clone_into(&mut editor.form_mut().repeat);
         }
         let form = editor.form_mut();
-        captioned(ui, theme, tr!("Show as"), show_as, |ui| {
+        labelled(ui, theme, tr!("Show as"), show_as, |ui| {
+            ui.add_space(2.0);
             if let Some(busy) = segmented(ui, theme, &shows, form.busy) {
                 form.busy = busy;
             }
@@ -184,32 +197,19 @@ fn repeat_and_show_as(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f3
     });
 }
 
-/// The calendar of a new event: a segmented control, or a select where the calendars do not fit side by side.
+/// The calendar of a new event, as a select.
 fn calendar_choice(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f32) {
     if editor.choices().is_empty() {
         return;
     }
     let names: Vec<(u64, String)> = editor.choices().to_vec();
-    let font = theme.fonts.button;
-    let wide: Vec<(u64, &str, Font)> = names.iter().map(|(id, name)| (*id, name.as_str(), font)).collect();
     let current = editor.form().calendar;
-    if segmented::width(ui, theme, &wide) <= width {
-        captioned(ui, theme, tr!("Calendar"), width, |ui| {
-            if let Some(calendar) = segmented(ui, theme, &wide, current) {
-                editor.form_mut().calendar = calendar;
-            }
-        });
-        return;
-    }
     let mut open = editor.menu() == Some(Menu::Calendar);
     let options: Vec<(u64, &str)> = names.iter().map(|(id, name)| (*id, name.as_str())).collect();
     let shown = options.iter().find(|(id, _)| *id == current).map_or("", |(_, name)| *name);
-    let mut chosen = None;
-    labelled(ui, theme, tr!("Calendar"), width, |ui| {
+    let chosen = labelled(ui, theme, tr!("Calendar"), width, |ui| {
         let select = Select { name: tr!("Calendar"), shown, options: &options, current: Some(current), icon: IconId::Calendar, width };
-        let (field, taken) = select.show(ui, theme, &mut open);
-        chosen = taken;
-        field
+        select.show(ui, theme, &mut open).1
     });
     keep_menu(editor, Menu::Calendar, open);
     if let Some(calendar) = chosen {
@@ -217,17 +217,15 @@ fn calendar_choice(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f32) 
     }
 }
 
-/// The question whether to tell the guests of the change, on a tinted box.
+/// The question whether to tell the guests of the change, with its two answers.
 fn notify(ui: &mut Ui, theme: &Theme, editor: &mut Editor) {
     let p = &theme.palette;
-    let s = &theme.spacing;
-    Frame::new().fill(p.grid).corner_radius(10).inner_margin(margin(s.s3, s.s3)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.spacing_mut().item_spacing.y = s.s2;
-        ui.label(RichText::new(editor.notify_question()).font(theme.fonts.body.id()).color(p.ink));
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 8.0;
+        crate::component::label(ui, theme.fonts.body, &editor.notify_question(), p.ink);
         let notify = editor.notify();
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s4;
+            ui.spacing_mut().item_spacing.x = 24.0;
             if radio(ui, theme, tr!("Don't tell them"), !notify).clicked() {
                 editor.set_notify(false);
             }

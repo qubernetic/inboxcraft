@@ -1,0 +1,110 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Small looks of the calendar's frames: New event pressed while the editor hangs from it, the toolbar's note 20 after
+//! the title, the day's float counting its events with the number alone.
+
+use egui::accesskit::Role;
+use egui::{Color32, Rect, vec2};
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable as _;
+use inboxcraft_time::{FakeClock, Timestamp};
+
+use crate::calendar::{Day, View};
+use crate::mailbox::Mailbox;
+use crate::theme::{Mode, Palette};
+use crate::{InboxApp, sample};
+
+fn clock() -> Box<FakeClock> {
+    Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()))
+}
+
+fn window(view: View) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.show_calendar();
+    let (calendar, mailbox) = app.calendar_mut();
+    calendar.set_view(mailbox, view);
+    let mut harness =
+        Harness::builder().with_size(vec2(1440.0, 900.0)).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness
+}
+
+/// Every filled rect of the last frame and its fill.
+fn rects(harness: &Harness<'static, InboxApp>) -> Vec<(Rect, Color32)> {
+    fn open(shape: &egui::Shape, out: &mut Vec<(Rect, Color32)>) {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, out)),
+            egui::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, &mut out));
+    out
+}
+
+/// The texts of the last frame: where each starts, how wide it is, and what it says.
+fn texts(harness: &Harness<'static, InboxApp>) -> Vec<(f32, f32, String)> {
+    harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => Some((text.pos.x, text.galley.size().x, text.galley.text().to_owned())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn new_event_is_pressed_while_the_editor_hangs_from_it() {
+    let p = Palette::of(Mode::Dark);
+    let mut harness = window(View::Week);
+    let button = harness.get_by_role_and_label(Role::Button, "New event").rect();
+    let pressed = |harness: &Harness<'static, InboxApp>| rects(harness).iter().any(|(rect, fill)| *fill == p.cyan_muted && *rect == button);
+    assert!(!pressed(&harness), "at rest it is the cyan fill");
+    harness.get_by_role_and_label(Role::Button, "New event").click();
+    harness.run();
+    assert!(pressed(&harness), "open, the editor's button is pressed: cyan_muted");
+    harness.state_mut().calendar_mut().0.close_editor();
+    harness.run();
+    assert!(!pressed(&harness));
+}
+
+#[test]
+fn the_toolbar_s_note_stands_20_after_the_title() {
+    let harness = window(View::Week);
+    let found = texts(&harness);
+    let title = found.iter().find(|(_, _, text)| text == "2 – 8 November 2026").unwrap();
+    let note = found.iter().find(|(_, _, text)| text.starts_with("week ")).unwrap();
+    assert!((note.0 - (title.0 + title.1) - 20.0).abs() < 0.01, "title {title:?}, note {note:?}");
+}
+
+#[test]
+fn the_day_s_float_counts_its_events_with_the_number_alone() {
+    let mut harness = window(View::Month);
+    let thursday = Day::new(2026, 11, 5).unwrap();
+    let held = harness.state().calendar().events().filter(|event| event.covers(thursday)).count();
+    harness.state_mut().calendar_mut().0.set_more(Some(thursday));
+    harness.run();
+    let found = texts(&harness);
+    assert!(found.iter().any(|(_, _, text)| *text == held.to_string()), "the count as the design writes it: {held}");
+    assert!(!found.iter().any(|(_, _, text)| text.ends_with(" events") && text.starts_with(&held.to_string())));
+}
+
+#[test]
+fn the_side_panel_s_content_stands_16_in_and_the_mini_month_is_220_wide() {
+    let p = Palette::of(Mode::Dark);
+    let harness = window(View::Week);
+    // The panel 252 wide at the right of the card, after its hairline; its scrolling part 15 in, its content 1 further,
+    // as the frame pads it.
+    let found = rects(&harness);
+    let (edge, _) =
+        found.iter().copied().find(|(rect, fill)| *fill == p.line && rect.width() == 1.0 && rect.height() > 500.0 && rect.left() > 1000.0).unwrap();
+    let mini = found.into_iter().find(|(rect, fill)| *fill == p.surface && rect.left() > edge.right() && (rect.height() - 240.0).abs() < 41.0);
+    let (mini, _) = mini.unwrap();
+    assert_eq!(mini.left(), edge.right() + 16.0, "{mini:?}");
+    assert_eq!(mini.width(), 220.0, "{mini:?}");
+    assert_eq!(mini.top(), edge.top() + 16.0, "{mini:?}");
+}

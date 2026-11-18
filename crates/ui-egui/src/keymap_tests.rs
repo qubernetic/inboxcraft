@@ -168,3 +168,68 @@ fn a_captured_key_is_taken_from_the_input_and_escape_cancels() {
         }
     }
 }
+
+/// `ui.list.down` stands for an action of the mail screen's list: its scope is the mail's.
+#[test]
+fn actions_of_screens_never_shown_together_share_a_key_and_a_real_clash_still_takes_it() {
+    use super::{CALENDAR_CLOSE, CALENDAR_DOWN, CALENDAR_OPEN, CALENDAR_UP, Scope, scope};
+    let down = KeyboardShortcut::new(Modifiers::NONE, Key::ArrowDown);
+    assert_eq!(scope(CALENDAR_DOWN), Scope::Calendar);
+    assert_eq!(scope(FIND), Scope::Window);
+    assert_eq!(scope("ui.list.down"), Scope::Mail);
+    assert!(!Scope::Calendar.meets(Scope::Mail) && !Scope::Mail.meets(Scope::Calendar), "the calendar and the mail never show together");
+    assert!(Scope::Window.meets(Scope::Calendar) && Scope::Calendar.meets(Scope::Calendar));
+    // Two actions of different screens keep one key.
+    let mut keymap = Keymap::default();
+    keymap.bind("ui.list.down", down);
+    assert_eq!(keymap.shortcut("ui.list.down"), Some(down));
+    assert_eq!(keymap.shortcut(CALENDAR_DOWN), Some(down), "the calendar keeps its ArrowDown beside the list's");
+    assert_eq!(keymap.clash(CALENDAR_DOWN, down), None);
+    // Two of one scope still clash: the calendar's up takes ArrowDown from its down.
+    keymap.bind(CALENDAR_UP, down);
+    assert_eq!(keymap.shortcut(CALENDAR_DOWN), None, "one key runs one action of a screen");
+    assert_eq!(keymap.shortcut("ui.list.down"), Some(down), "the other screen's action keeps it");
+    // A window action clashes with every screen's.
+    assert_eq!(keymap.clash(FIND, down), Some(CALENDAR_UP));
+    keymap.bind(FIND, down);
+    assert_eq!(keymap.shortcut(CALENDAR_UP), None);
+    assert_eq!(keymap.shortcut("ui.list.down"), None);
+    // The defaults hold every calendar key; Enter and Esc beside the window's keys.
+    let defaults = Keymap::default();
+    for id in super::CALENDAR_KEYS {
+        assert!(defaults.shortcut(id).is_some(), "{id} has its key");
+    }
+    assert!(defaults.shortcut(CALENDAR_OPEN).is_some() && defaults.shortcut(CALENDAR_CLOSE).is_some());
+}
+
+#[test]
+fn a_keymap_kept_before_the_calendar_s_keys_still_loads() {
+    // As a keymap was kept before the calendar had keys: no `ui.calendar.*` at all.
+    let before = serde_json::json!({ "keys": { FIND: "Command+F", DONE: "D", READ: "Shift+R", PALETTE: "Command+K", MAIL: "Command+1" } });
+    let read = Keymap::from_value(&before);
+    assert_eq!(read.shortcut(READ), Some(KeyboardShortcut::new(Modifiers::SHIFT, Key::R)));
+    for id in super::CALENDAR_KEYS {
+        assert_eq!(read.shortcut(id), Keymap::default().shortcut(id), "{id} takes its default");
+    }
+    // Kept and read back, the defaults with their shared keys stay as they were.
+    assert_eq!(Keymap::from_value(&Keymap::default().to_value()), Keymap::default());
+    // A window action kept on what is now a calendar key: the scopes meet, so the window's action keeps the key the
+    // owner gave it and the calendar's action loses its default; the other calendar keys keep theirs.
+    let (down, enter) = (KeyboardShortcut::new(Modifiers::NONE, Key::ArrowDown), KeyboardShortcut::new(Modifiers::NONE, Key::Enter));
+    let read = Keymap::from_value(&serde_json::json!({ "keys": { FIND: "ArrowDown", DONE: "Enter" } }));
+    assert_eq!((read.shortcut(FIND), read.shortcut(DONE)), (Some(down), Some(enter)));
+    assert_eq!(read.shortcut(super::CALENDAR_DOWN), None, "one key runs one action where the window's and the calendar's meet");
+    assert_eq!(read.shortcut(super::CALENDAR_OPEN), None);
+    assert_eq!(read.shortcut(super::CALENDAR_UP), Keymap::default().shortcut(super::CALENDAR_UP));
+    // Whatever is kept, after loading no two actions whose scopes meet share a key.
+    let every: serde_json::Map<String, serde_json::Value> = actions().into_iter().map(|action| (action.id.to_owned(), "ArrowDown".into())).collect();
+    for kept in [before, serde_json::json!({ "keys": { FIND: "ArrowDown", DONE: "Enter" } }), serde_json::json!({ "keys": every })] {
+        let read = Keymap::from_value(&kept);
+        for a in actions() {
+            for b in actions() {
+                let shared = a.id != b.id && read.shortcut(a.id).is_some() && read.shortcut(a.id) == read.shortcut(b.id);
+                assert!(!(shared && super::scope(a.id).meets(super::scope(b.id))), "{} and {} share a key in scopes that meet", a.id, b.id);
+            }
+        }
+    }
+}

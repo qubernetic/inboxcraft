@@ -523,7 +523,11 @@ fn key_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, waits: 
 fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings) -> Option<Asked> {
     let s = &theme.spacing;
     let mut asked = None;
-    note(ui, theme, tr!("Every action can have a key. One key runs one action: giving a key takes it from the action that had it."));
+    note(
+        ui,
+        theme,
+        tr!("Every action can have a key. One key runs one action on a screen: giving a key takes it from the action that had it there."),
+    );
     ui.add_space(s.s2);
     ui.horizontal(|ui| {
         let width = (ui.available_width() * 0.6).max(1.0);

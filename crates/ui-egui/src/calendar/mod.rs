@@ -27,6 +27,7 @@ use serde_json::{Value, json};
 
 pub use self::day::Day;
 pub use self::editor::Editor;
+
 use crate::mailbox::{Mailbox, shown};
 use crate::tr;
 
@@ -239,7 +240,7 @@ impl EventRow {
     }
 
     fn read(value: &Value) -> Option<Self> {
-        let text = |key: &str| shown(value.get(key).and_then(Value::as_str).unwrap_or_default());
+        let text = |key: &str| line(value.get(key).and_then(Value::as_str).unwrap_or_default());
         let moment = |key: &str| value.get(key).and_then(Value::as_str).and_then(Moment::parse);
         let day = |key: &str| value.get(key).and_then(Value::as_str).and_then(Day::parse);
         let (start, end) = (moment("local_start")?, moment("local_end")?);
@@ -275,7 +276,7 @@ impl EventRow {
             untitled: summary.trim().is_empty(),
             summary: if summary.trim().is_empty() { tr!("(No title)").to_owned() } else { summary },
             location: text("location"),
-            description: text("description"),
+            description: paragraphs(value.get("description").and_then(Value::as_str).unwrap_or_default()),
             start,
             end,
             first,
@@ -355,6 +356,49 @@ pub struct Calendar {
     unreadable: u64,
     /// The event editor, while it is open.
     editor: Option<Editor>,
+    /// The accounts the calendars belong to, as of the last read: id, place in the account list, name.
+    accounts: Vec<(u64, usize, String)>,
+    /// The day the arrows picked in the month or the mini month, if they did.
+    picked_day: Option<Day>,
+    /// The day whose events show in a float ("+N more"), while it is open.
+    more: Option<Day>,
+    /// The seconds of the minute now, at the last tick: how long the now line rests.
+    second: u8,
+    /// Changes whenever the events shown change (a read, a calendar shown or hidden): what the views laid out of the
+    /// events is kept while it stays the same.
+    serial: u64,
+}
+
+/// The next [`Calendar::serial`]: never the same twice in a run, whichever calendar takes it.
+fn next_serial() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// What the keyboard is on in the calendar: the button the next frame hands the focus to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    /// An occurrence's block.
+    Event(Picked),
+    /// A day's number in the month view.
+    Day(Day),
+    /// A day of the mini month.
+    Mini(Day),
+    /// The picked event's details (their first control).
+    Details,
+}
+
+/// Which way an arrow moves the pick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Way {
+    /// Left: a day back, or the event of the day before.
+    Left,
+    /// Right: a day on, or the event of the next day.
+    Right,
+    /// Up: a week back, or the event before.
+    Up,
+    /// Down: a week on, or the next event.
+    Down,
 }
 
 impl Calendar {
@@ -432,6 +476,20 @@ impl Calendar {
         }
     }
 
+    /// Puts `events` in the days shown in place of what was read: a test's hostile events (zero or negative length,
+    /// far-off dates, hundreds at once) and the bench's thousands, which no server gives this way.
+    #[doc(hidden)]
+    pub fn set_events(&mut self, events: Vec<EventRow>) {
+        self.events = events;
+        self.serial = next_serial();
+    }
+
+    /// What the events shown are now: it changes whenever they change, and never comes back to an old value.
+    #[must_use]
+    pub fn serial(&self) -> u64 {
+        self.serial
+    }
+
     /// The occurrences of the shown calendars in the days shown, by start.
     pub fn events(&self) -> impl Iterator<Item = &EventRow> {
         self.events.iter().filter(|event| !self.hidden.contains(&event.calendar))
@@ -468,17 +526,142 @@ impl Calendar {
         (self.truncated, self.unreadable)
     }
 
+    /// The place of the account of calendar `id` among the accounts, which picks its colour (H8); 0 when unknown.
+    #[must_use]
+    pub fn account_place(&self, id: u64) -> u64 {
+        self.calendar(id).map_or(0, |row| self.account_index(row.account))
+    }
+
+    /// The place of account `account` among the accounts; 0 when unknown.
+    #[must_use]
+    pub fn account_index(&self, account: u64) -> u64 {
+        self.accounts.iter().find(|(id, _, _)| *id == account).map_or(0, |(_, index, _)| u64::try_from(*index).unwrap_or(0))
+    }
+
+    /// The name of account `account`, or `Account` when it is not known.
+    #[must_use]
+    pub fn account_label(&self, account: u64) -> String {
+        self.accounts.iter().find(|(id, _, _)| *id == account).map_or_else(|| tr!("Account").to_owned(), |(_, _, name)| name.clone())
+    }
+
+    /// The day the arrows picked in the month or the mini month, if they did.
+    #[must_use]
+    pub fn picked_day(&self) -> Option<Day> {
+        self.picked_day
+    }
+
+    /// Picks `day` in the month or the mini month, as the keyboard reaching its button does.
+    pub fn pick_day(&mut self, day: Option<Day>) {
+        self.picked_day = day;
+    }
+
+    /// The day whose events show in a float, while it is open.
+    #[must_use]
+    pub fn more(&self) -> Option<Day> {
+        self.more
+    }
+
+    /// Shows the events of `day` in a float, or with `None` closes it.
+    pub fn set_more(&mut self, day: Option<Day>) {
+        self.more = day;
+    }
+
+    /// Takes the time now from the clock (today, the now line) without reading the calendars again: each frame.
+    pub fn tick(&mut self, now: Timestamp, offset: Offset) {
+        if let Some(civil) = now.to_civil(offset) {
+            self.second = civil.second();
+            if let Some(day) = Day::new(civil.year(), civil.month(), civil.day()) {
+                self.today = Some(day);
+                self.now = Some(Moment { day, minute: u16::from(civil.hour()).saturating_mul(60).saturating_add(u16::from(civil.minute())) });
+            }
+        }
+    }
+
+    /// How long until the minute turns: the now line asks for a repaint then, never sooner.
+    #[must_use]
+    pub fn until_next_minute(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(60_u64.saturating_sub(u64::from(self.second.min(59))))
+    }
+
+    /// Moves the pick one step `way`: in the month (or the mini month, `mini`) the picked day a day or a week, in the
+    /// day, week and agenda the picked event to the one before or after (left and right to the day before or after in
+    /// the week, the day itself in the day view). The view follows a day that leaves it. Where the keyboard goes.
+    pub fn move_pick(&mut self, mailbox: &mut Mailbox, way: Way, mini: bool) -> Option<Target> {
+        if mini || self.view == View::Month {
+            let from = self.picked_day.unwrap_or_else(|| self.focus());
+            let to = from.plus(match way {
+                Way::Left => -1,
+                Way::Right => 1,
+                Way::Up => -7,
+                Way::Down => 7,
+            });
+            self.picked_day = Some(to);
+            if mini {
+                self.month = Some(to.first_of_month());
+                return Some(Target::Mini(to));
+            }
+            let (first, last) = self.span();
+            if to.month() != self.focus().month() || to < first || to > last {
+                self.go_to(mailbox, to);
+            } else {
+                self.focus = Some(to);
+                self.month = Some(to.first_of_month());
+            }
+            return Some(Target::Day(to));
+        }
+        if self.view == View::Day && matches!(way, Way::Left | Way::Right) {
+            self.step(mailbox, way == Way::Right);
+            return None;
+        }
+        let order: Vec<Picked> = self.events().map(EventRow::key).collect();
+        let at = self.picked.and_then(|picked| order.iter().position(|key| *key == picked));
+        let next = match (way, at) {
+            (Way::Down, None) | (Way::Right, None) => order.first().copied(),
+            (Way::Up, None) | (Way::Left, None) => order.last().copied(),
+            (Way::Down, Some(at)) => order.get(at.saturating_add(1)).copied(),
+            (Way::Up, Some(at)) => at.checked_sub(1).and_then(|before| order.get(before)).copied(),
+            (Way::Right | Way::Left, Some(at)) if self.view == View::Week => {
+                let day = order.get(at).map(|key| key.start.day);
+                let forward = way == Way::Right;
+                let wanted = day.map(|day| day.plus(if forward { 1 } else { -1 }));
+                let found = |key: &&Picked| wanted.is_some_and(|wanted| if forward { key.start.day >= wanted } else { key.start.day <= wanted });
+                if forward { order.iter().find(found).copied() } else { order.iter().rev().find(found).copied() }
+            }
+            (Way::Right, Some(at)) => order.get(at.saturating_add(1)).copied(),
+            (Way::Left, Some(at)) => at.checked_sub(1).and_then(|before| order.get(before)).copied(),
+        };
+        let next = next?;
+        self.picked = Some(next);
+        Some(Target::Event(next))
+    }
+
+    /// `Enter` on the pick: the picked day of the month opens in the day view, one of the mini month puts the view
+    /// there; a picked event's details take the keyboard. Where the keyboard goes.
+    pub fn open_pick(&mut self, mailbox: &mut Mailbox, mini: bool) -> Option<Target> {
+        if let Some(day) = self.picked_day.filter(|_| mini || self.view == View::Month) {
+            if mini {
+                self.go_to(mailbox, day);
+                return Some(Target::Mini(day));
+            }
+            self.picked_day = None;
+            self.open_day(mailbox, day);
+            return None;
+        }
+        self.picked().map(|_| Target::Details)
+    }
+
+    /// `Esc`: the picked event's details close and the picked day is let go.
+    pub fn leave_pick(&mut self) {
+        self.picked = None;
+        self.picked_day = None;
+    }
+
     /// Reads the calendars and the events of the days shown again; today comes from the list's clock. The first read
     /// puts the view on today. A refused command shows in the window's error banner.
     pub fn refresh(&mut self, mailbox: &mut Mailbox) {
         let (now, offset) = (mailbox.now(), mailbox.offset());
-        self.today = Day::of(now, offset).or(self.today);
-        self.now = now.to_civil(offset).and_then(|civil| {
-            Some(Moment {
-                day: Day::new(civil.year(), civil.month(), civil.day())?,
-                minute: u16::from(civil.hour()) * 60 + u16::from(civil.minute()),
-            })
-        });
+        self.tick(now, offset);
+        self.accounts = mailbox.accounts().iter().map(|account| (account.id, account.index, account.label.clone())).collect();
         if self.focus.is_none() {
             self.focus = self.today;
             self.month = self.today.map(Day::first_of_month);
@@ -494,6 +677,7 @@ impl Calendar {
             answer.get("calendars").and_then(Value::as_array).map(|rows| rows.iter().filter_map(calendar_row).collect()).unwrap_or_default();
         self.hidden.retain(|id| self.calendars.iter().any(|calendar| calendar.id == *id));
         self.events.clear();
+        self.serial = next_serial();
         (self.truncated, self.unreadable) = (false, 0);
         if self.calendars.is_empty() {
             return Ok(());
@@ -506,6 +690,7 @@ impl Calendar {
         self.events = rows.iter().filter_map(EventRow::read).filter(|event| event.last >= first && event.first <= last).collect();
         self.truncated = answer.get("truncated").and_then(Value::as_bool).unwrap_or(false);
         self.unreadable = answer.get("unreadable").and_then(Value::as_u64).unwrap_or(0);
+        self.serial = next_serial();
         Ok(())
     }
 
@@ -558,6 +743,7 @@ impl Calendar {
         if !self.hidden.remove(&id) {
             self.hidden.insert(id);
         }
+        self.serial = next_serial();
         if self.picked().is_none() {
             self.picked = None;
         }
@@ -574,6 +760,7 @@ impl Calendar {
             self.events.iter().find(|event| event.key() == exact).or_else(|| self.events.iter().find(|event| event.id == id && event.covers(at.day)));
         self.picked = found.map(EventRow::key);
         self.hidden.retain(|calendar| found.is_none_or(|event| event.calendar != *calendar));
+        self.serial = next_serial();
     }
 
     /// Picks an occurrence (`None` lets it go); the side panel shows its details.
@@ -595,6 +782,9 @@ impl Calendar {
     /// Opens the editor on a new event on the day the view is on, in the first calendar shown (the first of all when
     /// every one is hidden). Without a calendar nothing opens.
     pub fn new_event(&mut self) {
+        if self.keeps_typing() {
+            return;
+        }
         let Some(first) = self.calendars.iter().find(|row| self.is_shown(row.id)).or_else(|| self.calendars.first()) else { return };
         let choices = self.calendars.iter().map(|row| (row.id, row.name.clone())).collect();
         self.editor = Some(Editor::new_event(first.id, self.focus(), choices));
@@ -602,14 +792,39 @@ impl Calendar {
 
     /// Opens the editor on the picked event; nothing opens without one.
     pub fn edit_picked(&mut self) {
+        if self.keeps_typing() {
+            return;
+        }
         if let Some(event) = self.picked() {
             self.editor = Some(Editor::edit(event));
         }
     }
 
-    /// Closes the editor; what was typed is let go.
+    /// Closes the editor; what was typed is let go (Cancel).
     pub fn close_editor(&mut self) {
         self.editor = None;
+    }
+
+    /// Esc (`escape`) or a press outside the editor. With nothing typed it closes. With typing, the typing is thrown
+    /// away only by an act that says so: an Esc after the warning an Esc raised, with nothing changed since. A press
+    /// outside never closes it, however often, and says how to keep or throw away the typing; the first Esc after
+    /// that warning (or New event's or Edit's) warns as Esc does.
+    pub fn leave_editor(&mut self, escape: bool) {
+        match self.editor.as_mut() {
+            Some(editor) if editor.edited() && !(escape && editor.warned_by_escape()) => editor.warn(escape),
+            _ => self.editor = None,
+        }
+    }
+
+    /// Whether an open editor holds typing that another editor would replace: it then stays, and says so.
+    fn keeps_typing(&mut self) -> bool {
+        match self.editor.as_mut() {
+            Some(editor) if editor.edited() => {
+                editor.warn(false);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Saves the editor's event: a new one is made (`event.create`), an edit sends what changed (`event.update`), and
@@ -647,12 +862,41 @@ impl Calendar {
         match mailbox.event_act("event.delete", &json!({ "id": id }), tr!("Event deleted")) {
             Ok(_) => {
                 self.picked = None;
-                self.editor = None;
+                // What was typed in the editor stays; an editor with nothing typed goes with the event.
+                if !self.editor.as_ref().is_some_and(Editor::edited) {
+                    self.editor = None;
+                }
                 self.refresh(mailbox);
             }
             Err(error) => mailbox.fail(error),
         }
     }
+}
+
+/// The longest description read, in characters: a dial-in with its agenda fits many times over.
+pub const MAX_DESCRIPTION: usize = 10_000;
+
+/// A description from a server fit to be read as text: its line breaks kept, every other control character a space,
+/// the bidi controls that could reorder it gone, cut to [`MAX_DESCRIPTION`] characters.
+fn paragraphs(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .chars()
+        .filter(|c| !matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}'))
+        .map(|c| if c.is_control() && c != '\n' { ' ' } else { c })
+        .take(MAX_DESCRIPTION)
+        .collect()
+}
+
+/// An event's title or place from a server fit for one line, and whole: every control character (line breaks, tabs,
+/// NUL) a space, the bidi controls that could reorder it gone, cut only past the engine's own cap
+/// ([`editor::MAX_FIELD`], 1 000 characters). The details wrap it; an Edit opens on it, so it sends nothing it did not
+/// change.
+fn line(text: &str) -> String {
+    text.chars()
+        .filter(|c| !matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}'))
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(editor::MAX_FIELD)
+        .collect()
 }
 
 fn calendar_row(value: &Value) -> Option<CalendarRow> {

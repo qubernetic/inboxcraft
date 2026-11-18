@@ -25,48 +25,54 @@ pub struct Piece {
 }
 
 /// The timed events of `events` on `day` (blocks left out), side by side where they overlap: each takes the first
-/// column free at its start, and every event of a group that overlaps shares the group's number of columns.
+/// column free at its start, and every event of a group that overlaps shares the group's number of columns. At most
+/// `most` columns: an event that finds none of them free is left out, and only counted; the second number. The work is
+/// a sort of the day's events and, for each, a look at `most` columns at most.
 #[must_use]
-pub fn pieces(events: &[&EventRow], day: Day) -> Vec<Piece> {
-    let mut placed: Vec<Piece> = events
+pub fn pieces(events: &[&EventRow], day: Day, most: usize) -> (Vec<Piece>, usize) {
+    let most = most.max(1);
+    let mut held: Vec<(u16, u16, usize)> = events
         .iter()
         .enumerate()
         .filter(|(_, event)| !event.is_block() && event.covers(day))
         .map(|(index, event)| {
             let from = if event.start.day < day { 0 } else { event.start.minute.min(DAY_MINUTES - SHORTEST) };
             let to = if event.end.day > day { DAY_MINUTES } else { event.end.minute };
-            Piece { event: index, from, to: to.max(from.saturating_add(SHORTEST)).min(DAY_MINUTES), column: 0, columns: 1 }
+            (from, to.max(from.saturating_add(SHORTEST)).min(DAY_MINUTES), index)
         })
         .collect();
-    placed.sort_by_key(|piece| (piece.from, std::cmp::Reverse(piece.to), piece.event));
+    held.sort_by_key(|(from, to, index)| (*from, std::cmp::Reverse(*to), *index));
+    let mut placed: Vec<Piece> = Vec::new();
+    let mut left_out = 0_usize;
     let mut group_start = 0;
     let mut group_end = 0_u16;
-    // The minute each column is free again, in the group under way.
-    let mut free: Vec<u16> = Vec::new();
-    for at in 0..placed.len() {
-        let Some(piece) = placed.get(at).copied() else { continue };
-        if piece.from >= group_end {
-            close_group(&mut placed, group_start, at, free.len());
-            group_start = at;
+    // The minute each column is free again, in the group under way: at most `most` of them.
+    let mut free: Vec<u16> = Vec::with_capacity(most.min(64));
+    for (from, to, event) in held {
+        if from >= group_end {
+            close_group(&mut placed, group_start, free.len());
+            group_start = placed.len();
             free.clear();
+            group_end = to;
         }
-        let column = free.iter().position(|until| *until <= piece.from).unwrap_or(free.len());
+        group_end = group_end.max(to);
+        let column = free.iter().position(|until| *until <= from).or_else(|| (free.len() < most).then_some(free.len()));
+        let Some(column) = column else {
+            left_out = left_out.saturating_add(1);
+            continue;
+        };
         match free.get_mut(column) {
-            Some(until) => *until = piece.to,
-            None => free.push(piece.to),
+            Some(until) => *until = to,
+            None => free.push(to),
         }
-        if let Some(slot) = placed.get_mut(at) {
-            slot.column = column;
-        }
-        group_end = if at == group_start { piece.to } else { group_end.max(piece.to) };
+        placed.push(Piece { event, from, to, column, columns: 1 });
     }
-    let end = placed.len();
-    close_group(&mut placed, group_start, end, free.len());
-    placed
+    close_group(&mut placed, group_start, free.len());
+    (placed, left_out)
 }
 
-fn close_group(placed: &mut [Piece], from: usize, to: usize, columns: usize) {
-    for piece in placed.get_mut(from..to).unwrap_or_default() {
+fn close_group(placed: &mut [Piece], from: usize, columns: usize) {
+    for piece in placed.get_mut(from..).unwrap_or_default() {
         piece.columns = columns.max(1);
     }
 }
@@ -89,12 +95,14 @@ pub struct Bar {
 }
 
 /// The blocks of `events` (all-day, or over more than one day) in the `days` days from `first`, each in the first
-/// lane free over all its days, the earlier and longer ones first.
+/// lane free over all its days, the earlier and longer ones first. At most `most` lanes: a block that finds none free
+/// is left out and counted in each of its columns (the second list, one count a column). The work is a sort of the
+/// row's blocks and, for each, a look at `most` lanes at most.
 #[must_use]
-pub fn bars(events: &[&EventRow], first: Day, days: usize) -> Vec<Bar> {
+pub fn bars(events: &[&EventRow], first: Day, days: usize, most: usize) -> (Vec<Bar>, Vec<usize>) {
     let last = first.plus(i64::try_from(days).unwrap_or(0).saturating_sub(1));
     let column = |day: Day| usize::try_from(day.since(first)).unwrap_or(0).min(days.saturating_sub(1));
-    let mut placed: Vec<Bar> = events
+    let mut held: Vec<Bar> = events
         .iter()
         .enumerate()
         .filter(|(_, event)| days > 0 && event.is_block() && event.last >= first && event.first <= last)
@@ -107,18 +115,26 @@ pub fn bars(events: &[&EventRow], first: Day, days: usize) -> Vec<Bar> {
             ends: event.last <= last,
         })
         .collect();
-    placed.sort_by_key(|bar| (bar.from, std::cmp::Reverse(bar.to), bar.event));
-    // The last column taken in each lane.
-    let mut lanes: Vec<usize> = Vec::new();
-    for bar in &mut placed {
-        let lane = lanes.iter().position(|taken| *taken < bar.from).unwrap_or(lanes.len());
+    held.sort_by_key(|bar| (bar.from, std::cmp::Reverse(bar.to), bar.event));
+    let mut left_out = vec![0_usize; days];
+    // The last column taken in each lane: at most `most` lanes.
+    let mut lanes: Vec<usize> = Vec::with_capacity(most.min(64));
+    held.retain_mut(|bar| {
+        let lane = lanes.iter().position(|taken| *taken < bar.from).or_else(|| (lanes.len() < most).then_some(lanes.len()));
+        let Some(lane) = lane else {
+            for count in left_out.get_mut(bar.from..=bar.to).unwrap_or_default() {
+                *count = count.saturating_add(1);
+            }
+            return false;
+        };
         match lanes.get_mut(lane) {
             Some(taken) => *taken = bar.to,
             None => lanes.push(bar.to),
         }
         bar.lane = lane;
-    }
-    placed
+        true
+    });
+    (held, left_out)
 }
 
 /// How many lanes `bars` take.
