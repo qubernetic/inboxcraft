@@ -282,7 +282,13 @@ struct Drawn {
 /// over the row slide token, a frame's worth at a time; with reduced motion it is out at once.
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool, set: (usize, usize)) -> Drawn {
     let height = row_height(theme);
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+    let (_, rect) = ui.allocate_space(vec2(ui.available_width(), height));
+    let response = ui.interact(rect, row_id(message.id), Sense::click());
+    // egui does not scroll to what gains the focus: a row Tab reaches (the next one is always built, two below the
+    // viewport) comes into sight, so Tab walks the whole list.
+    if response.gained_focus() {
+        response.scroll_to_me(None);
+    }
     let selected = mailbox.selected() == Some(message.id);
     response.widget_info(|| WidgetInfo::selected(WidgetRole::ListBoxOption, true, selected, mailbox.spoken(message)));
     // Its place among all the list's rows, built or not: a screen reader says "12 of 1000".
@@ -321,6 +327,11 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         });
     }
     Drawn { clicked: response.clicked(), acted, out: leaving && gone >= 1.0 }
+}
+
+/// The id of message `id`'s row: its focus and its context menu, wherever it is built.
+pub(super) fn row_id(id: u64) -> Id {
+    Id::unique("list-row").with(id)
 }
 
 /// How strongly a done row shows under "Show done".
@@ -931,7 +942,11 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadS
     let mut done_all = false;
     if state.card {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            done_all = button::text(ui, theme, keymap, tr!("Done all"), None, false).clicked();
+            let pressed = button::text(ui, theme, keymap, tr!("Done all"), None, false);
+            if pressed.gained_focus() {
+                pressed.scroll_to_me(None);
+            }
+            done_all = pressed.clicked();
         });
     }
     done_all
@@ -941,7 +956,11 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadS
 fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: HeadState) -> bool {
     ui.add_space((text_indent(theme) - theme.spacing.s4 - button::LINK_PAD).max(0.0));
     let label = if state.open { tr!("Show fewer").to_owned() } else { tr!("Show all ({count})", count = state.count) };
-    button::link(ui, theme, keymap, &label).clicked()
+    let link = button::link(ui, theme, keymap, &label);
+    if link.gained_focus() {
+        link.scroll_to_me(None);
+    }
+    link.clicked()
 }
 
 /// What a line's ui is told apart by, so a row keeps its id (its focus, its context menu) wherever it is built.

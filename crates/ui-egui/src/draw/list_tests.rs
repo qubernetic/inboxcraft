@@ -817,8 +817,12 @@ fn wheel(harness: &mut Harness<'static, InboxApp>, points: f32) {
     harness.run();
 }
 
-/// The most lines a pane 828 high can build: those of 32 (the least line) that meet it, and two above and below.
+/// The most lines a pane 828 high can build, the brief's bound: those of 32 (the least line) that meet it, and two
+/// above and below: `ceil(828 / 32) + 4`.
 const MOST_BUILT: usize = 828_usize.div_ceil(32) + 4;
+
+/// The most rows of 56 a pane 828 high builds: those that meet it, and two above and below.
+const MOST_ROWS: usize = 828_usize.div_ceil(56) + 1 + 4;
 
 #[test]
 fn ten_thousand_messages_build_only_the_rows_in_sight() {
@@ -1129,4 +1133,26 @@ fn a_keyed_row_scrolled_away_from_stays_away_when_a_group_opens_or_folds_above()
     }
     assert_eq!(harness.state().mailbox().selected(), Some(1_005_007));
     assert!(selected_in_sight(&harness), "the newly keyed row comes into sight");
+}
+
+#[test]
+fn tab_walks_down_the_whole_list_building_rows_as_it_goes() {
+    let mut harness = ten_thousand(InboxView::Simple);
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(1_000_000)));
+    harness.run();
+    for _ in 0..40 {
+        harness.key_press(Key::Tab);
+        harness.run();
+    }
+    let focused = harness.ctx.memory(egui::Memory::focused);
+    assert_eq!(focused, Some(super::list::row_id(1_000_040)), "the 41st row has the focus");
+    assert!(in_sight(&harness, 1_000_040), "and is wholly in sight");
+    let built = super::list::built(&harness.ctx).unwrap();
+    assert!(built.count <= MOST_ROWS, "{built:?}");
+    for _ in 0..40 {
+        harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+        harness.run();
+    }
+    assert_eq!(harness.ctx.memory(egui::Memory::focused), Some(super::list::row_id(1_000_000)), "Shift+Tab walks back up");
+    assert!(in_sight(&harness, 1_000_000));
 }
