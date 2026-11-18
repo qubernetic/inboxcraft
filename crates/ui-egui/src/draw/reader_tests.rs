@@ -2428,6 +2428,10 @@ fn done_on_the_list_row_s_own_act_walks_on() {
 fn a_message_the_server_takes_away_opens_nothing_and_the_keyboard_goes_to_the_row_in_its_place() {
     let fetch = Recorder::default();
     let (mut harness, _, behind) = coast_walk_open(&fetch);
+    // The simple list, where the row under it is the next in the list: the grouped inbox keeps the keyboard in the
+    // card (`after_a_server_removal_the_keyboard_stays_in_the_card`).
+    harness.state_mut().mailbox_mut().set_inbox_view(crate::mailbox::InboxView::List);
+    settle(&mut harness);
     press_in_the_reader(&mut harness);
     let unread = !read(&harness, behind);
     taken_away(&mut harness);
@@ -2508,4 +2512,133 @@ fn a_read_then_a_server_removal_does_not_walk_on() {
     assert!(row_of(&harness, id).is_some(), "a read leaves the row in the list");
     taken_away(&mut harness);
     assert_eq!(harness.state().mailbox().selected(), None, "nothing is selected");
+}
+
+/// The app at `width` in the unified inbox's `view`, a new message docked in the reader's place if `compose`.
+fn inbox_at(width: f32, view: crate::mailbox::InboxView, compose: bool) -> Harness<'static, InboxApp> {
+    let fetch = Recorder::default();
+    let mut app = app_with(&fetch);
+    app.mailbox_mut().set_inbox_view(view);
+    let mut harness = Harness::builder()
+        .with_size(vec2(width, 820.0))
+        .with_theme(egui::Theme::Light)
+        .with_max_steps(12)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    if compose {
+        harness.get_by_role_and_label(Role::Button, "New message").click();
+        settle(&mut harness);
+    }
+    harness
+}
+
+/// The card of the unified inbox that holds message `id`: a group's name, or `None` for the rows no group holds.
+fn card_of(harness: &Harness<'static, InboxApp>, id: u64) -> Option<String> {
+    harness.state().mailbox().groups().into_iter().find(|group| group.messages.contains(&id)).map(|group| group.name)
+}
+
+/// The rows of `card` ([`card_of`]) the list draws now, in its order.
+fn card_rows(harness: &Harness<'static, InboxApp>, card: &Option<String>) -> Vec<u64> {
+    let groups = harness.state().mailbox().groups();
+    let held = |id: &u64| groups.iter().any(|group| group.messages.contains(id));
+    let order = super::list::order(&harness.ctx);
+    order
+        .iter()
+        .copied()
+        .filter(|id| match card {
+            Some(name) => groups.iter().any(|group| group.name == *name && group.messages.contains(id)),
+            None => !held(id),
+        })
+        .collect()
+}
+
+/// The server takes the message of the row `id` away.
+fn server_removes(harness: &mut Harness<'static, InboxApp>, id: u64) {
+    let (_, mailbox) = harness.state_mut().reader_mut();
+    mailbox.run("mail.done", &json!({ "id": id, "done": true })).unwrap();
+    mailbox.refresh();
+    settle(harness);
+    assert!(row_of(harness, id).is_none(), "it left the list");
+}
+
+/// Grouped, the keyboard Tabbed onto the last row of a card with another card under it, then the server takes that
+/// message away: the keyboard goes to the row now last in the same card, not to the next card's first row.
+#[test]
+fn after_a_server_removal_the_keyboard_stays_in_the_card() {
+    let mut harness = inbox_at(1280.0, crate::mailbox::InboxView::Grouped, false);
+    let groups = harness.state().mailbox().groups();
+    let card = groups
+        .iter()
+        .take(groups.len().saturating_sub(1))
+        .map(|group| Some(group.name.clone()))
+        .find(|card| card_rows(&harness, card).len() >= 2)
+        .unwrap();
+    let last = *card_rows(&harness, &card).last().unwrap();
+    for _ in 0..200 {
+        if super::list::focused_row(&harness.ctx) == Some(last) {
+            break;
+        }
+        harness.key_press(Key::Tab);
+        harness.run();
+    }
+    settle(&mut harness);
+    assert_eq!(super::list::focused_row(&harness.ctx), Some(last), "the card's last row has the keyboard");
+    server_removes(&mut harness, last);
+    let now_last = card_rows(&harness, &card).last().copied();
+    assert!(now_last.is_some(), "the card still has rows");
+    assert_eq!(super::list::focused_row(&harness.ctx), now_last, "the keyboard is on the row now last in the card {card:?}");
+}
+
+/// The keyboard on the list's last row in sight, its message shown as a preview (behind the docked composer: Shift Tab
+/// out of From; without one: End), then the server takes it away: nothing opens, nothing is selected, and the
+/// keyboard is on the row now last in its card.
+#[test]
+fn a_server_removal_of_the_focused_row_opens_nothing() {
+    for (width, height, compose) in [(1300.0, 820.0, true), (1300.0, 820.0, false), (720.0, 820.0, false), (1300.0, 420.0, false)] {
+        let mut harness = inbox_at(width, crate::mailbox::InboxView::Smart, compose);
+        harness.set_size(vec2(width, height));
+        settle(&mut harness);
+        if compose {
+            type_into_text(&mut harness, "Hello Odile");
+            harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("compose-from")));
+            harness.run();
+            harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+            harness.run();
+        } else {
+            for _ in 0..60 {
+                if super::list::focused_row(&harness.ctx).is_some() {
+                    break;
+                }
+                harness.key_press(Key::Tab);
+                harness.run();
+            }
+            harness.key_press(Key::End);
+            settle(&mut harness);
+        }
+        let keyed = super::list::focused_row(&harness.ctx).unwrap();
+        assert_eq!(harness.state().reader().open_id(), Some(keyed), "{width}, composer {compose}: the keyed row is the preview");
+        let card = card_of(&harness, keyed);
+        let seen: Vec<(u64, bool)> =
+            harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).filter(|(id, _)| *id != keyed).collect();
+        server_removes(&mut harness, keyed);
+        assert_eq!(harness.state().reader().open_id(), None, "{width}, composer {compose}: nothing is opened or previewed");
+        assert_eq!(harness.state().mailbox().selected(), None, "{width}, composer {compose}: nothing is selected");
+        let now: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect();
+        assert_eq!(now, seen, "{width}, composer {compose}: nothing is read");
+        let focused = super::list::focused_row(&harness.ctx);
+        assert!(focused.is_some(), "{width}, composer {compose}: the keyboard is on a row");
+        assert_eq!(focused, card_rows(&harness, &card).last().copied(), "{width}, composer {compose}: the row now last in the card");
+        if compose {
+            let composer = harness.state().composer().unwrap();
+            assert!(!composer.floating() && composer.text() == "Hello Odile", "{width}: the composer stays docked, the draft whole");
+        }
+    }
+}
+
+/// Types `text` into the composer's message text.
+fn type_into_text(harness: &mut Harness<'static, InboxApp>, text: &str) {
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::compose::text_id()));
+    harness.run();
+    harness.event(egui::Event::Text(text.to_owned()));
+    harness.run();
 }

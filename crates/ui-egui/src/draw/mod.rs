@@ -148,6 +148,12 @@ pub struct InboxApp {
     land_held: Option<u64>,
     /// The row landed on for [`InboxApp::land_held`]: its focus opens no preview.
     landed: Option<u64>,
+    /// The card of the grouped inbox the open message stood in when it opened (`Some(None)`: the rows no group holds;
+    /// `None`: no cards), so that the keyboard stays in that card when the server takes the message away.
+    card: Option<Option<String>>,
+    /// The messages of the list's rows in the order the list last drew them ([`list::order`]), read as each frame
+    /// begins: where the keyboard goes when the server takes the open message away.
+    drawn: std::sync::Arc<[u64]>,
     /// The message whose row of the list has the keyboard's focus, as this frame began: the list's keys act on it.
     list_row: Option<u64>,
     /// A row of the list was pressed or keyed last, not the reader: with nothing else focused the list has the keyboard
@@ -395,6 +401,8 @@ impl InboxApp {
             held_back: None,
             land_held: None,
             landed: None,
+            card: None,
+            drawn: std::sync::Arc::from(Vec::new()),
             list_row: None,
             list_keys: true,
             reading: false,
@@ -1417,7 +1425,8 @@ impl InboxApp {
     ///
     /// When the owner's own act takes the open message out of the list (done, snoozed, moved), the list walks on to the
     /// row the next-message rule selects; when the server takes it away, the reader shows nothing open and that row is
-    /// not opened by itself, only when the owner picks a message.
+    /// not opened by itself, only when the owner picks a message. The keyboard goes to the row that took its place, in
+    /// the grouped inbox in the same card ([`InboxApp::landing_after_removal`]).
     fn sync(&mut self) {
         let open = self.reader.open_id();
         let gone = open.is_some_and(|id| !self.mailbox.messages().iter().any(|row| row.id == id));
@@ -1449,10 +1458,8 @@ impl InboxApp {
         self.act_by_key = false;
         // Only where the list is the one the message was opened from: another account, place or search is no removal.
         let same_list = self.left.as_ref().is_some_and(|(left, from)| Some(*left) == open && *from == self.list_of());
-        if gone && !owner && same_list {
-            let at = self.mailbox.gap().unwrap_or(usize::MAX);
-            let rows = self.mailbox.messages();
-            self.land_held = rows.get(at).or_else(|| rows.last()).map(|row| row.id);
+        if let Some(gone) = open.filter(|_| gone && !owner && same_list) {
+            self.land_held = self.landing_after_removal(gone);
             self.landed = self.land_held;
         }
         if let (true, false, Some(pick)) = (gone, walking, self.mailbox.selected()) {
@@ -1490,7 +1497,34 @@ impl InboxApp {
             }
             self.reader.open(&mut self.mailbox, opening);
             self.hover = None;
+            self.card = opening.and_then(|id| {
+                let groups = self.mailbox.groups();
+                (!groups.is_empty()).then(|| groups.into_iter().find(|group| group.messages.contains(&id)).map(|group| group.name))
+            });
         }
+    }
+
+    /// The row the keyboard goes to when the server took the open message `gone` away: the row under it as the list
+    /// last drew it, else the row above it; in the grouped inbox the rows of its own card first, so the keyboard stays
+    /// in that card (a card the message was the last of went with it). A row a folded card hides is not drawn and is
+    /// left out. Before the list was drawn with it: the row that took its place in the list, or the last.
+    fn landing_after_removal(&self, gone: u64) -> Option<u64> {
+        let rows = self.mailbox.messages();
+        let listed = |id: &&u64| rows.iter().any(|row| row.id == **id);
+        let Some(at) = self.drawn.iter().position(|id| *id == gone) else {
+            let gap = self.mailbox.gap().unwrap_or(usize::MAX);
+            return rows.get(gap).or_else(|| rows.last()).map(|row| row.id);
+        };
+        let (above, below) = (self.drawn.get(..at).unwrap_or_default(), self.drawn.get(at.saturating_add(1)..).unwrap_or_default());
+        // The groups are read only here, when the server took the open message away, not in every frame.
+        let groups = if self.card.is_some() { self.mailbox.groups() } else { Vec::new() };
+        let in_card = |id: &&u64| match &self.card {
+            Some(Some(name)) => groups.iter().any(|group| group.name == *name && group.messages.contains(id)),
+            Some(None) => !groups.iter().any(|group| group.messages.contains(id)),
+            None => true,
+        };
+        let near = |card: &dyn Fn(&&u64) -> bool| below.iter().filter(listed).find(card).or_else(|| above.iter().rev().filter(listed).find(card));
+        near(&in_card).or_else(|| near(&|_| true)).copied()
     }
 
     /// The mailbox shown.
@@ -2070,6 +2104,8 @@ impl InboxApp {
         ui.set_style(theme.style());
         let p = theme.palette;
         let s = theme.spacing;
+        // The list's order as last drawn, before the engine's events: a cheap handle on the kept one.
+        self.drawn = list::order(ui.ctx());
         self.sync();
         if self.reader.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
