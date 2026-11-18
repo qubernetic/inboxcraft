@@ -7,7 +7,8 @@
 //! its own: the presentation gives it none.
 //!
 //! egui keeps the scrolling and the bar's pointer ([`style`] makes it paint nothing of its own); [`show`] and
-//! [`show_rows`] show an area and paint its bar as the sheet has it ([`bar`]).
+//! [`show_rows`] show an area and paint its bar as the sheet has it ([`bar`]). [`show_over`], whose bar stands over the
+//! content, keeps the pointer itself: only its thumb takes a press.
 
 use std::ops::Range;
 
@@ -92,14 +93,16 @@ pub fn bar_with_ends<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, en
     paint_bar(ui, theme, output, ends, false);
 }
 
-/// Paints the bar of the area `output` came from; `over` the content when the area gives it no room of its own.
-fn paint_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, ends: f32, over: bool) {
+/// Where the bar of the area `output` came from stands: the strip egui senses, the thumb's range down it, and how far
+/// the content scrolls for a point of the thumb's travel; nothing when it shows no bar. `over` the content when the
+/// area gives it no room of its own.
+fn thumb_of<R>(ui: &Ui, output: &ScrollAreaOutput<R>, ends: f32, over: bool) -> Option<(Rect, Rangef, f32)> {
     let id = output.id.with(1);
-    let Some(strip) = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(id).map(|widget| widget.rect)) else { return };
+    let strip = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(id).map(|widget| widget.rect))?;
     // egui starts showing a bar a frame before it gives it room beside the content: until the strip stands clear of
     // the content, nothing is painted, so no frame has the bar over a row.
     if !over && strip.left() < output.inner_rect.right() - 0.01 {
-        return;
+        return None;
     }
     let (inner, content) = (output.inner_rect.height(), output.content_size.y);
     // max then min, never `clamp`: a bound from a rect's height may be negative or NaN, and `min` and `max` keep the
@@ -107,7 +110,7 @@ fn paint_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, ends: f32,
     let ends = if ends.is_finite() { ends.max(0.0).min(strip.height().max(0.0) / 4.0) } else { 0.0 };
     let length = strip.height() - ends * 2.0;
     if !(content > inner && inner > 0.0 && length > 0.0 && content.is_finite()) {
-        return;
+        return None;
     }
     let size = (inner / content * length).max(ui.spacing().scroll.handle_min_length).min(length);
     // A thumb kept clear of the ends is a whole number of points long, rounded down: the field's board's 148, not 149.
@@ -115,13 +118,20 @@ fn paint_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, ends: f32,
     let most = content - inner;
     let share = (output.state.clamped_offset().y / most).clamp(0.0, 1.0);
     let top = strip.top() + ends + share * (length - size);
-    let response = ui.ctx().read_response(id);
+    let rate = if length - size > 0.0 { most / (length - size) } else { 0.0 };
+    Some((strip, Rangef::new(top, top + size), rate))
+}
+
+/// Paints the bar of the area `output` came from beside its content.
+fn paint_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, ends: f32, over: bool) {
+    let Some((strip, thumb, _)) = thumb_of(ui, output, ends, over) else { return };
+    let response = ui.ctx().read_response(output.id.with(1));
     let state = match response {
         Some(response) if response.dragged() || response.is_pointer_button_down_on() => Bar::Dragging,
         Some(response) if response.hovered() => Bar::Hover,
         _ => Bar::Rest,
     };
-    paint(ui.painter(), theme, strip, Rangef::new(top, top + size), state);
+    paint(ui.painter(), theme, strip, thumb, state);
 }
 
 /// Shows `area` in `ui` with `add` drawing its content, and paints its bar.
@@ -137,15 +147,44 @@ pub fn show_with_ends<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, ends: f32
 }
 
 /// Shows `area` in `ui` with `add` drawing its content as wide as the area, and paints its bar over the content's
-/// right edge (a view whose rows run under the bar, as the calendar's agenda and hours).
+/// right edge (a view whose rows run under the bar, as the calendar's agenda and hours). Over the content the strip
+/// takes no press of its own: only the thumb (its 8 wide under the pointer, as long as it is) takes one, to be dragged;
+/// a press anywhere else in the strip goes to the content under it. The wheel scrolls as everywhere.
 pub fn show_over<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui) -> R) -> ScrollAreaOutput<R> {
+    let ctx = ui.ctx().clone();
+    let held = ui.id().with("scroll-over-thumb");
+    let mut area = area.scroll_source(egui::scroll_area::ScrollSource { scroll_bar: false, ..egui::scroll_area::ScrollSource::default() });
+    // The thumb held since the last frame: the content follows the pointer's move along its travel.
+    if ctx.dragged_id() == Some(held)
+        && let Some((offset, rate, most)) = ctx.data(|data| data.get_temp::<(f32, f32, f32)>(held))
+    {
+        let to = offset + ctx.input(|input| input.pointer.delta().y) * rate;
+        if to.is_finite() && most.is_finite() {
+            area = area.vertical_scroll_offset(to.min(most).max(0.0));
+        }
+    }
     let output = ui
         .scope(|ui| {
             ui.spacing_mut().scroll.floating_allocated_width = 0.0;
             area.show(ui, add)
         })
         .inner;
-    paint_bar(ui, theme, &output, 0.0, true);
+    let Some((strip, thumb, rate)) = thumb_of(ui, &output, 0.0, true) else { return output };
+    let most = output.content_size.y - output.inner_rect.height();
+    ctx.data_mut(|data| data.insert_temp(held, (output.state.clamped_offset().y, rate, most)));
+    let inset = theme.spacing.s1 / 2.0;
+    let target = Rect::from_x_y_ranges(Rangef::new(strip.left() + inset, strip.right() - inset), thumb);
+    // Not reached by Tab: the keys scroll the view as they did.
+    let response = ui.interact(target, held, egui::Sense::CLICK | egui::Sense::DRAG);
+    let over = ctx.read_response(output.id.with(1)).is_some_and(|strip| strip.hovered());
+    let state = if response.dragged() || response.is_pointer_button_down_on() {
+        Bar::Dragging
+    } else if over || response.hovered() {
+        Bar::Hover
+    } else {
+        Bar::Rest
+    };
+    paint(ui.painter(), theme, strip, thumb, state);
     output
 }
 

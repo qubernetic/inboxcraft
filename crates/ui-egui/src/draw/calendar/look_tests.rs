@@ -165,7 +165,7 @@ fn thumbs_at_the_right(harness: &Harness<'static, InboxApp>) -> Vec<Rect> {
     let strips: Vec<Rect> = harness.query_all_by_role(Role::ScrollBar).map(|node| node.rect()).filter(|strip| strip.left() > 900.0).collect();
     rects(harness)
         .into_iter()
-        .filter(|(rect, fill)| *fill == p.muted && rect.width() <= 6.0 && rect.height() >= 20.0)
+        .filter(|(rect, fill)| *fill == p.muted && rect.width() <= 8.0 && rect.height() >= 20.0)
         .map(|(rect, _)| rect)
         .filter(|rect| strips.iter().any(|strip| strip.contains_rect(*rect)))
         .collect()
@@ -177,6 +177,83 @@ fn the_agenda_and_the_hours_paint_their_thumb_over_the_content() {
         let harness = window(view);
         assert_eq!(thumbs_at_the_right(&harness).len(), 1, "{view:?}: one thumb in the strip at the right");
     }
+}
+
+/// The week with one event more, "At the edge", on its last day, Sunday 8 November, 13:00 to 14:00.
+fn edged() -> Harness<'static, InboxApp> {
+    use crate::calendar::{EventRow, Moment};
+    let mut harness = window(View::Week);
+    let sunday = Day::new(2026, 11, 8).unwrap();
+    let mut events: Vec<EventRow> = harness.state().calendar().events().cloned().collect();
+    let mut event = events.iter().find(|event| !event.all_day).cloned().unwrap();
+    event.id = 41_000;
+    event.summary = "At the edge".to_owned();
+    (event.start, event.end) = (Moment { day: sunday, minute: 780 }, Moment { day: sunday, minute: 840 });
+    (event.first, event.last, event.all_day, event.repeat) = (sunday, sunday, false, None);
+    events.push(event);
+    harness.state_mut().calendar_mut().0.set_events(events);
+    harness.run();
+    harness
+}
+
+#[test]
+fn a_press_on_the_right_edge_of_an_event_in_the_last_day_picks_it_not_the_scroll_strip() {
+    let block = |harness: &Harness<'static, InboxApp>| {
+        harness.query_all(egui_kittest::kittest::by().role(Role::Button).label_contains("At the edge")).next().unwrap().rect()
+    };
+    for back in [11.0, 6.0, 1.0] {
+        let mut harness = edged();
+        let block = block(&harness);
+        let at = egui::pos2(block.right() - back, block.center().y);
+        harness.event(egui::Event::PointerMoved(at));
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            harness.step();
+        }
+        harness.run();
+        let picked = harness.state().calendar().picked().map(|event| event.summary.clone());
+        assert_eq!(picked.as_deref(), Some("At the edge"), "a press at {at:?} on {block:?}");
+    }
+}
+
+#[test]
+fn the_hours_thumb_drags_the_content_and_a_press_beside_it_scrolls_nothing() {
+    let p = Palette::of(Mode::Dark);
+    let top = |harness: &Harness<'static, InboxApp>| {
+        harness.query_all(egui_kittest::kittest::by().role(Role::Button).label_contains("At the edge")).next().unwrap().rect().top()
+    };
+    let mut harness = edged();
+    let before = top(&harness);
+    let thumb = thumbs_at_the_right(&harness)[0];
+    let from = thumb.center();
+    harness.event(egui::Event::PointerMoved(from));
+    harness.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    harness.step();
+    for step in 1..=4 {
+        harness.event(egui::Event::PointerMoved(from + vec2(0.0, 10.0 * step as f32)));
+        harness.step();
+    }
+    let held = rects(&harness).iter().any(|(rect, fill)| *fill == p.ink && rect.width() <= 8.0 && rect.height() >= 20.0 && rect.left() > 900.0);
+    harness.event(egui::Event::PointerButton {
+        pos: from + vec2(0.0, 40.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run();
+    assert!(held, "held, the thumb is ink");
+    let dragged = top(&harness);
+    assert!(dragged < before - 20.0, "40 down the travel scrolls the content: {before} then {dragged}");
+    // In the strip but past the thumb's end the press goes to what is under it; nothing scrolls.
+    let thumb = thumbs_at_the_right(&harness)[0];
+    let below = egui::pos2(thumb.center().x, thumb.bottom() + 8.0);
+    harness.event(egui::Event::PointerMoved(below));
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: below, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.step();
+    }
+    harness.run();
+    assert_eq!(top(&harness), dragged, "a press beside the thumb at {below:?}");
 }
 
 #[test]
