@@ -1866,6 +1866,45 @@ fn the_reader_notice_is_a_banner_after_the_head_in_tab_order() {
     assert!(harness.query_by_label(&format!("Note: {SAID}")).is_none(), "dismissed");
 }
 
+/// The notice stands between the head and the message, not in the message's scroll: scrolled to its end, the message
+/// leaves the notice where it was, and its `dismiss` still presses.
+#[test]
+fn the_notice_stays_in_sight_while_the_message_scrolls() {
+    const SAID: &str = "Subject copied";
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Draft logo for the bakery");
+    harness.set_size(vec2(1280.0, 420.0));
+    harness.state_mut().reader_mut().0.set_notice(SAID.to_owned());
+    settle(&mut harness);
+    let label = format!("Note: {SAID}");
+    let before = harness.get_by_label(&label).rect();
+    let file = |harness: &Harness<'static, InboxApp>| {
+        harness
+            .root()
+            .children_recursive()
+            .find(|node| node.accesskit_node().label().is_some_and(|said| said.starts_with("sketch-")))
+            .map(|node| node.rect())
+    };
+    let file_before = file(&harness).unwrap();
+    let over = egui::pos2(before.center().x, before.bottom() + 60.0);
+    harness.hover_at(over);
+    harness.run();
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -10_000.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+    });
+    settle(&mut harness);
+    let file_after = file(&harness).unwrap();
+    assert!(file_after.top() < file_before.top(), "the message scrolled: {file_before:?} to {file_after:?}");
+    assert_eq!(harness.get_by_label(&label).rect(), before, "the notice stays where it was");
+    harness.get_by_role_and_label(Role::Button, "dismiss").click();
+    settle(&mut harness);
+    assert_eq!(harness.state().reader().notice(), None, "dismiss still presses");
+}
+
 #[test]
 fn a_warning_shows_whole_while_the_message_wipes_in() {
     const SAID: &str = "The message could not be moved: the server refused.";

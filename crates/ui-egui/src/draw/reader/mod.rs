@@ -273,6 +273,19 @@ pub(super) fn show(
         ui.spacing_mut().item_spacing.y = HEAD_GAP;
         head::head(ui, theme, keymap, mailbox, reader, &mut drawn);
     });
+    // A message alone in its thread stands 16 under the head; a thread's lines 4 under it.
+    let top = if reader.thread().len() > 1 { THREAD_TOP } else { MESSAGE_TOP };
+    // The reader's notice, what was done or what failed: in a strip of its own between the head and the message, so it
+    // never scrolls away and the message does not move under the pointer; after the head in Tab order. It shows whole
+    // while the message wipes in, as the warnings do.
+    if let Some(notice) = reader.notice() {
+        body::keep_unwiped(ui.ctx(), ui.available_rect_before_wrap().intersect(unwiped));
+        let under = (theme.spacing.s4 - top).max(0.0);
+        let strip = Frame::new().inner_margin(Margin { left: side, right: side, top: margin(top).top, bottom: margin(under).bottom });
+        egui::Panel::top("reader-notice").show_separator_line(false).frame(strip).show(ui, |ui| {
+            body::notice(ui, theme, keymap, notice, reader.notice_failed(), &mut drawn);
+        });
+    }
     // The answers at the foot, under a `panel_line`, for the open message (not for a preview of held mail). Their room
     // is kept first and they are drawn after the message, so Tab goes from the head through the message to them.
     let alone = reader.open_id().and_then(|id| reader.opened(id)).is_some_and(|opened| thread::card_alone(mailbox, reader, opened));
@@ -293,18 +306,11 @@ pub(super) fn show(
     let message_room = foot.map_or(room, |(_, _, foot)| Rect::from_min_max(room.min, egui::pos2(room.right(), foot.top())));
     // Warnings show whole while the message wipes in: they are drawn clipped to the message's room only.
     body::keep_unwiped(ui.ctx(), message_room.intersect(unwiped));
-    // A message alone in its thread stands 16 under the head; a thread's lines 4 under it.
-    let top = if reader.thread().len() > 1 { THREAD_TOP } else { MESSAGE_TOP };
     ui.scope_builder(egui::UiBuilder::new().max_rect(message_room), |ui| {
         crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]).id_salt("reader"), |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             Frame::new().inner_margin(Margin { left: side, right: side, top: margin(top).top, bottom: margin(MESSAGE_FOOT).bottom }).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                // The reader's notice: what was done, or what failed, at the top of the message, after the head.
-                if let Some(notice) = reader.notice() {
-                    body::notice(ui, theme, keymap, notice, reader.notice_failed(), &mut drawn);
-                    ui.add_space(theme.spacing.s4);
-                }
                 if let Some(reason) =
                     reader.open_id().and_then(|id| mailbox.messages().iter().find(|row| row.id == id)).and_then(|row| row.bounced.as_deref())
                 {
