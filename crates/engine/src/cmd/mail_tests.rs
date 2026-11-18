@@ -10,7 +10,7 @@ use inboxcraft_model::{
 use inboxcraft_store::{Batch, Change, Memory, Storage};
 use serde_json::{Value, json};
 
-use super::{ADDRESS_CAP, MAX_REASONS, NAME_CAP, clean, reason, settle};
+use super::{ADDRESS_CAP, MAX_REASONS, NAME_CAP, TEXT_IDS, clean, reason, settle};
 use crate::test_support::{NOW, address, at, change, folder, mailbox, sample_session, session_with};
 use crate::{AgentClass, Caller, EngineError, Registry, Session};
 
@@ -75,7 +75,17 @@ fn mode(session: &mut Session, mode: &str) {
 
 fn why(session: &mut Session, id: u64) -> Vec<Value> {
     let answer = session.run("mail.why", &json!({ "id": id })).unwrap();
-    answer["reasons"].as_array().unwrap().clone()
+    let reasons = answer["reasons"].as_array().unwrap().clone();
+    listed_ids(&reasons);
+    reasons
+}
+
+/// Every reason's `text_id` is one of [`TEXT_IDS`]: every fixture of every kind and the sweep pass through here.
+fn listed_ids(reasons: &[Value]) {
+    for reason in reasons {
+        let text_id = reason["text_id"].as_str().unwrap();
+        assert!(TEXT_IDS.contains(&text_id), "{text_id} is not in TEXT_IDS");
+    }
 }
 
 /// The kinds and text ids of the reasons, in order.
@@ -360,6 +370,7 @@ fn every_message_of_the_sample_and_the_test_mailbox_has_one_to_four_reasons() {
                 Ok(answer) => {
                     let reasons = answer["reasons"].as_array().unwrap();
                     assert!((1..=MAX_REASONS).contains(&reasons.len()), "{id}: {answer}");
+                    listed_ids(reasons);
                     answered += 1;
                 }
                 Err(error) => assert!(matches!(error, EngineError::NotFound { .. }), "{id}: {error:?}"),
@@ -367,4 +378,13 @@ fn every_message_of_the_sample_and_the_test_mailbox_has_one_to_four_reasons() {
         }
     }
     assert_eq!(answered, 15);
+}
+
+#[test]
+fn the_text_ids_are_a_fixed_set_of_thirteen() {
+    let mut sorted = TEXT_IDS.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), 13, "an id twice");
+    assert!(TEXT_IDS.iter().all(|text_id| text_id.starts_with("why.") && text_id.chars().all(|c| c.is_ascii_lowercase() || c == '.')));
 }

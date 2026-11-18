@@ -445,6 +445,56 @@ struct WhyParams {
     id: u64,
 }
 
+/// Every `text_id` `mail.why` gives: the fixed set the front end words. The reasons take them from here, by name
+/// ([`text_id`]).
+pub(crate) const TEXT_IDS: [&str; 13] = [
+    "why.snooze.returned",
+    "why.snooze.until",
+    "why.rule.group",
+    "why.sender.group",
+    "why.sender.accepted",
+    "why.sender.blocked",
+    "why.screener.held",
+    "why.screener.blocked",
+    "why.screener.new",
+    "why.screener.known",
+    "why.thread.yours",
+    "why.thread.other",
+    "why.default",
+];
+
+/// The names of [`TEXT_IDS`], one each: the reasons are built with these.
+pub(crate) mod text_id {
+    use super::TEXT_IDS;
+
+    /// Back from a snooze (`at`).
+    pub(crate) const SNOOZE_RETURNED: &str = TEXT_IDS[0];
+    /// Snoozed until (`until`).
+    pub(crate) const SNOOZE_UNTIL: &str = TEXT_IDS[1];
+    /// The grouped inbox's rule gave the group (`group`, `rule`).
+    pub(crate) const RULE_GROUP: &str = TEXT_IDS[2];
+    /// The owner chose the sender's group (`address`, `group`).
+    pub(crate) const SENDER_GROUP: &str = TEXT_IDS[3];
+    /// The owner let the sender in (`address`).
+    pub(crate) const SENDER_ACCEPTED: &str = TEXT_IDS[4];
+    /// The owner blocked the sender (`address`).
+    pub(crate) const SENDER_BLOCKED: &str = TEXT_IDS[5];
+    /// Held back by the screener (`address`).
+    pub(crate) const SCREENER_HELD: &str = TEXT_IDS[6];
+    /// In the blocked folder (`address`).
+    pub(crate) const SCREENER_BLOCKED: &str = TEXT_IDS[7];
+    /// First mail from a new sender (`address`).
+    pub(crate) const SCREENER_NEW: &str = TEXT_IDS[8];
+    /// Let in by the screener as a sender the owner knows (`address`).
+    pub(crate) const SCREENER_KNOWN: &str = TEXT_IDS[9];
+    /// In a thread the owner wrote in (`messages`).
+    pub(crate) const THREAD_YOURS: &str = TEXT_IDS[10];
+    /// In a thread (`messages`).
+    pub(crate) const THREAD_OTHER: &str = TEXT_IDS[11];
+    /// The folder alone (`folder`, `role`).
+    pub(crate) const DEFAULT: &str = TEXT_IDS[12];
+}
+
 /// The most reasons one answer gives.
 pub(crate) const MAX_REASONS: usize = 4;
 
@@ -496,8 +546,8 @@ fn why(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     // the time it came back but not the folder, and a snooze brings mail back to the inbox, so it counts there only:
     // once the owner moves it on, the return no longer says why it is where it is.
     match (role, state.snoozed_until, state.returned) {
-        (Some(Role::Snoozed), Some(until), _) => reasons.push(reason("snooze", "why.snooze.until", json!({ "until": json::date(until) }))),
-        (Some(Role::Inbox), _, Some(at)) => reasons.push(reason("snooze", "why.snooze.returned", json!({ "at": json::date(at) }))),
+        (Some(Role::Snoozed), Some(until), _) => reasons.push(reason("snooze", text_id::SNOOZE_UNTIL, json!({ "until": json::date(until) }))),
+        (Some(Role::Inbox), _, Some(at)) => reasons.push(reason("snooze", text_id::SNOOZE_RETURNED, json!({ "at": json::date(at) }))),
         _ => {}
     }
 
@@ -506,31 +556,31 @@ fn why(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let grouped = if role == Some(Role::Inbox) { group::Grouping::new(store)?.of_by(message)? } else { None };
     match grouped {
         Some((in_group, Some(rule))) => {
-            reasons.push(reason("rule", "why.rule.group", json!({ "group": name_arg(group::name(in_group)), "rule": name_arg(group::rule_name(rule)) })));
+            reasons.push(reason("rule", text_id::RULE_GROUP, json!({ "group": name_arg(group::name(in_group)), "rule": name_arg(group::rule_name(rule)) })));
         }
         Some((in_group, None)) => {
-            reasons.push(reason("sender", "why.sender.group", json!({ "address": address_arg(from), "group": name_arg(group::name(in_group)) })));
+            reasons.push(reason("sender", text_id::SENDER_GROUP, json!({ "address": address_arg(from), "group": name_arg(group::name(in_group)) })));
         }
         None => {}
     }
 
     // The owner's decisions on the sender.
     match record.as_ref().and_then(|record| record.screening) {
-        Some(Screening::Accepted) => reasons.push(reason("sender", "why.sender.accepted", json!({ "address": address_arg(screened) }))),
-        Some(Screening::Blocked) => reasons.push(reason("sender", "why.sender.blocked", json!({ "address": address_arg(screened) }))),
+        Some(Screening::Accepted) => reasons.push(reason("sender", text_id::SENDER_ACCEPTED, json!({ "address": address_arg(screened) }))),
+        Some(Screening::Blocked) => reasons.push(reason("sender", text_id::SENDER_BLOCKED, json!({ "address": address_arg(screened) }))),
         None => {}
     }
 
     // The screener: held, blocked, marked as new, or let in as known.
     let mode = context.state().screener;
     let screener_said = match role {
-        Some(Role::Screener) => Some("why.screener.held"),
-        Some(Role::Blocked) => Some("why.screener.blocked"),
-        Some(Role::Inbox) if screener::is_new(store, mode, role, &accounts, message)? => Some("why.screener.new"),
+        Some(Role::Screener) => Some(text_id::SCREENER_HELD),
+        Some(Role::Blocked) => Some(text_id::SCREENER_BLOCKED),
+        Some(Role::Inbox) if screener::is_new(store, mode, role, &accounts, message)? => Some(text_id::SCREENER_NEW),
         Some(Role::Inbox)
             if mode != ScreenerMode::Off && record.as_ref().is_some_and(|record| record.known && record.screening.is_none()) =>
         {
-            Some("why.screener.known")
+            Some(text_id::SCREENER_KNOWN)
         }
         _ => None,
     };
@@ -542,12 +592,12 @@ fn why(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let (thread, entries) = thread_of(store, id)?;
     if thread.len() > 1 {
         let yours = thread.iter().filter(|other| **other != id).filter_map(|other| entries.get(other)).any(|other| role_of(other.message()) == Some(Role::Sent));
-        let text_id = if yours { "why.thread.yours" } else { "why.thread.other" };
+        let text_id = if yours { text_id::THREAD_YOURS } else { text_id::THREAD_OTHER };
         reasons.push(reason("thread", text_id, json!({ "messages": thread.len() })));
     }
 
     if reasons.is_empty() {
-        reasons.push(reason("default", "why.default", json!({ "folder": message.folder().get(), "role": role.map(|role| name_arg(&view::role_name(role))) })));
+        reasons.push(reason("default", text_id::DEFAULT, json!({ "folder": message.folder().get(), "role": role.map(|role| name_arg(&view::role_name(role))) })));
     }
     Ok(Outcome::new(json!({ "reasons": settle(reasons) })))
 }
@@ -555,7 +605,7 @@ fn why(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
 /// Pairs of reasons that say one decision of the owner's twice: the first, more specific, stays and the second goes.
 /// A sender blocked is why its mail is in the blocked folder; a group chosen for a sender is chosen by accepting it
 /// (`screener.accept` with a group) or for a sender whose mail comes in, so it says the sender is let in.
-const SAME_DECISION: [(&str, &str); 2] = [("why.sender.blocked", "why.screener.blocked"), ("why.sender.group", "why.sender.accepted")];
+const SAME_DECISION: [(&str, &str); 2] = [(text_id::SENDER_BLOCKED, text_id::SCREENER_BLOCKED), (text_id::SENDER_GROUP, text_id::SENDER_ACCEPTED)];
 
 /// The reasons an answer gives of `reasons`, most specific first: one reason a decision, then at most
 /// [`MAX_REASONS`].
