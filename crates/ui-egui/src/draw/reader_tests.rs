@@ -1541,3 +1541,45 @@ fn a_key_in_the_frame_the_server_removes_the_open_message_acts_on_no_row() {
         }
     }
 }
+
+#[test]
+fn the_message_the_rule_names_opens_from_the_palette_and_a_bound_key_and_only_after_one_left() {
+    const LEAVES: &str = "Photos from the coast walk";
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, LEAVES);
+    let list = subjects(&harness);
+    let behind = list[list.iter().position(|subject| subject == LEAVES).unwrap() + 1].clone();
+    assert!(!harness.state().can_run(crate::keymap::OPEN_HELD), "with a message open there is nothing to open");
+    // Through the palette: Ctrl K, its name, Enter.
+    let through_palette = |harness: &mut Harness<'static, InboxApp>| {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::K);
+        harness.run();
+        harness.get_by_role_and_label(Role::TextInput, "Command").type_text("the rule names");
+        harness.run();
+        harness.key_press(Key::Enter);
+        settle(harness);
+    };
+    done(&mut harness);
+    assert!(harness.state().can_run(crate::keymap::OPEN_HELD), "after a message left it can run");
+    through_palette(&mut harness);
+    assert!(!harness.state().palette().is_open());
+    assert_eq!(open_subject(&harness).as_deref(), Some(behind.as_str()), "the palette opens the message the rule names");
+    assert!(!harness.state().can_run(crate::keymap::OPEN_HELD), "once it opened, nothing is held");
+    // With nothing held the palette's Enter opens nothing: close the open one by Close, then run it.
+    harness.get_by_label("More").click();
+    harness.run();
+    harness.get_by_label("Close").click();
+    settle(&mut harness);
+    assert_eq!(harness.state().reader().open_id(), None);
+    assert!(!harness.state().can_run(crate::keymap::OPEN_HELD), "a closed reader holds nothing");
+    through_palette(&mut harness);
+    assert_eq!(harness.state().reader().open_id(), None, "nothing held: the palette opens nothing");
+    // Through a key the owner gave it (the lists' Enter, once they land): Done, then the key.
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, LEAVES);
+    harness.state_mut().keymap_mut().bind(crate::keymap::OPEN_HELD, egui::KeyboardShortcut::new(egui::Modifiers::NONE, Key::Enter));
+    done(&mut harness);
+    harness.key_press(Key::Enter);
+    settle(&mut harness);
+    assert_eq!(open_subject(&harness).as_deref(), Some(behind.as_str()), "its key opens the message the rule names");
+}
