@@ -1092,6 +1092,56 @@ fn undo_after_a_walk_on_beside_the_docked_composer_leaves_it_docked() {
 }
 
 #[test]
+fn a_palette_act_on_a_message_read_beside_the_docked_composer_leaves_the_keyboard_on_the_row_walked_to() {
+    // A press opens a row (the composer floats), a press in the reader, the composer docked again, then Done from the
+    // palette: the walk-on is no open, and the keyboard is on the row walked to, never on nothing or a reader tool.
+    let mut harness = composing(egui::Theme::Light);
+    type_into(&mut harness, "Message text", "Hello Odile");
+    harness.query_all_by_role(Role::ListBoxOption).nth(1).unwrap().click();
+    harness.run();
+    let pressed = harness.state().mailbox().selected().unwrap();
+    assert!(!docked_with(&harness).0, "the press floats it");
+    let reader = super::reader_rect(&harness.ctx).unwrap();
+    let at = egui::pos2(reader.center().x, reader.bottom() - 4.0);
+    harness.event(egui::Event::PointerMoved(at));
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.step();
+    }
+    harness.run();
+    assert!(!harness.state().list_keys, "the press in the reader: the list's keys rest");
+    harness.get_by_role_and_label(Role::Button, "Back to the reader's place").click();
+    harness.run();
+    assert!(docked_with(&harness).0, "docked again");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    harness.state_mut().palette_mut().set_query("Done");
+    harness.run();
+    harness.key_press(Key::Enter);
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert!(!harness.state().palette().is_open(), "the palette closed");
+    assert!(!harness.state().mailbox().messages().iter().any(|row| row.id == pressed), "done");
+    let next = harness.state().mailbox().selected();
+    assert!(next.is_some_and(|next| next != pressed), "it walked on");
+    assert_eq!(docked_with(&harness), (true, "Hello Odile".to_owned()), "the composer stays docked, the draft whole");
+    let focused = harness.ctx.memory(|memory| memory.focused());
+    assert!(focused.is_some_and(|id| harness.ctx.read_response(id).is_some()), "the keyboard is on a drawn widget: {focused:?}");
+    assert_eq!(super::list::focused_row(&harness.ctx), next, "on the row walked to");
+    // Closed later, the composer gives the place back: the keyboard is not pulled to the reader's tool.
+    harness.get_by_label("Close; the draft is kept").click();
+    for _ in 0..3 {
+        harness.run();
+    }
+    let focused = harness.ctx.memory(|memory| memory.focused());
+    let reader = super::reader_rect(&harness.ctx);
+    let in_reader =
+        focused.and_then(|id| harness.ctx.read_response(id)).is_some_and(|response| reader.is_some_and(|reader| reader.contains_rect(response.rect)));
+    assert!(!in_reader, "no reader tool takes the keyboard long after the act: {focused:?}");
+}
+
+#[test]
 fn a_press_or_enter_on_a_row_beside_the_docked_composer_floats_it() {
     // A press on a row.
     let mut harness = composing(egui::Theme::Light);

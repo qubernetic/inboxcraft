@@ -1436,6 +1436,11 @@ impl InboxApp {
             // reader's first tool, never on nothing.
             self.focus_walked = true;
         }
+        if walking && !from_list && self.docked() {
+            // Nor on nothing beside the docked composer: on the row walked on to, unless a widget keeps the focus (the
+            // composer's text).
+            self.land_held = self.mailbox.selected();
+        }
         // Read by the first sync after the act, which sees what it took away: it counts once.
         self.act_by_key = false;
         // Only where the list is the one the message was opened from: another account, place or search is no removal.
