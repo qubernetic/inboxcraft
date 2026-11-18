@@ -145,3 +145,75 @@ fn a_long_name_without_a_dot_is_cut_at_240_and_the_box_keeps_its_height_at_130_p
     assert!(paint.shapes.iter().any(|shape| matches!(&shape.look, Look::Text { text, .. } if text.starts_with("aaa") && text.ends_with('…'))));
     assert!(harness.get_by_label(&format!("Save {name}")).accesskit_node().label().is_some(), "the link is heard with the whole name");
 }
+
+#[test]
+fn in_a_narrow_pane_nothing_paints_outside_the_box() {
+    let long: &'static str = Box::leak("quarterly-report-with-a-very-long-name-".repeat(20).into_boxed_str());
+    for scale in [TextScale::default(), TextScale::ALL[4]] {
+        let theme = Theme::new(Mode::Dark, scale);
+        for room in [330.0, 240.0, 160.0, 90.0, 40.0, 1.0] {
+            for (name, state) in [
+                (NAME, FileState::Ready),
+                (long, FileState::Ready),
+                (long, FileState::Failed("not saved: the disk is full")),
+                (long, FileState::Saved("saved to Downloads")),
+            ] {
+                let harness = staged(
+                    theme,
+                    |p| p.surface,
+                    vec2(room + 48.0, 120.0),
+                    move |ui, theme| {
+                        ui.set_max_width(room);
+                        attachment(ui, theme, &Keymap::default(), name, "12 345.6 MB", state);
+                    },
+                );
+                let label = spoken(name, "12 345.6 MB", state);
+                let rect = harness.get_by_label(&label).rect();
+                let at = format!("{scale:?} {room} {state:?}");
+                assert!(rect.width() <= room.max(1.0) + 0.5, "the box keeps to the room: {rect:?} {at}");
+                let paint = painted(&harness, &label);
+                for shape in &paint.shapes {
+                    if let Look::Text { text, .. } = &shape.look {
+                        // What shows of a word stays inside the box: cut whole, or clipped at its edge.
+                        assert!(shape.inside || shape.clipped, "{text:?} at {:?} paints past the box {rect:?}: {at}", shape.rect);
+                    }
+                }
+                // A link that stands keeps inside the box.
+                for link in harness.query_all_by_role(egui::accesskit::Role::Button) {
+                    let link_rect = link.rect();
+                    if link.accesskit_node().label().is_some_and(|label| label.starts_with("Save ") || label.starts_with("Open ")) {
+                        assert!(link_rect.is_positive() && rect.expand(0.5).contains_rect(link_rect), "{link_rect:?} in {rect:?}: {at}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_press_on_the_box_saves_nothing_only_save_does() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let asked = std::rc::Rc::new(std::cell::Cell::new(None));
+    let kept = asked.clone();
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(640.0, 100.0),
+        move |ui, theme| {
+            let (_, got) = attachment(ui, theme, &Keymap::default(), NAME, SIZE, FileState::Ready);
+            if got.is_some() {
+                kept.set(got);
+            }
+        },
+    );
+    harness.get_by_label(&spoken(NAME, SIZE, FileState::Ready)).click();
+    harness.run();
+    assert_eq!(asked.get(), None, "a press on the name saves nothing");
+    // A press on the coming-soon `open` falls through to nothing either.
+    harness.get_by_label(&format!("Open {NAME}")).click();
+    harness.run();
+    assert_eq!(asked.get(), None, "a press on the unavailable open saves nothing");
+    harness.get_by_label(&format!("Save {NAME}")).click();
+    harness.run();
+    assert_eq!(asked.get(), Some(FileAsked::Save));
+}
