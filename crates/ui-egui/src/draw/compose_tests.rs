@@ -1226,3 +1226,49 @@ fn fold_is_an_action_the_palette_offers_while_the_panel_floats() {
     assert!(!harness.state().composer().unwrap().folded(), "open again");
     assert_eq!(keymap::action(keymap::FOLD).map(|action| action.id), Some("ui.compose.fold"));
 }
+
+/// Where the last frame painted the text `text`: its galley's rect on the screen.
+fn text_at(harness: &Harness<'static, InboxApp>, text: &str) -> Option<egui::Rect> {
+    fn walk(shape: &egui::Shape, text: &str, found: &mut Option<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, text, found)),
+            egui::Shape::Text(shown) if shown.galley.text() == text => *found = Some(shown.galley.rect.translate(shown.pos.to_vec2())),
+            _ => {}
+        }
+    }
+    let mut found = None;
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, text, &mut found));
+    found
+}
+
+#[test]
+fn a_wrong_reason_stands_six_after_its_warning_as_its_frame_draws_it() {
+    let mut harness = composing(egui::Theme::Dark);
+    type_into(&mut harness, "To", "ansel.example.org,");
+    let reason = "ansel.example.org is not an address";
+    let why = rect_of(&harness, Role::Label, reason);
+    let text = text_at(&harness, reason).unwrap();
+    // 4 in, the warning's 16, 6: the text starts 26 into "why Send waits".
+    assert!((text.left() - why.left() - 26.0).abs() < 0.5, "{text:?} in {why:?}");
+}
+
+#[test]
+fn the_from_name_keeps_the_room_its_frames_give_docked_and_floating() {
+    // The frames' sender names stop 246 short of the line's value docked (608 wide) and 248 floating (404 wide).
+    assert_eq!(super::compose::from_name_most(608.0, false), 362.0);
+    assert_eq!(super::compose::from_name_most(404.0, true), 156.0);
+    assert_eq!(super::compose::from_name_most(100.0, true), 1.0, "never less than a point");
+    assert_eq!(super::compose::from_name_most(f32::NAN, false), 1.0);
+}
+
+#[test]
+fn the_from_menu_hangs_on_the_from_line_s_rule() {
+    let mut harness = composing(egui::Theme::Dark);
+    let from = rect_of(&harness, Role::ComboBox, "From Mira Holloway <mira@example.org>");
+    harness.get_by_role_and_label(Role::ComboBox, "From Mira Holloway <mira@example.org>").click();
+    harness.run();
+    let first = rect_of(&harness, Role::MenuItemRadio, "Personal, mira@example.org");
+    // The menu's top (its 1 px edge over the first row) on the hairline under the line: 6 under the value's box.
+    assert!((first.top() - 1.0 - (from.bottom() + 6.0)).abs() < 0.5, "{first:?} under {from:?}");
+    assert!((first.left() - 1.0 - from.left()).abs() < 0.5, "{first:?} under {from:?}");
+}

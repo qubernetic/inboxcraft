@@ -727,6 +727,21 @@ pub fn menu<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width: f
     menu_at(ctx, theme, opener, opener.rect, id, width, add)
 }
 
+/// [`menu`] hung 4 px under `anchor` instead of under `opener` (the composer's From menu, which hangs on its line's
+/// rule).
+pub fn menu_under<R>(
+    ctx: &Context,
+    theme: &Theme,
+    opener: &Response,
+    anchor: Rect,
+    id: Id,
+    width: f32,
+    add: impl FnOnce(&mut Ui) -> (R, bool),
+) -> Option<R> {
+    toggle(ctx, opener, id);
+    menu_at(ctx, theme, opener, anchor, id, width, add)
+}
+
 /// Opens or closes the menu `id` as a press on `opener` asks, and keeps whether it was the keyboard's.
 fn toggle(ctx: &Context, opener: &Response, id: Id) {
     refocus(ctx, opener, id);

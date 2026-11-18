@@ -67,9 +67,16 @@ const SUGGESTIONS: f32 = 360.0;
 /// The widest the account's label at the From line's right end gets, docked and floating, in points.
 const LABEL_MOST: [f32; 2] = [160.0, 80.0];
 
-/// The room the From line keeps beside the sender's name for the address, the caret and the label, in points: the
-/// frames' name stops 246 short of the line's value.
-const NAME_ROOM: f32 = 246.0;
+/// The room the From line keeps beside the sender's name for the address, the caret and the label, in points, docked
+/// and floating: the frames' name stops 246 short of the line's value docked (608 wide, a name of 362) and 248 short
+/// floating (404 wide, a name of 156).
+const NAME_ROOM: [f32; 2] = [246.0, 248.0];
+
+/// The widest the sender's name gets in a From value `value` wide, `floating` or docked; a point at least.
+pub(super) fn from_name_most(value: f32, floating: bool) -> f32 {
+    let most = value - if floating { NAME_ROOM[1] } else { NAME_ROOM[0] };
+    if most.is_finite() { most.max(1.0) } else { 1.0 }
+}
 
 /// The warning before a reason that something is wrong: Phosphor's warning, as the frames draw it.
 const WARNING: char = '\u{e4e0}';
@@ -353,8 +360,10 @@ fn suggestions(ctx: &egui::Context, theme: &Theme, composer: &Composer, at: Pos2
 }
 
 /// The From line's value: the account as a button that opens the menu of the accounts, its bar and label at the right
-/// end; `label_most` the widest the label gets.
-fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, value: Rect, label_most: f32, asked: &mut Vec<Asked>) {
+/// end, as wide as `place` lets them be.
+fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, value: Rect, place: Place, asked: &mut Vec<Asked>) {
+    let floating = place == Place::Floating;
+    let label_most = if floating { LABEL_MOST[1] } else { LABEL_MOST[0] };
     let p = &theme.palette;
     let s = &theme.spacing;
     let Some(account) = mailbox.account(composer.account()) else { return };
@@ -383,7 +392,7 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, valu
     let bar = Rect::from_min_size(pos2(label_left - s.s2 + 2.0 - 3.0, (mid - 6.0).round()), vec2(3.0, 12.0));
     painter.rect_filled(bar, 0.0, theme.account_colour(u64::try_from(account.index).unwrap_or(0)));
     let room = (bar.left() - s.s2 - value.left()).max(1.0);
-    let name_most = (value.width() - NAME_ROOM).clamp(1.0, room);
+    let name_most = from_name_most(value.width(), floating).min(room);
     let name_text = cut(ui, &sender, theme.fonts.body, p.ink, name_most);
     let name_width = name_text.size().x;
     let mut x = value.left();
@@ -405,7 +414,9 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, valu
         paint::focus_ring(painter, theme, value, paint::Ring::Inside);
     }
     let accounts = mailbox.accounts();
-    popup::menu(ui.ctx(), theme, &response, from_menu(), FROM_MENU, |ui| {
+    // The menu hangs on the line's rule, 6 under the value's box (its frame): the float hangs 4 under its anchor.
+    let anchor = Rect::from_min_max(value.min, pos2(value.right(), value.bottom() + 2.0));
+    popup::menu_under(ui.ctx(), theme, &response, anchor, from_menu(), FROM_MENU, |ui| {
         let mut chosen = false;
         for choice in accounts {
             let index = u64::try_from(choice.index).unwrap_or(0);
@@ -581,7 +592,8 @@ fn foot(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
         if !waits {
             let mark = theme.boxes().icon;
             crate::iconset::paint_glyph(painter, Rect::from_min_size(pos2(x, mid - mark / 2.0), vec2(mark, mark)), WARNING, p.minus);
-            x += mark + s.s2 + 2.0;
+            // The frames' gap of 6 between the warning and the words.
+            x += mark + s.s1 + 2.0;
         }
         let text = cut(&row, &problem, theme.fonts.body, colour, (reason.right() - x).max(1.0));
         let response = row.interact(reason, Id::unique("compose-why"), Sense::hover());
@@ -684,8 +696,7 @@ fn lines(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &mut Composer,
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     name(ui, theme, rect, tr!("From"));
     let value = Rect::from_min_max(pos2(rect.left() + value_left, rect.top() + s.s2 - 2.0), pos2(rect.right(), rect.bottom() - s.s2 + 2.0));
-    let label_most = if place == Place::Docked { LABEL_MOST[0] } else { LABEL_MOST[1] };
-    from(ui, theme, mailbox, composer, value, label_most, asked);
+    from(ui, theme, mailbox, composer, value, place, asked);
     paint::rule(ui, p.panel_line);
     for line in composer.drawn() {
         recipients(ui, theme, composer, *line, asked);
