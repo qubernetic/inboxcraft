@@ -4,12 +4,14 @@
 //! `cargo xtask shots`: the committed pictures are what the code draws.
 //!
 //! Every scene of `crates/ui-egui/shots.jsonl` is drawn by the `ui_shot` example, as `just shot` runs it, into
-//! `<target>/shots/` (`ui_shot --out-dir`; `<target>` is `$CARGO_TARGET_DIR`, else `target/`), and each picture is
-//! compared byte for byte with the one committed at the scene's `out`. The gate fails, naming them, on a committed
-//! picture that differs from the render, a scene with no committed picture, two scenes that write one picture, and a
-//! PNG in a folder of the pictures that no scene writes. `--fix` copies the renders over the committed pictures and
-//! deletes the pictures of no scene; two scenes that write one picture still fail. The render is deterministic, so
-//! there is no tolerance: one pixel is a difference.
+//! a fresh folder `<target>/shots-*` of this run alone, removed at the end (`ui_shot --out-dir`; `<target>` is
+//! `$CARGO_TARGET_DIR`, else `target/`), and each picture is compared byte for byte with the one committed at the
+//! scene's `out`. The gate fails, naming them, on a committed picture that differs from the render, a scene with no
+//! committed picture, two scenes that write one picture, a PNG in a folder of the pictures that no scene writes, a
+//! run that draws no scene, and an `out` that is not a plain path under `docs/images/` or has a symbolic link on its
+//! way. `--fix` copies the renders over the committed pictures and deletes the pictures of no scene, only ever under
+//! `docs/images/`; two scenes that write one picture still fail. The render is deterministic, so there is no
+//! tolerance: one pixel is a difference.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -21,17 +23,23 @@ use crate::{Context, Error, count};
 /// The script of the scenes.
 pub(crate) const SCRIPT: &str = "crates/ui-egui/shots.jsonl";
 
-/// The folder of the renders under the target directory.
-const RENDERS: &str = "shots";
+/// The folder of the pictures: a scene writes under it and nowhere else, and only there are pictures deleted.
+pub(crate) const PICTURES: &str = "docs/images";
+
+/// The prefix of the run's own folder of renders under the target directory.
+const RENDERS: &str = "shots-";
 
 /// Draws every scene and compares, or with `fix` writes, the committed pictures; reports to `out`.
 pub(crate) fn gate(ctx: &mut Context, fix: bool, out: &mut dyn Write) -> Result<bool, Error> {
-    let renders = match &ctx.shots {
+    let parent = match &ctx.shots {
         Some(dir) => dir.clone(),
-        None => target_dir(&ctx.root, std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from)).join(RENDERS),
+        None => target_dir(&ctx.root, std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from)),
     };
-    let Some(dir) = renders.to_str() else {
-        return Err(Error::Config { path: renders.clone(), message: "the folder of the renders is not UTF-8".to_owned() });
+    fs::create_dir_all(&parent).map_err(|source| Error::Io { path: parent.clone(), source })?;
+    // A fresh folder for this run, so two runs never share renders; it is removed when it drops, also on an error.
+    let renders = tempfile::Builder::new().prefix(RENDERS).tempdir_in(&parent).map_err(|source| Error::Io { path: parent.clone(), source })?;
+    let Some(dir) = renders.path().to_str() else {
+        return Err(Error::Config { path: renders.path().to_path_buf(), message: "the folder of the renders is not UTF-8".to_owned() });
     };
     let args = ["run", "-q", "-p", "inboxcraft-ui-egui", "--example", "ui_shot", "--", "--out-dir", dir, SCRIPT];
     let Some(stdout) = ctx.runner.output(&ctx.cargo, &args, &ctx.root)? else {
@@ -40,7 +48,11 @@ pub(crate) fn gate(ctx: &mut Context, fix: bool, out: &mut dyn Write) -> Result<
     };
     let printed = String::from_utf8_lossy(&stdout);
     let scenes: Vec<&str> = printed.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
-    compare(&ctx.root, &renders, &scenes, fix, out)
+    if scenes.is_empty() {
+        writeln!(out, "shots: ui_shot drew no scene; nothing was compared")?;
+        return Ok(false);
+    }
+    compare(&ctx.root, renders.path(), &scenes, fix, out)
 }
 
 /// `$CARGO_TARGET_DIR` (relative to `root` when it is relative), else `root/target`.
@@ -64,8 +76,14 @@ pub(crate) fn compare(root: &Path, renders: &Path, scenes: &[&str], fix: bool, o
     let mut folders = BTreeSet::new();
     for (scene, writes) in &writers {
         let relative = Path::new(scene);
-        if !relative.components().all(|part| matches!(part, Component::Normal(_))) {
-            writeln!(out, "shots: {scene}: not a path under the workspace")?;
+        let plain = relative.components().all(|part| matches!(part, Component::Normal(_)));
+        if !plain || !relative.starts_with(PICTURES) || relative == Path::new(PICTURES) {
+            writeln!(out, "shots: {scene}: not a picture under {PICTURES}; refused")?;
+            problems = problems.saturating_add(1);
+            continue;
+        }
+        if symlinked(root, relative)? {
+            writeln!(out, "shots: {scene}: a symbolic link on its path; refused")?;
             problems = problems.saturating_add(1);
             continue;
         }
@@ -124,6 +142,22 @@ pub(crate) fn compare(root: &Path, renders: &Path, scenes: &[&str], fix: bool, o
         )?;
     }
     Ok(problems == 0)
+}
+
+/// Whether a part of `relative` under `root` (a folder on the way, or the file) is a symbolic link; a part that is not
+/// there ends the walk.
+fn symlinked(root: &Path, relative: &Path) -> Result<bool, Error> {
+    let mut path = root.to_path_buf();
+    for part in relative.components() {
+        path.push(part);
+        match fs::symlink_metadata(&path) {
+            Ok(meta) if meta.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(source) => return Err(Error::Io { path, source }),
+        }
+    }
+    Ok(false)
 }
 
 /// The PNG files in `dir` (`folder` under the root) that no scene writes, as paths under the root, sorted.

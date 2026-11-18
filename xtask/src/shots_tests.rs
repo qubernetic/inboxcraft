@@ -83,11 +83,54 @@ fn two_scenes_writing_one_picture_fail_even_with_fix() {
 }
 
 #[test]
-fn a_scene_outside_the_workspace_is_refused_and_a_missing_render_is_an_error() {
+fn a_scene_outside_the_pictures_is_refused_and_nothing_outside_is_written_or_deleted() {
     let (dir, renders) = pictures(&[], &[]);
-    let (passed, out) = check(dir.path(), &renders, &["../x.png", "/etc/x.png"], false);
+    let root = dir.path().join("root");
+    write(&root, "Cargo.toml", "[workspace]\n");
+    write(&root, "assets/icons/keep.png", "K");
+    for name in ["Cargo.toml", "assets/icons/x.png", "docs/images/../../Cargo.toml"] {
+        write(&renders, name, "R");
+    }
+    let scenes = ["../x.png", "/etc/x.png", "Cargo.toml", "assets/icons/x.png", "docs/images/../../Cargo.toml", "docs/images", "docs"];
+    for fix in [false, true] {
+        let (passed, out) = check(dir.path(), &renders, &scenes, fix);
+        assert!(!passed);
+        for scene in scenes {
+            assert!(out.contains(&format!("shots: {scene}: not a picture under docs/images; refused\n")), "{scene}: {out}");
+        }
+    }
+    assert_eq!(std::fs::read_to_string(root.join("Cargo.toml")).unwrap(), "[workspace]\n");
+    assert!(!root.join("assets/icons/x.png").exists());
+    assert_eq!(std::fs::read_to_string(root.join("assets/icons/keep.png")).unwrap(), "K", "no stray is deleted outside");
+}
+
+#[test]
+fn a_symbolic_link_on_a_pictures_path_is_refused_and_not_followed() {
+    let (dir, renders) = pictures(&[], &[("a.png", "R"), ("b.png", "R")]);
+    let root = dir.path().join("root");
+    write(dir.path(), "outside/a.png", "O");
+    write(dir.path(), "outside/stray.png", "S");
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    // The folder is a link out of the workspace.
+    std::os::unix::fs::symlink(dir.path().join("outside"), root.join("docs/images")).unwrap();
+    let (passed, out) = check(dir.path(), &renders, &["docs/images/a.png"], true);
     assert!(!passed);
-    assert!(out.contains("shots: ../x.png: not a path under the workspace") && out.contains("shots: /etc/x.png: not a path"), "{out}");
+    assert!(out.contains("shots: docs/images/a.png: a symbolic link on its path; refused\n"), "{out}");
+    assert_eq!(std::fs::read_to_string(dir.path().join("outside/a.png")).unwrap(), "O");
+    assert!(dir.path().join("outside/stray.png").exists(), "nothing deleted through the link");
+    // The picture itself is a link.
+    std::fs::remove_file(root.join("docs/images")).unwrap();
+    std::fs::create_dir_all(root.join("docs/images")).unwrap();
+    std::os::unix::fs::symlink(dir.path().join("outside/a.png"), root.join("docs/images/b.png")).unwrap();
+    let (passed, out) = check(dir.path(), &renders, &["docs/images/b.png"], true);
+    assert!(!passed);
+    assert!(out.contains("shots: docs/images/b.png: a symbolic link on its path; refused\n"), "{out}");
+    assert_eq!(std::fs::read_to_string(dir.path().join("outside/a.png")).unwrap(), "O");
+}
+
+#[test]
+fn a_missing_render_is_an_error() {
+    let (dir, renders) = pictures(&[], &[]);
     let mut out = Vec::new();
     let error = compare(&dir.path().join("root"), &renders, &["docs/images/a.png"], false, &mut out).unwrap_err();
     assert!(matches!(error, Error::Io { .. }), "{error}");
@@ -157,11 +200,22 @@ fn shots_runs_ui_shot_as_just_shot_does_and_compares_what_it_printed() {
     assert_eq!(code, OK, "{out}");
     let call = calls.borrow()[0].clone();
     assert!(call.starts_with("cargo run -q -p inboxcraft-ui-egui --example ui_shot -- --out-dir "), "{call}");
-    assert!(call.ends_with(&format!("/shots {SCRIPT}")), "{call}");
+    assert!(call.contains("/renders/shots/shots-") && call.ends_with(&format!(" {SCRIPT}")), "{call}");
+    let left: Vec<_> = std::fs::read_dir(dir.path().join("renders/shots")).unwrap().collect();
+    assert!(left.is_empty(), "the run's renders are removed");
     let (ctx, _) = shooter_context(dir.path(), Some("docs/images/a.png\n"), vec![("docs/images/a.png", "B")]);
     let (code, out, _) = run_in(ctx, &["shots"]);
     assert_eq!(code, FAILED, "{out}");
     assert!(out.contains("docs/images/a.png differs from the render"), "{out}");
+}
+
+#[test]
+fn a_run_that_draws_no_scene_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ctx, _) = shooter_context(dir.path(), Some("\n"), vec![]);
+    let (code, out, _) = run_in(ctx, &["shots"]);
+    assert_eq!(code, FAILED);
+    assert_eq!(out, "shots: ui_shot drew no scene; nothing was compared\n");
 }
 
 #[test]

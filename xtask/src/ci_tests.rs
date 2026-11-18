@@ -31,8 +31,8 @@ impl Runner for Recorder {
     }
 
     fn output(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<Option<Vec<u8>>, Error> {
-        // As `run`, with nothing printed: `ui_shot` drew no scene.
-        Ok(self.run(program, args, dir)?.then(Vec::new))
+        // As `run`, drawing what is committed.
+        Ok(self.run(program, args, dir)?.then(|| crate::test_support::draw_committed(args, dir)))
     }
 }
 
@@ -53,7 +53,7 @@ fn ci_runs_every_gate_in_order() {
     let (ctx, calls) = ci_context(vec![]);
     let cov = format!("llvm-cov nextest --workspace --profile ci --lcov --output-path {}", report_of(&ctx));
     let shots = format!(
-        "run -q -p inboxcraft-ui-egui --example ui_shot -- --out-dir {} crates/ui-egui/shots.jsonl",
+        "cargo run -q -p inboxcraft-ui-egui --example ui_shot -- --out-dir {}/shots-",
         ctx.shots.as_deref().map(|path| path.display().to_string()).unwrap_or_default()
     );
     let (code, out, _) = run_in(ctx, &["ci"]);
@@ -64,11 +64,14 @@ fn ci_runs_every_gate_in_order() {
         .concat();
     let wasm = format!("build --target wasm32-unknown-unknown{wasm}");
     let expected: Vec<String> =
-        ["fmt --all -- --check", "clippy --workspace --all-targets -- -D warnings", "test --workspace --doc", &cov, &wasm, "deny check", &shots]
+        ["fmt --all -- --check", "clippy --workspace --all-targets -- -D warnings", "test --workspace --doc", &cov, &wasm, "deny check"]
             .iter()
             .map(|args| format!("cargo {args} @ {}", root.display()))
             .collect();
-    assert_eq!(*calls.borrow(), expected);
+    let mut calls = calls.borrow().clone();
+    let last = calls.pop().unwrap_or_default();
+    assert_eq!(calls, expected);
+    assert!(last.starts_with(&shots) && last.ends_with(&format!(" crates/ui-egui/shots.jsonl @ {}", root.display())), "{last}");
     for name in [
         "fmt",
         "clippy",
@@ -131,7 +134,7 @@ fn an_in_process_gate_that_cannot_run_fails_without_stopping_ci() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: spdx: "), "{out}");
-    assert!(out.ends_with("ci: 7 of 14 gates failed: spdx, assets, layers, flatpak-sources-check, cov, wasm, stats\n"), "{out}");
+    assert!(out.ends_with("ci: 8 of 14 gates failed: spdx, assets, layers, flatpak-sources-check, cov, wasm, shots, stats\n"), "{out}");
     assert_eq!(calls.borrow().len(), 5);
 }
 
@@ -144,7 +147,7 @@ fn a_malformed_change_fragment_fails_ci() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: changes\nchanges: changes/5.md:3: the entry does not name #5\n"), "{out}");
-    assert!(out.ends_with("ci: 8 of 14 gates failed: spdx, assets, changes, layers, flatpak-sources-check, cov, wasm, stats\n"), "{out}");
+    assert!(out.ends_with("ci: 9 of 14 gates failed: spdx, assets, changes, layers, flatpak-sources-check, cov, wasm, shots, stats\n"), "{out}");
 }
 
 #[test]
