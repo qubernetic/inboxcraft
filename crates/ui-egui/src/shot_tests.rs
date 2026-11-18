@@ -846,6 +846,19 @@ fn the_blocks_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
 }
 
 #[test]
+fn the_lists_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "lists": true}}"#))).unwrap();
+        let size = crate::component::gallery_lists::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""blocks": true"#, r#""components": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "lists": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}
+
+#[test]
 fn a_click_presses_before_the_picture_and_what_it_opens_is_drawn() {
     // A button that paints its ground cyan once it has been pressed.
     let pressed = std::cell::Cell::new(false);

@@ -34,7 +34,7 @@ pub fn size() -> Vec2 {
 const WIDTH: f32 = 2000.0;
 
 /// The page's height, in points: the taller column and its margins.
-const HEIGHT: f32 = 1240.0;
+const HEIGHT: f32 = 1320.0;
 
 /// What draws a column of the page.
 type Draw = fn(&mut Ui, &Theme, &Keymap);
@@ -47,10 +47,11 @@ pub(crate) const ROW_WIDTH: f32 = 440.0;
 
 /// The hover actions of a row on the boards: those of the list's rows, in the list's order.
 pub(crate) fn row_actions() -> [Action<'static>; 4] {
+    // The page's keymap gives D, R and Del to the actions of the list's rows; Snooze keeps the app's H.
     [
-        Action { icon: IconId::Done, name: tr!("Done"), action: Some(keymap::DONE), unavailable: None },
-        Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some(keymap::READ), unavailable: None },
-        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE), unavailable: None },
+        Action { icon: IconId::Done, name: tr!("Done"), action: Some("mail.done"), unavailable: None },
+        Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some("mail.read"), unavailable: None },
+        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some("mail.delete"), unavailable: None },
         Action { icon: IconId::Snooze, name: tr!("Snooze"), action: Some(keymap::SNOOZE), unavailable: Some(tr!("Open the message to snooze it")) },
     ]
 }
@@ -206,7 +207,8 @@ pub(crate) fn mail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &MailStat
     .inner
 }
 
-/// The mail row's board: every state of its sheet, two to a line.
+/// The mail row's board: every state of its sheet, two to a line, and beside the last the coming-soon tag of the
+/// checked states' check box (bulk select is planned), once.
 fn mail_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     title(ui, theme, tr!("Mail row"));
     for pair in mail_states().chunks(2) {
@@ -214,6 +216,11 @@ fn mail_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
             for state in pair {
                 cell(ui, theme, state.name, |ui| {
                     mail(ui, theme, keymap, state);
+                });
+            }
+            if pair.len() == 1 {
+                cell(ui, theme, "bulk-select", |ui| {
+                    super::soon::soon_tag(ui, theme);
                 });
             }
         });
@@ -528,5 +535,8 @@ pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
             });
         });
     }
-    let _ = BOARD_GAP;
 }
+
+#[cfg(test)]
+#[path = "gallery_lists_tests.rs"]
+mod tests;

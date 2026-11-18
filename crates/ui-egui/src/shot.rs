@@ -42,7 +42,8 @@
 //! `icons` set to `true` draws every icon
 //! in every style in the theme's colours instead of the window, `components` set to `true` the gallery of
 //! the components ([`crate::component::gallery`]), `blocks` set to `true` the page of the shared rows and blocks
-//! ([`crate::component::gallery_blocks`]). The typeface and the icons are fixed, so a script that names a
+//! ([`crate::component::gallery_blocks`]), `lists` set to `true` the page of the mail lists' rows
+//! ([`crate::component::gallery_lists`]). The typeface and the icons are fixed, so a script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
 //! before the picture, so what that opens (a menu, a list) is in it; `put_away` set to `true` snoozes, pins, parks and marks
@@ -216,6 +217,9 @@ pub struct Shot {
     /// The page of the shared rows and blocks instead of the window.
     #[serde(default)]
     pub blocks: Option<bool>,
+    /// The page of the mail lists' rows instead of the window.
+    #[serde(default)]
+    pub lists: Option<bool>,
     /// The app's own window frame, as a native window draws it: `strip` or `top_row`; none when left out.
     #[serde(default)]
     pub frame: Option<String>,
@@ -614,7 +618,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.show_done.is_some()
         || shot.picker.is_some()
         || shot.outbox.is_some()
-        || [shot.icons, shot.components, shot.blocks].iter().filter(|page| **page == Some(true)).count() > 1;
+        || [shot.icons, shot.components, shot.blocks, shot.lists].iter().filter(|page| **page == Some(true)).count() > 1;
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
     }
@@ -649,6 +653,21 @@ fn blocks_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
         crate::component::gallery_blocks::page(ui, &theme, &keymap);
+    })
+}
+
+/// The page of the mail lists' rows of `shot` in `mode`.
+fn lists_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of the mail lists' rows")?;
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = gallery::keymap();
+    let mut fonts = true;
+    paint(crate::component::gallery_lists::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_lists::page(ui, &theme, &keymap);
     })
 }
 
@@ -1030,6 +1049,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if shot.blocks == Some(true) {
         return blocks_gallery(shot, mode);
+    }
+    if shot.lists == Some(true) {
+        return lists_gallery(shot, mode);
     }
     if shot.icons == Some(true) {
         return icon_sheet(shot, mode);
