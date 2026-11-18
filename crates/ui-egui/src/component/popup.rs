@@ -618,15 +618,24 @@ pub fn clicked(ctx: &Context, response: &Response, id: Id) -> bool {
 /// keyboard that frame and the next.
 const REFOCUS_FRAMES: u8 = 3;
 
-/// Gives the keyboard back to `opener` while the menu `id` closed on a choice asks for it.
+/// Asks for the keyboard back for the opener of the menu `id` for [`REFOCUS_FRAMES`] passes from this one.
+fn ask_refocus(ctx: &Context, id: Id) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(id.with("refocus"), (REFOCUS_FRAMES, pass)));
+}
+
+/// Gives the keyboard back to `opener` while the menu `id` closed on a choice asks for it. The ask lapses
+/// [`REFOCUS_FRAMES`] passes after it was made, whether or not `opener` was drawn in them: an opener drawn again later
+/// takes no keyboard.
 fn refocus(ctx: &Context, opener: &Response, id: Id) {
     let key = id.with("refocus");
-    if let Some(left) = ctx.data(|data| data.get_temp::<u8>(key)) {
-        if opener.has_focus() || left == 0 || is_open(ctx, id) {
-            ctx.data_mut(|data| data.remove::<u8>(key));
+    if let Some((left, asked)) = ctx.data(|data| data.get_temp::<(u8, u64)>(key)) {
+        let old = ctx.cumulative_pass_nr().saturating_sub(asked) > u64::from(REFOCUS_FRAMES);
+        if opener.has_focus() || left == 0 || old || is_open(ctx, id) {
+            ctx.data_mut(|data| data.remove::<(u8, u64)>(key));
         } else {
             opener.request_focus();
-            ctx.data_mut(|data| data.insert_temp(key, left.saturating_sub(1)));
+            ctx.data_mut(|data| data.insert_temp(key, (left.saturating_sub(1), asked)));
         }
     }
 }
@@ -704,7 +713,7 @@ fn menu_at<R>(
             if beside && !by_key {
                 ctx.memory_mut(|memory| memory.surrender_focus(opener.id));
             } else if beside {
-                ctx.data_mut(|data| data.insert_temp(id.with("refocus"), REFOCUS_FRAMES));
+                ask_refocus(ctx, id);
             }
             None
         }
@@ -713,7 +722,7 @@ fn menu_at<R>(
                 set_open(ctx, id, false);
                 if by_key {
                     opener.request_focus();
-                    ctx.data_mut(|data| data.insert_temp(id.with("refocus"), REFOCUS_FRAMES));
+                    ask_refocus(ctx, id);
                 }
             }
             Some(inner)

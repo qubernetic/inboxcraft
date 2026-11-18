@@ -3633,3 +3633,33 @@ fn one_esc_closes_the_float_over_the_reader_and_nothing_under_it() {
     assert!(!crate::component::popup::any_open(&harness.ctx), "Esc closes More");
     assert!(rows(&harness) == 0 && super::reader_rect(&harness.ctx).is_some(), "and only More: the message stays in front");
 }
+
+#[test]
+fn a_keyboard_menus_give_back_lapses_when_its_opener_is_not_drawn_again_in_time() {
+    // One pane: More opened from the keyboard, closed by a press outside, and the reader gone before More was drawn
+    // again. Later another message opens: its first tool takes the keyboard, not More.
+    let mut harness = wide(900.0);
+    harness.get_by_label(ODILE).click();
+    harness.run();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "More").click_accesskit();
+    harness.run();
+    harness.run();
+    assert!(crate::component::popup::any_open(&harness.ctx), "More is open");
+    let at = egui::pos2(890.0, 890.0);
+    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    harness.step();
+    harness.state_mut().run_action(&egui::Context::default(), crate::keymap::BACK);
+    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    harness.step();
+    harness.run();
+    assert!(rows(&harness) > 0, "back to the list");
+    harness.key_press(Key::J);
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.run();
+    harness.run();
+    let more = harness.get_by_role_and_label(Role::Button, "More");
+    assert!(!more.accesskit_node().is_focused(), "the old ask took the keyboard: {:?}", harness.ctx.memory(|memory| memory.focused()));
+}
