@@ -553,3 +553,7 @@ mod focus_tests;
 #[cfg(test)]
 #[path = "look_tests.rs"]
 mod look_tests;
+
+#[cfg(test)]
+#[path = "compose_tests.rs"]
+mod compose_tests;

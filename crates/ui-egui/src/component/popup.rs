@@ -171,12 +171,15 @@ enum Mode {
 
 /// The ground under a held float, over the window's panes (as the palette's and the settings sheet's dim ground): a
 /// press outside the float lands on it, from the press to the release, and reaches nothing under it. It paints
-/// nothing and takes no keyboard. The window's own controls and the toasts stand over it, as over those grounds.
+/// nothing and takes no keyboard. The window's own controls and the toasts stand over it, as over those grounds. It
+/// stays on top of the other middle layers (the floating composer), whichever showed first: a press on them only
+/// warns.
 fn backdrop(ctx: &Context, float: Id) {
     let screen = ctx.content_rect();
-    Area::new(float.with("backdrop")).order(Order::Middle).fixed_pos(screen.min).constrain(false).fade_in(false).show(ctx, |ui| {
+    let shown = Area::new(float.with("backdrop")).order(Order::Middle).fixed_pos(screen.min).constrain(false).fade_in(false).show(ctx, |ui| {
         ui.allocate_exact_size(screen.size(), Sense::CLICK | Sense::DRAG);
     });
+    ctx.move_to_top(shown.response.layer_id);
 }
 
 /// Shows `float` with `add` drawing its rows, as the module says; what `add` gave, or `None` once `Esc` or a press
