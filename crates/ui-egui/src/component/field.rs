@@ -661,6 +661,15 @@ fn paint_caret(ui: &Ui, theme: &Theme, id: Id, output: &TextEditOutput, clip: Re
     }
 }
 
+/// `text` on one line in `font` and `colour`, cut with one ellipsis at `width` as [`super::cut`] cuts it, laid out
+/// as [`layout`] lays out a field's value (so it stands where the value stands).
+fn cut_line(ui: &Ui, text: &str, font: Font, colour: Color32, width: f32) -> Arc<Galley> {
+    let mut job = LayoutJob::single_section(text.to_owned(), font.format(colour));
+    job.wrap = TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+    job.break_on_newline = false;
+    paint::tight_cut(ui.painter(), ui.fonts_mut(|fonts| fonts.layout_job(job)))
+}
+
 /// Paints `hint` in `muted` at `at` (the text's place), clipped to `clip`; after the caret's block and the box's gap
 /// when the field has the focus.
 fn paint_hint(ui: &Ui, theme: &Theme, hint: &str, font: Font, at: egui::Pos2, clip: Rect, focus: bool) {
@@ -728,7 +737,12 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
                 let blank = password && !seen.enabled;
                 let mut buffer = capped(if blank { &mut nothing } else { &mut *text }, &guarded, !blank && !field.read_only, password);
                 let empty = buffer.as_str().is_empty();
-                let mut layouter = |ui: &Ui, text: &dyn TextBuffer, _: f32| layout(ui, text.as_str(), font, colour, None, password);
+                // Without the focus, a value longer than the box shows cut with one ellipsis, as the design cuts a
+                // line; egui keeps the whole value, laid out unseen, for the pointer and a screen reader.
+                let cut = (!seen.focus && !password && !empty && layout(ui, buffer.as_str(), font, colour, None, false).size().x > inner.width())
+                    .then(|| cut_line(ui, buffer.as_str(), font, colour, inner.width()));
+                let laid = if cut.is_some() { Color32::TRANSPARENT } else { colour };
+                let mut layouter = |ui: &Ui, text: &dyn TextBuffer, _: f32| layout(ui, text.as_str(), font, laid, None, password);
                 let edit = TextEdit::singleline(&mut buffer)
                     .id(id)
                     .frame(egui::Frame::NONE.inner_margin(margin_of(rect, inner)))
@@ -743,6 +757,10 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
                     state.store(ui.ctx(), id);
                 }
                 let clip = inner.expand2(vec2(caret_size(theme).x + theme.spacing.s1, vertical));
+                if let Some(cut) = cut {
+                    // At the box's text start, where egui puts an unscrolled value, painted as egui paints it.
+                    super::solid(ui).with_clip_rect(rect.shrink(1.0)).galley(pos2(inner.left(), output.galley_pos.y), cut, colour);
+                }
                 if empty && !disabled_password {
                     // A stored password's hint is words, in `body`, centred as words are.
                     let hint_font = if stored { theme.fonts.body } else { font };

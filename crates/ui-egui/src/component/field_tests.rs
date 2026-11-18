@@ -209,7 +209,18 @@ fn a_text_field_looks_as_its_sheet_says_in_every_state() {
                 State::Disabled => (value, p.muted),
                 _ => (value, p.ink),
             };
-            let text = one(&harness, shown);
+            // A long value without the focus is cut with one ellipsis inside the box's pads, as the board's (its ink
+            // ends at 303); the whole value is there for egui, unseen.
+            let text = if state == State::Long {
+                // The cut galley keeps the whole value as its text and lays out the letters kept and the ellipsis.
+                let seen: Vec<_> = drawn(&harness).into_iter().filter(|text| text.text == LONG && text.colour.a() > 0).collect();
+                assert_eq!(seen.len(), 1, "{at}: the value shown once {seen:?}");
+                assert!(seen[0].rect.right() <= rect.left() + 303.5, "{at} {seen:?}");
+                assert!(drawn(&harness).iter().any(|text| text.text == LONG && text.colour.a() == 0), "{at}: the whole value unseen");
+                seen[0].clone()
+            } else {
+                one(&harness, shown)
+            };
             assert_eq!(text.rect.min, rect.min + vec2(13.0, 7.0), "{at} {text:?}");
             assert_eq!((text.colour, text.family.as_str(), text.size, text.row), (colour, "Proportional", 14.0, 22.0), "{at}");
             // The focus: the caret 2 after the text's box (its width rounded up, as the design sizes a text box), 3 down
