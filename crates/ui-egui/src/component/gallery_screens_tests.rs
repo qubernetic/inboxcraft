@@ -48,6 +48,6 @@ fn the_draft_file_board_is_coming_soon_and_fits_the_page() {
         for file in files {
             assert!(whole.contains_rect(file.rect().expand(3.0)), "{:?} leaves the page", file.accesskit_node().label());
         }
-        assert_eq!(painted(&harness, "open-day-all.zip, 48 MB").ground, Some(theme.palette.bg), "{mode:?}");
+        assert_eq!(painted(&harness, "open-day-all.zip, 48 MB, too large to send").ground, Some(theme.palette.bg), "{mode:?}");
     }
 }

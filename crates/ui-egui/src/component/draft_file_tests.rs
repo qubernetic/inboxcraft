@@ -54,6 +54,8 @@ fn a_file_on_a_draft_looks_as_its_sheet_says_in_every_state() {
         assert_eq!(own(&painted(&focus, label), rect).ring.map(|(_, _, colour)| colour), Some(p.cyan_edge), "{mode:?} focus");
         let large = DraftFile { name: "shop-front-quote.pdf", size: "184 KB", too_large: true };
         let large = row(mode, large, None);
+        // Not by colour alone: a screen reader hears it.
+        let label = "shop-front-quote.pdf, 184 KB, too large to send";
         let look = own(&painted(&large, label), rect);
         assert_eq!(look.edge.map(|(_, colour, _)| colour), Some(p.minus), "{mode:?} too large");
         assert!(look.texts.iter().any(|(text, colour, ..)| text == "184 KB" && *colour == p.minus), "{mode:?}");
@@ -64,11 +66,40 @@ fn a_file_on_a_draft_looks_as_its_sheet_says_in_every_state() {
 fn a_long_name_is_cut_and_remove_is_a_link_named_for_its_file() {
     let long = DraftFile { name: "the-whole-open-day-with-every-picture-taken-on-the-day.zip", size: "48 MB", too_large: true };
     let harness = row(Mode::Dark, long, None);
-    let label = "the-whole-open-day-with-every-picture-taken-on-the-day.zip, 48 MB";
+    let label = "the-whole-open-day-with-every-picture-taken-on-the-day.zip, 48 MB, too large to send";
     let rect = harness.get_by_role_and_label(Role::ListItem, label).rect();
     let look = own(&painted(&harness, label), rect);
     // Cut with its ellipsis inside the row: nothing reaches past it.
     assert!(!look.overflows, "{:?}", look.texts);
     let remove = harness.get_by_role_and_label(Role::Button, "Remove the-whole-open-day-with-every-picture-taken-on-the-day.zip").rect();
     assert!(rect.contains_rect(remove));
+}
+
+#[test]
+fn a_file_too_large_says_so_in_words_under_the_pointer() {
+    let large = DraftFile { name: "open-day-all.zip", size: "48 MB", too_large: true };
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let keymap = keymap();
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(400.0, 160.0),
+        move |ui, theme| {
+            draft_file_with(ui, theme, &keymap, &large, 320.0, None);
+        },
+    );
+    harness.get_by_role_and_label(Role::ListItem, "open-day-all.zip, 48 MB, too large to send").hover();
+    harness.run_steps(40);
+    assert!(harness.query_all_by_label_contains("Too large to send").next().is_some(), "its tooltip says it");
+    let small = DraftFile { name: "plan.pdf", size: "2 KB", too_large: false };
+    let keymap = super::super::gallery::keymap();
+    let harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(400.0, 160.0),
+        move |ui, theme| {
+            draft_file_with(ui, theme, &keymap, &small, 320.0, None);
+        },
+    );
+    harness.get_by_role_and_label(Role::ListItem, "plan.pdf, 2 KB");
 }

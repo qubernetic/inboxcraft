@@ -4,7 +4,8 @@
 //! A file on a draft, as its sheet draws it (`draft-file`): 44 high, a 1 px `line` edge, 12 in: the file's icon (16, in
 //! `muted`, `ink` under the pointer), its name in `mono` cut with an ellipsis, its size in `mono_s` and `muted`, and
 //! "remove" as a small link. Under the pointer it stands on the `stage`; with the keys its focus edge is 2 px clear of
-//! it. A file too large to send has a `minus` edge and its size in `minus`. Attaching files is not built yet: the
+//! it. A file too large to send has a `minus` edge and its size in `minus`, and says so in words: a screen reader hears
+//! "too large to send", and the pointer over it shows it in a tooltip. Attaching files is not built yet: the
 //! composer draws only its coming-soon button, and this is the board's.
 
 use egui::{Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
@@ -57,7 +58,12 @@ pub(crate) fn draft_file_with(
     let enabled = ui.is_enabled() && !soon::is_soon(ui);
     let height = Theme::size(theme, ROW);
     let (rect, row) = ui.allocate_exact_size(vec2(width.max(height), height), if enabled { Sense::click() } else { Sense::hover() });
-    let spoken = tr!("{name}, {size}", name = file.name, size = file.size);
+    // Too large is said in words as well as in `minus`: heard, and in the tooltip under the pointer.
+    let spoken = if file.too_large {
+        tr!("{name}, {size}, too large to send", name = file.name, size = file.size)
+    } else {
+        tr!("{name}, {size}", name = file.name, size = file.size)
+    };
     row.widget_info(|| WidgetInfo::labeled(Role::ListItem, enabled, &spoken));
     let lit = lit(ui, theme, &row, enabled, shown, Hover::AtOnce);
     let painter = solid(ui);
@@ -103,6 +109,7 @@ pub(crate) fn draft_file_with(
             response.clicked()
         })
         .inner;
+    let row = if file.too_large { super::tooltip::attach(row, theme, keymap, tr!("Too large to send"), None) } else { row };
     DraftFileOutput { row, removed }
 }
 
