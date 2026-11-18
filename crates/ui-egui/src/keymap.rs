@@ -84,6 +84,27 @@ pub const COMPOSE: &str = "ui.compose.new";
 /// Send the message being written (`mail.send`).
 pub const SEND: &str = "ui.compose.send";
 
+/// Calendar: move the pick left (a day back, or the event of the day before).
+pub const CALENDAR_LEFT: &str = "ui.calendar.left";
+
+/// Calendar: move the pick right (a day on, or the event of the next day).
+pub const CALENDAR_RIGHT: &str = "ui.calendar.right";
+
+/// Calendar: move the pick up (a week back, or the event before).
+pub const CALENDAR_UP: &str = "ui.calendar.up";
+
+/// Calendar: move the pick down (a week on, or the next event).
+pub const CALENDAR_DOWN: &str = "ui.calendar.down";
+
+/// Calendar: open the picked day, or take the keyboard into the picked event's details.
+pub const CALENDAR_OPEN: &str = "ui.calendar.open";
+
+/// Calendar: leave the picked event's details and let the pick go.
+pub const CALENDAR_CLOSE: &str = "ui.calendar.close";
+
+/// The calendar's keys: they act on the calendar screen only (`draw/calendar/keys.rs`).
+pub const CALENDAR_KEYS: [&str; 6] = [CALENDAR_LEFT, CALENDAR_RIGHT, CALENDAR_UP, CALENDAR_DOWN, CALENDAR_OPEN, CALENDAR_CLOSE];
+
 /// The longest key text read, in bytes; `Command+Shift+Alt+ArrowRight` takes 28.
 pub const MAX_TEXT: usize = 64;
 
@@ -111,6 +132,12 @@ pub fn actions() -> Vec<Action> {
         action(COMPOSE, tr!("New message"), IconId::Compose),
         action(SEND, tr!("Send the message"), IconId::Send),
         action(CALENDAR, tr!("Show the calendar"), IconId::Calendar),
+        action(CALENDAR_LEFT, tr!("Calendar: pick to the left"), IconId::Previous),
+        action(CALENDAR_RIGHT, tr!("Calendar: pick to the right"), IconId::Next),
+        action(CALENDAR_UP, tr!("Calendar: pick above"), IconId::Previous),
+        action(CALENDAR_DOWN, tr!("Calendar: pick below"), IconId::Next),
+        action(CALENDAR_OPEN, tr!("Calendar: open what is picked"), IconId::Calendar),
+        action(CALENDAR_CLOSE, tr!("Calendar: leave the details"), IconId::Close),
         action(DONE, tr!("Done"), IconId::Done),
         action(ARCHIVE, tr!("Archive"), IconId::Archive),
         action(SNOOZE, tr!("Snooze or remind me"), IconId::Snooze),
@@ -224,6 +251,12 @@ impl Default for Keymap {
         keymap.bind(CALENDAR, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num2));
         keymap.bind(COMPOSE, KeyboardShortcut::new(Modifiers::NONE, Key::C));
         keymap.bind(SEND, KeyboardShortcut::new(Modifiers::COMMAND, Key::Enter));
+        keymap.bind(CALENDAR_LEFT, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowLeft));
+        keymap.bind(CALENDAR_RIGHT, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowRight));
+        keymap.bind(CALENDAR_UP, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowUp));
+        keymap.bind(CALENDAR_DOWN, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowDown));
+        keymap.bind(CALENDAR_OPEN, KeyboardShortcut::new(Modifiers::NONE, Key::Enter));
+        keymap.bind(CALENDAR_CLOSE, KeyboardShortcut::new(Modifiers::NONE, Key::Escape));
         keymap
     }
 }

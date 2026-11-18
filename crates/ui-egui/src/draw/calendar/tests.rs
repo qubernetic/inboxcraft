@@ -64,6 +64,11 @@ fn shows(harness: &Harness<'static, InboxApp>, text: &str) -> bool {
     harness.query_all_by_label_contains(text).next().is_some()
 }
 
+/// Whether the details show each of `words` as a tag.
+fn tags(harness: &Harness<'static, InboxApp>, words: &[&str]) -> bool {
+    words.iter().all(|word| harness.query_all_by_label(word).next().is_some())
+}
+
 fn day(month: u8, date: u8) -> Day {
     Day::new(2026, month, date).unwrap()
 }
@@ -97,7 +102,7 @@ fn without_calendars_the_screen_says_there_are_none_yet() {
         let mut harness = build(app, theme);
         press(&mut harness, "Calendar");
         assert!(harness.state().calendar().is_empty());
-        harness.get_by_label("No calendars yet");
+        harness.get_by_label("No calendars yet.");
         assert!(harness.query_by_label("Week").is_none(), "no views without calendars");
         harness.check_accessibility();
     }
@@ -149,13 +154,14 @@ fn the_segmented_control_switches_between_day_week_month_and_agenda() {
         press(&mut harness, "Agenda");
         assert_eq!(harness.state().calendar().view(), View::Agenda);
         harness.get_by_label("From today");
-        harness.get_by_label("Today · Thursday 5 November");
+        assert!(shows(&harness, "Thursday 5 November, today"), "today's head says so");
         assert!(shows(&harness, "Ferry to the island, Sunday 8 November"));
         harness.check_accessibility();
 
         press(&mut harness, "Day");
         assert_eq!(harness.state().calendar().view(), View::Day);
-        assert_eq!(harness.get_all_by_label("Thursday 5 November 2026").count(), 2, "the title and the mini month's today");
+        assert_eq!(harness.get_all_by_label("Thursday 5 November 2026").count(), 1, "the title");
+        assert_eq!(harness.get_all_by_label("Thursday 5 November 2026, today").count(), 2, "the day's head and the mini month's today");
         assert!(shows(&harness, "Dentist, Thursday 5 November, 10:00 – 11:30"));
         assert!(!shows(&harness, "Ferry to the island"), "the day shows its own events only");
         harness.check_accessibility();
@@ -199,32 +205,30 @@ fn a_day_of_the_month_or_the_mini_month_opens_its_days() {
     harness.get_all_by_label("Monday 16 November 2026").next().unwrap().click();
     harness.run();
     harness.get_by_label("16 – 22 November 2026");
-    harness.get_all_by_label("Wednesday 18 November 2026").last().unwrap().click();
+    // The week's head comes first, the mini month's day after it.
+    harness.get_all_by_label("Wednesday 18 November 2026").next().unwrap().click();
     harness.run();
     assert_eq!(harness.state().calendar().view(), View::Day, "a day's name in the week opens the day");
-    assert_eq!(harness.get_all_by_label("Wednesday 18 November 2026").count(), 2, "the title and the mini month's day");
+    assert_eq!(harness.get_all_by_label("Wednesday 18 November 2026").count(), 3, "the title, the day's head and the mini month's day");
     let (calendar, mailbox) = harness.state_mut().calendar_mut();
     calendar.set_view(mailbox, View::Month);
     harness.run();
-    harness.get_all_by_label("Tuesday 17 November 2026").last().unwrap().click();
+    harness.get_all_by_label("Tuesday 17 November 2026").next().unwrap().click();
     harness.run();
     assert_eq!(harness.state().calendar().focus(), day(11, 17));
     assert_eq!(harness.state().calendar().view(), View::Day);
 }
 
 #[test]
-fn an_event_is_on_the_stage_with_its_colour_on_the_edge() {
-    use super::colours;
-    use crate::theme::{Mode, TextScale, Theme};
-
-    let theme = Theme::new(Mode::Light, TextScale::default());
-    let p = &theme.palette;
-    assert_eq!(colours(&theme, None, 1), (p.stage, p.accounts[1]), "without a colour from the server, the account colour of the place");
-    assert_eq!(colours(&theme, None, 7), (p.stage, p.accounts[1]), "the places go round");
-    let [r, g, b] = [200, 40, 120];
-    let (fill, edge) = colours(&theme, Some([r, g, b]), 0);
-    assert_eq!(edge, egui::Color32::from_rgb(r, g, b), "the server's colour at full strength");
-    assert_eq!(fill, p.stage, "never a tinted fill");
+fn an_event_is_coloured_by_its_account_s_bar_only() {
+    let harness = on_calendar(egui::Theme::Light);
+    let calendar = harness.state().calendar();
+    let theme = crate::theme::Theme::new(crate::theme::Mode::Light, crate::theme::TextScale::default());
+    for row in calendar.calendars() {
+        let place = calendar.account_index(row.account);
+        assert_eq!(calendar.account_place(row.id), place, "{}: its account's place", row.name);
+        assert_eq!(super::bar_colour(&theme, calendar, row.id), theme.account_colour(place), "{}: the account's colour", row.name);
+    }
 }
 
 #[test]
@@ -251,17 +255,17 @@ fn a_picked_event_shows_both_dates_and_its_own_zone_labelled() {
         harness.get_by_label("Event zone Atlantic/Azores: 07:00 – 10:00");
         harness.get_by_label("Sunday 8 November, 08:00 – 11:00");
         harness.get_by_label("Grey Gull Ferries · Booking GG-2291");
-        harness.get_by_label("Personal · busy");
+        assert!(tags(&harness, &["Personal", "busy"]));
         harness.check_accessibility();
 
         pick(&mut harness, "Call with Petra about the logo");
         assert!(!shows(&harness, "Event zone"), "an event on the computer's clock has no zone line");
-        harness.get_by_label("Studio · busy");
-        harness.get_by_label("Petra Lindqvist · going");
+        assert!(tags(&harness, &["Studio", "busy"]));
+        harness.get_by_label("Petra Lindqvist, going");
 
         press(&mut harness, "Close the details");
         assert!(harness.state().calendar().picked().is_none());
-        assert!(harness.query_by_label("Petra Lindqvist · going").is_none());
+        assert!(harness.query_by_label("Petra Lindqvist, going").is_none());
     }
 }
 
@@ -271,13 +275,13 @@ fn a_block_over_several_days_shows_both_dates_and_a_second_press_lets_it_go() {
     press(&mut harness, "Month");
     pick(&mut harness, "Coast trip");
     harness.get_by_label("Monday 16 November – Wednesday 18 November");
-    harness.get_by_label("Personal · busy");
+    assert!(tags(&harness, &["Personal", "busy"]));
     pick(&mut harness, "Coast trip");
     assert!(harness.state().calendar().picked().is_none());
     pick(&mut harness, "Studio stand-up");
-    harness.get_by_label("Studio · busy · repeats weekly");
+    assert!(tags(&harness, &["Studio", "busy", "repeats weekly"]));
     pick(&mut harness, "Dentist");
-    harness.get_by_label("Personal · busy · private");
+    assert!(tags(&harness, &["Personal", "busy", "private"]));
 }
 
 #[test]
@@ -298,36 +302,48 @@ fn a_click_on_an_alert_opens_the_calendar_on_the_event_with_its_details() {
 }
 
 #[test]
-fn the_picked_day_is_the_cyan_fill_with_its_number_in_on_cyan_in_light_mode() {
+fn today_is_a_cyan_edge_box_and_the_picked_day_the_cyan_fill_with_on_cyan() {
     let p = crate::theme::Palette::of(crate::theme::Mode::Light);
     let mut harness = on_calendar(egui::Theme::Light);
     press(&mut harness, "Month");
-    let mut shapes = Vec::new();
-    fn open(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
+    let rects = |harness: &Harness<'static, InboxApp>| flat_rects(harness).into_iter().map(|(_, fill)| fill).collect::<Vec<_>>();
+    let cyan = |harness: &Harness<'static, InboxApp>, colour| rects(harness).into_iter().filter(|fill| *fill == colour).count();
+    assert!(cyan(&harness, p.cyan_edge) >= 8, "today in the month and the mini month in a cyan_edge box, four lines each");
+    let before = cyan(&harness, p.cyan);
+    harness.key_press(Key::ArrowRight);
+    harness.run();
+    assert_eq!(harness.state().calendar().picked_day(), Some(day(11, 6)));
+    assert_eq!(cyan(&harness, p.cyan), before + 2, "the picked day on cyan, in the month and the mini month");
+    assert!(texts(&harness, "6").contains(&p.on_cyan), "its number in on_cyan");
+    assert!(crate::theme::contrast(p.on_cyan, p.cyan) >= 4.5);
+}
+
+/// Every filled rect painted in the last frame, with its fill.
+fn flat_rects(harness: &Harness<'static, InboxApp>) -> Vec<(egui::Rect, egui::Color32)> {
+    fn open(shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Color32)>) {
         match shape {
             egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, out)),
-            other => out.push(other.clone()),
+            egui::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
+            _ => {}
         }
     }
-    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, &mut shapes));
-    let rects: Vec<egui::Color32> =
-        shapes.iter().filter_map(|shape| if let egui::Shape::Rect(rect) = shape { Some(rect.fill) } else { None }).collect();
-    let circles: Vec<egui::Color32> =
-        shapes.iter().filter_map(|shape| if let egui::Shape::Circle(circle) = shape { Some(circle.fill) } else { None }).collect();
-    assert!(rects.contains(&p.cyan), "today in the month is on cyan");
-    assert!(circles.contains(&p.cyan), "today in the mini month is on cyan");
-    assert!(!rects.contains(&p.cyan_text) && !circles.contains(&p.cyan_text), "the accent as a fill is cyan");
-    // Today is the 5th: its number in the month and in the mini month is in `on_cyan`.
-    let fives = shapes
-        .iter()
-        .filter_map(|shape| match shape {
-            egui::Shape::Text(text) if text.galley.text() == "5" => {
-                text.galley.rows.iter().flat_map(|row| row.visuals.mesh.vertices.iter()).map(|vertex| vertex.color).next()
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, &mut out));
+    out
+}
+
+/// The colours the texts `text` were painted in, in the last frame.
+fn texts(harness: &Harness<'static, InboxApp>, text: &str) -> Vec<egui::Color32> {
+    fn open(shape: &egui::Shape, text: &str, out: &mut Vec<egui::Color32>) {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, text, out)),
+            egui::Shape::Text(shape) if shape.galley.text() == text => {
+                out.extend(shape.galley.rows.iter().flat_map(|row| row.visuals.mesh.vertices.iter()).map(|vertex| vertex.color).next());
             }
-            _ => None,
-        })
-        .filter(|colour| *colour == p.on_cyan)
-        .count();
-    assert!(fives >= 2, "today's number on cyan in on_cyan, in both months: {fives}");
-    assert!(crate::theme::contrast(p.on_cyan, p.cyan) >= 4.5);
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, text, &mut out));
+    out
 }

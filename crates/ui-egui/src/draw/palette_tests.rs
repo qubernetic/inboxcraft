@@ -60,7 +60,7 @@ fn command_k_opens_the_palette_over_every_action_with_its_key() {
 #[test]
 fn typing_narrows_the_list_and_enter_runs_the_first() {
     let mut harness = opened(egui::Theme::Light);
-    type_in(&mut harness, "calendar");
+    type_in(&mut harness, "show the calendar");
     assert_eq!(harness.query_all_by_role(Role::MenuItem).count(), 1);
     harness.key_press(Key::Enter);
     harness.run();

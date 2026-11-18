@@ -457,6 +457,7 @@ impl InboxApp {
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             keymap::SEND => self.docked(),
+            _ if keymap::CALENDAR_KEYS.contains(&id) => self.screen == Screen::Calendar && !self.calendar.is_empty(),
             _ => keymap::action(id).is_some(),
         }
     }
@@ -466,6 +467,10 @@ impl InboxApp {
     pub fn run_action(&mut self, ctx: &egui::Context, id: &str) {
         // An action only a coming-soon control offered runs by no way in.
         if !self.can_run(id) || soon::blocked(ctx, id) {
+            return;
+        }
+        if keymap::CALENDAR_KEYS.contains(&id) {
+            self.calendar_key(ctx, id);
             return;
         }
         match id {
@@ -613,7 +618,50 @@ impl InboxApp {
                 calendar::Asked::Delete => calendar.delete_picked(mailbox),
                 calendar::Asked::Save => calendar.save(mailbox),
                 calendar::Asked::Cancel => calendar.close_editor(),
+                calendar::Asked::Leave => calendar.leave_editor(),
+                calendar::Asked::More(day) => calendar.set_more(day),
+                calendar::Asked::PickDay(day) => calendar.pick_day(Some(day)),
             }
+        }
+    }
+
+    /// Before the calendar screen is drawn: the time now for its now line, and its own keys.
+    fn calendar_before(&mut self, ctx: &egui::Context, setting: bool) {
+        if self.screen != Screen::Calendar {
+            return;
+        }
+        self.calendar.tick(self.mailbox.now(), self.mailbox.offset());
+        let open = setting || self.palette.is_open() || self.settings.capturing().is_some();
+        for id in calendar::keys::pressed(ctx, &self.keymap, &self.calendar, open) {
+            self.calendar_key(ctx, id);
+        }
+        calendar::keys::begin(ctx);
+    }
+
+    /// Runs the calendar's key `id` ([`keymap::CALENDAR_KEYS`]): moves the pick, opens it or leaves it, and hands the
+    /// keyboard to what is picked.
+    fn calendar_key(&mut self, ctx: &egui::Context, id: &str) {
+        use crate::calendar::Way;
+        let (calendar, mailbox) = (&mut self.calendar, &mut self.mailbox);
+        let mini = calendar.picked_day().is_some_and(|day| ctx.memory(|memory| memory.focused()) == Some(calendar::mini_id(day)));
+        let target = match id {
+            keymap::CALENDAR_LEFT => calendar.move_pick(mailbox, Way::Left, mini),
+            keymap::CALENDAR_RIGHT => calendar.move_pick(mailbox, Way::Right, mini),
+            keymap::CALENDAR_UP => calendar.move_pick(mailbox, Way::Up, mini),
+            keymap::CALENDAR_DOWN => calendar.move_pick(mailbox, Way::Down, mini),
+            keymap::CALENDAR_OPEN => calendar.open_pick(mailbox, mini),
+            _ => {
+                calendar.leave_pick();
+                ctx.memory_mut(|memory| {
+                    if let Some(focused) = memory.focused() {
+                        memory.surrender_focus(focused);
+                    }
+                });
+                None
+            }
+        };
+        if let Some(target) = target {
+            calendar::keys::want(ctx, target);
         }
     }
 
@@ -675,6 +723,8 @@ impl InboxApp {
             .into_iter()
             .map(|action| action.id)
             .filter(|id| !ROW_ACTS.iter().any(|(act, _)| act == id))
+            // The calendar's keys are taken by the calendar screen alone (`calendar::keys`).
+            .filter(|id| !keymap::CALENDAR_KEYS.contains(id))
             .filter(|id| *id != keymap::UNDO || !(quiet || toasted))
             .filter(|id| {
                 let bare = self.keymap.shortcut(id).is_some_and(|key| {
@@ -1281,12 +1331,7 @@ impl InboxApp {
             self.close_settings();
         }
         let setting = self.settings.is_open();
-        // Escape closes a list of choices open in the editor first; the list's own control takes the key.
-        let left_editor =
-            escape && !left_settings && self.screen == Screen::Calendar && self.calendar.editor().is_some_and(|editor| editor.menu().is_none());
-        if left_editor {
-            self.calendar.close_editor();
-        }
+        self.calendar_before(ui.ctx(), setting);
         let left_full = escape && !left_settings && self.screen == Screen::Mail && self.reader.full_width();
         if left_full {
             self.reader.set_full_width(false);
@@ -1387,7 +1432,7 @@ impl InboxApp {
         }
         layers.finish(ui.painter(), &theme);
         if self.screen == Screen::Calendar {
-            on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, ui.max_rect()));
+            on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar));
         }
         if setting {
             changed = self.settings_sheet(ui.ctx(), &theme);
@@ -1418,7 +1463,6 @@ impl InboxApp {
             || screener_mode.is_some()
             || (out && leaving)
             || left_full
-            || left_editor
             || left_settings
             || !ran.is_empty()
             || palette.is_some()

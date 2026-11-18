@@ -12,7 +12,7 @@ fn ids(query: &str) -> Vec<&'static str> {
 fn an_empty_text_lists_every_action_and_words_narrow_it() {
     assert_eq!(matching("").len(), actions().len());
     assert_eq!(matching("   ").len(), actions().len());
-    assert_eq!(ids("calendar"), vec![keymap::CALENDAR]);
+    assert_eq!(ids("show the calendar"), vec![keymap::CALENDAR]);
     assert_eq!(ids("SHOW CAL"), vec![keymap::CALENDAR], "case and order of words left aside");
     assert_eq!(ids("palette.open"), vec![keymap::PALETTE], "the id counts too");
     assert!(ids("zzz nothing").is_empty());

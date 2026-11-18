@@ -1,206 +1,292 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The side panel of the calendar: the mini month (its name, the steps to the month before and after, a button per
-//! day that puts the view there; today in the accent, the days shown on the selection), the calendars with a box
-//! each that shows or hides its events, and the details of the picked event: its summary, both dates with the times,
-//! the event's own zone, labelled, when its clock differs from the computer's, the place, the description, the
-//! calendar with busy or free, private and the repeat, the guests with their answers, and Edit and Delete.
+//! The side panel of the calendar, 252 points wide at the right (H7): the mini month (its name, the steps to the month
+//! before and after, a button per day that puts the view there; today in a `cyan_edge` box, the day the arrows picked
+//! on `cyan`), the calendars by account (the account's bar and name, then a box per calendar that shows or hides its
+//! events), and the details of the picked event: its title beside its account's bar, both dates with the times, the
+//! event's own zone when its clock differs from the computer's, the place, the description, the calendar, busy or
+//! free, private and the repeat as tags, the guests with their answers, and Edit and Delete. At the foot the sync
+//! line, coming soon.
 
-use egui::{Align, Layout, Rect, RichText, ScrollArea, Sense, Ui, WidgetInfo, pos2, vec2};
+use egui::{Rect, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
-use super::{Asked, caption_bold, caption_strong, tint};
-use crate::calendar::{Calendar, Day, EventRow, View, day};
-use crate::component::button::{IconButton, TextButton};
+use super::grid::{line as line_width, snap};
+use super::{Asked, bar_colour, stroke};
+use crate::calendar::{Calendar, Day, EventRow, day};
+use crate::component::avatar::avatar;
+use crate::component::button::{IconButton, LinkSize, TextButton, link_sized};
 use crate::component::checkbox::checkbox;
-use crate::draw::paint::{line, selection};
+use crate::component::soon::{soon, soon_tag};
+use crate::component::tag::{TagKind, tag};
+use crate::draw::paint::run_at;
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::tr;
 
+/// The room around the panel's content, in points: 15 at the top and the sides.
+const PAD: f32 = 15.0;
+
+/// The sync line's height at the foot, in points.
+const SYNC: f32 = 40.0;
+
+/// Between the panel's parts, in points.
+const GAP: f32 = 12.0;
+
 /// The most guests the details list by name.
 const GUESTS: usize = 8;
 
-/// The height of the weekday letters over the mini month, in points.
-const MINI_HEAD: f32 = 24.0;
+/// A day's cell in the mini month, in points.
+const MINI_CELL: (f32, f32) = (28.0, 24.0);
 
-/// From the weekday letters to the first week, in points.
-const UNDER_HEAD: f32 = 5.0;
+/// Between two weeks of the mini month, in points.
+const MINI_GAP: f32 = 4.0;
 
-/// The height of a week of the mini month, in points.
-const MINI_WEEK: f32 = 40.0;
-
-/// The diameter of a day's disc in the mini month, in points.
-const MINI_DAY: f32 = 26.0;
-
-/// From one calendar's row to the next, in points.
-const CALENDAR_GAP: f32 = 10.0;
-
-/// The diameter of a calendar's dot, in points.
-const DOT: f32 = 8.0;
+/// The id of `day`'s button in the mini month: the keyboard's focus while the arrows pick days there.
+pub(in crate::draw) fn mini_id(day: Day) -> egui::Id {
+    egui::Id::unique(("calendar-mini", day))
+}
 
 /// The side panel.
 pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, asked: &mut Vec<Asked>) {
-    crate::component::scroll::show(ui, theme, ScrollArea::vertical().id_salt("calendar-side").auto_shrink([false, false]), |ui| {
-        mini_month(ui, theme, keymap, calendar, asked);
-        calendars(ui, theme, calendar, asked);
-        if let Some(event) = calendar.picked() {
-            details(ui, theme, keymap, calendar, event, asked);
-        }
+    let p = &theme.palette;
+    let ppp = ui.pixels_per_point();
+    let line = line_width(ppp);
+    let rect = ui.max_rect();
+    let foot = snap(rect.bottom() - SYNC - line, ppp);
+    let inner = Rect::from_min_max(pos2(rect.left() + PAD, rect.top() + PAD), pos2(rect.right() - PAD, foot));
+    ui.scope_builder(UiBuilder::new().max_rect(inner).id_salt("calendar-side-scroll"), |ui| {
+        let area = ScrollArea::vertical().id_salt("calendar-side").auto_shrink([false, false]);
+        crate::component::scroll::show(ui, theme, area, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            mini_month(ui, theme, calendar, asked);
+            ui.add_space(GAP);
+            calendars(ui, theme, calendar, asked);
+            if let Some(event) = calendar.picked() {
+                ui.add_space(GAP);
+                crate::draw::paint::rule(ui, p.panel_line);
+                ui.add_space(GAP);
+                details(ui, theme, keymap, calendar, event, asked);
+            }
+            ui.add_space(GAP);
+        });
+    });
+    ui.painter().rect_filled(Rect::from_min_max(pos2(inner.left(), foot), pos2(inner.right(), foot + line)), 0.0, p.panel_line);
+    let sync = Rect::from_min_max(pos2(inner.left(), foot + line), pos2(inner.right(), rect.bottom()));
+    ui.scope_builder(UiBuilder::new().max_rect(sync).layout(egui::Layout::left_to_right(egui::Align::Center)).id_salt("calendar-sync"), |ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        // The calendars are read with the mail; a sync of its own is not built yet (I-2.9).
+        soon(ui, theme, |ui| {
+            soon_tag(ui, theme);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| link_sized(ui, theme, keymap, tr!("sync now"), LinkSize::Small));
+        });
     });
 }
 
-fn mini_month(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, asked: &mut Vec<Asked>) {
+/// The mini month as the mini-month sheet draws it: a box with its name and steps, the weekdays' letters and the weeks
+/// the month touches.
+fn mini_month(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
+    let ppp = ui.pixels_per_point();
+    let line = line_width(ppp);
     let month = calendar.month();
-    ui.horizontal(|ui| {
-        let name = tr!("{month} {year}", month = day::month_name(month.month()), year = month.year());
-        ui.label(RichText::new(name).font(theme.fonts.heading.id()).color(p.ink));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if IconButton::new(IconId::Next, tr!("Month after")).show(ui, theme, keymap).clicked() {
-                asked.push(Asked::Month(true));
-            }
-            if IconButton::new(IconId::Previous, tr!("Month before")).show(ui, theme, keymap).clicked() {
-                asked.push(Asked::Month(false));
-            }
-        });
-    });
-    let spacing = ui.spacing().item_spacing.y;
-    ui.spacing_mut().item_spacing.y = 0.0;
-    let width = ui.available_width();
-    let cell = (width / 7.0).max(1.0);
-    let (rect, _) = ui.allocate_exact_size(vec2(width, MINI_HEAD), Sense::hover());
-    for index in 0..7_i64 {
-        let galley = line(ui, &[(day::weekday_letter(index), caption_strong(theme), p.muted)], cell);
-        let centre = pos2(rect.left() + cell * (index as f32 + 0.5), rect.center().y);
-        ui.painter().galley(centre - galley.size() / 2.0, galley, p.muted);
-    }
-    ui.add_space(UNDER_HEAD);
-    let (shown_first, shown_last) = calendar.span();
-    // The week and day views mark the days they show; a month or an agenda would mark nearly the whole mini month.
-    let marks = matches!(calendar.view(), View::Week | View::Day);
     let first = month.monday();
-    for week in 0..6_i64 {
-        let (rect, _) = ui.allocate_exact_size(vec2(width, MINI_WEEK), Sense::hover());
-        let side = MINI_DAY.min(cell);
-        for index in 0..7_i64 {
-            let day = first.plus(week * 7 + index);
-            let spot = Rect::from_center_size(pos2(rect.left() + cell * (index as f32 + 0.5), rect.center().y), vec2(side, side));
-            mini_day(
-                ui,
-                theme,
-                day,
-                month.month(),
-                spot,
-                marks && (shown_first..=shown_last).contains(&day) && day != calendar.today(),
-                calendar.today(),
-                asked,
-            );
+    let last = month.months_later(1).plus(-1);
+    let weeks = usize::try_from(last.since(first) / 7 + 1).unwrap_or(6).clamp(4, 6);
+    let width = ui.available_width();
+    let (cell_w, cell_h) = MINI_CELL;
+    let height = 8.0 + 28.0 + 4.0 + 20.0 + 4.0 + cell_h * weeks as f32 + MINI_GAP * (weeks - 1) as f32 + 12.0;
+    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, p.surface);
+    stroke(ui.painter(), rect, line, p.line);
+    let left = rect.left() + 12.0;
+    // The head: the month's name and the steps.
+    let head = Rect::from_min_size(pos2(left, rect.top() + 8.0), vec2(width - 24.0, 28.0));
+    let name = tr!("{month} {year}", month = day::month_name(month.month()), year = month.year());
+    let text = crate::component::cut(ui, &name, theme.fonts.label, p.ink, head.width() - 40.0);
+    run_at(ui.painter(), pos2(head.left(), snap(head.center().y - theme.fonts.label.line / 2.0, ppp)), text, p.ink);
+    let response = ui.interact(head, ui.scope_id().with("mini-name"), Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, &name));
+    for (forward, sign, spoken, x) in [(false, "‹", tr!("Month before"), head.right() - 32.0), (true, "›", tr!("Month after"), head.right() - 12.0)]
+    {
+        let spot = Rect::from_min_size(pos2(x - 4.0, head.top() + 4.0), vec2(16.0, 20.0));
+        let response = ui.interact(spot, ui.scope_id().with(("mini-step", forward)), Sense::click());
+        response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, spoken));
+        let colour = if response.hovered() { p.ink } else { p.muted };
+        let galley = crate::component::galley(ui, sign, theme.fonts.mono, colour);
+        crate::draw::paint::run_centred(ui.painter(), spot, galley, colour);
+        if response.has_focus() {
+            crate::draw::paint::focus_ring(ui.painter(), theme, spot, crate::draw::paint::Ring::Outside);
+        }
+        if response.clicked() {
+            asked.push(Asked::Month(forward));
         }
     }
-    ui.spacing_mut().item_spacing.y = spacing;
+    let letters = rect.top() + 8.0 + 28.0 + 4.0;
+    for index in 0..7_i64 {
+        let cell = Rect::from_min_size(pos2(left + cell_w * index as f32, letters), vec2(cell_w, 20.0));
+        let galley = crate::component::galley(ui, day::weekday_letter(index), theme.fonts.label, p.muted);
+        crate::draw::paint::run_centred(ui.painter(), cell, galley, p.muted);
+    }
+    let top = letters + 20.0 + 4.0;
+    for week in 0..weeks {
+        for index in 0..7_usize {
+            let day = first.plus(i64::try_from(week * 7 + index).unwrap_or(0));
+            let spot = Rect::from_min_size(pos2(left + cell_w * index as f32, top + (cell_h + MINI_GAP) * week as f32), vec2(cell_w, cell_h));
+            mini_day(ui, theme, calendar, day, month.month(), spot, asked);
+        }
+    }
 }
 
 /// One day of the mini month over `spot`: a button that puts the view on it.
-#[expect(clippy::too_many_arguments, reason = "the day, the month it is shown in, its place and its states")]
-fn mini_day(ui: &mut Ui, theme: &Theme, day: Day, month: u8, spot: Rect, shown: bool, today: Day, asked: &mut Vec<Asked>) {
+fn mini_day(ui: &mut Ui, theme: &Theme, calendar: &Calendar, day: Day, month: u8, spot: Rect, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
-    let response = ui.interact(spot, ui.scope_id().with(("calendar-mini", day)), Sense::click());
-    response.widget_info(|| WidgetInfo::selected(egui::accesskit::Role::Button, true, shown || day == today, day::long(day)));
-    let colour = if day == today {
+    let line = line_width(ui.pixels_per_point());
+    let today = day == calendar.today();
+    let picked = calendar.picked_day() == Some(day);
+    let response = ui.interact(spot, mini_id(day), Sense::click());
+    super::keys::item(ui.ctx(), &response);
+    if super::keys::wanted(ui.ctx(), crate::calendar::Target::Mini(day)) {
+        response.request_focus();
+    }
+    if response.gained_focus() && !picked {
+        asked.push(Asked::PickDay(day));
+    }
+    let spoken = if today { format!("{}, {}", day::long(day), tr!("today")) } else { day::long(day) };
+    response.widget_info(|| WidgetInfo::selected(egui::accesskit::Role::Button, true, picked, &spoken));
+    let colour = if picked {
         p.on_cyan
+    } else if today {
+        p.cyan_text
     } else if day.month() == month {
         p.ink
     } else {
         p.muted
     };
-    if day == today {
-        ui.painter().circle_filled(spot.center(), spot.height() / 2.0, p.cyan);
-    } else if shown {
-        selection(ui.painter(), theme, spot, spot.height() / 2.0);
+    if picked {
+        ui.painter().rect_filled(spot, 0.0, p.cyan);
     } else if response.hovered() {
-        ui.painter().circle_filled(spot.center(), spot.height() / 2.0, p.stage);
+        ui.painter().rect_filled(spot, 0.0, p.stage);
     }
-    let font = if day == today { caption_bold(theme) } else { theme.fonts.caption };
-    let galley = line(ui, &[(&day.date().to_string(), font, colour)], spot.width() + 8.0);
-    ui.painter().galley(spot.center() - galley.size() / 2.0, galley, colour);
+    if today && !picked {
+        stroke(ui.painter(), spot, line, p.cyan_edge);
+    }
+    let galley = crate::component::galley(ui, &day.date().to_string(), theme.fonts.mono_s, colour);
+    crate::draw::paint::run_centred(ui.painter(), spot, galley, colour);
+    if response.has_focus() && !picked {
+        crate::draw::paint::focus_ring(ui.painter(), theme, spot, crate::draw::paint::Ring::Inside);
+    }
     if response.clicked() {
         asked.push(Asked::Go(day));
     }
 }
 
+/// The calendars by account: the account's bar and name, then a box per calendar.
 fn calendars(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
-    let s = &theme.spacing;
-    ui.add_space(s.s3);
+    let ppp = ui.pixels_per_point();
     crate::component::label(ui, theme.fonts.label, tr!("Calendars"), p.muted);
-    ui.add_space(s.s2);
-    for row in calendar.calendars() {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s2;
-            // The dot's room stays beside even a name that fills the panel.
-            ui.set_max_width(ui.available_width() - DOT - s.s2);
-            if checkbox(ui, theme, &row.name, calendar.is_shown(row.id)).clicked() {
-                asked.push(Asked::Toggle(row.id));
-            }
-            let (dot, _) = ui.allocate_exact_size(vec2(DOT, DOT), Sense::hover());
-            ui.painter().circle_filled(dot.center(), DOT / 2.0, tint(theme, calendar, row.id));
-        });
-        ui.add_space(CALENDAR_GAP - ui.spacing().item_spacing.y);
+    ui.add_space(4.0);
+    let row = super::fixed(theme, 24.0);
+    let mut accounts: Vec<u64> = Vec::new();
+    for entry in calendar.calendars() {
+        if !accounts.contains(&entry.account) {
+            accounts.push(entry.account);
+        }
+    }
+    for account in accounts {
+        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), row), Sense::hover());
+        let colour = theme.account_colour(calendar.account_index(account));
+        let mark = Rect::from_min_size(pos2(rect.left(), snap(rect.center().y - 4.0, ppp)), vec2(super::grid::pixels(3.0, ppp), 12.0));
+        ui.painter().rect_filled(mark, 0.0, colour);
+        let name = calendar.account_label(account);
+        let text = crate::component::cut(ui, &name, theme.fonts.label, p.muted, (rect.width() - 11.0).max(1.0));
+        run_at(ui.painter(), pos2(rect.left() + 11.0, snap(rect.center().y - theme.fonts.label.line / 2.0 + 2.0, ppp)), text, p.muted);
+        response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, &name));
+        for entry in calendar.calendars().iter().filter(|entry| entry.account == account) {
+            ui.scope_builder(UiBuilder::new().max_rect(Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), row))), |ui| {
+                ui.set_min_height(row);
+                ui.horizontal_centered(|ui| {
+                    if checkbox(ui, theme, &entry.name, calendar.is_shown(entry.id)).clicked() {
+                        asked.push(Asked::Toggle(entry.id));
+                    }
+                });
+            });
+        }
     }
 }
 
 /// The details of the picked `event`.
 fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, event: &EventRow, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
-    let s = &theme.spacing;
-    ui.add_space(s.s4);
-    crate::draw::paint::rule(ui, p.line);
-    ui.add_space(s.s2);
-    ui.horizontal(|ui| {
-        let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
-        ui.painter().circle_filled(dot.center(), 5.0, tint(theme, calendar, event.calendar));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if IconButton::new(IconId::Close, tr!("Close the details")).show(ui, theme, keymap).clicked() {
-                asked.push(Asked::Pick(None));
-            }
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.add(egui::Label::new(RichText::new(&event.summary).font(theme.fonts.strong.id()).color(p.ink)).wrap());
-            });
-        });
-    });
-    ui.add_space(s.s1);
-    let body = |ui: &mut Ui, text: &str, muted: bool| {
-        let colour = if muted { p.muted } else { p.ink };
-        ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.body.id()).color(colour)).wrap());
+    let ppp = ui.pixels_per_point();
+    let width = ui.available_width();
+    let wrapped = |ui: &mut Ui, text: &str, font: crate::theme::Font, colour, rows: usize| {
+        let galley = crate::component::wrapped(ui, text, font, colour, width, rows, egui::Align::Min);
+        let (rect, response) = ui.allocate_exact_size(vec2(width, galley.size().y), Sense::hover());
+        response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, text));
+        crate::draw::paint::rows_at(ui.painter(), rect.min, width, galley, colour);
     };
-    body(ui, &event.when(), false);
+    // The head: the title beside its account's bar, Close at the right.
+    let close_side = theme.boxes().button;
+    let title =
+        crate::component::wrapped(ui, &event.summary, theme.fonts.heading, p.ink, (width - close_side - 8.0 - 11.0).max(1.0), 3, egui::Align::Min);
+    let head_height = (title.size().y + 10.0).max(close_side);
+    let (head, head_response) = ui.allocate_exact_size(vec2(width, head_height), Sense::hover());
+    ui.painter().rect_filled(
+        Rect::from_min_size(head.min, vec2(super::grid::pixels(3.0, ppp), head_height)),
+        0.0,
+        bar_colour(theme, calendar, event.calendar),
+    );
+    let title_width = (width - close_side - 8.0 - 11.0).max(1.0);
+    crate::draw::paint::rows_at(ui.painter(), pos2(head.left() + 11.0, head.top() + 5.0), title_width, title, p.ink);
+    head_response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, &event.summary));
+    let close = Rect::from_min_size(pos2(head.right() - close_side, head.top()), vec2(close_side, close_side));
+    let closed =
+        ui.scope_builder(UiBuilder::new().max_rect(close), |ui| IconButton::new(IconId::Close, tr!("Close the details")).show(ui, theme, keymap));
+    if super::keys::wanted(ui.ctx(), crate::calendar::Target::Details) {
+        closed.inner.request_focus();
+    }
+    if closed.inner.clicked() {
+        asked.push(Asked::Pick(None));
+    }
+    ui.add_space(8.0);
+    wrapped(ui, &event.when(), theme.fonts.body, p.ink, 3);
     if let Some(zone) = event.zone_line() {
-        ui.horizontal(|ui| {
-            let side = theme.fonts.caption.line;
-            let (spot, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            crate::iconset::paint(ui.painter(), spot, IconId::Globe, p.muted);
-            ui.add(egui::Label::new(RichText::new(zone).font(theme.fonts.caption.id()).color(p.muted)).wrap());
-        });
+        ui.add_space(8.0);
+        wrapped(ui, &zone, theme.fonts.caption, p.muted, 3);
     }
     if !event.location.is_empty() {
-        body(ui, &event.location, true);
+        ui.add_space(8.0);
+        wrapped(ui, &event.location, theme.fonts.body, p.muted, 3);
     }
     if !event.description.is_empty() {
-        body(ui, &event.description, true);
+        ui.add_space(8.0);
+        wrapped(ui, &event.description, theme.fonts.caption, p.muted, 6);
     }
-    body(ui, &facts(calendar, event), true);
-    for guest in event.guests.iter().take(GUESTS) {
-        let answer = answer(&guest.status);
-        let text = if answer.is_empty() { guest.name.clone() } else { tr!("{name} · {answer}", name = guest.name, answer = answer) };
-        body(ui, &text, true);
+    ui.add_space(8.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+        ui.add_space(0.0);
+        for fact in facts(calendar, event) {
+            tag(ui, theme, &fact, TagKind::Default);
+        }
+    });
+    if !event.guests.is_empty() {
+        ui.add_space(8.0 + 2.0);
+        crate::component::label(ui, theme.fonts.label, &tr!("Guests · {count}", count = event.guests.len()), p.muted);
+        ui.add_space(4.0);
+        for guest in event.guests.iter().take(GUESTS) {
+            guest_row(ui, theme, guest);
+        }
+        if let Some(more) = event.guests.len().checked_sub(GUESTS).filter(|more| *more > 0) {
+            wrapped(ui, &tr!("and {count} more", count = more), theme.fonts.caption, p.muted, 1);
+        }
     }
-    if let Some(more) = event.guests.len().checked_sub(GUESTS).filter(|more| *more > 0) {
-        body(ui, &tr!("and {count} more", count = more), true);
-    }
-    ui.add_space(s.s2);
+    ui.add_space(8.0 + 4.0);
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
         if TextButton::new(tr!("Edit")).secondary().icon(IconId::Compose).show(ui, theme, keymap).clicked() {
             asked.push(Asked::Edit);
         }
@@ -210,8 +296,28 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
     });
 }
 
-/// The calendar, busy or free, private and the repeat: `Personal · busy · private · repeats weekly`.
-fn facts(calendar: &Calendar, event: &EventRow) -> String {
+/// A guest's row: the avatar, the name, and the answer in its colour at the right.
+fn guest_row(ui: &mut Ui, theme: &Theme, guest: &crate::calendar::Guest) {
+    let p = &theme.palette;
+    let ppp = ui.pixels_per_point();
+    let (word, colour) = answer(theme, &guest.status);
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
+    ui.scope_builder(UiBuilder::new().max_rect(Rect::from_min_size(pos2(rect.left(), rect.top() + 1.0), vec2(24.0, 24.0))), |ui| {
+        avatar(ui, theme, &guest.name, &guest.address, 24.0);
+    });
+    let answer_galley = (!word.is_empty()).then(|| crate::component::galley(ui, word, theme.fonts.mono_s, colour));
+    let answer_width = answer_galley.as_ref().map_or(0.0, |galley| galley.size().x.ceil() + 8.0);
+    let name = crate::component::cut(ui, &guest.name, theme.fonts.caption, p.ink, (rect.width() - 32.0 - answer_width).max(1.0));
+    run_at(ui.painter(), pos2(rect.left() + 32.0, snap(rect.top() + 4.0, ppp)), name, p.ink);
+    if let Some(galley) = answer_galley {
+        crate::draw::paint::run_right(ui.painter(), rect.right(), snap(rect.top() + 5.0, ppp), galley, colour);
+    }
+    let spoken = if word.is_empty() { guest.name.clone() } else { format!("{}, {word}", guest.name) };
+    response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, &spoken));
+}
+
+/// The calendar, busy or free, private and the repeat, a tag each.
+fn facts(calendar: &Calendar, event: &EventRow) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(row) = calendar.calendar(event.calendar) {
         parts.push(row.name.clone());
@@ -233,17 +339,18 @@ fn facts(calendar: &Calendar, event: &EventRow) -> String {
             .to_owned(),
         );
     }
-    parts.join(" · ")
+    parts
 }
 
-/// A guest's answer in words.
-fn answer(status: &str) -> &'static str {
+/// A guest's answer in words and its colour: going in `plus`, maybe in `warn`, not going in `minus`, the rest `muted`.
+fn answer(theme: &Theme, status: &str) -> (&'static str, egui::Color32) {
+    let p = &theme.palette;
     match status {
-        "accepted" => tr!("going"),
-        "declined" => tr!("not going"),
-        "tentative" => tr!("maybe"),
-        "needs_action" => tr!("no answer yet"),
-        "delegated" => tr!("passed on"),
-        _ => "",
+        "accepted" => (tr!("going"), p.plus),
+        "declined" => (tr!("not going"), p.minus),
+        "tentative" => (tr!("maybe"), p.warn),
+        "needs_action" => (tr!("no answer yet"), p.muted),
+        "delegated" => (tr!("passed on"), p.muted),
+        _ => ("", p.muted),
     }
 }

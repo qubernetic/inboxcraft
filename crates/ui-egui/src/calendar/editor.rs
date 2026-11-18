@@ -78,6 +78,8 @@ pub struct Editor {
     problem: Option<String>,
     /// The list of choices open in the form, when one is.
     menu: Option<Menu>,
+    /// Whether Esc or a press outside already asked once to throw away what was typed.
+    warned: bool,
 }
 
 /// A list of choices of the form that opens over it.
@@ -105,7 +107,7 @@ impl Editor {
             repeat: REPEATS[0].to_owned(),
             guests: String::new(),
         };
-        Self { id: None, was: form.clone(), form, choices, notify: false, problem: None, menu: None }
+        Self { id: None, was: form.clone(), form, choices, notify: false, problem: None, menu: None, warned: false }
     }
 
     /// The occurrence `event` to edit: its times as the screen shows them.
@@ -124,7 +126,7 @@ impl Editor {
             repeat: event.repeat.clone().unwrap_or_else(|| REPEATS[0].to_owned()),
             guests: addresses.join(", "),
         };
-        Self { id: Some(event.id), was: form.clone(), form, choices: Vec::new(), notify: false, problem: None, menu: None }
+        Self { id: Some(event.id), was: form.clone(), form, choices: Vec::new(), notify: false, problem: None, menu: None, warned: false }
     }
 
     /// The list of choices open in the form, when one is.
@@ -212,6 +214,24 @@ impl Editor {
     #[must_use]
     pub fn problem(&self) -> Option<&str> {
         self.problem.as_deref()
+    }
+
+    /// Whether anything was typed or changed since the editor opened.
+    #[must_use]
+    pub fn edited(&self) -> bool {
+        self.form != self.was
+    }
+
+    /// Whether Esc or a press outside already asked once to throw away what was typed.
+    #[must_use]
+    pub fn warned(&self) -> bool {
+        self.warned
+    }
+
+    /// Esc or a press outside with something typed: the editor stays open and says that once more throws it away.
+    pub(crate) fn warn(&mut self) {
+        self.warned = true;
+        self.problem = Some(tr!("What you typed is not saved. Esc again throws it away; Save keeps it.").to_owned());
     }
 
     /// The save was refused for `why`: the editor stays open and says so.

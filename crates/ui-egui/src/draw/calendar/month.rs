@@ -1,198 +1,249 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The month view: the six weeks from the Monday on or before the month's first day, a cell per day with its number
-//! (a button to the day view; today in the accent, the days of other months muted). Blocks over whole days run
-//! across the cells of a week in lanes; under them the day's timed events, one line each with the start, as many as
-//! fit, and a "+N more" that opens the day.
+//! The month view: the weekdays' names, then the six weeks from the Monday on or before the month's first day on a grid
+//! of `panel_line` hairlines over the whole view. A cell holds its day's number (a button to the day view; the first of
+//! a month with the month's name, the days of other months `muted`, today in a `cyan_edge` box with `today` beside it,
+//! the day the arrows picked on `cyan`), the bands over whole days across the week's cells in lanes that share one
+//! line, and under them the day's timed events as chips, as many as fit, then a "+N more" link that opens the day's
+//! events in a float. Every count is bounded by the cell's room: a day of 500 events draws a few chips and one link.
 
-use egui::{Rect, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
+use egui::{Rect, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
-use super::{Asked, Shape, Text, block, caption_strong};
+use super::grid::{Lines, lane_pitch, line as line_width, snap};
+use super::{Asked, Kind, Sizes, Words, block};
 use crate::calendar::layout::{self, Bar};
 use crate::calendar::{Calendar, Day, EventRow, day};
-use crate::draw::paint::line;
+use crate::component::button::{LinkSize, link_sized};
+use crate::draw::paint::run_at;
+use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::tr;
 
 /// The weeks shown.
-const WEEKS: i64 = 6;
+const WEEKS: usize = 6;
 
-/// From the weekdays' names to the first week, in points.
-const UNDER_HEAD: f32 = 7.0;
+/// The most lanes of bands a week shows, whatever its room.
+const MOST_LANES: usize = 3;
 
-/// Between the weeks, in points.
-const WEEK_GAP: f32 = 10.0;
+/// From a cell's top to its first band, in points.
+const BANDS_TOP: f32 = 24.0;
 
-/// The room inside a cell around its number, in points.
-const CELL_PAD: f32 = 5.0;
+/// From a cell's top to its first chip under no band, in points.
+const CHIPS_TOP: f32 = 26.0;
 
-/// From one line of events to the next, beyond the line height of its text, in points.
-const LANE_ROOM: f32 = 2.0;
+/// A chip's height and the step from one chip to the next, in points.
+const CHIP: (f32, f32) = (20.0, 22.0);
 
-/// The gap under a block in its line, in points: a block is as tall as its text's line.
-const LANE_GAP: f32 = 2.0;
+/// The room left and right of a chip in its cell, in points.
+const CHIP_SIDE: f32 = 6.0;
+
+/// The id of the number of `day` in the month: the keyboard's focus while the arrows pick days.
+pub(super) fn number_id(day: Day) -> egui::Id {
+    egui::Id::unique(("calendar-number", day))
+}
+
+/// The month view of the calendar's focus.
+pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, asked: &mut Vec<Asked>) {
+    let p = &theme.palette;
+    let ppp = ui.pixels_per_point();
+    let line = line_width(ppp);
+    let rect = ui.max_rect();
+    let (first, _) = calendar.span();
+    let events: Vec<&EventRow> = calendar.events().collect();
+    let cols = Lines::cut(rect.left(), rect.right(), 7, ppp);
+
+    let head = snap(rect.top() + super::fixed(theme, 28.0), ppp);
+    for index in 0..7_usize {
+        let name = day::weekday_short(first.plus(i64::try_from(index).unwrap_or(0)).weekday());
+        let font = theme.fonts.label;
+        let text = crate::component::galley(ui, name, font, p.muted);
+        let y = snap((rect.top() + head) / 2.0 - font.line / 2.0, ppp);
+        run_at(ui.painter(), pos2(cols.line(index) + 8.0, y), text, p.muted);
+    }
+    ui.painter().rect_filled(Rect::from_min_max(pos2(rect.left(), head), pos2(rect.right(), head + line)), 0.0, p.line);
+    let weeks = Lines::cut(head + line, rect.bottom(), WEEKS, ppp);
+    for index in 1..WEEKS {
+        let y = weeks.line(index);
+        ui.painter().rect_filled(Rect::from_min_max(pos2(rect.left(), y), pos2(rect.right(), y + line)), 0.0, p.panel_line);
+    }
+    for index in 1..7 {
+        let x = cols.line(index);
+        ui.painter().rect_filled(Rect::from_min_max(pos2(x, weeks.line(0)), pos2(x + line, rect.bottom())), 0.0, p.panel_line);
+    }
+    let grid = Grid { cols, weeks, month: calendar.focus().month() };
+    for week in 0..WEEKS {
+        week_row(ui, theme, keymap, calendar, &events, &grid, week, asked);
+    }
+}
 
 /// Where the cells are.
 struct Grid {
-    left: f32,
-    top: f32,
-    /// A cell's width and height.
-    column: f32,
-    row: f32,
-    /// From the top of one week to the next.
-    pitch: f32,
-    /// The height of a line of events.
-    lane: f32,
-    /// The height of the day's number at the top of a cell.
-    number: f32,
-    /// How many lines fit under a day's number.
-    room: usize,
+    cols: Lines,
+    weeks: Lines,
     /// The month shown.
     month: u8,
 }
 
 impl Grid {
-    fn cell(&self, week: i64, index: usize) -> Rect {
-        Rect::from_min_size(pos2(self.left + self.column * index as f32, self.top + self.pitch * week as f32), vec2(self.column, self.row))
+    /// The cell of day `index` of week `week`, from its lines (the first line of the grid is its edge).
+    fn cell(&self, week: usize, index: usize) -> Rect {
+        Rect::from_min_max(pos2(self.cols.line(index), self.weeks.line(week)), pos2(self.cols.line(index + 1), self.weeks.line(week + 1)))
     }
 }
 
-/// The month view of the calendar's focus.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut Vec<Asked>) {
-    let p = &theme.palette;
-    let s = &theme.spacing;
+/// The days of week `week` of the grid: their numbers, the bands across them and their chips.
+#[expect(clippy::too_many_arguments, reason = "the week's place in the grid and the events laid out")]
+fn week_row(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    calendar: &Calendar,
+    events: &[&EventRow],
+    grid: &Grid,
+    week: usize,
+    asked: &mut Vec<Asked>,
+) {
+    let ppp = ui.pixels_per_point();
+    let line = grid.cols.width;
     let (first, _) = calendar.span();
-    let events: Vec<&EventRow> = calendar.events().collect();
-    let width = ui.available_width();
-    let column = (width / 7.0).max(1.0);
-
-    let head = theme.fonts.caption.line + s.s3;
-    let (rect, _) = ui.allocate_exact_size(vec2(width, head), Sense::hover());
-    for index in 0..7_i64 {
-        let name = day::weekday_short(first.plus(index).weekday());
-        let galley = line(ui, &[(name, caption_strong(theme), p.muted)], column);
-        ui.painter().galley(pos2(rect.left() + column * index as f32 + CELL_PAD + 1.0, rect.top()), galley, p.muted);
-    }
-
-    ui.add_space(UNDER_HEAD);
-    let rect = ui.available_rect_before_wrap();
-    ui.allocate_rect(rect, Sense::hover());
-    let row = ((rect.height() - WEEK_GAP * (WEEKS - 1) as f32) / WEEKS as f32).max(1.0);
-    let pitch = row + WEEK_GAP;
-    let lane = theme.fonts.caption.line + LANE_ROOM;
-    // The number and the room under it; today's disc is as tall.
-    let number = theme.fonts.mono_s.line + CELL_PAD + s.s1;
-    // A count of lines, never negative.
-    let room = ((row - number) / lane).floor().max(0.0) as usize;
-    let grid = Grid { left: rect.left(), top: rect.top(), column, row, pitch, lane, number, room, month: calendar.focus().month() };
-    let edge = Stroke::new(1.0, p.line);
-    for week in 0..WEEKS {
-        let top = grid.top + pitch * week as f32;
-        ui.painter().hline(rect.left()..=rect.right(), top, edge);
-        ui.painter().hline(rect.left()..=rect.right(), top + row, edge);
-        for index in 0..=7 {
-            let x = grid.left + column * index as f32;
-            ui.painter().vline(x, top..=top + row, edge);
-        }
-        week_row(ui, theme, calendar, &events, &grid, week, asked);
-    }
-}
-
-/// The days of week `week` of the grid: their numbers, the blocks across them and their timed events.
-fn week_row(ui: &mut Ui, theme: &Theme, calendar: &Calendar, events: &[&EventRow], grid: &Grid, week: i64, asked: &mut Vec<Asked>) {
-    let (first, _) = calendar.span();
-    let start = first.plus(week * 7);
+    let start = first.plus(i64::try_from(week.saturating_mul(7)).unwrap_or(0));
     let bars = layout::bars(events, start, 7);
-    let total = layout::lanes(&bars);
-    // The lanes shown: all, or one less than fit so that a line stays for "+N more".
-    let lanes = if total <= grid.room { total } else { grid.room.saturating_sub(1) };
+    let pitch = lane_pitch(Sizes::of(theme).lane, ppp);
+    let top = grid.weeks.line(week);
+    let row = grid.weeks.line(week + 1) - top;
+    // The lanes that fit over one chip and the link, at most a few.
+    let room = ((row - BANDS_TOP - CHIP.1 - 20.0) / pitch).floor();
+    let fit = if room.is_finite() && room > 0.0 { (room as usize).min(MOST_LANES) } else { 0 };
+    let lanes = layout::lanes(&bars).min(fit);
     for bar in bars.iter().filter(|bar| bar.lane < lanes) {
         let Some(event) = events.get(bar.event) else { continue };
-        let (from, to) = (grid.cell(week, bar.from), grid.cell(week, bar.to));
-        let y = from.top() + grid.number + grid.lane * bar.lane as f32;
-        let area = Rect::from_min_max(pos2(from.left() + CELL_PAD, y), pos2(to.right() - CELL_PAD, y + grid.lane - LANE_GAP));
-        asked.extend(block(ui, theme, calendar, event, area, &Text { title: &event.summary, detail: None, shape: Shape::Chip }, week));
+        let (mut left, right) = grid.cols.cell(bar.from, bar.to.saturating_add(1));
+        if bar.from == 0 && !bar.starts {
+            left -= line;
+        }
+        let y = snap(top + BANDS_TOP, ppp) + pitch * bar.lane as f32;
+        let area = Rect::from_min_max(pos2(left, y), pos2(right, y + pitch + line));
+        let words = Words { title: &event.summary, detail: "", time: "" };
+        let salt = 1000_i64.saturating_add(i64::try_from(week).unwrap_or(0));
+        asked.extend(block(ui, theme, calendar, event, area, Kind::Band, &words, salt));
     }
     for index in 0..7_usize {
         let day = start.plus(i64::try_from(index).unwrap_or(0));
         let cell = grid.cell(week, index);
         day_number(ui, theme, calendar, day, grid, cell, asked);
-        day_events(ui, theme, calendar, events, grid, (week, index, day), &bars, lanes, asked);
+        day_events(ui, theme, keymap, calendar, events, (cell, index, day), (&bars, lanes), asked);
     }
 }
 
-/// The timed events of `day` (in column `index` of `week`) under the `lanes` of blocks shown, and "+N more" for
-/// what does not fit, blocks of the day left out included.
-#[expect(clippy::too_many_arguments, reason = "the day's place in the grid and the blocks already laid out")]
+/// The timed events of `day` (column `index`, in `cell`) as chips under its lanes of bands, as many as fit, and
+/// "+N more" for the rest, bands left out included.
+#[expect(clippy::too_many_arguments, reason = "the day's place in the grid and the bands already laid out")]
 fn day_events(
     ui: &mut Ui,
     theme: &Theme,
+    keymap: &Keymap,
     calendar: &Calendar,
     events: &[&EventRow],
-    grid: &Grid,
-    (week, index, day): (i64, usize, Day),
-    bars: &[Bar],
-    lanes: usize,
+    (cell, index, day): (Rect, usize, Day),
+    (bars, lanes): (&[Bar], usize),
     asked: &mut Vec<Asked>,
 ) {
-    let p = &theme.palette;
-    let cell = grid.cell(week, index);
-    let hidden = bars.iter().filter(|bar| bar.lane >= lanes && bar.from <= index && index <= bar.to).count();
+    let ppp = ui.pixels_per_point();
+    let pitch = lane_pitch(Sizes::of(theme).lane, ppp);
+    let over = |bar: &&Bar| bar.from <= index && index <= bar.to;
+    let hidden = bars.iter().filter(over).filter(|bar| bar.lane >= lanes).count();
+    let mine = bars.iter().filter(over).filter(|bar| bar.lane < lanes).map(|bar| bar.lane + 1).max().unwrap_or(0);
     let timed: Vec<&EventRow> = events.iter().copied().filter(|event| !event.is_block() && event.covers(day)).collect();
-    let free = grid.room.saturating_sub(lanes);
-    let all = hidden.saturating_add(timed.len());
-    let lines = if all > free { free.saturating_sub(1).min(timed.len()) } else { timed.len() };
-    let mut y = cell.top() + grid.number + grid.lane * lanes as f32;
-    let salt = week.saturating_mul(7).saturating_add(i64::try_from(index).unwrap_or(0));
-    for event in timed.iter().take(lines) {
-        let area = Rect::from_min_size(pos2(cell.left() + CELL_PAD, y), vec2(cell.width() - CELL_PAD * 2.0, grid.lane - LANE_GAP));
-        let title = format!("{} {}", event.start.clock(), event.summary);
-        asked.extend(block(ui, theme, calendar, event, area, &Text { title: &title, detail: None, shape: Shape::Chip }, salt));
-        y += grid.lane;
+    let chips_top = snap(cell.top() + CHIPS_TOP + pitch * mine as f32, ppp);
+    let bottom = cell.bottom();
+    let all = timed.len().saturating_add(hidden);
+    // As many chips as fit; with a link under them when some are left out.
+    let fits = |count: usize, link: bool| chips_top + CHIP.1 * count as f32 - 2.0 + if link { 4.0 + 16.0 } else { 0.0 } <= bottom;
+    let shown = if hidden == 0 && fits(timed.len(), false) {
+        timed.len()
+    } else {
+        let mut count = timed.len().min(64);
+        while count > 0 && !fits(count, true) {
+            count -= 1;
+        }
+        count
+    };
+    for (row, event) in timed.iter().take(shown).enumerate() {
+        let y = chips_top + CHIP.1 * row as f32;
+        let area = Rect::from_min_size(pos2(cell.left() + CHIP_SIDE, y), vec2((cell.width() - CHIP_SIDE * 2.0).max(1.0), CHIP.0));
+        let time = event.start.clock();
+        let words = Words { title: &event.summary, detail: "", time: if event.start.day == day { &time } else { "" } };
+        let salt = 2000_i64.saturating_add(day.since(Day::EPOCH));
+        asked.extend(block(ui, theme, calendar, event, area, Kind::Chip, &words, salt));
     }
-    let left_out = all.saturating_sub(lines);
-    if left_out == 0 || free == 0 {
+    let left_out = all.saturating_sub(shown);
+    if left_out == 0 || !fits(shown, true) {
         return;
     }
-    let area = Rect::from_min_size(pos2(cell.left() + CELL_PAD, y), vec2(cell.width() - CELL_PAD * 2.0, grid.lane - LANE_GAP));
-    let response = ui.interact(area, ui.scope_id().with(("calendar-more", week, index)), Sense::click());
-    let spoken = tr!("{count} more on {day}", count = left_out, day = day::long(day));
-    response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, &spoken));
-    let galley = line(ui, &[(&tr!("+{count} more", count = left_out), theme.fonts.mono, p.muted)], area.width());
-    ui.painter().galley(pos2(area.left() + theme.spacing.s1, area.top()), galley, p.muted);
-    if response.clicked() {
-        asked.push(Asked::Open(day));
+    let y = chips_top + CHIP.1 * shown as f32 + 2.0;
+    let place = Rect::from_min_size(pos2(cell.left() + 9.0, y), vec2((cell.width() - 18.0).max(1.0), 16.0));
+    let words = tr!("+{count} more", count = left_out);
+    let link = ui.scope_builder(UiBuilder::new().max_rect(place).id_salt(("calendar-month-more", day)), |ui| {
+        link_sized(ui, theme, keymap, &words, LinkSize::Small)
+    });
+    ui.ctx().data_mut(|data| data.insert_temp(super::more::anchor_id(day), link.inner.rect));
+    if link.inner.clicked() {
+        asked.push(Asked::More(Some(day)));
     }
 }
 
-/// The number of `day` at the top of its `cell`, a button that opens the day; today in the accent, a day of another
-/// month than the grid's muted.
+/// The number of `day` at the top of its `cell`, a button that opens the day: the first of a month with the month's
+/// name, today in a `cyan_edge` box with `today` beside it, the picked day on `cyan`, a day of another month muted.
 fn day_number(ui: &mut Ui, theme: &Theme, calendar: &Calendar, day: Day, grid: &Grid, cell: Rect, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
-    let s = &theme.spacing;
+    let ppp = ui.pixels_per_point();
+    let line = grid.cols.width;
     let today = day == calendar.today();
-    let colour = if today {
+    let picked = calendar.picked_day() == Some(day);
+    let text = if day.date() == 1 { format!("{} {}", day.date(), day::month_short(day.month())) } else { day.date().to_string() };
+    let colour = if picked {
         p.on_cyan
+    } else if today {
+        p.cyan_text
     } else if day.month() == grid.month {
         p.ink
     } else {
         p.muted
     };
-    let font = if today { theme.fonts.mono_s.semibold() } else { theme.fonts.mono_s };
-    let galley = line(ui, &[(&day.date().to_string(), font, colour)], cell.width());
-    // Today's disc is 20 points tall; a day's number sits inside the cell's room.
-    let side = (grid.number - s.s1 + 1.0).max(1.0);
-    let spot = Rect::from_min_size(pos2(cell.left() + CELL_PAD, cell.top() + CELL_PAD - 2.0), vec2(side.max(galley.size().x + s.s1), side));
-    let response = ui.interact(spot, ui.scope_id().with(("calendar-number", day)), Sense::click());
-    response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, day::long(day)));
-    if today {
-        ui.painter().rect_filled(spot, side / 2.0, p.cyan);
-    } else if response.hovered() {
-        ui.painter().rect_filled(spot, side / 2.0, p.stage);
+    let font = theme.fonts.mono_s;
+    let galley = crate::component::galley(ui, &text, font, colour);
+    let wide = galley.size().x.ceil();
+    let boxed = Rect::from_min_size(pos2(cell.left() + 4.0, snap(cell.top() + 4.0, ppp)), vec2(wide + 12.0, font.line + 2.0));
+    let response = ui.interact(boxed, number_id(day), Sense::click());
+    super::keys::item(ui.ctx(), &response);
+    if super::keys::wanted(ui.ctx(), crate::calendar::Target::Day(day)) {
+        response.request_focus();
     }
-    let at = if today { spot.center() - galley.size() / 2.0 } else { pos2(spot.left() + 1.0, spot.center().y - galley.size().y / 2.0) };
-    ui.painter().galley(at, galley, colour);
+    if response.gained_focus() && !picked {
+        asked.push(Asked::PickDay(day));
+    }
+    let spoken = if today { format!("{}, {}", day::long(day), tr!("today")) } else { day::long(day) };
+    response.widget_info(|| WidgetInfo::selected(egui::accesskit::Role::Button, true, picked, &spoken));
+    if picked {
+        ui.painter().rect_filled(boxed, 0.0, p.cyan);
+    } else if response.hovered() {
+        ui.painter().rect_filled(boxed, 0.0, p.stage);
+    }
+    if today && !picked {
+        super::stroke(ui.painter(), boxed, line, p.cyan_edge);
+    }
+    let x = if today || picked { boxed.left() + 6.0 } else { cell.left() + 9.0 };
+    run_at(ui.painter(), pos2(x, boxed.top() + 1.0), galley, colour);
+    if today {
+        let note = crate::component::galley(ui, tr!("today"), font, p.muted);
+        if boxed.right() + 6.0 + note.size().x <= cell.right() - 4.0 {
+            run_at(ui.painter(), pos2(boxed.right() + 6.0, boxed.top() + 1.0), note, p.muted);
+        }
+    }
+    if response.has_focus() && !picked {
+        crate::draw::paint::focus_ring(ui.painter(), theme, boxed, crate::draw::paint::Ring::Outside);
+    }
     if response.clicked() {
         asked.push(Asked::Open(day));
     }
