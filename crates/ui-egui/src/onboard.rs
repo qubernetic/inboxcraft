@@ -775,6 +775,8 @@ pub struct Onboarding {
     /// The errors of single fields the owner's last try left, each with the field it stands under, in the form's
     /// order; [`Self::error`] is the page's own.
     sent: Vec<(Slot, String)>,
+    /// The field to take the keyboard next frame: the first of [`Self::sent`], once, after a refused try.
+    focus: Option<Slot>,
     keychain: Arc<dyn Keychain>,
     /// The accounts whose password this window put into the credential store and has not removed yet.
     stored: BTreeSet<u64>,
@@ -813,6 +815,7 @@ impl Onboarding {
             running: false,
             error: None,
             sent: Vec::new(),
+            focus: None,
             keychain,
             stored: BTreeSet::new(),
             detect,
@@ -1025,6 +1028,7 @@ impl Onboarding {
         self.sent = self.form.faults(false);
         if !self.sent.is_empty() {
             self.error = None;
+            self.focus = self.error_slot();
             return;
         }
         let (dry, params) = match (self.form.update_params(id, true, recheck), self.form.update_params(id, false, recheck)) {
@@ -1148,6 +1152,11 @@ impl Onboarding {
         self.error.as_deref()
     }
 
+    /// The field to give the keyboard to now, once: the first one a refused try named.
+    pub fn take_focus(&mut self) -> Option<Slot> {
+        self.focus.take()
+    }
+
     /// The owner changed the field `slot`: the error under it goes, until the form is sent again.
     pub fn edited(&mut self, slot: Slot) {
         self.sent.retain(|(at, _)| *at != slot);
@@ -1174,6 +1183,7 @@ impl Onboarding {
         if address.is_empty() {
             self.error = None;
             self.sent = vec![(Slot::Address, tr!("Enter the address, then Detect.").to_owned())];
+            self.focus = Some(Slot::Address);
             return;
         }
         self.error = None;
@@ -1248,6 +1258,7 @@ impl Onboarding {
         self.sent = self.form.faults(true);
         if !self.sent.is_empty() {
             self.error = None;
+            self.focus = self.error_slot();
             return;
         }
         let params = match self.form.params() {

@@ -937,3 +937,32 @@ fn rows_without_an_error_stand_12_apart() {
     let caldav = harness.get_by_label("CalDAV address, for calendars").rect();
     assert_eq!((smtp.top() - imap.top(), caldav.top() - smtp.top()), (72.0, 72.0), "a 60-high row and 12 between");
 }
+
+#[test]
+fn a_refused_press_takes_the_keyboard_to_the_first_faulty_field_which_says_its_error() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        let mut harness = form_open(theme, FakeWorkers::passing());
+        press(&mut harness, "Check and add");
+        harness.run();
+        let address = harness.get_by_label("Address");
+        assert!(address.is_focused(), "{theme:?}: the first faulty field has the keyboard");
+        assert_eq!(address.accesskit_node().description().as_deref(), Some("Enter the address."), "{theme:?}: and says why");
+        assert_eq!(harness.get_by_label("Password").accesskit_node().description().as_deref(), Some("Enter the password."), "{theme:?}");
+        // Once the address and the password are there, the IMAP server is the one; scrolled into view.
+        let (onboarding, _) = harness.state_mut().onboarding_mut();
+        onboarding.form_mut().address = "carol@example.org".to_owned();
+        onboarding.form_mut().password = Secret::new(PASSWORD);
+        onboarding.edited(crate::onboard::Slot::Address);
+        onboarding.edited(crate::onboard::Slot::Password);
+        harness.run();
+        assert_eq!(harness.get_by_label("Address").accesskit_node().description().as_deref(), None, "{theme:?}: the error went");
+        press(&mut harness, "Check and add");
+        harness.run();
+        assert!(harness.get_by_label("IMAP server").is_focused(), "{theme:?}");
+        assert!(!harness.get_by_label("Check and add").is_focused(), "{theme:?}");
+        // The keyboard is put there once: Tab moves on from it.
+        harness.key_press(Key::Tab);
+        harness.run();
+        assert!(!harness.get_by_label("IMAP server").is_focused(), "{theme:?}");
+    }
+}

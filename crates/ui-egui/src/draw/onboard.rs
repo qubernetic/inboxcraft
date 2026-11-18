@@ -154,11 +154,27 @@ fn part<R>(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
 struct Faults {
     sent: Vec<(Slot, String)>,
     typed: Vec<(Slot, String)>,
+    /// The field to take the keyboard this frame, after a refused try.
+    focus: Option<Slot>,
 }
 
 impl Faults {
-    fn of(onboarding: &Onboarding) -> Self {
-        Self { sent: onboarding.field_errors().to_vec(), typed: onboarding.form().typed_faults() }
+    fn of(onboarding: &mut Onboarding) -> Self {
+        let focus = onboarding.take_focus();
+        Self { sent: onboarding.field_errors().to_vec(), typed: onboarding.form().typed_faults(), focus }
+    }
+
+    /// Marks the field `slot` drawn as `response`: a screen reader hears its error after its name, and the first field
+    /// a refused try named takes the keyboard, brought into view.
+    fn mark(&self, ui: &Ui, slot: Slot, response: &Response) {
+        if let Some(error) = self.of_slot(slot) {
+            let error = error.to_owned();
+            ui.ctx().accesskit_node_builder(response.id, |node| node.set_description(error));
+        }
+        if self.focus == Some(slot) {
+            response.request_focus();
+            response.scroll_to_me(Some(Align::Center));
+        }
     }
 
     /// The error under the field `slot`: what is typed wrong first, then what the last try said.
@@ -247,11 +263,19 @@ fn server_row(
     with_error(ui, theme, &said, width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
-            if line_field(ui, theme, (caption, placeholder, name), host, errors[0], room).changed() {
+            let response = line_field(ui, theme, (caption, placeholder, name), host, errors[0], room);
+            if let Some(slot) = host_slot {
+                faults.mark(ui, slot, &response);
+            }
+            if response.changed() {
                 edited.extend(host_slot);
             }
             let usual = usual(current).to_string();
-            if line_field(ui, theme, (tr!("Port"), &usual, name), port_text, errors[1], PORT).changed() {
+            let response = line_field(ui, theme, (tr!("Port"), &usual, name), port_text, errors[1], PORT);
+            if let Some(slot) = port_slot {
+                faults.mark(ui, slot, &response);
+            }
+            if response.changed() {
                 edited.extend(port_slot);
             }
             if let Some(taken) = security(ui, theme, name, current) {
@@ -277,7 +301,9 @@ fn names(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: f3
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             line_field(ui, theme, (tr!("User name"), tr!("the address"), ""), &mut form.username, None, half);
-            if password(ui, theme, password_words, &mut form.password, error, width - GAP - half).changed() {
+            let response = password(ui, theme, password_words, &mut form.password, error, width - GAP - half);
+            faults.mark(ui, Slot::Password, &response);
+            if response.changed() {
                 edited.push(Slot::Password);
             }
         });
@@ -311,7 +337,9 @@ fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: 
         let error = faults.of_slot(Slot::Caldav);
         with_error(ui, theme, &[error], width, |ui| {
             let words = (tr!("CalDAV address, for calendars"), tr!("optional, https://dav.example.org"), "");
-            if line_field(ui, theme, words, &mut form.caldav, error, width).changed() {
+            let response = line_field(ui, theme, words, &mut form.caldav, error, width);
+            faults.mark(ui, Slot::Caldav, &response);
+            if response.changed() {
                 edited.push(Slot::Caldav);
             }
         });
@@ -359,7 +387,9 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             let room = (width - button - GAP).max(HOST_MIN);
-            edited = line_field(ui, theme, (tr!("Address"), "you@example.org", ""), &mut form.address, error, room).changed();
+            let response = line_field(ui, theme, (tr!("Address"), "you@example.org", ""), &mut form.address, error, room);
+            faults.mark(ui, Slot::Address, &response);
+            edited = response.changed();
             part(ui, button, |ui| {
                 // The button stands in the middle of the field's box, under its label.
                 ui.add_space(f.label.line + theme.spacing.s2 + ((theme.boxes().field - component::control_side(theme)) / 2.0).max(0.0));
