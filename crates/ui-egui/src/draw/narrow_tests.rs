@@ -113,8 +113,19 @@ fn at_every_width_nothing_in_the_list_s_or_the_composer_s_heads_stands_over_anyt
             let folders = harness.get_by_label("Accounts").rect().right() + 1.0;
             if let Some(search) = search_box(&harness) {
                 assert_eq!(overdrawn(&harness, band(folders, 0.0, search.bottom() + 24.0)), Vec::<String>::new(), "{at}: the list's head");
-                for done in harness.query_all_by_label("Done all").map(|node| node.rect()) {
-                    assert_eq!(overdrawn(&harness, band(folders, done.top(), done.bottom())), Vec::<String>::new(), "{at}: a card's head");
+                // Each group's head whole: nothing over anything, no word of it cut.
+                let heads: Vec<Rect> =
+                    harness.query_all_by_role(Role::Heading).map(|node| node.rect()).filter(|head| head.left() < search.right()).collect();
+                assert!(!heads.is_empty() || width < 980.0, "{at}: the groups' heads");
+                for head in heads {
+                    let inside = Rect::from_min_max(egui::pos2(head.left(), head.top()), egui::pos2(head.right() - 1.0, head.bottom()));
+                    assert_eq!(overdrawn(&harness, inside), Vec::<String>::new(), "{at}: a group's head");
+                    let cut: Vec<String> = texts(&harness)
+                        .into_iter()
+                        .filter(|(rect, text)| inside.contains(rect.center()) && text.contains('…'))
+                        .map(|(_, text)| text)
+                        .collect();
+                    assert_eq!(cut, Vec::<String>::new(), "{at}: a group's head cut");
                 }
             }
             let composer = super::compose::drawn_rect(&harness.ctx).unwrap();
@@ -305,4 +316,37 @@ fn a_list_float_open_when_the_list_goes_closes_and_does_not_come_back() {
     harness.run();
     assert!(search_box(&harness).is_some());
     assert!(!crate::component::popup::is_open(&harness.ctx, menu) && !crate::component::popup::any_open(&harness.ctx), "not back with the list");
+}
+
+#[test]
+fn where_the_list_stands_at_its_least_a_group_s_head_hovered_stands_whole() {
+    // At 130 % the head is wider than the list's 440: the list is never hidden for that (the cap).
+    for percent in [100, 110] {
+        // One group whose head is wider than the list's own head: it sets the list's least width.
+        let grouped = |width: f32| {
+            let mut harness = window(width, percent);
+            let ids = harness.state().mailbox().messages().iter().map(|row| row.id).collect();
+            let group = crate::mailbox::Group { icon: crate::iconset::IconId::Inbox, name: "Bakery orders".to_owned(), messages: ids };
+            harness.state_mut().mailbox_mut().set_showcase(crate::mailbox::Showcase { screener: Vec::new(), groups: vec![group] });
+            harness.get_by_role_and_label(Role::Button, "New message").click();
+            harness.run();
+            harness
+        };
+        // The first width, 2 points apart, at which the list stands beside the composer: there it is at its least.
+        let mut harness = (980..1600).step_by(2).map(|width| grouped(width as f32)).find(|harness| search_box(harness).is_some()).unwrap();
+        // Its head at its widest: every row shown ("11 of 11 · show fewer").
+        harness.get_by_label("show all").click();
+        harness.run();
+        let heads: Vec<Rect> = harness.query_all_by_role(Role::Heading).map(|node| node.rect()).collect();
+        assert!(!heads.is_empty(), "{percent}: the group's head");
+        for head in heads {
+            harness.event(egui::Event::PointerMoved(head.center()));
+            harness.run();
+            let inside = Rect::from_min_max(head.min, egui::pos2(head.right() - 1.0, head.bottom()));
+            let words: Vec<String> = texts(&harness).into_iter().filter(|(rect, _)| inside.contains(rect.center())).map(|(_, text)| text).collect();
+            assert!(words.iter().any(|text| text == "done all") && words.iter().any(|text| text == "show fewer"), "{percent}: {words:?}");
+            assert!(!words.iter().any(|text| text.contains('…')), "{percent}: cut, {words:?}");
+            assert_eq!(overdrawn(&harness, inside), Vec::<String>::new(), "{percent}: a group's head");
+        }
+    }
 }

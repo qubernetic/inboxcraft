@@ -136,6 +136,19 @@ pub fn group_head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, head: &GroupHead<
     pressed
 }
 
+/// The narrowest `head` stands whole in, its hover link shown: its pads, its index and name, how many show, its links
+/// and its count with the gaps between them, as [`group_head`] lays them out.
+#[must_use]
+pub fn least_width(ui: &Ui, theme: &Theme, head: &GroupHead<'_>) -> f32 {
+    let p = &theme.palette;
+    let f = &theme.fonts;
+    let wide = |text: &str, font| super::galley(ui, text, font, p.muted).size().x;
+    let count = if head.unread == 0 { crate::tr!("nothing to read").to_owned() } else { head.unread.to_string() };
+    let parts = [head.link, head.hover_link].into_iter().flatten().map(|words| GAP + wide(words, f.mono_s).ceil()).sum::<f32>()
+        + head.shown.map_or(0.0, |words| GAP + paint::run_box(wide(words, f.mono_s)));
+    (PAD * 2.0 + paint::run_box(wide(head.index, f.label)) + GAP + wide(head.name, f.label) + GAP + parts + wide(&count, f.mono_s)).ceil()
+}
+
 #[cfg(test)]
 #[path = "group_head_tests.rs"]
 mod tests;
