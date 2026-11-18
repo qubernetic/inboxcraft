@@ -1203,3 +1203,28 @@ fn a_saved_account_s_form_opens_as_the_account_now_stands() {
     onboarding.edit(&mut mailbox, 1);
     assert_eq!(onboarding.form().label, "Shed");
 }
+
+#[test]
+fn every_missing_or_wrong_field_is_named_at_one_press() {
+    let mut mailbox = mailbox();
+    let mut onboarding = onboarding(&Kept::default());
+    onboarding.form_mut().port = "99999".to_owned();
+    onboarding.add(&mut mailbox);
+    let named: Vec<Slot> = onboarding.field_errors().iter().map(|(slot, _)| *slot).collect();
+    assert_eq!(named, [Slot::Address, Slot::Password, Slot::Host, Slot::Port]);
+    assert_eq!((onboarding.error(), onboarding.error_slot()), (Some("Enter the address."), Some(Slot::Address)), "the first leads");
+    assert_eq!(onboarding.page_error(), None, "each error is its field's");
+    // Typing in one field takes its error alone away.
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.edited(Slot::Address);
+    let named: Vec<Slot> = onboarding.field_errors().iter().map(|(slot, _)| *slot).collect();
+    assert_eq!(named, [Slot::Password, Slot::Host, Slot::Port]);
+    // An account's form names its missing server and its wrong port at once.
+    let (mut mailbox, mut onboarding) = added(&Kept::default());
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().host.clear();
+    onboarding.form_mut().smtp_port = "smtp".to_owned();
+    onboarding.save(&mut mailbox);
+    let named: Vec<Slot> = onboarding.field_errors().iter().map(|(slot, _)| *slot).collect();
+    assert_eq!(named, [Slot::Host, Slot::SmtpPort]);
+}

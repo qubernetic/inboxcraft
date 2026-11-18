@@ -909,3 +909,31 @@ fn going_from_one_form_to_the_other_keeps_no_password() {
     assert!(onboarding.form().password.is_empty());
     assert_eq!(onboarding.kept_forms(), (1, false));
 }
+
+#[test]
+fn one_press_names_every_missing_field_and_a_row_says_both_its_errors() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        let mut harness = form_open(theme, FakeWorkers::passing());
+        harness.state_mut().onboarding_mut().0.form_mut().port = "99999".to_owned();
+        harness.run();
+        press(&mut harness, "Check and add");
+        for said in ["Enter the address.", "Enter the password.", "Enter the IMAP server, or use Detect.", "The port is a number from 1 to 65535."] {
+            assert!(harness.query_by_label(said).is_some(), "{theme:?}: {said}");
+        }
+        // The host's and the port's errors stand under their row, one under the other.
+        let port = harness.get_all_by_label("Port").next().unwrap().rect();
+        let host = harness.get_by_label("Enter the IMAP server, or use Detect.").rect();
+        let wrong = harness.get_by_label("The port is a number from 1 to 65535.").rect();
+        assert_eq!(host.top(), port.bottom() + 6.0, "{theme:?}");
+        assert!(wrong.top() >= host.bottom(), "{theme:?}: {wrong:?} under {host:?}");
+    }
+}
+
+#[test]
+fn rows_without_an_error_stand_12_apart() {
+    let harness = form_open(egui::Theme::Dark, FakeWorkers::passing());
+    let imap = harness.get_by_label("IMAP server").rect();
+    let smtp = harness.get_by_label("Outgoing server (SMTP), to send").rect();
+    let caldav = harness.get_by_label("CalDAV address, for calendars").rect();
+    assert_eq!((smtp.top() - imap.top(), caldav.top() - smtp.top()), (72.0, 72.0), "a 60-high row and 12 between");
+}

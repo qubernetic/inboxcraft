@@ -150,16 +150,15 @@ fn part<R>(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     .inner
 }
 
-/// The form's errors this frame: the one the owner's last try left under its field, and what is wrong as it is typed.
+/// The form's errors this frame: those the owner's last try left under their fields, and what is wrong as it is typed.
 struct Faults {
-    sent: Option<(Slot, String)>,
+    sent: Vec<(Slot, String)>,
     typed: Vec<(Slot, String)>,
 }
 
 impl Faults {
     fn of(onboarding: &Onboarding) -> Self {
-        let sent = onboarding.error_slot().zip(onboarding.error()).map(|(slot, error)| (slot, error.to_owned()));
-        Self { sent, typed: onboarding.form().typed_faults() }
+        Self { sent: onboarding.field_errors().to_vec(), typed: onboarding.form().typed_faults() }
     }
 
     /// The error under the field `slot`: what is typed wrong first, then what the last try said.
@@ -168,13 +167,19 @@ impl Faults {
     }
 }
 
-/// A field or a row of fields that `add` draws, with `error` under it, `UNDER` below it, in `caption` and `minus`.
-fn with_error<R>(ui: &mut Ui, theme: &Theme, error: Option<&str>, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+/// A field or a row of fields that `add` draws, with its `errors` under it, the first `UNDER` below it and each under
+/// the one before, in `caption` and `minus`.
+fn with_error<R>(ui: &mut Ui, theme: &Theme, errors: &[Option<&str>], width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = UNDER;
         let added = add(ui);
-        if let Some(error) = error {
-            words(ui, error, theme.fonts.caption, theme.palette.minus, width);
+        if errors.iter().any(Option::is_some) {
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for error in errors.iter().flatten() {
+                    words(ui, error, theme.fonts.caption, theme.palette.minus, width);
+                }
+            });
         }
         added
     })
@@ -237,7 +242,9 @@ fn server_row(
     let [host_slot, port_slot] = slots;
     let errors = [host_slot.and_then(|slot| faults.of_slot(slot)), port_slot.and_then(|slot| faults.of_slot(slot))];
     let current = chosen.unwrap_or(Security::Tls);
-    with_error(ui, theme, errors[0].or(errors[1]), width, |ui| {
+    // The host's and the port's errors both, the one under the other.
+    let said = if errors[0] == errors[1] { [errors[0], None] } else { errors };
+    with_error(ui, theme, &said, width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             if line_field(ui, theme, (caption, placeholder, name), host, errors[0], room).changed() {
@@ -266,7 +273,7 @@ fn names(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: f3
         line_field(ui, theme, (tr!("Name on sent mail"), tr!("optional"), ""), &mut form.display_name, None, width - GAP - half);
     });
     let error = faults.of_slot(Slot::Password);
-    with_error(ui, theme, error, width, |ui| {
+    with_error(ui, theme, &[error], width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             line_field(ui, theme, (tr!("User name"), tr!("the address"), ""), &mut form.username, None, half);
@@ -302,7 +309,7 @@ fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: 
             width,
         ));
         let error = faults.of_slot(Slot::Caldav);
-        with_error(ui, theme, error, width, |ui| {
+        with_error(ui, theme, &[error], width, |ui| {
             let words = (tr!("CalDAV address, for calendars"), tr!("optional, https://dav.example.org"), "");
             if line_field(ui, theme, words, &mut form.caldav, error, width).changed() {
                 edited.push(Slot::Caldav);
@@ -348,7 +355,7 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
     let name = if detecting { tr!("Detecting…") } else { tr!("Detect") };
     let button = paint::run_box(component::galley(ui, name, f.button, theme.palette.ink).size().x) + 2.0 * theme.spacing.s3;
     let error = faults.of_slot(Slot::Address);
-    with_error(ui, theme, error, width, |ui| {
+    with_error(ui, theme, &[error], width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             let room = (width - button - GAP).max(HOST_MIN);
@@ -417,7 +424,7 @@ fn columns(room: f32) -> (f32, f32, bool) {
 
 /// The page's error that belongs to no field, as an error banner over the buttons.
 fn page_error(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &Onboarding) {
-    if let Some(error) = onboarding.error().filter(|_| onboarding.error_slot().is_none()) {
+    if let Some(error) = onboarding.page_error() {
         banner(ui, theme, keymap, BannerKind::Error, error, &[]);
     }
 }

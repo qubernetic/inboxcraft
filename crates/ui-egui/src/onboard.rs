@@ -480,20 +480,28 @@ impl Form {
         faults
     }
 
-    /// The first thing that keeps the form from being sent, and the field it stands under: what is missing (the
-    /// address and the password only when `adding`), then what is wrong.
+    /// Everything that keeps the form from being sent, each with the field it stands under, in the form's order: what
+    /// is missing (the address and the password only when `adding`), then what is wrong.
     #[must_use]
-    pub fn fault(&self, adding: bool) -> Option<(Slot, String)> {
+    pub fn faults(&self, adding: bool) -> Vec<(Slot, String)> {
+        let mut faults = Vec::new();
         if adding && self.address.trim().is_empty() {
-            return Some((Slot::Address, tr!("Enter the address.").to_owned()));
+            faults.push((Slot::Address, tr!("Enter the address.").to_owned()));
         }
         if adding && self.password.is_empty() {
-            return Some((Slot::Password, tr!("Enter the password.").to_owned()));
+            faults.push((Slot::Password, tr!("Enter the password.").to_owned()));
         }
         if self.host.trim().is_empty() {
-            return Some((Slot::Host, tr!("Enter the IMAP server, or use Detect.").to_owned()));
+            faults.push((Slot::Host, tr!("Enter the IMAP server, or use Detect.").to_owned()));
         }
-        self.typed_faults().into_iter().next()
+        faults.extend(self.typed_faults());
+        faults
+    }
+
+    /// The first of [`Self::faults`].
+    #[must_use]
+    pub fn fault(&self, adding: bool) -> Option<(Slot, String)> {
+        self.faults(adding).into_iter().next()
     }
 
     fn servers(&self) -> Result<Servers, String> {
@@ -764,8 +772,9 @@ pub struct Onboarding {
     steps: Vec<StepRow>,
     running: bool,
     error: Option<String>,
-    /// The field [`Self::error`] stands under, when it is one field's.
-    slot: Option<Slot>,
+    /// The errors of single fields the owner's last try left, each with the field it stands under, in the form's
+    /// order; [`Self::error`] is the page's own.
+    sent: Vec<(Slot, String)>,
     keychain: Arc<dyn Keychain>,
     /// The accounts whose password this window put into the credential store and has not removed yet.
     stored: BTreeSet<u64>,
@@ -803,7 +812,7 @@ impl Onboarding {
             steps: Vec::new(),
             running: false,
             error: None,
-            slot: None,
+            sent: Vec::new(),
             keychain,
             stored: BTreeSet::new(),
             detect,
@@ -823,7 +832,7 @@ impl Onboarding {
         self.found = found;
         self.detected = detected;
         self.error = None;
-        self.slot = None;
+        self.sent.clear();
         self.steps.clear();
         self.held = None;
         self.stage = Stage::Form;
@@ -881,7 +890,7 @@ impl Onboarding {
     /// it: the field starts empty, and an empty field keeps the stored one.
     pub fn edit(&mut self, mailbox: &mut Mailbox, id: u64) {
         self.error = None;
-        self.slot = None;
+        self.sent.clear();
         let answer = match mailbox.run("account.list", &json!({})) {
             Ok(answer) => answer,
             Err(error) => {
@@ -1012,10 +1021,10 @@ impl Onboarding {
             return;
         }
         let recheck = (changes.caldav || password) && !changes.sign_in;
-        self.slot = None;
-        if let Some((slot, error)) = self.form.fault(false) {
-            self.error = Some(error);
-            self.slot = Some(slot);
+        self.sent.clear();
+        self.sent = self.form.faults(false);
+        if !self.sent.is_empty() {
+            self.error = None;
             return;
         }
         let (dry, params) = match (self.form.update_params(id, true, recheck), self.form.update_params(id, false, recheck)) {
@@ -1118,21 +1127,30 @@ impl Onboarding {
     /// What went wrong last, in words for the owner.
     #[must_use]
     pub fn error(&self) -> Option<&str> {
-        self.error.as_deref()
+        self.sent.first().map(|(_, error)| error.as_str()).or(self.error.as_deref())
     }
 
     /// The field [`Self::error`] stands under, when it is one field's; `None` for an error of the whole page.
     #[must_use]
     pub fn error_slot(&self) -> Option<Slot> {
-        self.slot.filter(|_| self.error.is_some())
+        self.sent.first().map(|(slot, _)| *slot)
+    }
+
+    /// The errors of single fields the owner's last try left, each with its field, in the form's order.
+    #[must_use]
+    pub fn field_errors(&self) -> &[(Slot, String)] {
+        &self.sent
+    }
+
+    /// What went wrong last that belongs to no single field.
+    #[must_use]
+    pub fn page_error(&self) -> Option<&str> {
+        self.error.as_deref()
     }
 
     /// The owner changed the field `slot`: the error under it goes, until the form is sent again.
     pub fn edited(&mut self, slot: Slot) {
-        if self.error_slot() == Some(slot) {
-            self.error = None;
-            self.slot = None;
-        }
+        self.sent.retain(|(at, _)| *at != slot);
     }
 
     /// How the check stands.
@@ -1154,12 +1172,12 @@ impl Onboarding {
         }
         let address = self.form.address.trim().to_owned();
         if address.is_empty() {
-            self.error = Some(tr!("Enter the address, then Detect.").to_owned());
-            self.slot = Some(Slot::Address);
+            self.error = None;
+            self.sent = vec![(Slot::Address, tr!("Enter the address, then Detect.").to_owned())];
             return;
         }
         self.error = None;
-        self.slot = None;
+        self.sent.clear();
         self.runs = self.runs.wrapping_add(1);
         self.detect.start(self.runs, &address, self.form.ispdb);
         self.asking = Some((self.runs, address));
@@ -1226,10 +1244,10 @@ impl Onboarding {
     /// Adds the account in the form through `mailbox` and keeps its password in the credential store; the check
     /// `account.add` started shows next. The password is forgotten here either way it ends.
     pub fn add(&mut self, mailbox: &mut Mailbox) {
-        self.slot = None;
-        if let Some((slot, error)) = self.form.fault(true) {
-            self.error = Some(error);
-            self.slot = Some(slot);
+        self.sent.clear();
+        self.sent = self.form.faults(true);
+        if !self.sent.is_empty() {
+            self.error = None;
             return;
         }
         let params = match self.form.params() {
@@ -1313,7 +1331,7 @@ impl Onboarding {
     /// be typed again. An account that was edited is not removed: its form opens again as it now stands.
     pub fn change(&mut self, mailbox: &mut Mailbox) {
         let Stage::Checking(id) = self.stage else { return };
-        self.slot = None;
+        self.sent.clear();
         if self.held.is_some() {
             self.edit(mailbox, id);
             return;
