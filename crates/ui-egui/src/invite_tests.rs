@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 
-use super::{Invite, Method, Rsvp};
+use super::{Invite, MOST_REPLIES, Method, Rsvp};
 
 /// What `invite.show` answers for the update of a lunch moved from 11:00 to 12:30, answered Going before.
 fn update() -> Value {
@@ -128,6 +128,17 @@ fn a_cancel_and_a_reply_read_their_own_parts() {
         Invite::read(9, &json!({ "invite": { "method": "request", "answer": "tentative" } })).unwrap().answered().as_deref(),
         Some("You answered Maybe.")
     );
+}
+
+/// A reply naming thousands of guests keeps the first `MOST_REPLIES` answers where it is read, and counts the rest.
+#[test]
+fn a_reply_keeps_its_first_guests_and_counts_the_rest() {
+    let guests: Vec<Value> = (0..5000).map(|n| json!({ "address": format!("g{n}@example.org"), "name": null, "status": "accepted" })).collect();
+    let invite = Invite::read(10, &json!({ "invite": { "method": "reply", "replies": guests } })).unwrap();
+    assert_eq!((invite.replies.len(), invite.more_replies), (MOST_REPLIES, 5000 - MOST_REPLIES));
+    let few =
+        Invite::read(10, &json!({ "invite": { "method": "reply", "replies": [{ "address": "a@example.org", "status": "declined" }] } })).unwrap();
+    assert_eq!((few.replies.len(), few.more_replies), (1, 0));
 }
 
 /// The organiser's text is hostile: what the card shows of it has no line breaks or invisible marks.

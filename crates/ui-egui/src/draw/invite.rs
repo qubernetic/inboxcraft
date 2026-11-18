@@ -21,7 +21,7 @@ use egui::{RichText, Ui};
 
 use super::reader::{Asked, Drawn};
 use crate::component::invite_card::{CardAsked, CardEvent, CardState, Said, invite_card, invite_card_with};
-use crate::invite::{Invite, Method, Rsvp};
+use crate::invite::{Invite, MOST_REPLIES, Method, Rsvp};
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
 use crate::reader::Reader;
@@ -38,9 +38,6 @@ pub(crate) enum Ask {
     /// Take the cancelled event out of the calendar.
     Remove,
 }
-
-/// The most guests' answers a card of replies lists one by one.
-const MOST_REPLIES: usize = 20;
 
 /// The words of an event the card shows, owned.
 struct Words {
@@ -136,7 +133,8 @@ pub(super) fn card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader,
         None => tr!("This event is cancelled.").to_owned(),
     };
     let lines: Vec<String> = invite.replies.iter().take(MOST_REPLIES).map(Invite::reply_line).collect();
-    let more = invite.replies.len().saturating_sub(MOST_REPLIES);
+    // `Invite::read` keeps the first `MOST_REPLIES` already; the card holds to it too.
+    let more = invite.replies.len().saturating_sub(MOST_REPLIES).saturating_add(invite.more_replies);
     let more_line = tr!("{count} more guests answered.", count = more);
     let mut replies: Vec<(Said, &str)> = invite.replies.iter().zip(&lines).map(|(reply, line)| (said(reply.answer), line.as_str())).collect();
     if more > 0 {

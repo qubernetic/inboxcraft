@@ -210,9 +210,15 @@ pub struct Invite {
     pub why_not: Option<String>,
     /// The cancelled event can be taken out of the calendar.
     pub can_remove: bool,
-    /// The guests' answers, on a reply.
+    /// The guests' answers, on a reply: the first [`MOST_REPLIES`].
     pub replies: Vec<Reply>,
+    /// How many more guests answered than `replies` keeps.
+    pub more_replies: usize,
 }
+
+/// The most guests' answers a card keeps one by one; the rest are counted. A reply may name tens of thousands of
+/// guests, and the card is read again on every refresh.
+pub const MOST_REPLIES: usize = 20;
 
 impl Invite {
     /// The card `invite.show` answers for message `message`; `None` for a message without an invitation.
@@ -230,12 +236,13 @@ impl Invite {
         let organizer = invite.get("organizer").filter(|organizer| organizer.is_object());
         let address = organizer.and_then(|organizer| organizer.get("address")).and_then(Value::as_str).map(shown);
         let name = organizer.and_then(|organizer| organizer.get("name")).and_then(Value::as_str).map(shown).filter(|name| !name.is_empty());
-        let replies = invite
-            .get("replies")
-            .and_then(Value::as_array)
+        let all = invite.get("replies").and_then(Value::as_array);
+        let more_replies = all.map_or(0, |all| all.len().saturating_sub(MOST_REPLIES));
+        let replies = all
             .map(|replies| {
                 replies
                     .iter()
+                    .take(MOST_REPLIES)
                     .map(|reply| {
                         let address = reply.get("address").and_then(Value::as_str).unwrap_or_default();
                         let name = reply.get("name").and_then(Value::as_str).filter(|name| !name.is_empty()).unwrap_or(address);
@@ -265,6 +272,7 @@ impl Invite {
             why_not: invite.get("why_not").and_then(Value::as_str).map(shown),
             can_remove: flag("can_remove"),
             replies,
+            more_replies,
         })
     }
 
