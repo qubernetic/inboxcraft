@@ -104,13 +104,20 @@ pub(super) struct Laid {
     columns: Vec<std::ops::Range<usize>>,
     /// For each rule, the lowest foot of the rules of its column down to it, so the first in sight is found by halving.
     reach: Vec<f32>,
+    /// The items that hold a Tab stop (a link, a fold, a table with a link), in order.
+    stops: Vec<usize>,
     height: f32,
 }
 
 impl Laid {
     /// Nothing laid out.
     fn empty() -> Self {
-        Self { items: Vec::new(), rules: Vec::new(), columns: Vec::new(), reach: Vec::new(), height: 0.0 }
+        Self { items: Vec::new(), rules: Vec::new(), columns: Vec::new(), reach: Vec::new(), stops: Vec::new(), height: 0.0 }
+    }
+
+    /// Notes which items hold a Tab stop, once all are placed.
+    fn find_stops(&mut self, document: &Document) {
+        self.stops = self.items.iter().enumerate().filter(|(_, item)| item.kind.stops(document)).map(|(index, _)| index).collect();
     }
 
     /// Puts the rules in their columns, once all are made.
@@ -159,6 +166,21 @@ enum Kind {
     Table(Box<Grid>),
 }
 
+impl Kind {
+    /// Whether it holds a Tab stop.
+    fn stops(&self, document: &Document) -> bool {
+        let linked = |link: Option<usize>| link.is_some_and(|index| document.links.get(index).is_some());
+        match self {
+            Self::Text { links, .. } => !links.is_empty(),
+            Self::Picture { image, .. } => linked(image.link),
+            Self::Missing { link, .. } => linked(*link),
+            Self::Fold { .. } => true,
+            Self::Table(grid) => !grid.stops.is_empty(),
+            Self::Pre { .. } | Self::Rule => false,
+        }
+    }
+}
+
 /// The words of one link in a text, as it wrapped: a box for each of its rows and the band of its underline there,
 /// relative to the galley.
 struct Piece {
@@ -180,6 +202,8 @@ struct Section {
 struct Grid {
     lefts: Vec<f32>,
     rows: Vec<GridRow>,
+    /// The rows that hold a Tab stop, in order.
+    stops: Vec<usize>,
     size: Vec2,
     note: Option<Arc<Galley>>,
 }
@@ -190,6 +214,8 @@ struct GridRow {
     high: f32,
     head: bool,
     cells: Vec<Laid>,
+    /// The cells that hold a Tab stop, in order.
+    stops: Vec<usize>,
 }
 
 /// How the text of a block is set: the style of its paragraphs, and whether it is a table's head.
@@ -204,6 +230,7 @@ struct Context<'a> {
     ui: &'a Ui,
     theme: &'a Theme,
     reader: &'a Reader,
+    document: &'a Document,
     id: u64,
     quotes: bool,
     ppp: f32,
@@ -242,13 +269,16 @@ pub(super) fn blocks(
     };
     let probe = ui.painter().layout_job(LayoutJob::single_section("fitted".to_owned(), theme.fonts.read.format(theme.palette.ink)));
     let laid = kept(ui, probe, who, key, || {
-        let context = Context { ui, theme, reader, id, quotes, ppp };
+        let context = Context { ui, theme, reader, document, id, quotes, ppp };
         Arc::new(lay(&context, list, width, Style { text: theme.fonts.read, head: false }, depth))
     });
     let (_, rect) = ui.allocate_space(vec2(width, laid.height));
     let base = ui.scope_id().with(("fitted", id, depth));
     let mut show = Show { theme, reader, id, document, textures, drawn };
-    show.laid(ui, &laid, rect.min, base);
+    // What lies within a pane's height of the sight takes the pointer and the keyboard, so a screen reader finds the
+    // words round what is shown; Tab reaches the links beyond through the nearest stop before and after.
+    let sight = ui.clip_rect();
+    show.laid(ui, &laid, rect.min, base, Reach::Near(sight.expand2(vec2(0.0, sight.height().max(1.0)))));
 }
 
 /// The layouts kept, and the galley that shows whether egui built its font atlas afresh since they were made.
@@ -445,6 +475,7 @@ fn lay(context: &Context<'_>, list: &[Block], width: f32, style: Style, depth: u
     }
     laid.height = y.ceil();
     laid.order_rules();
+    laid.find_stops(context.document);
     laid
 }
 
@@ -592,7 +623,9 @@ fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, sty
         job.append(&shown, 0.0, format);
     }
     let galley = paint::on_baseline(context.ui.painter().layout_job(job));
-    let links = pieces(&galley, &sections);
+    // A link the message does not have is no link.
+    let mut links = pieces(&galley, &sections);
+    links.retain(|piece| context.document.links.get(piece.link).is_some());
     if pre {
         let size = vec2(room, (galley.size().y + PRE_PAD.y * 2.0).ceil());
         let spoken = crate::component::spoken(crate::component::capped(&words, MOST_SPOKEN).0);
@@ -769,13 +802,15 @@ fn grid(context: &Context<'_>, rows: &[Vec<Cell>], room: f32, depth: usize) -> G
         let least = if head { theme.fonts.label.line } else { theme.fonts.body.line };
         let tallest = cells.iter().map(|cell| cell.height).fold(least, f32::max);
         let high = (tallest + CELL_PAD.y * 2.0).ceil();
-        laid_rows.push(GridRow { top, high, head, cells });
+        let stops = cells.iter().enumerate().filter(|(_, cell)| !cell.stops.is_empty()).map(|(index, _)| index).collect();
+        laid_rows.push(GridRow { top, high, head, cells, stops });
         top += high + 1.0;
     }
     let shown_columns = rows.iter().take(MOST_ROWS).map(Vec::len).max().unwrap_or(0);
     let note = crate::component::hairline_table::left_out(shown_columns.saturating_sub(count), rows.len().saturating_sub(MOST_ROWS))
         .map(|note| crate::component::wrapped(context.ui, &note, theme.fonts.caption, theme.palette.muted, room.max(1.0), 2, egui::Align::LEFT));
-    Grid { lefts, rows: laid_rows, size: vec2(x, top.max(2.0)), note }
+    let stops = laid_rows.iter().enumerate().filter(|(_, row)| !row.stops.is_empty()).map(|(index, _)| index).collect();
+    Grid { lefts, rows: laid_rows, stops, size: vec2(x, top.max(2.0)), note }
 }
 
 /// The drawing of a laid out message: what it needs and what it gives back.
@@ -788,68 +823,121 @@ struct Show<'a> {
     drawn: &'a mut Drawn,
 }
 
+/// What of a laid out part takes the pointer and the keyboard this frame.
+#[derive(Clone, Copy)]
+enum Reach {
+    /// What meets the rect (sight and a pane's height round it), with the nearest stop before it and the nearest after:
+    /// Tab and Shift Tab always have the next link to go to, however far, and the focus brings it into sight.
+    Near(Rect),
+    /// Only its first stop.
+    First,
+    /// Only its last stop.
+    Last,
+    /// Only the stop that has the focus.
+    Held,
+}
+
+/// Which of the parts of something to draw for `reach`, in their order: those in `near` (the parts meeting the reach's
+/// rect) with the nearest stop `before` and `after` them, or the `first` or `last` stop, and the part `focused` (with
+/// the focus), each with what of it to draw.
+fn picks(
+    reach: Reach,
+    near: std::ops::Range<usize>,
+    (before, after): (Option<usize>, Option<usize>),
+    (first, last): (Option<usize>, Option<usize>),
+    focused: Option<usize>,
+) -> Vec<(usize, Reach)> {
+    let mut picks = Vec::new();
+    match reach {
+        Reach::Near(_) => {
+            picks.extend(before.map(|index| (index, Reach::Last)));
+            picks.extend(near.map(|index| (index, reach)));
+            picks.extend(after.map(|index| (index, Reach::First)));
+        }
+        Reach::First => picks.extend(first.map(|index| (index, Reach::First))),
+        Reach::Last => picks.extend(last.map(|index| (index, Reach::Last))),
+        Reach::Held => {}
+    }
+    if let Some(index) = focused
+        && !picks.iter().any(|(picked, _)| *picked == index)
+    {
+        let place = picks.partition_point(|(picked, _)| *picked < index);
+        picks.insert(place, (index, Reach::Held));
+    }
+    picks
+}
+
+/// The nearest of the ordered `stops` before index `start` and the nearest at or after `end`.
+fn around(stops: &[usize], start: usize, end: usize) -> (Option<usize>, Option<usize>) {
+    let before = stops.partition_point(|stop| *stop < start).checked_sub(1).and_then(|at| stops.get(at)).copied();
+    let after = stops.get(stops.partition_point(|stop| *stop < end)).copied();
+    (before, after)
+}
+
+/// Remembers under `slot` which part has the focus (`holds`), or forgets it.
+fn remember<T: Clone + Send + Sync + 'static>(ui: &Ui, slot: Id, holds: Option<T>) {
+    ui.data_mut(|data| match holds {
+        Some(part) => {
+            data.insert_temp(slot, part);
+        }
+        None => data.remove::<T>(slot),
+    });
+}
+
 impl Show<'_> {
-    /// Draws `laid` with its top left at `origin`, its widgets' ids from `base`; whether one of its links has the focus.
-    fn laid(&mut self, ui: &mut Ui, laid: &Laid, origin: Pos2, base: Id) -> bool {
+    /// Draws what of `laid` `reach` asks, with its top left at `origin`, its widgets' ids from `base`; whether one of its
+    /// links has the focus.
+    fn laid(&mut self, ui: &mut Ui, laid: &Laid, origin: Pos2, base: Id, reach: Reach) -> bool {
         let sight = ui.clip_rect();
-        // What lies within a pane's height of the sight takes the pointer and the keyboard, so Tab reaches the next
-        // link before it is in sight (the focus brings it in).
-        let near = sight.expand2(vec2(0.0, sight.height().max(1.0)));
         let p = &self.theme.palette;
-        // The rules in sight, column by column: the first found by halving, the rest until one starts below sight.
-        for column in &laid.columns {
-            let (Some(rules), Some(reach)) = (laid.rules.get(column.clone()), laid.reach.get(column.clone())) else { continue };
-            let first = reach.partition_point(|foot| origin.y + foot < sight.top());
-            for rule in rules.iter().skip(first) {
-                let rule = rule.translate(origin.to_vec2());
-                if rule.top() > sight.bottom() {
-                    break;
-                }
-                if rule.intersects(sight) {
-                    ui.painter().rect_filled(rule, 0.0, p.line);
+        if let Reach::Near(_) = reach {
+            // The rules in sight, column by column: the first found by halving, the rest until one starts below sight.
+            for column in &laid.columns {
+                let (Some(rules), Some(reach)) = (laid.rules.get(column.clone()), laid.reach.get(column.clone())) else { continue };
+                let first = reach.partition_point(|foot| origin.y + foot < sight.top());
+                for rule in rules.iter().skip(first) {
+                    let rule = rule.translate(origin.to_vec2());
+                    if rule.top() > sight.bottom() {
+                        break;
+                    }
+                    if rule.intersects(sight) {
+                        ui.painter().rect_filled(rule, 0.0, p.line);
+                    }
                 }
             }
         }
         let focus_slot = base.with("focus");
         let focused = ui.data(|data| data.get_temp::<usize>(focus_slot));
-        let first = laid.items.partition_point(|item| origin.y + item.rect.bottom() < near.top());
-        let mut holds = None;
-        let mut seen_focused = false;
-        for (index, item) in laid.items.iter().enumerate().skip(first) {
-            let rect = item.rect.translate(origin.to_vec2());
-            if rect.top() > near.bottom() {
-                break;
+        let near = match reach {
+            Reach::Near(near) => {
+                let start = laid.items.partition_point(|item| origin.y + item.rect.bottom() < near.top());
+                let length =
+                    laid.items.get(start..).map_or(0, |rest| rest.iter().take_while(|item| origin.y + item.rect.top() <= near.bottom()).count());
+                start..start.saturating_add(length)
             }
-            seen_focused |= focused == Some(index);
-            if self.item(ui, item, rect, base.with(index), sight, near) {
+            Reach::First | Reach::Last | Reach::Held => 0..0,
+        };
+        let edges = (laid.stops.first().copied(), laid.stops.last().copied());
+        let mut holds = None;
+        for (index, part) in picks(reach, near.clone(), around(&laid.stops, near.start, near.end), edges, focused) {
+            let Some(item) = laid.items.get(index) else { continue };
+            if self.item(ui, item, item.rect.translate(origin.to_vec2()), base.with(index), sight, part) {
                 holds = Some(index);
             }
         }
-        // The link with the focus keeps it while it is far from sight.
-        if let (Some(index), false) = (focused, seen_focused)
-            && let Some(item) = laid.items.get(index)
-            && self.item(ui, item, item.rect.translate(origin.to_vec2()), base.with(index), sight, near)
-        {
-            holds = Some(index);
-        }
-        ui.data_mut(|data| match holds {
-            Some(index) => {
-                data.insert_temp(focus_slot, index);
-            }
-            None => data.remove::<usize>(focus_slot),
-        });
+        remember(ui, focus_slot, holds);
         holds.is_some()
     }
 
-    /// Draws `item` at `rect`, painting it only where it meets `sight` and giving the keyboard what meets `near`;
-    /// whether a link in it has the focus.
-    fn item(&mut self, ui: &mut Ui, item: &Item, rect: Rect, id: Id, sight: Rect, near: Rect) -> bool {
+    /// Draws `item` at `rect`, painting it only where it meets `sight` and giving the pointer and the keyboard what
+    /// `reach` asks; whether a link in it has the focus.
+    fn item(&mut self, ui: &mut Ui, item: &Item, rect: Rect, id: Id, sight: Rect, reach: Reach) -> bool {
         let theme = self.theme;
         let p = &theme.palette;
         let shows = rect.intersects(sight);
         match &item.kind {
             Kind::Text { galley, left, mark, links, spoken } => {
-                if let Some(spoken) = spoken {
+                if let (Some(spoken), Reach::Near(_)) = (spoken, reach) {
                     let response = ui.interact(rect, id.with("words"), Sense::hover());
                     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, spoken));
                 }
@@ -861,40 +949,37 @@ impl Show<'_> {
                     paint::rows_at(ui.painter(), at, (rect.width() - left).max(1.0), galley.clone(), p.ink);
                 }
                 // Only the links near sight take the pointer and the keyboard (found by halving: a paragraph may hold
-                // thousands), and the one with the focus.
+                // thousands), with the nearest before and after them and the one with the focus.
                 let slot = id.with("focus");
                 let focused = ui.data(|data| data.get_temp::<usize>(slot));
-                let first = links.partition_point(|piece| piece.rects.last().is_some_and(|last| at.y + last.bottom() < near.top()));
-                let in_reach = links
-                    .iter()
-                    .enumerate()
-                    .skip(first)
-                    .take_while(|(_, piece)| piece.rects.first().is_some_and(|top| at.y + top.top() <= near.bottom()))
-                    .map(|(index, _)| index);
-                let mut reached: Vec<usize> = in_reach.collect();
-                if let Some(index) = focused.filter(|index| !reached.contains(index)) {
-                    let place = reached.partition_point(|other| *other < index);
-                    reached.insert(place, index);
-                }
+                let near = match reach {
+                    Reach::Near(near) => {
+                        let start = links.partition_point(|piece| piece.rects.last().is_some_and(|last| at.y + last.bottom() < near.top()));
+                        let length = links.get(start..).map_or(0, |rest| {
+                            rest.iter().take_while(|piece| piece.rects.first().is_some_and(|top| at.y + top.top() <= near.bottom())).count()
+                        });
+                        start..start.saturating_add(length)
+                    }
+                    Reach::First | Reach::Last | Reach::Held => 0..0,
+                };
+                let around = (near.start.checked_sub(1), (near.end < links.len()).then_some(near.end));
+                let edges = ((!links.is_empty()).then_some(0), links.len().checked_sub(1));
                 let mut holds = None;
-                for index in reached {
+                for (index, _) in picks(reach, near, around, edges, focused) {
                     if let Some(piece) = links.get(index)
                         && self.link_piece(ui, piece, at, id.with(("link", index)))
                     {
                         holds = Some(index);
                     }
                 }
-                ui.data_mut(|data| match holds {
-                    Some(index) => {
-                        data.insert_temp(slot, index);
-                    }
-                    None => data.remove::<usize>(slot),
-                });
+                remember(ui, slot, holds);
                 holds.is_some()
             }
             Kind::Pre { galley, spoken } => {
-                let response = ui.interact(rect, id.with("words"), Sense::hover());
-                response.widget_info(|| WidgetInfo::labeled(Role::Label, true, spoken));
+                if let Reach::Near(_) = reach {
+                    let response = ui.interact(rect, id.with("words"), Sense::hover());
+                    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, spoken));
+                }
                 if shows {
                     let painter = ui.painter();
                     painter.rect(rect, 0.0, p.term, Stroke::new(1.0, p.line), StrokeKind::Inside);
@@ -946,11 +1031,11 @@ impl Show<'_> {
                     let area = ScrollArea::horizontal().id_salt(id.with("sideways")).auto_shrink([false, true]);
                     crate::component::scroll::show(&mut child, theme, area, |ui| {
                         let (_, at) = ui.allocate_space(grid.size);
-                        holds = self.grid(ui, grid, at.min, id);
+                        holds = self.grid(ui, grid, at.min, id, reach);
                     });
                 } else {
                     let (_, at) = child.allocate_space(grid.size);
-                    holds = self.grid(&mut child, grid, at.min, id);
+                    holds = self.grid(&mut child, grid, at.min, id, reach);
                 }
                 if let Some(note) = &grid.note {
                     let at = Rect::from_min_size(pos2(rect.left(), rect.top() + grid.size.y + LIST_GAP), note.size());
@@ -965,16 +1050,16 @@ impl Show<'_> {
         }
     }
 
-    /// Draws `grid` with its top left at `origin`; whether a link in it has the focus.
-    fn grid(&mut self, ui: &mut Ui, grid: &Grid, origin: Pos2, id: Id) -> bool {
+    /// Draws `grid` with its top left at `origin`, giving the pointer and the keyboard what `reach` asks; whether a link
+    /// in it has the focus.
+    fn grid(&mut self, ui: &mut Ui, grid: &Grid, origin: Pos2, id: Id, reach: Reach) -> bool {
         let p = &self.theme.palette;
         let sight = ui.clip_rect();
-        let near = sight.expand2(vec2(0.0, sight.height().max(1.0)));
         let whole = Rect::from_min_size(origin, grid.size);
         let shows = whole.intersects(sight);
-        let first = grid.rows.partition_point(|row| origin.y + row.top + row.high < near.top());
         if shows {
             let painter = ui.painter();
+            let first = grid.rows.partition_point(|row| origin.y + row.top + row.high < sight.top());
             for row in grid.rows.iter().skip(first).take_while(|row| origin.y + row.top <= sight.bottom()) {
                 if row.head {
                     painter.rect_filled(
@@ -996,14 +1081,29 @@ impl Show<'_> {
                 }
             }
         }
-        let mut holds = false;
-        for (row_index, row) in grid.rows.iter().enumerate().skip(first) {
-            if origin.y + row.top > near.bottom() {
-                break;
+        let near = match reach {
+            Reach::Near(near) => {
+                let start = grid.rows.partition_point(|row| origin.y + row.top + row.high < near.top());
+                let length = grid.rows.get(start..).map_or(0, |rest| rest.iter().take_while(|row| origin.y + row.top <= near.bottom()).count());
+                start..start.saturating_add(length)
             }
-            for (column, (cell, left)) in row.cells.iter().zip(&grid.lefts).enumerate() {
+            Reach::First | Reach::Last | Reach::Held => 0..0,
+        };
+        let edges = (grid.stops.first().copied(), grid.stops.last().copied());
+        let mut holds = false;
+        for (row_index, part) in picks(reach, near.clone(), around(&grid.stops, near.start, near.end), edges, None) {
+            let Some(row) = grid.rows.get(row_index) else { continue };
+            // A row in reach draws every cell; a row reached for its first or last stop draws that cell only.
+            let cells: Vec<(usize, Reach)> = match part {
+                Reach::Near(_) => (0..row.cells.len()).map(|column| (column, part)).collect(),
+                Reach::First => row.stops.first().map(|column| (*column, part)).into_iter().collect(),
+                Reach::Last => row.stops.last().map(|column| (*column, part)).into_iter().collect(),
+                Reach::Held => Vec::new(),
+            };
+            for (column, part) in cells {
+                let (Some(cell), Some(left)) = (row.cells.get(column), grid.lefts.get(column)) else { continue };
                 let at = pos2(origin.x + left + CELL_PAD.x, origin.y + row.top + CELL_PAD.y);
-                holds |= self.laid(ui, cell, at, id.with(("cell", row_index, column)));
+                holds |= self.laid(ui, cell, at, id.with(("cell", row_index, column)), part);
             }
         }
         if shows {

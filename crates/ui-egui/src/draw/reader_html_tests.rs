@@ -321,3 +321,64 @@ fn every_fitted_scene_is_walked_by_the_keyboard_and_rests() {
         assert!(crate::component::tests::rests(&mut harness, 8), "quotes {quotes}: it repaints at rest");
     }
 }
+
+/// Paragraphs of words without a link, `panes` panes of 600 high.
+fn filler(panes: usize) -> String {
+    "<p>Filler words that carry no link at all and stand between two links.</p>".repeat(panes * 600 / 34)
+}
+
+/// `document` in a pane 640 × 600 that scrolls, a button under the pane: what Tab reaches after the message.
+fn fitted_then_button(document: Document) -> Harness<'static, Seen> {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
+    let mut harness =
+        Harness::builder().with_size(vec2(640.0, 640.0)).with_max_steps(64).with_context_setup(crate::theme::install_fonts).build_ui_state(
+            move |ui, seen: &mut Seen| {
+                let room = Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 600.0));
+                ui.scope_builder(UiBuilder::new().max_rect(room), |ui| {
+                    let area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                    crate::component::scroll::show(ui, &theme, area, |ui| {
+                        let mut textures = super::reader::Textures::default();
+                        let mut drawn = super::reader::Drawn::default();
+                        super::reader::blocks(ui, &theme, &reader, 1, &document, &document.blocks, 0, &mut textures, &mut drawn);
+                        seen.asked.extend(drawn.asked);
+                        seen.hover = drawn.hover;
+                    });
+                });
+                ui.scope_builder(UiBuilder::new().max_rect(Rect::from_min_size(pos2(0.0, 604.0), vec2(200.0, 30.0))), |ui| {
+                    let _ = ui.button("Outside the reader");
+                });
+            },
+            Seen::default(),
+        );
+    harness.run();
+    harness
+}
+
+#[test]
+fn every_link_is_reached_by_tab_and_shift_tab_however_far_apart() {
+    let html = format!(
+        "<p><a href=\"https://example.org/a\">link A</a></p>{}<p><a href=\"https://example.org/b\">link B</a></p>{}\
+         <p><a href=\"https://example.org/c\">link C</a></p>",
+        filler(3),
+        filler(3)
+    );
+    let mut harness = fitted_then_button(display(&html));
+    let step = |harness: &mut Harness<'static, Seen>, back: bool| {
+        if back {
+            harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+        } else {
+            harness.key_press(Key::Tab);
+        }
+        harness.run();
+        harness.run();
+        focused(harness).map(|(_, label)| label)
+    };
+    let forward: Vec<_> = (0..4).map(|_| step(&mut harness, false)).collect();
+    assert_eq!(forward, ["link A", "link B", "link C", "Outside the reader"].map(|label| Some(label.to_owned())), "Tab");
+    // The focused link was brought into sight.
+    let back: Vec<_> = (0..3).map(|_| step(&mut harness, true)).collect();
+    assert_eq!(back, ["link C", "link B", "link A"].map(|label| Some(label.to_owned())), "Shift Tab");
+    let link = harness.get_by_role_and_label(Role::Link, "link A").rect();
+    assert!(link.top() >= 0.0 && link.bottom() <= 600.0, "the focused link is in sight: {link:?}");
+}
