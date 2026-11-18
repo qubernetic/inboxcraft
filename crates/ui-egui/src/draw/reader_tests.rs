@@ -95,7 +95,7 @@ fn every_reader_control_has_an_accessible_name_in_both_modes() {
         app.mailbox_mut().select(Some(id));
         let mut harness = harness_with(app, theme);
         harness.check_accessibility();
-        harness.get_by_label("Load once").click();
+        harness.get_by_label("load once").click();
         harness.run();
         harness.check_accessibility();
         harness.get_by_label("details ▾").click();
@@ -139,12 +139,12 @@ fn no_remote_request_before_consent() {
     assert!(fetch.asked.lock().unwrap().is_empty(), "nothing asked while the banner stands");
     harness.get_by_label("1 remote picture is not shown. Loading it tells the sender that you opened this message.");
     harness.get_by_label_contains("Remote picture not loaded");
-    harness.get_by_label("Load once").click();
+    harness.get_by_label("load once").click();
     harness.run();
     assert_eq!(*fetch.asked.lock().unwrap(), ["https://pictures.example.org/cycles/workshop.png"]);
     harness.run();
     harness.get_by_role_and_label(Role::Image, "The workshop bench");
-    assert!(harness.query_by_label("Load once").is_none(), "the banner is gone");
+    assert!(harness.query_by_label("load once").is_none(), "the banner is gone");
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn always_for_this_sender_remembers_the_sender() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");
     assert!(fetch.asked.lock().unwrap().is_empty());
-    harness.get_by_label("Always for prize-desk@example.org").click();
+    harness.get_by_label("always for prize-desk@example.org").click();
     harness.run();
     assert_eq!(fetch.asked.lock().unwrap().len(), 1);
     let (_, mailbox) = harness.state_mut().reader_mut();
@@ -163,7 +163,7 @@ fn always_for_this_sender_remembers_the_sender() {
 fn a_texture_goes_with_its_picture() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");
-    harness.get_by_label("Always for prize-desk@example.org").click();
+    harness.get_by_label("always for prize-desk@example.org").click();
     harness.run();
     let url = "https://track.example.net/open.png?id=4417";
     assert!(harness.state().textures.contains_key(url), "the fetched picture is drawn");
@@ -572,8 +572,16 @@ fn the_reader_keeps_to_a_narrow_window() {
     let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");
     harness.set_size(vec2(420.0, 420.0));
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "Load once");
-    harness.get_by_role_and_label(Role::Button, "Always for prize-desk@example.org");
+    // A window this narrow leaves the reader a sliver: the banner's links stand where it has room for them, inside the
+    // banner, and nothing of it paints past the window.
+    let banner = harness.get_by_label_contains("Pictures: ").rect();
+    for link in harness.query_all_by_role(Role::Button).filter(|node| node.accesskit_node().label().is_some_and(|label| label.contains("load once")))
+    {
+        assert!(banner.contains_rect(link.rect()), "{:?} in {banner:?}", link.rect());
+    }
+    for (rect, text) in painted_texts(&harness) {
+        assert!(rect.left() < 420.0 || !text.contains("remote picture"), "{text:?} at {rect:?} paints past the window");
+    }
 }
 
 /// How wide and how high the text `label` comes out in a message made of `html`, in a reader 800 points wide.
@@ -1328,7 +1336,7 @@ fn every_reader_scene_is_walked_by_the_keyboard_and_rests() {
     harness.run();
     harness.get_by_label_contains("not delivered").click();
     harness.run();
-    harness.get_by_label_contains("Not delivered: petra@example.org: 550 5.1.1");
+    harness.get_by_label_contains("Not delivered: This message did not arrive: petra@example.org: 550 5.1.1");
     walks_and_rests(&mut harness, "a bounced message");
 }
 
@@ -1800,4 +1808,52 @@ fn a_warning_shows_whole_while_the_message_wipes_in() {
     assert_eq!(found.len(), 1, "the notice's words: {found:?}");
     let (words, clip) = found[0];
     assert!(clip.contains_rect(words), "the wipe clips the warning: {words:?} in {clip:?}");
+}
+
+/// The app with `subject` open, its text drawn as `content` (and `cut`).
+fn opened_as(fetch: &Recorder, subject: &str, content: crate::reader::Content, cut: bool) -> Harness<'static, InboxApp> {
+    let mut harness = opened(fetch, None, subject);
+    let id = harness.state().reader().open_id().unwrap();
+    harness.state_mut().reader_mut().0.show_as(id, content, cut);
+    settle(&mut harness);
+    harness
+}
+
+#[test]
+fn a_message_without_its_text_says_why_in_one_sentence_in_the_text_s_place() {
+    use crate::reader::Content;
+    for (content, said) in [
+        (Content::NotKept, "The text of this message is not here yet. It comes with the next connection."),
+        (Content::TooLarge, "This message is too large to keep, so it cannot be shown."),
+        (Content::Unreadable, "This message cannot be read."),
+    ] {
+        let fetch = Recorder::default();
+        let harness = opened_as(&fetch, "Photos from the coast walk", content.clone(), false);
+        // A note, as the frames draw it, 16 under the head, where the text would stand.
+        let banner = harness.get_by_label(&format!("Note: {said}")).rect();
+        let more = harness.get_by_role_and_label(Role::Button, "More").rect();
+        assert!(banner.top() > more.bottom() && banner.top() < more.bottom() + 300.0, "{content:?}: in the text's place: {banner:?}");
+        assert!(harness.query_by_label("Photos from the coast walk").is_some());
+    }
+    // Loading: the progress line, "loading the message".
+    let fetch = Recorder::default();
+    let harness = opened_as(&fetch, "Photos from the coast walk", Content::Loading, false);
+    let line = harness.get_by_role_and_label(Role::ProgressIndicator, "loading the message").rect();
+    assert!((line.height() - 24.0).abs() < 0.5, "the progress line is 24 high: {line:?}");
+}
+
+#[test]
+fn a_cut_text_ends_with_a_note_that_says_so() {
+    const SAID: &str = "The text is cut here: the rest is longer than the reader shows.";
+    let fetch = Recorder::default();
+    let harness = opened(&fetch, None, "Photos from the coast walk");
+    let id = harness.state().reader().open_id().unwrap();
+    let content = harness.state().reader().opened(id).unwrap().content.clone();
+    drop(harness);
+    let harness = opened_as(&fetch, "Photos from the coast walk", content, true);
+    let note = harness.get_by_label(&format!("Note: {SAID}")).rect();
+    // Under the text: below every line of the message's own words.
+    let texts = painted_texts(&harness);
+    let words = texts.iter().filter(|(rect, text)| rect.top() > 200.0 && text.contains("coast")).map(|(rect, _)| rect.bottom()).fold(0.0, f32::max);
+    assert!(note.top() >= words, "the note comes after the text: {note:?} {words}");
 }

@@ -671,6 +671,15 @@ impl Reader {
         self.thread.iter().find(|row| row.id == id).and_then(|row| row.opened.as_ref())
     }
 
+    /// Message `id` of the thread as it would stand with `content` and `cut` (the tests' states without text).
+    #[cfg(test)]
+    pub(crate) fn show_as(&mut self, id: u64, content: Content, cut: bool) {
+        if let Some(opened) = self.thread.iter_mut().find(|row| row.id == id).and_then(|row| row.opened.as_mut()) {
+            opened.content = content;
+            opened.cut = cut;
+        }
+    }
+
     /// Whether message `id` is unfolded.
     #[must_use]
     pub fn is_expanded(&self, id: u64) -> bool {
