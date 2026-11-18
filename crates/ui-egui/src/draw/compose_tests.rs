@@ -1439,3 +1439,116 @@ fn many_templates_in_a_short_window_stay_in_it() {
     assert!(shown.iter().all(|row| row.top() >= screen.top() + 3.0 - 0.5), "the menu keeps 3 clear of the window's top: {shown:?}");
     assert!(shown.len() < rows.len(), "the rows past the room scroll: {} of {}", shown.len(), rows.len());
 }
+
+/// The send-later picker's rect as it was last drawn.
+fn later_picker(harness: &Harness<'static, InboxApp>) -> egui::Rect {
+    harness.ctx.memory(|memory| memory.area_rect(super::compose::later_popup())).unwrap()
+}
+
+#[test]
+fn the_send_later_picker_stands_over_the_foot_4_above_its_caret() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        let mut harness = composing(theme);
+        harness.get_by_role_and_label(Role::Button, "Send later").click();
+        harness.run();
+        let caret = rect_of(&harness, Role::Button, "Send later");
+        let picker = later_picker(&harness);
+        // Its frame: 320 wide, its left on the caret's, its bottom 4 over the foot's buttons; nothing of it over the foot.
+        assert!((picker.width() - 320.0).abs() < 0.5, "{picker:?}");
+        assert!((picker.left() - caret.left()).abs() < 0.5, "{picker:?} over {caret:?}");
+        assert!((picker.bottom() - (caret.top() - 4.0)).abs() < 0.5, "{picker:?} over {caret:?}");
+        // It stays there frame after frame.
+        harness.run();
+        assert_eq!(later_picker(&harness), picker);
+    }
+}
+
+#[test]
+fn the_floating_panel_casts_its_shadow_beyond_its_edge() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        let mut harness = composing(theme);
+        harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
+        harness.run();
+        let close = rect_of(&harness, Role::Button, "Close; the draft is kept");
+        let panel = egui::Rect::from_min_max(
+            egui::pos2(close.right() + 20.0 - 520.0, close.top() - 12.0),
+            egui::pos2(close.right() + 20.0, close.top() - 12.0 + 560.0),
+        );
+        // The shadow's mesh reaches past the panel, and what it is clipped to lets it show there: 24 to its left and
+        // over its top (its frame: 0, 12, blur 32).
+        let shadow = harness.output().shapes.iter().find(|clipped| match &clipped.shape {
+            egui::Shape::Mesh(mesh) => {
+                let bounds = mesh.calc_bounds();
+                bounds.contains_rect(panel.expand(8.0)) && bounds.width() < panel.width() + 200.0
+            }
+            _ => false,
+        });
+        let shadow = shadow.expect("the panel's shadow");
+        let round = egui::Rect::from_min_max(panel.min - egui::vec2(24.0, 8.0), panel.max);
+        assert!(shadow.clip_rect.contains_rect(round), "{:?} clips the shadow of {panel:?}", shadow.clip_rect);
+    }
+}
+
+#[test]
+fn in_a_narrow_pane_the_foot_s_coming_soon_gives_way_and_nothing_paints_through_send() {
+    for width in [1100.0, 1024.0, 1300.0] {
+        let mut harness = Harness::builder()
+            .with_size(vec2(width, 800.0))
+            .with_max_steps(12)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+        harness.run();
+        harness.get_by_role_and_label(Role::Button, "New message").click();
+        harness.run();
+        for written in [false, true] {
+            if written {
+                // Send takes its key and grows.
+                type_into(&mut harness, "To", "odile@example.org,");
+                harness.run();
+            }
+            let send = rect_of(&harness, Role::Button, "Send");
+            let later = rect_of(&harness, Role::Button, "Send later");
+            let left = later.right() + 8.0 - 0.5;
+            let templates = rect_of(&harness, Role::Button, "Templates");
+            assert!(templates.left() >= left, "{width}: {templates:?} after {later:?}");
+            // What comes soon stands between the caret and Templates, 8 clear of the caret, or is not drawn.
+            let foot = |rect: egui::Rect| (rect.center().y - send.center().y).abs() < 8.0;
+            for soon in harness.query_all_by_label("coming soon").map(|node| node.rect()).filter(|rect| foot(*rect)) {
+                assert!(soon.left() >= left && soon.right() <= templates.left(), "{width} {written}: {soon:?} beside {send:?} {later:?}");
+            }
+            if let Some(attach) = harness.query_by_label("Attach a file").map(|node| node.rect()) {
+                assert!(attach.left() >= left && attach.right() <= templates.left(), "{width} {written}: {attach:?}");
+            }
+            if width >= 1300.0 {
+                assert!(harness.query_all_by_label("coming soon").any(|node| foot(node.rect())), "room for the tag at {width}");
+            }
+        }
+    }
+}
+
+/// The colours the glyph of `icon` was painted in, in the last frame.
+fn icon_colours(harness: &Harness<'static, InboxApp>, icon: crate::iconset::IconId) -> Vec<egui::Color32> {
+    fn walk(shape: &egui::Shape, glyph: &str, found: &mut Vec<egui::Color32>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, glyph, found)),
+            egui::Shape::Text(text) if text.galley.job.text == glyph => {
+                found.extend(text.galley.job.sections.iter().map(|section| section.format.color))
+            }
+            _ => {}
+        }
+    }
+    let glyph = crate::iconset::glyph(icon).to_string();
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &glyph, &mut found));
+    found
+}
+
+#[test]
+fn attaching_a_file_coming_soon_is_drawn_in_muted_as_its_frame() {
+    for (theme, mode) in [(egui::Theme::Dark, crate::theme::Mode::Dark), (egui::Theme::Light, crate::theme::Mode::Light)] {
+        let harness = composing(theme);
+        let attach = harness.get_by_label("Attach a file");
+        assert!(attach.accesskit_node().is_disabled(), "coming soon: not pressable");
+        let muted = crate::theme::Palette::of(mode).muted;
+        assert_eq!(icon_colours(&harness, crate::iconset::IconId::Attach), vec![muted]);
+    }
+}

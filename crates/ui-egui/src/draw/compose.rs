@@ -81,6 +81,12 @@ pub(super) fn from_name_most(value: f32, floating: bool) -> f32 {
 /// The warning before a reason that something is wrong: Phosphor's warning, as the frames draw it.
 const WARNING: char = '\u{e4e0}';
 
+/// The widest a text button's words get before they are cut, in points (`component/button.rs`).
+const SEND_WIDEST: f32 = 240.0;
+
+/// The room the coming-soon tag keeps round its words, in points: its 6 at each side (`component/tag.rs`).
+const TAG_PADS: f32 = 12.0;
+
 /// The width of the draft's caret's mark beside the sender, in points (Phosphor's caret-down at 14).
 const FROM_CARET: f32 = 14.0;
 
@@ -198,6 +204,15 @@ fn later_id() -> Id {
     Id::unique("compose-later")
 }
 
+/// The id the send-later picker's height is kept under, with the pass it was drawn in.
+fn later_height_id() -> Id {
+    Id::unique("compose-later-height")
+}
+
+/// How far the send-later picker stands over its caret, in points (its frame), as far as a float hangs under its
+/// anchor.
+const LATER_DROP: f32 = 4.0;
+
 /// The id of the From line's menu of the accounts.
 pub(super) fn from_menu() -> Id {
     Id::unique("compose-from-menu")
@@ -230,7 +245,18 @@ fn later(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compose
     if !popup::is_open(&ctx, later_popup()) {
         return;
     }
-    let float = popup::Float { id: later_popup(), anchor: response.rect, width: time_picker::WIDTH, returns_to: response.id };
+    // It stands over the foot, its left on the caret's and its bottom 4 over it (its frame): its height is the one it
+    // was drawn with in the last pass, measured in a first pass of the frame it opens in, so it never jumps.
+    let pass = ctx.cumulative_pass_nr();
+    let kept = ctx.data(|data| data.get_temp::<(f32, u64)>(later_height_id())).filter(|(_, drawn)| drawn.saturating_add(1) >= pass);
+    if kept.is_none() {
+        ctx.request_discard("the send-later picker over its caret measures its height first");
+    }
+    let height = kept.map_or(0.0, |(height, _)| height);
+    // The float hangs 4 under its anchor: the anchor stands 8 over the caret and the picker's height more.
+    let top = response.rect.top() - LATER_DROP - height - LATER_DROP;
+    let anchor = Rect::from_min_size(pos2(response.rect.left(), top), Vec2::ZERO);
+    let float = popup::Float { id: later_popup(), anchor, width: time_picker::WIDTH, returns_to: response.id };
     let shown = popup::float(&ctx, theme, &float, |ui| {
         let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
         let note = tr!("It goes while InboxCraft or its tray runs; a time missed sends at the next start, and says so.");
@@ -241,6 +267,9 @@ fn later(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compose
         ui.data_mut(|data| data.insert_temp(later_id(), state));
         picked
     });
+    if let Some(drawn) = ctx.memory(|memory| memory.area_rect(later_popup())).filter(|_| shown.is_some()) {
+        ctx.data_mut(|data| data.insert_temp(later_height_id(), (drawn.height(), pass)));
+    }
     let close = |asked: &mut Vec<Asked>, later: Option<Option<inboxcraft_time::Timestamp>>| {
         if let Some(later) = later {
             asked.push(Asked::Later(later));
@@ -564,8 +593,14 @@ fn foot(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     let mut row = ui.new_child(UiBuilder::new().max_rect(rect).layout(Layout::left_to_right(Align::Center)));
     row.spacing_mut().item_spacing.x = s.s2;
     let (label, problem, waits) = send_label(mailbox, composer);
-    // Waiting, Send is the disabled button of its frames, without its key.
-    let send = TextButton::new(&label).primary().action(keymap::SEND).key(problem.is_none());
+    // Waiting, Send is the disabled button of its frames, without its key. In a pane too narrow for Send with its key,
+    // the caret, Templates and Discard on one line, the key's chip gives way (the key still sends).
+    let chip = keymap
+        .chip(ui.ctx(), keymap::SEND)
+        .map_or(0.0, |key| crate::component::key::Chip::new(ui, theme, &key, crate::component::key::ChipState::OnCyan).size().x + s.s2);
+    let send_width = cut(ui, &label, theme.fonts.button, p.ink, SEND_WIDEST).size().x.ceil() + s.s3 * 2.0 + chip;
+    let fits = send_width + (s.s2 + side) * 3.0 + s.s2 <= rect.width();
+    let send = TextButton::new(&label).primary().action(keymap::SEND).key(problem.is_none() && fits);
     match &problem {
         Some(problem) => {
             send.unavailable(problem).show(&mut row, theme, keymap);
@@ -608,15 +643,33 @@ fn foot(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     {
         asked.push(Asked::Discard);
     }
-    // Coming soon: attaching a file, its tag before it.
-    let soon_row = Rect::from_min_max(pos2(rect.left(), rect.top()), pos2(attach.right(), rect.bottom()));
+    // Coming soon: attaching a file, its tag before it, between the caret (8 clear of it) and Templates. In a narrow
+    // pane the tag gives way, then the button: nothing is drawn through Send or its caret.
+    let tag_width = galley(ui, tr!("coming soon"), theme.fonts.mono_s, p.muted).size().x.ceil() + TAG_PADS;
+    let soon_row = Rect::from_min_max(pos2(reason_left.min(attach.right()), rect.top()), pos2(attach.right(), rect.bottom()));
     ui.scope_builder(UiBuilder::new().max_rect(soon_row).layout(Layout::right_to_left(Align::Center)), |ui| {
         ui.spacing_mut().item_spacing.x = s.s2;
         soon(ui, theme, |ui| {
-            IconButton::new(IconId::Attach, tr!("Attach a file")).show(ui, theme, keymap);
-            soon_tag(ui, theme);
+            if ui.available_width() >= side {
+                attach_soon(ui, theme, keymap);
+                if ui.available_width() >= tag_width {
+                    soon_tag(ui, theme);
+                }
+            }
         });
     });
+}
+
+/// Attaching a file, coming soon: the icon button not pressable, its glyph in `muted` as its frames draw it (a
+/// disabled icon button's is `dim`), its name in its tooltip.
+fn attach_soon(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    let side = control_side(theme);
+    let name = tr!("Attach a file");
+    let (rect, response) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+    response.widget_info(|| WidgetInfo::selected(Role::Button, false, false, name));
+    let icon = theme.icon_side();
+    crate::iconset::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(icon, icon)), IconId::Attach, theme.palette.muted);
+    crate::component::tooltip::attach(response, theme, keymap, name, None);
 }
 
 /// The head in `rect`: the title (in the floating panel a button that folds it), when the draft was kept, the
@@ -867,10 +920,12 @@ pub(super) fn floating(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, mail
         .fixed_pos(rect.min)
         .fade_in(false)
         .show(ctx, |ui| {
-            ui.set_clip_rect(rect.intersect(screen));
+            // The shadow falls on the window round the panel (its frames); what is drawn in the panel stays in it.
+            let shadow = ui.painter().with_clip_rect(screen);
             for shape in paint::float_shapes(theme, rect, paint::FloatEdge::Keyboard) {
-                ui.painter().add(shape);
+                shadow.add(shape);
             }
+            ui.set_clip_rect(rect.intersect(screen));
             ui.allocate_rect(rect, Sense::hover());
             mark_drawn(ui, rect);
             // 12 above the head, 20 beside and under the rest.
