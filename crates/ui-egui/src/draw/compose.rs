@@ -734,17 +734,8 @@ fn body(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     let side = control_side(theme);
     let mut asked = Vec::new();
     let head_rect = Rect::from_min_size(area.min, vec2(area.width(), side));
-    if place == Place::Docked {
-        let mut child = ui.new_child(UiBuilder::new().max_rect(head_rect));
-        super::frame::beside(&mut child, theme, |ui| {
-            let rect = ui.max_rect();
-            ui.allocate_rect(rect, Sense::hover());
-            head(ui, theme, keymap, mailbox, composer, rect, place, &mut asked);
-        });
-    } else {
-        head(ui, theme, keymap, mailbox, composer, head_rect, place, &mut asked);
-    }
     if composer.folded() && place == Place::Floating {
+        head(ui, theme, keymap, mailbox, composer, head_rect, place, &mut asked);
         return asked;
     }
     let foot_rect = Rect::from_min_max(pos2(area.left(), area.bottom() - side), area.max);
@@ -765,6 +756,17 @@ fn body(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
         blank(&mut column, theme, keymap, composer, rect, &mut asked);
     }
     foot(ui, theme, keymap, mailbox, composer, foot_rect, &mut asked);
+    // The head last: Tab comes into the composer at From and leaves it from Close.
+    if place == Place::Docked {
+        let mut child = ui.new_child(UiBuilder::new().max_rect(head_rect));
+        super::frame::beside(&mut child, theme, |ui| {
+            let rect = ui.max_rect();
+            ui.allocate_rect(rect, Sense::hover());
+            head(ui, theme, keymap, mailbox, composer, rect, place, &mut asked);
+        });
+    } else {
+        head(ui, theme, keymap, mailbox, composer, head_rect, place, &mut asked);
+    }
     asked
 }
 

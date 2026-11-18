@@ -815,23 +815,54 @@ fn the_tab_order_is_the_reading_order() {
 }
 
 #[test]
-fn from_comes_before_to_on_the_way_round() {
-    let mut harness = composing(egui::Theme::Dark);
-    harness.ctx.memory_mut(|memory| memory.request_focus(super::compose::subject_id()));
-    harness.run();
-    let mut walked = Vec::new();
-    for _ in 0..60 {
-        harness.key_press(Key::Tab);
-        harness.run();
-        let focused = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused());
-        if let Some(label) = focused.and_then(|node| node.accesskit_node().label()) {
-            if label == "To" {
-                break;
-            }
-            walked.push(label);
+fn the_composer_s_tab_order_starts_at_from_and_ends_with_its_head() {
+    for floating in [false, true] {
+        let mut harness = composing(egui::Theme::Dark);
+        if floating {
+            harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
+            harness.run();
         }
+        harness.ctx.memory_mut(|memory| memory.request_focus(super::compose::subject_id()));
+        harness.run();
+        let ours = [
+            "From ",
+            "To",
+            "Cc",
+            "Bcc",
+            "Remove ",
+            "Subject",
+            "Message text",
+            "Send",
+            "Send later",
+            "Templates",
+            "Discard the draft",
+            "Fold the draft",
+            "Back to the reader",
+            "Close; the draft is kept",
+        ];
+        let is_ours = |label: &str| ours.iter().any(|own| label.starts_with(own));
+        // Twice round the window: every stop Tab reaches, in order.
+        let mut walked: Vec<String> = Vec::new();
+        for _ in 0..160 {
+            harness.key_press(Key::Tab);
+            harness.run();
+            let focused = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused());
+            let label = focused.and_then(|node| node.accesskit_node().label()).unwrap_or_default();
+            if walked.last() != Some(&label) {
+                walked.push(label);
+            }
+        }
+        // Every time Tab comes into the composer from the rest of the window, it comes in at From.
+        let entries: Vec<&String> = walked.windows(2).filter(|pair| !is_ours(&pair[0]) && is_ours(&pair[1])).map(|pair| &pair[1]).collect();
+        assert!(!entries.is_empty(), "{floating}: Tab reaches the composer: {walked:?}");
+        assert!(entries.iter().all(|label| label.starts_with("From ")), "{floating}: it comes in at {entries:?}");
+        // And it leaves from its head, after Discard.
+        let exits: Vec<&String> = walked.windows(2).filter(|pair| is_ours(&pair[0]) && !is_ours(&pair[1])).map(|pair| &pair[0]).collect();
+        assert!(exits.iter().all(|label| label.as_str() == "Close; the draft is kept"), "{floating}: it leaves at {exits:?}");
+        let discard = walked.iter().position(|label| label == "Discard the draft").unwrap_or(usize::MAX);
+        let close = walked.iter().skip(discard).position(|label| label == "Close; the draft is kept");
+        assert!(close.is_some(), "{floating}: Close after Discard: {walked:?}");
     }
-    assert!(walked.iter().any(|label| label.starts_with("From ")), "From before To: {walked:?}");
 }
 
 #[test]
