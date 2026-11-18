@@ -4,8 +4,15 @@
 //! The add-account page: the form with Detect, then the check's steps with the host, port and issuer each saw. An
 //! account already there gets the same fields, with a new password instead of the password.
 
-use egui::{CollapsingHeader, Color32, Frame, Response, RichText, ScrollArea, Sense, Ui, vec2};
+use std::sync::Arc;
 
+use egui::{
+    Align, CentralPanel, CollapsingHeader, Color32, Frame, Galley, Layout, Margin, Pos2, Rect, Response, RichText, Role, ScrollArea, Sense, Ui,
+    UiBuilder, WidgetInfo, pos2, vec2,
+};
+
+use super::paint::{self, Panes};
+use crate::component;
 use crate::component::button::{self, TextButton};
 use crate::component::checkbox::checkbox_wrapping;
 use crate::component::field::{self, Field};
@@ -382,6 +389,90 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
         Outcome::Running => {}
     });
     asked
+}
+
+/// The welcome box's width, in points.
+const WELCOME: f32 = 520.0;
+
+/// The room above and below the welcome's lines, in points.
+const WELCOME_PAD_Y: f32 = 40.0;
+
+/// The room left and right of the welcome's lines, and under where Add account leads, in points.
+const WELCOME_PAD_X: f32 = 24.0;
+
+/// The room between two of the welcome's lines, in points.
+const WELCOME_GAP: f32 = 12.0;
+
+/// The room over Add account, under the gap after the help, in points.
+const WELCOME_ACTION_TOP: f32 = 8.0;
+
+/// The most lines the welcome's title and help each take.
+const WELCOME_ROWS: usize = 4;
+
+/// A line of words at `at` that a screen reader reads as `text`.
+fn said(ui: &mut Ui, at: Pos2, width: f32, galley: Arc<Galley>, colour: Color32, text: &str) {
+    let rect = Rect::from_min_size(at, vec2(paint::run_box(galley.size().x).min(width), galley.size().y));
+    let response = ui.interact(rect, ui.scope_id().with("said").with(text), Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text));
+    if ui.is_rect_visible(rect) {
+        paint::rows_at(ui.painter(), at, width, galley, colour);
+    }
+}
+
+/// The window with no account: a box 520 wide in the middle of the body, the empty state of no account in it and,
+/// where the window can add accounts (`can_add`), Add account with its arrow and where it leads; whether Add account
+/// was pressed. A window that cannot add accounts says how to look around instead.
+pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, layers: &mut Panes, can_add: bool) -> bool {
+    let p = &theme.palette;
+    let f = &theme.fonts;
+    let gap = theme.spacing.s2;
+    let mut add = false;
+    CentralPanel::no_frame().frame(Frame::new().inner_margin(Margin::same(gap.clamp(0.0, 100.0) as i8))).show(ui, |ui| {
+        let room = ui.max_rect();
+        let width = WELCOME.min(room.width()).floor().max(1.0);
+        let inner = (width - 2.0 - 2.0 * WELCOME_PAD_X).max(1.0);
+        let (title, help) = if can_add {
+            (tr!("Add an account to read its mail here."), tr!("Nothing leaves this computer before you do."))
+        } else {
+            (tr!("This window cannot add an account."), tr!("Start InboxCraft with --sample to look around an invented mailbox."))
+        };
+        let align = if can_add { Align::LEFT } else { Align::Center };
+        let label = tr!("No account yet");
+        let lines = [
+            (component::wrapped(ui, label, f.label, p.muted, inner, 1, align), label),
+            (component::wrapped(ui, title, f.title, p.muted, inner, WELCOME_ROWS, align), title),
+            (component::wrapped(ui, help, f.caption, p.muted, inner, WELCOME_ROWS, align), help),
+        ];
+        let text_high: f32 = lines.iter().map(|(line, _)| line.size().y).sum::<f32>() + WELCOME_GAP * 2.0;
+        let action = if can_add { WELCOME_GAP + WELCOME_ACTION_TOP + component::control_side(theme) } else { 0.0 };
+        let leads = if can_add { f.caption.line + WELCOME_PAD_X } else { 0.0 };
+        let high = (2.0 + WELCOME_PAD_Y + text_high + action + WELCOME_PAD_Y + leads).ceil().min(room.height().max(1.0));
+        let card = Rect::from_min_size((room.center() - vec2(width, high) / 2.0).round(), vec2(width, high));
+        let group = ui.interact(card, ui.scope_id().with("welcome"), Sense::hover());
+        group.widget_info(|| WidgetInfo::labeled(Role::Group, true, tr!("Welcome")));
+        ui.scope_builder(UiBuilder::new().max_rect(card), |ui| {
+            layers.card(ui, Margin::ZERO, |ui| {
+                let left = card.left() + 1.0 + WELCOME_PAD_X;
+                let mut top = card.top() + 1.0 + WELCOME_PAD_Y;
+                for (line, text) in lines {
+                    let high = line.size().y;
+                    said(ui, pos2(left, top), inner, line, p.muted, text);
+                    top += high + WELCOME_GAP;
+                }
+                if !can_add {
+                    return;
+                }
+                let at = Rect::from_min_size(pos2(left, top + WELCOME_ACTION_TOP), vec2(inner, component::control_side(theme)));
+                let mut child = ui.new_child(UiBuilder::new().max_rect(at).layout(Layout::left_to_right(Align::Center)));
+                add = TextButton::new(tr!("Add account")).primary().arrow().show(&mut child, theme, keymap).clicked();
+                let where_to = tr!("Opens Settings · Accounts");
+                let galley = component::galley(ui, where_to, f.caption, p.muted);
+                let bottom = card.bottom() - 1.0 - WELCOME_PAD_X;
+                said(ui, pos2(left, bottom - galley.size().y), inner, galley, p.muted, where_to);
+            });
+        });
+    });
+    add
 }
 
 /// Draws the page and returns what was asked for; the caller applies it after the frame's drawing.

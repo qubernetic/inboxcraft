@@ -1600,8 +1600,7 @@ impl InboxApp {
 
     /// The window with no account: one card in the middle, as tall as what it says; whether Add account was pressed.
     fn welcome(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes) -> bool {
-        let (keymap, can_add) = (&self.keymap, self.can_add);
-        middle_card(ui, theme, layers, |ui| list::welcome(ui, theme, keymap, can_add))
+        onboard::welcome(ui, theme, &self.keymap, layers, self.can_add)
     }
 
     /// The calendar screen: its empty state on one card in the middle until there are calendars; what was pressed.

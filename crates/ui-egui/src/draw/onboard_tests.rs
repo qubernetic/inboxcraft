@@ -63,7 +63,7 @@ fn on_sheet<'h>(harness: &'h Harness<'static, InboxApp>, label: &'h str) -> egui
 #[test]
 fn the_empty_window_offers_add_account_which_opens_settings_on_accounts_where_the_form_opens() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
-    harness.get_by_label("No accounts yet");
+    harness.get_by_label("Add an account to read its mail here.");
     // Without an account the folder pane would hold only the app's name: it is left out.
     assert_eq!(harness.get_all_by_label("Add account").count(), 1, "on the empty window only");
     assert!(harness.query_by_label("Mailboxes").is_none() && harness.query_all_by_label("InboxCraft").count() <= 1, "no folder pane");
@@ -95,15 +95,57 @@ fn the_empty_window_offers_add_account_which_opens_settings_on_accounts_where_th
 }
 
 #[test]
-fn the_empty_window_is_one_card_in_the_middle() {
-    let harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
-    let title = harness.get_by_label("No accounts yet").rect();
-    let add = harness.get_by_role_and_label(Role::Button, "Add account").rect();
-    harness.get_by_label("Opens Settings · Accounts");
-    assert!((add.center().x - title.center().x).abs() < 2.0, "{add:?} under {title:?}");
-    // The window is 1100 by 760; right of the rail its middle is near x 580, and the card stands in the middle.
-    assert!((500.0..660.0).contains(&title.center().x), "{title:?}");
-    assert!(title.top() > 150.0 && add.bottom() < 610.0, "{title:?} {add:?}");
+fn the_welcome_is_a_box_520_wide_in_the_middle_with_add_account_and_its_arrow() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let harness = harness(app(&Kept::default(), FakeWorkers::passing()), theme);
+        let card = harness.get_by_role_and_label(Role::Group, "Welcome").rect();
+        assert_eq!(card.width(), 520.0, "{card:?}");
+        assert_eq!(card.height(), 294.0, "the frame's box: {card:?}");
+        // Right of the rail the window's middle is near x 580 of 1100; the box stands in the middle, on whole points.
+        assert!((card.center().x - 580.0).abs() < 40.0 && card.min.x.fract() == 0.0 && card.min.y.fract() == 0.0, "{card:?}");
+        let label = harness.get_by_label("No account yet").rect();
+        let title = harness.get_by_label("Add an account to read its mail here.").rect();
+        let help = harness.get_by_label("Nothing leaves this computer before you do.").rect();
+        let add = harness.get_by_role_and_label(Role::Button, "Add account").rect();
+        let leads = harness.get_by_label("Opens Settings · Accounts").rect();
+        // The empty state's lines 24 in from the edge, 40 under its top, 12 apart; the button 8 under the gap after the
+        // help; where it leads 24 above the box's bottom.
+        for (name, rect) in [("label", label), ("title", title), ("help", help), ("add", add), ("leads", leads)] {
+            assert_eq!(rect.left(), card.left() + 25.0, "{name} {rect:?} in {card:?}");
+        }
+        assert_eq!(label.top(), card.top() + 41.0);
+        assert_eq!(title.top(), label.bottom() + 12.0);
+        assert_eq!(help.top(), title.bottom() + 12.0);
+        assert_eq!(add.top(), help.bottom() + 20.0);
+        assert_eq!(leads.bottom(), card.bottom() - 25.0);
+        assert!(texts_in(harness.output(), add).iter().any(|text| text == "→"), "the primary button carries the arrow");
+    }
+}
+
+/// The texts painted inside `rect` this frame, each galley's text whole.
+fn texts_in(output: &egui::FullOutput, rect: egui::Rect) -> Vec<String> {
+    fn walk(shape: &egui::Shape, rect: egui::Rect, found: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, rect, found)),
+            egui::Shape::Text(text) if rect.expand(1.0).contains_rect(text.visual_bounding_rect()) => found.push(text.galley.text().to_owned()),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, rect, &mut found);
+    }
+    found
+}
+
+#[test]
+fn a_window_that_cannot_add_says_how_to_look_around_in_the_same_box() {
+    let harness = harness_empty();
+    let card = harness.get_by_role_and_label(Role::Group, "Welcome").rect();
+    assert_eq!((card.width(), card.height()), (520.0, 170.0), "{card:?}");
+    harness.get_by_label("This window cannot add an account.");
+    harness.get_by_label("Start InboxCraft with --sample to look around an invented mailbox.");
+    assert!(harness.query_by_role_and_label(Role::Button, "Add account").is_none());
 }
 
 #[test]

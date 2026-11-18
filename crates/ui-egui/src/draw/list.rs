@@ -1016,33 +1016,6 @@ fn plain(ui: &mut Ui, rows: &Rows<'_>) -> Option<u64> {
     clicked
 }
 
-/// The empty window's card: the inbox icon, "No accounts yet" and what to do. Where the window can add accounts
-/// (`can_add`), Add account, which opens the settings on Accounts; whether it was pressed.
-pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool) -> bool {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let side = theme.fonts.body.line * 3.6;
-    let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-    crate::iconset::paint(ui.painter(), rect, IconId::Inbox, p.cyan_text);
-    ui.add_space(s.s3);
-    ui.label(RichText::new(tr!("No accounts yet")).font(theme.fonts.title.id()).color(p.ink));
-    ui.add_space(s.s1);
-    let about = if can_add {
-        tr!("Add an account to read its mail here. Nothing leaves this computer before you do.")
-    } else {
-        tr!("Start InboxCraft with --sample to look around an invented mailbox.")
-    };
-    ui.add(egui::Label::new(RichText::new(about).font(theme.fonts.body.id()).color(p.muted)).wrap());
-    if !can_add {
-        return false;
-    }
-    ui.add_space(s.s4);
-    let add = button::TextButton::new(tr!("Add account")).icon(IconId::Add).primary().show(ui, theme, keymap).clicked();
-    ui.add_space(s.s1);
-    ui.label(RichText::new(tr!("Opens Settings · Accounts")).font(theme.fonts.caption.id()).color(p.muted));
-    add
-}
-
 /// "New senders": the list, then under it the screener's mode as pills, the choice the Triage settings page offers.
 fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Option<u64>, Option<ScreenerMode>) {
     let theme = rows.theme;
