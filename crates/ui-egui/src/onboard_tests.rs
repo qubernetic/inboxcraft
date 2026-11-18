@@ -756,7 +756,7 @@ fn a_threaded_detect_answers_from_its_thread_and_wakes_the_window() {
     let mut detect = super::Threaded::new(run, Some(wake));
     assert!(format!("{detect:?}").starts_with("Threaded"));
     assert!(super::Detect::finished(&mut detect).is_none());
-    super::Detect::start(&mut detect, "carol@example.org", true);
+    super::Detect::start(&mut detect, 7, "carol@example.org", true);
     let mut answer = None;
     for _ in 0..2000 {
         answer = super::Detect::finished(&mut detect);
@@ -765,7 +765,8 @@ fn a_threaded_detect_answers_from_its_thread_and_wakes_the_window() {
         }
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(answer.unwrap().asked, ["carol@example.org true"]);
+    let (run, answer) = answer.unwrap();
+    assert_eq!((run, answer.asked), (7, vec!["carol@example.org true".to_owned()]));
     for _ in 0..2000 {
         if woken.load(Ordering::SeqCst) > 0 {
             break;
@@ -896,4 +897,119 @@ fn detect_keeps_what_the_owner_typed_and_refills_what_it_put_there() {
     onboarding.detect();
     assert!(onboarding.poll());
     assert_eq!((onboarding.form().host.as_str(), onboarding.form().username.as_str()), ("imap.example.org", "carol@example.org"));
+}
+
+/// A Detect whose runs answer only when the test lets them: each start takes the next queued proposal, and
+/// [`Held::answer`] hands the oldest started run's answer over at the next poll.
+#[derive(Clone, Default)]
+struct Held {
+    queued: Arc<Mutex<std::collections::VecDeque<Proposal>>>,
+    started: Arc<Mutex<std::collections::VecDeque<(u64, Proposal)>>>,
+    ready: Arc<Mutex<std::collections::VecDeque<(u64, Proposal)>>>,
+}
+
+impl Held {
+    fn new(answers: Vec<Proposal>) -> Self {
+        let held = Self::default();
+        held.queued.lock().unwrap().extend(answers);
+        held
+    }
+
+    fn answer(&self) {
+        let next = self.started.lock().unwrap().pop_front().unwrap();
+        self.ready.lock().unwrap().push_back(next);
+    }
+}
+
+impl super::Detect for Held {
+    fn start(&mut self, run: u64, _address: &str, _ispdb: bool) {
+        let next = self.queued.lock().unwrap().pop_front().unwrap_or_default();
+        self.started.lock().unwrap().push_back((run, next));
+    }
+
+    fn finished(&mut self) -> Option<(u64, Proposal)> {
+        self.ready.lock().unwrap().pop_front()
+    }
+}
+
+/// What Detect finds at `host` (and `smtp`, when given) for the user `user`.
+fn found_at(host: &str, smtp: Option<&str>, user: &str) -> Proposal {
+    let suggestion =
+        |host: &str, port, security| Suggestion { host: host.to_owned(), port, security, username: user.to_owned(), source: Source::Autoconfig };
+    Proposal {
+        imap: vec![suggestion(host, 993, Security::Tls)],
+        submission: smtp.map(|host| vec![suggestion(host, 465, Security::Tls)]).unwrap_or_default(),
+        asked: vec!["dns MX example.org".to_owned()],
+        failed: vec![],
+    }
+}
+
+#[test]
+fn detect_s_late_answer_never_lands_in_an_account_s_form() {
+    let kept = Kept::default();
+    // An account with no outgoing server.
+    let mut mailbox = mailbox();
+    let mut first = onboarding(&kept);
+    filled(first.form_mut());
+    first.add(&mut mailbox);
+    assert_eq!(first.stage(), Stage::Checking(1), "{:?}", first.error());
+    let detect = Held::new(vec![found_at("imap.other.example.org", Some("smtp.other.example.org"), "x@other.example.org")]);
+    let mut onboarding = Onboarding::new(Arc::new(kept.clone()), Box::new(detect.clone()));
+    onboarding.open();
+    onboarding.form_mut().address = "x@other.example.org".to_owned();
+    onboarding.detect();
+    // The account's row is pressed before Detect answers.
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.stage(), Stage::Edit(1));
+    let before = (onboarding.form().host.clone(), onboarding.form().smtp_host.clone(), onboarding.form().username.clone());
+    detect.answer();
+    onboarding.poll();
+    let after = (onboarding.form().host.clone(), onboarding.form().smtp_host.clone(), onboarding.form().username.clone());
+    assert_eq!(after, before, "the account's form is as it was");
+    assert!(!onboarding.save_checks(), "nothing to save, no sign-in anywhere");
+    // Nor in the add form, once it is back: the page was left.
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "x@other.example.org");
+    assert_eq!(onboarding.form().host, "");
+    assert!(!onboarding.detecting());
+}
+
+#[test]
+fn detect_s_answer_after_the_page_was_left_is_thrown_away_and_the_next_one_counts() {
+    let detect = Held::new(vec![
+        found_at("imap.first.example.org", None, "carol@example.org"),
+        found_at("imap.second.example.org", None, "carol@example.org"),
+    ]);
+    let mut onboarding = Onboarding::new(Arc::new(NoKeychain), Box::new(detect.clone()));
+    onboarding.open();
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.detect();
+    onboarding.close();
+    onboarding.open();
+    assert!(!onboarding.detecting(), "Detect under way ended with the page");
+    onboarding.detect();
+    // The first run's answer comes now: it is the left page's, and thrown away.
+    detect.answer();
+    onboarding.poll();
+    assert_eq!(onboarding.form().host, "");
+    assert!(onboarding.detecting(), "the second run is still under way");
+    detect.answer();
+    assert!(onboarding.poll());
+    assert_eq!(onboarding.form().host, "imap.second.example.org");
+    assert!(!onboarding.detecting());
+}
+
+#[test]
+fn detect_s_answer_for_an_address_no_longer_in_the_form_is_thrown_away() {
+    let detect = Held::new(vec![found_at("imap.first.example.org", None, "a@first.example.org")]);
+    let mut onboarding = Onboarding::new(Arc::new(NoKeychain), Box::new(detect.clone()));
+    onboarding.open();
+    onboarding.form_mut().address = "a@first.example.org".to_owned();
+    onboarding.detect();
+    onboarding.form_mut().address = "b@second.example.org".to_owned();
+    detect.answer();
+    onboarding.poll();
+    assert_eq!((onboarding.form().host.as_str(), onboarding.form().username.as_str()), ("", ""));
+    assert!(onboarding.found().is_none());
+    assert!(!onboarding.detecting());
 }

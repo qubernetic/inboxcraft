@@ -23,7 +23,8 @@
 //!
 //! What the owner typed in the add form is kept on every way out and back but Cancel: Back, Esc, another page or the
 //! window's welcome keep it ([`Onboarding::close`]), and the form opens with it again; only the password is dropped
-//! on the way out. Detect fills a server row or the user name only where the owner typed nothing, or kept what Detect
+//! on the way out. Detect's answer belongs to the add form and the address that asked: one that comes after the page
+//! was left, or for an address no longer in the form, is thrown away. Detect fills a server row or the user name only where the owner typed nothing, or kept what Detect
 //! put there before. A field whose text is wrong says so under itself ([`Slot`]): a port or a CalDAV address as it is
 //! typed, a missing address, password or IMAP server when the form is sent.
 //!
@@ -198,27 +199,28 @@ pub struct Proposal {
 
 /// Runs Detect for the form.
 pub trait Detect: Send {
-    /// Starts Detect for `address`, asking Mozilla's ISPDB too when `ispdb` is on; the answer comes from
-    /// [`Detect::finished`].
-    fn start(&mut self, address: &str, ispdb: bool);
+    /// Starts Detect's run `run` for `address`, asking Mozilla's ISPDB too when `ispdb` is on; the answer comes from
+    /// [`Detect::finished`], with the run it answers.
+    fn start(&mut self, run: u64, address: &str, ispdb: bool);
 
-    /// The proposal, once Detect ended.
-    fn finished(&mut self) -> Option<Proposal>;
+    /// A run that ended: its number and its proposal. Each run answers once.
+    fn finished(&mut self) -> Option<(u64, Proposal)>;
 }
 
 /// The Detect of a window that asks nobody: it ends at once with nothing found.
 #[derive(Debug, Default)]
 pub struct NoDetect {
-    done: Option<Proposal>,
+    done: Option<u64>,
 }
 
 impl Detect for NoDetect {
-    fn start(&mut self, _address: &str, _ispdb: bool) {
-        self.done = Some(Proposal { failed: vec![tr!("Detect does not run in this window.").to_owned()], ..Proposal::default() });
+    fn start(&mut self, run: u64, _address: &str, _ispdb: bool) {
+        self.done = Some(run);
     }
 
-    fn finished(&mut self) -> Option<Proposal> {
-        self.done.take()
+    fn finished(&mut self) -> Option<(u64, Proposal)> {
+        let run = self.done.take()?;
+        Some((run, Proposal { failed: vec![tr!("Detect does not run in this window.").to_owned()], ..Proposal::default() }))
     }
 }
 
@@ -230,8 +232,8 @@ pub type Run = Arc<dyn Fn(&str, bool) -> Proposal + Send + Sync>;
 pub struct Threaded {
     run: Run,
     wake: Option<Wake>,
-    sender: Sender<Proposal>,
-    receiver: Receiver<Proposal>,
+    sender: Sender<(u64, Proposal)>,
+    receiver: Receiver<(u64, Proposal)>,
 }
 
 impl fmt::Debug for Threaded {
@@ -250,21 +252,21 @@ impl Threaded {
 }
 
 impl Detect for Threaded {
-    fn start(&mut self, address: &str, ispdb: bool) {
+    fn start(&mut self, number: u64, address: &str, ispdb: bool) {
         let (run, wake, sender, address) = (Arc::clone(&self.run), self.wake.clone(), self.sender.clone(), address.to_owned());
         let spawned = thread::Builder::new().name("inboxcraft-detect".to_owned()).spawn(move || {
             // A closed window no longer listens; nothing to tell it then.
-            let _ = sender.send(run(&address, ispdb));
+            let _ = sender.send((number, run(&address, ispdb)));
             if let Some(wake) = wake {
                 wake();
             }
         });
         if let Err(error) = spawned {
-            let _ = self.sender.send(Proposal { failed: vec![error.to_string()], ..Proposal::default() });
+            let _ = self.sender.send((number, Proposal { failed: vec![error.to_string()], ..Proposal::default() }));
         }
     }
 
-    fn finished(&mut self) -> Option<Proposal> {
+    fn finished(&mut self) -> Option<(u64, Proposal)> {
         self.receiver.try_recv().ok()
     }
 }
@@ -277,7 +279,8 @@ pub struct Proposed {
     pub proposal: Proposal,
     /// Each address it was asked for, and whether the ISPDB was on.
     pub asked: Arc<std::sync::Mutex<Vec<(String, bool)>>>,
-    pending: bool,
+    /// The runs started and not answered yet, the oldest first.
+    pending: std::collections::VecDeque<u64>,
 }
 
 impl Proposed {
@@ -289,17 +292,20 @@ impl Proposed {
 }
 
 impl Detect for Proposed {
-    fn start(&mut self, address: &str, ispdb: bool) {
+    fn start(&mut self, run: u64, address: &str, ispdb: bool) {
         if let Ok(mut asked) = self.asked.lock() {
             asked.push((address.to_owned(), ispdb));
         }
-        self.pending = true;
+        self.pending.push_back(run);
     }
 
-    fn finished(&mut self) -> Option<Proposal> {
-        std::mem::take(&mut self.pending).then(|| self.proposal.clone())
+    fn finished(&mut self) -> Option<(u64, Proposal)> {
+        self.pending.pop_front().map(|run| (run, self.proposal.clone()))
     }
 }
+
+/// The most answers of Detect [`Onboarding::poll`] takes in one call.
+const MOST_ANSWERS: usize = 8;
 
 /// The most characters the password field takes.
 pub const MAX_PASSWORD_CHARS: usize = crate::component::field::MAX_SECRET;
@@ -710,7 +716,11 @@ fn fill(
 pub struct Onboarding {
     stage: Stage,
     form: Form,
-    detecting: bool,
+    /// Detect's run under way for the add form, and the address it asked about: only its answer is taken, and only
+    /// while the add form is open and still holds that address.
+    asking: Option<(u64, String)>,
+    /// The number of Detect's last run.
+    runs: u64,
     found: Option<Found>,
     detected: Detected,
     /// The add form as the owner left it, while another form or none is open.
@@ -748,7 +758,8 @@ impl Onboarding {
         Self {
             stage: Stage::Closed,
             form: Form::default(),
-            detecting: false,
+            asking: None,
+            runs: 0,
             found: None,
             detected: Detected::default(),
             kept: None,
@@ -785,7 +796,6 @@ impl Onboarding {
     pub fn close(&mut self) {
         self.form.password.clear();
         self.keep();
-        self.detecting = false;
         self.held = None;
         self.stage = Stage::Closed;
     }
@@ -802,6 +812,8 @@ impl Onboarding {
         if self.stage != Stage::Form {
             return;
         }
+        // Detect under way ends with the page: its answer is thrown away when it comes.
+        self.asking = None;
         self.form.password.clear();
         let form = std::mem::take(&mut self.form);
         self.kept = Some(Kept { form, found: self.found.take(), detected: std::mem::take(&mut self.detected) });
@@ -1017,7 +1029,7 @@ impl Onboarding {
     /// Whether Detect runs.
     #[must_use]
     pub fn detecting(&self) -> bool {
-        self.detecting
+        self.asking.is_some()
     }
 
     /// What Detect last found.
@@ -1066,6 +1078,9 @@ impl Onboarding {
 
     /// Starts Detect for the address in the form.
     pub fn detect(&mut self) {
+        if self.stage != Stage::Form {
+            return;
+        }
         let address = self.form.address.trim().to_owned();
         if address.is_empty() {
             self.error = Some(tr!("Enter the address, then Detect.").to_owned());
@@ -1074,16 +1089,35 @@ impl Onboarding {
         }
         self.error = None;
         self.slot = None;
-        self.detecting = true;
-        self.detect.start(&address, self.form.ispdb);
+        self.runs = self.runs.wrapping_add(1);
+        self.detect.start(self.runs, &address, self.form.ispdb);
+        self.asking = Some((self.runs, address));
     }
 
     /// Takes Detect's answer when it came: its first IMAP and outgoing server fill their rows of the form, and its user
-    /// name the user name, each only where the owner typed nothing or kept what Detect put there before. Whether
-    /// anything changed.
+    /// name the user name, each only where the owner typed nothing or kept what Detect put there before. An answer is
+    /// the add form's only for the run under way, while that form is open and holds the address asked about; any other
+    /// (a run of a page left since, an address changed since) is thrown away. Whether anything changed.
     pub fn poll(&mut self) -> bool {
-        let Some(proposal) = self.detect.finished() else { return false };
-        self.detecting = false;
+        let mut changed = false;
+        // A few answers at most a frame: each run answers once, and only one is under way at a time.
+        for _ in 0..MOST_ANSWERS {
+            let Some((run, proposal)) = self.detect.finished() else { break };
+            let Some((asked, address)) = self.asking.take() else { continue };
+            if run != asked {
+                self.asking = Some((asked, address));
+                continue;
+            }
+            changed = true;
+            if self.stage == Stage::Form && self.form.address.trim() == address {
+                self.take(proposal);
+            }
+        }
+        changed
+    }
+
+    /// Puts Detect's `proposal` into the add form, as [`Self::poll`] says.
+    fn take(&mut self, proposal: Proposal) {
         let form = &mut self.form;
         let detected = &mut self.detected;
         let source = proposal.imap.first().map(|best| {
@@ -1107,7 +1141,6 @@ impl Onboarding {
         });
         let clean = |lines: Vec<String>| lines.iter().map(|line| shown(line)).collect();
         self.found = Some(Found { source, outgoing, asked: clean(proposal.asked), failed: clean(proposal.failed) });
-        true
     }
 
     /// Adds the account in the form through `mailbox` and keeps its password in the credential store; the check
