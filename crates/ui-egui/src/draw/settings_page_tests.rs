@@ -561,3 +561,18 @@ fn the_motion_row_says_what_the_computer_gives_until_the_owner_chooses() {
     let help = "Reduced keeps what explains a change and drops the text effects. Until you choose, the computer's reduce-motion setting gives Off.";
     harness.get_by_label_contains(help);
 }
+
+#[test]
+fn nothing_changed_stands_12_right_of_a_signature_s_save() {
+    let mut harness = harness();
+    harness.state_mut().settings_mut().open_at(Section::Sending);
+    harness.run();
+    // `settings-sending/default`: Save 56 wide, disabled, then "nothing changed" 12 to its right.
+    let save = harness
+        .get_all_by_role(Role::Button)
+        .find(|node| node.accesskit_node().label().unwrap_or_default().starts_with("Save the signature of"))
+        .unwrap()
+        .rect();
+    let words = harness.get_all_by_label("nothing changed").find(|node| (node.rect().center().y - save.center().y).abs() < 8.0).unwrap().rect();
+    assert_eq!(words.left() - save.right(), 12.0, "{save:?} {words:?}");
+}

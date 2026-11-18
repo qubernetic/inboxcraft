@@ -738,6 +738,8 @@ fn signature(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
     ui.add_space(8.0);
     let mut asked = None;
     ui.horizontal(|ui| {
+        // Not the 24 between two signatures this row stands in: only the 12 below.
+        ui.spacing_mut().item_spacing.x = 0.0;
         let save = tr!("Save the signature of {account}", account = account.label);
         let button = TextButton::new(tr!("Save")).secondary();
         let response = if changed { button.show(ui, theme, keymap) } else { button.unavailable(tr!("Nothing changed")).show(ui, theme, keymap) };
