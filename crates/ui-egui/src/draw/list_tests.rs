@@ -2182,3 +2182,44 @@ fn the_planned_parts_of_the_lists_are_drawn_coming_soon() {
         .count();
     assert!(drafts == 0 || disabled >= 1, "{drafts} drafts, {disabled} drawn coming soon");
 }
+
+#[test]
+fn every_scene_of_the_lists_is_walked_by_tab_and_rests() {
+    use crate::mailbox::Pile;
+    use inboxcraft_model::Role as MailRole;
+    type Scene = (&'static str, fn(&mut InboxApp));
+    let scenes: [Scene; 8] = [
+        ("smart", |_| {}),
+        ("grouped", |app| app.mailbox_mut().set_inbox_view(InboxView::Grouped)),
+        ("list", |app| app.mailbox_mut().set_inbox_view(InboxView::List)),
+        ("later", |app| app.mailbox_mut().open(Place::Later(Pile::Snoozed))),
+        ("new senders", |app| app.mailbox_mut().open(Place::Senders)),
+        ("empty search", |app| app.search("zeppelin")),
+        ("drafts", |app| app.mailbox_mut().open(Place::View(MailRole::Drafts))),
+        ("outbox", |app| app.mailbox_mut().open(Place::Outbox)),
+    ];
+    for (name, set) in scenes {
+        let mut app = app(true);
+        app.set_reduce_motion(true);
+        set(&mut app);
+        // A message open, as Tab onto a row opens its message: the reader stands beside the list all the walk long.
+        let first = app.mailbox().messages().first().map(|row| row.id);
+        app.mailbox_mut().select(first);
+        let mut harness = harness_of(app);
+        // The list's pane: the walk's scene. Tab onto a row opens its message, so the reader's controls change under
+        // the walk: they are its own slice's.
+        let pane = super::list::view_rect(&harness.ctx).map(|view| (view.left() - 1.0, view.left() + 441.0));
+        let in_list: Vec<String> = harness
+            .root()
+            .children_recursive()
+            .filter(|node| {
+                let middle = node.accesskit_node().bounding_box().map(|b| ((b.x0 + b.x1) / 2.0) as f32);
+                pane.zip(middle).is_some_and(|((left, right), x)| x > left && x < right)
+            })
+            .filter_map(|node| node.accesskit_node().label())
+            .collect();
+        let missed: Vec<String> = crate::component::tests::keyboard_walk(&mut harness).into_iter().filter(|label| in_list.contains(label)).collect();
+        assert!(missed.is_empty(), "{name}: Tab never reaches {missed:?}");
+        assert!(crate::component::tests::rests(&mut harness, 4), "{name}: at rest");
+    }
+}

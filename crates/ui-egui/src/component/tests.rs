@@ -370,18 +370,29 @@ pub(crate) fn keyboard_walk<State>(harness: &mut Harness<'_, State>) -> Vec<Stri
             None => {}
         }
     }
-    // A radio button without a Tab stop of its own is reached through its group (a segmented control's option: the
-    // group takes the focus and the arrow keys move the choice).
+    // A radio button in a group Tab reached is reached through it (a segmented control's option: the group takes the
+    // focus and the arrow keys move the choice): the group holds it in the tree, or its options stand inside its box.
+    let groups: Vec<Rect> = harness
+        .root()
+        .children_recursive()
+        .filter(|node| node.accesskit_node().role() == accesskit::Role::RadioGroup && reached.contains(&node.accesskit_node().locate().0))
+        .filter_map(|node| node.accesskit_node().bounding_box())
+        .map(|b| Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32)).expand(0.5))
+        .collect();
     let through_group: Vec<NodeId> = harness
         .root()
         .children_recursive()
         .filter(|node| {
             let data = node.accesskit_node();
+            let inside = data.bounding_box().is_some_and(|b| {
+                let rect = Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32));
+                groups.iter().any(|group| group.contains_rect(rect))
+            });
             data.role() == accesskit::Role::RadioButton
-                && !data.data().supports_action(accesskit::Action::Focus)
-                && std::iter::successors(node.parent(), |up| up.parent())
-                    .find(|up| up.accesskit_node().role() == accesskit::Role::RadioGroup)
-                    .is_some_and(|group| reached.contains(&group.accesskit_node().locate().0))
+                && (inside
+                    || std::iter::successors(node.parent(), |up| up.parent())
+                        .find(|up| up.accesskit_node().role() == accesskit::Role::RadioGroup)
+                        .is_some_and(|group| reached.contains(&group.accesskit_node().locate().0)))
         })
         .map(|node| node.accesskit_node().locate().0)
         .collect();
