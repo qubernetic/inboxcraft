@@ -264,7 +264,7 @@ fn on_a_line(width: f32) -> Harness<'static, (Option<Shown>, Rect, Rect)> {
         move |ui, (drawn, line, placed): &mut (Option<Shown>, Rect, Rect)| {
             let (_, at) = ui.allocate_space(vec2(width, 24.0));
             *line = at;
-            *placed = super::place(ui, &theme, &Keymap::default(), at, &sheet(None));
+            *placed = super::place(ui, &theme, &Keymap::default(), at, &sheet(None), None);
             *drawn = Some(actions(ui, &theme, &Keymap::default(), Id::unique("narrow"), at, true, &sheet(None)));
         },
         (None, Rect::NOTHING, Rect::NOTHING),
@@ -291,6 +291,51 @@ fn actions_that_do_not_fit_their_line_give_way_from_the_end() {
         if shown == 0 {
             assert_eq!(placed.width(), 0.0, "{width}: nothing to cover");
         }
+    }
+}
+
+/// The sheet's four on a line `width` wide with Read (place 2) the spare: the names drawn, left to right, and what a
+/// press on the last one names.
+fn sparing(width: f32) -> (Vec<String>, Option<usize>) {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = builder().with_size(vec2(400.0, 100.0)).build_ui_state(
+        move |ui, (line, clicked): &mut (Rect, Option<usize>)| {
+            let (_, at) = ui.allocate_space(vec2(width, 24.0));
+            *line = at;
+            let shown = super::actions_sparing(ui, &theme, &Keymap::default(), Id::unique("sparing"), at, true, &sheet(None), Some(2));
+            *clicked = clicked.or(shown.clicked);
+        },
+        (Rect::NOTHING, None),
+    );
+    harness.run();
+    let line = harness.state().0;
+    let mut drawn: Vec<(String, Rect)> =
+        SHEET.iter().filter_map(|(name, ..)| harness.query_by_label(name).map(|node| ((*name).to_owned(), node.rect()))).collect();
+    drawn.sort_by(|a, b| a.1.left().total_cmp(&b.1.left()));
+    for (name, rect) in &drawn {
+        assert!(line.contains_rect(*rect), "{width}: {name} {rect:?} leaves the line {line:?}");
+    }
+    if let Some((name, _)) = drawn.last() {
+        harness.get_by_label(name).click();
+        harness.run();
+    }
+    (drawn.into_iter().map(|(name, _)| name).collect(), harness.state().1)
+}
+
+#[test]
+fn the_spare_action_gives_way_first_and_the_others_keep_their_places() {
+    // Done 43, Snooze 43, Read 43, Delete 56, 4 apart: all four need 197, Done, Snooze and Delete 150.
+    for (width, wanted, last) in [
+        (197.0, &["Done", "Snooze", "Mark as read", "Delete"][..], Some(3)),
+        (196.0, &["Done", "Snooze", "Delete"][..], Some(3)),
+        (150.0, &["Done", "Snooze", "Delete"][..], Some(3)),
+        (149.0, &["Done", "Snooze"][..], Some(1)),
+        (43.0, &["Done"][..], Some(0)),
+        (42.0, &[][..], None),
+    ] {
+        let (names, clicked) = sparing(width);
+        assert_eq!(names, wanted, "a line {width} wide");
+        assert_eq!(clicked, last, "{width}: a press names the action by its place in the list");
     }
 }
 

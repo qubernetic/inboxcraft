@@ -13,8 +13,9 @@
 //! the rows no group holds come last. A row of a grouped account has a context menu that puts its sender's mail in
 //! another group. `ui_shot` can show invented senders and groups instead ([`crate::mailbox::Showcase`]).
 //!
-//! A hovered row and a row selected by keyboard show the hover actions alike: Done, mark read or unread, Delete, on a
-//! real account as on the sample. Done and Delete act at once, and the toast with Undo shows; the row's gap closes over
+//! A hovered row and a row selected by keyboard show the hover actions alike: Done, Snooze, mark read or unread, Delete,
+//! on a real account as on the sample; where the row holds only three (beside the reader at 130 %), Read gives way and
+//! stays on its key and the row's menu. Done and Delete act at once, and the toast with Undo shows; the row's gap closes over
 //! the `row_collapse` token (at once with motion off).
 //!
 //! Under the header, pills: over a wide unified inbox with groups the view switch (the one of the Triage settings
@@ -649,6 +650,8 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         marks: &marks,
         done: message.done,
         checked: false,
+        // Beside the reader the 440 list holds three of the four: Read gives way, Delete stays.
+        spare: Some(READ_ACTION),
     };
     // Built only for the row whose group can show: the other rows hand the group nothing.
     let reach = keyed || ui.rect_contains_pointer(ui.available_rect_before_wrap());
@@ -993,6 +996,7 @@ fn leaving_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, m
         marks: &[],
         done: false,
         checked: false,
+        spare: None,
     };
     let _ = mail_row(&mut face, theme, keymap, &shown, false, &[], rest);
 }
