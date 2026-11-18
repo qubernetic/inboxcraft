@@ -1865,6 +1865,7 @@ impl Mailbox {
     /// Puts `rows` in the list in place of the engine's: a list longer than the engine lists, for a test.
     #[cfg(test)]
     pub(crate) fn set_rows(&mut self, rows: Vec<MessageRow>) {
+        self.revision = self.revision.wrapping_add(1);
         self.messages = rows;
         self.rows_serial = self.rows_serial.wrapping_add(1);
     }
