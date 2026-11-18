@@ -127,15 +127,30 @@ fn the_grouped_inbox_names_its_rule_and_group() {
 fn the_owners_choices_for_the_sender_come_before_the_classifier() {
     let mut session = session();
     put(&mut session, FIRST, 1, "carol@example.org", listed());
-    sender(&mut session, "carol@example.org", true, Some(Screening::Accepted), Some(Group::People));
-    let reasons = why(&mut session, FIRST);
+    sender(&mut session, "carol@example.org", true, Some(Screening::Accepted), None);
     assert_eq!(
-        reasons,
+        why(&mut session, FIRST),
         [
-            json!({ "kind": "sender", "text_id": "why.sender.group", "args": { "address": "carol@example.org", "group": "people" } }),
+            json!({ "kind": "rule", "text_id": "why.rule.group", "args": { "group": "newsletters", "rule": "list" } }),
             json!({ "kind": "sender", "text_id": "why.sender.accepted", "args": { "address": "carol@example.org" } }),
         ]
     );
+    // A group chosen for the sender takes the classifier's place, and says the acceptance too: one decision, one
+    // reason.
+    sender(&mut session, "carol@example.org", true, Some(Screening::Accepted), Some(Group::People));
+    assert_eq!(
+        why(&mut session, FIRST),
+        [json!({ "kind": "sender", "text_id": "why.sender.group", "args": { "address": "carol@example.org", "group": "people" } })]
+    );
+}
+
+#[test]
+fn a_blocked_sender_in_the_blocked_folder_is_one_reason_and_leaves_room() {
+    let mut session = session();
+    put(&mut session, FIRST, 2, "anna@example.org", with_id("plans@example.org"));
+    put(&mut session, FIRST + 1, BLOCKED, "frank@example.org", answering("plans@example.org"));
+    sender(&mut session, "frank@example.org", true, Some(Screening::Blocked), Some(Group::Updates));
+    assert_eq!(said(&why(&mut session, FIRST + 1)), [pair("sender", "why.sender.blocked"), pair("thread", "why.thread.yours")]);
 }
 
 #[test]
@@ -246,6 +261,28 @@ fn at_most_four_reasons_the_least_specific_left_out() {
         said(&settle(five)),
         [pair("snooze", "why.snooze.returned"), pair("rule", "why.rule.group"), pair("sender", "why.sender.blocked"), pair("screener", "why.screener.new")]
     );
+}
+
+#[test]
+fn a_reason_that_says_a_decision_again_goes_before_the_cap() {
+    let reasons = |pairs: &[(&str, &str)]| pairs.iter().map(|(kind, text_id)| reason(kind, text_id, json!({}))).collect::<Vec<Value>>();
+    let five = reasons(&[
+        ("snooze", "why.snooze.returned"),
+        ("sender", "why.sender.group"),
+        ("sender", "why.sender.accepted"),
+        ("screener", "why.screener.held"),
+        ("thread", "why.thread.other"),
+    ]);
+    assert_eq!(
+        said(&settle(five)),
+        [pair("snooze", "why.snooze.returned"), pair("sender", "why.sender.group"), pair("screener", "why.screener.held"), pair("thread", "why.thread.other")]
+    );
+    let blocked = reasons(&[("sender", "why.sender.blocked"), ("screener", "why.screener.blocked"), ("thread", "why.thread.other")]);
+    assert_eq!(said(&settle(blocked)), [pair("sender", "why.sender.blocked"), pair("thread", "why.thread.other")]);
+    // Alone, each says its own decision.
+    for alone in [("sender", "why.sender.accepted"), ("screener", "why.screener.blocked")] {
+        assert_eq!(said(&settle(reasons(&[alone]))), [pair(alone.0, alone.1)]);
+    }
 }
 
 #[test]

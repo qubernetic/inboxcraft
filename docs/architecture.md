@@ -101,7 +101,8 @@ sender's address (cleaned and cut at 254 characters), a count, a folder id and r
 into the answer. `rule` names the grouped inbox classifier's rule (`calendar`, `automatic`, `list`, `junk`, `robot`,
 `other`), or `why.sender.group` the owner's choice of group for the sender, only for mail in the inbox of a grouped
 account; a return from a snooze counts while the message is in the inbox, as the store keeps
-when it came back but not where to; `default` (the folder) comes only when nothing else does.
+when it came back but not where to. One decision gives one reason: a sender blocked leaves out `why.screener.blocked`,
+a group chosen for the sender leaves out `why.sender.accepted`, before the four are counted. `default` (the folder) comes only when nothing else does.
 
 The appearance commands (`ui.theme.set`, `ui.text_scale.set`, `ui.motion.set`, `ui.frame.set`, all `safe`) change
 one choice each of the session's `Appearance` (`engine::appearance`) and answer the whole of it. The colours, the

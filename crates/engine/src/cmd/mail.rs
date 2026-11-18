@@ -552,8 +552,17 @@ fn why(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     Ok(Outcome::new(json!({ "reasons": settle(reasons) })))
 }
 
-/// The reasons an answer gives of `reasons`, most specific first: at most [`MAX_REASONS`].
+/// Pairs of reasons that say one decision of the owner's twice: the first, more specific, stays and the second goes.
+/// A sender blocked is why its mail is in the blocked folder; a group chosen for a sender is chosen by accepting it
+/// (`screener.accept` with a group) or for a sender whose mail comes in, so it says the sender is let in.
+const SAME_DECISION: [(&str, &str); 2] = [("why.sender.blocked", "why.screener.blocked"), ("why.sender.group", "why.sender.accepted")];
+
+/// The reasons an answer gives of `reasons`, most specific first: one reason a decision, then at most
+/// [`MAX_REASONS`].
 fn settle(mut reasons: Vec<Value>) -> Vec<Value> {
+    let said = |text_id: &str, reasons: &[Value]| reasons.iter().any(|reason| reason["text_id"] == text_id);
+    let dropped: Vec<&str> = SAME_DECISION.iter().filter(|(stays, _)| said(stays, &reasons)).map(|(_, goes)| *goes).collect();
+    reasons.retain(|reason| !dropped.iter().any(|goes| reason["text_id"] == *goes));
     reasons.truncate(MAX_REASONS);
     reasons
 }
