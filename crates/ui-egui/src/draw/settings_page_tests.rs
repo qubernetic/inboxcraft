@@ -223,3 +223,34 @@ fn tab_reaches_every_control_of_every_page_and_each_page_rests() {
         }
     }
 }
+
+#[test]
+fn hostile_account_names_never_break_a_page() {
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    // The engine cleans a name (controls out, at most its length): what is left is still long, wide and without spaces.
+    let label = format!("Allotment\u{202e}\r\n\u{0}\u{7}{}", "Ω".repeat(400));
+    let answer = app.mailbox_mut().run("account.update", &serde_json::json!({ "account": 1, "label": label }));
+    assert!(answer.is_ok(), "{answer:?}");
+    app.mailbox_mut().refresh();
+    let kept = app.mailbox().accounts().iter().map(|account| account.label.chars().count()).max().unwrap_or(0);
+    assert!(kept >= 60, "a long name: {kept} characters");
+    for scale in [crate::theme::TextScale::default(), crate::theme::TextScale::from_percent(130).unwrap()] {
+        let mut harness = Harness::builder()
+            .with_size(vec2(900.0, 640.0))
+            .with_context_setup(crate::theme::install_fonts)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        harness.state_mut().set_text_scale(scale);
+        for section in Section::ALL {
+            harness.state_mut().settings_mut().open_at(section);
+            harness.run();
+            let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+            // On the page (the window under the sheet has its own rows of the account).
+            let page = harness.get_by_role_and_label(Role::Heading, section.name()).rect();
+            for node in harness.query_all_by_label_contains("ΩΩΩΩ").filter(|node| node.rect().left() >= page.left() - 16.0) {
+                let rect = node.rect();
+                assert!(rect.right() <= sheet.right() + 0.5, "{section:?}: {rect:?} past the sheet {sheet:?}");
+            }
+        }
+        app = harness.into_state();
+    }
+}
