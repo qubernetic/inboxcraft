@@ -420,18 +420,28 @@ fn what_comes_from_outside_opens_where_it_is_seen_from_every_place() {
         assert!(!desktop.app().settings().is_open(), "place {at}: nor under the settings");
         assert_eq!(desktop.app().calendar().picked().map(|event| event.id), Some(event), "place {at}");
 
-        // What opens nothing leaves the window where it was.
-        let (mut desktop, send_show, click) = clicking();
+        // What opens nothing leaves the window where it was: the tray's and a second start's "show", a
+        // notification's buttons, and an agent's calls (the control channel's and the CLI's `safe` commands only
+        // read or change the mail; none of them opens a message, a thread or the composer in the window).
+        let (desktop, send_show, click) = clicking();
+        let (calls_in, calls) = mpsc::channel();
+        let mut desktop = desktop.with_control(calls);
         place(desktop.app_mut());
         let settings = desktop.app().settings().is_open();
         let id = unread_message(&desktop);
         click.send(Click::Show).unwrap();
         click.send(Click::Read(id)).unwrap();
-        click.send(Click::Done(id)).unwrap();
         send_show.send(Request::Show).unwrap();
+        let (listing, listed) = call("mail.list", json!({}));
+        calls_in.send(listing).unwrap();
+        let (thread, threaded) = call("mail.thread", json!({ "id": id }));
+        calls_in.send(thread).unwrap();
+        click.send(Click::Done(id)).unwrap();
         tick(&mut desktop, &ctx, false);
-        assert_eq!(desktop.app().screen(), before, "place {at}: show, read and done move nothing");
+        assert!(listed.try_recv().unwrap().is_ok() && threaded.try_recv().unwrap().is_ok(), "place {at}");
+        assert_eq!(desktop.app().screen(), before, "place {at}: show, read, done and a call move nothing");
         assert_eq!(desktop.app().settings().is_open(), settings, "place {at}");
+        assert_eq!(desktop.app().reader().open_id(), None, "place {at}: nor open a message");
         drop(send);
     }
 }
