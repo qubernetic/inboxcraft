@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The month view: the weekdays' names, then the six weeks from the Monday on or before the month's first day on a grid
-//! of `panel_line` hairlines over the whole view. A cell holds its day's number (a button to the day view; the first of
-//! a month with the month's name, the days of other months `muted`, today in a `cyan_edge` box with `today` beside it,
-//! the day the arrows picked on `cyan`), the bands over whole days across the week's cells in lanes that share one
-//! line, and under them the day's timed events as chips, as many as fit, then a "+N more" link that opens the day's
+//! The month view: the weekdays' names, then the six weeks from the week's first day (the owner's week rule) on or
+//! before the month's first day on a grid of `panel_line` hairlines over the whole view. A cell holds its day's number
+//! (a button to the day view; the first of a month with the month's name, the days of other months `muted`, today in a
+//! `cyan_edge` box with `today` beside it, the day the arrows picked on `cyan`), the bands over whole days across the
+//! week's cells in lanes that share one line, and under them the day's timed events as chips, as many as fit, then a "+N more" link that opens the day's
 //! events in a float. Every count is bounded by the cell's room: a day of 500 events draws a few chips and one link.
 
 use egui::{Rect, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};

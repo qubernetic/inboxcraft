@@ -185,3 +185,25 @@ fn another_idle_job_moves_the_watch() -> Result {
     assert!(lines.iter().any(|line| line.contains("EXAMINE Archive") || line.contains("EXAMINE \"Archive\"")), "{lines:?}");
     Ok(())
 }
+
+#[test]
+fn after_a_failure_the_second_clean_resync_tells_that_the_account_is_current() -> Result {
+    // The first IDLE brings nothing; the second, after the failed round, new mail.
+    let fake = FakeImap::sample().on(When::Idle, []).on(When::Idle, [deliver()]);
+    let mut run = Run::with(fake, Options::default())?;
+    run.job(idle_inbox()?)?;
+    run.rounds(|kind| matches!(kind, EventKind::SyncFinished { .. }))?;
+    run.rounds(watching)?;
+    run.job(JobKind::SyncFolder { folder: FolderId::new(99), path: path("Nowhere")?, known: None })?;
+    // The round fails, and the resync right after it tells no end.
+    let events = run.rounds(watching)?;
+    assert!(events.iter().any(|kind| matches!(kind, EventKind::Failed { .. })), "{events:?}");
+    assert!(!events.iter().any(|kind| matches!(kind, EventKind::SyncFinished { .. })), "{events:?}");
+    // The mail that comes brings a resync with nothing failed since the last: the account is current again.
+    let events = run.rounds(|kind| matches!(kind, EventKind::FolderSynced { .. }))?;
+    assert!(!added(&events).is_empty(), "{events:?}");
+    let next = run.rounds(|_| true)?;
+    assert!(matches!(next[..], [EventKind::SyncFinished { .. }]), "{next:?}");
+    run.finish()?;
+    Ok(())
+}

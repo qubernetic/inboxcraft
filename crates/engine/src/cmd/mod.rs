@@ -9,6 +9,7 @@
 //! in the `modules!` line below.
 
 pub use mail::MAX_LIST;
+pub(crate) use sync::{finished as sync_finished, progress as sync_progress};
 
 use crate::CommandSpec;
 
@@ -40,7 +41,7 @@ macro_rules! modules {
     };
 }
 
-modules!(account, act, calendar, compose, folder, mail, notify, outbox, remote, sample, schedule, send, template, triage, ui);
+modules!(account, act, calendar, compose, folder, mail, notify, outbox, remote, sample, schedule, send, sync, template, triage, ui);
 
 /// Every built-in command.
 pub(crate) fn all() -> Vec<CommandSpec> {
@@ -119,6 +120,9 @@ pub(crate) mod send_tests;
 #[cfg(test)]
 #[path = "snooze_tests.rs"]
 mod snooze_tests;
+#[cfg(test)]
+#[path = "sync_tests.rs"]
+mod sync_tests;
 #[cfg(test)]
 #[path = "template_tests.rs"]
 mod template_tests;
