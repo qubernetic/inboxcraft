@@ -56,11 +56,12 @@ fn texts(paint: &Paint, rect: Rect) -> Vec<(Vec2, String, Color32, bool)> {
 }
 
 /// The fills of the marks of `paint`: the discs' and the ring's dots, and the circles' strokes.
+/// (A disc at 130 % is 10.7 across.)
 fn marks(paint: &Paint) -> Vec<Color32> {
     paint
         .rects()
         .filter_map(|shape| match shape.look {
-            Look::Rect { fill, stroke, .. } if shape.rect.width() <= 10.0 => {
+            Look::Rect { fill, stroke, .. } if shape.rect.width() <= 12.0 => {
                 if fill.a() > 0 {
                     Some(fill)
                 } else {
@@ -131,9 +132,9 @@ fn at_130_percent_the_item_is_34_high_and_its_paddings_stay() {
 }
 
 #[test]
-fn hover_focus_and_pressed_look_as_the_sheet_and_the_rule_say() {
-    for mode in [Mode::Dark, Mode::Light] {
-        let theme = Theme::new(mode, TextScale::default());
+fn hover_focus_and_pressed_look_as_the_sheet_and_the_rule_say_at_100_and_130_percent() {
+    for (mode, scale) in [Mode::Dark, Mode::Light].into_iter().flat_map(|mode| [(mode, TextScale::default()), (mode, TextScale::ALL[4])]) {
+        let theme = Theme::new(mode, scale);
         let p = theme.palette;
         let looks = [
             (Shown::Hover, Some(p.grid), None, p.ink),
@@ -146,8 +147,17 @@ fn hover_focus_and_pressed_look_as_the_sheet_and_the_rule_say() {
             let rect = harness.get_by_label(words).rect();
             let paint = painted(&harness, words);
             let look = own(&paint, rect);
-            let at = format!("{mode:?} {shown:?}: {look:#?}");
-            assert_eq!(rect.size(), vec2(109.0, 26.0), "{at}");
+            let at = format!("{mode:?} {scale:?} {shown:?}: {look:#?}");
+            if scale == TextScale::default() {
+                assert_eq!(rect.size(), vec2(109.0, 26.0), "{at}");
+            } else {
+                // 34 high; 6 in, the sign 15 (11 × 1.3, up), 6 to the text, whose box ends 6 before the item's.
+                assert_eq!(rect.height(), 34.0, "{at}");
+                let (offset, ..) = &texts(&paint, rect)[0];
+                assert_eq!(offset.x, 27.0, "{at}");
+                let text = paint.shapes.iter().find(|shape| matches!(shape.look, Look::Text { .. })).map(|shape| shape.rect).unwrap();
+                assert_eq!(rect.right() - 6.0, rect.left() + 27.0 + crate::draw::paint::run_box(text.width()), "{at}");
+            }
             assert_eq!(look.fill, fill, "{at}");
             assert_eq!(look.edge, edge.map(|colour| (1.0, colour, false)), "{at}");
             assert_eq!(texts(&paint, rect)[0].2, ink, "{at}");
@@ -276,5 +286,56 @@ fn a_hostile_10000_character_failure_is_one_line_inside_the_item_cleaned_or_not(
         assert!(line.ends_with('…') && line.matches('…').count() == 1, "{line:?}");
         assert!(!line.contains(['\r', '\n', '\0', '\u{202E}', '\u{2067}']), "{line:?}");
         assert!(rect.expand(0.5).contains_rect(bounds), "{bounds:?} leaves {rect:?}");
+    }
+}
+
+#[test]
+fn a_line_looks_at_no_more_than_the_cap_of_a_10000_character_text() {
+    let long = format!("Studio\r\n\0\u{202E}{}", "refused ".repeat(1300));
+    assert!(long.chars().count() > 10_000);
+    let (kept, cut) = super::kept(&long);
+    assert!(cut);
+    assert!(kept.chars().count() <= crate::component::MOST, "{}", kept.chars().count());
+    assert!(!kept.contains(['\r', '\n', '\0', '\u{202E}']), "plain words");
+    let (short, cut) = super::kept("synced 14:02");
+    assert_eq!((short.as_ref(), cut), ("synced 14:02", false));
+}
+
+/// Every text, rect and disc the last frame of `harness` painted, as far as its clip shows it, and whether it is text.
+fn shown_shapes<State>(harness: &Harness<'_, State>) -> Vec<(Rect, bool, bool)> {
+    fn open(shape: &egui::Shape, clip: Rect, out: &mut Vec<(Rect, bool, bool)>) {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, clip, out)),
+            egui::Shape::Text(text) => out.push((text.visual_bounding_rect().intersect(clip), true, false)),
+            egui::Shape::Rect(rect) => out.push((rect.rect.intersect(clip), false, false)),
+            egui::Shape::Circle(circle) => {
+                out.push((Rect::from_center_size(circle.center, Vec2::splat(circle.radius * 2.0)).intersect(clip), false, true));
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, clipped.clip_rect, &mut out));
+    out
+}
+
+#[test]
+fn an_item_is_never_wider_than_its_room_and_draws_only_what_fits_whole() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    // In 20 the mark fits whole (6 + 11) and the text not at all; in 8 not even the mark; in 0 nothing.
+    for (room, disc) in [(0.0, false), (8.0, false), (20.0, true)] {
+        let words = "synced 14:02";
+        let harness = harness(theme, StatusItem::new(words, Kind::Ok).pressable(), room);
+        let rect = harness.get_by_label(words).rect();
+        assert!(rect.width() <= room, "{room}: {rect:?}");
+        let shapes: Vec<_> = shown_shapes(&harness)
+            .into_iter()
+            .filter(|(bounds, ..)| bounds.is_positive() && !(bounds.contains_rect(rect) && *bounds != rect))
+            .collect();
+        for (bounds, ..) in &shapes {
+            assert!(rect.expand(0.01).contains_rect(*bounds), "{room}: {bounds:?} leaves {rect:?}");
+        }
+        assert!(!shapes.iter().any(|(_, text, _)| *text), "{room}: no text fits");
+        assert_eq!(shapes.iter().any(|(_, _, circle)| *circle), disc, "{room}: the mark");
     }
 }

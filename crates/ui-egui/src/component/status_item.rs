@@ -141,14 +141,21 @@ impl<'a> StatusItem<'a> {
 /// of a line.
 pub(crate) fn one_line(ui: &Ui, theme: &Theme, text: &str, room: f32) -> String {
     let font = theme.fonts.mono_s;
-    let (kept, was_capped) = super::capped(text, super::MOST);
-    let clean = super::plain(kept);
+    let (clean, was_capped) = kept(text);
     let shown = super::fit_capped(ui, &clean, font, room);
     if was_capped && !shown.ends_with('…') {
         // The line held all it was given: the ellipsis says the rest was left out.
         return super::fit_capped(ui, &format!("{}…", clean.trim_end()), font, room);
     }
     shown
+}
+
+/// The part of `text` from outside that a line looks at: at most [`super::MOST`] characters, cut between grapheme
+/// clusters before anything else reads it, as plain words; and whether it was cut. However long `text` is, what comes
+/// back is a line's worth.
+pub(crate) fn kept(text: &str) -> (std::borrow::Cow<'_, str>, bool) {
+    let (kept, was_capped) = super::capped(text, super::MOST);
+    (super::plain(kept), was_capped)
 }
 
 /// What a screen reader hears for `text` from outside: plain words, at most [`super::MOST`] characters of them.
@@ -171,7 +178,9 @@ fn layout(ui: &Ui, theme: &Theme, item: &StatusItem<'_>, room: f32) -> (f32, Str
     let text_room = if room.is_nan() { 0.0 } else { (room - before - PAD).clamp(0.0, MOST_TEXT) };
     let text = one_line(ui, theme, item.text, text_room);
     let wide = run_box(super::galley(ui, &text, theme.fonts.mono_s, ink).size().x).min(text_room);
-    ((before + wide + PAD).floor(), text, mark, ink)
+    // Never wider than the room: the text gives way first, then the pads and the mark are cut by the room.
+    let room = if room.is_nan() { 0.0 } else { room.max(0.0) };
+    ((before + wide + PAD).min(room).floor(), text, mark, ink)
 }
 
 /// The status item `item` in `ui`, at most as wide as `ui` has room for; its response, clicked when it was pressed
@@ -216,10 +225,15 @@ pub fn status_item(ui: &mut Ui, theme: &Theme, item: StatusItem<'_>) -> Response
     let top = (rect.center().y - font.line / 2.0).round();
     let mut left = rect.left() + PAD;
     if let Some(mark) = mark {
-        paint_mark(&painter, theme, mark, pos2(left, top), rect.center().y);
+        // Only a mark that fits whole is drawn.
+        if left + mark.width(theme) <= rect.right() {
+            paint_mark(&painter, theme, mark, pos2(left, top), rect.center().y);
+        }
         left += mark.width(theme) + PAD;
     }
-    run_at(&painter, pos2(left, top), super::galley(ui, &text, font, ink), ink);
+    if !text.is_empty() {
+        run_at(&painter, pos2(left, top), super::galley(ui, &text, font, ink), ink);
+    }
     response
 }
 
