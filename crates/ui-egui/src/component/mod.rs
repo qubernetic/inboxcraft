@@ -61,6 +61,7 @@ pub mod gallery_fields;
 pub mod gallery_lists;
 pub mod gallery_reader;
 pub mod gallery_screens;
+pub mod gallery_status;
 pub mod group_head;
 pub mod hairline_table;
 pub mod hover;

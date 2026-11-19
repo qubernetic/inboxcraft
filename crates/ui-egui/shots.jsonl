@@ -283,3 +283,6 @@
 # An open list on the settings sheet: the add-account form's IMAP security select, its list open over the sheet (#238).
 {"out": "docs/images/settings-select-open-light.png", "mode": "light", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
 {"out": "docs/images/settings-select-open-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
+# The page of the status line's sets: the status item and the status message in every state (#287).
+{"out": "docs/images/components-status-light.png", "mode": "light", "status_sets": true}
+{"out": "docs/images/components-status-dark.png", "mode": "dark", "status_sets": true}

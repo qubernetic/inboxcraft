@@ -924,3 +924,16 @@ fn the_screens_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
         assert!(error.to_string().contains("x.png:"), "{error}");
     }
 }
+
+#[test]
+fn the_status_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "status_sets": true}}"#))).unwrap();
+        let size = crate::component::gallery_status::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""lists": true"#, r#""calendar_sets": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "status_sets": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}
