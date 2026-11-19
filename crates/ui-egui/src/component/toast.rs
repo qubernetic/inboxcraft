@@ -85,13 +85,16 @@ pub fn panel(ui: &mut Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>, wid
     undone
 }
 
-/// Shows the toast `id` at its `place`, rising into it; whether Undo was pressed.
+/// Shows the toast `id` at its `place`, rising into it; whether Undo was pressed. A toast with no Undo has no control
+/// and takes no press: a press on its float reaches what lies under it. A toast with Undo still takes the presses over
+/// its whole float (egui's area does, so its Undo can be pressed).
 pub fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, id: Id, toast: &Toast<'_>, place: Place) -> bool {
     let risen = motion::appear(ctx, id, theme.motion.toast);
     let below = (theme.spacing.s6 * (1.0 - risen)).min((place.lowest - place.bottom.y).max(0.0));
     let at = place.bottom + vec2(0.0, below);
     Area::new(id)
         .order(Order::Foreground)
+        .interactable(toast.undo.is_some())
         .pivot(Align2::CENTER_BOTTOM)
         .fixed_pos(at)
         .fade_in(false)
@@ -105,3 +108,7 @@ pub fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, id: Id, toast: &Toast
 #[cfg(test)]
 #[path = "toast_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "toast_cover_tests.rs"]
+mod cover_tests;

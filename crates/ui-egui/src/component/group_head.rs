@@ -146,7 +146,14 @@ pub fn least_width(ui: &Ui, theme: &Theme, head: &GroupHead<'_>) -> f32 {
     let count = if head.unread == 0 { crate::tr!("nothing to read").to_owned() } else { head.unread.to_string() };
     let parts = [head.link, head.hover_link].into_iter().flatten().map(|words| GAP + wide(words, f.mono_s).ceil()).sum::<f32>()
         + head.shown.map_or(0.0, |words| GAP + paint::run_box(wide(words, f.mono_s)));
-    (PAD * 2.0 + paint::run_box(wide(head.index, f.label)) + GAP + wide(head.name, f.label) + GAP + parts + wide(&count, f.mono_s)).ceil()
+    (PAD * 2.0
+        + paint::run_box(wide(head.index, f.label))
+        + GAP
+        + paint::measured(&super::galley(ui, head.name, f.label, p.muted)).max(wide(head.name, f.label))
+        + GAP
+        + parts
+        + paint::run_box(wide(&count, f.mono_s)))
+    .ceil()
 }
 
 #[cfg(test)]
