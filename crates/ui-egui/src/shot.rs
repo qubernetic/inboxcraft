@@ -177,7 +177,7 @@ pub struct Shot {
     #[serde(default)]
     pub notifications: Option<bool>,
     /// The settings shown on the section of this name (`appearance` … `plugins`, [`crate::settings::Section::id`]), or on
-    /// the page under one (`templates`, [`crate::settings::Under::id`]).
+    /// the page under one (`templates`; `scheduled`, over the sending sample; [`crate::settings::Under::id`]).
     #[serde(default)]
     pub section: Option<String>,
     /// How the unified inbox shows its groups: `smart` when left out, `grouped` or `list` (the earlier `cards` and
@@ -642,6 +642,10 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
             // The page under Sending, with the sample's templates kept (the window's own saves, not an agent's).
             crate::sample::templates(app.mailbox_mut()).map_err(|error| bad(format!("{}: {error}", shot.out)))?;
             app.open_templates();
+        } else if crate::settings::Under::named(name) == Some(crate::settings::Under::Scheduled) {
+            // The page under Sending, over the sending sample with its snooze, reminder, send later and alert.
+            crate::sample::scheduled(app.mailbox_mut()).map_err(|error| bad(format!("{}: {error}", shot.out)))?;
+            app.open_scheduled();
         } else {
             let section = crate::settings::Section::named(name).ok_or_else(|| bad(format!("{}: no settings section {name:?}", shot.out)))?;
             app.settings_mut().open_at(section);
@@ -1722,7 +1726,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     let session = if shot.first == Some(true) {
         let store = inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default());
         inboxcraft_engine::Session::new(Box::new(store), Box::new(clock.clone())).map_err(UiError::Engine)?
-    } else if shot.outbox.is_some() {
+    } else if shot.outbox.is_some() || shot.section.as_deref() == Some(crate::settings::Under::Scheduled.id()) {
         sample::sending(Box::new(clock.clone()))?
     } else if shot.invitations == Some(true) {
         let mut store = sample::mailbox(time)?;

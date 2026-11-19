@@ -130,6 +130,8 @@ pub struct Settings {
     under: Option<Under>,
     /// The Templates page's state.
     templates: crate::templates::Templates,
+    /// The Scheduled page's state.
+    scheduled: crate::scheduled::Scheduled,
 }
 
 /// A page under a section, reached from a row of the section's page, with a link back to it.
@@ -137,6 +139,8 @@ pub struct Settings {
 pub enum Under {
     /// The templates of every account, under Sending.
     Templates,
+    /// Everything that waits for its time, under Sending.
+    Scheduled,
 }
 
 impl Under {
@@ -144,7 +148,7 @@ impl Under {
     #[must_use]
     pub fn section(self) -> Section {
         match self {
-            Self::Templates => Section::Sending,
+            Self::Templates | Self::Scheduled => Section::Sending,
         }
     }
 
@@ -153,13 +157,14 @@ impl Under {
     pub fn id(self) -> &'static str {
         match self {
             Self::Templates => "templates",
+            Self::Scheduled => "scheduled",
         }
     }
 
     /// The page whose [`Self::id`] is `name`.
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
-        [Self::Templates].into_iter().find(|under| under.id() == name)
+        [Self::Templates, Self::Scheduled].into_iter().find(|under| under.id() == name)
     }
 }
 
@@ -235,6 +240,7 @@ impl Settings {
         self.capturing = None;
         self.under = None;
         self.templates.leave();
+        self.scheduled.leave();
     }
 
     /// Shows the page `under` its section.
@@ -260,6 +266,17 @@ impl Settings {
         &mut self.templates
     }
 
+    /// The Scheduled page's state.
+    #[must_use]
+    pub fn scheduled(&self) -> &crate::scheduled::Scheduled {
+        &self.scheduled
+    }
+
+    /// The Scheduled page's state, to change.
+    pub fn scheduled_mut(&mut self) -> &mut crate::scheduled::Scheduled {
+        &mut self.scheduled
+    }
+
     /// Another place is shown: an action waiting for a key stops waiting and the notes on what the last change did go;
     /// the page, the text that narrows the Shortcuts page and a signature typed stay.
     pub fn leave(&mut self) {
@@ -268,6 +285,7 @@ impl Settings {
         self.keys_note = None;
         self.login_note = None;
         self.templates.leave();
+        self.scheduled.leave();
     }
 
     /// The action waiting for a key, if one is.

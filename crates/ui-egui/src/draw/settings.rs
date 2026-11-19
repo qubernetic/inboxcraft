@@ -46,6 +46,8 @@ use crate::tr;
 #[path = "settings_planned.rs"]
 mod planned;
 
+#[path = "settings_scheduled.rs"]
+pub(super) mod scheduled;
 #[path = "settings_templates.rs"]
 pub(super) mod templates;
 
@@ -169,6 +171,14 @@ pub(super) enum Asked {
     DeleteTemplate(u64, String),
     /// The delete was not confirmed.
     KeepTemplate,
+    /// The Scheduled page, under Sending.
+    Scheduled,
+    /// Ask the owner to confirm the cancel of this schedule entry.
+    AskCancelScheduled(u64),
+    /// The owner confirmed it: cancel this schedule entry.
+    CancelScheduled(u64),
+    /// The cancel was not confirmed.
+    KeepScheduled,
 }
 
 /// What the settings show and change.
@@ -592,6 +602,9 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
     if view.settings.under() == Some(crate::settings::Under::Templates) {
         return templates::page(ui, theme, keymap, view.settings, mailbox);
     }
+    if view.settings.under() == Some(crate::settings::Under::Scheduled) {
+        return scheduled::page(ui, theme, keymap, view.settings, mailbox);
+    }
     match view.settings.section() {
         Section::Appearance => appearance(ui, theme, view.current, view.level, mailbox.inbox_view()),
         Section::Accounts => super::accounts::page(ui, theme, keymap, mailbox, view.onboarding, view.can_add),
@@ -785,7 +798,7 @@ fn signature(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
     asked
 }
 
-/// The Sending page: Undo send, the signatures two by two, then the templates and the scheduled list (coming soon).
+/// The Sending page: Undo send, the signatures two by two, then the templates and the scheduled list.
 fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, mailbox: &Mailbox) -> Option<Asked> {
     let mut asked = None;
     head(ui, theme, Section::Sending, &[], |_| {});
@@ -859,15 +872,13 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
                 asked = Some(Asked::Templates);
             }
         });
-        settings_row_soon_with(
-            ui,
-            theme,
-            tr!("Scheduled"),
-            tr!("Everything that waits for its time, sends, snoozes, reminders and calendar alerts, in one list."),
-            |ui| {
-                link_sized(ui, theme, keymap, tr!("open the list →"), LinkSize::Small);
-            },
-        );
+        let line = tr!("Everything that waits for its time, sends, snoozes, reminders and calendar alerts, in one list.");
+        settings_row(ui, theme, tr!("Scheduled"), Some(line), |ui| {
+            let own = UiBuilder::new().scope_id(Id::unique("settings-open-scheduled"));
+            if ui.scope_builder(own, |ui| link_sized(ui, theme, keymap, tr!("open the list →"), LinkSize::Small)).inner.clicked() {
+                asked = Some(Asked::Scheduled);
+            }
+        });
     });
     asked
 }

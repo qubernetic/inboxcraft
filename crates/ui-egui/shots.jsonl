@@ -195,6 +195,11 @@
 {"out": "docs/images/settings-templates-delete-confirm-dark.png", "mode": "dark", "size": [1440, 900], "section": "templates", "steps": [{"press": "Delete the template Away from the studio"}]}
 {"out": "docs/images/settings-templates-editing-light.png", "mode": "light", "size": [1440, 900], "section": "templates", "steps": [{"press": "Edit the template Workshop invitation"}]}
 {"out": "docs/images/settings-templates-editing-dark.png", "mode": "dark", "size": [1440, 900], "section": "templates", "steps": [{"press": "Edit the template Workshop invitation"}]}
+# The Scheduled page under Sending (#317): the list, a cancel asked in place, nothing waiting.
+{"out": "docs/images/settings-scheduled-list-light.png", "mode": "light", "size": [1440, 900], "section": "scheduled"}
+{"out": "docs/images/settings-scheduled-list-dark.png", "mode": "dark", "size": [1440, 900], "section": "scheduled"}
+{"out": "docs/images/settings-scheduled-cancel-confirm-light.png", "mode": "light", "size": [1440, 900], "section": "scheduled", "steps": [{"press": "Cancel the send Fri 11:00: Thank-you cards: the proof"}]}
+{"out": "docs/images/settings-scheduled-cancel-confirm-dark.png", "mode": "dark", "size": [1440, 900], "section": "scheduled", "steps": [{"press": "Cancel the send Fri 11:00: Thank-you cards: the proof"}]}
 {"out": "docs/images/screener-senders-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
 {"out": "docs/images/screener-accepted-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps", "act": "accept"}
 {"out": "docs/images/grouped-cards-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "act": "newsletters"}

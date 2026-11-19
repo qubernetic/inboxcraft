@@ -3187,6 +3187,10 @@ impl InboxApp {
             | settings::Asked::AskDeleteTemplate(..)
             | settings::Asked::DeleteTemplate(..)
             | settings::Asked::KeepTemplate) => self.apply_templates(asked),
+            asked @ (settings::Asked::Scheduled
+            | settings::Asked::AskCancelScheduled(_)
+            | settings::Asked::CancelScheduled(_)
+            | settings::Asked::KeepScheduled) => self.apply_scheduled(asked),
         }
     }
 
