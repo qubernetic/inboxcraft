@@ -353,6 +353,18 @@ struct SnoozeRow {
     pass: u64,
 }
 
+/// Where a Snooze asked from outside the row (its key, in one pane over the keyed row) waits for the row's next draw.
+fn ask_snooze_id() -> Id {
+    Id::unique("list-ask-snooze")
+}
+
+/// Opens the time picker of the message `message`'s row as its Snooze does, when the row is next drawn keyed: the
+/// Snooze key in one pane, where the reader is not shown.
+pub(super) fn ask_snooze(ctx: &egui::Context, message: u64) {
+    ctx.data_mut(|data| data.insert_temp(ask_snooze_id(), message));
+    ctx.request_repaint();
+}
+
 /// Opens the time picker of the message `message`'s row from its Snooze (the hover action's `id`) on the row `rect`.
 fn open_snooze(ctx: &egui::Context, message: u64, action: Id, rect: Rect) {
     let anchor = ctx.read_response(action).map_or(rect, |response| response.rect).translate(-rect.min.to_vec2());
@@ -625,7 +637,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         }
     }
     let mut acted = drawn.acted.and_then(|index| act(message, index));
-    let presets = drawn.acted == Some(SNOOZE_ACTION);
+    // Its Snooze pressed, or its key asked for the keyed row ([`ask_snooze`]).
+    let asked = keyed && ui.ctx().data_mut(|data| data.remove_temp::<u64>(ask_snooze_id())) == Some(message.id);
+    let presets = drawn.acted == Some(SNOOZE_ACTION) || asked;
     if presets {
         open_snooze(ui.ctx(), message.id, actions_id(message.id).with(SNOOZE_ACTION), rect);
         note_snooze_row(ui.ctx(), message.id, rect, response.id);

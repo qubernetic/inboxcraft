@@ -885,7 +885,11 @@ impl InboxApp {
             // In one pane only, where it brings the list back in front: the list hidden beside a composer in two panes
             // has no Back.
             keymap::BACK => self.screen == Screen::Mail && self.single == Some(true) && self.in_place_of_list(),
-            keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
+            // In one pane with the list in front, on the keyed row, as its Snooze shows the key.
+            keymap::SNOOZE => {
+                self.screen == Screen::Mail
+                    && ((self.reader.open_id().is_some() && !self.docked() && !self.list_in_front()) || self.snooze_row().is_some())
+            }
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             // The composer's own: wherever a composer is drawn ([`crate::surface::of_the_composer`]).
             keymap::FOLD => self.composer_drawn() && !self.docked(),
@@ -960,7 +964,13 @@ impl InboxApp {
                 }
                 self.search.clear();
             }
-            keymap::SNOOZE => self.open_picker(""),
+            keymap::SNOOZE => match self.snooze_row() {
+                Some(row) => {
+                    self.mailbox.load_presets();
+                    list::ask_snooze(ctx, row);
+                }
+                None => self.open_picker(""),
+            },
             keymap::OPEN_HELD => {
                 if let Some(held) = self.held_back.take() {
                     // The owner's open, as a press: the message in the reader, read, a docked composer floating.
@@ -1271,6 +1281,12 @@ impl InboxApp {
     /// one selected from outside (a script); never one the keys or the focus walked to, which stays behind the list.
     fn message_in_front(&self) -> bool {
         self.reading || !self.mailbox.keyed()
+    }
+
+    /// In one pane with the list in front, the row that has the keyboard: the Snooze key opens the time picker on it,
+    /// as its Snooze does, since the reader is not shown.
+    fn snooze_row(&self) -> Option<u64> {
+        self.list_row.filter(|_| self.list_in_front() && !self.list_hidden)
     }
 
     /// Whether the calendar shows its event editor ([`Surface::Editor`]).

@@ -3070,6 +3070,26 @@ fn keyed_over_an_unread_row() -> (Harness<'static, InboxApp>, u64, u64) {
 }
 
 #[test]
+fn in_one_pane_h_opens_the_time_picker_on_the_keyed_row() {
+    // The owner's ruling: the row's Snooze shows H, and H does what it shows.
+    let (mut harness, keyed, _) = keyed_over_an_unread_row();
+    assert!(harness.query_by_label("Snooze until").is_none());
+    harness.key_press(Key::H);
+    harness.run();
+    harness.run();
+    harness.get_by_label("Snooze until");
+    let float = harness.ctx.memory(|memory| memory.area_rect(super::list::snooze_popup(keyed)));
+    let row = harness.ctx.read_response(super::list::row_id(keyed)).map(|response| response.rect).unwrap();
+    assert!(float.is_some_and(|float| float.top() >= row.top()), "it hangs from the keyed row: {float:?} {row:?}");
+    assert!(rows(&harness) > 0 && super::reader_rect(&harness.ctx).is_none(), "the list stays in front");
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none(), "Esc closes it");
+    assert!(harness.ctx.memory(|memory| memory.has_focus(super::list::row_id(keyed))), "and the row has the keyboard again");
+}
+
+#[test]
 fn in_one_pane_an_act_on_the_keyed_row_keys_the_next_and_reads_nothing_unseen() {
     // D, Delete, and an act from outside (a notification's Done, the control channel), each on the keyed row.
     for way in ["D", "Delete", "outside"] {
