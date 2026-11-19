@@ -428,6 +428,115 @@ pub(crate) fn check(_arguments: &Value, answer: &Value) -> String {
     cap(out)
 }
 
+/// The reasons `mail_why` writes: `mail.why` gives at most this many.
+const WHY_REASONS: usize = 4;
+
+/// The values of one reason `mail_why` writes: `mail.why` gives at most two.
+const WHY_ARGS: usize = 4;
+
+/// The longest value of a reason written, in characters: an address is at most 254 bytes.
+const WHY_ARG: usize = 254;
+
+/// The longest word of the engine's written (a kind, a text id, a key, a day's name), in characters.
+const MAX_WORD: usize = 40;
+
+/// The names of a list of the engine's words written (the days of the week are seven).
+const MAX_WORDS: usize = 7;
+
+/// One of the engine's words, kept to letters, digits, `_`, `.` and `-` and [`MAX_WORD`] characters; `-` for none.
+fn word(value: Option<&Value>) -> String {
+    word_of(value.and_then(Value::as_str).unwrap_or_default())
+}
+
+/// [`word`] of a text.
+fn word_of(text: &str) -> String {
+    let kept: String = text.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-')).take(MAX_WORD).collect();
+    if kept.is_empty() { "-".to_owned() } else { kept }
+}
+
+/// The first [`MAX_WORDS`] words of a list, comma-separated; `-` for none.
+fn words(value: Option<&Value>) -> String {
+    let list = value.and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    if list.is_empty() {
+        return "-".to_owned();
+    }
+    list.iter().take(MAX_WORDS).map(|item| word(Some(item))).collect::<Vec<_>>().join(", ")
+}
+
+/// `mail_why`: how many reasons, then one a line, most specific first: its kind, its text id and its values. An
+/// address is the sender's, so the values are quoted under the untrusted line.
+pub(crate) fn why(arguments: &Value, answer: &Value) -> String {
+    let reasons = answer.get("reasons").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let shown = reasons.len().min(WHY_REASONS);
+    let mut out = format!(
+        "mail_why: message {}, {shown} reason{}, most specific first\n{UNTRUSTED}\nkind | text_id | args\n",
+        number(arguments, "id"),
+        if shown == 1 { "" } else { "s" }
+    );
+    for reason in reasons.iter().take(WHY_REASONS) {
+        let args = reason.get("args").and_then(Value::as_object);
+        let values: Vec<String> = args
+            .into_iter()
+            .flatten()
+            .take(WHY_ARGS)
+            .map(|(key, value)| {
+                let value = match value {
+                    Value::String(text) => quote(text, WHY_ARG),
+                    Value::Number(number) if number.is_u64() => number.to_string(),
+                    _ => "-".to_owned(),
+                };
+                format!("{} {value}", word_of(key))
+            })
+            .collect();
+        let values = if values.is_empty() { "-".to_owned() } else { values.join("; ") };
+        let _ = writeln!(out, "{} | {} | {values}", word(reason.get("kind")), word(reason.get("text_id")));
+    }
+    cap(out)
+}
+
+/// `week_settings`: the rule, the week of today, the names each part of the rule can take.
+pub(crate) fn week(_arguments: &Value, answer: &Value) -> String {
+    let this_week = answer.get("this_week").filter(|week| week.is_object()).map_or_else(
+        || "-".to_owned(),
+        |week| {
+            let number = week.get("number").and_then(Value::as_u64).map_or_else(|| "-".to_owned(), |number| number.to_string());
+            let year = week.get("year").and_then(Value::as_i64).map_or_else(|| "-".to_owned(), |year| year.to_string());
+            format!("{number} of {year}, from {}", word(week.get("first_day")))
+        },
+    );
+    cap(format!(
+        "week_settings: weeks start on {}; the first week of the year: {}\nthis week: {this_week}\nfirst days: {}\nfirst weeks: {}\n",
+        word(answer.get("first_day")),
+        word(answer.get("first_week")),
+        words(answer.get("days")),
+        words(answer.get("first_weeks"))
+    ))
+}
+
+/// A count of the answer, `-` when it is not one.
+fn count_of(value: Option<&Value>) -> String {
+    value.and_then(Value::as_u64).map_or_else(|| "-".to_owned(), |count| count.to_string())
+}
+
+/// `sync_status`: the state, the progress of the rounds under way, the last sync, the accounts that fail.
+pub(crate) fn sync(_arguments: &Value, answer: &Value) -> String {
+    let last = answer.get("last_synced").filter(|last| !last.is_null()).map_or_else(
+        || "never".to_owned(),
+        |last| {
+            // The app's answer, through the control channel: kept to the characters a date to the minute has.
+            let kept: String = date(last).chars().filter(|c| c.is_ascii_digit() || matches!(c, '-' | ':' | ' ')).take(MAX_WORD).collect();
+            if kept.trim().is_empty() { "-".to_owned() } else { kept }
+        },
+    );
+    cap(format!(
+        "sync_status: {}\nprogress: {} of {} folder syncs\nlast synced (UTC): {last}\nfailing accounts: {}\n",
+        word(answer.get("state")),
+        count_of(answer.get("done")),
+        count_of(answer.get("of")),
+        count_of(answer.get("failing_accounts"))
+    ))
+}
+
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;

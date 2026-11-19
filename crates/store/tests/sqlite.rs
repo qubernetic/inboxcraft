@@ -12,8 +12,8 @@ use std::path::Path;
 
 use contract::{account, body, folder, m, message, two_accounts};
 use inboxcraft_model::{
-    Account, AccountId, AlertId, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, Due, EmailAddress, FolderId, Job, JobId, JobKind,
-    MessageState, OutboxState,
+    AccountId, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, Due, EmailAddress, FolderId, Job, JobId, JobKind, MessageState,
+    OutboxState,
 };
 use inboxcraft_store::{Batch, Change, DATABASE_FILE, SCHEMA_VERSION, SOURCES_DIR, Search, Sqlite, Storage, StoreConfig, StoreError};
 
@@ -211,15 +211,6 @@ fn a_damaged_record_is_reported() {
 }
 
 #[test]
-fn an_id_sqlite_cannot_hold_is_refused() {
-    let (mut store, _tmp) = fresh();
-    let big = Account::new(AccountId::new(u64::MAX), "Big", EmailAddress::new("big@example.org").unwrap(), "big", account(1).imap().clone()).unwrap();
-    let refused = store.apply(&Batch::new().with(Change::PutAccount(big)));
-    assert_eq!(refused, Err(StoreError::Database(format!("id {} is out of range", u64::MAX))));
-    assert!(store.accounts().unwrap().is_empty());
-}
-
-#[test]
 fn the_database_runs_in_wal_mode_with_full_sync() {
     let tmp = dir();
     let dir = tmp.path();
@@ -388,33 +379,6 @@ fn every_store_has_an_id_of_its_own_for_good() {
 }
 
 #[test]
-fn a_local_id_sqlite_cannot_hold_is_refused() {
-    let (mut store, _tmp) = fresh();
-    two_accounts(&mut store);
-    let out_of_range = Err(StoreError::Database(format!("id {} is out of range", u64::MAX)));
-    for change in [
-        Change::QueueJob(Job::new(JobId::new(u64::MAX), AccountId::new(1), JobKind::SyncFolderList)),
-        Change::PutDraft(contract::draft(u64::MAX, 1, "x")),
-        Change::PutOutgoing(contract::outgoing(u64::MAX, OutboxState::Waiting)),
-        Change::PutScheduled(contract::scheduled(1, 1, Due::Send(DraftId::new(u64::MAX)))),
-        Change::PutScheduled(contract::scheduled(1, 1, Due::FollowUp(m(u64::MAX)))),
-        Change::PutScheduled(contract::scheduled(1, 1, Due::Alert(AlertId::new(u64::MAX)))),
-        Change::SetMessageState(m(u64::MAX), MessageState::default()),
-        Change::PutCalendar(contract::calendar(u64::MAX, 1, "home")),
-        Change::SetSyncToken(CalendarId::new(u64::MAX), None),
-        Change::PutCalendarEvent(contract::event(1, u64::MAX)),
-        Change::PutAlert(contract::alert(1, u64::MAX, 1)),
-        Change::RemoveJob(JobId::new(u64::MAX)),
-    ] {
-        assert_eq!(store.apply(&Batch::new().with(change)), out_of_range);
-    }
-    store.apply(&Batch::new().with(Change::PutDraft(contract::draft(1, 1, "x")))).unwrap();
-    let entry = Change::PutScheduled(contract::scheduled(u64::MAX, 1, Due::Send(DraftId::new(1))));
-    assert_eq!(store.apply(&Batch::new().with(entry)), out_of_range);
-    assert_eq!(store.drafts(AccountId::new(u64::MAX)), out_of_range.map(|()| Vec::new()));
-}
-
-#[test]
 fn a_removed_draft_leaves_no_words_in_the_files() {
     let tmp = dir();
     let dir = tmp.path();
@@ -464,4 +428,151 @@ fn a_forgotten_sender_refusal_or_sync_token_leaves_nothing_in_the_files() {
         store.apply(&Batch::new().with(change)).unwrap();
         assert_eq!(holding(dir, marker), Vec::<String>::new(), "{marker}");
     }
+}
+
+/// A record whose own id is past `i64::MAX` cannot be kept: its own error, not a database failure, and nothing written.
+/// `i64::MAX` itself is kept.
+#[test]
+fn a_record_whose_own_id_is_past_the_largest_key_is_refused() {
+    let (mut store, _tmp) = fresh();
+    two_accounts(&mut store);
+    let near = Batch::new()
+        .with(Change::PutDraft(contract::draft(1, 1, "near")))
+        .with(Change::PutCalendar(contract::calendar(1, 1, "home")))
+        .with(Change::PutCalendarEvent(contract::event(1, 1)));
+    store.apply(&near).unwrap();
+    for id in [u64::MAX, i64::MAX.unsigned_abs() + 1] {
+        for change in [
+            Change::PutAccount(account(id)),
+            Change::PutFolder(folder(id, 1, "Far")),
+            Change::PutMessage(message(id, 1, 1, 9, "far", None)),
+            Change::QueueJob(Job::new(JobId::new(id), AccountId::new(1), JobKind::SyncFolderList)),
+            Change::PutDraft(contract::draft(id, 1, "far")),
+            Change::PutCalendar(contract::calendar(id, 1, "far")),
+            Change::PutScheduled(contract::scheduled(id, 1, Due::Send(DraftId::new(1)))),
+            Change::PutCalendarEvent(contract::event(id, 1)),
+            Change::PutAlert(contract::alert(id, 1, 1)),
+        ] {
+            let what = format!("{change:?}");
+            let refused = store.apply(&Batch::new().with(change));
+            assert!(matches!(refused, Err(StoreError::IdOutOfRange(held)) if held == id), "{what}: {refused:?}");
+        }
+    }
+    assert_eq!(store.accounts().unwrap().len(), 2);
+    assert_eq!(store.folders(AccountId::new(1)).unwrap().len(), 2);
+    assert!(store.messages(FolderId::new(1)).unwrap().is_empty());
+    assert!(store.queued_jobs().unwrap().is_empty());
+    assert_eq!(store.drafts(AccountId::new(1)).unwrap(), [contract::draft(1, 1, "near")]);
+    assert_eq!(store.calendars(AccountId::new(1)).unwrap().len(), 1);
+    assert_eq!(store.calendar_events(CalendarId::new(1)).unwrap(), [contract::event(1, 1)]);
+    assert!(store.alerts(CalendarEventId::new(1)).unwrap().is_empty() && store.schedule().unwrap().is_empty());
+    let largest = i64::MAX.unsigned_abs();
+    store.apply(&Batch::new().with(Change::PutAccount(account(largest))).with(Change::PutFolder(folder(largest, largest, "Last")))).unwrap();
+    assert_eq!(store.folders(AccountId::new(largest)).unwrap(), [folder(largest, largest, "Last")]);
+}
+
+/// Every row of every table that holds an id, read straight from the file.
+fn dump(dir: &Path) -> String {
+    let conn = rusqlite::Connection::open(dir.join(DATABASE_FILE)).unwrap();
+    let mut all = String::new();
+    for table in
+        ["account", "folder", "message", "body", "job", "draft", "outbox", "schedule", "message_state", "calendar", "calendar_event", "alert"]
+    {
+        let mut statement = conn.prepare(&format!("SELECT * FROM {table} ORDER BY rowid")).unwrap();
+        let columns = statement.column_count();
+        let rows = statement
+            .query_map([], |row| (0..columns).map(|column| row.get::<_, rusqlite::types::Value>(column)).collect::<Result<Vec<_>, _>>())
+            .unwrap();
+        for row in rows {
+            all.push_str(&format!("{table} {:?}\n", row.unwrap()));
+        }
+    }
+    all
+}
+
+/// A store with a row of every kind at id 1, as this code writes them.
+fn of_every_kind(dir: &Path) {
+    let mut store = with_body(dir);
+    let pinned = MessageState { pinned: true, ..MessageState::default() };
+    let batch = Batch::new()
+        .with(Change::SetMessageState(m(1), pinned))
+        .with(Change::QueueJob(Job::new(JobId::new(1), AccountId::new(1), JobKind::SyncFolderList)))
+        .with(Change::PutDraft(contract::draft(1, 1, "near")))
+        .with(Change::PutOutgoing(contract::outgoing(1, OutboxState::Waiting)))
+        .with(Change::PutScheduled(contract::scheduled(1, 1, Due::Send(DraftId::new(1)))))
+        .with(Change::PutCalendar(contract::calendar(1, 1, "home")))
+        .with(Change::PutCalendarEvent(contract::event(1, 1)))
+        .with(Change::PutAlert(contract::alert(1, 1, 1)));
+    store.apply(&batch).unwrap();
+}
+
+/// A damaged or crafted file can hold a row at a negative key, which this code never writes. An id past what the store
+/// can hold reaches none of them: it finds, changes and removes nothing, whatever the file holds.
+#[test]
+fn an_id_past_the_largest_key_reaches_no_row_a_damaged_file_holds() {
+    let tmp = dir();
+    let dir = tmp.path();
+    of_every_kind(dir);
+    sql(
+        dir,
+        "PRAGMA foreign_keys = OFF;
+         INSERT INTO account SELECT -1, record FROM account WHERE id = 1;
+         CREATE TEMP TABLE f AS SELECT * FROM folder WHERE id = 1; UPDATE f SET id = -1, account = -1; INSERT INTO folder SELECT * FROM f;
+         CREATE TEMP TABLE m AS SELECT * FROM message WHERE id = 1; UPDATE m SET id = -1, account = -1, folder = -1;
+         INSERT INTO message SELECT * FROM m;
+         INSERT INTO message_state SELECT -1, record FROM message_state WHERE message = 1;
+         CREATE TEMP TABLE j AS SELECT * FROM job WHERE id = 1; UPDATE j SET seq = NULL, id = -1, account = -1; INSERT INTO job SELECT * FROM j;
+         CREATE TEMP TABLE d AS SELECT * FROM draft WHERE id = 1; UPDATE d SET id = -1, account = -1; INSERT INTO draft SELECT * FROM d;
+         INSERT INTO outbox SELECT -1, record FROM outbox WHERE draft = 1;
+         CREATE TEMP TABLE s AS SELECT * FROM schedule WHERE id = 1; UPDATE s SET id = -1, draft = -1; INSERT INTO schedule SELECT * FROM s;
+         CREATE TEMP TABLE c AS SELECT * FROM calendar WHERE id = 1; UPDATE c SET id = -1, account = -1; INSERT INTO calendar SELECT * FROM c;
+         CREATE TEMP TABLE e AS SELECT * FROM calendar_event WHERE id = 1; UPDATE e SET id = -1, calendar = -1;
+         INSERT INTO calendar_event SELECT * FROM e;
+         CREATE TEMP TABLE l AS SELECT * FROM alert WHERE id = 1; UPDATE l SET id = -1, event = -1; INSERT INTO alert SELECT * FROM l;",
+    );
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let before = dump(dir);
+    for table in ["account", "folder", "message", "job", "draft", "outbox", "schedule", "message_state", "calendar", "calendar_event", "alert"] {
+        let crafted = before.lines().any(|line| line.starts_with(&format!("{table} [")) && line.contains("Integer(-1)"));
+        assert!(crafted, "{table} has a row at -1:\n{before}");
+    }
+    for id in contract::FAR {
+        contract::reads_nothing(&store, id);
+        for (change, refused) in contract::refusals(id) {
+            let what = format!("{change:?}");
+            assert_eq!(store.apply(&Batch::new().with(change)), Err(refused), "{what}");
+        }
+        let mut removals = Batch::new();
+        for change in contract::removals(id) {
+            removals.push(change);
+        }
+        assert_eq!(store.apply(&removals), Ok(()), "{id}");
+    }
+    assert_eq!(dump(dir), before, "a far id reached a row at a negative key");
+}
+
+/// A write that links to another row (an outbox item to its draft, a schedule entry to what it names, an event to its
+/// calendar …) links only to a row it found: with an id past what the store can hold, it is refused and nothing is
+/// written.
+#[test]
+fn a_write_with_a_reference_past_the_largest_key_writes_nothing() {
+    let tmp = dir();
+    let dir = tmp.path();
+    of_every_kind(dir);
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let before = dump(dir);
+    for id in contract::FAR {
+        let (draft, message) = (DraftId::new(id), m(id));
+        for (change, refused) in [
+            (Change::PutOutgoing(contract::outgoing(id, OutboxState::Waiting)), StoreError::UnknownDraft(draft)),
+            (Change::PutScheduled(contract::scheduled(7, 1, Due::Send(draft))), StoreError::UnknownDraft(draft)),
+            (Change::PutScheduled(contract::scheduled(7, 1, Due::FollowUp(message))), StoreError::UnknownMessage(message)),
+            (Change::SetMessageState(message, MessageState { pinned: true, ..MessageState::default() }), StoreError::UnknownMessage(message)),
+            (Change::PutCalendarEvent(contract::event(7, id)), StoreError::UnknownCalendar(CalendarId::new(id))),
+        ] {
+            let what = format!("{change:?}");
+            assert_eq!(store.apply(&Batch::new().with(change)), Err(refused), "{what}");
+        }
+    }
+    assert_eq!(dump(dir), before);
 }

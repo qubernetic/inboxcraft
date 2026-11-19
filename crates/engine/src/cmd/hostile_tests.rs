@@ -56,6 +56,8 @@ fn junk() -> Vec<Value> {
         json!(1),
         json!(-1),
         json!(u64::MAX),
+        json!(i64::MAX.unsigned_abs() + 1),
+        json!(i64::MAX),
         json!(i64::MIN),
         json!(1.5),
         json!(1e308),
@@ -252,7 +254,7 @@ fn draft(session: &mut Session, subject: &str) -> u64 {
 /// its hold, a send later, a snooze, a follow-up, a pin, a parked message, a template, a sender allowed remote
 /// pictures, a blocked sender and a sender's group, with the screener inside the inbox. Every job it makes is taken and
 /// dropped: no worker is ever started.
-fn world() -> Session {
+pub(super) fn world() -> Session {
     let clock = clock();
     let mut session = Session::with_registry(Box::new(world_store()), Box::new(clock.clone()), Registry::builtin().unwrap()).unwrap();
     session.apply(&Event::new(AccountId::new(1), None, EventKind::Abilities { uid_expunge: true })).unwrap();

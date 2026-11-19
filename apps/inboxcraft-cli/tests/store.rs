@@ -147,6 +147,23 @@ fn a_failed_command_is_one_json_error_object_and_a_non_zero_exit() {
     }
 }
 
+/// An id past `i64::MAX`, the largest key the store takes, is a message that is not there, in the same words as any
+/// unknown id: never "the store database failed".
+#[test]
+fn an_id_past_the_largest_key_is_not_found_and_no_database_failure() {
+    let dir = fixture();
+    for id in [u64::MAX, i64::MAX.unsigned_abs() + 1, i64::MAX.unsigned_abs()] {
+        for command in ["mail.read", "mail.thread"] {
+            let (code, out, err) = on(dir.path(), &["--json", command, &format!(r#"{{"id":{id}}}"#)]);
+            assert_eq!((code, out.as_str()), (1, ""), "{command} {id}: {err}");
+            let error: Value = serde_json::from_str(&err).unwrap();
+            assert_eq!(error["error"], json!({ "code": "not_found", "message": format!("there is no message {id}") }), "{command} {id}");
+            let (_, _, text) = on(dir.path(), &[command, &format!(r#"{{"id":{id}}}"#)]);
+            assert!(!text.contains("database"), "{command} {id}: {text}");
+        }
+    }
+}
+
 #[test]
 fn a_directory_without_a_store_is_refused_and_left_empty() {
     let dir = tempfile::tempdir().unwrap();

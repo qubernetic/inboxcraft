@@ -45,6 +45,8 @@ pub enum StoreError {
         /// The UID.
         uid: Uid,
     },
+    /// A record's own id is past `i64::MAX`, the largest key the database takes; nothing is kept.
+    IdOutOfRange(u64),
     /// A message source over [`MAX_SOURCE_BYTES`](crate::MAX_SOURCE_BYTES).
     TooLarge,
     /// The database was written by a newer InboxCraft; it is left untouched.
@@ -108,6 +110,7 @@ impl fmt::Display for StoreError {
             Self::UnknownAlert(id) => write!(f, "no alert {id} in the store"),
             Self::WrongAccount { folder, account } => write!(f, "folder {folder} does not belong to account {account}"),
             Self::DuplicateUid { folder, uid } => write!(f, "folder {folder} already holds UID {uid}"),
+            Self::IdOutOfRange(id) => write!(f, "id {id} is past the largest the store can keep"),
             Self::TooLarge => write!(f, "the message source is too large to keep"),
             Self::NewerSchema { found, known } => {
                 write!(f, "the store has schema version {found}, newer than this build's {known}")

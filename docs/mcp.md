@@ -51,9 +51,13 @@ letters, digits, `_` and `-` only.
 | `mail_search` | `mail.search` | `from`, `to`, `subject`, `text`, `since`, `before`, `account`, `folder`, `limit` (25 when left out) |
 | `thread_read` | `mail.thread` | `id` |
 | `account_check` | `account.check` | `account` |
+| `week_settings` | `week.settings` | none |
+| `sync_status` | `sync.status` | none |
 
-The tools are this fixed list, not every `safe` command: `sync.status`, for one, is not a tool and runs through the
-CLI and the control channel.
+The tools are this fixed list, not every `safe` command: the others run through the CLI and the control channel.
+`mail.why` is not offered until the owner has decided whether a client may read what it gives beyond `mail_list`:
+the grouped inbox's group and its rule, the owner's choice for the sender, the snooze times and whether the owner
+wrote in the thread.
 
 Each tool's `inputSchema` lists its arguments; unknown ones are refused. `mail_read` marks the message opened on this
 computer, as reading it in the app does, and changes nothing on the server.
@@ -85,6 +89,12 @@ id | date (UTC) | from | subject | flags
   the headers leave. A result still longer than 64 KiB is cut at a line break, and its last line says how long it
   was.
 - `account_check` lists the steps of the check as they stand. Headless, nothing runs the check, and the result says so.
+- `week_settings` gives the first day of the week, the first week of the year, the week of today (its number, its
+  week-year and its first day) and the names each part of the rule can take.
+- `sync_status` gives the state (`synced`, `syncing`, `offline` or `failing`), the folder syncs done of all in the
+  rounds under way, the last sync to the minute (`never` before one) and how many accounts fail. With `--store`
+  no worker runs, so on a store with an account the state reads `offline`, with no progress and no last sync
+  (`synced` with no account); in the running app it is what the workers told.
 
 ## Message text is untrusted
 
