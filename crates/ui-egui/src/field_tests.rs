@@ -368,15 +368,27 @@ fn pixels_per_point_that_are_not_usable_build_once() {
 }
 
 #[test]
-fn a_4k_field_builds_without_a_spike() {
-    use inboxcraft_time::{Clock as _, SystemClock};
-    let clock = SystemClock::new();
-    let started = clock.monotonic();
-    let cells = cells(Rect::from_min_size(Pos2::ZERO, vec2(3840.0, 2160.0)), TextScale::default(), None, 1.0, 7, None);
-    assert_eq!(cells.held.len(), 480 * 144);
-    // Some 69 000 cells, a hash each: far under a frame even unoptimised.
-    let took = clock.monotonic().saturating_sub(started);
-    assert!(took < std::time::Duration::from_millis(50), "{took:?}");
+fn a_4k_field_builds_its_cells_once_and_a_text_a_row() {
+    // The work counted, not the time (the time is the bench's): one build of 480 × 144 cells in one allocation of
+    // their size, and one text a row, each about as long as its dots.
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let rect = Rect::from_min_size(Pos2::ZERO, vec2(3840.0, 2160.0));
+    let mut field = Field::new(7);
+    for _ in 0..3 {
+        field.build(rect, TextScale::default(), None, 1.0);
+        field.lay_out(&theme);
+    }
+    let cells = field.cells.as_ref().unwrap();
+    assert_eq!(field.builds, 1);
+    assert_eq!((cells.held.len(), cells.held.capacity()), (480 * 144, 480 * 144));
+    let look = field.look.as_ref().unwrap();
+    assert_eq!(look.rows.len(), 144);
+    let texts = look.rows.iter().flatten().count();
+    assert_eq!(field.layouts, texts as u64, "a row's text was built more than once");
+    let dots = cells.held.iter().filter(|held| **held == DOT).count();
+    let characters: usize = look.rows.iter().flatten().map(|job| job.text.chars().count()).sum();
+    // A dot and at most the three spaces kept before it.
+    assert!(characters <= dots * 4, "{characters} characters for {dots} dots");
 }
 
 #[test]
