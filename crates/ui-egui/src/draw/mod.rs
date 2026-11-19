@@ -1033,9 +1033,11 @@ impl InboxApp {
     /// rest until `Esc` there gives it back.
     fn open_from_list(&mut self, ctx: &egui::Context) {
         if self.mailbox.drafts_listed() {
-            // The keyed draft opens in the composer to go on writing.
+            // The keyed draft opens in the composer to go on writing; the keyed Drafts folder on the server opens.
             if let Some(draft) = list::focused_draft(ctx, &self.mailbox) {
                 self.open_draft(ctx, draft);
+            } else if let Some(folder) = list::focused_server(ctx, &self.mailbox) {
+                self.open_server_drafts(folder);
             }
             return;
         }
@@ -1272,8 +1274,10 @@ impl InboxApp {
         if !surfaces.list_has_keyboard() {
             return false;
         }
-        // A row of the list has the keyboard: a message's, or a kept draft's in the drafts place.
-        if self.list_row.is_some() || (self.mailbox.drafts_listed() && list::focused_draft(ctx, &self.mailbox).is_some()) {
+        // A row of the list has the keyboard: a message's, or in the drafts place a kept draft's or a server folder's.
+        let drafts =
+            self.mailbox.drafts_listed() && (list::focused_draft(ctx, &self.mailbox).is_some() || list::focused_server(ctx, &self.mailbox).is_some());
+        if self.list_row.is_some() || drafts {
             return true;
         }
         let focused = ctx.memory(|memory| memory.focused().is_some());
@@ -1965,6 +1969,28 @@ impl InboxApp {
         }
     }
 
+    /// Applies what was pressed in the drafts place: a kept draft's row or its links (`drafted`), or the row of a Drafts
+    /// folder on the server (`server`).
+    fn apply_drafts(&mut self, ctx: &egui::Context, drafted: Option<(u64, list::Drafted)>, server: Option<u64>) {
+        match drafted {
+            Some((draft, list::Drafted::Open)) => self.open_draft(ctx, draft),
+            Some((draft, list::Drafted::Discard)) => self.discard_draft(draft),
+            None => {}
+        }
+        if let Some(folder) = server {
+            self.open_server_drafts(folder);
+        }
+    }
+
+    /// Opens the Drafts folder `folder` on the server from the drafts place: its mail, as any folder's. Once: Enter on
+    /// its row also presses it in the same frame.
+    fn open_server_drafts(&mut self, folder: u64) {
+        if self.mailbox.place() != Place::Folder(folder) {
+            self.mailbox.open(Place::Folder(folder));
+            self.search.clear();
+        }
+    }
+
     /// Sends the refused draft `draft` again (`outbox.retry`), the countdown toast showing its hold.
     pub fn retry(&mut self, draft: u64) {
         match self.mailbox.retry(draft) {
@@ -2559,7 +2585,7 @@ impl InboxApp {
         dismiss |= dismissed;
         ran.extend(line.hint);
         add |= line.open_account;
-        let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, draft: drafted, screener: screener_mode, presets, gained } =
+        let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, draft: drafted, server, screener: screener_mode, presets, gained } =
             listed;
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
@@ -2569,6 +2595,7 @@ impl InboxApp {
             || line != status::Pressed::default()
             || outboxed.is_some()
             || drafted.is_some()
+            || server.is_some()
             || screener_mode.is_some()
             || (out && leaving)
             || left_full
@@ -2595,11 +2622,7 @@ impl InboxApp {
             ui.ctx().request_repaint();
         }
         self.act(out, acted, undone, outboxed, screener_mode);
-        match drafted {
-            Some((draft, list::Drafted::Open)) => self.open_draft(ui.ctx(), draft),
-            Some((draft, list::Drafted::Discard)) => self.discard_draft(draft),
-            None => {}
-        }
+        self.apply_drafts(ui.ctx(), drafted, server);
         if presets {
             // A row's time picker opened: the presets still ahead, read as the reader's picker reads them.
             self.mailbox.load_presets();

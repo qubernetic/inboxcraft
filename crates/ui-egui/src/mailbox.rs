@@ -391,8 +391,8 @@ pub struct FolderRow {
     pub role: Option<Role>,
     /// The unread messages in it.
     pub unread: u64,
-    /// All messages in it.
-    pub messages: u64,
+    /// All messages in it; `None` when `folder.list` does not say.
+    pub messages: Option<u64>,
     /// Whether it can hold mail: a `\Noselect` or `\NonExistent` folder cannot. Fails closed: `false` when
     /// `folder.list` leaves it out, so a move is never offered into a folder the engine would refuse.
     pub selectable: bool,
@@ -1808,7 +1808,7 @@ impl Mailbox {
                     depth,
                     role: folder.get("role").and_then(Value::as_str).and_then(role),
                     unread: number(folder, "unread"),
-                    messages: number(folder, "messages"),
+                    messages: folder.get("messages").and_then(Value::as_u64),
                     selectable: folder.get("selectable").and_then(Value::as_bool) == Some(true),
                 }
             })
@@ -1903,6 +1903,17 @@ impl Mailbox {
             1 => tr!("1 draft").to_owned(),
             count => tr!("{count} drafts", count = count),
         }
+    }
+
+    /// The Drafts folders on the servers of the accounts shown that hold mail, or whose count is not known: the mail
+    /// there may be drafts written in another program, which the drafts place does not list.
+    pub fn server_drafts(&self) -> impl Iterator<Item = &FolderRow> {
+        self.folders.iter().filter(|folder| {
+            folder.role == Some(Role::Drafts)
+                && folder.selectable
+                && folder.messages != Some(0)
+                && self.narrowed.is_none_or(|narrowed| narrowed == folder.account)
+        })
     }
 
     /// Reads the outbox (`outbox.list`).

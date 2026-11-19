@@ -88,6 +88,22 @@ fn opened(harness: &Harness<'static, InboxApp>) -> Option<u64> {
     harness.state().composer().map(crate::compose::Composer::draft)
 }
 
+/// The sample's Drafts folder on the server of its first account, which holds one message.
+fn server_folder(harness: &Harness<'static, InboxApp>) -> u64 {
+    let mailbox = harness.state().mailbox();
+    let account = mailbox.accounts().first().map(|account| account.id).unwrap();
+    mailbox.folders_of(account).iter().find(|folder| folder.role == Some(Folder::Drafts)).map(|folder| folder.id).unwrap()
+}
+
+/// What the row of [`server_folder`] says: its count, and whose it is over the sample's two accounts.
+const SERVER_ROW: &str = "1 in the server's Drafts folder · Personal";
+
+/// Whether the row of [`server_folder`] has the keyboard.
+fn on_server_row(harness: &Harness<'static, InboxApp>) -> bool {
+    let id = super::list::server_row_id(server_folder(harness));
+    harness.ctx.memory(|memory| memory.has_focus(id))
+}
+
 fn total(app: &mut InboxApp) -> u64 {
     app.mailbox_mut().run("compose.list", &json!({})).unwrap().get("total").and_then(Value::as_u64).unwrap()
 }
@@ -146,7 +162,12 @@ fn j_k_and_the_arrows_walk_the_drafts_and_enter_opens_the_keyed_one() {
     key(&mut harness, Key::ArrowDown);
     assert_eq!(keyed(&harness), Some(oldest));
     key(&mut harness, Key::J);
-    assert_eq!(keyed(&harness), Some(oldest), "the last row stays keyed at the end");
+    assert_eq!(keyed(&harness), None, "past the last draft, the server's Drafts folder's row");
+    assert!(on_server_row(&harness));
+    key(&mut harness, Key::J);
+    assert!(on_server_row(&harness), "the last row stays keyed at the end");
+    key(&mut harness, Key::K);
+    assert_eq!(keyed(&harness), Some(oldest));
     key(&mut harness, Key::K);
     assert_eq!(keyed(&harness), Some(middle));
     key(&mut harness, Key::ArrowUp);
@@ -383,4 +404,75 @@ fn opening_a_draft_while_another_holds_unsaved_text_keeps_that_one() {
     assert_eq!(opened(&harness), Some(glaze));
     let shown = harness.state_mut().mailbox_mut().run("compose.show", &json!({ "id": kiln })).unwrap();
     assert_eq!(shown.get("text").and_then(Value::as_str), Some("Firing on Thursday."), "{shown}");
+}
+
+#[test]
+fn under_the_drafts_a_row_opens_the_server_s_drafts_folder_with_its_count() {
+    let mut app = sample_app();
+    draft(&mut app, "", "Kiln rota", "");
+    let mut harness = drafts_place(app, egui::Theme::Light);
+    let folder = server_folder(&harness);
+    let server = harness.get_by_label(SERVER_ROW).rect();
+    assert!(row(&harness, "Kiln rota").bottom() <= server.top() + 0.5, "under the kept drafts");
+    harness.get_by_label(SERVER_ROW).click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::Folder(folder), "the press opens the folder");
+    assert!(harness.state().mailbox().messages().iter().any(|message| message.folder == folder), "and lists its mail");
+}
+
+#[test]
+fn with_no_kept_drafts_the_empty_state_shows_the_server_s_row_too() {
+    let mut harness = drafts_place(sample_app(), egui::Theme::Dark);
+    let folder = server_folder(&harness);
+    harness.get_by_label("No drafts.");
+    harness.get_by_label(SERVER_ROW);
+    key(&mut harness, Key::J);
+    assert!(on_server_row(&harness), "J keys the row");
+    key(&mut harness, Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::Folder(folder), "Enter opens the folder");
+}
+
+#[test]
+fn enter_on_the_keyed_server_s_row_opens_its_folder() {
+    let mut app = sample_app();
+    draft(&mut app, "", "Kiln rota", "");
+    let mut harness = drafts_place(app, egui::Theme::Dark);
+    let folder = server_folder(&harness);
+    key(&mut harness, Key::J);
+    key(&mut harness, Key::J);
+    assert!(on_server_row(&harness));
+    key(&mut harness, Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::Folder(folder));
+    assert_eq!(opened(&harness), None, "no draft opens");
+}
+
+#[test]
+fn tab_and_shift_tab_reach_the_server_s_row_after_the_last_draft() {
+    let mut app = sample_app();
+    draft(&mut app, "", "Kiln rota", "");
+    let mut harness = drafts_place(app, egui::Theme::Light);
+    let kiln = super::list::draft_row_id(keyed_draft(&harness));
+    harness.ctx.memory_mut(|memory| memory.request_focus(kiln));
+    harness.run();
+    let mut steps = 0;
+    while !on_server_row(&harness) && steps < 8 {
+        key(&mut harness, Key::Tab);
+        steps += 1;
+    }
+    assert!(on_server_row(&harness), "Tab from the draft's row reaches the server's row");
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert!(!on_server_row(&harness), "Shift Tab goes back");
+    let back = harness.ctx.memory(|memory| memory.focused());
+    let row = harness.ctx.read_response(kiln).map(|response| response.rect).unwrap();
+    let on = back.and_then(|id| harness.ctx.read_response(id)).map(|response| response.rect).unwrap();
+    assert!(row.expand(0.5).contains_rect(on), "to the draft's row or one of its links");
+}
+
+/// The only kept draft of the drafts place.
+fn keyed_draft(harness: &Harness<'static, InboxApp>) -> u64 {
+    harness.state().mailbox().drafts().map(|draft| draft.id).next().unwrap()
 }
