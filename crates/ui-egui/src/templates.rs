@@ -89,9 +89,15 @@ impl TemplateForm {
     pub fn leaves(&self) -> Option<(u64, &str)> {
         self.was
             .as_ref()
-            .filter(|(account, name)| *account != self.account || name != self.name.trim())
+            .filter(|(account, name)| *account != self.account || !same_name(name, &self.name))
             .map(|(account, name)| (*account, name.as_str()))
     }
+}
+
+/// Whether two template names are one name to the engine, which matches them without case (`template.save` replaces
+/// in place, `template.delete` finds by it).
+fn same_name(one: &str, other: &str) -> bool {
+    one.trim().to_lowercase() == other.trim().to_lowercase()
 }
 
 /// Where the keyboard goes when the page is drawn next.
@@ -221,8 +227,8 @@ impl Templates {
     pub fn replaces(&self) -> bool {
         let Some(form) = &self.form else { return false };
         let name = form.name.trim();
-        let same = form.was.as_ref().is_some_and(|(account, was)| *account == form.account && was == name);
-        !same && !name.is_empty() && self.rows.iter().any(|row| row.account == form.account && row.name == name)
+        let same = form.was.as_ref().is_some_and(|(account, was)| *account == form.account && same_name(was, name));
+        !same && !name.is_empty() && self.rows.iter().any(|row| row.account == form.account && same_name(&row.name, name))
     }
 
     /// Asks that the keyboard go to `hand` when the page is drawn next.

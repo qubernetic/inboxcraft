@@ -290,3 +290,28 @@ fn a_held_key_deletes_at_most_once_and_never_by_its_repeats() {
         assert_eq!(kept(&mut harness).len(), 4, "a held {key:?} on Delete template deletes once");
     }
 }
+
+#[test]
+fn a_rename_in_case_only_keeps_the_template_renamed() {
+    let mut harness = on_templates(&FIVE);
+    press(&mut harness, "Edit the template Out of town");
+    let form = harness.state_mut().settings_mut().templates_mut().form_mut().unwrap();
+    form.name = "out of Town".to_owned();
+    harness.run();
+    assert!(harness.query_by_label_contains("Save replaces it").is_none(), "its own name in another case replaces nothing");
+    press(&mut harness, "Save");
+    let names = kept(&mut harness);
+    assert!(names.iter().any(|name| name == "out of Town"), "the template is kept, renamed: {names:?}");
+    assert!(!names.iter().any(|name| name == "Out of town"));
+    assert_eq!(names.len(), 5);
+}
+
+#[test]
+fn a_name_taken_in_another_case_says_save_replaces_it() {
+    let mut harness = on_templates(&FIVE);
+    press(&mut harness, "Edit the template Workshop invitation");
+    let form = harness.state_mut().settings_mut().templates_mut().form_mut().unwrap();
+    form.name = "quote for a SHOP front".to_owned();
+    harness.run();
+    harness.get_by_label("Studio has a template named “quote for a SHOP front”: Save replaces it.");
+}
