@@ -192,7 +192,7 @@ fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credenti
         account,
         settings,
         credentials,
-        out: Out { account: account.id(), events, listening: true, reported: None, states: HashMap::new(), failures: 0 },
+        out: Out { account: account.id(), events, listening: true, reported: None, states: HashMap::new(), failures: 0, offline: false },
         connection: None,
         halted: None,
         submission_halted: None,
@@ -226,6 +226,8 @@ struct Out<'a> {
     states: HashMap<FolderId, FolderState>,
     /// The failures told so far ([`EventKind::Failed`], a body fetch's aside), to tell whether one came since a point.
     failures: u64,
+    /// `Offline` was told since the last sign-in.
+    offline: bool,
 }
 
 impl Out<'_> {
@@ -252,6 +254,7 @@ impl Out<'_> {
     fn report(&mut self, state: ConnectionState) {
         if self.reported != Some(state) {
             self.reported = Some(state);
+            self.offline |= state == ConnectionState::Offline;
             self.say(None, EventKind::Connection(state));
         }
     }
@@ -532,6 +535,11 @@ impl Run<'_> {
                 self.current = self.out.failures;
                 self.out.report(ConnectionState::Online);
                 self.out.say(None, EventKind::Abilities { uid_expunge });
+                // The engine dropped the round's progress when the connection went offline: tell it again at once.
+                if std::mem::take(&mut self.out.offline) {
+                    self.round.told = None;
+                    self.tell_round();
+                }
                 return true;
             }
             Err(error) => error,

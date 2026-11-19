@@ -484,3 +484,25 @@ fn a_body_fetch_that_failed_in_a_round_does_not_hold_its_end_back() -> Result {
     run.finish()?;
     Ok(())
 }
+
+#[test]
+fn after_a_drop_in_a_round_the_new_sign_in_tells_its_progress_again_at_once() -> Result {
+    // The second folder's EXAMINE drops the connection; the worker signs in again on the fake's second connection.
+    let fake = FakeImap::sample().on(When::command("EXAMINE"), []).on(When::command("EXAMINE"), [Action::Fault(Fault::Drop)]);
+    let mut run = Run::with(fake, Options { connections: 2, ..Options::default() })?;
+    sync(&mut run, 10, "INBOX")?;
+    sync(&mut run, 11, "Sent")?;
+    sync(&mut run, 12, "Lists/Rust")?;
+    let mut onlines = 0;
+    let events = run.rounds(|kind| {
+        onlines += usize::from(*kind == EventKind::Connection(ConnectionState::Online));
+        onlines == 2
+    })?;
+    assert!(events.contains(&EventKind::Connection(ConnectionState::Offline)), "{events:?}");
+    let last = told(&events).into_iter().flatten().last().ok_or("no progress before the sign-in")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::SyncProgress { .. }))?;
+    assert!(!events.iter().any(|kind| matches!(kind, EventKind::FolderSynced { .. })), "told before the next folder: {events:?}");
+    assert_eq!(told(&events), [Some(last)], "{events:?}");
+    run.worker.stop();
+    Ok(())
+}
