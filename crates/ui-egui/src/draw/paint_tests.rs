@@ -1073,11 +1073,12 @@ fn rows_in_sight_are_painted_as_before_also_where_the_text_is_cut() {
     }
 }
 
-/// One line [`crate::component::fitted`] laid out of `text` in `font` for `room`: the text it shows and how far its
-/// letters reach as drawn (the right edge of the rightmost glyph).
+/// One line [`crate::component::fitted`] laid out of `text` in `font` for `room`: the text it shows, how far its
+/// letters reach as drawn (the right edge of the rightmost glyph) and how wide the cutting rule measures it.
 struct Fitted {
     shown: String,
     reach: f32,
+    measured: f32,
 }
 
 /// Every text of `texts` fitted in `font` to every room of `rooms`, at `ppp` pixels per point, and each text laid out
@@ -1101,8 +1102,8 @@ fn fitted_lines(font: Font, texts: &[String], rooms: &[f32], ppp: f32) -> Vec<(S
                     found.push((
                         text.clone(),
                         *room,
-                        Fitted { shown: shown(&galley), reach: reach(&galley) },
-                        Fitted { shown: shown(&whole), reach: reach(&whole) },
+                        Fitted { shown: shown(&galley), reach: reach(&galley), measured: super::measured(&galley) },
+                        Fitted { shown: shown(&whole), reach: reach(&whole), measured: super::measured(&whole) },
                     ));
                 }
             }
@@ -1117,16 +1118,21 @@ fn repeated(pattern: &str, count: usize) -> String {
     pattern.chars().cycle().take(count).collect()
 }
 
-/// What is wrong with a line fitted to `room` at `ppp` in `font`: wider than its room as drawn (a glyph's place is
-/// rounded to the pixel, half a pixel at most), an ellipsis that is not the one at its end, a cut that is not needed or
-/// that splits a grapheme cluster.
+/// What is wrong with a line fitted to `room` at `ppp` in `font`: wider than its room as drawn, a run measured
+/// narrower than it is drawn (cut or whole), an ellipsis that is not the one at its end, a cut that is not needed or
+/// that splits a grapheme cluster. The only slack is what adding up the advances in `f32` drifts by.
 fn faults(font: Font, ppp: f32, texts: &[String], rooms: &[f32]) -> Vec<String> {
     use unicode_segmentation::UnicodeSegmentation as _;
     let mut faults = Vec::new();
     for (text, room, fitted, whole) in fitted_lines(font, texts, rooms, ppp) {
         let name = format!("{} chars of {:?}… in {room} at ppp {ppp}", text.chars().count(), text.chars().take(6).collect::<String>());
-        if fitted.reach > room + 0.5 / ppp + 0.001 {
+        if fitted.reach > room + 0.001 {
             faults.push(format!("{name}: {} wide", fitted.reach));
+        }
+        for (which, line) in [("cut", &fitted), ("whole", &whole)] {
+            if line.measured + 0.001 < line.reach {
+                faults.push(format!("{name}: {which} measured {} but drawn {} wide", line.measured, line.reach));
+            }
         }
         if fitted.shown == whole.shown {
             continue;
@@ -1154,18 +1160,20 @@ fn faults(font: Font, ppp: f32, texts: &[String], rooms: &[f32]) -> Vec<String> 
 
 /// The texts of the sweep: Latin words, letters with combining marks, an emoji ZWJ sequence, and clusters whose second
 /// part has a width of its own (flags, Hangul jamo, Thai with sara am: a cut between their parts would be narrower,
-/// so only cutting between clusters keeps them whole); 10, 40 and 10 000 characters of each.
+/// so only cutting between clusters keeps them whole), and letters between zero-width non-joiners (each one a shaped
+/// cluster of no advance, inside its letter's grapheme); 10, 40 and 10 000 characters of each.
 fn sweep_texts() -> Vec<String> {
     let patterns = [
         "Quarterly studio planning, kiln rota ",
         "e\u{301}a\u{308}o\u{302} ",
         "\u{1F469}\u{200D}\u{1F469}\u{200D}\u{1F467} ab ",
         "\u{1F1ED}\u{1F1FA}\u{1F1EB}\u{1F1F7} \u{1112}\u{1161}\u{11AB} \u{0E01}\u{0E33}\u{0E19}\u{0E33} ",
+        "A\u{200C}B\u{200C}",
     ];
     patterns.iter().flat_map(|pattern| [10, 40, 10_000].map(|count| repeated(pattern, count))).collect()
 }
 
-const SWEEP_ROOMS: [f32; 4] = [0.0, 20.0, 240.0, 1000.0];
+const SWEEP_ROOMS: [f32; 7] = [0.0, 20.0, 60.0, 100.0, 150.0, 240.0, 1000.0];
 
 #[test]
 fn a_fitted_label_in_the_tracked_style_is_never_wider_than_its_room() {
@@ -1188,8 +1196,10 @@ fn a_fitted_line_in_an_untracked_or_tightened_style_is_never_wider_than_its_room
         let scale = TextScale::from_percent(percent).unwrap_or_default();
         let f = Theme::new(Mode::Dark, scale).fonts;
         for (name, font) in [("body", f.body), ("mono_s", f.mono_s), ("caption", f.caption), ("display", f.display)] {
-            let found = faults(font, 1.0, &texts, &SWEEP_ROOMS);
-            assert!(found.is_empty(), "{name} at {percent} %: {} faults: {:#?}", found.len(), found.iter().take(6).collect::<Vec<_>>());
+            for ppp in [1.0, 1.5] {
+                let found = faults(font, ppp, &texts, &SWEEP_ROOMS);
+                assert!(found.is_empty(), "{name} at {percent} %: {} faults: {:#?}", found.len(), found.iter().take(6).collect::<Vec<_>>());
+            }
         }
     }
 }
@@ -1213,9 +1223,41 @@ fn within_measures_a_tracked_run_with_its_letter_spacing_and_none_after_the_last
     drop(shapes);
     let (Some(plain), Some(tracked)) = (plain, tracked) else { panic!("laid out") };
     let bare: f32 = plain.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum();
+    // How far the letters reach as drawn, on their rounded places: the measure is never less.
+    let drawn = |galley: &egui::Galley| {
+        galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| row.pos.x + glyph.pos.x + glyph.advance_width)).fold(0.0_f32, f32::max)
+    };
     // Four gaps between five letters, none after the last.
     let wide = bare + 4.0 * spacing;
-    assert!(super::within(&tracked, wide + 0.0005), "fits its letters and the four gaps");
+    assert!(super::within(&tracked, wide.max(drawn(&tracked)) + 0.0005), "fits its letters and the four gaps");
     assert!(!super::within(&tracked, wide - 0.01), "not with less room than its letters and the four gaps");
-    assert!(super::within(&plain, bare + 0.0005) && !super::within(&plain, bare - 0.01), "an untracked run: its advances");
+    let bare_box = bare.max(drawn(&plain));
+    assert!(super::within(&plain, bare_box + 0.0005) && !super::within(&plain, bare - 0.01), "an untracked run: its advances");
+}
+
+#[test]
+fn a_tracked_label_is_never_measured_narrower_than_drawn_whatever_zero_width_signs_it_holds() {
+    // Signs of no advance that may shape as clusters of their own, each taking the label's spacing before it: the
+    // zero-width non-joiner, a joiner outside an emoji sequence, the word joiner, the soft hyphen, two variation
+    // selectors, the byte order mark, the zero-width space and the direction marks (`plain` lets them through).
+    let signs = ['\u{200C}', '\u{200D}', '\u{2060}', '\u{00AD}', '\u{FE0F}', '\u{FE00}', '\u{FEFF}', '\u{200B}', '\u{200E}', '\u{200F}', '\u{061C}'];
+    let texts: Vec<String> = signs
+        .iter()
+        .flat_map(|sign| [format!("A{sign}B{sign}"), format!("Kiln{sign} rota{sign}{sign} ")])
+        .flat_map(|pattern| [10, 40].map(|count| repeated(&pattern, count)))
+        .collect();
+    for percent in [100, 130] {
+        let font = Theme::new(Mode::Dark, TextScale::from_percent(percent).unwrap_or_default()).fonts.label;
+        for ppp in [1.0, 1.5] {
+            // A joiner or a selector after a letter is counted as a gap egui may not draw (the over-count of
+            // `advances`, one spacing each at most): such a line may be cut a letter before it would have to be.
+            let over_counted = |fault: &String| {
+                fault.contains("cut although")
+                    && ['\u{200D}', '\u{FE0F}', '\u{FE00}'].iter().any(|sign| fault.contains(&sign.escape_unicode().to_string()))
+            };
+            let found: Vec<String> =
+                faults(font, ppp, &texts, &[60.0, 100.0, 150.0, 240.0]).into_iter().filter(|fault| !over_counted(fault)).collect();
+            assert!(found.is_empty(), "{percent} % at ppp {ppp}: {} faults: {:#?}", found.len(), found.iter().take(8).collect::<Vec<_>>());
+        }
+    }
 }

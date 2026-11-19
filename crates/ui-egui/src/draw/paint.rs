@@ -70,21 +70,28 @@ pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> A
     on_baseline(cut_within(ui.painter(), job, width.max(1.0)))
 }
 
-/// The run's width as its letters' advances add up, with the style's letter spacing (tracking) in every gap between two
-/// clusters: egui puts each letter on a rounded place, so the galley's own width can be a fraction under it. egui adds
-/// the spacing before every shaped cluster but a section's first, never after the last letter, so a run of `n`
-/// clusters has `n - 1` gaps. Its clusters are not in the galley: they are counted as the more of the grapheme clusters
-/// and the letters with an advance, so a gap is never missed (a flag or Thai sara am is two shaped clusters in one
-/// grapheme; a zero-width space is a cluster of no advance). A galley of several sections is measured with its widest
-/// spacing in every gap; a tightened style (a negative spacing) by its advances alone. Either way the run is never
-/// measured narrower than it is drawn. A run of no added spacing (every style but the tracked ones) is not counted.
+/// The run's width as the cutting rule measures it: its letters' advances added up, with the style's letter spacing
+/// (tracking) in every gap between two clusters, and never less than how far its letters reach as drawn ([`reach`]).
+/// egui puts each letter on a rounded place, so the galley's own width can be a fraction under the added-up advances,
+/// or over them; the larger of the two is taken. egui adds the spacing before every shaped cluster but a section's
+/// first, never after the last letter, so a run of `n` clusters has `n - 1` gaps. Its clusters are not in the galley:
+/// they are counted as the more of the grapheme clusters and the letters with an advance (a flag or Thai sara am is
+/// two shaped clusters in one grapheme). A shaped cluster of no advance inside a grapheme (a zero-width non-joiner) is
+/// not counted, and the drawn reach covers it. The count is over for a letter with marks of their own advance or an
+/// emoji selector: at most one spacing (0.88 pt in the label style at 100 %) per such mark or selector. A galley of
+/// several sections is counted with its widest spacing; a tightened style (a negative spacing) by its advances alone.
+/// So a run is never measured narrower than it is drawn. A run of no added spacing is not counted.
 fn advances(galley: &Galley) -> f32 {
     let letters: f32 = galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum();
     let spacing = galley.job.sections.iter().map(|section| section.format.extra_letter_spacing).fold(0.0_f32, f32::max);
-    if spacing <= 0.0 {
-        return letters;
-    }
-    letters + spacing * gaps(galley) as f32
+    let counted = if spacing <= 0.0 { letters } else { letters + spacing * gaps(galley) as f32 };
+    // A NaN advance stays NaN: then nothing fits and `cut_within` tries nothing more.
+    if counted.is_nan() { counted } else { counted.max(reach(galley)) }
+}
+
+/// How far `galley`'s letters reach as drawn: the right edge of its rightmost glyph, from the galley's left.
+fn reach(galley: &Galley) -> f32 {
+    galley.rows.iter().flat_map(|row| row.glyphs.iter().map(move |glyph| row.pos.x + glyph.pos.x + glyph.advance_width)).fold(0.0_f32, f32::max)
 }
 
 /// The width the one cutting rule measures `galley` at ([`within`]): what a box that must hold the run whole, uncut,
@@ -111,8 +118,8 @@ fn gaps(galley: &Galley) -> usize {
 /// How far a run's added-up advances may pass its box and still fit: what adding up the advances in `f32` drifts by.
 const SLACK: f32 = 0.001;
 
-/// Whether `galley`'s letters fit in `width` as the one cutting rule measures them ([`cut_within`]): their advances
-/// added up, not the galley's width. Not when a width is NaN.
+/// Whether `galley`'s letters fit in `width` as the one cutting rule measures them ([`cut_within`], [`advances`]):
+/// their advances added up, or their drawn reach where that is more. Not when a width is NaN.
 pub(crate) fn within(galley: &Galley, width: f32) -> bool {
     advances(galley) - width <= SLACK
 }
