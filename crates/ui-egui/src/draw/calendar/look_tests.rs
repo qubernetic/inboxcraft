@@ -130,6 +130,26 @@ fn in_the_pictures_window_the_title_stays_readable_its_note_giving_way_first() {
 }
 
 #[test]
+fn where_even_the_short_title_has_no_room_the_side_panel_gives_way_first() {
+    // 1150: the body about 915; with the 252 side panel the view would leave the title no room for "2 – 8 Nov".
+    for (view, full, back) in [(View::Week, "2 – 8 November 2026", "Previous week"), (View::Day, "Thursday 5 November 2026", "Previous day")] {
+        for (width, side) in [(1150.0, false), (1200.0, true), (1440.0, true)] {
+            let harness = window_at(view, vec2(width, 820.0), egui::Theme::Light);
+            let found = drawn(&harness);
+            assert_eq!(found.iter().any(|(_, _, text)| text == "CALENDARS"), side, "{view:?} at {width}: the side panel shown {side}");
+            let back = harness.get_by_role_and_label(Role::Button, back).rect();
+            let title = found.iter().find(|(left, _, _)| (*left - 258.0).abs() < 20.0 && *left < back.left());
+            let Some((left, wide, text)) = title else { panic!("{view:?} at {width}: no title {found:?}") };
+            assert!(!text.ends_with('…'), "{view:?} at {width}: the title {text:?} not cut");
+            assert!(left + wide <= back.left(), "{view:?} at {width}: {text:?} left of {back:?}");
+            if !side {
+                assert_eq!(text, full, "{view:?} at {width}: without the side panel the whole title");
+            }
+        }
+    }
+}
+
+#[test]
 fn the_toolbar_s_groups_stand_24_apart_and_their_controls_8() {
     let harness = window(View::Week);
     let rect = |role, name| harness.get_by_role_and_label(role, name).rect();
