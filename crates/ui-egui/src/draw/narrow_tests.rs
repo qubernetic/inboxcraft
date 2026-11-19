@@ -394,7 +394,7 @@ fn under_1280_the_why_line_leaves_out_its_last_part_whole() {
 }
 
 #[test]
-fn the_reader_has_482_at_980() {
+fn the_reader_has_480_at_980() {
     for width in [980.0, 1024.0, 1279.0] {
         let mut harness = window(width, 100);
         open_message(&mut harness);
@@ -402,8 +402,8 @@ fn the_reader_has_482_at_980() {
         let reader = super::reader_rect(&harness.ctx).unwrap();
         let body = super::shell::laid(&harness.ctx).unwrap().body;
         assert_eq!(list.width(), super::LIST_WIDTH + 1.0, "{width}: the list keeps its 440 and its line");
-        // The test's window stands in a margin; the app's fills the window: its reader's pane is the design's
-        // 980 − 56 − 441 − 1 = 482, less the window's outline, a hairline at each side.
+        // The test's window stands in a margin; the app's fills the window: its reader's pane is the frames' 480 at a
+        // 980 window, 980 − 56 − 441 − 1 less the window's outline, a hairline at each side.
         assert_eq!(body.right() - list.right(), body.width() - 441.0, "{width}: the reader's pane");
         let whole = super::shell::regions(
             vec2(width, 900.0),
