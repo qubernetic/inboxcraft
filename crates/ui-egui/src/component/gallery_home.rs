@@ -13,6 +13,7 @@ use crate::theme::Theme;
 use crate::tr;
 
 use super::Shown;
+use super::block::{self, Block, Inset};
 use super::block_line::{self, BlockLine};
 use super::count_tile::{self, CountTile, Tone};
 use super::gallery::{cell, cells, title};
@@ -39,6 +40,9 @@ pub(crate) const TILE_WIDTH: f32 = 140.0;
 
 /// A block's and a block line's width on the boards, in points: the sheets'.
 pub(crate) const BLOCK_WIDTH: f32 = 320.0;
+
+/// The drafts block's width on its board, in points: the drafts frame's.
+pub(crate) const DRAFTS_WIDTH: f32 = 494.0;
 
 /// One state of the count tile's sheet.
 #[derive(Debug, Clone, Copy)]
@@ -98,6 +102,64 @@ fn tiles(ui: &mut Ui, theme: &Theme, _keymap: &Keymap) {
     }
 }
 
+/// One state of the block's sheet.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BlockState {
+    pub name: &'static str,
+    pub selected: bool,
+    pub shown: Shown,
+}
+
+/// The block's states, in the sheet's order.
+pub(crate) fn block_states() -> [BlockState; 4] {
+    let default = BlockState { name: "default", selected: false, shown: Shown::Rest };
+    [
+        default,
+        BlockState { name: "hover", shown: Shown::Hover, ..default },
+        BlockState { name: "focus", shown: Shown::Focus, ..default },
+        BlockState { name: "selected", selected: true, ..default },
+    ]
+}
+
+/// The block's sheet's label and lines.
+pub(crate) const BLOCK_INDEX: &str = "[ 02 ]";
+pub(crate) const AGENDA: [&str; 2] = ["10:00  Workshop prep", "15:00  Design review"];
+
+/// The block of `state`, 320 wide, at `ui`'s cursor, holding the sheet's two lines of the agenda.
+pub(crate) fn agenda(ui: &mut Ui, theme: &Theme, state: &BlockState) -> block::Drawn<()> {
+    let shown = Block {
+        id: Id::unique("gallery-block").with(state.name),
+        index: BLOCK_INDEX,
+        word: tr!("Agenda"),
+        inset: Inset::Text,
+        presses: true,
+        selected: state.selected,
+    };
+    ui.allocate_ui(vec2(BLOCK_WIDTH, 400.0), |ui| {
+        ui.set_width(BLOCK_WIDTH);
+        block::block(ui, theme, &shown, (state.shown != Shown::Rest).then_some(state.shown), |ui| {
+            for line in AGENDA {
+                block::text_line(ui, theme, line);
+            }
+        })
+    })
+    .inner
+}
+
+/// The block's board: every state of its sheet, two to a line.
+fn blocks(ui: &mut Ui, theme: &Theme, _keymap: &Keymap) {
+    title(ui, theme, tr!("Block"));
+    for pair in block_states().chunks(2) {
+        cells(ui, theme, |ui| {
+            for state in pair {
+                cell(ui, theme, state.name, |ui| {
+                    agenda(ui, theme, state);
+                });
+            }
+        });
+    }
+}
+
 /// One state of the block line's sheet.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LineState {
@@ -139,6 +201,24 @@ fn lines(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
             }
         });
     }
+    cells(ui, theme, |ui| {
+        cell(ui, theme, "drafts-empty", |ui| {
+            drafts_empty(ui, theme, keymap);
+        });
+    });
+}
+
+/// Home's drafts block with nothing in it, 494 wide: its empty line edge to edge.
+pub(crate) fn drafts_empty(ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> block::Drawn<bool> {
+    let shown =
+        Block { id: Id::unique("gallery-drafts"), index: "[ 03 ]", word: tr!("Drafts"), inset: Inset::Flush, presses: false, selected: false };
+    ui.allocate_ui(vec2(DRAFTS_WIDTH, 400.0), |ui| {
+        ui.set_width(DRAFTS_WIDTH);
+        block::block(ui, theme, &shown, None, |ui| {
+            block_line::block_line(ui, theme, keymap, &BlockLine::Empty(tr!("No drafts. What you start and do not send is kept here.")), None)
+        })
+    })
+    .inner
 }
 
 /// The left column: the count tile and the block line.
@@ -148,8 +228,10 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     lines(ui, theme, keymap);
 }
 
-/// The right column: empty yet.
-fn right(_ui: &mut Ui, _theme: &Theme, _keymap: &Keymap) {}
+/// The right column: the block.
+fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    blocks(ui, theme, keymap);
+}
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {

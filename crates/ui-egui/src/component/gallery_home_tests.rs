@@ -7,7 +7,7 @@ use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::{line_states, page, size, tile_of, tile_states};
+use super::{block_states, line_states, page, size, tile_of, tile_states};
 use crate::component::block_line::BlockLine;
 use crate::component::count_tile::spoken;
 use crate::component::gallery::keymap;
@@ -62,18 +62,23 @@ fn the_boards_of_the_home_page_stand_on_bg_with_every_state() {
     for mode in [Mode::Light, Mode::Dark] {
         let theme = Theme::new(mode, TextScale::default());
         let harness = harness(mode, true);
-        for title in ["Count tile", "Block line"] {
+        for title in ["Count tile", "Block", "Block line"] {
             assert!(harness.query_all_by_label(title).count() >= 1, "{mode:?}: the {title} board");
             assert_eq!(painted(&harness, title).ground, Some(theme.palette.bg), "{mode:?}: {title}");
         }
         for state in tile_states() {
             assert!(harness.query_all_by_label(&spoken(&tile_of(&state))).count() >= 1, "{mode:?}: {}", state.name);
         }
+        for state in block_states() {
+            assert!(harness.query_all_by_label(state.name).count() >= 1, "{mode:?}: the block's {}", state.name);
+        }
+        assert_eq!(harness.query_all_by_role_and_label(Role::Button, "Agenda").count(), block_states().len(), "{mode:?}");
         for state in line_states() {
             let words = match state.line {
                 BlockLine::Empty(words) | BlockLine::More(words) => words,
             };
             assert!(harness.query_all_by_label(words).count() >= 1, "{mode:?}: {}", state.name);
         }
+        assert!(harness.query_by_role_and_label(Role::Button, "Drafts").is_none(), "the drafts block does not press");
     }
 }

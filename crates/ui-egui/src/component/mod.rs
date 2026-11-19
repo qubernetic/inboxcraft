@@ -42,6 +42,7 @@ pub mod attachment;
 pub mod avatar;
 pub mod badge;
 pub mod banner;
+pub mod block;
 pub mod block_line;
 pub mod button;
 pub mod button_row;
