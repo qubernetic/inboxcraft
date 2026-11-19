@@ -26,12 +26,27 @@ fn clock() -> Box<FakeClock> {
 
 /// The sample window, its passwords in `kept`, on the form of Studio (account 2).
 fn on_studio(kept: &Kept) -> Harness<'static, InboxApp> {
+    on_studio_writing(kept, None)
+}
+
+/// [`on_studio`], with a new message being written from the account `writing`, its text typed and kept.
+fn on_studio_writing(kept: &Kept, writing: Option<u64>) -> Harness<'static, InboxApp> {
     let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())).with_accounts(
         Arc::new(kept.clone()),
         Box::new(NoDetect::default()),
         Box::new(NoWorkers),
     );
     app.set_reduce_motion(true);
+    if let Some(account) = writing {
+        app.compose();
+        let (composer, mailbox) = app.composer_mut();
+        let composer = composer.unwrap();
+        composer.set_account(mailbox, account).unwrap();
+        composer.text_mut().push_str(WRITTEN);
+        composer.edited();
+        composer.save(mailbox).unwrap();
+        assert_eq!(app.composer().unwrap().account(), account);
+    }
     app.open_accounts();
     let (onboarding, mailbox) = app.onboarding_mut();
     onboarding.edit(mailbox, 2);
@@ -200,4 +215,44 @@ fn a_held_key_never_removes_the_account() {
     harness.run();
     hold(&mut harness, Key::Enter, 0, true, "");
     assert_eq!(accounts(&harness), [1]);
+}
+
+const WRITTEN: &str = "Half a thought about the studio's rota";
+const WRITING: &str = "The message you are writing from Studio is discarded with it.";
+
+#[test]
+fn removing_the_account_a_message_is_written_from_says_so_and_closes_it() {
+    let kept = Kept::default();
+    let mut harness = on_studio_writing(&kept, Some(2));
+    press(&mut harness, "Remove account…");
+    let heading = harness.get_by_role_and_label(Role::Heading, QUESTION).rect();
+    let writing = harness.get_by_label(WRITING).rect();
+    let stays = harness.get_by_label_contains("Everything on the server stays:").rect();
+    assert!(heading.bottom() <= writing.top() && writing.bottom() <= stays.top(), "said with what goes: {writing:?}");
+    press(&mut harness, "Remove account");
+    assert_eq!(accounts(&harness), [1]);
+    assert!(harness.state().composer().is_none(), "the message written from it closes with the account");
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert_eq!(harness.state().mailbox().error(), None, "no keep into a draft that is gone");
+    assert_eq!(harness.state().notice(), Some("Studio removed from this computer"));
+}
+
+#[test]
+fn a_message_written_from_another_account_stays_with_its_text() {
+    let kept = Kept::default();
+    let mut harness = on_studio_writing(&kept, Some(1));
+    press(&mut harness, "Remove account…");
+    harness.get_by_role_and_label(Role::Heading, QUESTION);
+    assert!(harness.query_by_label(WRITING).is_none(), "nothing is written from Studio");
+    press(&mut harness, "Remove account");
+    assert_eq!(accounts(&harness), [1]);
+    let composer = harness.state().composer().expect("the message from the other account stays");
+    assert_eq!(composer.account(), 1);
+    assert!(composer.text().contains(WRITTEN), "with its text");
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert_eq!(harness.state().mailbox().error(), None);
 }

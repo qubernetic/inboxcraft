@@ -625,8 +625,9 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
 }
 
 /// The form of an account already there: the add form's fields, the address read-only, a new password instead of the
-/// password, and where the sign-in will go when it would go anywhere new.
-fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding) -> Option<Asked> {
+/// password, and where the sign-in will go when it would go anywhere new. `writing`: a message is being written from
+/// this account.
+fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding, writing: bool) -> Option<Asked> {
     let f = &theme.fonts;
     let p = &theme.palette;
     let mut asked = None;
@@ -639,7 +640,8 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     let mut edited = Vec::new();
     let asking = onboarding.asking_remove();
     let hand = onboarding.take_remove_hand();
-    let question = Question { name: onboarding.removed_name(), address: crate::component::plain(onboarding.form().address.trim()).into_owned() };
+    let question =
+        Question { name: onboarding.removed_name(), address: crate::component::plain(onboarding.form().address.trim()).into_owned(), writing };
     // Esc while the question asks is the question's: the account stays, the form and the settings stay open.
     if asking && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape)) {
         asked = Some(Asked::KeepAccount);
@@ -690,10 +692,12 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     asked
 }
 
-/// The words of the question whether to remove an account: its name and its address, each one plain line.
+/// The words of the question whether to remove an account: its name and its address, each one plain line, and
+/// whether a message is being written from it.
 struct Question {
     name: String,
     address: String,
+    writing: bool,
 }
 
 /// The question whether to remove the account, in place under the form's buttons: first that it cannot be undone, then
@@ -717,6 +721,9 @@ fn remove_question(ui: &mut Ui, theme: &Theme, keymap: &Keymap, question: &Quest
         p.ink,
         width,
     );
+    if question.writing {
+        words(ui, &tr!("The message you are writing from {name} is discarded with it.", name = question.name), f.body, p.ink, width);
+    }
     words(
         ui,
         &tr!(
@@ -1064,13 +1071,21 @@ pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, layers: &mut 
     add
 }
 
-/// Draws the page and returns what was asked for; the caller applies it after the frame's drawing.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onboarding: &mut Onboarding) -> Option<Asked> {
+/// Draws the page and returns what was asked for; the caller applies it after the frame's drawing. `writing` is the
+/// account the message being written is from: the question to remove that account says the message goes with it.
+pub(super) fn show(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    onboarding: &mut Onboarding,
+    writing: Option<u64>,
+) -> Option<Asked> {
     let mut asked = None;
     component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         asked = match onboarding.stage() {
             Stage::Form => form(ui, theme, keymap, onboarding),
-            Stage::Edit(_) => edit_form(ui, theme, keymap, onboarding),
+            Stage::Edit(account) => edit_form(ui, theme, keymap, onboarding, writing == Some(account)),
             Stage::Checking(account) => checking(ui, theme, keymap, mailbox, onboarding, account),
             Stage::Closed => None,
         };

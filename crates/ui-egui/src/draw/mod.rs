@@ -2863,6 +2863,7 @@ impl InboxApp {
             mailbox: &self.mailbox,
             onboarding: &mut self.onboarding,
             can_add: self.can_add,
+            writing: self.composer.as_ref().map(Composer::account),
         };
         settings::place(ui, theme, view)
     }
@@ -3273,7 +3274,13 @@ impl InboxApp {
             onboard::Asked::KeepAccount => onboarding.keep_account(),
             onboard::Asked::Remove => {
                 // The owner's press of the question: the only way the form removes an account.
+                let gone = if let crate::onboard::Stage::Edit(id) = onboarding.stage() { Some(id) } else { None };
                 if let Some(said) = onboarding.remove(mailbox) {
+                    // The message being written from it goes with its drafts, as the question said: nothing keeps it
+                    // into a draft that is gone.
+                    if self.composer.as_ref().is_some_and(|composer| gone == Some(composer.account())) {
+                        self.composer = None;
+                    }
                     self.say(&said);
                     self.settings.hand_to_nav();
                 }

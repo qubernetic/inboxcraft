@@ -206,6 +206,8 @@ pub(super) struct Sheet<'a> {
     pub(super) onboarding: &'a mut Onboarding,
     /// Whether the window can add accounts.
     pub(super) can_add: bool,
+    /// The account the message being written is from, when one is being written.
+    pub(super) writing: Option<u64>,
     /// What the app's desk says now.
     pub(super) desk: DeskView,
 }
@@ -625,7 +627,7 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
     }
     match view.settings.section() {
         Section::Appearance => appearance(ui, theme, view.current, view.level, mailbox.inbox_view()),
-        Section::Accounts => super::accounts::page(ui, theme, keymap, mailbox, view.onboarding, view.can_add),
+        Section::Accounts => super::accounts::page(ui, theme, keymap, mailbox, view.onboarding, (view.can_add, view.writing)),
         Section::Shortcuts => shortcuts(ui, theme, keymap, view.settings),
         Section::Sending => sending(ui, theme, keymap, view.settings, mailbox),
         Section::Triage => triage(ui, theme, mailbox),
