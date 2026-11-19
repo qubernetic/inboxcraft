@@ -180,7 +180,19 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
             // The side panel gives way before the toolbar's title would be cut past its short form: the toolbar keeps
             // the least view it needs from the frame before (its controls, its pads, the short title whole).
             let least = ui.ctx().data(|data| data.get_temp::<f32>(least_view_id())).filter(|least| least.is_finite()).unwrap_or(0.0);
-            let with_side = all.width() - SIDE - line >= VIEW_LEAST.max(least);
+            // In one pane the side panel swaps with the view: a picked event's details take the pane, Esc gives it back.
+            // While the event editor is open the view stays under it.
+            let single = super::one_pane(ui.ctx());
+            let details = single && calendar.picked().is_some() && calendar.editor().is_none();
+            swap_keys(ui.ctx(), details);
+            if details {
+                ui.scope_builder(UiBuilder::new().max_rect(all).id_salt("calendar-side"), |ui| {
+                    ui.set_clip_rect(all.intersect(ui.clip_rect()));
+                    side::show(ui, theme, keymap, calendar, &mut asked);
+                });
+                return;
+            }
+            let with_side = !single && all.width() - SIDE - line >= VIEW_LEAST.max(least);
             let side_left = if with_side { snap(all.right() - SIDE, ppp) } else { all.right() + line };
             let view = Rect::from_min_max(all.min, pos2((side_left - line).max(all.left()), all.bottom()));
             if with_side {
@@ -201,6 +213,17 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
         });
     });
     asked
+}
+
+/// Notes whether the side panel stands in the view's place this frame (`details`); when it comes, the keyboard goes to
+/// its details' first control, so it is never left on an event that is no longer drawn.
+fn swap_keys(ctx: &egui::Context, details: bool) {
+    let id = Id::unique("calendar-details-in-front");
+    let was = ctx.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
+    ctx.data_mut(|data| data.insert_temp(id, details));
+    if details && !was {
+        keys::want(ctx, crate::calendar::Target::Details);
+    }
 }
 
 /// The view: its toolbar, a `line` hairline, and the days.
