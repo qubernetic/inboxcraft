@@ -170,7 +170,7 @@ pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, k
     let mut session = Session::new(owned.store, clock())?;
     session.start();
     let detecting = tls.clone();
-    let run: Run = Arc::new(move |address: &str, ispdb: bool, stop: &onboard::RunStop| accounts::detect(&detecting, address, ispdb, stop));
+    let run: Run = accounts::run(move || accounts::system(&detecting));
     let detect = Box::new(onboard::Threaded::new(run, wake.clone()));
     let workers = Box::new(accounts::NetWorkers::new(WorkerSettings::new(Connector::new(tls)), Arc::clone(&keychain) as Arc<dyn Credentials>, wake));
     Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save).with_accounts(keychain, detect, workers).with_keep(keep))

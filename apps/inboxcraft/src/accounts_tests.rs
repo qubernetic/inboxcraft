@@ -13,7 +13,7 @@ use inboxcraft_model::{
     Account, AccountId, CalendarJob, CalendarReport, CheckStep, EmailAddress, ErrorKind, Event, EventKind, Host, Job, JobId, JobKind, Security,
     Server, StepStatus,
 };
-use inboxcraft_net::detect::{Candidate, Checked, DetectConfig, Outside, Proposal as Found, Source as Where};
+use inboxcraft_net::detect::{Candidate, Checked, Proposal as Found, Source as Where};
 use inboxcraft_net::{Connector, Credentials, Password, TlsSettings, Trust, WorkerSettings};
 use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_testkit::imap::{FakeImap, PASSWORD, USER};
@@ -23,7 +23,7 @@ use inboxcraft_ui_egui::mailbox::Mailbox;
 use inboxcraft_ui_egui::onboard::{self, Keychain};
 use inboxcraft_ui_egui::workers::Workers;
 
-use super::{Entries, NetWorkers, OsKeychain, SERVICE, described, detect, entry_name, newer_run_stops, proposal, run_stops};
+use super::{Entries, NetWorkers, Network, OsKeychain, SERVICE, described, detect, entry_name, newer_run_stops, proposal, run, run_stops};
 
 const SECRET: &str = "maple-Harbour-42-lantern";
 
@@ -277,10 +277,26 @@ fn a_named_server_no_probe_reached_is_shown_and_said_to_be_unchecked() {
 
 /// A stand-in for the name servers, the web and the probes that counts what it is asked and sets the form's stop at the
 /// first question, as the owner's Cancel while Detect asks.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Cancelling {
-    asked: Mutex<Vec<String>>,
+    asked: Arc<Mutex<Vec<String>>>,
     form: onboard::RunStop,
+}
+
+impl Cancelling {
+    /// A stand-in that sets `form` at the first question.
+    fn setting(form: &onboard::RunStop) -> Self {
+        Self { asked: Arc::default(), form: form.clone() }
+    }
+
+    /// The network Detect asks: this stand-in in place of the name servers, the web and the probes.
+    fn network(&self) -> Network {
+        Network { dns: Box::new(self.clone()), web: Box::new(self.clone()), probe: Box::new(self.clone()), clock: Arc::new(SystemClock::new()) }
+    }
+
+    fn asked(&self) -> Vec<String> {
+        self.asked.lock().unwrap().clone()
+    }
 }
 
 impl Cancelling {
@@ -334,14 +350,25 @@ fn the_forms_stop_ends_a_run_before_its_next_lookup_and_a_newer_run_still_stops_
     assert!(!older());
     let _newer = run_stops(&RUNS, &onboard::RunStop::default());
     assert!(older());
-    // Through Detect: the Cancel lands while the first question is out; no other question starts after it.
-    let fake = Cancelling::default();
-    let address = EmailAddress::new("carol@example.org").unwrap();
-    let outside = Outside { dns: &fake, web: &fake, probe: &fake, clock: Arc::new(SystemClock::new()), stop: Some(run_stops(&RUNS, &fake.form)) };
-    let found = inboxcraft_net::detect::detect(&address, &DetectConfig::default(), &outside);
-    assert!(fake.form.is_stopped());
-    assert_eq!(fake.asked.lock().unwrap().len(), 1, "{:?}", fake.asked.lock().unwrap());
+}
+
+/// The Detect the window runs, as the app makes it (`accounts::run`), with only the network replaced: the form's Cancel
+/// lands while the first question is out, and no other question starts after it.
+#[test]
+fn the_apps_detect_run_stops_at_the_forms_cancel_before_its_next_question() {
+    let form = onboard::RunStop::default();
+    let fake = Cancelling::setting(&form);
+    let made = fake.clone();
+    let run = run(move || made.network());
+    let found = run("carol@example.org", false, &form);
+    assert!(form.is_stopped());
+    assert_eq!(fake.asked().len(), 1, "{:?}", fake.asked());
     assert!(found.imap.is_empty() && found.submission.is_empty());
+    // Not stopped, the same run asks on: the stop is what ended it above.
+    let free = Cancelling::setting(&onboard::RunStop::default());
+    let made = free.clone();
+    let _ = super::run(move || made.network())("carol@example.org", false, &onboard::RunStop::default());
+    assert!(free.asked().len() > 1, "{:?}", free.asked());
 }
 
 #[test]
@@ -355,9 +382,9 @@ fn a_newer_detect_run_stops_the_older_one() {
 
 #[test]
 fn detect_refuses_what_is_not_an_address_without_asking_anyone() {
-    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
-    let shown = detect(&tls, "not an address", false, &onboard::RunStop::default());
-    assert!(shown.imap.is_empty() && shown.asked.is_empty());
+    let fake = Cancelling::setting(&onboard::RunStop::default());
+    let shown = detect(&fake.network(), "not an address", false, &onboard::RunStop::default());
+    assert!(shown.imap.is_empty() && shown.asked.is_empty() && fake.asked().is_empty());
     assert_eq!(shown.failed, ["the address is not a mail address"]);
 }
 
