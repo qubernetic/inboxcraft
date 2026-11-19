@@ -267,8 +267,10 @@ pub struct Field {
     warm: BTreeMap<Spot, Warm>,
     /// Updates so far.
     frame: u64,
-    /// The input time of the last update, in seconds: a cell the pointer was near then and is not now was left then.
-    last: Option<f64>,
+    /// The input time, in seconds, and egui's pass number of the last update. If the field missed passes since (it
+    /// was not drawn), a cell the pointer was near then and is not now was left then; if it missed none (it was
+    /// drawn, and only nothing asked for a frame), it is left now.
+    last: Option<(f64, u64)>,
     /// Flips so far: a flip's glyph is a hash of its cell and this.
     flips: u32,
     /// How many times the cells were built.
@@ -346,8 +348,9 @@ impl Field {
         self.look = Some(Look { mode: theme.mode, build: self.builds, rows, emblem_rows });
     }
 
-    /// Flips the cells within the level's reach of `pointer` and cools those it has left, at input time `now`.
-    fn update(&mut self, now: f64, pointer: Option<Pos2>, level: Level, on_home: bool) {
+    /// Flips the cells within the level's reach of `pointer` and cools those it has left, at input time `now` in egui's
+    /// pass `pass`.
+    fn update(&mut self, now: f64, pass: u64, pointer: Option<Pos2>, level: Level, on_home: bool) {
         self.frame = self.frame.wrapping_add(1);
         let field_reach = match level {
             Level::Full => REACH_FULL,
@@ -377,16 +380,21 @@ impl Field {
                 self.touch(spot);
             }
         }
-        // A cell the pointer has left was left after the last update: if the field was not drawn for a while, the
-        // cells that have cooled since are cold at once.
-        let (frame, left) = (self.frame, self.last.unwrap_or(now).min(now));
+        // A cell the pointer has left was left now, unless the field missed passes: then it was left after the last
+        // update, and the cells that have cooled since it was last drawn are cold at once.
+        let missed = self.last.is_some_and(|(_, last)| pass > last.saturating_add(1));
+        let left = match self.last {
+            Some((last, _)) if missed => last.min(now),
+            _ => now,
+        };
+        let frame = self.frame;
         for warm in self.warm.values_mut() {
             if warm.seen != frame && warm.left.is_none() {
                 warm.left = Some(left);
             }
         }
         self.warm.retain(|_, warm| warm.left.is_none_or(|left| now - left < warm.cool));
-        self.last = Some(now);
+        self.last = Some((now, pass));
     }
 
     /// `spot` is within reach: it stays warm, or flips if it was not.
@@ -479,7 +487,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, field: &mut Field, rect: Rect, level: Le
     field.build(rect, theme.text_scale, opts.emblem, ppp);
     field.lay_out(theme);
     let (now, pointer) = ui.input(|input| (input.time, input.pointer.hover_pos()));
-    field.update(now, pointer, level, opts.on_home);
+    field.update(now, ctx.cumulative_pass_nr(), pointer, level, opts.on_home);
     if field.cooling() {
         ctx.request_repaint();
     }

@@ -548,6 +548,38 @@ fn a_field_drawn_again_after_a_pause_shows_no_cell_that_cooled_meanwhile() {
     assert!(stale.is_empty(), "{} cells held before the pause are still warm", stale.len());
 }
 
+/// A field over [`RECT`] with its cells built, and the cells held under the pointer at (300, 300) at 1 s in pass 10.
+fn held_at_rest() -> (Field, usize) {
+    let mut field = Field::new(7);
+    field.build(RECT, TextScale::default(), None, 1.0);
+    field.update(1.0, 10, Some(pos2(300.0, 300.0)), Level::Full, false);
+    let held = field.warm.len();
+    assert!(held > 0 && !field.cooling());
+    (field, held)
+}
+
+#[test]
+fn after_a_rest_on_screen_the_cells_the_pointer_leaves_cool_over_200_ms() {
+    // egui runs no pass at rest: 0.5 s later, in the very next pass, the pointer leaves the window.
+    let (mut field, held) = held_at_rest();
+    field.update(1.5, 11, None, Level::Full, false);
+    assert_eq!(field.warm.len(), held, "the cells left after a rest vanished at once");
+    assert!(field.warm.values().all(|warm| warm.left.is_some()));
+    field.update(1.6, 12, None, Level::Full, false);
+    let mid = field.warm.len();
+    assert!(mid > 0 && mid < held, "{mid} of {held} still warm at 100 ms");
+    field.update(1.5 + TRAIL + 1e-6, 13, None, Level::Full, false);
+    assert!(field.warm.is_empty(), "still warm at 200 ms");
+}
+
+#[test]
+fn a_field_not_drawn_for_a_while_shows_no_cell_that_cooled_meanwhile() {
+    // Passes ran for 0.5 s without the field: drawn again, the pointer elsewhere, the cells it held are cold.
+    let (mut field, _) = held_at_rest();
+    field.update(1.5, 41, Some(pos2(700.0, 300.0)), Level::Full, false);
+    assert!(!field.cooling(), "cells held before the field was hidden still cool");
+}
+
 #[test]
 fn the_level_turning_off_stills_everything_at_once() {
     let mut harness = harness(with_emblem(Level::Full));
