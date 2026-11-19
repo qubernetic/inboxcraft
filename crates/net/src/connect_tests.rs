@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use std::io::Write;
+use std::io::{IoSlice, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
@@ -116,4 +116,18 @@ fn hanging_lookups_are_capped_across_runs() {
     let deadline = Deadline::new(clock, Duration::from_secs(5));
     let found = lookup_by(Arc::clone(&held) as Arc<dyn Resolve>, &host, 993, &deadline).unwrap();
     assert_eq!(found, [SocketAddr::from(([127, 0, 0, 1], 993))]);
+}
+
+/// A vectored write reaches the socket as one call, as without the wrapper: both pieces are written at once.
+#[test]
+fn a_vectored_write_goes_through_as_one_call() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let socket = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut peer, _) = listener.accept().unwrap();
+    let mut timed = Timed::new(socket, None, Duration::from_secs(30));
+    let written = timed.write_vectored(&[IoSlice::new(b"abc"), IoSlice::new(b"defg")]).unwrap();
+    assert_eq!(written, 7);
+    let mut got = [0_u8; 7];
+    peer.read_exact(&mut got).unwrap();
+    assert_eq!(&got, b"abcdefg");
 }

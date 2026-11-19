@@ -352,6 +352,13 @@ impl Write for Timed {
         self.socket.write(buf)
     }
 
+    /// Passed through as one call, as the socket itself would make it: rustls writes TLS records this way.
+    /// (`is_write_vectored` is not stable in Rust yet, so it cannot be passed through too.)
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        self.arm(TcpStream::set_write_timeout)?;
+        self.socket.write_vectored(bufs)
+    }
+
     fn flush(&mut self) -> io::Result<()> {
         self.socket.flush()
     }
