@@ -48,7 +48,7 @@ use crate::component::pill::pill;
 use crate::component::segmented::segmented_for;
 use crate::component::tag::TagKind;
 use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
-use crate::component::{avatar, button, galley, popup};
+use crate::component::{avatar, button, popup};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, Group, GroupKind, InboxView, Leaving, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState, Waiting};
@@ -181,60 +181,6 @@ fn subtitle(mailbox: &Mailbox) -> String {
         Some(summary) => summary,
         None => tr!("{whose} · {shown}", whose = mailbox.subtitle(), shown = mailbox.list_count()),
     }
-}
-
-/// The narrowest the list gets, its pane's left margin left out, with its own head (the title and the line under it)
-/// and each group's head whole (index, name, how many
-/// show and "show all" in Smart, "done all" and the unread count), as [`header`] and [`head`] lay them out: the head
-/// 16 in at each side, a group's head across the list, the line at its left. Never more than the list's default
-/// width: a head that does not fit there is not helped by hiding the list.
-pub(super) fn least_width(ui: &Ui, theme: &Theme, mailbox: &Mailbox) -> f32 {
-    let s = &theme.spacing;
-    let p = &theme.palette;
-    let title = galley(ui, &mailbox.title(), theme.fonts.title, p.ink).size().x;
-    let under = galley(ui, &subtitle(mailbox), theme.fonts.mono_s, p.muted).size().x;
-    let head = s.s4 * 2.0 + title.max(under).ceil();
-    // The line at the list's left stands before its heads.
-    (head.max(group_heads_width(ui, theme, mailbox)) + 1.0).min(super::LIST_WIDTH + 1.0)
-}
-
-/// The widest of the group heads [`lines`] draws for `mailbox`'s list (none in the List view or with no groups),
-/// "Other" among them while it holds a message: each at its most, its hover link shown, in Smart "show all" or "show
-/// fewer" and how many show.
-fn group_heads_width(ui: &Ui, theme: &Theme, mailbox: &Mailbox) -> f32 {
-    let groups = mailbox.groups();
-    if groups.is_empty() {
-        return 0.0;
-    }
-    let smart = mailbox.inbox_view() == InboxView::Smart;
-    let held: HashSet<u64> = groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
-    let other: Vec<u64> = mailbox.messages().iter().map(|message| message.id).filter(|id| !held.contains(id)).collect();
-    let other = Group { icon: IconId::Inbox, name: tr!("Other").to_owned(), messages: other };
-    let link = [tr!("show all"), tr!("show fewer")].into_iter().max_by(|a, b| a.len().cmp(&b.len()));
-    let mut widest = 0.0_f32;
-    for (index, group) in groups.iter().chain(std::iter::once(&other)).filter(|group| !group.messages.is_empty()).enumerate() {
-        let members: HashSet<u64> = group.messages.iter().copied().collect();
-        let listed = || mailbox.messages().iter().filter(|message| members.contains(&message.id));
-        let count = listed().count();
-        if count == 0 {
-            continue;
-        }
-        let unread = u64::try_from(listed().filter(|message| !message.seen).count()).unwrap_or(u64::MAX);
-        let state = HeadState { unread, count, open: true, folds: smart && count > GROUP_ROWS, index };
-        let letter = char::from(b'A'.saturating_add(u8::try_from(state.index % 26).unwrap_or(0)));
-        let shown = state.folds.then(|| tr!("{shown} of {count} ·", shown = count, count = count));
-        let head = GroupHead {
-            id: Id::NULL,
-            index: &format!("[ {letter} ]"),
-            name: &group.name,
-            unread,
-            shown: shown.as_deref(),
-            link: link.filter(|_| state.folds),
-            hover_link: Some(tr!("done all")),
-        };
-        widest = widest.max(crate::component::group_head::least_width(ui, theme, &head));
-    }
-    widest
 }
 
 /// What `key`'s action is pressed with, and `with` after it ("H snoozes the open message."), or nothing when the

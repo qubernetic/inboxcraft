@@ -236,23 +236,6 @@ fn the_keyboard_in_the_list_when_it_goes_moves_to_the_composer() {
 }
 
 #[test]
-fn the_list_s_least_width_is_measured_again_only_when_the_mailbox_or_the_scale_changes() {
-    let mut harness = composing(720.0, 100);
-    let once = harness.state().measured;
-    assert!(once >= 1, "measured while docked");
-    for _ in 0..5 {
-        harness.step();
-    }
-    assert_eq!(harness.state().measured, once, "kept from frame to frame, the list hidden");
-    harness.state_mut().mailbox_mut().open(crate::mailbox::Place::View(inboxcraft_model::Role::Sent));
-    harness.run();
-    assert_eq!(harness.state().measured, once + 1, "another place: measured again");
-    harness.state_mut().set_text_scale(crate::theme::TextScale::from_percent(130).unwrap());
-    harness.run();
-    assert_eq!(harness.state().measured, once + 2, "another text size: measured again");
-}
-
-#[test]
 fn a_list_float_open_when_the_list_goes_closes_and_does_not_come_back() {
     let mut harness = composing(1100.0, 100);
     let id = harness.state().mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").unwrap().id;

@@ -609,16 +609,6 @@ pub(super) fn send_problem(mailbox: &Mailbox, composer: &Composer) -> Option<Str
     send_label(mailbox, composer).1
 }
 
-/// The narrowest the composer gets in the reader's place, in points: its 40 beside, and the wider of its foot (Send
-/// with its shortest words, the caret of send later and Discard, 8 apart) and a recipient line with its widest chip
-/// beside "Cc  Bcc". The list beside it gives way to it.
-pub(super) fn least_width(ui: &Ui, theme: &Theme) -> f32 {
-    let s = &theme.spacing;
-    let words = galley(ui, tr!("Send"), theme.fonts.button, theme.palette.ink).size().x.ceil();
-    let foot = words + s.s3 * 2.0 + (s.s2 + control_side(theme)) * 2.0;
-    s.s10 * 2.0 + foot.max(recipient::line_least(ui, theme))
-}
-
 /// The foot in `rect`: Send with its key, the caret of send later, why Send waits; Templates and Discard at the right
 /// end, attaching a file before them coming soon. Made in the order the keyboard walks it: Send, send later, Templates,
 /// Discard. Send and its caret are always drawn, Send's words cut to the room; as the room runs out the rest gives way
