@@ -54,4 +54,5 @@ fn a_migration_step_keeps_a_kind_and_takes_the_rest() {
     assert_eq!(migrated(failure(rusqlite::ffi::SQLITE_FULL)), StoreError::DatabaseFull("words".to_owned()));
     assert_eq!(migrated(failure(rusqlite::ffi::SQLITE_CORRUPT)), StoreError::DatabaseDamaged("words".to_owned()));
     assert_eq!(migrated(failure(rusqlite::ffi::SQLITE_ERROR)), StoreError::Migration("words".to_owned()));
+    assert_eq!(migrated(failure(rusqlite::ffi::SQLITE_CONSTRAINT)), StoreError::Migration("words".to_owned()), "the owner changed nothing");
 }

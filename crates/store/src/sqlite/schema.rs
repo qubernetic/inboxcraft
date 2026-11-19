@@ -143,11 +143,12 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// A migration step's failure: a busy, full, damaged or refusing database keeps its kind; any other is the
-/// migration's.
+/// A migration step's failure: a busy, full or damaged database keeps its kind; any other is the migration's. A
+/// constraint a step meets (a new unique index over rows already there) is the migration's too: the owner changed
+/// nothing, so "the store refused the change" would mislead.
 pub(super) fn migration_failed(error: rusqlite::Error) -> StoreError {
     match StoreError::from(error) {
-        StoreError::Database(detail) => StoreError::Migration(detail),
+        StoreError::Database(detail) | StoreError::DatabaseRefused(detail) => StoreError::Migration(detail),
         kept => kept,
     }
 }
