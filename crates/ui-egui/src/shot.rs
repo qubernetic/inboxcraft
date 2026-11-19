@@ -78,7 +78,7 @@ use crate::calendar::{EventRow, View};
 use crate::component::gallery;
 use crate::compose::Line;
 use crate::mailbox::{Act, GroupKind, InboxView, Mailbox, Pile, Place};
-use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
+use crate::onboard::{Checked, Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
 use crate::theme::{self, Mode, TextScale, Theme};
 use crate::workers::Scripted;
@@ -415,6 +415,7 @@ fn pictured_proposal() -> Proposal {
         security,
         username: "robin@example.org".to_owned(),
         source: Source::Autoconfig,
+        checked: Checked::Answered,
     };
     Proposal {
         imap: vec![suggestion("imap.example.org", 993, Security::Tls), suggestion("imap.example.org", 143, Security::StartTls)],

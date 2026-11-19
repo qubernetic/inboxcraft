@@ -283,25 +283,23 @@ pub fn proposal(found: &Found) -> Proposal {
                     Where::AutoconfigRedirect => onboard::Source::AutoconfigRedirect,
                     Where::Ispdb => onboard::Source::Ispdb,
                     Where::Srv => onboard::Source::Srv,
-                    // The form has no words of its own for these yet: a host name or a file the MX record and a rule
-                    // of thumb pointed to is a guess the owner must confirm.
-                    Where::ProviderAutoconfig | Where::Provider | Where::Guess => onboard::Source::Guess,
+                    // A file or a host name the MX records and a rule of thumb pointed to: a guess the owner confirms.
+                    Where::ProviderAutoconfig | Where::Provider => onboard::Source::Provider,
+                    Where::Guess => onboard::Source::Guess,
+                },
+                // A server the domain names that no probe reached is still proposed; the form says beside it why it
+                // was not checked.
+                checked: match candidate.checked {
+                    Checked::Answered => onboard::Checked::Answered,
+                    Checked::NoAnswer => onboard::Checked::NoAnswer,
+                    Checked::Refused => onboard::Checked::Refused,
+                    Checked::NoName => onboard::Checked::NoName,
+                    Checked::Clock => onboard::Checked::Clock,
                 },
             })
             .collect()
     };
-    let mut failed: Vec<String> = found.failed.iter().map(|(what, kind)| format!("{what}: {kind}")).collect();
-    // A server the domain names that no probe reached is still proposed; the form's list says it was not checked.
-    for candidate in found.imap.iter().chain(&found.submission) {
-        let why = match candidate.checked {
-            Checked::Answered => continue,
-            Checked::NoAnswer => "it did not answer from here",
-            Checked::Refused => "it refused the connection from here",
-            Checked::NoName => "its name was not found",
-            Checked::Clock => "its certificate does not fit this computer's clock",
-        };
-        failed.push(format!("{} was not checked: {why}", candidate.server));
-    }
+    let failed = found.failed.iter().map(|(what, kind)| format!("{what}: {kind}")).collect();
     Proposal { imap: suggestions(&found.imap), submission: suggestions(&found.submission), asked: found.asked.clone(), failed }
 }
 

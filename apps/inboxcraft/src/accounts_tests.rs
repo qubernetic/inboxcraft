@@ -239,30 +239,39 @@ fn a_detected_proposal_reads_as_the_form_shows_it() {
     every.imap.push(Candidate { source: Where::Srv, ..every.imap[0].clone() });
     every.imap.push(Candidate { source: Where::ProviderAutoconfig, ..every.imap[0].clone() });
     every.imap.push(Candidate { source: Where::Provider, ..every.imap[0].clone() });
+    every.imap.push(Candidate { source: Where::Guess, ..every.imap[0].clone() });
     let sources: Vec<onboard::Source> = proposal(&every).imap.iter().map(|suggestion| suggestion.source).collect();
-    // What the MX record pointed to is a guess the owner confirms.
+    // What the MX records pointed to is the provider's guess, a common host name of the domain the domain's own.
     assert_eq!(
         sources,
-        [onboard::Source::AutoconfigRedirect, onboard::Source::Ispdb, onboard::Source::Srv, onboard::Source::Guess, onboard::Source::Guess]
+        [
+            onboard::Source::AutoconfigRedirect,
+            onboard::Source::Ispdb,
+            onboard::Source::Srv,
+            onboard::Source::Provider,
+            onboard::Source::Provider,
+            onboard::Source::Guess
+        ]
     );
 }
 
-/// A named server no probe reached is shown, and the list says why it was not checked, by cause.
+/// A named server no probe reached is shown, with why it was not checked as a fixed id for the form to word; the
+/// lookups' list holds only what failed.
 #[test]
 fn a_named_server_no_probe_reached_is_shown_and_said_to_be_unchecked() {
-    for (checked, why) in [
-        (Checked::NoAnswer, "it did not answer from here"),
-        (Checked::Refused, "it refused the connection from here"),
-        (Checked::NoName, "its name was not found"),
-        (Checked::Clock, "its certificate does not fit this computer's clock"),
+    for (checked, said) in [
+        (Checked::Answered, onboard::Checked::Answered),
+        (Checked::NoAnswer, onboard::Checked::NoAnswer),
+        (Checked::Refused, onboard::Checked::Refused),
+        (Checked::NoName, onboard::Checked::NoName),
+        (Checked::Clock, onboard::Checked::Clock),
     ] {
         let mut found = found();
         found.imap[0].checked = checked;
         let shown = proposal(&found);
         assert_eq!(shown.imap[0].host, "imap.example.org");
-        let line = format!("imap.example.org:993 (TLS) was not checked: {why}");
-        assert!(shown.failed.contains(&line), "{checked:?}: {:?}", shown.failed);
-        assert_eq!(shown.failed.len(), 2);
+        assert_eq!((shown.imap[0].checked, shown.imap[1].checked), (said, onboard::Checked::Answered), "{checked:?}");
+        assert_eq!(shown.failed.len(), 1, "{checked:?}: {:?}", shown.failed);
     }
 }
 
