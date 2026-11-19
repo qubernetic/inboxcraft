@@ -2449,18 +2449,11 @@ fn the_planned_parts_of_the_lists_are_drawn_coming_soon() {
     harness.run();
     let text = harness.get_by_label("in message text");
     assert!(text.accesskit_node().is_disabled());
-    // Drafts: its rows drawn from the mail there, the list coming soon.
+    // Drafts works (`drafts_tests`): nothing of it is coming soon.
     harness.state_mut().search("");
     harness.state_mut().mailbox_mut().open(Place::View(MailRole::Drafts));
     harness.run();
-    harness.get_by_label("coming soon");
-    let drafts = harness.state().mailbox().messages().len();
-    let disabled = harness
-        .root()
-        .children_recursive()
-        .filter(|node| node.accesskit_node().is_disabled() && node.accesskit_node().label().is_some_and(|label| label.contains(", ")))
-        .count();
-    assert!(drafts == 0 || disabled >= 1, "{drafts} drafts, {disabled} drawn coming soon");
+    assert!(harness.query_by_label("coming soon").is_none());
 }
 
 #[test]

@@ -133,6 +133,8 @@ fn with_its_opener_gone_the_editor_gives_the_keyboard_to_the_grid_s_picked_day()
     harness.set_size(vec2(560.0, 900.0));
     harness.run();
     assert!(harness.query_by_role_and_label(Role::Button, "Edit").is_none(), "under 600 the details hide");
+    // In one pane a picked event's details would take the pane when the editor closes: the pick let go first.
+    harness.state_mut().calendar_mut().0.pick(None);
     cancel(&mut harness);
     assert_eq!(focused(&harness).as_deref(), Some("Thursday 5 November 2026, today"), "the grid's picked day");
     // The event deleted under the editor: the same.
@@ -151,6 +153,7 @@ fn with_its_opener_gone_the_editor_gives_the_keyboard_to_the_grid_s_picked_day()
     editing(&mut harness);
     harness.set_size(vec2(560.0, 900.0));
     harness.run();
+    harness.state_mut().calendar_mut().0.pick(None);
     cancel(&mut harness);
     assert_eq!(focused(&harness).as_deref(), Some("Thursday 5 November 2026, today"));
     // The day view and the agenda draw no day's button: New event.
@@ -159,6 +162,7 @@ fn with_its_opener_gone_the_editor_gives_the_keyboard_to_the_grid_s_picked_day()
         editing(&mut harness);
         harness.set_size(vec2(560.0, 900.0));
         harness.run();
+        harness.state_mut().calendar_mut().0.pick(None);
         cancel(&mut harness);
         assert_eq!(focused(&harness).as_deref(), Some("New event"), "{view:?}: never nowhere");
     }

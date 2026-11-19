@@ -269,6 +269,9 @@
 {"out": "docs/images/one-pane-900-reader-dark.png", "mode": "dark", "size": [900, 700], "select": "Allotment rota for November"}
 {"out": "docs/images/one-pane-900-composer-light.png", "mode": "light", "size": [900, 700], "compose": "written"}
 {"out": "docs/images/one-pane-900-composer-dark.png", "mode": "dark", "size": [900, 700], "compose": "written"}
+# Two panes under 1280 at 130 %: the docked composer beside the list, which keeps its 440 (#312).
+{"out": "docs/images/narrow-1024-composer-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "compose": "written"}
+{"out": "docs/images/narrow-1024-composer-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "compose": "written"}
 {"out": "docs/images/one-pane-900-held-light.png", "mode": "light", "size": [900, 700], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
 {"out": "docs/images/one-pane-900-held-dark.png", "mode": "dark", "size": [900, 700], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
 # The menus as floats (#234): the reader's More and Move, the composer's From and Templates, a row's group menu.
@@ -342,3 +345,8 @@
 {"out": "docs/images/home-place-1000-dark.png", "mode": "dark", "size": [1000, 760], "home_place": true}
 {"out": "docs/images/home-place-130-light.png", "mode": "light", "size": [1440, 900], "text_scale": 130, "home_place": true}
 {"out": "docs/images/home-place-130-dark.png", "mode": "dark", "size": [1440, 900], "text_scale": 130, "home_place": true}
+# The drafts place (#314): the kept drafts as draft rows, newest first, and its empty state.
+{"out": "docs/images/drafts-filled-light.png", "mode": "light", "size": [1440, 900], "drafts": "filled"}
+{"out": "docs/images/drafts-filled-dark.png", "mode": "dark", "size": [1440, 900], "drafts": "filled"}
+{"out": "docs/images/drafts-empty-light.png", "mode": "light", "size": [1440, 900], "drafts": "empty"}
+{"out": "docs/images/drafts-empty-dark.png", "mode": "dark", "size": [1440, 900], "drafts": "empty"}

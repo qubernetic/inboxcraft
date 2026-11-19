@@ -82,7 +82,7 @@ fn folders_come_by_account_roles_first_then_by_path_with_depth() {
         ]
     );
     let inbox = &mailbox.folders_of(2)[0];
-    assert_eq!((inbox.id, inbox.unread, inbox.messages), (10, 2, 4));
+    assert_eq!((inbox.id, inbox.unread, inbox.messages), (10, 2, Some(4)));
     assert!(mailbox.folders_of(9).is_empty());
 }
 

@@ -16,7 +16,7 @@
 //! [`clean`] first: one line of at most [`MOST`] characters.
 //!
 //! Under 1280 points of window the line keeps three facts and its last three keys, under 980 two and two
-//! ([`kept_under`]); the rule is written here and switched on with the widths.
+//! ([`kept_under`]).
 
 use std::collections::VecDeque;
 
@@ -134,7 +134,6 @@ pub(crate) const NOTICE_SECONDS: f64 = motion::NOTICE;
 
 /// How many facts and keys the line keeps in a window `width` points wide: all of them from 1280, three and three under
 /// it, two and two under 980.
-#[cfg_attr(not(test), expect(dead_code, reason = "switched on with the widths"))]
 pub(crate) fn kept_under(width: f32) -> Option<(usize, usize)> {
     if width < 980.0 {
         Some((2, 2))
