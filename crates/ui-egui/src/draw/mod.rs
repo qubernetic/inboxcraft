@@ -2650,6 +2650,8 @@ impl InboxApp {
         self.change_place(ui.ctx(), drawn_place, regions.body, p.bg);
         self.rows_changed(ui.ctx(), rows_drawn);
         self.reader_changed(ui.ctx(), reader_drawn, drawn_place, regions.status, &theme);
+        // The outline before the change of mode keeps the window's picture: it is part of the window that fades (M14).
+        self.own_frame_over(ui.ctx(), &theme, corner);
         self.mode_changed(ui.ctx(), mode_drawn, ui.ctx().content_rect());
         self.follow_accounts_page();
         self.keep_keys();
@@ -2657,7 +2659,6 @@ impl InboxApp {
         self.keep_notify();
         self.keep_week();
         self.hear_desk();
-        self.own_frame_over(ui.ctx(), &theme, corner);
         self.sync();
         // What runs after this pass, before the next frame, comes after everything this frame painted.
         // A press on the index that shows a list beside the docked composer, which holds the list's keys there: the

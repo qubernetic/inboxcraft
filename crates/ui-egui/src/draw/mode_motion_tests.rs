@@ -125,3 +125,43 @@ fn a_key_the_command_line_takes_ends_the_cross_fade_in_its_frame() {
     assert_ne!(harness.state().command().picked(), picked, "the command line took the key");
     assert_eq!(dark_over(&harness), None, "and the key ended the cross-fade in its frame");
 }
+
+/// The window outlines painted over the dark window's ground as the last frame drew them: whether the light one, at
+/// full strength, and whether the dark one (faded with the old window).
+fn outlines_over_the_old_window(harness: &Harness<'static, InboxApp>) -> (bool, bool) {
+    let window = harness.ctx.content_rect();
+    let dark = Palette::of(Mode::Dark);
+    let light = Palette::of(Mode::Light);
+    let shapes: Vec<&egui::Shape> = harness
+        .output()
+        .shapes
+        .iter()
+        .flat_map(|clipped| match &clipped.shape {
+            egui::Shape::Vec(shapes) => shapes.iter().collect::<Vec<_>>(),
+            shape => vec![shape],
+        })
+        .collect();
+    let ground = shapes.iter().rposition(|shape| {
+        matches!(shape, egui::Shape::Rect(ground) if ground.rect.contains_rect(window.shrink(2.0)) && ground.fill.a() > 0 && near(ground.fill, dark.bg))
+    });
+    let Some(ground) = ground else { return (false, false) };
+    let outline = |shape: &&egui::Shape, colour: egui::Color32, whole: bool| {
+        matches!(shape, egui::Shape::Rect(line) if line.stroke.width > 0.0 && (line.rect.width() - window.width()).abs() < 2.0
+            && (line.rect.height() - window.height()).abs() < 2.0 && near(line.stroke.color, colour) && (!whole || line.stroke.color.a() == 255))
+    };
+    let after = &shapes[ground..];
+    (after.iter().any(|shape| outline(shape, light.line, true)), after.iter().any(|shape| outline(shape, dark.line, false)))
+}
+
+#[test]
+fn the_cross_fade_takes_the_window_outline_with_the_old_window() {
+    let mut harness = dark(Level::Full);
+    // The app's own frame, whose outline lies over everything.
+    harness.state_mut().set_own_frame(true);
+    harness.state_mut().set_frame(inboxcraft_engine::appearance::WindowFrame::Own);
+    harness.run();
+    light(&mut harness);
+    harness.run_steps(4);
+    assert!(dark_over(&harness).is_some(), "40 ms, still fading");
+    assert_eq!(outlines_over_the_old_window(&harness), (false, true), "the old outline fades with the old window, the new one under it");
+}

@@ -81,15 +81,21 @@ pub(crate) fn shapes(ctx: &Context, rect: Rect, layers: &[LayerId]) -> Option<Ve
     })
 }
 
+/// The layers painted through a painter of their own, not as areas (the memory does not list them), as egui paints
+/// them: after the areas of their order.
+const PAINTED_ONLY: [(Order, &str); 2] = [(Order::Foreground, "reader-scan"), (Order::Tooltip, "window-outline")];
+
 /// Every layer of the window in the order they are painted: the window's own first, the tooltips last.
 pub(crate) fn every_layer(ctx: &Context) -> Vec<LayerId> {
     let known: Vec<LayerId> = ctx.memory(|memory| memory.layer_ids().filter(|layer| *layer != LayerId::background()).collect());
-    let mut layers = Vec::with_capacity(known.len().saturating_add(1));
+    let mut layers = Vec::with_capacity(known.len().saturating_add(1 + PAINTED_ONLY.len()));
     for order in [Order::Background, Order::Middle, Order::Foreground, Order::Tooltip, Order::Debug] {
         if order == Order::Background {
             layers.push(LayerId::background());
         }
         layers.extend(known.iter().filter(|layer| layer.order == order));
+        let painted = PAINTED_ONLY.iter().filter(|(at, _)| *at == order).map(|(_, name)| LayerId::new(order, Id::unique(name)));
+        layers.extend(painted.filter(|layer| !known.contains(layer)));
     }
     layers
 }
