@@ -96,6 +96,9 @@
 # The mail lists' rows (#236): mail row, group head, outbox row, later row, draft row, on a page of their own.
 {"out": "docs/images/components-lists-light.png", "mode": "light", "lists": true}
 {"out": "docs/images/components-lists-dark.png", "mode": "dark", "lists": true}
+# The index's rows (#254): place row, mailbox row, account row, on a page of their own.
+{"out": "docs/images/components-index-light.png", "mode": "light", "index": true}
+{"out": "docs/images/components-index-dark.png", "mode": "dark", "index": true}
 # The appearance settings page (E1.16b).
 {"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true}
 {"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true}
