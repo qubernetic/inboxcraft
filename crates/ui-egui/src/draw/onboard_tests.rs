@@ -30,7 +30,7 @@ fn app(kept: &Kept, workers: FakeWorkers) -> InboxApp {
 }
 
 fn harness(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
-    let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    let mut harness = Harness::builder().with_size(vec2(1440.0, 900.0)).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness
 }
@@ -43,7 +43,7 @@ fn type_in(harness: &mut Harness<'static, InboxApp>) {
     harness.run();
 }
 
-/// Presses Add account on the empty window, then on the sheet's Accounts page: the form opens there.
+/// Presses Add account on the empty window, then on the settings' Accounts page: the form opens there.
 fn open_form(harness: &mut Harness<'static, InboxApp>) {
     harness.get_by_role_and_label(Role::Button, "Add account").click();
     harness.run();
@@ -59,10 +59,9 @@ fn press(harness: &mut Harness<'static, InboxApp>, label: &str) {
     harness.run();
 }
 
-/// The button called `label` on the settings sheet: the window under it may hold one of the same name, and the sheet
-/// comes after it in the tree.
+/// The button called `label` on the settings: the window may hold one of the same name elsewhere.
 fn on_sheet<'h>(harness: &'h Harness<'static, InboxApp>, label: &'h str) -> egui_kittest::Node<'h> {
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     harness.get_all_by_role_and_label(Role::Button, label).rfind(|node| sheet.contains_rect(node.rect())).unwrap()
 }
 
@@ -84,7 +83,7 @@ fn the_empty_window_offers_add_account_which_opens_settings_on_accounts_where_th
     on_sheet(&harness, "Add account").click();
     harness.run();
     assert_eq!(harness.state().onboarding().stage(), Stage::Form);
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     assert!(sheet.contains_rect(harness.get_by_label("Add an account").rect()), "the form is on the sheet");
     harness.get_by_label("Password");
     harness.check_accessibility();
@@ -105,16 +104,16 @@ fn the_accounts_page_with_no_account_is_the_frames_box_with_add_account_in_it() 
         let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), theme);
         harness.get_by_role_and_label(Role::Button, "Add account").click();
         harness.run();
-        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
         harness.get_by_label("The mail accounts this computer reads and sends from.");
         // `settings-accounts/empty`: no button in the head, no other group, one box 520 × 240 in the middle of the
         // page's room under the head (the column 720 wide, 40 right of the sections' 232 and its hairline).
         let card = harness.get_by_role_and_label(Role::Group, "No account yet").rect();
         assert_eq!((card.width(), card.height()), (520.0, 240.0), "{theme:?}: {card:?}");
-        let column = sheet.left() + 1.0 + 232.0 + 1.0 + 40.0;
+        let column = sheet.left() + 232.0 + 1.0 + 40.0;
         assert_eq!(card.left(), column + 100.0, "{theme:?}: in the middle of the 720 column");
         let intro = harness.get_by_label("The mail accounts this computer reads and sends from.").rect();
-        let room = (intro.bottom(), sheet.bottom() - 1.0 - 16.0);
+        let room = (intro.bottom(), sheet.bottom() - 16.0);
         assert!((card.center().y - (room.0 + room.1) / 2.0).abs() <= 1.0, "{theme:?}: {card:?} in the middle of {room:?}");
         let adds: Vec<_> = harness.get_all_by_role_and_label(Role::Button, "Add account").map(|node| node.rect()).collect();
         let head = egui::Rect::from_x_y_ranges(sheet.x_range(), sheet.top()..=intro.bottom());
@@ -200,19 +199,22 @@ fn a_window_that_cannot_add_says_how_to_look_around_in_the_same_box() {
 }
 
 #[test]
-fn closing_the_sheet_closes_the_form_on_it() {
+fn esc_on_the_form_closes_neither_the_form_nor_the_settings() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
     open_form(&mut harness);
+    type_in(&mut harness);
     harness.key_press(Key::Escape);
     harness.run();
-    assert!(!harness.state().settings().is_open());
-    assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "the form would open the sheet again");
+    assert!(harness.state().settings().is_open(), "a place is not closed by an Esc");
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form, "nor the form on it");
+    assert!(!harness.state().onboarding().form().password.is_empty(), "nothing typed is dropped");
 }
 
 #[test]
 fn opening_the_form_from_outside_opens_it_on_the_sheet() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     assert!(harness.state().settings().is_open());
     assert_eq!(harness.state().settings().section(), Section::Accounts);
@@ -312,7 +314,7 @@ fn an_accounts_row_opens_its_settings_and_a_new_password_is_saved_and_checked() 
         onboarding.close();
     }
     harness.state_mut().pump();
-    harness.state_mut().open_accounts();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     harness.get_by_label("carol@example.org, carol@example.org").click();
     harness.run();
@@ -339,6 +341,7 @@ fn every_control_of_the_form_has_a_name_in_both_modes() {
         let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), theme);
         harness.check_accessibility();
         harness.state_mut().onboarding_mut().0.open();
+        super::tests::at_settings(harness.state_mut(), Section::Accounts);
         harness.run();
         harness.check_accessibility();
         // The IMAP server's row has its own select; the outgoing server's has another.
@@ -376,6 +379,7 @@ fn undo_brings_no_password_back_after_change_settings() {
     let kept = Kept::default();
     let mut harness = harness(app(&kept, failed), egui::Theme::Light);
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     harness.state_mut().onboarding_mut().0.form_mut().address = "carol@example.org".to_owned();
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
@@ -395,6 +399,7 @@ fn undo_brings_no_password_of_an_earlier_account_into_the_next() {
     let kept = Kept::default();
     let mut harness = harness(app(&kept, FakeWorkers::passing()), egui::Theme::Light);
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     harness.state_mut().onboarding_mut().0.form_mut().address = "carol@example.org".to_owned();
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
@@ -404,6 +409,7 @@ fn undo_brings_no_password_of_an_earlier_account_into_the_next() {
     harness.run();
     press(&mut harness, "Done");
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
@@ -419,6 +425,7 @@ fn undo_brings_no_password_of_an_earlier_account_into_the_next() {
 fn the_password_field_takes_no_more_than_its_limit_and_never_grows_its_buffer() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     let capacity = harness.state_mut().onboarding_mut().0.form_mut().password.expose_mut().capacity();
     // Past the limit, what was typed is refused whole (never cut) and the field says so.
@@ -438,6 +445,7 @@ fn closing_the_window_forgets_the_password_of_every_account_added_in_it() {
         let mut harness = harness(app(&kept, workers), egui::Theme::Light);
         for address in ["carol@example.org", "dave@example.org"] {
             harness.state_mut().onboarding_mut().0.open();
+            super::tests::at_settings(harness.state_mut(), Section::Accounts);
             type_in(&mut harness);
             harness.state_mut().onboarding_mut().0.form_mut().address = address.to_owned();
             harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
@@ -460,6 +468,7 @@ fn a_password_the_store_did_not_forget_in_change_settings_is_forgotten_at_exit()
     let kept = Kept::default();
     let mut harness = harness(app(&kept, failed), egui::Theme::Light);
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     type_in(&mut harness);
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
     harness.run();
@@ -480,6 +489,7 @@ fn a_password_the_store_did_not_forget_in_change_settings_is_forgotten_at_exit()
 fn the_form_says_what_detect_sends_before_it_is_pressed() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     harness.get_by_label(
         "Detect asks your name servers and your domain's web server (once without encryption) about your domain; it sends no address, user name or password.",
@@ -511,6 +521,7 @@ fn the_box_to_ask_mozilla_s_list_ticks_by_pointer_and_by_space() {
     const NAME: &str = "Also ask Mozilla's list of providers (tells Mozilla the domain)";
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     let ticked = |harness: &Harness<'static, InboxApp>| harness.state().onboarding().form().ispdb;
     assert!(!ticked(&harness), "it starts off");
@@ -537,61 +548,74 @@ fn add_account(harness: &mut Harness<'static, InboxApp>, address: &str) {
 }
 
 #[test]
-fn the_typed_form_outlasts_every_way_out_of_the_sheet() {
-    for way in ["Escape", "Close", "beside", "Appearance", "back", "rail", "palette"] {
+fn the_typed_form_outlasts_every_way_out_of_the_settings() {
+    for way in ["settings' key", "Appearance", "back", "index", "palette"] {
         let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
         open_form(&mut harness);
         type_in(&mut harness);
         match way {
-            "Escape" => harness.key_press(Key::Escape),
-            "Close" => on_sheet(&harness, "Close").click(),
-            "beside" => {
-                let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-                let at = egui::pos2(sheet.left() / 2.0, sheet.center().y);
-                harness.hover_at(at);
-                harness.run();
-                for pressed in [true, false] {
-                    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
-                }
-            }
+            "settings' key" => harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma),
             "Appearance" => harness.get_by_label("Appearance, settings page").click(),
             "back" => harness.get_by_label("Back to the accounts").click(),
             "palette" => harness.key_press_modifiers(Modifiers::COMMAND, Key::K),
             _ => harness.state_mut().run_action(&egui::Context::default(), crate::keymap::CALENDAR),
         }
         harness.run();
-        assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "{way}: the form is left");
-        assert!(harness.state().onboarding().form().password.is_empty(), "{way}: the kept form holds no password");
+        let onboarding = harness.state().onboarding();
         if way == "palette" {
-            assert!(!harness.state().settings().is_open(), "the palette closed the sheet");
+            // The palette comes over the settings: nothing is left.
+            assert!(harness.state().settings().is_open(), "the palette leaves the settings shown");
+            assert_eq!(onboarding.stage(), Stage::Form, "{way}");
+            assert!(!onboarding.form().password.is_empty(), "{way}: nothing is left, the password stays");
             harness.key_press(Key::Escape);
             harness.run();
+            continue;
         }
-        harness.state_mut().open_accounts();
+        // Back closes the form into the kept ones; a change of page or place keeps it open as it is.
+        let stage = if way == "back" { Stage::Closed } else { Stage::Form };
+        assert_eq!(onboarding.stage(), stage, "{way}: the form is kept");
+        assert!(onboarding.form().password.is_empty(), "{way}: the kept form holds no password");
+        super::tests::at_settings(harness.state_mut(), Section::Accounts);
         harness.run();
-        on_sheet(&harness, "Add account").click();
-        harness.run();
+        if way == "back" {
+            on_sheet(&harness, "Add account").click();
+            harness.run();
+        }
         let onboarding = harness.state().onboarding();
         assert_eq!(onboarding.stage(), Stage::Form, "{way}");
         assert_eq!(onboarding.form().address, "carol@example.org", "{way}: the address as typed");
         assert!(onboarding.form().password.is_empty(), "{way}: the password is dropped on the way out and typed again");
         // Cancel on the form itself lets it go: the next form is empty.
-        // As a screen reader presses it: in this window the form's foot is under the sheet's view.
+        // As a screen reader presses it: in this window the form's foot is under the page's view.
         harness.get_by_label("Cancel").click_accesskit();
         harness.run();
         assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "{way}: Cancel closes the form");
         harness.state_mut().onboarding_mut().0.open();
+        super::tests::at_settings(harness.state_mut(), Section::Accounts);
         assert_eq!(harness.state().onboarding().form().address, "", "{way}: Cancel let it go");
     }
 }
 
-/// Leaves the form on the sheet by Escape, then opens the sheet on Accounts again.
+/// Leaves the settings by their key with a form open, and comes back by it: the form shows as it was left, without
+/// its password.
 fn leave_and_come_back(harness: &mut Harness<'static, InboxApp>) {
-    harness.key_press(Key::Escape);
+    let stage = harness.state().onboarding().stage();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
-    assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "the form is left");
-    harness.state_mut().open_accounts();
+    assert!(!harness.state().settings().is_open(), "the settings are left");
+    assert_eq!(harness.state().onboarding().stage(), stage, "the form is kept open");
+    assert!(harness.state().onboarding().form().password.is_empty(), "without its password");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
+    assert!(harness.state().settings().is_open() && harness.state().settings().section() == Section::Accounts, "back on Accounts");
+    assert_eq!(harness.state().onboarding().stage(), stage, "the form as it was left");
+}
+
+/// Back to the accounts' list from the form shown: the form is kept.
+fn back_to_the_list(harness: &mut Harness<'static, InboxApp>) {
+    harness.get_by_label("Back to the accounts").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "the form is left for the list");
 }
 
 /// Opens the form of the account whose row is `row`, and gives it the name `label`.
@@ -610,10 +634,11 @@ const DANA: &str = "dana@example.org, dana@example.org";
 fn add_account_over_a_kept_edit_opens_the_add_form_and_the_edit_stays_kept() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
     add_account(&mut harness, "carol@example.org");
-    harness.state_mut().open_accounts();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     edit_typed(&mut harness, CAROL, 1, "Typed label");
     leave_and_come_back(&mut harness);
+    back_to_the_list(&mut harness);
     on_sheet(&harness, "Add account").click();
     harness.run();
     let onboarding = harness.state().onboarding();
@@ -634,7 +659,7 @@ fn add_account_over_a_kept_edit_opens_the_add_form_and_the_edit_stays_kept() {
 fn an_account_s_row_over_a_kept_add_form_opens_the_edit_and_the_add_form_stays_kept() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
     add_account(&mut harness, "carol@example.org");
-    harness.state_mut().open_accounts();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     on_sheet(&harness, "Add account").click();
     harness.run();
@@ -642,6 +667,7 @@ fn an_account_s_row_over_a_kept_add_form_opens_the_edit_and_the_add_form_stays_k
     harness.state_mut().onboarding_mut().0.form_mut().address = "dana@example.org".to_owned();
     harness.state_mut().onboarding_mut().0.form_mut().password = Secret::new(PASSWORD);
     leave_and_come_back(&mut harness);
+    back_to_the_list(&mut harness);
     harness.get_by_label(CAROL).click();
     harness.run();
     let onboarding = harness.state().onboarding();
@@ -663,10 +689,11 @@ fn another_account_s_row_over_a_kept_edit_opens_that_edit_and_both_stay_kept() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
     add_account(&mut harness, "carol@example.org");
     add_account(&mut harness, "dana@example.org");
-    harness.state_mut().open_accounts();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     edit_typed(&mut harness, CAROL, 1, "Carol typed");
     leave_and_come_back(&mut harness);
+    back_to_the_list(&mut harness);
     harness.get_by_label(DANA).click();
     harness.run();
     let onboarding = harness.state().onboarding();
@@ -688,7 +715,7 @@ fn another_account_s_row_over_a_kept_edit_opens_that_edit_and_both_stay_kept() {
     // Cancel lets dana's go; carol's stays.
     harness.get_by_label("Cancel").click_accesskit();
     harness.run();
-    harness.state_mut().open_accounts();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     harness.get_by_label(DANA).click();
     harness.run();
@@ -707,13 +734,14 @@ fn add_account_stands_at_the_right_end_of_the_accounts_title() {
         let accounts = true;
         let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
         add_account(&mut harness, "carol@example.org");
-        harness.state_mut().open_accounts();
+        super::tests::at_settings(harness.state_mut(), Section::Accounts);
         harness.run();
-        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
         let add = on_sheet(&harness, "Add account").rect();
         let title = harness.get_by_role_and_label(Role::Heading, "Accounts").rect();
-        // The page's column ends 40 in from the sheet's edge, its words 16 further in.
-        assert!((add.right() - (sheet.right() - 1.0 - 40.0 - 16.0)).abs() <= 0.5, "{accounts}: {add:?} in {sheet:?}");
+        // The page's column, 720 wide, 40 right of the sections' 232 and its hairline; its words end 16 in.
+        let column_right = sheet.left() + 232.0 + 1.0 + 40.0 + 720.0;
+        assert!((add.right() - (column_right - 16.0)).abs() <= 0.5, "{accounts}: {add:?} in {sheet:?}");
         assert!((add.center().y - title.center().y).abs() <= 1.0, "{accounts}: on the title's line: {add:?} {title:?}");
         // `settings-accounts/list`: a secondary text button 110 × 32, its word only.
         assert_eq!((add.width(), add.height()), (110.0, 32.0), "{accounts}: {add:?}");
@@ -721,14 +749,14 @@ fn add_account_stands_at_the_right_end_of_the_accounts_title() {
 }
 
 /// The form scrolls itself to the control `Tab` comes to, as a settings page does: in a window too low for it, every
-/// stop is in sight on the sheet, the last ones included.
+/// stop on the settings is in sight, the last ones included (the index's and the command line's stops lie beside).
 #[test]
 fn tab_through_the_form_in_a_low_window_keeps_each_stop_in_sight() {
     let app = app(&Kept::default(), FakeWorkers::passing());
-    let mut harness = Harness::builder().with_size(vec2(1100.0, 600.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    let mut harness = Harness::builder().with_size(vec2(1440.0, 600.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     open_form(&mut harness);
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     let mut seen = Vec::new();
     for _ in 0..40 {
         harness.key_press(Key::Tab);
@@ -736,7 +764,10 @@ fn tab_through_the_form_in_a_low_window_keeps_each_stop_in_sight() {
         let focused = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused());
         if let Some(node) = focused {
             let label = node.accesskit_node().label().unwrap_or_default();
-            assert!(sheet.contains_rect(node.rect()), "{label} {:?} has the keyboard out of sight of the sheet {sheet:?}", node.rect());
+            if !sheet.x_range().contains(node.rect().center().x) {
+                continue;
+            }
+            assert!(sheet.contains_rect(node.rect()), "{label} {:?} has the keyboard out of sight of the settings {sheet:?}", node.rect());
             seen.push(label);
         }
     }
@@ -747,6 +778,7 @@ fn tab_through_the_form_in_a_low_window_keeps_each_stop_in_sight() {
 fn form_open(theme: egui::Theme, workers: FakeWorkers) -> Harness<'static, InboxApp> {
     let mut harness = harness(app(&Kept::default(), workers), theme);
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     harness
 }
@@ -842,6 +874,7 @@ fn no_control_offers_an_unencrypted_sign_in() {
     for stage in ["add", "edit"] {
         if stage == "add" {
             harness.state_mut().onboarding_mut().0.open();
+            super::tests::at_settings(harness.state_mut(), Section::Accounts);
         } else {
             let (onboarding, mailbox) = harness.state_mut().onboarding_mut();
             onboarding.edit(mailbox, 1);
@@ -1034,7 +1067,7 @@ fn a_skipped_step_names_its_server_on_its_line() {
     harness.state_mut().onboarding_mut().0.show_check(1, steps, false);
     harness.run();
     harness.run();
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     let texts = texts_in(harness.output(), sheet);
     assert!(texts.iter().any(|text| text == "sign-in · smtp.example.org:465"), "{texts:?}");
     assert!(texts.iter().any(|text| text == "calendars"), "{texts:?}");
@@ -1054,6 +1087,7 @@ fn scene(name: &str, theme: egui::Theme) -> Harness<'static, InboxApp> {
         return harness;
     }
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     type_in(&mut harness);
     match name {
         "error" => harness.state_mut().onboarding_mut().0.form_mut().port = "99999".to_owned(),
@@ -1093,16 +1127,16 @@ fn every_scene_of_the_page_rests_and_tab_reaches_its_controls() {
         let mut harness = scene(name, egui::Theme::Light);
         // The page's own controls: on the sheet, or the welcome's box.
         let place = harness
-            .query_by_role_and_label(Role::Dialog, "Settings")
+            .query_by_role_and_label(Role::Pane, "Settings")
             .or_else(|| harness.query_by_role_and_label(Role::Group, "Welcome"))
             .map(|node| node.rect())
             .unwrap();
         // What the window draws under the sheet (the sheet is wide enough to cover most of it) is not the page's: the
         // controls found in the same place, their rects under the sheet's, with the sheet closed. A sheet control of
         // the same name elsewhere stays the page's.
-        let beneath: Vec<egui::Rect> = if harness.query_by_role_and_label(Role::Dialog, "Settings").is_some() {
+        let beneath: Vec<egui::Rect> = if harness.query_by_role_and_label(Role::Pane, "Settings").is_some() {
             let mut bare = scene(name, egui::Theme::Light);
-            bare.state_mut().close_settings();
+            bare.state_mut().leave_settings();
             bare.run();
             bare.root().children_recursive().filter_map(|node| node_rect(&node)).filter(|at| place.contains_rect(*at)).collect()
         } else {
@@ -1152,38 +1186,27 @@ fn esc_closes_the_open_list_and_only_the_list() {
         assert_eq!(onboarding.stage(), Stage::Form, "{theme:?}");
         assert!(!onboarding.form().password.is_empty(), "{theme:?}: nothing typed is dropped");
         assert_eq!(onboarding.form().host, "imap.example.org", "{theme:?}");
-        // The next Esc is the sheet's.
+        // The next Esc closes nothing: the settings are a place.
         harness.key_press(Key::Escape);
         harness.run();
         harness.run();
-        assert!(!harness.state().settings().is_open(), "{theme:?}");
-        assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "{theme:?}");
+        assert!(harness.state().settings().is_open(), "{theme:?}");
+        assert_eq!(harness.state().onboarding().stage(), Stage::Form, "{theme:?}");
     }
 }
 
 #[test]
-fn a_press_beside_the_sheet_closes_the_open_list_and_only_the_list() {
+fn a_press_elsewhere_on_the_settings_closes_the_open_list_and_only_the_list() {
     let mut harness = list_open(egui::Theme::Dark);
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-    let beside = egui::pos2(sheet.left() / 2.0, sheet.center().y);
-    assert!(!sheet.contains(beside));
-    harness.hover_at(beside);
-    harness.run();
-    for pressed in [true, false] {
-        harness.event(egui::Event::PointerButton { pos: beside, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
-        harness.run();
-    }
-    harness.run();
+    press_on_the_settings(&mut harness);
     assert!(harness.query_by_label("STARTTLS").is_none(), "the list closed");
-    assert!(harness.state().settings().is_open(), "the sheet stays");
+    assert!(harness.state().settings().is_open(), "the settings stay");
     assert_eq!(harness.state().onboarding().stage(), Stage::Form);
     assert!(!harness.state().onboarding().form().password.is_empty(), "nothing typed is dropped");
-    // The next press beside is the sheet's.
-    for pressed in [true, false] {
-        harness.event(egui::Event::PointerButton { pos: beside, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
-        harness.run();
-    }
-    assert!(!harness.state().settings().is_open());
+    // The next press there closes nothing.
+    press_on_the_settings(&mut harness);
+    assert!(harness.state().settings().is_open());
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form);
 }
 
 #[test]
@@ -1203,21 +1226,10 @@ fn detect_s_note_says_what_the_form_now_holds() {
 /// Each way out of the page the window offers, by its name.
 fn leave(harness: &mut Harness<'static, InboxApp>, way: &str) {
     match way {
-        "Esc" => harness.key_press(Key::Escape),
-        "a press beside" => {
-            let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-            let beside = egui::pos2(sheet.left() / 2.0, sheet.center().y);
-            harness.hover_at(beside);
-            harness.run();
-            for pressed in [true, false] {
-                harness.event(egui::Event::PointerButton { pos: beside, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
-                harness.run();
-            }
-        }
         "Back" => harness.get_by_label("Back to the accounts").click(),
         "another section" => harness.get_by_label("Sending, settings page").click(),
         "the calendar" => harness.state_mut().show_calendar(),
-        "the settings' first page" => harness.state_mut().open_settings(),
+        "the settings' key" => harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma),
         "the shortcuts" => harness.state_mut().open_shortcuts(),
         _ => panic!("{way}"),
     }
@@ -1225,22 +1237,30 @@ fn leave(harness: &mut Harness<'static, InboxApp>, way: &str) {
     harness.run();
 }
 
+/// Whether a form the onboarding keeps, or the one it shows, holds a password.
+fn holds_a_password(harness: &Harness<'static, InboxApp>) -> bool {
+    let onboarding = harness.state().onboarding();
+    onboarding.kept_forms().1 || !onboarding.form().password.is_empty()
+}
+
 #[test]
 fn no_way_out_keeps_a_password_in_the_forms_it_keeps() {
-    let ways = ["Esc", "a press beside", "Back", "another section", "the calendar", "the settings' first page", "the shortcuts"];
+    let ways = ["Back", "another section", "the calendar", "the settings' key", "the shortcuts"];
     for way in ways {
-        // The add form.
+        // The add form: Back closes it into the kept ones; the rest keep it open, as it is.
         let mut harness = form_open(egui::Theme::Dark, FakeWorkers::passing());
         let form = harness.state_mut().onboarding_mut().0.form_mut();
         form.address = "carol@example.org".to_owned();
         form.password = Secret::new(PASSWORD);
         harness.run();
         leave(&mut harness, way);
-        assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "{way}");
-        assert_eq!(harness.state().onboarding().kept_forms(), (1, false), "{way}: the add form is kept, without its password");
+        let (stage, kept) = if way == "Back" { (Stage::Closed, 1) } else { (Stage::Form, 0) };
+        assert_eq!(harness.state().onboarding().stage(), stage, "{way}");
+        assert_eq!(harness.state().onboarding().kept_forms().0, kept, "{way}");
+        assert!(!holds_a_password(&harness), "{way}: the add form is kept, without its password");
         // An account's form, changed.
+        let mut harness = form_open(egui::Theme::Dark, FakeWorkers::passing());
         let (onboarding, mailbox) = harness.state_mut().onboarding_mut();
-        onboarding.open();
         crate::onboard::tests::filled(onboarding.form_mut());
         onboarding.add(mailbox);
         assert_eq!(onboarding.stage(), Stage::Checking(1), "{way}: {:?}", onboarding.error());
@@ -1249,8 +1269,9 @@ fn no_way_out_keeps_a_password_in_the_forms_it_keeps() {
         onboarding.form_mut().password = Secret::new(PASSWORD);
         harness.run();
         leave(&mut harness, way);
-        assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "{way}");
-        assert_eq!(harness.state().onboarding().kept_forms(), (1, false), "{way}: the account's form is kept, without its password");
+        let stage = if way == "Back" { Stage::Closed } else { Stage::Edit(1) };
+        assert_eq!(harness.state().onboarding().stage(), stage, "{way}");
+        assert!(!holds_a_password(&harness), "{way}: the account's form is kept, without its password");
     }
 }
 
@@ -1405,26 +1426,26 @@ fn an_account_s_form_starts_16_under_its_title_s_row() {
     assert_eq!(field_top(&harness, "Address") - title.top(), 47.0, "1 down in a 32-high row, then 16");
 }
 
-/// The add form on the settings sheet, which makes itself the modal layer every frame, with a password typed; the
-/// IMAP security's list open when `list` is on. With `own` the app draws its own frame (the strip with the window's
-/// controls).
-fn modal_sheet_in(list: bool, own: bool) -> Harness<'static, InboxApp> {
+/// The add form on the settings, with a password typed; the IMAP security's list open when `list` is on. With `own`
+/// the app draws its own frame (the strip with the window's controls).
+fn form_with_a_password(list: bool, own: bool) -> Harness<'static, InboxApp> {
     let mut app = app(&Kept::default(), FakeWorkers::passing());
     if own {
         app.set_own_frame(true);
         app.set_frame(inboxcraft_engine::appearance::WindowFrame::Strip);
     }
     let mut harness = Harness::builder()
-        .with_size(vec2(1100.0, 900.0))
+        .with_size(vec2(1440.0, 900.0))
         .with_context_setup(crate::theme::install_fonts)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     harness.state_mut().onboarding_mut().0.form_mut().password = Secret::new(PASSWORD);
     harness.run();
     harness.run();
-    assert!(harness.ctx.memory(|memory| memory.top_modal_layer()).is_some(), "the sheet is a modal layer itself");
+    assert!(harness.ctx.memory(|memory| memory.top_modal_layer()).is_none(), "the settings are a place, no modal layer");
     if list {
         harness.get_by_label("IMAP security").click();
         harness.run();
@@ -1434,69 +1455,62 @@ fn modal_sheet_in(list: bool, own: bool) -> Harness<'static, InboxApp> {
     harness
 }
 
-fn modal_sheet(list: bool) -> Harness<'static, InboxApp> {
-    modal_sheet_in(list, false)
-}
-
-/// A press of the pointer beside the sheet, down and up.
-fn press_beside(harness: &mut Harness<'static, InboxApp>) {
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-    let beside = egui::pos2(sheet.left() / 2.0, sheet.center().y);
-    harness.hover_at(beside);
+/// A press of the pointer on the settings where no control stands (under the sections' rows), down and up.
+fn press_on_the_settings(harness: &mut Harness<'static, InboxApp>) {
+    let settings = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+    let at = egui::pos2(settings.left() + 100.0, settings.bottom() - 20.0);
+    harness.hover_at(at);
     harness.run();
     for pressed in [true, false] {
-        harness.event(egui::Event::PointerButton { pos: beside, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
         harness.run();
     }
     harness.run();
 }
 
 #[test]
-fn a_modal_sheet_closes_on_esc_and_on_a_press_beside_when_no_list_is_open() {
-    let mut harness = modal_sheet(false);
+fn on_the_form_esc_and_a_press_on_the_settings_close_nothing_when_no_list_is_open() {
+    let mut harness = form_with_a_password(false, false);
     harness.key_press(Key::Escape);
     harness.run();
     harness.run();
-    assert!(!harness.state().settings().is_open(), "Esc closes the sheet");
-    let mut harness = modal_sheet(false);
-    press_beside(&mut harness);
-    assert!(!harness.state().settings().is_open(), "a press beside closes the sheet");
+    assert!(harness.state().settings().is_open(), "Esc closes no place");
+    press_on_the_settings(&mut harness);
+    assert!(harness.state().settings().is_open(), "a press on the settings leaves nothing");
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    assert!(!harness.state().onboarding().form().password.is_empty(), "nothing typed is dropped");
 }
 
 #[test]
-fn on_a_modal_sheet_esc_and_a_press_beside_close_only_the_open_list() {
-    let mut harness = modal_sheet(true);
+fn on_the_form_esc_and_a_press_on_the_settings_close_only_the_open_list() {
+    let mut harness = form_with_a_password(true, false);
     harness.key_press(Key::Escape);
     harness.run();
     harness.run();
     assert!(harness.query_by_label("STARTTLS").is_none(), "Esc closed the list");
     assert!(harness.state().settings().is_open(), "and only the list");
     assert!(!harness.state().onboarding().form().password.is_empty());
-    let mut harness = modal_sheet(true);
-    press_beside(&mut harness);
-    assert!(harness.query_by_label("STARTTLS").is_none(), "a press beside closed the list");
+    let mut harness = form_with_a_password(true, false);
+    press_on_the_settings(&mut harness);
+    assert!(harness.query_by_label("STARTTLS").is_none(), "a press elsewhere closed the list");
     assert!(harness.state().settings().is_open(), "and only the list");
 }
 
-/// While the sheet or a list on it keeps the keyboard, `Tab` goes round them and never on to the window's controls.
+/// While a list on the form keeps the keyboard, `Tab` goes round it and never on to the window's controls.
 #[test]
-fn tab_never_reaches_the_window_s_controls_while_the_sheet_or_a_list_on_it_is_open() {
-    for list in [false, true] {
-        let mut harness = modal_sheet_in(list, true);
-        harness.get_by_role_and_label(Role::Button, "Minimise");
-        for step in 0..40 {
-            harness.key_press(Key::Tab);
-            harness.run();
-            let focused = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused());
-            let label = focused.and_then(|node| node.accesskit_node().label()).unwrap_or_default();
-            assert!(!["Minimise", "Maximise", "Restore", "Close the window"].contains(&label.as_str()), "list {list}, Tab {step} reached {label}");
-        }
-        if list {
-            assert!(harness.query_by_label("STARTTLS").is_some(), "Tab kept to the list");
-        }
-        assert!(harness.state().settings().is_open());
-        assert!(!harness.state().onboarding().form().password.is_empty(), "list {list}: nothing typed is dropped");
+fn tab_never_reaches_the_window_s_controls_while_a_list_on_the_form_is_open() {
+    let mut harness = form_with_a_password(true, true);
+    harness.get_by_role_and_label(Role::Button, "Minimise");
+    for step in 0..40 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        let focused = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused());
+        let label = focused.and_then(|node| node.accesskit_node().label()).unwrap_or_default();
+        assert!(!["Minimise", "Maximise", "Restore", "Close the window"].contains(&label.as_str()), "Tab {step} reached {label}");
     }
+    assert!(harness.query_by_label("STARTTLS").is_some(), "Tab kept to the list");
+    assert!(harness.state().settings().is_open());
+    assert!(!harness.state().onboarding().form().password.is_empty(), "nothing typed is dropped");
 }
 
 #[test]
@@ -1726,6 +1740,7 @@ fn detected_by(proposal: crate::onboard::Proposal, theme: egui::Theme, percent: 
     app.set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
     let mut harness = harness(app, theme);
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     harness.run();
     harness.state_mut().onboarding_mut().0.form_mut().address = "carol@example.org".to_owned();
     harness.run();
@@ -1834,11 +1849,9 @@ fn leaving_the_form_while_detect_asks_stops_the_run_and_the_buttons_come_back() 
     press(&mut harness, "Detect");
     assert!(harness.get_by_role_and_label(Role::Button, "Check and add").accesskit_node().is_disabled(), "waits while Detect asks");
     let stop = held.stops.lock().unwrap()[0].clone();
-    // Esc leaves the form, and the owner comes back to it.
+    // The owner leaves the settings, and comes back to the form.
     leave_and_come_back(&mut harness);
-    assert!(stop.is_stopped(), "leaving the form stops the run");
-    on_sheet(&harness, "Add account").click();
-    harness.run();
+    assert!(stop.is_stopped(), "leaving the settings stops the run");
     assert_eq!(harness.state().onboarding().stage(), Stage::Form);
     // The stopped run's answer comes late.
     held.answer();
@@ -1857,6 +1870,7 @@ fn a_server_detect_left_out_for_the_owners_says_in_its_note_that_it_was_not_chec
     app.set_text_scale(crate::theme::TextScale::from_percent(100).unwrap());
     let mut harness = harness(app, egui::Theme::Light);
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
     {
         let form = harness.state_mut().onboarding_mut().0.form_mut();
         form.address = "carol@example.org".to_owned();

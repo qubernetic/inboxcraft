@@ -54,7 +54,7 @@ fn harness_of(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
 }
 
 fn on_the_page(mut app: InboxApp) -> Harness<'static, InboxApp> {
-    app.settings_mut().open_at(Section::Notifications);
+    super::tests::at_settings(&mut app, Section::Notifications);
     harness_of(app, egui::Theme::Light)
 }
 
@@ -215,9 +215,9 @@ fn starting_with_the_computer_waits_for_the_desktop_and_says_why_it_was_not_done
     assert!(harness.query_all_by_label_contains("Not changed: the desktop did not allow InboxCraft to start at login.").next().is_some());
     assert_eq!(toggled(&harness, Role::Switch, "Start with the computer"), Some(Toggled::False));
     // The note goes with the sheet.
-    harness.state_mut().close_settings();
+    harness.state_mut().leave_settings();
     harness.run();
-    harness.state_mut().settings_mut().open_at(Section::Notifications);
+    super::tests::at_settings(harness.state_mut(), Section::Notifications);
     harness.run();
     assert!(harness.query_by_label("Not changed: the desktop did not allow InboxCraft to start at login.").is_none());
 }
@@ -247,7 +247,7 @@ fn without_accounts_the_page_says_to_add_one_first() {
 fn every_control_on_the_page_has_an_accessible_name_in_both_modes() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let mut app = app().with_desk(Box::new(Fake::with(Some(true), Some(false))));
-        app.settings_mut().open_at(Section::Notifications);
+        super::tests::at_settings(&mut app, Section::Notifications);
         let harness = harness_of(app, theme);
         harness.check_accessibility();
     }
@@ -348,7 +348,7 @@ fn a_refusal_that_comes_after_the_sheet_closed_shows_in_the_error_banner() {
     let mut harness = on_the_page(app().with_desk(Box::new(desk.clone())));
     harness.get_by_role_and_label(Role::Switch, "Start with the computer").click();
     harness.run();
-    harness.state_mut().close_settings();
+    harness.state_mut().leave_settings();
     harness.run();
     desk.0.lock().unwrap().answer = Some(Err("the Background portal did not answer".to_owned()));
     harness.run();

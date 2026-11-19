@@ -103,19 +103,21 @@ fn cover_id() -> Id {
     Id::unique("inboxcraft-float-cover")
 }
 
-/// How many times the settings sheet or the palette came over the window.
+/// How many times the palette came over the window or the settings took the place of what was shown.
 fn covers(ctx: &Context) -> u64 {
-    ctx.data(|data| data.get_temp::<(bool, u64)>(cover_id())).map_or(0, |(_, count)| count)
+    ctx.data(|data| data.get_temp::<([bool; 2], u64)>(cover_id())).map_or(0, |(_, count)| count)
 }
 
-/// Says, each frame before the floats are drawn, whether the settings sheet or the palette lies over the window. The
-/// frame one of them comes over it, every [`float`] open under it closes: it picks nothing, and asks for no keyboard
-/// back (the surface over it has the keyboard), so nothing under that surface stands over it, holds the modal layer,
-/// keeps `Tab` or takes its Esc. A [`held`] float (the event editor) stays as it is, quiet; a float opened afterwards
-/// (a list on the sheet) is not touched.
-pub fn covered(ctx: &Context, covered: bool) {
-    let (was, count) = ctx.data(|data| data.get_temp::<(bool, u64)>(cover_id())).unwrap_or((false, 0));
-    let count = if covered && !was { count.saturating_add(1) } else { count };
+/// Says, each frame before the floats are drawn, whether the settings are the place shown and whether the palette lies
+/// over the window (`[settings, palette]`). The frame either comes (the settings in the place of the mail or the
+/// calendar, whose floats are no longer drawn; the palette over everything), every [`float`] open closes: it picks
+/// nothing, and asks for no keyboard back, so nothing stands over the surface that came, holds the modal layer, keeps
+/// `Tab` or takes its Esc, and nothing opens again when the place it was on shows again. A [`held`] float (the event
+/// editor) stays as it is, quiet; a float opened afterwards (a list on a settings page) is not touched.
+pub fn covered(ctx: &Context, covered: [bool; 2]) {
+    let (was, count) = ctx.data(|data| data.get_temp::<([bool; 2], u64)>(cover_id())).unwrap_or(([false; 2], 0));
+    let came = covered.iter().zip(was).any(|(now, was)| *now && !was);
+    let count = if came { count.saturating_add(1) } else { count };
     ctx.data_mut(|data| data.insert_temp(cover_id(), (covered, count)));
 }
 
@@ -192,7 +194,7 @@ enum Mode {
     Held { quiet: bool },
 }
 
-/// The ground under a held float, over the window's panes (as the palette's and the settings sheet's dim ground): a
+/// The ground under a held float, over the window's panes (as the palette's dim ground): a
 /// press outside the float lands on it, from the press to the release, and reaches nothing under it. It paints
 /// nothing and takes no keyboard. The window's own controls and the toasts stand over it, as over those grounds. It
 /// stays on top of the other middle layers (the floating composer), whichever showed first: a press on them only
@@ -217,7 +219,7 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
 /// between them). That ground also swallows the wheel and the hover of everything under it, so nothing under the float
 /// scrolls or lights up while it is open; surfaces in the foreground (the window's own controls, the toasts) stay
 /// live over it. It closes when the caller stops drawing it, and the caller gives the
-/// keyboard back. While `quiet` another surface lies over it (the palette, the settings sheet): it takes neither key
+/// keyboard back. While `quiet` another surface lies over it (the palette): it takes neither key
 /// nor press, and is not modal, so that surface has them. What `add` gave (always there), and how it was asked to close.
 pub fn held<R>(ctx: &Context, theme: &Theme, float: &Float, quiet: bool, add: impl FnOnce(&mut Ui) -> R) -> Option<(R, Option<Leave>)> {
     shown(ctx, theme, float, Mode::Held { quiet }, add)
@@ -227,11 +229,14 @@ fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl F
     let key = float.id.with("float-kept");
     let pass = ctx.cumulative_pass_nr();
     let now = ctx.input(|input| input.time);
-    let kept = ctx.data(|data| data.get_temp::<Kept>(key)).filter(|kept| kept.pass.saturating_add(1) >= pass);
+    let stored = ctx.data(|data| data.get_temp::<Kept>(key));
+    let kept = stored.filter(|kept| kept.pass.saturating_add(1) >= pass);
     let cover = covers(ctx);
-    if mode == Mode::Closes && kept.is_some_and(|kept| kept.cover != cover) {
-        // The settings sheet or the palette came over it ([`covered`]): it closes, choosing nothing, and leaves the
-        // keyboard to that surface. Where the keyboard was in it, it goes to the control the float opened from in this
+    // A float whose place was not drawn for a while (the settings shown in its stead) is asked here again when its place
+    // shows: it closes too.
+    if mode == Mode::Closes && stored.is_some_and(|kept| kept.cover != cover) {
+        // The palette came over it or the settings took its place ([`covered`]): it closes, choosing nothing, and leaves
+        // the keyboard to that surface. Where the keyboard was in it, it goes to the control the float opened from in this
         // same frame, before the surface takes it, so the surface gives it back there when it closes.
         let mine = LayerId::new(Order::Foreground, float.id);
         let inside =
@@ -299,8 +304,8 @@ fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl F
     if !quiet {
         // Only the float takes the keyboard and the pointer while it is open: Tab goes round its rows.
         ctx.memory_mut(|memory| memory.set_modal_layer(mine));
-        // It says itself that a float is open, for the window's Esc and a sheet's press beside ([`any_open`]): another
-        // surface may be a modal layer too. A quiet float (the event editor under the sheet) says nothing.
+        // It says itself that a float is open, for the window's Esc ([`any_open`]): another
+        // surface may be a modal layer too. A quiet float (the event editor under the palette) says nothing.
         ctx.data_mut(|data| data.insert_temp(shown_id(), pass));
         // Drawn after the float it may be opened from, it stands over it: a float opened from another is on top.
         ctx.move_to_top(mine);

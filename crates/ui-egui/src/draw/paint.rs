@@ -376,11 +376,13 @@ pub(crate) fn shadow_box(mesh: &egui::epaint::Mesh) -> Option<Rect> {
 /// painter's scale: the fill [`snapped`], the edge a pane's band on each side ([`edge_shape`]), a [`hairline`]'s
 /// pixels thick, so no side has a half-tone fringe at 1.25, 1.5 or 1.75. At 1 a float on whole points is painted as
 /// [`float_shapes`] paints it.
+#[cfg_attr(not(test), expect(dead_code, reason = "no window float paints by it since the settings became a place"))]
 pub(crate) fn float(painter: &Painter, theme: &Theme, rect: Rect, edge: FloatEdge) {
     painter.extend(float_at(theme, rect, edge, painter.pixels_per_point()));
 }
 
 /// The shapes of a [`float`] over `rect` at `ppp` (a scale that is not a positive number counts as 1, [`line_pixels`]).
+#[cfg_attr(not(test), expect(dead_code, reason = "no window float paints by it since the settings became a place"))]
 fn float_at(theme: &Theme, rect: Rect, edge: FloatEdge, ppp: f32) -> Vec<Shape> {
     let (ppp, _) = line_pixels(ppp);
     let p = theme.palette;
@@ -421,6 +423,7 @@ fn outline_at(rect: Rect, edge: Color32, ppp: f32) -> [Shape; 4] {
 }
 
 /// The inside of a [`float`] over `rect` at `ppp`: its fill less the edge's band on every side, on whole pixels.
+#[expect(dead_code, reason = "no window float paints by it since the settings became a place")]
 pub(crate) fn float_inside(rect: Rect, ppp: f32) -> Rect {
     let (ppp, pixels) = line_pixels(ppp);
     snapped(rect, ppp).shrink(pixels / ppp)

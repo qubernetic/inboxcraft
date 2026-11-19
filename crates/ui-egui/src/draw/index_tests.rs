@@ -86,7 +86,7 @@ fn harness(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, height: 
                 let whole = ui.ctx().content_rect();
                 let asked = ui
                     .scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| {
-                        show(ui, &state.theme, &state.keymap, &state.mailbox, state.at, state.narrow, true)
+                        show(ui, &state.theme, &state.keymap, &state.mailbox, state.at, state.narrow, (true, false))
                     })
                     .inner;
                 if let Some(id) = asked.toggle {

@@ -273,6 +273,21 @@ fn place(ui: &mut Ui, theme: &Theme, keymap: &Keymap, which: Place, at: Place, c
     response
 }
 
+/// The side of the square SETTINGS carries while a check runs elsewhere, as the unread square's, in points.
+const CHECK_MARK: f32 = 6.0;
+
+/// The square on SETTINGS's `row` while the check of an added account runs elsewhere: `cyan_edge`, at the right end where
+/// a count stands (narrow, at the icon's top right).
+fn check_mark(ui: &Ui, theme: &Theme, row: Rect, narrow: bool) {
+    if !ui.is_rect_visible(row) {
+        return;
+    }
+    let right = if narrow { row.center().x + nav_row::ICON / 2.0 + CHECK_MARK } else { row.right() - nav_row::RIGHT };
+    let top = if narrow { row.center().y - nav_row::ICON / 2.0 - CHECK_MARK / 2.0 } else { row.center().y - CHECK_MARK / 2.0 };
+    let square = Rect::from_min_size(pos2((right - CHECK_MARK).round(), top.round()), vec2(CHECK_MARK, CHECK_MARK));
+    ui.painter().rect_filled(square, 0.0, theme.palette.cyan_edge);
+}
+
 /// Opens the folders of account `id` in the index, or closes them when they are open.
 pub(crate) fn toggle(ctx: &egui::Context, id: u64) {
     let mut open: BTreeSet<u64> = ctx.data(|data| data.get_temp::<BTreeSet<u64>>(open_id())).unwrap_or_default();
@@ -287,8 +302,9 @@ pub(crate) fn toggle(ctx: &egui::Context, id: u64) {
 ///
 /// While not `live` (a modal surface in front) the owner's row does not open the account picker: a screen reader's
 /// activate reaches it under egui's modal layers, and a float opened there would come over the surface. The rest of
-/// what is pressed is returned and gated by the caller.
-pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, at: Place, narrow: bool, live: bool) -> Asked {
+/// what is pressed is returned and gated by the caller. While `checking` (the check of an added account runs and the
+/// Accounts page does not show) SETTINGS carries a `cyan_edge` square at its right end.
+pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, at: Place, narrow: bool, (live, checking): (bool, bool)) -> Asked {
     let p = &theme.palette;
     let rect = ui.max_rect();
     ui.painter().rect_filled(rect, 0.0, p.panel);
@@ -348,7 +364,11 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             }
         }
         for (which, count) in [(Place::Calendar, 0), (Place::Later, later), (Place::Settings, 0)] {
-            if place(ui, theme, keymap, which, at, count, narrow).clicked() {
+            let response = place(ui, theme, keymap, which, at, count, narrow);
+            if which == Place::Settings && checking {
+                check_mark(ui, theme, response.rect, narrow);
+            }
+            if response.clicked() {
                 asked.place = Some(which);
             }
         }

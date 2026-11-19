@@ -1,21 +1,21 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings sheet: whether it is open and on which page; on the Shortcuts page, the text that narrows the list, the
-//! action waiting for a key and what giving the last key changed; on the Sending page, the signatures as typed until
-//! they are saved (`compose.signature`); on the Notifications page, why the last change of starting with the computer
-//! was not done.
+//! The settings, a place of the window: whether they are the place shown and on which page; on the Shortcuts page, the
+//! text that narrows the list, the action waiting for a key and what giving the last key changed; on the Sending page,
+//! the signatures as typed until they are saved (`compose.signature`); on the Notifications page, why the last change
+//! of starting with the computer was not done.
 //!
-//! The sheet has one open state: every way out (its Close button, Escape, a press beside it, a rail button or a key
-//! that shows another place) goes through [`Settings::close`], which forgets what the open sheet held (the key waited
-//! for, the text that narrows the Shortcuts page, the notes), so it opens clean the next time. What was typed into a
-//! setting is never lost that way: a signature typed and not saved stays until it is saved.
+//! A place is not closed: every way to another place (its key or the index's SETTINGS pressed again, a key or a row of
+//! the index that shows another place) goes through [`Settings::leave`], which ends a key being waited for and drops
+//! the notes on what the last change did, and keeps the rest: the page, the text that narrows the Shortcuts page, a
+//! signature typed and not saved. Coming back shows the settings as they were left.
 //!
 //! Every other control of the page runs its `ui.*.set` command at once.
 
 use std::collections::BTreeMap;
 
-/// A page of the settings sheet.
+/// A page of the settings.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Section {
     /// Look (mode, motion, text size) and Layout (the inbox view, where a message opens and is written, the window
@@ -46,7 +46,7 @@ pub enum Section {
 }
 
 impl Section {
-    /// Every section, in the order the sheet lists them: the nine of the design, then the two planned ones.
+    /// Every section, in the order the settings list them: the nine of the design, then the two planned ones.
     pub const ALL: [Self; 11] = [
         Self::Appearance,
         Self::Accounts,
@@ -110,7 +110,7 @@ impl Section {
     }
 }
 
-/// The settings sheet.
+/// The settings place.
 #[derive(Debug, Default)]
 pub struct Settings {
     open: bool,
@@ -121,15 +121,15 @@ pub struct Settings {
     find: String,
     /// What giving the last key changed, on the Shortcuts page.
     keys_note: Option<String>,
-    /// The signatures as typed on the Sending page and not saved yet, by account, kept while the sheet is closed; an
-    /// account not in it shows the one it has.
+    /// The signatures as typed on the Sending page and not saved yet, by account, kept while another place is shown;
+    /// an account not in it shows the one it has.
     signatures: BTreeMap<u64, String>,
     /// Why the last change of starting with the computer was not done, on the Notifications page.
     login_note: Option<String>,
 }
 
 impl Settings {
-    /// Whether the page is open.
+    /// Whether the settings are the place shown.
     #[must_use]
     pub fn is_open(&self) -> bool {
         self.open
@@ -141,28 +141,27 @@ impl Settings {
         self.section
     }
 
-    /// Opens the sheet on Appearance.
+    /// Shows the settings on the page last shown (Appearance the first time).
     pub fn open(&mut self) {
-        self.open_at(Section::Appearance);
-    }
-
-    /// Opens the sheet on `section`.
-    pub fn open_at(&mut self, section: Section) {
-        self.forget();
         self.open = true;
-        self.section = section;
     }
 
-    /// Forgets what the open sheet held: the notes, the text on the Shortcuts page and the action waiting for a key.
-    /// The signatures typed and not saved stay: what a person wrote is never lost on the way out.
-    fn forget(&mut self) {
-        self.capturing = None;
-        self.find.clear();
-        self.keys_note = None;
-        self.login_note = None;
+    /// Shows the settings on `section`; an action waiting for a key stops waiting.
+    pub fn open_at(&mut self, section: Section) {
+        self.open = true;
+        self.show(section);
     }
 
-    /// Why the last change of starting with the computer was not done, while the sheet is open.
+    /// Shows the settings on the section whose id ([`Section::id`]) is `page`; a page that is no section's id (outside
+    /// data: the control channel's, a script's) shows the page last shown.
+    pub fn open_page(&mut self, page: Option<&str>) {
+        match page.and_then(Section::named) {
+            Some(section) => self.open_at(section),
+            None => self.open(),
+        }
+    }
+
+    /// Why the last change of starting with the computer was not done, while the settings show.
     #[must_use]
     pub fn login_note(&self) -> Option<&str> {
         self.login_note.as_deref()
@@ -190,16 +189,19 @@ impl Settings {
         self.signatures.remove(&account);
     }
 
-    /// Shows `section` on the open sheet; an action waiting for a key stops waiting.
+    /// Shows `section`; an action waiting for a key stops waiting.
     pub fn show(&mut self, section: Section) {
         self.section = section;
         self.capturing = None;
     }
 
-    /// Closes the sheet and forgets what it held.
-    pub fn close(&mut self) {
+    /// Another place is shown: an action waiting for a key stops waiting and the notes on what the last change did go;
+    /// the page, the text that narrows the Shortcuts page and a signature typed stay.
+    pub fn leave(&mut self) {
         self.open = false;
-        self.forget();
+        self.capturing = None;
+        self.keys_note = None;
+        self.login_note = None;
     }
 
     /// The action waiting for a key, if one is.

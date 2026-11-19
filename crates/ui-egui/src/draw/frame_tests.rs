@@ -313,15 +313,15 @@ fn in_the_own_frame_the_error_banner_stands_under_the_strip() {
 }
 
 #[test]
-fn over_the_settings_sheet_the_window_controls_stand_clear_and_do_what_they_do() {
+fn on_the_settings_the_window_controls_stand_clear_and_do_what_they_do() {
     for frame in [WindowFrame::Strip, WindowFrame::TopRow] {
         let mut harness = harness_with(frame, InboxApp::open_settings);
-        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
         for name in ["Minimise", "Maximise", "Close the window"] {
             let control = harness.get_by_label(name).rect();
-            assert!(!control.intersects(sheet), "{frame:?}: {name} {control:?} lies over the sheet {sheet:?}");
+            assert!(!control.intersects(sheet), "{frame:?}: {name} {control:?} lies over the settings {sheet:?}");
         }
-        // A press on Minimise minimises the window and leaves the sheet open.
+        // A press on Minimise minimises the window and leaves the settings shown.
         let at = harness.get_by_label("Minimise").rect().center();
         let mut seen = press_at(&mut harness, at);
         harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
@@ -329,42 +329,27 @@ fn over_the_settings_sheet_the_window_controls_stand_clear_and_do_what_they_do()
         seen.extend(commands(&harness));
         harness.run();
         assert!(seen.contains(&ViewportCommand::Minimized(true)), "{frame:?}: {seen:?}");
-        assert!(harness.state().settings().is_open(), "{frame:?}: the press on a window control closed the sheet");
+        assert!(harness.state().settings().is_open(), "{frame:?}: the press on a window control left the settings");
     }
 }
 
 #[test]
-fn tab_in_the_settings_sheet_stays_in_it_in_the_app_s_own_frame() {
+fn on_the_settings_tab_walks_the_window_s_controls_and_the_settings_alike_in_the_app_s_own_frame() {
     for frame in [WindowFrame::Strip, WindowFrame::TopRow] {
         let mut harness = harness_with(frame, InboxApp::open_settings);
-        let mut stops = 0;
-        for _ in 0..80 {
-            harness.key_press(egui::Key::Tab);
-            harness.run();
-            if let Some(node) = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()) {
-                stops += 1;
-                let label = node.accesskit_node().label().unwrap_or_default();
-                let control = ["Minimise", "Maximise", "Close the window"].contains(&label.as_str());
-                assert!(!control, "{frame:?}: Tab left the sheet for {label}");
-            }
-        }
-        assert!(stops > 40, "{frame:?}: Tab goes round the sheet's controls");
-        // Away from the sheet, Tab reaches the window controls again.
-        harness.key_press(egui::Key::Escape);
-        harness.run();
-        harness.run();
-        assert!(!harness.state().settings().is_open());
-        let mut controls = false;
+        let settings = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+        let (mut controls, mut on_settings) = (false, 0);
         for _ in 0..200 {
             harness.key_press(egui::Key::Tab);
             harness.run();
-            let on = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused());
-            if on.is_some_and(|node| node.accesskit_node().label().is_some_and(|label| label == "Minimise")) {
-                controls = true;
-                break;
-            }
+            let Some(node) = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()) else { continue };
+            let label = node.accesskit_node().label().unwrap_or_default();
+            controls |= label == "Minimise";
+            on_settings += usize::from(settings.contains_rect(node.rect()));
         }
-        assert!(controls, "{frame:?}: without a sheet, Tab reaches Minimise");
+        assert!(controls, "{frame:?}: the settings are a place: Tab reaches Minimise beside them");
+        assert!(on_settings > 20, "{frame:?}: Tab reaches the settings' controls ({on_settings})");
+        assert!(harness.state().settings().is_open(), "{frame:?}: Tab leaves no place");
     }
 }
 

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings sheet over the dimmed window: the list of sections on the left, 232 wide (a head, "Settings" and how
+//! The settings, a place of the window in the body beside the index: the list of sections on the left, 232 wide (a head, "Settings" and how
 //! many sections there are, then a row per section: the nine of the design, Appearance, Accounts, Notifications,
 //! Triage, Sending, Calendar, Shortcuts, Privacy and About, then the two planned ones, AI and Plugins), and the open
 //! section's page beside it in a column 720 wide. A page is its head (where it is, `[ 04 ] SETTINGS · APPEARANCE`, its
@@ -16,16 +16,16 @@
 //! with its key: a press on the key waits for the next key pressed, which becomes the action's. The sections and rows
 //! not built yet are drawn as coming soon (`planned.rs`).
 //!
-//! The sheet keeps the keyboard: `Tab` goes round its controls only, and when it closes the keyboard goes back to the
-//! control it was opened from.
+//! The settings are a place, not a surface in front: the index and the window's keys work beside them, and `Tab` walks
+//! from the index to the sections and on to the page.
 
-use egui::{Align, Area, Id, LayerId, Layout, Order, Rect, Response, Role, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
+use egui::{Align, Id, Layout, Rect, Response, Role, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::{Appearance, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
 
 use super::paint::{Ring, focus_ring};
-use crate::component::button::{IconButton, LinkSize, TextButton, link_sized};
+use crate::component::button::{LinkSize, TextButton, link_sized};
 use crate::component::field;
 use crate::component::key::{Chip, ChipState};
 use crate::component::label::section_label;
@@ -33,7 +33,7 @@ use crate::component::segmented::{segmented, segmented_but, segmented_for};
 use crate::component::settings_row::{page as on_page, settings_row, settings_row_soon_with};
 use crate::component::slider;
 use crate::component::switch::switch;
-use crate::draw::paint::{self, FloatEdge};
+use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::{Action, Keymap};
 use crate::mailbox::{InboxView, Mailbox};
@@ -44,10 +44,6 @@ use crate::tr;
 
 #[path = "settings_planned.rs"]
 mod planned;
-
-/// The sheet's size where the window has room for it, in points: its 1 px edge either side, the sections' column and
-/// the hairline after it, and the page's column with its room either side.
-const SHEET: [f32; 2] = [1.0 + NAV + 1.0 + PAGE_X + COLUMN + PAGE_X + 1.0, 780.0];
 
 /// The width of the sections' column, in points: as wide as the window's index.
 const NAV: f32 = 232.0;
@@ -66,6 +62,13 @@ const PAGE_TOP: f32 = 24.0;
 
 /// The room left and right of a page, in points.
 const PAGE_X: f32 = 40.0;
+
+/// The least room left and right of a page, where the body has no room for the page's 720 and 40 either side (a narrow
+/// window): the page keeps the width, the room gives way first, in points.
+const PAGE_X_LEAST: f32 = 24.0;
+
+/// The page's width the sections' column gives way for in a narrow body, in points.
+const PAGE_LEAST: f32 = 520.0;
 
 /// The room under a page, in points.
 const PAGE_BOTTOM: f32 = 16.0;
@@ -91,14 +94,14 @@ const TOOLS_UNDER: f32 = 12.0;
 /// The width of the field that narrows the Shortcuts page's list, in points.
 const FIND: f32 = 320.0;
 
-/// What the owner asked for on the sheet this frame.
+/// What the owner asked for on the settings this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Asked {
     Mode(ThemeMode),
     Scale(TextScale),
     ReduceMotion(bool),
     Frame(WindowFrame),
-    /// Another page of the sheet.
+    /// Another page of the settings.
     Section(Section),
     /// Add account on the Accounts page: the form opens on it.
     Add,
@@ -136,10 +139,9 @@ pub(super) enum Asked {
     Background(bool),
     /// Whether InboxCraft starts with the computer.
     Login(bool),
-    Close,
 }
 
-/// What the sheet shows and changes.
+/// What the settings show and change.
 pub(super) struct Sheet<'a> {
     pub(super) keymap: &'a Keymap,
     pub(super) settings: &'a mut Settings,
@@ -506,34 +508,15 @@ fn section_row(ui: &mut Ui, theme: &Theme, section: Section, shown: bool) -> Res
     response
 }
 
-/// The room between the section count and the sheet's Close in the sections' head, in points.
-const CLOSE_GAP: f32 = 8.0;
-
 /// "<n> sections": every row the list shows, the two planned ones, AI and Plugins, among them (the design's list has
 /// nine rows and says nine).
 fn section_count() -> String {
     tr!("{count} sections", count = Section::ALL.len())
 }
 
-/// Whether the sheet's Close fits in the sections' head, `width` wide, beside "Settings" and the whole count. It does
-/// not at large text: the design's head has no Close, so Close gives way and the count stands whole.
-fn close_in_head(ui: &Ui, theme: &Theme, width: f32) -> bool {
-    let f = &theme.fonts;
-    let p = &theme.palette;
-    let title = crate::component::galley(ui, tr!("Settings"), f.heading, p.ink).size().x;
-    let count = crate::component::galley(ui, &section_count(), f.mono_s, p.muted).size().x;
-    INSET + title + 10.0 + count + CLOSE_GAP + crate::component::control_side(theme) + INSET <= width
-}
-
-/// The sheet's Close, which the design does not have (settings are a place of the window there).
-fn close_button(ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> bool {
-    IconButton::new(IconId::Close, tr!("Close")).show(ui, theme, keymap).clicked()
-}
-
-/// The list of sections: its head ("Settings", how many sections are built, and the sheet's Close at its right end
-/// when `close` and it fits), a `line` hairline, then a row per section, the one shown selected. The section pressed,
-/// or Close.
-fn nav(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: Section, close: bool) -> Option<Asked> {
+/// The list of sections: its head ("Settings" and how many sections there are), a `line` hairline, then a row per
+/// section, the one shown selected. The section pressed.
+fn nav(ui: &mut Ui, theme: &Theme, shown: Section) -> Option<Asked> {
     let p = &theme.palette;
     let f = &theme.fonts;
     let width = ui.available_width();
@@ -546,21 +529,12 @@ fn nav(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: Section, close: bool)
         crate::component::label(ui, f.heading, tr!("Settings"), p.ink);
         ui.add_space(10.0);
         let count = section_count();
-        // Cut only where even without Close there is no room (a window too narrow for the sheet).
-        let beside = if close { crate::component::control_side(theme) + CLOSE_GAP } else { 0.0 };
-        let room = ui.available_width() - INSET - beside;
+        // Cut only where there is no room (a window too small for the column).
+        let room = ui.available_width() - INSET;
         let words = crate::component::cut(ui, &count, f.mono_s, p.muted, room);
         let (at, said) = ui.allocate_exact_size(words.size(), Sense::hover());
         said.widget_info(|| WidgetInfo::labeled(Role::Label, true, &count));
         ui.painter().galley(at.min, words, p.muted);
-        if close {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add_space(INSET);
-                if close_button(ui, theme, keymap) {
-                    asked = Some(Asked::Close);
-                }
-            });
-        }
     });
     rule_in(ui, p.line);
     ui.add_space(NAV_GAP);
@@ -966,128 +940,63 @@ fn in_the_background(ui: &mut Ui, theme: &Theme, settings: &Settings, desk: Desk
     asked
 }
 
-/// The sheet's place in `screen`: its size where there is room, and two gaps from each edge where there is not.
-/// Where the window's own controls float over it (`controls`), the sheet starts under them.
-fn place(theme: &Theme, screen: Rect, controls: Option<Rect>) -> Rect {
-    let least = theme.spacing.s2 * 2.0;
-    let margin = vec2(((screen.width() - SHEET[0]) / 2.0).max(least), ((screen.height() - SHEET[1]) / 2.0).max(least));
-    let mut rect = screen.shrink2(margin);
-    if let Some(controls) = controls.filter(|controls| controls.intersects(rect)) {
-        rect.min.y = (controls.bottom() + theme.spacing.s2).min(rect.max.y - 1.0);
-    }
-    // On whole points, so its hairlines and columns stand on whole pixels; never inverted, however small the window.
-    let min = rect.min.round();
-    Rect::from_min_max(min, rect.max.round().max(min))
+/// Where the settings stand in `body`: the sections' column (232 wide, as the index) with the `line` hairline after it,
+/// and the page's column, 720 wide at most, 40 in from either side (down to 24 where the body is narrow), 24 under the
+/// top and 16 over the foot (the Shortcuts page's list runs to the foot). On whole points; never inverted, however small the body.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Columns {
+    /// The sections' column.
+    pub(super) nav: Rect,
+    /// The hairline's x, right of the sections' column.
+    pub(super) divider: f32,
+    /// The page's column.
+    pub(super) page: Rect,
 }
 
-/// The id of the sheet's layer.
-fn sheet_id() -> Id {
-    Id::unique("settings-sheet")
-}
-
-/// Where the keyboard was when the sheet opened, kept while it is open.
-#[derive(Debug, Clone, Copy, Default)]
-struct Opened {
-    /// The pass the sheet was last drawn in.
-    pass: u64,
-    /// The control that had the keyboard, if one had it.
-    from: Option<Id>,
-}
-
-/// The key [`Opened`] is kept under.
-fn opened_id() -> Id {
-    sheet_id().with("opened")
-}
-
-/// Call each frame the sheet is not drawn: the frame after it closed, the keyboard goes back to the control it was
-/// opened from.
-pub(super) fn rest(ctx: &egui::Context) {
-    let Some(opened) = ctx.data_mut(|data| data.remove_temp::<Opened>(opened_id())) else { return };
-    if let Some(from) = opened.from {
-        ctx.memory_mut(|memory| memory.request_focus(from));
-    }
-}
-
-/// Draws the settings sheet over the window, which it dims and keeps from taking presses and the keyboard; returns
-/// what was asked for, applied by the caller after the frame's drawing.
-pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> Option<Asked> {
-    let p = &theme.palette;
-    let screen = ctx.content_rect();
-    let controls = super::frame::controls_place(ctx, theme);
-    let rect = place(theme, screen, controls);
-    let pass = ctx.cumulative_pass_nr();
-    // The first frame it shows, the keyboard leaves the control the sheet opened from, to come back to it after.
-    let kept = ctx.data(|data| data.get_temp::<Opened>(opened_id())).filter(|opened| opened.pass.saturating_add(1) >= pass);
-    let from = match kept {
-        Some(opened) => opened.from,
-        None => ctx.memory_mut(|memory| {
-            let focused = memory.focused();
-            if let Some(focused) = focused {
-                memory.surrender_focus(focused);
-            }
-            focused
-        }),
-    };
-    ctx.data_mut(|data| data.insert_temp(opened_id(), Opened { pass, from }));
-    // Only the sheet, and what opens from it, takes the pointer and the keyboard: Tab goes round its controls.
-    let layer = LayerId::new(Order::Foreground, sheet_id());
-    ctx.memory_mut(|memory| memory.set_modal_layer(layer));
-    // The dim covers the window, so a press there reaches nothing under it; a press beside the sheet (on the press, not
-    // the release: what lies under the press is no longer covered when the button comes up) leaves it. A press on the
-    // window's own controls, which stand above the dim, is theirs. While a list of choices is open on the sheet, the
-    // press is the list's, which it closes, and the sheet stays: only a float says it is open ([`popup::any_open`]),
-    // never the modal layer, which the sheet always is.
-    let float_open = crate::component::popup::any_open(ctx);
-    Area::new(Id::unique("settings-dim")).order(Order::Middle).fixed_pos(screen.min).show(ctx, |ui| {
-        let (rect, _) = ui.allocate_exact_size(screen.size(), Sense::click());
-        ui.painter().rect_filled(rect, 0.0, p.scrim);
-    });
-    let beside = ctx.input(|input| {
-        input.pointer.primary_pressed()
-            && input.pointer.interact_pos().is_some_and(|at| !rect.contains(at) && !controls.is_some_and(|controls| controls.contains(at)))
-    });
-    let mut asked = (beside && !float_open).then_some(Asked::Close);
-    Area::new(sheet_id()).order(Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
-        let (whole, response) = ui.allocate_exact_size(rect.size(), Sense::hover());
-        response.widget_info(|| WidgetInfo::labeled(Role::Dialog, true, tr!("Settings")));
-        // The float's shadow and edge, then a solid surface: nothing of the window shows through the text.
-        paint::float(ui.painter(), theme, whole, FloatEdge::Keyboard);
-        ui.painter().rect_filled(paint::float_inside(whole, ctx.pixels_per_point()), 0.0, p.surface);
-        let inner = whole.shrink(1.0);
-        let nav_width = NAV.min((inner.width() * 0.3).floor());
-        let left = Rect::from_min_size(inner.min, vec2(nav_width, inner.height()));
-        let divider = left.right();
-        paint::hairline(ui.painter(), pos2(divider, left.top()), pos2(divider, left.bottom() - 1.0), p.line);
-        let shown = view.settings.section();
-        let keymap = view.keymap;
-        // Where Close does not fit in the sections' head, it stands in the sheet's top right corner, over the page's
-        // top room.
-        // The corner's room is made either way, so the ids of what comes after it (the keyboard's focus among them)
-        // do not change when Close moves.
-        let in_head = close_in_head(ui, theme, nav_width);
-        let side = crate::component::control_side(theme);
-        let gap = theme.spacing.s2;
-        let at = Rect::from_min_size(pos2(inner.right() - gap - side, inner.top() + gap), vec2(side, side));
-        let corner = UiBuilder::new().max_rect(at).layout(Layout::left_to_right(Align::Min));
-        if ui.scope_builder(corner, |ui| !in_head && close_button(ui, theme, keymap)).inner {
-            asked = Some(Asked::Close);
-        }
-        let pressed =
-            ui.scope_builder(UiBuilder::new().max_rect(left).layout(Layout::top_down(Align::Min)), |ui| nav(ui, theme, keymap, shown, in_head)).inner;
-        if pressed.is_some() {
-            asked = pressed;
-        }
-        // The Shortcuts page's list runs to the sheet's foot.
+impl Columns {
+    /// The columns in `body` with the page `shown`.
+    pub(super) fn of(body: Rect, shown: Section) -> Self {
+        let body = Rect::from_min_max(body.min.round(), body.max.round().max(body.min.round()));
+        // The sections' column gives way only where the page would keep less than its least width beside it, and then
+        // down to a quarter of the body.
+        let nav_width = NAV.min((body.width() * 0.25).floor().max(body.width() - 1.0 - 2.0 * PAGE_X_LEAST - PAGE_LEAST)).max(0.0);
+        let nav = Rect::from_min_size(body.min, vec2(nav_width, body.height()));
+        let divider = nav.right();
         let bottom = if shown == Section::Shortcuts { 0.0 } else { PAGE_BOTTOM };
-        let room = Rect::from_min_max(pos2(divider + 1.0 + PAGE_X, inner.top() + PAGE_TOP), pos2(inner.right() - PAGE_X, inner.bottom() - bottom));
+        let side = ((body.right() - divider - 1.0 - COLUMN) / 2.0).clamp(PAGE_X_LEAST, PAGE_X).floor();
+        let left = divider + 1.0 + side;
+        let room = Rect::from_min_max(
+            pos2(left, body.top() + PAGE_TOP),
+            pos2((body.right() - side).max(left), (body.bottom() - bottom).max(body.top() + PAGE_TOP)),
+        );
         let width = room.width().clamp(1.0, COLUMN).floor();
-        let column = Rect::from_min_size(room.min, vec2(width, room.height().max(1.0)));
-        ui.scope_builder(UiBuilder::new().max_rect(column).layout(Layout::top_down(Align::Min)), |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            if let Some(on_page) = page(ui, theme, &mut view) {
-                asked = Some(on_page);
-            }
-        });
+        let page = Rect::from_min_size(room.min, vec2(width, room.height().max(1.0)));
+        Self { nav, divider, page }
+    }
+}
+
+/// Draws the settings in `ui`'s whole rect, the window's body: the sections' column and the page shown; returns what
+/// was asked for, applied by the caller after the frame's drawing.
+pub(super) fn place(ui: &mut Ui, theme: &Theme, mut view: Sheet<'_>) -> Option<Asked> {
+    let p = &theme.palette;
+    let body = ui.max_rect();
+    // One node a screen reader names the place by; it takes no press, the sections and the page lie over it.
+    let place = ui.interact(body, Id::unique("settings-place"), Sense::hover());
+    place.widget_info(|| WidgetInfo::labeled(Role::Pane, true, tr!("Settings")));
+    ui.painter().rect_filled(body, 0.0, p.surface);
+    let shown = view.settings.section();
+    let columns = Columns::of(body, shown);
+    paint::hairline(ui.painter(), pos2(columns.divider, body.top()), pos2(columns.divider, body.bottom() - 1.0), p.line);
+    let mut asked = ui
+        .scope_builder(UiBuilder::new().id_salt("settings-sections").max_rect(columns.nav).layout(Layout::top_down(Align::Min)), |ui| {
+            nav(ui, theme, shown)
+        })
+        .inner;
+    ui.scope_builder(UiBuilder::new().id_salt("settings-page").max_rect(columns.page).layout(Layout::top_down(Align::Min)), |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        if let Some(on_page) = page(ui, theme, &mut view) {
+            asked = Some(on_page);
+        }
     });
     asked
 }

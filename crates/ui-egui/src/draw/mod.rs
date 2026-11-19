@@ -72,7 +72,7 @@ use crate::keep::{Keep, NoKeep, Triage};
 use crate::keymap::{self, Captured, Keymap};
 use crate::mailbox::{Act, InboxView, Mailbox, Pile, Place};
 use crate::motion;
-use crate::onboard::{Detect, Keychain, Onboarding, Stage};
+use crate::onboard::{Detect, Keychain, Onboarding};
 use crate::palette::Palette;
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
@@ -543,7 +543,8 @@ impl InboxApp {
         self.own_frame_parts(command, theme, corner);
         let new_message = self.new_message(command, theme) && surfaces.allows(keymap::COMPOSE, &self.keymap);
         let at = self.index_place(setting);
-        let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, false, Self::index_live(surfaces));
+        let flags = (Self::index_live(surfaces), self.checking_elsewhere());
+        let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, false, flags);
         let indexed = Self::index_allowed(surfaces, &self.keymap, indexed);
         if let Some(id) = indexed.toggle {
             index::toggle(index.ctx(), id);
@@ -583,17 +584,20 @@ impl InboxApp {
         }
     }
 
-    /// Whether the index's mailboxes, account rows and account picker act: with no palette, capture, sheet or event
-    /// editor in front.
+    /// Whether the index's mailboxes, account rows and account picker act: with no palette, capture or event editor in
+    /// front.
     fn index_live(surfaces: &Surfaces) -> bool {
-        !(surfaces.held() || surfaces.has(Surface::Sheet) || surfaces.has(Surface::Editor))
+        !(surfaces.held() || surfaces.has(Surface::Editor))
     }
 
     /// What of the index's `asked` the `surfaces` in front allow: a place where its action may run
-    /// ([`Surfaces::allows`]); a mailbox, the account picker's choice and an account row only with no palette, capture,
-    /// sheet or event editor in front.
+    /// ([`Surfaces::allows`]); a mailbox, the account picker's choice and an account row only with no palette, capture
+    /// or event editor in front.
     fn index_allowed(surfaces: &Surfaces, keymap: &Keymap, asked: index::Asked) -> index::Asked {
-        let place = asked.place.filter(|place| Self::index_action(*place).is_some_and(|action| surfaces.allows(action, keymap)));
+        // A key waited for on the Shortcuts page holds the keys, not the pointer: a place pressed shows, and leaving the
+        // settings ends the wait.
+        let waiting = surfaces.has(Surface::Capture) && !surfaces.has(Surface::Palette) && !surfaces.has(Surface::Float);
+        let place = asked.place.filter(|place| Self::index_action(*place).is_some_and(|action| waiting || surfaces.allows(action, keymap)));
         if Self::index_live(surfaces) { index::Asked { place, ..asked } } else { index::Asked { place, ..index::Asked::default() } }
     }
 
@@ -752,9 +756,13 @@ impl InboxApp {
     }
 
     /// Whether the action `id` can run now: an act on a row needs a selected message, Undo an act in the history, the
-    /// reader's full width an open message; an id the window does not know never runs.
+    /// reader's full width an open message; on the settings nothing of the mail and nothing of the calendar runs; an id
+    /// the window does not know never runs.
     #[must_use]
     pub fn can_run(&self, id: &str) -> bool {
+        if self.settings.is_open() && (crate::surface::mail_only(id) || keymap::CALENDAR_KEYS.contains(&id)) {
+            return false;
+        }
         match id {
             // With the list hidden nothing acts on a row the owner cannot see, by a key or from the palette; Undo, which
             // may take back an act on such a row, rests too.
@@ -795,10 +803,8 @@ impl InboxApp {
             return;
         }
         match id {
-            keymap::PALETTE => {
-                self.close_settings();
-                self.palette.open();
-            }
+            // The palette comes over the place shown, the settings too: they stay under it.
+            keymap::PALETTE => self.palette.open(),
             keymap::FIND => {
                 self.show_mail();
                 self.reader.set_full_width(false);
@@ -834,6 +840,8 @@ impl InboxApp {
             }
             keymap::CALENDAR => self.show_calendar(),
             keymap::COMPOSE => {
+                // The settings draw no composer: New message shows the place the owner came from.
+                self.leave_settings();
                 self.compose();
                 ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
             }
@@ -843,8 +851,11 @@ impl InboxApp {
                     composer.toggle_fold();
                 }
             }
+            // A place: pressed again it shows the place the owner came from.
             keymap::SETTINGS => {
-                if !self.settings.is_open() {
+                if self.settings.is_open() {
+                    self.leave_settings();
+                } else {
                     self.open_settings();
                 }
             }
@@ -1123,22 +1134,23 @@ impl InboxApp {
 
     /// Whether the calendar shows its event editor ([`Surface::Editor`]).
     fn editing_event(&self) -> bool {
-        self.screen == Screen::Calendar && self.calendar.editor().is_some()
+        self.screen == Screen::Calendar && !self.settings.is_open() && self.calendar.editor().is_some()
     }
 
     /// What stands in front this frame, read before its keys ([`Surfaces`]).
     fn surfaces(&self, ctx: &egui::Context) -> Surfaces {
-        let mail = self.screen == Screen::Mail;
+        let settings = self.settings.is_open();
+        let mail = self.screen == Screen::Mail && !settings;
         Surfaces::new(Facts {
             float: crate::component::popup::any_open(ctx),
             palette: self.palette.is_open(),
             capture: self.settings.capturing().is_some(),
-            sheet: self.settings.is_open(),
             editor: self.editing_event(),
-            composer: self.composer_in_front(),
+            composer: !settings && self.composer_in_front(),
             full_width: self.reader.full_width(),
             one_pane_reader: mail && one_pane(ctx) && !self.docked() && self.message_in_front() && self.reader.open_id().is_some(),
             mail,
+            settings,
         })
     }
 
@@ -1203,9 +1215,9 @@ impl InboxApp {
         crate::component::popup::set_open(ctx, reader::picker_popup(), true);
     }
 
-    /// Shows the calendar screen, leaving the settings sheet; its calendars and events are read again.
+    /// Shows the calendar screen, leaving the settings; its calendars and events are read again.
     pub fn show_calendar(&mut self) {
-        self.close_settings();
+        self.leave_settings();
         self.screen_to(Screen::Calendar);
         self.calendar.refresh(&mut self.mailbox);
     }
@@ -1292,15 +1304,14 @@ impl InboxApp {
         }
     }
 
-    /// Opens the settings sheet on Shortcuts, keeping the account forms as they are typed, all but the password.
+    /// Shows the settings on Shortcuts, keeping the account forms as they are typed, all but the password.
     pub fn open_shortcuts(&mut self) {
-        self.onboarding.close();
         self.settings.open_at(Section::Shortcuts);
     }
 
-    /// Shows the mail, leaving the settings sheet and the calendar.
+    /// Shows the mail, leaving the settings and the calendar.
     fn show_mail(&mut self) {
-        self.close_settings();
+        self.leave_settings();
         self.screen_to(Screen::Mail);
     }
 
@@ -1335,13 +1346,12 @@ impl InboxApp {
     }
 
     /// The keys of the frame, read before its drawing, with `surfaces` in front ([`Surfaces`]). While the Shortcuts page
-    /// waits for a key or the palette is open, the keys are theirs; the settings sheet, the palette and the calendar lie
-    /// over the list or in its place, so the mail's keys (the arrows, the acts on a row) rest while they show.
+    /// waits for a key or the palette is open, the keys are theirs; the palette lies over the list and the calendar and
+    /// the settings stand in its place, so the mail's keys (the arrows, the acts on a row) rest while they show.
     fn keys(&mut self, ctx: &egui::Context, surfaces: &Surfaces) -> Keys {
-        // Send's key acts only from inside the composer, open and not under the settings sheet: never from a field in
-        // front of it or beside it.
-        self.composer_keys =
-            !surfaces.has(Surface::Sheet) && self.composer.as_ref().is_some_and(|composer| !composer.folded()) && compose::has_keys(ctx);
+        // Send's key acts only from inside the composer, open and not on the settings, which draw none: never from a
+        // field in front of it or beside it.
+        self.composer_keys = !surfaces.on_settings() && self.composer.as_ref().is_some_and(|composer| !composer.folded()) && compose::has_keys(ctx);
         let held = surfaces.held();
         self.capture_key(ctx);
         // Read before anything returns: a row that lost the focus while the palette was open is not the list's row.
@@ -1431,34 +1441,45 @@ impl InboxApp {
         &self.settings
     }
 
-    /// The settings sheet, to drive from outside (the `ui_shot` scripts, later the control channel).
+    /// The settings, to drive from outside (the `ui_shot` scripts, later the control channel).
     pub fn settings_mut(&mut self) -> &mut Settings {
         &mut self.settings
     }
 
-    /// Opens the settings sheet on Appearance, keeping the account forms as they are typed, all but the password.
+    /// Shows the settings, a place, on the page last shown.
     pub fn open_settings(&mut self) {
-        self.onboarding.close();
         self.settings.open();
     }
 
-    /// Opens the settings sheet on Accounts, where accounts are added.
+    /// Shows the settings on the page whose id is `page` (`appearance`, `accounts` … [`Section::id`]); no page, or one
+    /// that is no section's (outside data), shows the page last shown. Never a panic.
+    pub fn open_settings_page(&mut self, page: Option<&str>) {
+        self.settings.open_page(page);
+    }
+
+    /// Shows the settings on Accounts, where accounts are added.
     pub fn open_accounts(&mut self) {
         self.settings.open_at(Section::Accounts);
     }
 
-    /// Closes the settings sheet, keeping the account forms on it as they are typed, all but the password.
-    pub fn close_settings(&mut self) {
-        self.onboarding.close();
-        self.settings.close();
+    /// Shows the place the owner came to the settings from: a key being waited for stops waiting; the account forms
+    /// stay as they are typed, all but the password, and a check goes on ([`Onboarding::leave_page`]).
+    pub fn leave_settings(&mut self) {
+        self.settings.leave();
+        self.onboarding.leave_page();
     }
 
-    /// The add-account form and the check run on the sheet's Accounts page: opening the form opens it there.
-    fn follow_adding(&mut self) {
-        let adding = self.onboarding.stage() != Stage::Closed;
-        if adding && !(self.settings.is_open() && self.settings.section() == Section::Accounts) {
-            self.open_accounts();
+    /// The add-account form and the check are the Accounts page's: while the page does not show, the form keeps all
+    /// but its password and Detect stops; the check goes on.
+    fn follow_accounts_page(&mut self) {
+        if !(self.settings.is_open() && self.settings.section() == Section::Accounts) {
+            self.onboarding.leave_page();
         }
+    }
+
+    /// Whether the check of an added account runs while the Accounts page does not show: the index marks SETTINGS.
+    fn checking_elsewhere(&self) -> bool {
+        self.onboarding.checking() && !(self.settings.is_open() && self.settings.section() == Section::Accounts)
     }
 
     /// Asks `ctx` for a frame when the engine next has something to do ([`Mailbox::due_in`]): an idle window draws
@@ -2247,18 +2268,14 @@ impl InboxApp {
         let Keys { mut ran, escape, to_place, typing, quiet } = self.keys(ui.ctx(), &surfaces);
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };
         self.act_by_key |= keyed.is_some();
-        self.follow_adding();
         // One Esc closes one surface ([`Surfaces::escape`]): an open float (a menu, a picker, a select), the palette, a
-        // capture and the event editor take theirs before anything under them.
-        let left_settings = escape == Some(Surface::Sheet);
-        if left_settings {
-            self.close_settings();
-            // The sheet on top took the Esc: nothing under it sees it (the calendar's pick, the editor).
-            ui.ctx().input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Escape));
-        }
+        // capture and the event editor take theirs before anything under them. On the settings, a place, an Esc with
+        // nothing in front closes nothing.
         let setting = self.settings.is_open();
-        // The sheet or the palette coming over the window closes the lists, menus and pickers open under it.
-        crate::component::popup::covered(ui.ctx(), setting || self.palette.is_open());
+        let to_place = to_place && !setting;
+        // The settings shown in the place of what was, and the palette coming over the window, close the lists, menus and
+        // pickers open.
+        crate::component::popup::covered(ui.ctx(), [setting, self.palette.is_open()]);
         self.calendar_before(ui.ctx(), setting);
         let left_full = escape == Some(Surface::FullWidth);
         if left_full {
@@ -2300,9 +2317,8 @@ impl InboxApp {
         body.data_mut(|data| data.remove::<egui::Rect>(egui::Id::unique("reader-rect")));
         let (gap, half) = (0.0, 0.0);
         let (indexed, new_message) = self.index_and_command(&mut index, &mut command, &theme, &surfaces, (setting, corner));
-        let index_settings = indexed.place == Some(index::Place::Settings);
         let index_to_list = Self::shows_list(&indexed);
-        ran.extend(indexed.place.and_then(Self::index_action).filter(|action| *action != keymap::SETTINGS));
+        ran.extend(indexed.place.and_then(Self::index_action));
         asked.open = indexed.mailbox;
         asked.narrow = indexed.account;
         ran.extend(new_message.then_some(keymap::COMPOSE));
@@ -2312,7 +2328,9 @@ impl InboxApp {
         let mut on_calendar = Vec::new();
         let mut composer_left = half;
         self.list_hidden = false;
-        if self.screen == Screen::Calendar {
+        if setting {
+            changed = self.settings_place(&mut body, &theme);
+        } else if self.screen == Screen::Calendar {
             on_calendar = self.calendar_screen(&mut body, &theme, &mut layers);
         } else if self.mailbox.accounts().is_empty() {
             add = self.welcome(&mut body, &theme, &mut layers);
@@ -2368,7 +2386,9 @@ impl InboxApp {
         let mut composed = Vec::new();
         // A texture lives no longer than the picture the reader keeps for it.
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
-        if docked && reader_shown {
+        if setting {
+            // The settings stand in the body alone: no composer, no reader.
+        } else if docked && reader_shown {
             composed = self.composer_card(&mut body, &theme, &mut layers, composer_left);
         } else if self.screen == Screen::Mail && (self.reader.open_id().is_some() || self.held_back.is_some()) && reader_shown && !docked {
             drawn = self.reader_card(&mut body, &theme, &mut layers, if full { gap } else { half });
@@ -2376,15 +2396,10 @@ impl InboxApp {
         layers.finish(&panes, &theme);
         // A row's menu whose row this pass did not draw closes; an ask no row took is dropped.
         list::settle_menus(ui.ctx());
-        if self.screen == Screen::Calendar {
-            // The palette and the settings sheet lie over the editor: they have the keys and the pointer.
-            let over = setting || self.palette.is_open();
+        if self.screen == Screen::Calendar && !setting {
+            // The palette lies over the editor: it has the keys and the pointer.
+            let over = self.palette.is_open();
             on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, over));
-        }
-        if setting {
-            changed = self.settings_sheet(ui.ctx(), &theme);
-        } else {
-            settings::rest(ui.ctx());
         }
         let palette = if self.palette.is_open() {
             self.palette.set_screen(if self.screen == Screen::Calendar { keymap::Scope::Calendar } else { keymap::Scope::Mail });
@@ -2394,7 +2409,9 @@ impl InboxApp {
         } else {
             None
         };
-        composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
+        if !setting {
+            composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
+        }
         // The toasts keep clear of the composer drawn this pass, docked or floating ([`compose::drawn_now`]).
         let (undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests(), regions.body);
         let acted = acted.or(keyed);
@@ -2408,10 +2425,8 @@ impl InboxApp {
             || screener_mode.is_some()
             || (out && leaving)
             || left_full
-            || left_settings
             || !ran.is_empty()
             || palette.is_some()
-            || index_settings
             || changed.is_some()
             || asked.narrow.is_some()
             || asked.open.is_some()
@@ -2456,9 +2471,6 @@ impl InboxApp {
         if add {
             self.open_accounts();
         }
-        if index_settings {
-            if setting { self.close_settings() } else { self.open_settings() }
-        }
         if let Some(asked) = palette {
             ran.extend(self.apply_palette(asked));
         }
@@ -2468,6 +2480,7 @@ impl InboxApp {
         if let Some(changed) = changed {
             self.apply_settings(changed);
         }
+        self.follow_accounts_page();
         self.keep_keys();
         self.keep_triage();
         self.keep_notify();
@@ -2488,9 +2501,9 @@ impl InboxApp {
         if let Some(account) = asked.narrow {
             self.mailbox.narrow(account);
         }
-        // A mailbox pressed in the index shows the mail, from the calendar too.
+        // A mailbox pressed in the index shows the mail, from the calendar and the settings too.
         if asked.open.is_some() {
-            self.screen_to(Screen::Mail);
+            self.show_mail();
         }
         if let Some(view) = header.view {
             self.mailbox.set_inbox_view(view);
@@ -2632,13 +2645,13 @@ impl InboxApp {
             calendar::empty(ui, theme, layers);
             return Vec::new();
         }
-        // The palette and the settings sheet lie over the screen's floats: they have the keys.
-        let over = self.palette.is_open() || self.settings.is_open();
+        // The palette lies over the screen's floats: it has the keys.
+        let over = self.palette.is_open();
         calendar::screen(ui, theme, &self.keymap, &self.calendar, layers, over)
     }
 
-    /// The settings sheet over the window; what was asked on it.
-    fn settings_sheet(&mut self, ctx: &egui::Context, theme: &Theme) -> Option<settings::Asked> {
+    /// The settings in the body; what was asked on them.
+    fn settings_place(&mut self, ui: &mut Ui, theme: &Theme) -> Option<settings::Asked> {
         let reduce = self.reduce_motion();
         let desk = self.desk_view();
         let view = settings::Sheet {
@@ -2651,7 +2664,7 @@ impl InboxApp {
             onboarding: &mut self.onboarding,
             can_add: self.can_add,
         };
-        settings::sheet(ctx, theme, view)
+        settings::place(ui, theme, view)
     }
 
     /// Call with each frame's input before the frame (eframe's `raw_input_hook`): after the desktop moved or resized
@@ -2827,10 +2840,7 @@ impl InboxApp {
             settings::Asked::Scale(scale) => self.set_text_scale(scale),
             settings::Asked::ReduceMotion(reduce) => self.set_reduce_motion(reduce),
             settings::Asked::Frame(frame) => self.set_frame(frame),
-            settings::Asked::Section(section) => {
-                self.onboarding.close();
-                self.settings.show(section);
-            }
+            settings::Asked::Section(section) => self.settings.show(section),
             settings::Asked::Add => self.onboarding.open(),
             settings::Asked::Edit(account) => self.onboarding.edit(&mut self.mailbox, account),
             settings::Asked::Back => self.onboarding.close(),
@@ -2852,7 +2862,6 @@ impl InboxApp {
             settings::Asked::Reminders(on) => self.mailbox.set_notify_reminders(on),
             settings::Asked::Background(on) => self.set_background(on),
             settings::Asked::Login(on) => self.set_login(on),
-            settings::Asked::Close => self.close_settings(),
         }
     }
 

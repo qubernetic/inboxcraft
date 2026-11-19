@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The settings pages as the design lays them out: the sections in its order, the pages as section labels over
-//! settings rows, coming soon where nothing is built, and a sheet that keeps the keyboard.
+//! settings rows, coming soon where nothing is built, and a place the keyboard walks.
 
 use egui::accesskit::Role;
 use egui::{Key, vec2};
@@ -22,7 +22,7 @@ fn clock() -> Box<FakeClock> {
 fn harness() -> Harness<'static, InboxApp> {
     let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     let mut harness =
-        Harness::builder().with_size(vec2(1200.0, 900.0)).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        Harness::builder().with_size(vec2(1440.0, 900.0)).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness
 }
@@ -65,7 +65,7 @@ fn the_nine_sections_stand_in_the_design_s_order() {
         harness.get_by_label(&format!("[ 04 ] Settings · {name}"));
         let title = harness.get_by_role_and_label(Role::Heading, name).rect();
         // The page's column: 720 wide, its rows as wide.
-        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
         assert!(title.left() > first.right() + 40.0 && title.right() < sheet.right(), "{name}");
         let planned = matches!(section, Section::About | Section::Ai | Section::Plugins);
         let tags = harness.query_all_by_label("coming soon").filter(|tag| (tag.rect().center().y - title.center().y).abs() < 4.0).count();
@@ -80,21 +80,17 @@ fn the_nine_sections_stand_in_the_design_s_order() {
 #[test]
 fn the_sections_column_stands_as_the_design_draws_it() {
     let harness = opened();
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-    // Inside the sheet's 1 px edge: the head 48, its hairline, 8, then the rows 30 high one under the other.
-    let mut top = sheet.top() + 1.0 + 48.0 + 1.0 + 8.0;
+    let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+    // From the body's top left: the head 48, its hairline, 8, then the rows 30 high one under the other.
+    let mut top = sheet.top() + 48.0 + 1.0 + 8.0;
     for name in NAMES {
         let row = harness.get_by_label(&format!("{name}, settings page")).rect();
         assert_eq!((row.top(), row.height()), (top, 30.0), "{name}");
-        assert_eq!((row.left(), row.width()), (sheet.left() + 1.0, 232.0), "{name}");
+        assert_eq!((row.left(), row.width()), (sheet.left(), 232.0), "{name}");
         top = row.bottom();
     }
-    // Close, which the design does not have, stands at the right end of the column's head, out of every page's way.
-    let close = harness.get_by_role_and_label(Role::Button, "Close").rect();
-    let head = egui::Rect::from_min_size(sheet.min + vec2(1.0, 1.0), vec2(232.0, 48.0));
-    assert!(head.contains_rect(close), "Close {close:?} in the head {head:?}");
-    assert!((close.right() - (head.right() - 16.0)).abs() <= 0.5, "16 from the column's edge: {close:?}");
-    assert!((close.center().y - head.center().y).abs() <= 0.5, "in the head's middle: {close:?}");
+    // A place has no Close: the design's head has none.
+    assert!(harness.query_by_role_and_label(Role::Button, "Close").is_none(), "no Close");
 }
 
 #[test]
@@ -163,32 +159,77 @@ fn a_coming_soon_row_takes_no_focus_and_no_press() {
     }
 }
 
+/// Where the control with the keyboard stands: the index (and the command line) left of the settings, the sections'
+/// column, or the page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Region {
+    Index,
+    Sections,
+    Page,
+}
+
+fn region(harness: &Harness<'static, InboxApp>) -> Option<(String, Region)> {
+    let place = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+    focused(harness).map(|(label, rect)| {
+        let x = rect.center().x;
+        let region = if x < place.left() {
+            Region::Index
+        } else if x < place.left() + 232.0 {
+            Region::Sections
+        } else {
+            Region::Page
+        };
+        (label, region)
+    })
+}
+
 #[test]
-fn the_sheet_keeps_tab_inside_and_esc_returns_the_focus() {
+fn the_keyboard_walks_the_index_the_sections_and_the_page_and_back() {
     let mut harness = harness();
-    let rail = "Settings";
-    harness.get_by_role_and_label(Role::Button, rail).focus();
+    let index = "Settings";
+    harness.get_by_role_and_label(Role::Button, index).focus();
     harness.run();
-    assert_eq!(focused(&harness).map(|(label, _)| label).as_deref(), Some(rail));
     harness.key_press(Key::Enter);
     harness.run();
     assert!(harness.state().settings().is_open());
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-    let mut stops = 0;
-    for _ in 0..60 {
+    assert_eq!(region(&harness), Some((index.to_owned(), Region::Index)), "the index's row keeps the keyboard");
+    // Tab: on from the index to the sections' rows, then on to the page; never back to a section before the page ends.
+    let mut walk = Vec::new();
+    for _ in 0..30 {
         harness.key_press(Key::Tab);
         harness.run();
-        if let Some((label, rect)) = focused(&harness) {
-            stops += 1;
-            assert!(sheet.contains_rect(rect), "{label} lies outside the sheet");
+        if let Some(stop) = region(&harness) {
+            walk.push(stop);
         }
     }
-    assert!(stops > 30, "Tab goes round the sheet's controls");
-    harness.key_press(Key::Escape);
+    let regions: Vec<Region> = walk.iter().map(|(_, region)| *region).collect();
+    let first_section = regions.iter().position(|region| *region == Region::Sections).unwrap();
+    let first_page = regions.iter().position(|region| *region == Region::Page).unwrap();
+    assert!(regions[..first_section].iter().all(|region| *region == Region::Index), "the index first: {walk:?}");
+    assert_eq!(first_page - first_section, NAMES.len(), "every section's row, then the page: {walk:?}");
+    // Then the page, until Tab comes round to the window's first control.
+    let page = regions[first_page..].iter().take_while(|region| **region != Region::Index);
+    assert!(page.clone().count() > 1 && page.clone().all(|region| *region == Region::Page), "then the page: {walk:?}");
+    // Shift+Tab: back from the page's first stop to the last section, and from the first section to the index.
+    let first_stop = walk[first_page].0.clone();
+    harness.get_by_label(&first_stop).focus();
     harness.run();
+    assert_eq!(region(&harness), Some((first_stop, Region::Page)), "on the page's first stop");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert_eq!(region(&harness), Some(("Plugins, settings page".to_owned(), Region::Sections)), "back to the last section");
+    for _ in 0..NAMES.len() {
+        harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+        harness.run();
+    }
+    assert_eq!(region(&harness).map(|(_, region)| region), Some(Region::Index), "and back to the index");
+    // The index's SETTINGS pressed again shows the mail; the keyboard stays on the row.
+    harness.get_by_role_and_label(Role::Button, index).focus();
+    harness.run();
+    harness.key_press(Key::Enter);
     harness.run();
     assert!(!harness.state().settings().is_open());
-    assert_eq!(focused(&harness).map(|(label, _)| label).as_deref(), Some(rail), "the keyboard is back where it was");
+    assert_eq!(focused(&harness).map(|(label, _)| label).as_deref(), Some(index), "the keyboard is where it was");
 }
 
 /// The controls on the sheet that can be pressed (not disabled, not text or a scroll bar), by node, with their names; a
@@ -225,9 +266,9 @@ fn tab_reaches_every_control_of_every_page_and_each_page_rests() {
             harness.state_mut().settings_mut().open_at(section);
             harness.run();
             assert!(crate::component::tests::rests(&mut harness, 4), "{name} rests");
-            let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+            let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
             let pressable = pressable_on_sheet(&harness, sheet);
-            assert!(pressable.len() > Section::ALL.len(), "{name}: the sections and Close at least");
+            assert!(pressable.len() >= Section::ALL.len(), "{name}: the sections at least");
             let mut reached = Vec::new();
             for _ in 0..400 {
                 harness.key_press(Key::Tab);
@@ -271,9 +312,10 @@ fn hostile_account_names_never_break_a_page() {
             for section in Section::ALL {
                 harness.state_mut().settings_mut().open_at(section);
                 harness.run();
-                // Every text painted on the sheet lies inside the row or button it belongs to, inside its pane, and
+                // Every text painted on the settings lies inside the row or button it belongs to, inside its pane, and
                 // over no other text.
-                let found = super::super::fit_tests::misfits(&harness);
+                let place = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+                let found = super::super::fit_tests::misfits_within(&harness, place);
                 assert!(found.is_empty(), "{section:?} at {size:?}, {scale:?}:\n{}", found.join("\n"));
             }
             app = harness.into_state();
@@ -281,25 +323,30 @@ fn hostile_account_names_never_break_a_page() {
     }
 }
 
+/// Where a page's words end in the settings `place`: 16 in from the page column's right end.
+fn words_end(place: egui::Rect) -> f32 {
+    super::Columns::of(place, Section::Appearance).page.right() - 16.0
+}
+
 #[test]
 fn the_accounts_and_shortcuts_pages_take_the_design_s_values() {
     let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     let mut harness = Harness::builder()
-        .with_size(vec2(1200.0, 900.0))
+        .with_size(vec2(1440.0, 900.0))
         .with_context_setup(crate::component::tests::record_layers)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     // Shortcuts: the field 320 wide with its own label, Reset all keys 2 over its foot at the column's right end, the
     // list's first hairline 12 under them and the first chip 8 into its 36 row.
     harness.state_mut().settings_mut().open_at(Section::Shortcuts);
     harness.run();
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     let find = harness.get_by_role_and_label(Role::TextInput, "Find a command").rect();
     assert_eq!(find.width(), 320.0, "{find:?}");
     let title = harness.get_by_role_and_label(Role::Heading, "Shortcuts").rect();
     // The head's foot (its intro, a line of 22 under 6), 16, the label 16 and 8, then the box.
     assert_eq!(find.top(), title.top() - 1.0 + 32.0 + 6.0 + 22.0 + 16.0 + 16.0 + 8.0, "{find:?} under {title:?}");
     let reset = harness.get_by_role_and_label(Role::Button, "Reset all keys").rect();
-    assert_eq!((reset.bottom(), reset.right()), (find.bottom() - 2.0, sheet.right() - 1.0 - 40.0 - 16.0), "{reset:?}");
+    assert_eq!((reset.bottom(), reset.right()), (find.bottom() - 2.0, words_end(sheet)), "{reset:?}");
     let chip = harness.get_all_by_role(Role::Button).find(|node| node.accesskit_node().label().unwrap_or_default().starts_with("Key of ")).unwrap();
     assert_eq!(chip.rect().top(), find.bottom() + 12.0 + 1.0 + 8.0, "{:?}", chip.rect());
     // Accounts: the bar 3 × 12 at 16 and 18 in its 48 row, the address at 191, "open" a small link 16 from the end.
@@ -332,11 +379,11 @@ fn calendar_rows_stand_56_apart_with_read_again_at_their_end_and_about_names_the
     let mut harness = harness();
     harness.state_mut().settings_mut().open_at(Section::Calendar);
     harness.run();
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     let links: Vec<egui::Rect> = harness.query_all_by_label("read again").map(|node| node.rect()).collect();
     assert_eq!(links.len(), harness.state().mailbox().accounts().len(), "one row per account");
     for link in &links {
-        assert!((link.right() - (sheet.right() - 1.0 - 40.0 - 16.0)).abs() <= 1.0, "{link:?}");
+        assert!((link.right() - words_end(sheet)).abs() <= 1.0, "{link:?}");
     }
     for pair in links.windows(2) {
         assert_eq!(pair[1].center().y - pair[0].center().y, 56.0, "{pair:?}");
@@ -354,7 +401,7 @@ fn a_window_too_small_for_the_sheet_draws_it_without_a_fault() {
         for section in Section::ALL {
             harness.state_mut().settings_mut().open_at(section);
             harness.run();
-            let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+            let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
             assert!(sheet.width() >= 0.0 && sheet.height() >= 0.0, "{size:?} {section:?}: {sheet:?}");
         }
     }
@@ -372,7 +419,7 @@ fn a_page_with_many_accounts_lays_out_the_rows_in_sight_and_tab_still_reaches_ev
     }
     app.mailbox_mut().refresh();
     let accounts = app.mailbox().accounts().len();
-    let mut harness = Harness::builder().with_size(vec2(1200.0, 900.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    let mut harness = Harness::builder().with_size(vec2(1440.0, 900.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.state_mut().settings_mut().open_at(Section::Sending);
     harness.run();
     let built = harness.query_all_by_role(Role::MultilineTextInput).count();
@@ -398,13 +445,14 @@ fn tab_to_a_control_below_the_page_s_view_scrolls_the_page_to_it() {
     let mut harness = Harness::builder().with_size(vec2(1100.0, 600.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.state_mut().settings_mut().open_at(Section::Appearance);
     harness.run();
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     let mut seen = Vec::new();
     for _ in 0..60 {
         harness.key_press(Key::Tab);
         harness.run();
-        if let Some((label, rect)) = focused(&harness) {
-            assert!(sheet.contains_rect(rect), "{label} {rect:?} has the keyboard out of sight of the sheet {sheet:?}");
+        // The index's and the command line's stops lie beside the settings.
+        if let Some((label, rect)) = focused(&harness).filter(|(_, rect)| sheet.x_range().contains(rect.center().x)) {
+            assert!(sheet.contains_rect(rect), "{label} {rect:?} has the keyboard out of sight of the settings {sheet:?}");
             seen.push(label);
         }
     }
@@ -446,7 +494,7 @@ fn painted_texts(harness: &Harness<'static, InboxApp>) -> Vec<(String, egui::Rec
 }
 
 #[test]
-fn at_every_text_size_the_section_count_stands_whole_and_close_gives_way() {
+fn at_every_text_size_the_section_count_stands_whole() {
     for percent in [90, 100, 110, 120, 130] {
         for section in [Section::Appearance, Section::Accounts, Section::Shortcuts] {
             let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
@@ -459,23 +507,6 @@ fn at_every_text_size_the_section_count_stands_whole_and_close_gives_way() {
             harness.run();
             let texts = painted_texts(&harness);
             assert!(texts.iter().any(|(text, _)| text == "11 sections"), "{percent} %, {section:?}: the count is cut");
-            let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-            let close = harness.get_by_role_and_label(Role::Button, "Close").rect();
-            assert!(sheet.contains_rect(close), "{percent} %, {section:?}: Close {close:?} on the sheet {sheet:?}");
-            let under: Vec<&String> = texts
-                .iter()
-                .filter(|(_, rect)| rect.intersects(close) && sheet.contains_rect(*rect) && !close.contains(rect.center()))
-                .map(|(text, _)| text)
-                .collect();
-            assert!(under.is_empty(), "{percent} %, {section:?}: Close {close:?} lies over {under:?}");
-            // The controls on the sheet: those after it in the tree (the window's own lie under the dim).
-            let nodes: Vec<_> = harness.root().children_recursive().collect();
-            let first = nodes.iter().position(|node| node.accesskit_node().role() == Role::Dialog).unwrap();
-            for other in nodes.iter().skip(first + 1).filter(|node| node.accesskit_node().label().is_none_or(|label| label != "Close")) {
-                let data = other.accesskit_node();
-                let pressable = data.data().supports_action(egui::accesskit::Action::Click) && data.role() != Role::Label;
-                assert!(!pressable || !other.rect().intersects(close), "{percent} %, {section:?}: Close lies over {:?}", data.label());
-            }
         }
     }
 }
@@ -489,15 +520,16 @@ fn shift_tab_round_a_page_with_many_accounts_reaches_the_last_account() {
     }
     app.mailbox_mut().refresh();
     let last = format!("Signature of {}", app.mailbox().accounts().last().unwrap().label);
-    let mut harness = Harness::builder().with_size(vec2(1200.0, 900.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    let mut harness = Harness::builder().with_size(vec2(1440.0, 900.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.state_mut().settings_mut().open_at(Section::Sending);
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "Close").focus();
+    harness.get_by_role_and_label(Role::Button, "New message").focus();
     harness.run();
-    // Back from the sheet's first control comes round to its last: the last account's signature, scrolled to.
+    // Back from the window's first control comes round to its last, the page's: the last account's signature, scrolled
+    // to.
     harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
     harness.run();
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     let (label, rect) = focused(&harness).unwrap_or((String::new(), egui::Rect::NOTHING));
     assert_eq!(label, last, "Shift+Tab from the first control");
     assert!(sheet.contains_rect(rect), "{label} {rect:?} in sight on the sheet {sheet:?}");

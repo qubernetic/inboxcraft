@@ -180,13 +180,17 @@ fn the_index_s_places_and_mailboxes_go_where_the_rail_and_the_folder_pane_went()
     // Home is coming soon: a press does nothing.
     press(&mut harness, "Home");
     assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (crate::Screen::Mail, Place::View(Folder::Sent)));
-    // Settings opens the sheet and is the place shown while it is open; Mail leaves it.
+    // Settings is a place, the one shown while it shows; Esc does not close it, SETTINGS again shows the place left.
     press(&mut harness, "Settings");
     assert!(harness.state().settings().is_open());
     assert_eq!(shown(&harness, "Settings"), Some(Toggled::True));
     harness.key_press(egui::Key::Escape);
     harness.run();
+    assert!(harness.state().settings().is_open());
+    press(&mut harness, "Settings");
     assert!(!harness.state().settings().is_open());
+    assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (crate::Screen::Mail, Place::View(Folder::Sent)));
+    assert_eq!(shown(&harness, "Settings"), Some(Toggled::False));
 }
 
 /// What a press under a modal surface must not change: the screen, the mailbox shown, the account narrowed to, the
@@ -203,9 +207,10 @@ fn under(harness: &Harness<'static, InboxApp>) -> (crate::Screen, Place, Option<
 
 #[test]
 fn a_screen_reader_s_activate_on_the_index_runs_nothing_under_a_modal_surface() {
+    // The settings are not one of them: they are a place (below).
     use crate::keymap;
     let presses = ["Mail", "Calendar", "Later", "Sent", "Inbox", "Personal", "Show mail of: mira@example.org", "New message"];
-    for surface in ["editor", "sheet", "palette"] {
+    for surface in ["editor", "palette"] {
         let mut harness = window(vec2(1300.0, 820.0));
         let ctx = harness.ctx.clone();
         match surface {
@@ -218,10 +223,6 @@ fn a_screen_reader_s_activate_on_the_index_runs_nothing_under_a_modal_surface() 
                 harness.get_by_role_and_label(Role::TextInput, "Title").type_text("Kiln");
                 harness.run();
             }
-            "sheet" => {
-                harness.state_mut().run_action(&ctx, keymap::SETTINGS);
-                harness.run();
-            }
             _ => {
                 harness.state_mut().run_action(&ctx, keymap::PALETTE);
                 harness.run();
@@ -230,9 +231,7 @@ fn a_screen_reader_s_activate_on_the_index_runs_nothing_under_a_modal_surface() 
             }
         }
         let before = under(&harness);
-        // Under the sheet a place runs as its key does there: it closes the sheet and shows the place (below).
-        let presses = presses.iter().filter(|name| surface != "sheet" || !["Mail", "Calendar", "Later"].contains(name));
-        for &name in presses {
+        for name in presses {
             let Some(node) = harness
                 .query_all_by_role(Role::Button)
                 .find(|node| node.accesskit_node().label().is_some_and(|label| label == name || label.starts_with(&format!("{name},"))))
@@ -248,7 +247,6 @@ fn a_screen_reader_s_activate_on_the_index_runs_nothing_under_a_modal_surface() 
                     let summary = harness.state().calendar().editor().map(|editor| editor.form().summary.clone());
                     assert_eq!(summary.as_deref(), Some("Kiln"), "{surface}: {name}: the editor stays with its typing");
                 }
-                "sheet" => assert!(harness.state().settings().is_open(), "{surface}: {name}: the sheet stays"),
                 _ => {
                     assert!(harness.state().palette().is_open(), "{surface}: {name}: the palette stays");
                     assert_eq!(harness.state().palette().query(), "zz", "{surface}: {name}: its typing whole");
@@ -259,15 +257,24 @@ fn a_screen_reader_s_activate_on_the_index_runs_nothing_under_a_modal_surface() 
 }
 
 #[test]
-fn under_the_sheet_a_place_of_the_index_does_what_its_key_does_there() {
+fn on_the_settings_a_place_or_mailbox_of_the_index_does_what_its_key_does() {
+    // The settings are a place, not a surface in front: a press, a screen reader's activate and the key alike leave
+    // them and show what was asked for.
     let mut harness = window(vec2(1300.0, 820.0));
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, crate::keymap::SETTINGS);
     harness.run();
     harness.get_by_role_and_label(Role::Button, "Calendar").click_accesskit();
     harness.run();
-    assert!(!harness.state().settings().is_open(), "the sheet closes first, as with Ctrl 2");
+    assert!(!harness.state().settings().is_open(), "the settings are left, as with Ctrl 2");
     assert_eq!(harness.state().screen(), crate::Screen::Calendar);
+    harness.state_mut().run_action(&ctx, crate::keymap::SETTINGS);
+    harness.run();
+    let sent = harness.query_all_by_role(Role::Button).find(|node| node.accesskit_node().label().is_some_and(|label| label == "Sent")).unwrap();
+    sent.click_accesskit();
+    harness.run();
+    assert!(!harness.state().settings().is_open(), "a mailbox pressed leaves the settings");
+    assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (crate::Screen::Mail, Place::View(Folder::Sent)));
 }
 
 #[test]

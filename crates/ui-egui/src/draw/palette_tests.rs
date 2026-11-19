@@ -167,7 +167,10 @@ fn every_action_runs_through_run_action_and_an_unknown_one_does_nothing() {
     app.run_action(&ctx, keymap::SHORTCUTS);
     assert_eq!(app.settings().section(), crate::settings::Section::Shortcuts);
     app.run_action(&ctx, keymap::SETTINGS);
-    assert!(app.settings().is_open(), "Settings leaves an open sheet open");
+    assert!(!app.settings().is_open(), "Settings again shows the place the owner came from");
+    app.run_action(&ctx, keymap::SETTINGS);
+    assert!(app.settings().is_open(), "and once more the settings");
+    assert_eq!(app.settings().section(), crate::settings::Section::Shortcuts, "on the page last shown");
     app.run_action(&ctx, keymap::SENT);
     assert!(!app.settings().is_open());
     assert_eq!(app.mailbox().place(), crate::mailbox::Place::View(inboxcraft_model::Role::Sent));

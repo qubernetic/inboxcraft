@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings sheet and the palette coming over an open float: a list, a menu or a picker open under them closes
-//! (it picks, sends and changes nothing, and asks for no keyboard), so nothing under the sheet stands over it, keeps
-//! `Tab` or takes its Esc and its press beside; the held floats (the event editor, the floating composer) stay as they
-//! are, quiet under it.
+//! The palette coming over an open float, and the settings shown in its place's stead: a list, a menu or a picker open
+//! closes (it picks, sends and changes nothing, and asks for no keyboard), so nothing stands over them or takes their
+//! Esc; the held floats (the event editor, the floating composer) stay as they are, and show again with their place.
 
 use egui::accesskit::Role;
-use egui::{Event, Id, Key, LayerId, Modifiers, Order, PointerButton, vec2};
+use egui::{Key, LayerId, Modifiers, Order, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_time::{FakeClock, Timestamp};
@@ -95,10 +94,18 @@ fn subject(harness: &Harness<'static, InboxApp>) -> Option<String> {
     harness.state().composer().map(|composer| composer.subject().to_owned())
 }
 
-fn open_sheet(harness: &mut Harness<'static, InboxApp>) {
+/// Shows the settings by their key.
+fn open_settings(harness: &mut Harness<'static, InboxApp>) {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
     assert!(harness.state().settings().is_open());
+}
+
+/// The settings' key again: the place the owner came from shows.
+fn open_settings_again(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    assert!(!harness.state().settings().is_open());
 }
 
 fn open_palette(harness: &mut Harness<'static, InboxApp>) {
@@ -112,91 +119,43 @@ fn esc(harness: &mut Harness<'static, InboxApp>) {
     harness.run();
 }
 
-/// A press of the pointer beside the sheet, down and up.
-fn press_beside(harness: &mut Harness<'static, InboxApp>) {
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-    let beside = egui::pos2(sheet.left() / 2.0, sheet.center().y);
-    harness.hover_at(beside);
-    harness.run();
-    for pressed in [true, false] {
-        harness.event(Event::PointerButton { pos: beside, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
-        harness.run();
-    }
-    harness.run();
-}
-
-/// The label of the control with the keyboard, and whether it lies in the settings sheet.
-fn focus(harness: &Harness<'static, InboxApp>) -> Option<(String, bool)> {
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-    let focused = harness.ctx.memory(|memory| memory.focused())?;
-    let response = harness.ctx.read_response(focused)?;
-    let label = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label());
-    Some((label.unwrap_or_default(), sheet.contains_rect(response.rect)))
-}
-
-/// Walks `Tab` over the sheet: every stop lies in it, and the walk comes round to its first stop.
-fn tab_goes_round_the_sheet(harness: &mut Harness<'static, InboxApp>) {
-    let mut stops = Vec::new();
-    for step in 0..40 {
-        harness.key_press(Key::Tab);
-        harness.run();
-        let (label, inside) = focus(harness).unwrap_or_default();
-        assert!(inside, "Tab {step} stopped outside the sheet, on {label:?}");
-        stops.push(label);
-    }
-    let first = stops.first().cloned().unwrap_or_default();
-    assert!(stops.iter().skip(1).any(|stop| *stop == first), "Tab comes round to {first:?}: {stops:?}");
+/// Whether the control with the keyboard lies on the settings; no keyboard anywhere counts as on them.
+fn keyboard_on_the_settings(harness: &Harness<'static, InboxApp>) -> bool {
+    let settings = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+    harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).is_none_or(|node| settings.contains_rect(node.rect()))
 }
 
 #[test]
-fn the_sheet_over_the_editor_closes_its_open_list_and_one_esc_closes_the_sheet() {
+fn the_settings_shown_from_the_editor_close_its_open_list_and_keep_its_typing() {
     let mut harness = editor_with_its_list_open();
-    open_sheet(&mut harness);
-    assert!(!repeat_list(&harness), "the list under the sheet closed when the sheet opened");
-    assert!(!popup::any_open(&harness.ctx), "nothing under the sheet says it is open");
-    let modal = harness.ctx.memory(|memory| memory.top_modal_layer());
-    assert_eq!(modal, Some(LayerId::new(Order::Foreground, Id::unique("settings-sheet"))), "the sheet holds the modal layer");
-    tab_goes_round_the_sheet(&mut harness);
+    open_settings(&mut harness);
+    assert!(!repeat_list(&harness), "the list of a place no longer drawn closed");
+    assert!(!popup::any_open(&harness.ctx), "nothing says it is open");
+    assert!(keyboard_on_the_settings(&harness), "the closed list holds no keyboard: {:?}", focused(&harness));
     esc(&mut harness);
-    assert!(!harness.state().settings().is_open(), "one Esc closes the sheet");
-    assert!(!repeat_list(&harness), "and the list stays closed");
+    assert!(harness.state().settings().is_open(), "Esc closes no place");
+    open_settings_again(&mut harness);
+    assert!(!repeat_list(&harness), "back on the calendar the list stays closed");
     assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "the editor keeps its typing");
     let editor = harness.state().calendar().editor();
-    assert!(editor.is_some_and(|editor| !editor.warned()), "the editor is open and that Esc was the sheet's");
+    assert!(editor.is_some_and(|editor| !editor.warned()), "the editor is open and saw no Esc");
 }
 
 #[test]
-fn the_sheet_over_the_editor_with_its_list_open_closes_on_a_press_beside() {
-    let mut harness = editor_with_its_list_open();
-    open_sheet(&mut harness);
-    press_beside(&mut harness);
-    assert!(!harness.state().settings().is_open(), "a press beside closes the sheet");
-    assert!(!repeat_list(&harness), "the list stays closed");
-    assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "the editor keeps its typing");
-    assert!(harness.state().calendar().editor().is_some_and(|editor| !editor.warned()), "the press was the sheet's");
-}
-
-#[test]
-fn the_sheet_over_the_composer_closes_its_picker_and_keeps_the_keyboard() {
+fn the_settings_shown_from_the_composer_close_its_picker_and_keep_the_draft() {
     let mut harness = composer_with_its_picker_open();
-    open_sheet(&mut harness);
-    assert!(!picker_open(&harness), "the picker closed when the sheet opened");
-    assert!(!picker_drawn(&harness), "nothing stands over the sheet");
-    let modal = harness.ctx.memory(|memory| memory.top_modal_layer());
-    assert_eq!(modal, Some(LayerId::new(Order::Foreground, Id::unique("settings-sheet"))), "the sheet holds the modal layer");
-    assert!(focus(&harness).is_none_or(|(_, inside)| inside), "the closed picker asked for no keyboard under the sheet");
-    tab_goes_round_the_sheet(&mut harness);
+    open_settings(&mut harness);
+    assert!(!picker_drawn(&harness), "the picker of a place no longer drawn is not drawn over the settings");
+    assert!(!popup::any_open(&harness.ctx), "nothing says it is open");
+    assert_eq!(harness.ctx.memory(|memory| memory.top_modal_layer()), None, "a place holds no modal layer");
+    assert!(keyboard_on_the_settings(&harness), "the closed picker holds no keyboard: {:?}", focused(&harness));
     esc(&mut harness);
-    assert!(!harness.state().settings().is_open(), "one Esc closes the sheet");
+    assert!(harness.state().settings().is_open(), "Esc closes no place");
+    open_settings_again(&mut harness);
     assert!(!picker_open(&harness), "the picker stays closed");
     let composer = harness.state().composer();
     assert!(composer.is_some_and(|composer| composer.later().is_none()), "the closed picker picked no time");
     assert_eq!(subject(&harness).as_deref(), Some("Plot"), "and nothing typed is lost");
-    let mut harness = composer_with_its_picker_open();
-    open_sheet(&mut harness);
-    press_beside(&mut harness);
-    assert!(!harness.state().settings().is_open(), "a press beside closes the sheet");
-    assert!(!picker_open(&harness), "the picker stays closed");
 }
 
 #[test]
@@ -234,61 +193,35 @@ fn reading_with_keys_on_ctrl() -> Harness<'static, InboxApp> {
 }
 
 #[test]
-fn under_the_sheet_a_key_with_ctrl_runs_no_command_of_the_window_under_it() {
+fn on_the_settings_a_key_with_ctrl_runs_nothing_of_the_mail_and_new_message_leaves_them() {
     let mut harness = reading_with_keys_on_ctrl();
     let screen = format!("{:?}", harness.state().screen());
-    open_sheet(&mut harness);
-    // Snooze's picker and a new message: neither from a key under the sheet. (The keys to a place of the window, the
-    // calendar's Ctrl+2 among them, close the sheet first, as before.)
-    for (modifiers, key) in [(Modifiers::COMMAND, Key::H), (Modifiers::COMMAND, Key::M)] {
-        harness.key_press_modifiers(modifiers, key);
-        harness.run();
-        harness.run();
-        let case = format!("{modifiers:?} {key:?}");
-        assert!(harness.state().settings().is_open(), "{case}: the sheet stays");
-        assert!(harness.query_by_label("Snooze until").is_none() && !popup::any_open(&harness.ctx), "{case}: no float opened");
-        assert!(harness.state().composer().is_none(), "{case}: no message begun");
-        assert_eq!(format!("{:?}", harness.state().screen()), screen, "{case}: the screen under it stays");
-        let modal = harness.ctx.memory(|memory| memory.top_modal_layer());
-        assert_eq!(modal.map(|layer| layer.id), Some(Id::unique("settings-sheet")), "{case}: the sheet holds the modal layer");
-        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-        let inside =
-            harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).is_none_or(|node| sheet.contains_rect(node.rect()));
-        assert!(inside, "{case}: the keyboard is nowhere outside the sheet: {:?}", focused(&harness));
-    }
-    // Esc closes the sheet, as before (Ctrl+, over it keeps it open, as before); the palette's key opens the palette.
-    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    open_settings(&mut harness);
+    // Snooze acts on the mail, which the settings do not show: its key rests.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::H);
     harness.run();
-    assert!(harness.state().settings().is_open(), "Ctrl+, keeps the sheet");
-    esc(&mut harness);
-    assert!(!harness.state().settings().is_open(), "Esc closes the sheet");
-    open_sheet(&mut harness);
+    harness.run();
+    assert!(harness.state().settings().is_open(), "the settings stay");
+    assert!(harness.query_by_label("Snooze until").is_none() && !popup::any_open(&harness.ctx), "no float opened");
+    assert!(harness.state().composer().is_none(), "no message begun");
+    assert_eq!(format!("{:?}", harness.state().screen()), screen, "the place left stays");
+    assert!(keyboard_on_the_settings(&harness), "the keyboard is nowhere off the settings: {:?}", focused(&harness));
+    // The palette comes over the settings, which stay under it.
     open_palette(&mut harness);
-    assert!(!harness.state().settings().is_open(), "the palette closes the sheet, as before");
+    assert!(harness.state().settings().is_open(), "the palette leaves the settings shown");
     esc(&mut harness);
-    // Without the sheet the same keys run.
+    assert!(!harness.state().palette().is_open() && harness.state().settings().is_open(), "one Esc, the palette's");
+    // New message leaves the settings for the mail and begins a message.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    harness.run();
+    assert!(!harness.state().settings().is_open(), "New message leaves the settings");
+    assert!(harness.state().composer().is_some(), "and begins a message");
+    // Off the settings the same Snooze key runs.
+    let mut harness = reading_with_keys_on_ctrl();
+    open_settings(&mut harness);
+    open_settings_again(&mut harness);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::H);
     harness.run();
     harness.run();
     assert!(harness.query_by_label("Snooze until").is_some(), "Ctrl+H opens Snooze over the reader");
-}
-
-#[test]
-fn the_keyboard_in_a_float_the_sheet_closed_comes_back_to_its_opener_when_the_sheet_closes() {
-    let mut harness = composer_with_its_picker_open();
-    // The keyboard on a row of the picker.
-    harness.key_press(Key::Tab);
-    harness.run();
-    let row = focused(&harness);
-    assert!(row.is_some() && row.as_deref() != Some("Send later"), "the keyboard is in the picker: {row:?}");
-    open_sheet(&mut harness);
-    assert!(!picker_open(&harness), "the picker closed");
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-    let inside =
-        harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).is_none_or(|node| sheet.contains_rect(node.rect()));
-    assert!(inside, "the sheet keeps the keyboard: {:?}", focused(&harness));
-    esc(&mut harness);
-    assert!(!harness.state().settings().is_open());
-    assert_eq!(focused(&harness).as_deref(), Some("Send later"), "the keyboard is back on the picker's opener");
-    assert!(!picker_open(&harness), "the picker stays closed");
 }

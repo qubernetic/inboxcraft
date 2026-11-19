@@ -101,6 +101,12 @@ fn inside(inner: Rect, outer: Rect) -> bool {
 /// text cut at the top or bottom of a scrolling pane is only scrolled), or lies over another text. While a dialog (the
 /// settings sheet) is open, only what lies in it counts: the window under it is covered on purpose.
 pub(super) fn misfits<S>(harness: &Harness<'_, S>) -> Vec<String> {
+    misfits_within(harness, Rect::EVERYTHING)
+}
+
+/// [`misfits`] among the texts and controls that lie in `area` (a place of the window, the settings: the index beside
+/// them has its own checks).
+pub(super) fn misfits_within<S>(harness: &Harness<'_, S>, area: Rect) -> Vec<String> {
     let mut found = Vec::new();
     // A dialog covers the controls made before it.
     let nodes: Vec<_> = harness.root().children_recursive().collect();
@@ -109,7 +115,7 @@ pub(super) fn misfits<S>(harness: &Harness<'_, S>) -> Vec<String> {
     let texts = texts(harness);
     let visible: Vec<(Rect, &str)> = texts
         .iter()
-        .filter(|(clip, rect, _)| clip.y_range().intersects(rect.y_range()))
+        .filter(|(clip, rect, _)| clip.y_range().intersects(rect.y_range()) && area.contains(rect.center()))
         .map(|(clip, rect, text)| {
             if rect.left() < clip.left() - SLACK || rect.right() > clip.right() + SLACK {
                 found.push(format!("cut at the side: {text:?} {rect:?} in {clip:?}"));
@@ -119,7 +125,7 @@ pub(super) fn misfits<S>(harness: &Harness<'_, S>) -> Vec<String> {
         .filter(|(rect, _)| rect.is_positive())
         .collect();
     for role in [Role::ListBoxOption, Role::Button] {
-        for node in counted.iter().filter(|node| node.accesskit_node().role() == role) {
+        for node in counted.iter().filter(|node| node.accesskit_node().role() == role && area.contains(node.rect().center())) {
             let control = node.rect();
             for (rect, text) in visible.iter().filter(|(rect, _)| control.contains(rect.center())) {
                 if !inside(*rect, control) {
