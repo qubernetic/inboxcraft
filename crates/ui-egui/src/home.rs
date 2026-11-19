@@ -287,6 +287,12 @@ fn length(minutes: i64) -> String {
 /// today through `event.list` of today and tomorrow and `calendar.list`. A refused read leaves its part empty (a count `None`), never made
 /// up. Runs commands: call it when the mailbox changed, not every frame.
 pub fn build(mailbox: &mut Mailbox) -> Home {
+    build_hiding(mailbox, None)
+}
+
+/// Home as [`build`] makes it, with the draft `hidden` left out of the drafts' block and its count: a discard waits
+/// behind its toast ([`Kept::current`]).
+pub fn build_hiding(mailbox: &mut Mailbox, hidden: Option<u64>) -> Home {
     if mailbox.accounts().is_empty() {
         return Home::first_run();
     }
@@ -299,7 +305,7 @@ pub fn build(mailbox: &mut Mailbox) -> Home {
     let back = back_today(mailbox, today, offset);
     let outbox = u64::try_from(mailbox.outbox().len()).ok();
     let refused = u64::try_from(mailbox.outbox().iter().filter(|row| matches!(row.state, SendState::Refused { .. })).count()).unwrap_or(u64::MAX);
-    let (drafts, drafts_total) = drafts(mailbox);
+    let (drafts, drafts_total) = drafts(mailbox, hidden);
     let now_moment = civil.and_then(|civil| {
         let day = Day::new(civil.year(), civil.month(), civil.day())?;
         Some(Moment { day, minute: u16::from(civil.hour()).saturating_mul(60).saturating_add(u16::from(civil.minute())) })
@@ -363,12 +369,17 @@ fn drafts_asked() -> Value {
     json!({ "limit": DRAFTS })
 }
 
-/// The newest [`DRAFTS`] drafts and how many there are, from `compose.list`; none when the read was refused.
-fn drafts(mailbox: &mut Mailbox) -> (Vec<DraftLine>, u64) {
-    let Ok(answer) = mailbox.run("compose.list", &drafts_asked()) else { return (Vec::new(), 0) };
+/// The newest [`DRAFTS`] drafts and how many there are, from `compose.list`; none when the read was refused. The draft
+/// `hidden` is left out: one more is asked for to stand in its place, and the count drops by one when it was among
+/// those answered (a hidden draft further down, newer ones written since, stays counted).
+fn drafts(mailbox: &mut Mailbox, hidden: Option<u64>) -> (Vec<DraftLine>, u64) {
+    let asked = if hidden.is_some() { json!({ "limit": DRAFTS.saturating_add(1) }) } else { drafts_asked() };
+    let Ok(answer) = mailbox.run("compose.list", &asked) else { return (Vec::new(), 0) };
     let rows = answer.get("drafts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
     let total = answer.get("total").and_then(Value::as_u64).unwrap_or(0).max(u64::try_from(rows.len()).unwrap_or(u64::MAX));
-    let lines = rows.iter().take(DRAFTS).filter_map(|row| draft_line(mailbox, row)).collect();
+    let is_hidden = |row: &&Value| hidden.is_some() && row.get("id").and_then(Value::as_u64) == hidden;
+    let total = if rows.iter().any(|row| is_hidden(&row)) { total.saturating_sub(1) } else { total };
+    let lines = rows.iter().filter(|row| !is_hidden(row)).take(DRAFTS).filter_map(|row| draft_line(mailbox, row)).collect();
     (lines, total)
 }
 
@@ -463,6 +474,7 @@ struct Stamp {
     revision: u64,
     writes: u64,
     hour: Option<(Day, u8)>,
+    hidden: Option<u64>,
 }
 
 /// Home as the window keeps it between frames: built while Home shows, and again only when the mailbox changed (a load,
@@ -476,22 +488,23 @@ pub struct Kept {
 }
 
 impl Kept {
-    /// Home for this frame, built again only when what it was built from changed.
-    pub fn current(&mut self, mailbox: &mut Mailbox) -> &Home {
+    /// Home for this frame, built again only when what it was built from changed; the draft `hidden` (a discard waiting
+    /// behind its toast) left out of it, and back in when it is no longer hidden.
+    pub fn current(&mut self, mailbox: &mut Mailbox, hidden: Option<u64>) -> &Home {
         let (now, offset) = (mailbox.now(), mailbox.offset());
         let civil = now.to_civil(offset);
         let hour = civil.and_then(|civil| Some((Day::new(civil.year(), civil.month(), civil.day())?, civil.hour())));
-        let stamp = Stamp { revision: mailbox.revision(), writes: mailbox.writes(), hour };
+        let stamp = Stamp { revision: mailbox.revision(), writes: mailbox.writes(), hour, hidden };
         let moment = hour
             .zip(civil)
             .map(|((day, _), civil)| Moment { day, minute: u16::from(civil.hour()).saturating_mul(60).saturating_add(u16::from(civil.minute())) });
         let ended = |home: &Home| home.until.zip(moment).is_some_and(|(until, now)| until <= now);
         let stale = self.stamp != Some(stamp) || self.home.as_ref().is_none_or(ended);
         if stale {
-            let home = build(mailbox);
+            let home = build_hiding(mailbox, hidden);
             self.builds = self.builds.saturating_add(1);
             // The build read the mailbox: the stamp is taken after it, so its own reads count as seen.
-            self.stamp = Some(Stamp { revision: mailbox.revision(), writes: mailbox.writes(), hour });
+            self.stamp = Some(Stamp { revision: mailbox.revision(), writes: mailbox.writes(), hour, hidden });
             self.home = Some(home);
         }
         self.home.get_or_insert_with(Home::first_run)

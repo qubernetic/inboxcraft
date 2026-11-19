@@ -248,6 +248,9 @@ pub struct InboxApp {
     workers: Box<dyn Workers>,
     /// The act the toast shows (by its serial) and when the toast came.
     toast: Option<(u64, f64)>,
+    /// The draft discarded from Home whose discard waits behind its toast, and when the toast came: carried out when
+    /// the toast ends, the window closes or the app ends, dropped by its Undo ([`InboxApp::discard_draft`]).
+    discarding: Option<(u64, Option<f64>)>,
     /// Whether the window is a native one whose frame the app may draw (`set_own_frame`).
     own_frame: bool,
     /// The frame the window was last told to show.
@@ -300,6 +303,7 @@ pub(crate) const KEEP_EVERY: f64 = 1.0;
 impl Drop for InboxApp {
     fn drop(&mut self) {
         self.keep_draft_now();
+        self.discard_waiting();
     }
 }
 
@@ -431,6 +435,7 @@ impl InboxApp {
             can_add: false,
             workers: Box::new(NoWorkers),
             toast: None,
+            discarding: None,
             own_frame: false,
             frame_applied: None,
             composer: None,
@@ -1890,15 +1895,38 @@ impl InboxApp {
         }
     }
 
-    /// Discards the kept draft `draft` as the composer's Discard does (`compose.discard`, here and on the server, with
-    /// the same toast); the draft being written, when it is that one, closes with it.
-    fn discard_draft(&mut self, draft: u64) {
+    /// Discards the kept draft `draft` from Home, with an Undo: Home hides it at once and a toast says "Draft
+    /// discarded" with Undo for [`TOAST_SECONDS`]; the discard (`compose.discard`, here and on the server) is carried
+    /// out when the toast ends, when the window closes or when the app ends, and Undo drops it, the row back where it
+    /// was. Until then nothing is gone: after a crash the draft is still there. A discard already waiting is carried
+    /// out first. The draft being written, when it is that one, is closed and kept first (refused when keeping it
+    /// fails: it stays on screen).
+    pub fn discard_draft(&mut self, draft: u64) {
         if self.composer.as_ref().is_some_and(|composer| composer.draft() == draft) {
-            return self.discard_composer();
+            self.close_composer();
+            if self.composer.is_some() {
+                return;
+            }
         }
-        match self.mailbox.run("compose.discard", &json!({ "id": draft })) {
-            Ok(_) => self.say(tr!("Draft discarded")),
-            Err(error) => self.mailbox.fail(error),
+        if self.discarding.is_some_and(|(waiting, _)| waiting != draft) {
+            self.discard_waiting();
+        }
+        self.notice = None;
+        self.discarding = Some((draft, None));
+    }
+
+    /// The draft whose discard waits behind its toast, if one does.
+    #[must_use]
+    pub fn discarding(&self) -> Option<u64> {
+        self.discarding.map(|(draft, _)| draft)
+    }
+
+    /// Carries out the discard that waits behind its toast, if one does.
+    fn discard_waiting(&mut self) {
+        if let Some((draft, _)) = self.discarding.take()
+            && let Err(error) = self.mailbox.run("compose.discard", &json!({ "id": draft }))
+        {
+            self.mailbox.fail(error);
         }
     }
 
@@ -2177,7 +2205,7 @@ impl InboxApp {
     /// The toast of the composer's last step, while no act's toast and no countdown shows.
     fn notice_toast(&mut self, ui: &Ui, theme: &Theme, room: ToastRoom) {
         let Some((text, since)) = self.notice.clone() else { return };
-        if self.mailbox.undoable().is_some() || self.counting().is_some() {
+        if self.mailbox.undoable().is_some() || self.counting().is_some() || self.discarding.is_some() {
             return;
         }
         let now = ui.input(|input| input.time);
@@ -2734,7 +2762,8 @@ impl InboxApp {
     fn home_place(&mut self, ui: &mut Ui, theme: &Theme) -> Option<home::Asked> {
         let rect = ui.available_rect_before_wrap();
         let level = self.motion_level();
-        let shown = self.home.current(&mut self.mailbox);
+        let hidden = self.discarding();
+        let shown = self.home.current(&mut self.mailbox, hidden);
         let stage = home::Stage { field: &mut self.field, emblem: None, level };
         let drawn = home::show(ui, theme, &self.keymap, shown, rect, stage);
         if let Some(due) = self.home.due_in(&self.mailbox) {
@@ -2754,8 +2783,8 @@ impl InboxApp {
     }
 
     /// Applies what was pressed on Home: a count's tile shows its mailbox or pile, a draft row opens that draft in the
-    /// composer (the draft being written is kept first, as every other way to a draft does), its discard discards it as
-    /// the composer's Discard does, the agenda's link shows the calendar on today, the buttons do what they say. An
+    /// composer (the draft being written is kept first, as every other way to a draft does), its discard hides it behind
+    /// a toast with Undo and discards it when the toast ends ([`InboxApp::discard_draft`]), the agenda's link shows the calendar on today, the buttons do what they say. An
     /// action that runs as its key does is given back, to run through [`InboxApp::run_action`] and its gates.
     fn apply_home(&mut self, ctx: &egui::Context, asked: home::Asked) -> Option<&'static str> {
         use crate::home::Counted;
@@ -2895,7 +2924,9 @@ impl InboxApp {
     fn toasts(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool, body: Rect) -> (bool, bool) {
         let room = (body, compose::drawn_now(ui.ctx()));
         let unsent = self.send_toast(ui, theme, quiet, room);
-        let undone = if unsent || self.counting().is_some() { false } else { self.toast(ui, theme, quiet, rests, room) };
+        let counting = unsent || self.counting().is_some();
+        self.discard_toast(ui, theme, (quiet, rests), room, !counting);
+        let undone = if counting || self.discarding.is_some() { false } else { self.toast(ui, theme, quiet, rests, room) };
         self.notice_toast(ui, theme, room);
         (undone, unsent)
     }
@@ -2936,6 +2967,38 @@ impl InboxApp {
             self.unsend(draft);
         }
         undone
+    }
+
+    /// The toast of a draft discarded from Home while its discard waits ([`InboxApp::discard_draft`]): "Draft
+    /// discarded" with Undo and its key (resting as the act's do, for `quiet` and `rests`), `shown` unless the send's
+    /// countdown has the place. Its time runs whether shown or not; when it ends the discard is carried out, and Undo
+    /// drops it; a closing window carries it out too.
+    fn discard_toast(&mut self, ui: &Ui, theme: &Theme, (quiet, rests): (bool, bool), room: ToastRoom, shown: bool) {
+        let Some((draft, since)) = self.discarding else { return };
+        let now = ui.input(|input| input.time);
+        let since = since.unwrap_or(now);
+        let left = TOAST_SECONDS - (now - since);
+        // Not a number, over, or the window closes: carried out, not lost with the toast.
+        let closing = ui.input(|input| input.viewport().close_requested());
+        let Some(wait) = std::time::Duration::try_from_secs_f64(left).ok().filter(|_| left > 0.0 && !closing) else {
+            return self.discard_waiting();
+        };
+        self.discarding = Some((draft, Some(since)));
+        ui.ctx().request_repaint_after(wait);
+        if !shown {
+            return;
+        }
+        let mut keys = self.keymap.clone();
+        if quiet || rests {
+            keys.unbind(keymap::UNDO);
+        }
+        let id = egui::Id::unique("discard-toast").with(draft);
+        let card = Toast { text: tr!("Draft discarded"), undo: Some(keymap::UNDO), rests };
+        let place = Self::toast_place(room.0, theme, room.1, toast::width(ui, theme, &keys, &card));
+        if toast::show(ui.ctx(), theme, &keys, id, &card, place) {
+            self.discarding = None;
+            ui.ctx().request_repaint();
+        }
     }
 
     /// The toast after the last act, rising from the bottom edge, for [`TOAST_SECONDS`]; after it Ctrl+Z still takes

@@ -281,27 +281,191 @@ fn the_buttons_do_what_they_say() {
     assert!(harness.state().composer().is_some_and(|composer| !composer.floating()), "a new message in the reader's place");
 }
 
+/// A press on the discard of the draft row whose name starts with `subject`.
+fn press_discard(harness: &mut Harness<'static, InboxApp>, subject: &str) {
+    let row = draft_row(harness, subject);
+    harness.hover_at(row.center());
+    harness.run();
+    harness.run();
+    harness.get_by_label("discard").click();
+    harness.run();
+    harness.run();
+}
+
+/// The draft rows Home shows, top to bottom, by the start of their names.
+fn rows(harness: &Harness<'static, InboxApp>) -> Vec<String> {
+    let mut rows: Vec<(f32, String)> = harness
+        .query_all_by_role(Role::ListItem)
+        .filter_map(|node| {
+            let label = node.accesskit_node().label()?;
+            let subject = ["Workshop dates", "Glaze order"].into_iter().find(|subject| label.starts_with(subject))?;
+            Some((node.rect().top(), subject.to_owned()))
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+    rows.into_iter().map(|(_, subject)| subject).collect()
+}
+
+/// Frames until the toast's time has gone.
+fn wait_out_the_toast(harness: &mut Harness<'static, InboxApp>) {
+    let later = harness.ctx.input(|input| input.time) + super::TOAST_SECONDS + 1.0;
+    while harness.ctx.input(|input| input.time) < later {
+        harness.step();
+    }
+    harness.run();
+}
+
+fn exists(app: &mut InboxApp, id: u64) -> bool {
+    app.mailbox_mut().run("compose.show", &json!({ "id": id })).is_ok()
+}
+
 #[test]
-fn a_draft_row_opens_its_draft_and_its_discard_discards_it() {
+fn a_draft_row_opens_its_draft() {
+    let mut app = sample_app(&clock());
+    let newer = draft(&mut app, "Glaze order");
+    let mut harness = window(app);
+    press_draft(&mut harness, "Glaze order");
+    assert_eq!(harness.state().screen(), Screen::Mail);
+    assert_eq!(harness.state().composer().map(crate::compose::Composer::draft), Some(newer), "the row's draft in the composer");
+}
+
+#[test]
+fn a_draft_row_s_discard_hides_it_at_once_and_discards_it_when_its_toast_ends() {
     let mut app = sample_app(&clock());
     let older = draft(&mut app, "Workshop dates");
     let newer = draft(&mut app, "Glaze order");
     let mut harness = window(app);
-    let row = draft_row(&harness, "Workshop dates");
-    harness.hover_at(row.center());
-    harness.run();
-    harness.run();
     let before = drafts_total(harness.state_mut());
-    harness.get_by_label("discard").click();
-    harness.run();
-    harness.run();
-    assert_eq!(drafts_total(harness.state_mut()), before - 1, "the draft is discarded");
-    assert!(harness.state_mut().mailbox_mut().run("compose.show", &json!({ "id": older })).is_err(), "that draft, not another");
-    assert_eq!(harness.state().notice(), Some("Draft discarded"), "the composer's Discard's toast");
+    let all = format!("all drafts ({before}) →");
+    harness.get_by_label(&all);
+    press_discard(&mut harness, "Workshop dates");
+    assert_eq!(rows(&harness), ["Glaze order"], "the row goes at once");
+    harness.get_by_label(&format!("all drafts ({}) →", before - 1));
+    harness.get_by_label("Draft discarded");
+    harness.get_by_role_and_label(Role::Button, "Undo");
     assert_eq!(harness.state().screen(), Screen::Home, "discard leaves Home where it is");
-    press_draft(&mut harness, "Glaze order");
-    assert_eq!(harness.state().screen(), Screen::Mail);
-    assert_eq!(harness.state().composer().map(crate::compose::Composer::draft), Some(newer), "the row's draft in the composer");
+    // Nothing is gone yet: a crash now leaves the draft where it was.
+    assert!(exists(harness.state_mut(), older), "the discard waits for its toast");
+    assert_eq!(harness.state().discarding(), Some(older));
+    wait_out_the_toast(&mut harness);
+    assert!(!exists(harness.state_mut(), older), "carried out when the toast ends");
+    assert!(exists(harness.state_mut(), newer), "that draft, not another");
+    assert_eq!(drafts_total(harness.state_mut()), before - 1);
+    assert_eq!(harness.state().discarding(), None);
+    assert!(harness.query_by_label("Draft discarded").is_none());
+    assert_eq!(rows(&harness), ["Glaze order"]);
+}
+
+#[test]
+fn undo_brings_the_discarded_draft_back_where_it_was_by_button_and_by_key() {
+    for by_key in [false, true] {
+        let mut app = sample_app(&clock());
+        let older = draft(&mut app, "Workshop dates");
+        draft(&mut app, "Glaze order");
+        let mut harness = window(app);
+        let before = rows(&harness);
+        assert_eq!(before, ["Glaze order", "Workshop dates"]);
+        let total = drafts_total(harness.state_mut());
+        press_discard(&mut harness, "Workshop dates");
+        if by_key {
+            harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+            harness.run();
+            harness.run();
+        } else {
+            press(&mut harness, "Undo");
+        }
+        assert_eq!(harness.state().discarding(), None, "by key {by_key}");
+        assert_eq!(rows(&harness), before, "by key {by_key}: the row is back where it was");
+        harness.get_by_label(&format!("all drafts ({total}) →"));
+        wait_out_the_toast(&mut harness);
+        assert!(exists(harness.state_mut(), older), "by key {by_key}: undone, nothing is discarded");
+        assert_eq!(drafts_total(harness.state_mut()), total);
+    }
+}
+
+#[test]
+fn a_second_discard_while_one_waits_carries_the_first_out() {
+    let mut app = sample_app(&clock());
+    let older = draft(&mut app, "Workshop dates");
+    let newer = draft(&mut app, "Glaze order");
+    let mut harness = window(app);
+    press_discard(&mut harness, "Workshop dates");
+    press_discard(&mut harness, "Glaze order");
+    assert!(!exists(harness.state_mut(), older), "the first is carried out");
+    assert!(exists(harness.state_mut(), newer), "the second waits");
+    assert_eq!(harness.state().discarding(), Some(newer));
+    press(&mut harness, "Undo");
+    wait_out_the_toast(&mut harness);
+    assert!(exists(harness.state_mut(), newer), "its Undo takes back the second only");
+    assert!(!exists(harness.state_mut(), older));
+}
+
+#[test]
+fn leaving_home_does_not_cancel_the_wait_and_a_closing_window_carries_it_out() {
+    let mut app = sample_app(&clock());
+    let older = draft(&mut app, "Workshop dates");
+    let mut harness = window(app);
+    press_discard(&mut harness, "Workshop dates");
+    harness.state_mut().show_mail();
+    harness.run();
+    assert!(exists(harness.state_mut(), older), "still waiting on the mail");
+    harness.get_by_label("Draft discarded");
+    wait_out_the_toast(&mut harness);
+    assert!(!exists(harness.state_mut(), older), "carried out off Home too");
+
+    let mut app = sample_app(&clock());
+    let older = draft(&mut app, "Workshop dates");
+    let mut harness = window(app);
+    press_discard(&mut harness, "Workshop dates");
+    harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+    harness.step();
+    assert!(!exists(harness.state_mut(), older), "the window closes: carried out, not lost with the toast");
+    assert_eq!(harness.state().discarding(), None);
+}
+
+#[test]
+fn discarding_the_draft_being_written_keeps_and_closes_it_first() {
+    let mut app = sample_app(&clock());
+    let older = draft(&mut app, "Workshop dates");
+    let mut harness = window(app);
+    press_draft(&mut harness, "Workshop dates");
+    harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
+    harness.get_by_role_and_label(Role::TextInput, "Subject").type_text(" and kilns");
+    harness.run();
+    command(&mut harness, Key::Num0);
+    assert_eq!(harness.state().screen(), Screen::Home);
+    press_discard(&mut harness, "Workshop dates");
+    assert!(harness.state().composer().is_none(), "the composer closes with its draft");
+    assert_eq!(harness.state().discarding(), Some(older));
+    press(&mut harness, "Undo");
+    assert_eq!(subject_of(harness.state_mut(), older), "Workshop dates and kilns", "what was typed was kept first");
+}
+
+#[test]
+fn the_discard_s_toast_covers_no_control_of_home() {
+    for size in [vec2(1440.0, 900.0), vec2(1300.0, 900.0), vec2(1000.0, 900.0), vec2(800.0, 900.0)] {
+        let mut app = sample_app(&clock());
+        draft(&mut app, "Workshop dates");
+        draft(&mut app, "Glaze order");
+        let mut harness = window_of(app, size);
+        press_discard(&mut harness, "Workshop dates");
+        // The toast's float, which takes the presses over it: the area its Undo stands on.
+        let undo = harness.get_by_role_and_label(Role::Button, "Undo").rect();
+        let layer = harness.ctx.layer_id_at(undo.center()).unwrap();
+        let float = harness.ctx.memory(|memory| memory.area_rect(layer.id)).unwrap();
+        assert!(float.contains_rect(harness.get_by_label("Draft discarded").rect()), "{float:?}");
+        let home = harness.state().screen();
+        assert_eq!(home, Screen::Home);
+        for node in
+            harness.query_all_by_role(Role::Button).chain(harness.query_all_by_role(Role::ListItem)).chain(harness.query_all_by_role(Role::Link))
+        {
+            let label = node.accesskit_node().label().unwrap_or_default().to_owned();
+            if label == "Undo" {
+                continue;
+            }
+            assert!(!node.rect().intersects(float), "{size:?}: the toast covers {label:?} at {:?} ({float:?})", node.rect());
+        }
+    }
 }
 
 #[test]
