@@ -317,15 +317,19 @@ fn typing_on_home_or_the_calendar_changes_no_place_until_enter() {
 
 #[test]
 fn a_long_paste_is_capped() {
+    // Put in past the field (whose own limit would cut it first), as the pictures and the prefixes' hints put text in:
+    // the command line's state cuts it.
     let mut harness = opened(egui::Theme::Light, "");
     let before = harness.state().mailbox().last_run();
-    type_in(&mut harness, &"x".repeat(10_000));
+    harness.state_mut().command_mut().open_with(&"x".repeat(10_000));
+    harness.run();
     assert_eq!(harness.state().command().text().chars().count(), crate::command::MOST);
     assert!(field_focused(&harness), "the keyboard stays in the field");
     let mut harness = opened(egui::Theme::Light, "");
-    type_in(&mut harness, &format!(">{}", "y".repeat(10_000)));
+    harness.state_mut().command_mut().open_with(&format!(">{}", "y".repeat(10_000)));
+    harness.run();
     assert_eq!(harness.state().command().mode(), Mode::Command);
-    assert!(harness.state().command().text().chars().count() < crate::command::MOST);
+    assert_eq!(harness.state().command().text().chars().count(), crate::command::MOST - 1, "the mark and the text, capped");
     harness.key_press(Key::Enter);
     harness.run();
     assert_eq!(harness.state().mailbox().last_run(), before, "nothing ran");
@@ -349,8 +353,13 @@ fn a_bare_prefix_lists_and_runs_nothing() {
 
 #[test]
 fn slash_in_a_text_field_types_a_slash() {
+    // The floating composer is no quiet surface: only the window's gate for a focused field keeps the bare `/` from
+    // opening the command line.
     let mut harness = harness(egui::Theme::Light);
     harness.state_mut().compose();
+    if let (Some(composer), _) = harness.state_mut().composer_mut() {
+        composer.set_floating(true);
+    }
     harness.run();
     let ctx = harness.ctx.clone();
     ctx.memory_mut(|memory| memory.request_focus(super::compose::subject_id()));
@@ -360,6 +369,20 @@ fn slash_in_a_text_field_types_a_slash() {
     assert!(!field_focused(&harness));
     let subject = harness.state().composer().map(|composer| composer.subject().to_owned());
     assert_eq!(subject.as_deref(), Some("/"), "the slash is typed in the field");
+}
+
+#[test]
+fn tab_and_shift_tab_keep_the_keyboard_in_the_field_while_the_results_show() {
+    let mut harness = opened(egui::Theme::Light, ">");
+    for (shift, times) in [(false, 6), (true, 3)] {
+        for _ in 0..times {
+            let modifiers = if shift { Modifiers::SHIFT } else { Modifiers::NONE };
+            harness.key_press_modifiers(modifiers, Key::Tab);
+            harness.run();
+            assert!(field_focused(&harness), "shift {shift}: the field keeps the keyboard");
+            assert!(harness.state().command().results(), "shift {shift}: the results stay");
+        }
+    }
 }
 
 #[test]
