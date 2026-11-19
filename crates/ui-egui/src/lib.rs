@@ -23,6 +23,7 @@
 //! - [`settings`]: the settings sheet's state: open or not, the page shown and what its pages hold while it is open.
 //! - [`keep`]: where the appearance choices (the `ui.*.set` commands) and the keys are kept between runs.
 //! - [`desk`]: the app's side of running without a window: in the background, and starting with the computer.
+//! - [`field`]: the character field and the emblem, the ground of Home, flipping under the pointer.
 //! - [`motion`]: the motion tokens and the one reduced-motion flag every animation reads.
 //! - [`keymap`]: every action of the window and which key runs it; tooltips and chips read their keys from it.
 //! - [`palette`]: the command palette's state and which actions match what is typed into it.
@@ -40,6 +41,7 @@ pub mod desk;
 mod draw;
 mod error;
 pub mod fetch;
+pub mod field;
 mod fitted_text;
 pub mod i18n;
 pub mod icons;
