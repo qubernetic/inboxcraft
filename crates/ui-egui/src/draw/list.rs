@@ -42,6 +42,7 @@ use std::collections::HashSet;
 use egui::accesskit::Role as AccessRole;
 use egui::{Align, Frame, Id, Layout, Margin, Rect, RichText, ScrollArea, Sense, Ui, UiBuilder, pos2, vec2};
 use inboxcraft_model::Role;
+use inboxcraft_time::Timestamp;
 
 use inboxcraft_engine::ScreenerMode;
 
@@ -352,6 +353,19 @@ struct SnoozeRow {
     pass: u64,
 }
 
+/// Where a Snooze asked from outside the row (its key, over the keyed or the ringed row) waits for the row's next draw.
+fn ask_snooze_id() -> Id {
+    Id::unique("list-ask-snooze")
+}
+
+/// Opens the time picker of the message `message`'s row as its Snooze does, if the list's next draw draws the row
+/// (else the ask is dropped): the Snooze key in one pane, where the reader is not shown, or on the row the owner
+/// ringed by Esc from its pointer menu.
+pub(super) fn ask_snooze(ctx: &egui::Context, message: u64) {
+    ctx.data_mut(|data| data.insert_temp(ask_snooze_id(), message));
+    ctx.request_repaint();
+}
+
 /// Opens the time picker of the message `message`'s row from its Snooze (the hover action's `id`) on the row `rect`.
 fn open_snooze(ctx: &egui::Context, message: u64, action: Id, rect: Rect) {
     let anchor = ctx.read_response(action).map_or(rect, |response| response.rect).translate(-rect.min.to_vec2());
@@ -555,8 +569,19 @@ impl Slot {
     }
 }
 
-/// One message row across `ui`'s width, the mail row of the design; a click selects it.
-fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool, slot: Slot) -> Drawn {
+/// One message row across `ui`'s width, the mail row of the design; a click selects it. `ask`: the message a Snooze
+/// key asked the time picker for in this draw.
+#[expect(clippy::too_many_arguments, reason = "the parts of one row")]
+fn row(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    message: &MessageRow,
+    account_marker: bool,
+    slot: Slot,
+    ask: Option<u64>,
+) -> Drawn {
     let arrival = Arrival::of(ui.ctx(), theme, message.id);
     let selected = mailbox.selected() == Some(message.id);
     let keyed = selected && mailbox.keyed();
@@ -624,7 +649,10 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         }
     }
     let mut acted = drawn.acted.and_then(|index| act(message, index));
-    let presets = drawn.acted == Some(SNOOZE_ACTION);
+    // Its Snooze pressed, or its key asked for this row in this draw: the keyed row, or the one the owner ringed
+    // ([`ask_snooze`]).
+    let asked = ask == Some(message.id);
+    let presets = drawn.acted == Some(SNOOZE_ACTION) || asked;
     if presets {
         open_snooze(ui.ctx(), message.id, actions_id(message.id).with(SNOOZE_ACTION), rect);
         note_snooze_row(ui.ctx(), message.id, rect, response.id);
@@ -1009,7 +1037,23 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow)
         let pass = ctx.cumulative_pass_nr();
         ctx.data_mut(|data| data.insert_temp(menu_shown_id(), (message.id, pass)));
     }
-    (acted, was_open && !open)
+    let closed = was_open && !open;
+    // Esc from a menu the pointer opened gave the row the keyboard: the owner put the ring there ([`take_ringed`]).
+    if closed && acted.is_none() && !popup::opened_by_key(&ctx, popup_id) && ctx.memory(|memory| memory.has_focus(response.id)) {
+        ctx.data_mut(|data| data.insert_temp(ringed_id(), message.id));
+    }
+    (acted, closed)
+}
+
+/// Where the row an Esc from its pointer menu gave the keyboard waits for the window ([`take_ringed`]).
+fn ringed_id() -> Id {
+    Id::unique("list-ringed-by-menu")
+}
+
+/// The row an Esc from its pointer menu gave the keyboard to since the last call, if any: the ring the owner put
+/// there, which the acts on a row follow even with nothing open.
+pub(super) fn take_ringed(ctx: &egui::Context) -> Option<u64> {
+    ctx.data_mut(|data| data.remove_temp::<u64>(ringed_id()))
 }
 
 /// The id of the hover action group of message `id`'s row: its n-th action is `actions_id(id).with(n)` (Snooze's
@@ -1230,6 +1274,8 @@ struct Rows<'a> {
     server: Cell<Option<u64>>,
     /// The row that gained the focus this frame.
     gained: Cell<Option<u64>>,
+    /// The message whose row a Snooze key asked to open the time picker on ([`ask_snooze`]), taken for this draw only.
+    ask: Option<u64>,
 }
 
 impl Rows<'_> {
@@ -1239,7 +1285,7 @@ impl Rows<'_> {
             Place::Later(pile) if self.mailbox.query().is_empty() => {
                 later(ui, self.theme, self.keymap, self.mailbox, message, pile, self.account_marker, slot)
             }
-            _ => row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker, slot),
+            _ => row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker, slot, self.ask),
         };
         if drawn.focused {
             ui.data_mut(|data| data.insert_temp(focused_row_id(), message.id));
@@ -1690,7 +1736,7 @@ struct HeadPressed {
 
 /// A group's head across `ui`, the design's group head: its index, name and unread count; in Smart, while it has more
 /// rows than it shows, how many show and "show all" or "show fewer"; "done all" while it is hovered or keyed.
-fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState) -> HeadPressed {
+fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState, done_all: bool) -> HeadPressed {
     let letter = char::from(b'A'.saturating_add(u8::try_from(state.index % 26).unwrap_or(0)));
     let index = format!("[ {letter} ]");
     let shown = state.folds.then(|| {
@@ -1706,7 +1752,7 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadS
         shown: shown.as_deref(),
         link,
         // A head over no message left (its last row leaving) offers nothing to mark done.
-        hover_link: (state.count > 0).then_some(tr!("done all")),
+        hover_link: (done_all && state.count > 0).then_some(tr!("done all")),
     };
     let pressed = group_head(ui, theme, keymap, &head, None);
     HeadPressed { done_all: pressed.hover_link, fold: pressed.link }
@@ -1755,7 +1801,9 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, slot: Slot) {
     let (theme, keymap, mailbox) = (rows.theme, rows.keymap, rows.mailbox);
     match line {
         Line::Head(group, state) => {
-            let pressed = head(ui, theme, keymap, group, *state);
+            // Later's heads sort the snoozed pile by when it comes back: they mark nothing done.
+            let done_all = !matches!(mailbox.place(), Place::Later(_));
+            let pressed = head(ui, theme, keymap, group, *state, done_all);
             if pressed.done_all {
                 let all = mailbox.messages().iter().filter(|message| group.messages.contains(&message.id)).map(|message| message.id);
                 rows.done_all.set(Some(all.collect()));
@@ -2541,6 +2589,23 @@ fn other_of(ctx: &egui::Context, mailbox: &Mailbox, view: InboxView, groups: &[G
     other
 }
 
+/// The heads of Later's snoozed pile ([`Mailbox::later_heads`]), kept for the list of rows, its place, search and
+/// the day and week they count from, so a frame at rest sorts nothing.
+fn later_heads(ctx: &egui::Context, mailbox: &Mailbox) -> std::sync::Arc<[Group]> {
+    if mailbox.place() != Place::Later(Pile::Snoozed) || !mailbox.query().is_empty() {
+        return std::sync::Arc::from(Vec::new());
+    }
+    type Kept = ((u64, (Option<Timestamp>, Option<Timestamp>)), std::sync::Arc<[Group]>);
+    let key = (mailbox.rows_serial(), mailbox.later_bounds());
+    let id = Id::unique("list-later-heads");
+    if let Some((_, heads)) = ctx.data(|data| data.get_temp::<Kept>(id)).filter(|(kept, _)| *kept == key) {
+        return heads;
+    }
+    let heads: std::sync::Arc<[Group]> = std::sync::Arc::from(mailbox.later_heads());
+    ctx.data_mut(|data| data.insert_temp::<Kept>(id, (key, heads.clone())));
+    heads
+}
+
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
 pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     let mut asked = drawn_rows(ui, theme, keymap, mailbox);
@@ -2557,6 +2622,8 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
     let room = ui.max_rect();
     super::paint::hairline(ui.painter(), room.left_top(), room.right_top(), theme.palette.panel_line);
     ui.add_space(1.0);
+    // A Snooze asked by its key lives for this one draw: served if its row is drawn now, else gone, never later.
+    let ask = ui.data_mut(|data| data.remove_temp::<u64>(ask_snooze_id()));
     #[cfg(test)]
     ui.data_mut(|data| data.remove::<Rect>(Id::unique("list-view-rect")));
     if mailbox.place() != Place::Senders {
@@ -2596,8 +2663,16 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
     }
     let inbox = mailbox.place() == Place::View(Role::Inbox) && mailbox.query().is_empty();
     let wait = inbox && !mailbox.waiting().is_empty();
-    let groups = mailbox.groups();
-    let view = if groups.is_empty() { InboxView::List } else { mailbox.inbox_view() };
+    // Later's snoozed pile stands under its heads, all of each shown; the inbox under its groups, in its view.
+    let later = later_heads(ui.ctx(), mailbox);
+    let groups = if later.is_empty() { std::sync::Arc::from(mailbox.groups()) } else { later };
+    let view = if groups.is_empty() {
+        InboxView::List
+    } else if matches!(mailbox.place(), Place::Later(_)) {
+        InboxView::Grouped
+    } else {
+        mailbox.inbox_view()
+    };
     let rows = Rows {
         theme,
         keymap,
@@ -2613,6 +2688,7 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
         draft: Cell::new(None),
         server: Cell::new(None),
         gained: Cell::new(None),
+        ask,
     };
     // "Other" stands over the messages no group holds: its "done all" marks those, built or not. Worked out once for a
     // list of rows and its view.

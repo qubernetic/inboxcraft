@@ -306,3 +306,120 @@ fn bringing_back_a_snoozed_message_the_owner_deleted_says_only_its_snooze_went()
     mailbox.act(rota, Act::Unsnooze);
     assert_eq!(mailbox.undoable().map(|undo| undo.text.as_str()), Some("Snooze taken off"), "it stays in Trash: never 'back in the inbox'");
 }
+
+/// The snoozed pile with four messages coming back at `NOW` plus each of `hours`, in the order the pile lists them.
+fn snoozed_at(hours: [i64; 4]) -> (Mailbox, Vec<u64>) {
+    let mut mailbox = mailbox();
+    let ids: Vec<u64> = mailbox.messages().iter().take(4).map(|row| row.id).collect();
+    for (id, hours) in ids.iter().zip(hours) {
+        mailbox.act(*id, Act::Snooze(Timestamp::from_unix(NOW + hours * 3_600, 0).unwrap()));
+    }
+    mailbox.open(Place::Later(Pile::Snoozed));
+    (mailbox, ids)
+}
+
+/// The heads of the pile, each with the ids under it.
+fn heads(mailbox: &Mailbox) -> Vec<(String, Vec<u64>)> {
+    mailbox.later_heads().into_iter().map(|group| (group.name, group.messages)).collect()
+}
+
+#[test]
+fn the_snoozed_pile_stands_under_back_today_back_this_week_and_later() {
+    // Thursday 5 November 09:00: today at 16:00; Saturday 7 at 09:00; Sunday 8 at 09:00; Monday 9 at 09:00.
+    let (mut mailbox, ids) = snoozed_at([7, 48, 72, 96]);
+    let (today, saturday, sunday, monday) = (ids[0], ids[1], ids[2], ids[3]);
+    // Monday first (the default): the week ends as Sunday ends.
+    assert_eq!(
+        heads(&mailbox),
+        [("Back today".to_owned(), vec![today]), ("Back this week".to_owned(), vec![saturday, sunday]), ("Later".to_owned(), vec![monday]),]
+    );
+    // Sunday first: Sunday 8 starts the next week, and so "Next week" of the presets.
+    mailbox.run("week.set", &serde_json::json!({ "first_day": "sunday" })).unwrap();
+    assert_eq!(
+        heads(&mailbox),
+        [("Back today".to_owned(), vec![today]), ("Back this week".to_owned(), vec![saturday]), ("Later".to_owned(), vec![sunday, monday]),]
+    );
+    mailbox.load_presets();
+    let next_week = mailbox.presets().iter().find(|(name, _)| name == "Next week").map(|(_, at)| at.unix_seconds());
+    assert_eq!(next_week, Some(NOW + 72 * 3_600), "the first row of Later is where Next week begins");
+}
+
+#[test]
+fn a_head_with_no_row_is_left_out_and_other_piles_and_searches_have_none() {
+    let (mut mailbox, ids) = snoozed_at([30, 31, 32, 33]);
+    assert_eq!(heads(&mailbox), [("Back this week".to_owned(), ids.clone())], "only the head with rows");
+    mailbox.search("rota");
+    assert!(heads(&mailbox).is_empty(), "a search lists by time, under no head");
+    mailbox.open(Place::Later(Pile::Pins));
+    assert!(heads(&mailbox).is_empty(), "the pins have none");
+    mailbox.open(Place::View(Role::Inbox));
+    assert!(heads(&mailbox).is_empty(), "nor the inbox");
+}
+
+/// [`snoozed_at`] with the clock at `now` (Unix seconds) when the four are snoozed and the pile is read.
+fn snoozed_from(now: i64, hours: [i64; 4]) -> (Mailbox, Vec<u64>) {
+    let shared = FakeClock::new(Timestamp::from_unix(NOW, 0).unwrap());
+    let mut mailbox = Mailbox::new(sample::session(Box::new(shared.clone())).unwrap(), Box::new(shared.clone()));
+    shared.set(Timestamp::from_unix(now, 0).unwrap());
+    let ids: Vec<u64> = mailbox.messages().iter().take(4).map(|row| row.id).collect();
+    for (id, hours) in ids.iter().zip(hours) {
+        mailbox.act(*id, Act::Snooze(Timestamp::from_unix(now + hours * 3_600, 0).unwrap()));
+    }
+    mailbox.open(Place::Later(Pile::Snoozed));
+    (mailbox, ids)
+}
+
+#[test]
+fn on_the_weeks_last_day_this_week_ends_with_today_and_its_head_is_left_out() {
+    // Sunday 8 November 2026, 09:00 UTC: today at 16:00 and 23:00; Monday 9 at 05:00 and 09:00, the next week.
+    let (mailbox, ids) = snoozed_from(1_794_128_400, [7, 14, 20, 24]);
+    assert_eq!(heads(&mailbox), [("Back today".to_owned(), vec![ids[0], ids[1]]), ("Later".to_owned(), vec![ids[2], ids[3]])]);
+}
+
+#[test]
+fn the_week_runs_on_across_the_years_turn() {
+    // Thursday 31 December 2026, 09:00 UTC: the week runs to Sunday 3 January 2027.
+    let (mailbox, ids) = snoozed_from(1_798_707_600, [7, 48, 72, 96]);
+    assert_eq!(
+        heads(&mailbox),
+        [("Back today".to_owned(), vec![ids[0]]), ("Back this week".to_owned(), vec![ids[1], ids[2]]), ("Later".to_owned(), vec![ids[3]])]
+    );
+}
+
+#[test]
+fn a_junk_kept_week_rule_files_the_pile_by_the_default_week() {
+    let (mut mailbox, ids) = snoozed_at([7, 48, 72, 96]);
+    mailbox.run("week.set", &serde_json::json!({ "first_day": "sunday" })).unwrap();
+    mailbox.restore_week(&serde_json::json!({ "first_day": 9, "first_week": [] }));
+    // Monday first, as the default counts: Sunday 8 still in this week.
+    assert_eq!(
+        heads(&mailbox),
+        [("Back today".to_owned(), vec![ids[0]]), ("Back this week".to_owned(), vec![ids[1], ids[2]]), ("Later".to_owned(), vec![ids[3]])]
+    );
+}
+
+#[test]
+fn where_the_calendar_cannot_say_when_today_ends_only_the_rows_whose_time_has_passed_are_back_today() {
+    // Snoozed as the sample's week begins, then the clock set to 31 December 10000, the last day it counts: neither
+    // today's nor the week's end can be told.
+    let shared = FakeClock::new(Timestamp::from_unix(NOW, 0).unwrap());
+    let mut mailbox = Mailbox::new(sample::session(Box::new(shared.clone())).unwrap(), Box::new(shared.clone()));
+    let ids: Vec<u64> = mailbox.messages().iter().take(4).map(|row| row.id).collect();
+    for (id, hours) in ids.iter().zip([7, 48, 72, 96]) {
+        mailbox.act(*id, Act::Snooze(Timestamp::from_unix(NOW + hours * 3_600, 0).unwrap()));
+    }
+    let last_day = Timestamp::MAX.unix_seconds() - 15 * 3_600;
+    shared.set(Timestamp::from_unix(last_day, 0).unwrap());
+    mailbox.open(Place::Later(Pile::Snoozed));
+    assert_eq!(mailbox.later_bounds(), (None, None), "no bounds");
+    // Two come back later that day: the engine takes no time past the year 9999, so the rows are told so here.
+    let ahead = [ids[2], ids[3]];
+    for row in mailbox.messages.iter_mut().filter(|row| ahead.contains(&row.id)) {
+        row.snoozed_until = Some(Timestamp::from_unix(last_day + 3 * 3_600, 0).unwrap());
+    }
+    assert_eq!(
+        heads(&mailbox),
+        [("Back today".to_owned(), vec![ids[0], ids[1]]), ("Later".to_owned(), vec![ids[2], ids[3]])],
+        "the rows whose time has passed are back today; the others are not, with no bound to tell"
+    );
+}

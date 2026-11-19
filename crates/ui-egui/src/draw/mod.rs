@@ -195,6 +195,8 @@ pub struct InboxApp {
     landed: Option<u64>,
     /// Whether [`InboxApp::land_held`] is a row the owner's act walked on to, brought into sight before it lands.
     bring_held: bool,
+    /// The row an Undo selected again while the ring stood on another row: the ring goes to it.
+    ring_back: Option<u64>,
     /// The card of the grouped inbox the open message stood in when it opened (`Some(None)`: the rows no group holds;
     /// `None`: no cards), so that the keyboard stays in that card when the server takes the message away.
     card: Option<Option<String>>,
@@ -203,6 +205,9 @@ pub struct InboxApp {
     drawn: std::sync::Arc<[u64]>,
     /// The message whose row of the list has the keyboard's focus, as this frame began: the list's keys act on it.
     list_row: Option<u64>,
+    /// The row an Esc from its pointer menu gave the keyboard to, while the ring stays on it: the owner put it there, so
+    /// the acts on a row take it with nothing open too ([`InboxApp::row_act`]). It ends when the ring moves.
+    owner_ring: Option<u64>,
     /// A row of the list was pressed or keyed last, not the reader: with nothing else focused the list has the keyboard
     /// ([`InboxApp::list_has_keyboard`]).
     list_keys: bool,
@@ -420,9 +425,11 @@ impl InboxApp {
             land_held: None,
             landed: None,
             bring_held: false,
+            ring_back: None,
             card: None,
             drawn: std::sync::Arc::from(Vec::new()),
             list_row: None,
+            owner_ring: None,
             list_keys: true,
             reading: false,
             list_over_composer: false,
@@ -836,11 +843,18 @@ impl InboxApp {
         }
     }
 
-    /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row; under Stay, with
-    /// nothing selected, on the row that has the keyboard, as the menu key takes it, so the acts go on down the list.
+    /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row, or on the row that
+    /// has the keyboard's ring when it stands on another (after Esc from a row's pointer menu), as J, K, Enter and the
+    /// menu key take it; with nothing selected only under Stay, or on the row the owner put the ring on by Esc from its
+    /// pointer menu ([`InboxApp::owner_ring`]), so the acts go on down the list: a row the keyboard landed on after the
+    /// server took the open message away is not acted on.
     fn row_act(&self, action: &str) -> Option<(u64, Act)> {
-        let keyed = self.list_row.filter(|_| self.mailbox.after() == crate::mailbox::After::Stay);
-        let row = self.mailbox.selected().or(keyed).and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
+        let stay = self.mailbox.after() == crate::mailbox::After::Stay;
+        let target = match self.mailbox.selected() {
+            Some(selected) => Some(self.list_row.unwrap_or(selected)),
+            None => self.list_row.filter(|row| stay || self.owner_ring == Some(*row)),
+        };
+        let row = target.and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
         let (_, act) = ROW_ACTS.into_iter().find(|(id, _)| *id == action)?;
         let act = match act {
             Act::Read if row.seen => Act::Unread,
@@ -876,7 +890,11 @@ impl InboxApp {
             // In one pane only, where it brings the list back in front: the list hidden beside a composer in two panes
             // has no Back.
             keymap::BACK => self.screen == Screen::Mail && self.single == Some(true) && self.in_place_of_list(),
-            keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
+            // In one pane with the list in front, on the keyed row, as its Snooze shows the key.
+            keymap::SNOOZE => {
+                self.screen == Screen::Mail
+                    && ((self.reader.open_id().is_some() && !self.docked() && !self.list_in_front()) || self.snooze_row().is_some())
+            }
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             // The composer's own: wherever a composer is drawn ([`crate::surface::of_the_composer`]).
             keymap::FOLD => self.composer_drawn() && !self.docked(),
@@ -951,7 +969,13 @@ impl InboxApp {
                 }
                 self.search.clear();
             }
-            keymap::SNOOZE => self.open_picker(""),
+            keymap::SNOOZE => match self.snooze_row() {
+                Some(row) => {
+                    self.mailbox.load_presets();
+                    list::ask_snooze(ctx, row);
+                }
+                None => self.open_picker(""),
+            },
             keymap::OPEN_HELD => {
                 if let Some(held) = self.held_back.take() {
                     // The owner's open, as a press: the message in the reader, read, a docked composer floating.
@@ -1177,6 +1201,9 @@ impl InboxApp {
         if self.screen != Screen::Mail {
             return;
         }
+        if let Some(id) = self.ring_back.take() {
+            ctx.memory_mut(|memory| memory.request_focus(list::row_id(id)));
+        }
         // The list's act walked on, or the server took the open message away: the keyboard lands on the row asked.
         if let Some(id) = self.land_held.take() {
             // The row walked on to comes into sight, as a keyed one does; a removal lands in sight where the owner
@@ -1259,6 +1286,13 @@ impl InboxApp {
     /// one selected from outside (a script); never one the keys or the focus walked to, which stays behind the list.
     fn message_in_front(&self) -> bool {
         self.reading || !self.mailbox.keyed()
+    }
+
+    /// In one pane with the list in front, the row that has the keyboard: the Snooze key opens the time picker on it,
+    /// as its Snooze does, since the reader is not shown. So it does on the row the owner put the ring on by Esc from
+    /// its pointer menu ([`InboxApp::owner_ring`]), in one pane or two.
+    fn snooze_row(&self) -> Option<u64> {
+        self.list_row.filter(|row| (self.list_in_front() || self.owner_ring == Some(*row)) && !self.list_hidden)
     }
 
     /// Whether the calendar shows its event editor ([`Surface::Editor`]).
@@ -1507,6 +1541,12 @@ impl InboxApp {
         self.capture_key(ctx);
         // Read before anything returns: a row that lost the focus while the palette was open is not the list's row.
         self.list_row = if held { None } else { list::focused_row(ctx) };
+        // The ring an Esc from a row's pointer menu put on its row lasts while the row keeps the keyboard: J, K, a click,
+        // another menu or a removal moves it, and it ends.
+        if let Some(ringed) = list::take_ringed(ctx) {
+            self.owner_ring = Some(ringed);
+        }
+        self.owner_ring = self.owner_ring.filter(|ringed| !held && ctx.memory(|memory| memory.has_focus(list::row_id(*ringed))));
         // A row with the focus is the list's keyed row: it quiets no key.
         let focused = ctx.memory(|memory| memory.focused().is_some()) && self.list_row.is_none();
         // A field with the focus, or a surface whose fields the letters are for.
@@ -3093,7 +3133,16 @@ impl InboxApp {
         if self.editing_event() {
             return;
         }
+        let before = self.mailbox.selected();
         self.mailbox.undo();
+        // The row given back is selected again: the ring goes to it too, so the next key acts on what is marked. An Undo
+        // that selected nothing again leaves the ring where the owner put it.
+        if let (Some(ringed), Some(back)) = (self.list_row, self.mailbox.selected())
+            && ringed != back
+            && before != Some(back)
+        {
+            self.ring_back = Some(back);
+        }
         self.restored = self.docked();
         if self.screen == Screen::Calendar {
             self.calendar.refresh(&mut self.mailbox);

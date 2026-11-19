@@ -3070,6 +3070,26 @@ fn keyed_over_an_unread_row() -> (Harness<'static, InboxApp>, u64, u64) {
 }
 
 #[test]
+fn in_one_pane_h_opens_the_time_picker_on_the_keyed_row() {
+    // The owner's ruling: the row's Snooze shows H, and H does what it shows.
+    let (mut harness, keyed, _) = keyed_over_an_unread_row();
+    assert!(harness.query_by_label("Snooze until").is_none());
+    harness.key_press(Key::H);
+    harness.run();
+    harness.run();
+    harness.get_by_label("Snooze until");
+    let float = harness.ctx.memory(|memory| memory.area_rect(super::list::snooze_popup(keyed)));
+    let row = harness.ctx.read_response(super::list::row_id(keyed)).map(|response| response.rect).unwrap();
+    assert!(float.is_some_and(|float| float.top() >= row.top()), "it hangs from the keyed row: {float:?} {row:?}");
+    assert!(rows(&harness) > 0 && super::reader_rect(&harness.ctx).is_none(), "the list stays in front");
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none(), "Esc closes it");
+    assert!(harness.ctx.memory(|memory| memory.has_focus(super::list::row_id(keyed))), "and the row has the keyboard again");
+}
+
+#[test]
 fn in_one_pane_an_act_on_the_keyed_row_keys_the_next_and_reads_nothing_unseen() {
     // D, Delete, and an act from outside (a notification's Done, the control channel), each on the keyed row.
     for way in ["D", "Delete", "outside"] {
@@ -3537,6 +3557,139 @@ fn in_one_pane_esc_from_a_rows_pointer_menu_gives_it_the_keyboard_and_opens_noth
     assert_eq!(harness.state().mailbox().selected(), Some(keyed), "the row the menu was on is not keyed");
     assert!(rows(&harness) > 0 && super::reader_rect(&harness.ctx).is_none(), "the list stays in front");
     assert!(!seen(&harness, next), "and the row's message is not read");
+}
+
+#[test]
+fn after_esc_from_a_rows_pointer_menu_the_acts_go_to_the_ringed_row_not_the_open_message() {
+    // The owner's ruling: what the ring marks is what the keys act on, as J, K and Enter do.
+    let mut harness = wide(1300.0);
+    harness.get_by_label(TEODOR).click();
+    harness.run();
+    let teodor = harness.state().reader().open_id().unwrap();
+    let odile = id_with(&harness, "Allotment rota for November");
+    menu_then_esc(&mut harness, ODILE);
+    assert!(seen(&harness, teodor) && !seen(&harness, odile), "the open message read, the ringed one not");
+    harness.key_press(Key::R);
+    harness.run();
+    assert!(seen(&harness, odile), "R marked the ringed row read");
+    assert!(seen(&harness, teodor), "and left the open message as it was");
+    harness.key_press(Key::D);
+    harness.run();
+    harness.run();
+    let done = |id: u64| harness.state().mailbox().messages().iter().all(|row| row.id != id || row.done);
+    assert!(done(odile), "D took the ringed row");
+    assert!(harness.state().mailbox().messages().iter().any(|row| row.id == teodor && !row.done), "not the open message");
+}
+
+#[test]
+fn with_nothing_open_after_esc_from_a_rows_pointer_menu_the_acts_go_to_the_ringed_row() {
+    // The ruling holds with nothing open too, whatever After is: here Next, the default.
+    let mut harness = wide(1300.0);
+    assert_eq!(harness.state().mailbox().selected(), None, "nothing open");
+    let odile = id_with(&harness, "Allotment rota for November");
+    menu_then_esc(&mut harness, ODILE);
+    assert!(!seen(&harness, odile));
+    harness.key_press(Key::R);
+    harness.run();
+    assert!(seen(&harness, odile), "R marked the ringed row read");
+    assert_eq!(harness.state().reader().open_id(), None, "and opened nothing");
+    harness.key_press(Key::S);
+    harness.run();
+    assert!(harness.state().mailbox().messages().iter().any(|row| row.id == odile && row.flagged), "S flagged it");
+    harness.key_press(Key::D);
+    harness.run();
+    harness.run();
+    let done = |harness: &Harness<'static, InboxApp>, id: u64| harness.state().mailbox().messages().iter().all(|row| row.id != id || row.done);
+    assert!(done(&harness, odile), "D took the ringed row");
+    // The row it took is gone: the ring the keyboard lands on is not one the owner put there, and acts on nothing.
+    let landed = super::list::focused_row(&harness.ctx);
+    let before: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect();
+    harness.key_press(Key::R);
+    harness.run();
+    let after: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect();
+    assert_eq!(after, before, "R after the removal acts on no row (the keyboard on {landed:?})");
+}
+
+#[test]
+fn the_ring_an_esc_from_a_rows_pointer_menu_put_ends_when_the_ring_moves() {
+    // Every way back to the row in two panes selects it; what ends is the memory itself, by Tab, an arrow or a menu.
+    let mut harness = wide(1300.0);
+    let odile = id_with(&harness, "Allotment rota for November");
+    let ringed = |harness: &mut Harness<'static, InboxApp>| {
+        harness.run();
+        harness.state().owner_ring
+    };
+    for (way, key) in [("Tab", Key::Tab), ("J", Key::J), ("the down arrow", Key::ArrowDown)] {
+        menu_then_esc(&mut harness, ODILE);
+        assert_eq!(ringed(&mut harness), Some(odile), "{way}: Esc from the pointer menu rings the row");
+        harness.key_press(key);
+        harness.run();
+        assert_eq!(ringed(&mut harness), None, "{way}: the ring moved, the memory ends");
+    }
+    menu_then_esc(&mut harness, ODILE);
+    harness.get_by_label(TEODOR).click_secondary();
+    harness.run();
+    assert_eq!(ringed(&mut harness), None, "another row's menu ends it");
+    harness.key_press(Key::Escape);
+    harness.run();
+}
+
+#[test]
+fn with_nothing_open_the_snooze_key_after_esc_from_a_rows_pointer_menu_opens_its_picker() {
+    let mut harness = wide(1300.0);
+    let odile = id_with(&harness, "Allotment rota for November");
+    menu_then_esc(&mut harness, ODILE);
+    harness.key_press(Key::H);
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_some(), "H opened the time picker");
+    assert!(harness.ctx.memory(|memory| memory.area_rect(super::list::snooze_popup(odile))).is_some(), "on the ringed row");
+}
+
+#[test]
+fn undo_of_an_act_on_the_ringed_row_leaves_the_ring_on_it() {
+    let mut harness = wide(1300.0);
+    harness.get_by_label(TEODOR).click();
+    harness.run();
+    let teodor = harness.state().reader().open_id().unwrap();
+    let odile = id_with(&harness, "Allotment rota for November");
+    menu_then_esc(&mut harness, ODILE);
+    harness.key_press(Key::R);
+    harness.run();
+    assert!(seen(&harness, odile), "R marked the ringed row read");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    harness.run();
+    harness.run();
+    assert!(!seen(&harness, odile), "Undo took the read back");
+    assert!(harness.ctx.memory(|memory| memory.has_focus(super::list::row_id(odile))), "the ring stays on the row");
+    harness.key_press(Key::D);
+    harness.run();
+    harness.run();
+    let done = |id: u64| harness.state().mailbox().messages().iter().all(|row| row.id != id || row.done);
+    assert!(done(odile), "the next D takes the ringed row");
+    assert!(harness.state().mailbox().messages().iter().any(|row| row.id == teodor && !row.done), "not the open message");
+}
+
+#[test]
+fn a_snooze_asked_for_a_row_not_drawn_next_never_opens_its_picker_later() {
+    // The key asked for the row, but the list drew another place before the row: the ask goes with that draw.
+    let mut harness = wide(1300.0);
+    let odile = id_with(&harness, "Allotment rota for November");
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::SENT);
+    super::list::ask_snooze(&ctx, odile);
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none(), "the row is not in Sent: no picker");
+    harness.state_mut().run_action(&ctx, crate::keymap::MAIL);
+    harness.run();
+    harness.run();
+    let opened = |harness: &Harness<'static, InboxApp>| {
+        harness.query_by_label("Snooze until").is_some() || harness.ctx.memory(|memory| memory.area_rect(super::list::snooze_popup(odile))).is_some()
+    };
+    assert!(!opened(&harness), "back in the inbox, the row drawn, the old ask opens nothing");
+    menu_then_esc(&mut harness, ODILE);
+    assert!(!opened(&harness), "nor once the row has the keyboard");
 }
 
 #[test]

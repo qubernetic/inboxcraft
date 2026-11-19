@@ -399,6 +399,84 @@ fn every_link_is_reached_by_tab_and_shift_tab_however_far_apart() {
     assert!(link.top() >= 0.0 && link.bottom() <= 600.0, "the focused link is in sight: {link:?}");
 }
 
+/// Where the words `label` of a table cell stand, if they are drawn.
+fn cell_at(harness: &Harness<'static, Seen>, label: &str) -> Option<Rect> {
+    harness.query_all_by_label(label).next().map(|node| node.rect())
+}
+
+#[test]
+fn a_table_wider_than_its_room_is_a_tab_stop_whose_arrows_show_its_other_columns() {
+    // The owner's ruling: the columns scrolled off are reached by the arrows while the table has the focus.
+    let cells: String = (0..24).map(|index| format!("<td>column{index}</td>")).collect();
+    // Far under the link: Tab finds it out of sight and brings it in.
+    let filler = "<p>filler</p>".repeat(120);
+    let html = format!("<p><a href=\"https://example.org/before\">before</a></p>{filler}<table><tr>{cells}</tr><tr>{cells}</tr></table>");
+    let mut harness = fitted_then_button(display(&html));
+    let last = |harness: &Harness<'static, Seen>| cell_at(harness, "column23").is_some_and(|rect| rect.right() <= 640.0 && rect.left() >= 0.0);
+    let first = |harness: &Harness<'static, Seen>| cell_at(harness, "column0").is_some_and(|rect| rect.left() >= 0.0);
+    assert!(cell_at(&harness, "column0").is_none_or(|rect| rect.top() > 600.0), "the table starts out of sight");
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness).map(|(_, label)| label).as_deref(), Some("before"));
+    harness.key_press(Key::Tab);
+    harness.run();
+    harness.run();
+    assert!(!last(&harness) && first(&harness), "the table in sight, its last column not");
+    let table = focused(&harness);
+    assert_eq!(table.as_ref().map(|(role, _)| *role), Some(Role::ScrollView), "Tab reaches the table: {table:?}");
+    for _ in 0..80 {
+        harness.key_press(Key::ArrowRight);
+        harness.run();
+    }
+    assert!(last(&harness), "Right brought the last column in: {:?}", cell_at(&harness, "column23"));
+    assert_eq!(focused(&harness), table, "and the table keeps the focus");
+    for _ in 0..80 {
+        harness.key_press(Key::ArrowLeft);
+        harness.run();
+    }
+    assert!(first(&harness) && !last(&harness), "Left took it back to the first");
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness).map(|(_, label)| label).as_deref(), Some("Outside the reader"), "Tab goes on past it");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness), table, "and Shift Tab comes back to it");
+}
+
+#[test]
+fn the_arrows_of_a_wide_table_of_links_scroll_it_and_never_take_the_focus_to_a_link() {
+    // The table keeps the arrows while it has the focus: egui would move the focus to the link beside it.
+    let cells: String = (0..24).map(|index| format!("<td><a href=\"https://example.org/{index}\">cell{index}</a></td>")).collect();
+    let html = format!("<table><tr>{cells}</tr></table>");
+    let mut harness = fitted_then_button(display(&html));
+    harness.key_press(Key::Tab);
+    harness.run();
+    harness.run();
+    let table = focused(&harness);
+    assert_eq!(table.as_ref().map(|(role, _)| *role), Some(Role::ScrollView), "Tab reaches the table first: {table:?}");
+    let start = cell_at(&harness, "cell0").map(|rect| rect.left());
+    for _ in 0..3 {
+        harness.key_press(Key::ArrowRight);
+        harness.run();
+        assert_eq!(focused(&harness), table, "Right leaves the focus on the table");
+    }
+    let moved = cell_at(&harness, "cell0").map(|rect| rect.left());
+    assert!(moved < start, "Right scrolled the table: {start:?} to {moved:?}");
+    harness.key_press(Key::ArrowLeft);
+    harness.run();
+    assert_eq!(focused(&harness), table, "Left too");
+    // No trap: Tab and Shift Tab leave it.
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert!(focused(&harness).is_some_and(|now| Some(&now) != table.as_ref()), "Tab leaves the table");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness), table, "Shift Tab comes back to it");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert_ne!(focused(&harness), table, "and leaves it backwards");
+}
+
 #[test]
 fn a_focused_link_in_a_table_keeps_the_focus_far_from_sight() {
     let html = format!(
