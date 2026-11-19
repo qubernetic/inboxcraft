@@ -26,7 +26,7 @@ use inboxcraft_net::dns::Resolver;
 use inboxcraft_net::web::Https;
 use inboxcraft_net::{Connector, Credentials, Password, Stop, Timeouts, TlsSettings, Worker, WorkerSettings};
 use inboxcraft_ui_egui::fetch::Wake;
-use inboxcraft_ui_egui::onboard::{self, Keychain, Proposal, Suggestion};
+use inboxcraft_ui_egui::onboard::{self, Keychain, Proposal, RunStop, Suggestion};
 use inboxcraft_ui_egui::workers::Workers;
 
 /// The service name of every password InboxCraft keeps in the credential store: the app id.
@@ -315,10 +315,19 @@ pub fn newer_run_stops(runs: &'static AtomicU64) -> Stop {
     Arc::new(move || runs.load(Ordering::SeqCst) != mine)
 }
 
-/// Detect for `address` over the system's name servers and HTTPS with `tls`; the ISPDB only when `ispdb`. A newer
-/// run ends this one ([`newer_run_stops`]).
+/// The stop of a run counted in `runs`: set by a newer run ([`newer_run_stops`]) or by the form (`form`, set when the
+/// owner cancels or leaves the form while Detect asks).
 #[must_use]
-pub fn detect(tls: &TlsSettings, address: &str, ispdb: bool) -> Proposal {
+pub fn run_stops(runs: &'static AtomicU64, form: &RunStop) -> Stop {
+    let newer = newer_run_stops(runs);
+    let form = form.clone();
+    Arc::new(move || form.is_stopped() || newer())
+}
+
+/// Detect for `address` over the system's name servers and HTTPS with `tls`; the ISPDB only when `ispdb`. A newer
+/// run ends this one, and so does `stop` once the form sets it ([`run_stops`]).
+#[must_use]
+pub fn detect(tls: &TlsSettings, address: &str, ispdb: bool, stop: &RunStop) -> Proposal {
     let Ok(address) = EmailAddress::new(address) else {
         return Proposal { failed: vec!["the address is not a mail address".to_owned()], ..Proposal::default() };
     };
@@ -327,7 +336,7 @@ pub fn detect(tls: &TlsSettings, address: &str, ispdb: bool) -> Proposal {
     let dns = Resolver::system(DNS_TIMEOUT).unwrap_or_else(|_| Resolver::new(Vec::new(), DNS_TIMEOUT));
     let web = Https::new(tls.clone(), WEB_TIMEOUT);
     let probe = Connector::new(tls.clone()).with_timeouts(PROBE_TIMEOUTS);
-    let outside = Outside { dns: &dns, web: &web, probe: &probe, clock: Arc::clone(tls.clock()), stop: Some(newer_run_stops(&RUNS)) };
+    let outside = Outside { dns: &dns, web: &web, probe: &probe, clock: Arc::clone(tls.clock()), stop: Some(run_stops(&RUNS, stop)) };
     proposal(&detect::detect(&address, &config, &outside))
 }
 

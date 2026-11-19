@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 use inboxcraft_engine::Session;
 use inboxcraft_model::{Account, AccountId, CheckStep, ErrorKind, Host, Job, JobKind, StepStatus};
@@ -774,14 +774,15 @@ fn a_threaded_detect_answers_from_its_thread_and_wakes_the_window() {
 
     let woken = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&woken);
-    let run: super::Run = Arc::new(|address: &str, ispdb: bool| Proposal { asked: vec![format!("{address} {ispdb}")], ..Proposal::default() });
+    let run: super::Run =
+        Arc::new(|address: &str, ispdb: bool, _stop: &super::RunStop| Proposal { asked: vec![format!("{address} {ispdb}")], ..Proposal::default() });
     let wake: crate::fetch::Wake = Arc::new(move || {
         counter.fetch_add(1, Ordering::SeqCst);
     });
     let mut detect = super::Threaded::new(run, Some(wake));
     assert!(format!("{detect:?}").starts_with("Threaded"));
     assert!(super::Detect::finished(&mut detect).is_none());
-    super::Detect::start(&mut detect, 7, "carol@example.org", true);
+    super::Detect::start(&mut detect, 7, "carol@example.org", true, super::RunStop::default());
     let mut answer = None;
     for _ in 0..2000 {
         answer = super::Detect::finished(&mut detect);
@@ -932,6 +933,8 @@ pub(crate) struct Held {
     queued: Arc<Mutex<std::collections::VecDeque<Proposal>>>,
     started: Arc<Mutex<std::collections::VecDeque<(u64, Proposal)>>>,
     ready: Arc<Mutex<std::collections::VecDeque<(u64, Proposal)>>>,
+    /// The stop of each run started, in order.
+    pub(crate) stops: Arc<Mutex<Vec<super::RunStop>>>,
 }
 
 impl Held {
@@ -948,7 +951,8 @@ impl Held {
 }
 
 impl super::Detect for Held {
-    fn start(&mut self, run: u64, _address: &str, _ispdb: bool) {
+    fn start(&mut self, run: u64, _address: &str, _ispdb: bool, stop: super::RunStop) {
+        self.stops.lock().unwrap().push(stop);
         let next = self.queued.lock().unwrap().pop_front().unwrap_or_default();
         self.started.lock().unwrap().push_back((run, next));
     }
@@ -1468,4 +1472,122 @@ fn a_hostile_host_name_in_the_unchecked_line_is_cleaned_and_cut_with_one_ellipsi
     let named = line.trim_start_matches("Not checked: the name ").trim_end_matches(" was not found.");
     assert_eq!(named.chars().count(), super::MOST_HOST_CHARS, "{named}");
     assert!(named.starts_with("evil "), "{named}");
+}
+
+#[test]
+fn cancel_while_detect_asks_stops_the_run_and_its_late_answer_is_dropped() {
+    let (mut onboarding, detect) = detecting(vec![
+        found_at("imap.late.example.org", Some("smtp.late.example.org"), "carol@example.org"),
+        found_at("imap.example.org", None, "carol@example.org"),
+    ]);
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.detect();
+    assert!(onboarding.detecting());
+    let stop = detect.stops.lock().unwrap()[0].clone();
+    assert!(!stop.is_stopped());
+    onboarding.cancel();
+    assert!(stop.is_stopped(), "Cancel stops the run");
+    assert!(!onboarding.detecting());
+    // The stopped run's answer comes late: nothing of it is written anywhere.
+    detect.answer();
+    assert!(!onboarding.poll());
+    onboarding.open();
+    assert!(!onboarding.detecting(), "Detect and Check and add are back");
+    assert_eq!((onboarding.form().host.as_str(), onboarding.form().smtp_host.as_str()), ("", ""));
+    assert!(onboarding.found().is_none());
+    // A second Detect works, with a stop of its own.
+    detect_now(&mut onboarding, &detect, "carol@example.org");
+    assert_eq!(onboarding.form().host, "imap.example.org");
+    let stops = detect.stops.lock().unwrap();
+    assert_eq!(stops.len(), 2);
+    assert!(!stops[1].is_stopped());
+}
+
+#[test]
+fn leaving_the_form_while_detect_asks_stops_the_run_and_its_late_answer_is_dropped() {
+    let (mut onboarding, detect) = detecting(vec![found_at("imap.late.example.org", None, "carol@example.org")]);
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.detect();
+    let stop = detect.stops.lock().unwrap()[0].clone();
+    onboarding.close();
+    assert!(stop.is_stopped(), "leaving stops the run");
+    detect.answer();
+    assert!(!onboarding.poll());
+    onboarding.open();
+    assert!(!onboarding.detecting());
+    assert_eq!((onboarding.form().address.as_str(), onboarding.form().host.as_str()), ("carol@example.org", ""));
+}
+
+#[test]
+fn a_newer_detect_stops_the_run_before_it() {
+    let (mut onboarding, detect) = detecting(vec![Proposal::default(), Proposal::default()]);
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.detect();
+    onboarding.detect();
+    let stops = detect.stops.lock().unwrap();
+    assert!(stops[0].is_stopped() && !stops[1].is_stopped());
+}
+
+/// A threaded Detect whose run asks one question per permit, and looks at its stop before each.
+fn gated() -> (Onboarding, mpsc::Sender<()>, Arc<Mutex<Vec<String>>>) {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let (permit, gate) = mpsc::channel::<()>();
+    let gate = Mutex::new(gate);
+    let written = Arc::clone(&log);
+    let run: super::Run = Arc::new(move |_address: &str, _ispdb: bool, stop: &super::RunStop| {
+        for n in 1..=100 {
+            if gate.lock().unwrap().recv().is_err() {
+                written.lock().unwrap().push("closed".to_owned());
+                break;
+            }
+            if stop.is_stopped() {
+                written.lock().unwrap().push("stopped".to_owned());
+                break;
+            }
+            written.lock().unwrap().push(format!("lookup {n}"));
+        }
+        found_at("imap.example.org", None, "carol@example.org")
+    });
+    let mut onboarding = Onboarding::new(Arc::new(NoKeychain), Box::new(super::Threaded::new(run, None)));
+    onboarding.open();
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    (onboarding, permit, log)
+}
+
+fn wait_until(mut what: impl FnMut() -> bool) {
+    for _ in 0..2000 {
+        if what() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("never came");
+}
+
+#[test]
+fn cancel_stops_a_threaded_run_before_its_next_lookup_and_a_second_detect_works() {
+    let (mut onboarding, permit, log) = gated();
+    onboarding.detect();
+    permit.send(()).unwrap();
+    permit.send(()).unwrap();
+    wait_until(|| log.lock().unwrap().len() == 2);
+    onboarding.cancel();
+    // The run comes to its next lookup: it sees the stop and asks nothing more.
+    permit.send(()).unwrap();
+    wait_until(|| log.lock().unwrap().len() == 3);
+    assert_eq!(*log.lock().unwrap(), ["lookup 1", "lookup 2", "stopped"]);
+    // Its answer is dropped when it comes.
+    for _ in 0..40 {
+        assert!(!onboarding.poll());
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    onboarding.open();
+    assert_eq!(onboarding.form().host, "");
+    // A second Detect after the Cancel runs and fills the form.
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.detect();
+    drop(permit);
+    wait_until(|| onboarding.poll());
+    assert_eq!(onboarding.form().host, "imap.example.org");
+    assert_eq!(log.lock().unwrap().last().map(String::as_str), Some("closed"));
 }

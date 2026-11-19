@@ -30,7 +30,8 @@
 //! While the server rows still hold what Detect put there and the address has changed since it answered, a line says
 //! they come from an earlier Detect (and the user name, while it is Detect's too), until Detect runs again or a server
 //! field is edited by hand. A server Detect proposes without having reached it ([`Checked`]) says why beside its row,
-//! until that row is edited or Detect runs again.
+//! until that row is edited or Detect runs again. Leaving the add form any way, Cancel too, while Detect asks sets the
+//! run's [`RunStop`]: it starts no further lookup or probe, and its answer is thrown away when it comes.
 //! A field whose text is wrong says so under itself ([`Slot`]): a port or a CalDAV address as it is
 //! typed, a missing address, password or IMAP server when the form is sent.
 //!
@@ -40,6 +41,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 
@@ -222,6 +224,23 @@ pub fn unchecked_line(checked: Checked, host: &str) -> Option<String> {
     })
 }
 
+/// The stop of one Detect run: once set, the run starts no further lookup or probe and ends as soon as it can.
+#[derive(Debug, Clone, Default)]
+pub struct RunStop(Arc<AtomicBool>);
+
+impl RunStop {
+    /// Stops the run.
+    pub fn stop(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether the run was stopped.
+    #[must_use]
+    pub fn is_stopped(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
 /// An IMAP server Detect proposes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suggestion {
@@ -255,8 +274,8 @@ pub struct Proposal {
 /// Runs Detect for the form.
 pub trait Detect: Send {
     /// Starts Detect's run `run` for `address`, asking Mozilla's ISPDB too when `ispdb` is on; the answer comes from
-    /// [`Detect::finished`], with the run it answers.
-    fn start(&mut self, run: u64, address: &str, ispdb: bool);
+    /// [`Detect::finished`], with the run it answers. Once `stop` is set, the run starts no further lookup or probe.
+    fn start(&mut self, run: u64, address: &str, ispdb: bool, stop: RunStop);
 
     /// A run that ended: its number and its proposal. Each run answers once.
     fn finished(&mut self) -> Option<(u64, Proposal)>;
@@ -269,7 +288,7 @@ pub struct NoDetect {
 }
 
 impl Detect for NoDetect {
-    fn start(&mut self, run: u64, _address: &str, _ispdb: bool) {
+    fn start(&mut self, run: u64, _address: &str, _ispdb: bool, _stop: RunStop) {
         self.done = Some(run);
     }
 
@@ -279,8 +298,8 @@ impl Detect for NoDetect {
     }
 }
 
-/// The function a [`Threaded`] Detect runs: the address and whether the ISPDB is on, to the proposal.
-pub type Run = Arc<dyn Fn(&str, bool) -> Proposal + Send + Sync>;
+/// The function a [`Threaded`] Detect runs: the address, whether the ISPDB is on and the run's stop, to the proposal.
+pub type Run = Arc<dyn Fn(&str, bool, &RunStop) -> Proposal + Send + Sync>;
 
 /// Runs Detect on a thread of its own, so the window does not wait for the name servers and the web; `wake` draws
 /// the window again when it ended. The desktop app gives it `net`'s Detect.
@@ -307,11 +326,11 @@ impl Threaded {
 }
 
 impl Detect for Threaded {
-    fn start(&mut self, number: u64, address: &str, ispdb: bool) {
+    fn start(&mut self, number: u64, address: &str, ispdb: bool, stop: RunStop) {
         let (run, wake, sender, address) = (Arc::clone(&self.run), self.wake.clone(), self.sender.clone(), address.to_owned());
         let spawned = thread::Builder::new().name("inboxcraft-detect".to_owned()).spawn(move || {
             // A closed window no longer listens; nothing to tell it then.
-            let _ = sender.send((number, run(&address, ispdb)));
+            let _ = sender.send((number, run(&address, ispdb, &stop)));
             if let Some(wake) = wake {
                 wake();
             }
@@ -334,6 +353,8 @@ pub struct Proposed {
     pub proposal: Proposal,
     /// Each address it was asked for, and whether the ISPDB was on.
     pub asked: Arc<std::sync::Mutex<Vec<(String, bool)>>>,
+    /// The stop of each run started, in order.
+    pub stops: Arc<std::sync::Mutex<Vec<RunStop>>>,
     /// The runs started and not answered yet, the oldest first.
     pending: std::collections::VecDeque<u64>,
 }
@@ -347,9 +368,15 @@ impl Proposed {
 }
 
 impl Detect for Proposed {
-    fn start(&mut self, run: u64, address: &str, ispdb: bool) {
+    fn start(&mut self, run: u64, address: &str, ispdb: bool, stop: RunStop) {
         if let Ok(mut asked) = self.asked.lock() {
             asked.push((address.to_owned(), ispdb));
+        }
+        if let Ok(mut stops) = self.stops.lock() {
+            // Bounded like the runs a test starts: a picture starts one.
+            if stops.len() < MOST_LINES {
+                stops.push(stop);
+            }
         }
         self.pending.push_back(run);
     }
@@ -898,6 +925,8 @@ pub struct Onboarding {
     /// Detect's run under way for the add form, and the address it asked about: only its answer is taken, and only
     /// while the add form is open and still holds that address.
     asking: Option<(u64, String)>,
+    /// The stop of the run under way: set when the add form is left or cancelled, or another run starts.
+    stop: Option<RunStop>,
     /// The number of Detect's last run.
     runs: u64,
     found: Option<Arc<Found>>,
@@ -944,6 +973,7 @@ impl Onboarding {
             stage: Stage::Closed,
             form: Form::default(),
             asking: None,
+            stop: None,
             runs: 0,
             found: None,
             detected: Detected::default(),
@@ -1020,8 +1050,8 @@ impl Onboarding {
         if self.stage != Stage::Form {
             return;
         }
-        // Detect under way ends with the page: its answer is thrown away when it comes.
-        self.asking = None;
+        // Detect under way ends with the page: it is stopped, and its answer is thrown away if one still comes.
+        self.end_run();
         self.form.password.clear();
         let form = std::mem::take(&mut self.form);
         self.kept = Some(Kept { form, found: self.found.take(), detected: std::mem::take(&mut self.detected) });
@@ -1346,11 +1376,24 @@ impl Onboarding {
         }
         self.error = None;
         self.sent.clear();
+        // A run still under way asks no more: only the new one's answer is taken.
+        self.end_run();
         // What the last answer said of the servers it did not reach goes with it.
         self.detected.unchecked = [None, None];
         self.runs = self.runs.wrapping_add(1);
-        self.detect.start(self.runs, &address, self.form.ispdb);
+        let stop = RunStop::default();
+        self.detect.start(self.runs, &address, self.form.ispdb, stop.clone());
         self.asking = Some((self.runs, address));
+        self.stop = Some(stop);
+    }
+
+    /// Ends Detect's run under way, if one is: its stop is set, so it starts no further lookup or probe, and its answer
+    /// is thrown away when it comes.
+    fn end_run(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            stop.stop();
+        }
+        self.asking = None;
     }
 
     /// Takes Detect's answer when it came: its first IMAP and outgoing server fill their rows of the form, and its user
@@ -1368,6 +1411,7 @@ impl Onboarding {
                 continue;
             }
             changed = true;
+            self.stop = None;
             if self.stage == Stage::Form && self.form.address.trim() == address {
                 self.take(proposal);
                 self.detected.address = Some(address);

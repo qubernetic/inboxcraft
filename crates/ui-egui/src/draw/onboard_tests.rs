@@ -1820,3 +1820,29 @@ fn a_hostile_host_name_in_the_unchecked_line_stays_in_the_form() {
     let caldav = harness.get_by_label("CalDAV address, for calendars").rect();
     assert!(line.bottom() <= caldav.top(), "{line:?} over {caldav:?}");
 }
+
+#[test]
+fn leaving_the_form_while_detect_asks_stops_the_run_and_the_buttons_come_back() {
+    let held = crate::onboard::tests::Held::new(vec![crate::onboard::tests::found_at("imap.late.example.org", None, "carol@example.org")]);
+    let app = InboxApp::new(mailbox()).with_accounts(Arc::new(Kept::default()), Box::new(held.clone()), Box::new(FakeWorkers::passing()));
+    let mut harness = harness(app, egui::Theme::Dark);
+    open_form(&mut harness);
+    harness.state_mut().onboarding_mut().0.form_mut().address = "carol@example.org".to_owned();
+    harness.run();
+    press(&mut harness, "Detect");
+    assert!(harness.get_by_role_and_label(Role::Button, "Check and add").accesskit_node().is_disabled(), "waits while Detect asks");
+    let stop = held.stops.lock().unwrap()[0].clone();
+    // Esc leaves the form, and the owner comes back to it.
+    leave_and_come_back(&mut harness);
+    assert!(stop.is_stopped(), "leaving the form stops the run");
+    on_sheet(&harness, "Add account").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    // The stopped run's answer comes late.
+    held.answer();
+    harness.run();
+    harness.run();
+    assert!(!harness.get_by_role_and_label(Role::Button, "Detect").accesskit_node().is_disabled());
+    assert!(!harness.get_by_role_and_label(Role::Button, "Check and add").accesskit_node().is_disabled());
+    assert_eq!(harness.state().onboarding().form().host, "", "the late answer is dropped");
+}
