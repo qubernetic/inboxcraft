@@ -296,3 +296,6 @@
 # The page of the status line's sets: the status item and the status message in every state (#287).
 {"out": "docs/images/components-status-light.png", "mode": "light", "status_sets": true}
 {"out": "docs/images/components-status-dark.png", "mode": "dark", "status_sets": true}
+# Home's sets (#288): count tile, block, block line, on a page of their own.
+{"out": "docs/images/components-home-light.png", "mode": "light", "home_sets": true}
+{"out": "docs/images/components-home-dark.png", "mode": "dark", "home_sets": true}

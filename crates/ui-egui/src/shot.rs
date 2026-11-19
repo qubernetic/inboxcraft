@@ -50,8 +50,9 @@
 //! ([`crate::component::gallery_lists`]), `index` set to `true` the page of the index's rows
 //! ([`crate::component::gallery_index`]), `character_field` set to `true` the page of the character field
 //! ([`crate::component::gallery_field`]), where `pointer` may rest, `status_sets` set to `true` the page of the
-//! status line's sets ([`crate::component::gallery_status`]). The typeface and the icons are fixed, so a script
-//! that names a
+//! status line's sets ([`crate::component::gallery_status`]),
+//! `home_sets` set to `true` the page of Home's sets ([`crate::component::gallery_home`]). The typeface and the icons are fixed, so a
+//! script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
 //! before the picture, so what that opens (a menu, a list) is in it; `put_away` set to `true` snoozes, pins, parks and marks
@@ -258,6 +259,9 @@ pub struct Shot {
     /// The page of the status line's sets (status item, status message) instead of the window.
     #[serde(default)]
     pub status_sets: Option<bool>,
+    /// The page of Home's sets (count tile, block, block line) instead of the window.
+    #[serde(default)]
+    pub home_sets: Option<bool>,
     /// The app's own window frame, as a native window draws it: `strip` or `top_row`; none when left out.
     #[serde(default)]
     pub frame: Option<String>,
@@ -822,6 +826,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
             shot.index,
             shot.character_field,
             shot.status_sets,
+            shot.home_sets,
         ]
         .iter()
         .filter(|page| **page == Some(true))
@@ -987,6 +992,21 @@ fn status_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
         crate::component::gallery_status::page(ui, &theme, &keymap);
+    })
+}
+
+/// The page of Home's sets of `shot` in `mode`.
+fn home_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of Home's sets")?;
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = gallery::keymap();
+    let mut fonts = true;
+    paint(crate::component::gallery_home::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_home::page(ui, &theme, &keymap);
     })
 }
 
@@ -1590,6 +1610,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if shot.status_sets == Some(true) {
         return status_gallery(shot, mode);
+    }
+    if shot.home_sets == Some(true) {
+        return home_gallery(shot, mode);
     }
     if shot.icons == Some(true) {
         return icon_sheet(shot, mode);
