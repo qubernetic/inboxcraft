@@ -553,7 +553,6 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     Ok(())
 }
 
-/// Puts the calendar screen in the view of `shot` and picks its event.
 /// With `shot.sync`, every account of `app` signed in, and synced two minutes ago or `syncing` 27 of 50 folders, as
 /// their workers would tell it.
 fn sync(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
@@ -575,6 +574,7 @@ fn sync(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     Ok(())
 }
 
+/// Puts the calendar screen in the view of `shot` and picks its event.
 fn calendar(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     let (calendar, mailbox) = app.calendar_mut();
     if let Some(name) = &shot.calendar_view {
