@@ -127,7 +127,7 @@ impl Laid {
 
     /// Notes which items hold a Tab stop, once all are placed.
     fn find_stops(&mut self, document: &Document) {
-        self.stops = self.items.iter().enumerate().filter(|(_, item)| item.kind.stops(document)).map(|(index, _)| index).collect();
+        self.stops = self.items.iter().enumerate().filter(|(_, item)| item.kind.stops(document) || item.sideways()).map(|(index, _)| index).collect();
     }
 
     /// Puts the rules in their columns, once all are made.
@@ -175,6 +175,14 @@ enum Kind {
     Fold { lines: usize, open: bool },
     /// A table.
     Table(Box<Grid>),
+}
+
+impl Item {
+    /// Whether it is a table wider than its room, which scrolls sideways inside itself: a Tab stop of its own, whose
+    /// arrows bring its other columns into sight.
+    fn sideways(&self) -> bool {
+        matches!(&self.kind, Kind::Table(grid) if grid.size.x > self.rect.width() + 0.5)
+    }
 }
 
 impl Kind {
@@ -1116,10 +1124,18 @@ impl Show<'_> {
                 let room = rect.width();
                 let mut holds = false;
                 if grid.size.x > room + 0.5 {
+                    // The table itself is a Tab stop, before its links: while it has the focus the arrows bring the
+                    // columns scrolled off into sight.
+                    let shown = Rect::from_min_size(rect.min, vec2(room, grid.size.y));
+                    let (step, keyed) = sideways_keys(&child, theme, shown, id.with("sideways keys"));
+                    holds |= keyed;
                     let area = ScrollArea::horizontal().id_salt(id.with("sideways")).auto_shrink([false, true]);
                     crate::component::scroll::show(&mut child, theme, area, |ui| {
+                        if step != 0.0 {
+                            ui.scroll_with_delta_animation(vec2(step, 0.0), egui::style::ScrollAnimation::none());
+                        }
                         let (_, at) = ui.allocate_space(grid.size);
-                        holds = self.grid(ui, grid, at.min, id, reach);
+                        holds |= self.grid(ui, grid, at.min, id, reach);
                     });
                 } else {
                     let (_, at) = child.allocate_space(grid.size);
@@ -1319,6 +1335,39 @@ pub(crate) fn board(ui: &mut Ui, theme: &Theme, open: bool) {
     let mut textures = Textures::default();
     let mut drawn = Drawn::default();
     blocks(ui, theme, &reader, id, 0, &document, &document.blocks, 0, &mut textures, &mut drawn);
+}
+
+/// How far one press of an arrow moves a table that scrolls sideways, in points.
+const SIDEWAYS_STEP: f32 = 48.0;
+
+/// The Tab stop of a table wider than its room, over `shown`, the part of it in its room: a scroll view a screen
+/// reader names, ringed while it has the focus. While it has it, Left and Right are its own and move the table one
+/// [`SIDEWAYS_STEP`] each press. How far to move it this frame (as `scroll_with_delta` takes it), and whether it has
+/// the focus.
+fn sideways_keys(ui: &Ui, theme: &Theme, shown: Rect, id: Id) -> (f32, bool) {
+    let response = ui.interact(shown, id, Sense::FOCUSABLE);
+    response.widget_info(|| WidgetInfo::labeled(Role::ScrollView, true, tr!("Table, wider than its room: Left and Right show its other columns")));
+    if response.gained_focus() {
+        response.scroll_to_me(None);
+    }
+    if !response.has_focus() {
+        return (0.0, false);
+    }
+    ui.memory_mut(|memory| memory.set_focus_lock_filter(id, egui::EventFilter { horizontal_arrows: true, ..Default::default() }));
+    let (left, right) = ui.input_mut(|input| {
+        let mut count = |key| {
+            let mut times = 0_u8;
+            while times < 16 && input.consume_key(egui::Modifiers::NONE, key) {
+                times = times.saturating_add(1);
+            }
+            f32::from(times)
+        };
+        (count(egui::Key::ArrowLeft), count(egui::Key::ArrowRight))
+    });
+    if ui.is_rect_visible(shown) {
+        paint::focus_ring(ui.painter(), theme, shown, Ring::Inside);
+    }
+    ((left - right) * SIDEWAYS_STEP, true)
 }
 
 #[cfg(test)]
