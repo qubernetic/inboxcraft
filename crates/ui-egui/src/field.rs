@@ -642,7 +642,7 @@ fn emblem_near(emblem: &Emblem, corner: Pos2, at: Pos2, reach: f32, seed: u32, n
 fn field_row(cells: &Cells, row: usize, warm: &[(u32, Warm)], theme: &Theme) -> Option<LayoutJob> {
     let held = cells.held.get(row * cells.columns..(row + 1) * cells.columns)?;
     let p = &theme.palette;
-    let mut runs = Runs::new(theme.fonts.field(), cells.height);
+    let mut runs = Runs::new(theme.fonts.field(), cells.height, CELL_WIDTH);
     let mut warm = warm.iter().peekable();
     for (column, cell) in held.iter().enumerate() {
         // At most 1 024 columns: the cast loses nothing.
@@ -659,7 +659,7 @@ fn field_row(cells: &Cells, row: usize, warm: &[(u32, Warm)], theme: &Theme) -> 
 /// The text of the emblem's row `row`, `warm` cells (by column) flipped: `None` for an empty row.
 fn emblem_row(emblem: &Emblem, row: usize, warm: &[(u32, Warm)], theme: &Theme) -> Option<LayoutJob> {
     let p = &theme.palette;
-    let mut runs = Runs::new(theme.fonts.emblem(), EMBLEM_CELL.y);
+    let mut runs = Runs::new(theme.fonts.emblem(), EMBLEM_CELL.y, EMBLEM_CELL.x);
     let mut warm = warm.iter().peekable();
     for column in 0..emblem.columns {
         let (density, cyan) = emblem.cell(column, row);
@@ -680,33 +680,46 @@ fn glyph(index: u8) -> char {
     CODE.get(usize::from(index)).map_or('·', |code| char::from(*code))
 }
 
-/// A row's text gathered in runs of one colour, the spaces at its end left out.
+/// A row's text gathered in runs of one colour. A long gap starts a new run that stands its gap off as leading space
+/// instead of spaces, so a row of the field is about as long as its dots, not its columns; the spaces at the row's
+/// end are left out.
 struct Runs {
     job: LayoutJob,
     font: Font,
     line: f32,
+    /// A cell's width, in points: a gap of `n` cells is `n` of these.
+    cell: f32,
     text: String,
     colour: Color32,
-    /// Spaces seen since the last character that shows.
-    spaces: usize,
+    /// The leading space of the run being gathered, in points.
+    lead: f32,
+    /// Empty cells since the last one that shows.
+    gap: usize,
     shows: bool,
 }
 
+/// The longest gap kept as spaces inside a run of one colour.
+const SPACES_KEPT: usize = 3;
+
 impl Runs {
-    fn new(font: Font, line: f32) -> Self {
-        Self { job: LayoutJob::default(), font, line, text: String::new(), colour: Color32::TRANSPARENT, spaces: 0, shows: false }
+    fn new(font: Font, line: f32, cell: f32) -> Self {
+        Self { job: LayoutJob::default(), font, line, cell, text: String::new(), colour: Color32::TRANSPARENT, lead: 0.0, gap: 0, shows: false }
     }
 
     fn push(&mut self, ch: char, colour: Color32) {
         if ch == ' ' {
-            self.spaces += 1;
+            self.gap = self.gap.saturating_add(1);
             return;
         }
-        if colour != self.colour {
+        let gap = std::mem::take(&mut self.gap);
+        if !self.shows || colour != self.colour || gap > SPACES_KEPT {
             self.flush();
             self.colour = colour;
+            // A row has at most 1 024 cells: the cast loses nothing.
+            self.lead = gap as f32 * self.cell;
+        } else {
+            self.text.extend(std::iter::repeat_n(' ', gap));
         }
-        self.text.extend(std::iter::repeat_n(' ', std::mem::take(&mut self.spaces)));
         self.text.push(ch);
         self.shows = true;
     }
@@ -714,7 +727,7 @@ impl Runs {
     fn flush(&mut self) {
         if !self.text.is_empty() {
             let format = TextFormat { line_height: Some(self.line), ..self.font.format(self.colour) };
-            self.job.append(&std::mem::take(&mut self.text), 0.0, format);
+            self.job.append(&std::mem::take(&mut self.text), self.lead, format);
         }
     }
 
