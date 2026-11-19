@@ -102,7 +102,7 @@ impl Why {
             Self::NoConnection => tr!("no connection"),
             Self::Certificate => tr!("not secure"),
             Self::NoCalendars => tr!("no calendars there"),
-            Self::Elsewhere => tr!("sent elsewhere"),
+            Self::Elsewhere => tr!("on another server"),
             Self::Refused => tr!("refused"),
             Self::Unreadable => tr!("answer unreadable"),
             Self::NotStarted => tr!("not started"),
@@ -116,11 +116,12 @@ impl Why {
 pub enum SyncState {
     /// No sync of the owner's: when the calendars were last read, and the control to sync.
     Idle,
-    /// Under way: `done` of the `of` jobs heard back, `account` the name of the account whose calendars are read.
+    /// Under way: `done` of the `of` calendars found so far read, `account` the name of the account whose calendars
+    /// are read. A discovery is no calendar: the count starts once the calendars are found, and never goes back.
     Syncing {
-        /// The jobs heard back.
+        /// The calendars read.
         done: usize,
-        /// Every job of the sync handed out so far.
+        /// The calendars found so far.
         of: usize,
         /// The account whose calendars are read now, cleaned and capped.
         account: String,
@@ -159,11 +160,11 @@ impl Default for SyncView {
 struct Running {
     /// The accounts asked, by id, with their names.
     accounts: BTreeMap<u64, String>,
-    /// The jobs out, with their accounts.
-    out: BTreeMap<JobId, u64>,
-    /// Every job followed.
+    /// The jobs out, with their accounts and whether each reads a calendar (a sync, not a discovery).
+    out: BTreeMap<JobId, (u64, bool)>,
+    /// The calendars whose sync was handed out.
     of: usize,
-    /// The jobs heard back.
+    /// The calendars whose sync came back.
     done: usize,
     /// The first failure heard: its account and why.
     failure: Option<(u64, Why)>,
@@ -239,14 +240,22 @@ impl Tracker {
         let before = self.view.clone();
         for job in jobs {
             let account = job.account.get();
-            let calendar = matches!(job.kind, JobKind::Calendar(CalendarJob::Discover { .. } | CalendarJob::Sync { .. }));
-            if calendar && running.accounts.contains_key(&account) && running.out.len() < MOST_JOBS && running.out.insert(job.id, account).is_none() {
-                running.of = running.of.saturating_add(1);
+            let (followed, reads) = match job.kind {
+                JobKind::Calendar(CalendarJob::Discover { .. }) => (true, false),
+                JobKind::Calendar(CalendarJob::Sync { .. }) => (true, true),
+                _ => (false, false),
+            };
+            if followed
+                && running.accounts.contains_key(&account)
+                && running.out.len() < MOST_JOBS
+                && running.out.insert(job.id, (account, reads)).is_none()
+            {
+                running.of = running.of.saturating_add(usize::from(reads));
                 running.current = running.current.or(Some(account));
             }
         }
         // A job of an account that is gone has no worker to answer it.
-        running.out.retain(|_, account| alive.contains(account));
+        running.out.retain(|_, (account, _)| alive.contains(account));
         if running.out.is_empty() {
             self.view.state = match running.failure {
                 Some((account, why)) => SyncState::Failed { account: running.accounts.get(&account).cloned(), why },
@@ -259,23 +268,26 @@ impl Tracker {
         self.view != before
     }
 
-    /// Hears `event`, at `now` on the clock of `offset`: a calendar read notes the time, and the end of a job followed
-    /// counts it done (a failure noted, the first one kept). Whether the event was one of the sync's.
-    pub fn heard(&mut self, event: &Event, now: Timestamp, offset: Offset) -> bool {
+    /// Hears `event` after the engine applied it (`dropped` when the engine left it out), at `now` on the clock of
+    /// `offset`: a calendar read notes the time, and the end of a job followed counts it done (a failure noted, the
+    /// first one kept). Calendars found that the engine dropped (listed on another server than the account's) read
+    /// nothing: that is the account's failure, [`Why::Elsewhere`]. Whether the event was one of the sync's.
+    pub fn heard(&mut self, event: &Event, dropped: bool, now: Timestamp, offset: Offset) -> bool {
         if matches!(event.kind, EventKind::Calendar(CalendarReport::Synced { .. })) {
             self.view.read = super::moment(now, offset).or(self.view.read);
         }
         let Some(running) = self.running.as_mut() else { return false };
         let ends = matches!(event.kind, EventKind::Calendar(_) | EventKind::Failed { .. });
-        let Some(account) = event.job.filter(|_| ends).and_then(|job| running.out.remove(&job)) else { return false };
-        running.done = running.done.saturating_add(1);
-        running.current = running.out.values().next().copied().or(Some(account));
-        let kind = match &event.kind {
-            EventKind::Calendar(CalendarReport::Failed { kind, .. }) | EventKind::Failed { kind, .. } => Some(*kind),
+        let Some((account, reads)) = event.job.filter(|_| ends).and_then(|job| running.out.remove(&job)) else { return false };
+        running.done = running.done.saturating_add(usize::from(reads));
+        running.current = running.out.values().next().map(|(account, _)| *account).or(Some(account));
+        let why = match &event.kind {
+            EventKind::Calendar(CalendarReport::Failed { kind, .. }) | EventKind::Failed { kind, .. } => Some(Why::of(*kind)),
+            EventKind::Calendar(CalendarReport::Found { .. }) if dropped => Some(Why::Elsewhere),
             _ => None,
         };
-        if let Some(kind) = kind {
-            running.failure = running.failure.or(Some((account, Why::of(kind))));
+        if let Some(why) = why {
+            running.failure = running.failure.or(Some((account, why)));
         }
         self.view.state = syncing(running);
         true

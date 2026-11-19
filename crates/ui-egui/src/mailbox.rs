@@ -1544,12 +1544,15 @@ impl Mailbox {
         }
         workers.keep(&accounts.iter().map(Account::id).collect::<Vec<_>>());
         for event in workers.events() {
-            changed |= sync::with(&self.calendar_sync, |tracker| tracker.heard(&event, now, offset));
-            match self.session.apply(&event) {
+            let applied = self.session.apply(&event);
+            match &applied {
                 Ok(Applied::Changed) => changed = true,
                 Ok(Applied::Dropped) => {}
-                Err(error) => self.error = Some(UiError::from(error).to_string()),
+                Err(error) => self.error = Some(UiError::from(error.clone()).to_string()),
             }
+            // After the engine took it: calendars found that it dropped read nothing.
+            let dropped = matches!(applied, Ok(Applied::Dropped));
+            changed |= sync::with(&self.calendar_sync, |tracker| tracker.heard(&event, dropped, now, offset));
         }
         changed
     }

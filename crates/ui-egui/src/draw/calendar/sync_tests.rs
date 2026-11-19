@@ -176,11 +176,11 @@ fn the_foot_draws_idle_syncing_synced_and_failed_as_the_frames_do() {
         harness.get_by_label_contains("sync now").click();
         frames(&mut harness);
         assert_eq!(feed.discoveries(), 1, "the press asked account 1's server for its calendars");
-        assert_eq!(control(&harness), "syncing calendars: Personal, 0 of 1");
+        assert_eq!(control(&harness), "syncing calendars: Personal, 0 of 0");
         let mut done = Vec::new();
         feed.answer_all(&mut done);
         frames(&mut harness);
-        assert!(matches!(state(&harness), SyncState::Syncing { done: 1, of: 3, .. }), "the calendars found are synced: {:?}", state(&harness));
+        assert!(matches!(state(&harness), SyncState::Syncing { done: 0, of: 2, .. }), "the calendars found are synced: {:?}", state(&harness));
         feed.answer_all(&mut done);
         frames(&mut harness);
         let SyncState::Synced { at: Some(at) } = state(&harness) else { panic!("{:?}", state(&harness)) };
@@ -395,4 +395,18 @@ fn click_at<State>(harness: &mut Harness<'_, State>, at: egui::Pos2) {
     for pressed in [true, false] {
         harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
     }
+}
+
+#[test]
+fn calendars_found_on_another_server_end_as_a_failure_in_the_window_s_words() {
+    let feed = Feed::default();
+    let mut harness = on_calendar(egui::Theme::Light, &feed);
+    harness.get_by_label_contains("sync now").click();
+    frames(&mut harness);
+    let (job, account, _) = feed.calendar_jobs().into_iter().next().unwrap();
+    let elsewhere = CalendarListing { url: "https://calendars.example.net/mira/personal/".to_owned(), ..listing("personal") };
+    feed.answer(account, job, CalendarReport::Found { home: "https://calendars.example.net/mira/".to_owned(), calendars: vec![elsewhere] });
+    frames(&mut harness);
+    assert_eq!(control(&harness), "Personal calendars: on another server, try again");
+    assert!(harness.query_all_by_label_contains("Choir").next().is_some(), "the calendars kept stay");
 }

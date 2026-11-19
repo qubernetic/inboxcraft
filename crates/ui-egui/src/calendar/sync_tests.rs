@@ -68,17 +68,17 @@ fn a_sync_runs_until_every_job_of_its_accounts_comes_back() {
     tracker.start(&[(1, "Personal"), (2, "Studio")]);
     // Account 3 was not asked: its jobs are not the press's.
     tracker.sent(&[discover(10, 1), discover(11, 2), discover(12, 3)], &[1, 2, 3], at(0), utc());
-    assert_eq!(tracker.view().state, SyncState::Syncing { done: 0, of: 2, account: "Personal".to_owned() });
-    assert!(tracker.heard(&found(10, 1), at(1), utc()));
-    assert!(!tracker.heard(&found(12, 3), at(1), utc()), "another's job is not counted");
+    assert_eq!(tracker.view().state, SyncState::Syncing { done: 0, of: 0, account: "Personal".to_owned() }, "a discovery is no calendar");
+    assert!(tracker.heard(&found(10, 1), false, at(1), utc()));
+    assert!(!tracker.heard(&found(12, 3), false, at(1), utc()), "another's job is not counted");
     tracker.sent(&[sync_job(20, 1), sync_job(21, 1)], &[1, 2, 3], at(1), utc());
-    assert!(matches!(tracker.view().state, SyncState::Syncing { done: 1, of: 4, .. }), "{:?}", tracker.view());
+    assert!(matches!(tracker.view().state, SyncState::Syncing { done: 0, of: 2, .. }), "{:?}", tracker.view());
     for (job, account) in [(11, 2), (20, 1)] {
-        tracker.heard(&if job == 11 { found(job, account) } else { synced(job, account) }, at(2), utc());
+        tracker.heard(&if job == 11 { found(job, account) } else { synced(job, account) }, false, at(2), utc());
         tracker.sent(&[], &[1, 2, 3], at(2), utc());
         assert!(matches!(tracker.view().state, SyncState::Syncing { .. }));
     }
-    tracker.heard(&synced(21, 1), at(3), utc());
+    tracker.heard(&synced(21, 1), false, at(3), utc());
     assert!(tracker.sent(&[], &[1, 2, 3], at(3), utc()));
     assert_eq!(tracker.view().state, SyncState::Synced { at: moment(3) });
     assert_eq!(tracker.view().read, moment(3));
@@ -90,8 +90,8 @@ fn the_first_failure_is_kept_and_named_after_its_account() {
     let mut tracker = Tracker::default();
     tracker.start(&[(1, "Personal"), (2, "Studio")]);
     tracker.sent(&[discover(10, 1), discover(11, 2)], &[1, 2], at(0), utc());
-    tracker.heard(&failed(11, 2, ErrorKind::LoginRefused), at(1), utc());
-    tracker.heard(&failed(10, 1, ErrorKind::HostNotFound), at(1), utc());
+    tracker.heard(&failed(11, 2, ErrorKind::LoginRefused), false, at(1), utc());
+    tracker.heard(&failed(10, 1, ErrorKind::HostNotFound), false, at(1), utc());
     tracker.sent(&[], &[1, 2], at(1), utc());
     assert_eq!(tracker.view().state, SyncState::Failed { account: Some("Studio".to_owned()), why: Why::SignIn });
     assert_eq!(tracker.view().read, None, "nothing was read");
@@ -104,7 +104,7 @@ fn a_connection_failure_of_a_job_followed_ends_it_too() {
     tracker.start(&[(1, "Personal")]);
     tracker.sent(&[discover(10, 1)], &[1], at(0), utc());
     let event = Event::new(AccountId::new(1), Some(JobId::new(10)), EventKind::Failed { kind: ErrorKind::TimedOut, folder: None });
-    assert!(tracker.heard(&event, at(1), utc()));
+    assert!(tracker.heard(&event, false, at(1), utc()));
     tracker.sent(&[], &[1], at(1), utc());
     assert_eq!(tracker.view().state, SyncState::Failed { account: Some("Personal".to_owned()), why: Why::NoConnection });
 }
@@ -124,7 +124,7 @@ fn a_job_of_an_account_that_went_away_is_not_waited_for() {
     let mut tracker = Tracker::default();
     tracker.start(&[(1, "Personal"), (2, "Studio")]);
     tracker.sent(&[discover(10, 1), discover(11, 2)], &[1, 2], at(0), utc());
-    tracker.heard(&found(10, 1), at(1), utc());
+    tracker.heard(&found(10, 1), false, at(1), utc());
     tracker.sent(&[], &[1], at(1), utc());
     assert_eq!(tracker.view().state, SyncState::Synced { at: moment(1) });
 }
@@ -132,7 +132,7 @@ fn a_job_of_an_account_that_went_away_is_not_waited_for() {
 #[test]
 fn a_read_of_anyone_s_sync_moves_the_time_and_nothing_else() {
     let mut tracker = Tracker::default();
-    assert!(!tracker.heard(&synced(5, 1), at(7), utc()), "no sync of the owner's is under way");
+    assert!(!tracker.heard(&synced(5, 1), false, at(7), utc()), "no sync of the owner's is under way");
     assert_eq!(tracker.view().state, SyncState::Idle);
     assert_eq!(tracker.view().read, moment(7));
     assert_eq!(tracker.view().read.map(Moment::clock).as_deref(), Some("08:27"));
@@ -159,4 +159,33 @@ fn every_failure_has_words_of_the_window() {
         assert!(!Why::of(kind).words().is_empty());
     }
     assert_eq!(Why::of(ErrorKind::CommandRefused).words(), "refused");
+}
+
+#[test]
+fn the_count_is_of_calendars_and_never_goes_back() {
+    let mut tracker = Tracker::default();
+    tracker.start(&[(1, "Personal")]);
+    tracker.sent(&[discover(10, 1)], &[1], at(0), utc());
+    let of = |tracker: &Tracker| match tracker.view().state {
+        SyncState::Syncing { done, of, .. } => (done, of),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(of(&tracker), (0, 0));
+    tracker.heard(&found(10, 1), false, at(1), utc());
+    assert_eq!(of(&tracker), (0, 0), "the discovery is not counted done");
+    tracker.sent(&[sync_job(20, 1), sync_job(21, 1), sync_job(22, 1)], &[1], at(1), utc());
+    assert_eq!(of(&tracker), (0, 3), "three calendars found: 0 of 3");
+    tracker.heard(&synced(20, 1), false, at(2), utc());
+    assert_eq!(of(&tracker), (1, 3));
+}
+
+#[test]
+fn calendars_found_that_the_engine_dropped_end_as_a_failure() {
+    let mut tracker = Tracker::default();
+    tracker.start(&[(1, "Personal")]);
+    tracker.sent(&[discover(10, 1)], &[1], at(0), utc());
+    assert!(tracker.heard(&found(10, 1), true, at(1), utc()));
+    tracker.sent(&[], &[1], at(1), utc());
+    assert_eq!(tracker.view().state, SyncState::Failed { account: Some("Personal".to_owned()), why: Why::Elsewhere });
+    assert_eq!(Why::Elsewhere.words(), "on another server");
 }
