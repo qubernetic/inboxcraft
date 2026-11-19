@@ -34,6 +34,8 @@ struct Stage {
     under: usize,
     keys: usize,
     buttons: bool,
+    /// Whether the button over the field and the one under its edge were hovered in the last frame.
+    hovered: (bool, bool),
 }
 
 impl Stage {
@@ -49,6 +51,7 @@ impl Stage {
             under: 0,
             keys: 0,
             buttons: false,
+            hovered: (false, false),
         }
     }
 }
@@ -66,7 +69,9 @@ fn harness_at(stage: Stage, ppp: f32) -> Harness<'static, Stage> {
                 // Under the field: drawn before it, across its bottom edge.
                 if stage.buttons {
                     let under = Rect::from_min_size(pos2(500.0, 590.0), vec2(120.0, 32.0));
-                    if ui.put(under, egui::Button::new("Under")).clicked() {
+                    let response = ui.put(under, egui::Button::new("Under"));
+                    stage.hovered.1 = response.hovered();
+                    if response.clicked() {
                         stage.under += 1;
                     }
                 }
@@ -77,7 +82,9 @@ fn harness_at(stage: Stage, ppp: f32) -> Harness<'static, Stage> {
                 // Over the field: drawn after it.
                 if stage.buttons {
                     let over = Rect::from_min_size(pos2(100.0, 100.0), vec2(120.0, 32.0));
-                    if ui.put(over, egui::Button::new("Over")).clicked() {
+                    let response = ui.put(over, egui::Button::new("Over"));
+                    stage.hovered.0 = response.hovered();
+                    if response.clicked() {
                         stage.over += 1;
                     }
                 }
@@ -478,6 +485,16 @@ fn the_field_takes_no_click_no_key_and_no_focus() {
     let mut stage = with_emblem(Level::Full);
     stage.buttons = true;
     let mut harness = harness(stage);
+    // The pointer on the button over the field and on the one under its edge hovers it as if the field were not
+    // there, with cells warm under the pointer.
+    harness.hover_at(pos2(160.0, 116.0));
+    harness.run_steps(2);
+    assert!(!warm(&harness).is_empty(), "no cell warm under the button over the field");
+    assert_eq!(harness.state().hovered, (true, false), "the button over the field is not hovered");
+    harness.hover_at(pos2(560.0, 596.0));
+    harness.run_steps(2);
+    assert!(!warm(&harness).is_empty(), "no cell warm under the button under the field's edge");
+    assert_eq!(harness.state().hovered, (false, true), "the button under the field's edge is not hovered");
     // Nothing of the field is a node: the two buttons are all a screen reader or Tab finds.
     assert_eq!(harness.query_all_by_role(egui::accesskit::Role::Button).count(), 2);
     let pressable = harness
