@@ -22,8 +22,8 @@
 //! `shortcuts` set to `true` the Shortcuts page, where `capture` names the action waiting for a key
 //! (`ui.calendar.show`), `sending` set to `true` the Sending page, `triage` set to `true` the Triage page,
 //! `notifications` set to `true` the Notifications page (Studio notifying of people only, and a desk that runs in the
-//! background and starts with the computer, [`PicturedDesk`]). `palette` opens the command palette with that text
-//! typed (`""` for the whole list), and `calendar` set to `true` shows the calendar screen (with `first`, its empty
+//! background and starts with the computer, [`PicturedDesk`]). `command` opens the command line with that text
+//! typed (`">"` for every command), and `calendar` set to `true` shows the calendar screen (with `first`, its empty
 //! state), `calendar_view` shows it in a view (`day`, `week`, `month` or `agenda`) and `event` picks the event with
 //! that summary, whose details show in the side panel; `edit_event` opens the event editor on a `new` event or, with
 //! `edit`, on the picked one, and `delete_event` set to `true` deletes the picked event, so its toast shows. `compose`
@@ -191,9 +191,9 @@ pub struct Shot {
     /// The action waiting for a key on the Shortcuts page.
     #[serde(default)]
     pub capture: Option<String>,
-    /// The text typed into the command palette, which opens it.
+    /// The text typed into the command line, which opens it.
     #[serde(default)]
-    pub palette: Option<String>,
+    pub command: Option<String>,
     /// Whether the calendar screen shows.
     #[serde(default)]
     pub calendar: Option<bool>,
@@ -580,7 +580,7 @@ fn calendar(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
 }
 
 /// Shows the places of `shot` beyond the mail: the calendar, the Shortcuts page with an action waiting for a key, the
-/// command palette with its text.
+/// command line with its text.
 fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     if let Some(scene) = &shot.compose {
         compose(app, &shot.out, scene)?;
@@ -615,10 +615,8 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
         };
         app.settings_mut().capture(action.id);
     }
-    if let Some(text) = &shot.palette {
-        let palette = app.palette_mut();
-        palette.open();
-        palette.set_query(text);
+    if let Some(text) = &shot.command {
+        app.command_mut().open_with(text);
     }
     Ok(())
 }
@@ -808,7 +806,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.view.is_some()
         || shot.compose.is_some()
         || shot.capture.is_some()
-        || shot.palette.is_some()
+        || shot.command.is_some()
         || shot.calendar.is_some()
         || shot.home_place.is_some()
         || shot.calendar_view.is_some()

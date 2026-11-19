@@ -35,6 +35,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod calendar;
+pub mod command;
 pub mod component;
 pub mod compose;
 pub mod desk;

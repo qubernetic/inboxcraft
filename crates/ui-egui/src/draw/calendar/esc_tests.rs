@@ -60,9 +60,9 @@ fn esc_with_the_palette_over_the_editor_closes_the_palette_alone() {
     typed(&mut harness);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    assert!(harness.state().palette().is_open());
+    assert!(harness.state().command().results());
     esc(&mut harness);
-    assert!(!harness.state().palette().is_open(), "the palette, on top, takes the Esc");
+    assert!(!harness.state().command().results(), "the palette, on top, takes the Esc");
     assert_eq!(summary(&harness).as_deref(), Some("Kiln"));
     assert!(!warned(&harness), "the editor under it never saw the Esc");
     // Then the editor is on top: Esc asks, a second Esc throws the typing away.
@@ -134,9 +134,9 @@ fn esc_with_the_palette_over_the_day_s_float_closes_the_palette_alone() {
     harness.run();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    assert!(harness.state().palette().is_open());
+    assert!(harness.state().command().results());
     esc(&mut harness);
-    assert!(!harness.state().palette().is_open(), "the palette, on top, takes the Esc");
+    assert!(!harness.state().command().results(), "the palette, on top, takes the Esc");
     assert_eq!(harness.state().calendar().more(), Some(thursday), "the day's float under it stays");
     esc(&mut harness);
     assert_eq!(harness.state().calendar().more(), None, "then the float is on top and closes");

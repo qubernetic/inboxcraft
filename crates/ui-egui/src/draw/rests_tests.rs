@@ -115,7 +115,7 @@ fn on_the_settings_no_key_of_the_list_back_or_the_views_runs() {
 }
 
 /// A row picked and flagged, so its acts and Undo could run, then New message: the window `width` wide hides the list
-/// (one pane at 720, beside the composer at 1000).
+/// (one pane at 720, beside the composer at 980).
 fn hidden_list(width: f32) -> Harness<'static, InboxApp> {
     let mut harness = window(width);
     bind_views_and_back(&mut harness);
@@ -141,7 +141,7 @@ fn hidden_list(width: f32) -> Harness<'static, InboxApp> {
 
 #[test]
 fn with_the_list_hidden_its_keys_views_and_row_commands_rest_and_the_palette_shows_them_unavailable() {
-    for width in [720.0, 1000.0] {
+    for width in [720.0, 980.0] {
         let mut harness = hidden_list(width);
         let rows = [keymap::DONE, keymap::ARCHIVE, keymap::READ, keymap::FLAG, keymap::DELETE, keymap::UNDO];
         // In one pane Back is the way the list comes back in front of the composer (the lists slice's own rule); in two
@@ -160,7 +160,7 @@ fn with_the_list_hidden_its_keys_views_and_row_commands_rest_and_the_palette_sho
         // The palette lists them, unavailable.
         harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
         harness.run();
-        assert!(harness.state().palette().is_open());
+        assert!(harness.state().command().results());
         for (typed, name) in [
             ("Inbox view", "Inbox view: List"),
             ("Inbox view", "Inbox view: Grouped"),
@@ -168,7 +168,7 @@ fn with_the_list_hidden_its_keys_views_and_row_commands_rest_and_the_palette_sho
             ("menu of the list", "The menu of the list's row, the reader's line or its subject"),
             ("Done", "Done"),
         ] {
-            harness.state_mut().palette_mut().set_query(typed);
+            harness.state_mut().command_mut().set_text(&format!(">{typed}"));
             harness.run();
             let item = harness.get_by_role_and_label(Role::MenuItem, name);
             assert!(item.accesskit_node().is_disabled(), "{width}: {name} is offered as unavailable");
@@ -265,10 +265,10 @@ fn one_esc_closes_one_surface_a_list_over_a_settings_page_a_menu_left_and_the_pa
     let mut harness = float_over_the_sheet();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    assert!(harness.state().palette().is_open());
+    assert!(harness.state().command().results());
     harness.key_press(Key::Escape);
     harness.run();
-    assert!(!harness.state().palette().is_open(), "one Esc: the palette");
+    assert!(!harness.state().command().results(), "one Esc: the palette");
     assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "STARTTLS").is_none() && !popup::any_open(&harness.ctx), "no list");
     assert!(harness.state().settings().is_open(), "the palette leaves the settings shown");
 }
@@ -418,7 +418,7 @@ fn the_thumb_of_the_bar_over_the_content_is_no_tab_stop() {
 #[test]
 fn opening_the_held_back_message_rests_while_the_list_is_hidden() {
     // Two panes, the list hidden beside the composer by the window's width.
-    let width = 1000.0;
+    let width = 980.0;
     let mut harness = window(width);
     harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
     harness.run();
@@ -437,7 +437,7 @@ fn opening_the_held_back_message_rests_while_the_list_is_hidden() {
     assert!(!harness.state().can_run(keymap::OPEN_HELD), "{width}: it rests with the list hidden");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    harness.state_mut().palette_mut().set_query("rule names");
+    harness.state_mut().command_mut().set_text(">rule names");
     harness.run();
     let item = harness.get_by_role_and_label(Role::MenuItem, "Open the message the rule names");
     assert!(item.accesskit_node().is_disabled(), "{width}: the palette offers it as unavailable");
@@ -463,8 +463,8 @@ fn undo_by(harness: &mut Harness<'static, InboxApp>, how: UndoBy) {
         UndoBy::Palette => {
             harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
             harness.run();
-            assert!(harness.state().palette().is_open(), "the palette comes over the editor");
-            harness.state_mut().palette_mut().set_query("Undo");
+            assert!(harness.state().command().results(), "the palette comes over the editor");
+            harness.state_mut().command_mut().set_text(">Undo");
             harness.run();
             let item = harness.get_by_role_and_label(Role::MenuItem, "Undo");
             assert!(item.accesskit_node().is_disabled(), "the palette offers Undo as unavailable under the editor");

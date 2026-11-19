@@ -166,11 +166,11 @@ fn the_palette_no_longer_closes_settings() {
     harness.run();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    assert!(harness.state().palette().is_open());
+    assert!(harness.state().command().results());
     assert!(harness.state().settings().is_open(), "the palette comes over the settings");
     harness.key_press(Key::Escape);
     harness.run();
-    assert!(!harness.state().palette().is_open(), "one Esc: the palette");
+    assert!(!harness.state().command().results(), "one Esc: the palette");
     assert!(harness.state().settings().is_open(), "the settings stay, on their page");
     assert_eq!(harness.state().settings().section(), Section::Triage);
 }
@@ -214,12 +214,13 @@ pub(super) const OF_THE_MAIL: [&str; 29] = [
 pub(super) const OF_THE_COMPOSER: [&str; 2] = [keymap::SEND, keymap::FOLD];
 
 /// The window's own actions: they run on the settings as off them (a way to a place shows it, leaving the settings).
-pub(super) const THE_WINDOW_S: [&str; 15] = [
+pub(super) const THE_WINDOW_S: [&str; 16] = [
     keymap::FIND,
     keymap::HOME,
     keymap::MAIL,
     keymap::SETTINGS,
     keymap::PALETTE,
+    keymap::COMMAND_LINE,
     keymap::CALENDAR,
     keymap::SENT,
     keymap::LATER,

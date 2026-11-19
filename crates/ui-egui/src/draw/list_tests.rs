@@ -645,7 +645,7 @@ fn the_key_of_an_action_only_a_coming_soon_control_offers_runs_nothing() {
         assert_eq!(crate::component::soon::blocked(&harness.ctx, crate::keymap::PALETTE), !normal);
         harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
         harness.run();
-        assert_eq!(harness.state().palette().is_open(), normal, "its key opens the palette, a usable control offering it too: {normal}");
+        assert_eq!(harness.state().command().results(), normal, "its key opens the palette, a usable control offering it too: {normal}");
     }
 }
 
@@ -1725,7 +1725,7 @@ fn the_list_keys_rest_while_the_list_does_not_have_the_keyboard() {
     harness.run();
     assert_eq!(harness.state().mailbox().selected(), Some(1_000_004), "J while reading");
     // The search field keeps its own Home and End.
-    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::search_id()));
+    harness.ctx.memory_mut(|memory| memory.request_focus(crate::command::field_id()));
     harness.run();
     harness.event(egui::Event::Text("odile".to_owned()));
     harness.run();
@@ -2291,7 +2291,7 @@ fn j_and_k_move_as_the_arrows_and_rest_in_a_text_field() {
     harness.key_press(Key::J);
     harness.run();
     let keyed = harness.state().mailbox().selected();
-    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::search_id()));
+    harness.ctx.memory_mut(|memory| memory.request_focus(crate::command::field_id()));
     harness.run();
     for key in [Key::J, Key::K, Key::ArrowDown, Key::ArrowUp] {
         harness.key_press(key);

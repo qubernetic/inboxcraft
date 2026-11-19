@@ -86,12 +86,14 @@ fn the_toolbar_s_note_stands_20_after_the_title() {
 
 /// The texts of the last frame as drawn (a cut text shows its ellipsis): where each starts, how wide, what it shows.
 fn drawn(harness: &Harness<'static, InboxApp>) -> Vec<(f32, f32, String)> {
+    // The command line's texts stand above the body: they are not the screen's.
+    let body = crate::draw::shell::laid(&harness.ctx).map_or(0.0, |laid| laid.body.top());
     harness
         .output()
         .shapes
         .iter()
         .filter_map(|clipped| match &clipped.shape {
-            egui::Shape::Text(text) => {
+            egui::Shape::Text(text) if text.pos.y >= body => {
                 let shown = text.galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
                 Some((text.pos.x, text.galley.size().x, shown))
             }

@@ -38,6 +38,7 @@
 mod accounts;
 mod calendar;
 pub(crate) use self::calendar::{event_board, mini_month_board};
+mod command;
 mod compose;
 mod frame;
 pub(crate) mod home;
@@ -45,7 +46,6 @@ mod invite;
 mod list;
 mod onboard;
 pub(crate) mod paint;
-mod palette;
 mod reader;
 pub(crate) use reader::fitted_board;
 mod index;
@@ -63,6 +63,7 @@ use inboxcraft_model::Role;
 use serde_json::{Value, json};
 
 use crate::calendar::Calendar;
+use crate::command::Command;
 use crate::component::banner::{self, BannerKind, BannerLink};
 use crate::component::button::IconButton;
 use crate::component::soon;
@@ -76,7 +77,6 @@ use crate::keymap::{self, Captured, Keymap};
 use crate::mailbox::{Act, InboxView, Mailbox, Pile, Place};
 use crate::motion;
 use crate::onboard::{Detect, Keychain, Onboarding};
-use crate::palette::Palette;
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
 use crate::settings::{Section, Settings};
@@ -93,10 +93,6 @@ pub(super) const LIST_WIDTH: f32 = 440.0;
 /// A window narrower than this, in points, holds one pane beside the folders: the open message and the list swap
 /// (`Enter` or a press opens, `Esc` goes back), as the design's breakpoint has it.
 pub(super) const ONE_PANE: f32 = 980.0;
-
-/// The width the search field in the list's header is measured from (three quarters of it), in points: the old
-/// folder pane's default width, which the header kept when the pane went.
-pub(super) const FOLDER_PANE: f32 = 240.0;
 
 /// Where the keyboard last was, and whether that was in the composer.
 fn last_keyboard_id() -> egui::Id {
@@ -238,8 +234,8 @@ pub struct InboxApp {
     screen: Screen,
     /// The calendar screen.
     calendar: Calendar,
-    /// The command palette.
-    palette: Palette,
+    /// The command line.
+    command: Command,
     onboarding: Onboarding,
     /// The appearance settings page.
     settings: Settings,
@@ -429,7 +425,7 @@ impl InboxApp {
             desk: None,
             screen,
             calendar: Calendar::default(),
-            palette: Palette::default(),
+            command: Command::default(),
             onboarding: Onboarding::default(),
             settings: Settings::default(),
             can_add: false,
@@ -580,10 +576,12 @@ impl InboxApp {
         theme: &Theme,
         surfaces: &Surfaces,
         (setting, corner): (bool, f32),
-    ) -> (index::Asked, bool) {
-        // The command line first: its New message stands above the index, and Tab walks the drawn order.
+        (regions, keys): (shell::Regions, command::Early),
+    ) -> (index::Asked, bool, Vec<command::Asked>) {
+        // The command line first: its New message and its field stand above the index, and Tab walks the drawn order.
         self.own_frame_parts(command, theme, corner);
         let new_message = self.new_message(command, theme) && surfaces.allows_press(keymap::COMPOSE);
+        let commanded = self.command_line(command, theme, regions, keys);
         let at = self.index_place(setting);
         let flags = (Self::index_live(surfaces), self.checking_elsewhere());
         let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, false, flags);
@@ -597,7 +595,7 @@ impl InboxApp {
             index::toggle(index.ctx(), id);
         }
 
-        (indexed, new_message)
+        (indexed, new_message, commanded)
     }
 
     /// Whether what the index `asked` shows a list: a mailbox, Mail or Later.
@@ -634,7 +632,7 @@ impl InboxApp {
     /// Whether the index's mailboxes, account rows and account picker act: with no palette or event editor in front. A
     /// key waited for on the Shortcuts page holds the keys, not the pointer: a row pressed ends the wait and acts.
     fn index_live(surfaces: &Surfaces) -> bool {
-        !(surfaces.has(Surface::Palette) || surfaces.has(Surface::Editor))
+        !(surfaces.has(Surface::Command) || surfaces.has(Surface::Editor))
     }
 
     /// What of the index's `asked` the `surfaces` in front allow: a place where a press may run its action
@@ -643,7 +641,7 @@ impl InboxApp {
     fn index_allowed(surfaces: &Surfaces, asked: index::Asked) -> index::Asked {
         // A key waited for on the Shortcuts page holds the keys, not the pointer: a place pressed shows, and leaving the
         // settings ends the wait.
-        let waiting = surfaces.has(Surface::Capture) && !surfaces.has(Surface::Palette) && !surfaces.has(Surface::Float);
+        let waiting = surfaces.has(Surface::Capture) && !surfaces.has(Surface::Command) && !surfaces.has(Surface::Float);
         let place = asked.place.filter(|place| Self::index_action(*place).is_some_and(|action| waiting || surfaces.allows_press(action)));
         if Self::index_live(surfaces) { index::Asked { place, ..asked } } else { index::Asked { place, ..index::Asked::default() } }
     }
@@ -751,15 +749,15 @@ impl InboxApp {
         &self.calendar
     }
 
-    /// The command palette.
+    /// The command line.
     #[must_use]
-    pub fn palette(&self) -> &Palette {
-        &self.palette
+    pub fn command(&self) -> &Command {
+        &self.command
     }
 
-    /// The command palette, to type in from outside (the `ui_shot` scripts, later the control channel).
-    pub fn palette_mut(&mut self) -> &mut Palette {
-        &mut self.palette
+    /// The command line, to type in from outside (the `ui_shot` scripts, later the control channel).
+    pub fn command_mut(&mut self) -> &mut Command {
+        &mut self.command
     }
 
     /// Steps the list's keyed row `rows` below (`forward`) or above through `order`, the rows as the list shows them.
@@ -855,12 +853,13 @@ impl InboxApp {
             return;
         }
         match id {
-            // The palette comes over the place shown, the settings too: they stay under it.
-            keymap::PALETTE => self.palette.open(),
+            // The command line comes over the place shown, the settings too: they stay under it.
+            keymap::PALETTE => self.command.open(ctx, false),
+            keymap::COMMAND_LINE => self.command.open_by_slash(ctx),
             keymap::FIND => {
                 self.show_mail();
                 self.reader.set_full_width(false);
-                ctx.memory_mut(|memory| memory.request_focus(list::search_id()));
+                self.command.open(ctx, true);
             }
             keymap::MAIL => {
                 self.show_mail();
@@ -1191,7 +1190,7 @@ impl InboxApp {
         let home = self.screen == Screen::Home && !settings;
         Surfaces::new(Facts {
             float: crate::component::popup::any_open(ctx),
-            palette: self.palette.is_open(),
+            command: self.command.results(),
             capture: self.settings.capturing().is_some(),
             editor: self.editing_event(),
             composer: !settings && self.composer_in_front(),
@@ -1328,7 +1327,7 @@ impl InboxApp {
         }
         self.calendar.tick(self.mailbox.now(), self.mailbox.offset());
         self.calendar.follow_week(&mut self.mailbox);
-        let open = setting || self.palette.is_open() || self.settings.capturing().is_some();
+        let open = setting || self.command.results() || self.settings.capturing().is_some();
         for id in calendar::keys::pressed(ctx, &self.keymap, &self.calendar, open) {
             self.calendar_key(ctx, id);
         }
@@ -2046,7 +2045,7 @@ impl InboxApp {
         let least = match self.list_least {
             Some((kept, least)) if kept == key => least,
             _ => {
-                let least = list::least_width(ui, theme, &self.mailbox, &self.search);
+                let least = list::least_width(ui, theme, &self.mailbox);
                 self.list_least = Some((key, least));
                 #[cfg(test)]
                 {
@@ -2368,6 +2367,8 @@ impl InboxApp {
         self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
         self.frame = ui.ctx().cumulative_frame_nr();
+        // The command line's keys first: with its results shown, or the keyboard in it, they are its own.
+        let command_keys = command::early(ui.ctx(), &mut self.command);
         // What stands in front, once, before any key is read.
         let surfaces = self.surfaces(ui.ctx());
         let Keys { mut ran, escape, to_place, typing, quiet } = self.keys(ui.ctx(), &surfaces);
@@ -2380,7 +2381,7 @@ impl InboxApp {
         let to_place = to_place && !setting;
         // The settings shown in the place of what was, and the palette coming over the window, close the lists, menus and
         // pickers open.
-        crate::component::popup::covered(ui.ctx(), [setting, self.palette.is_open()]);
+        crate::component::popup::covered(ui.ctx(), [setting, self.command.results()]);
         self.calendar_before(ui.ctx(), setting);
         let left_full = escape == Some(Surface::FullWidth);
         if left_full {
@@ -2421,7 +2422,8 @@ impl InboxApp {
         #[cfg(test)]
         body.data_mut(|data| data.remove::<egui::Rect>(egui::Id::unique("reader-rect")));
         let (gap, half) = (0.0, 0.0);
-        let (indexed, new_message) = self.index_and_command(&mut index, &mut command, &theme, &surfaces, (setting, corner));
+        let (indexed, new_message, commanded) =
+            self.index_and_command(&mut index, &mut command, &theme, &surfaces, (setting, corner), (regions, command_keys));
         let index_to_list = Self::shows_list(&indexed);
         ran.extend(indexed.place.and_then(Self::index_action));
         asked.open = indexed.mailbox;
@@ -2452,15 +2454,15 @@ impl InboxApp {
             // The list is hidden where the composer stands in its place: beside a composer too narrow for it, and in
             // one pane with the composer in front. Nothing of it acts then.
             let hidden = place == ListPlace::Hidden || (place == ListPlace::Away && self.composer_in_front());
-            let (mailbox, search, keymap) = (&self.mailbox, &mut self.search, &self.keymap);
-            let mut list = |ui: &mut Ui, layers: &mut Panes| {
+            let (mailbox, keymap) = (&self.mailbox, &self.keymap);
+            let list = |ui: &mut Ui, layers: &mut Panes| {
                 layers.card(ui, Margin::ZERO, |ui| {
                     // The pane's first column is the line at its left: the header and the rows start right of it.
                     let pad = margin(s.s4);
                     let searched = Panel::top("list-header")
                         .show_separator_line(false)
                         .frame(Frame::new().inner_margin(Margin { left: pad.left.saturating_add(1), ..pad }))
-                        .show(ui, |ui| frame::beside(ui, &theme, |ui| list::header(ui, &theme, keymap, mailbox, search)))
+                        .show(ui, |ui| frame::beside(ui, &theme, |ui| list::header(ui, &theme, mailbox)))
                         .inner;
                     let listed = CentralPanel::no_frame()
                         .frame(Frame::new().inner_margin(Margin { left: 1, right: 0, top: 0, bottom: 0 }))
@@ -2505,18 +2507,10 @@ impl InboxApp {
         // A row's menu whose row this pass did not draw closes; an ask no row took is dropped.
         list::settle_menus(ui.ctx());
         if self.screen == Screen::Calendar && !setting {
-            // The palette lies over the editor: it has the keys and the pointer.
-            let over = self.palette.is_open();
+            // The command line's results lie over the editor: they have the keys and the pointer.
+            let over = self.command.results();
             on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, over));
         }
-        let palette = if self.palette.is_open() {
-            self.palette.set_screen(if self.screen == Screen::Calendar { keymap::Scope::Calendar } else { keymap::Scope::Mail });
-            let runnable: Vec<&str> =
-                keymap::actions().into_iter().map(|action| action.id).filter(|id| self.can_run(id) && !soon::blocked(ui.ctx(), id)).collect();
-            palette::show(ui.ctx(), &theme, &self.keymap, &mut self.palette, &runnable)
-        } else {
-            None
-        };
         if !setting {
             composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
         }
@@ -2534,7 +2528,7 @@ impl InboxApp {
             || (out && leaving)
             || left_full
             || !ran.is_empty()
-            || palette.is_some()
+            || !commanded.is_empty()
             || changed.is_some()
             || asked.narrow.is_some()
             || asked.open.is_some()
@@ -2581,8 +2575,8 @@ impl InboxApp {
         if add {
             self.open_accounts();
         }
-        if let Some(asked) = palette {
-            ran.extend(self.apply_palette(asked));
+        for asked in commanded {
+            ran.extend(self.apply_command(ui.ctx(), asked));
         }
         for id in ran {
             self.run_action(ui.ctx(), id);
@@ -2710,6 +2704,49 @@ impl InboxApp {
         frame::outline(ctx, theme, corner);
     }
 
+    /// The command line in its region (`ui`): the field from the index's column to the window's controls, and its
+    /// results for the mode typed; what was asked of it.
+    fn command_line(&mut self, ui: &mut Ui, theme: &Theme, regions: shell::Regions, early: command::Early) -> Vec<command::Asked> {
+        let ctx = ui.ctx().clone();
+        // A search set elsewhere (another place shown empties it) shows in the field while it is not typed in.
+        if self.command.mode() == crate::command::Mode::Search
+            && !self.command.results()
+            && !self.command.has_focus(&ctx)
+            && self.command.text() != self.search
+        {
+            self.command.text_mut().clone_from(&self.search);
+        }
+        if command::wants_people(&self.command) {
+            let mut skip = std::collections::BTreeSet::new();
+            skip.extend(self.mailbox.accounts().iter().map(|account| account.address.to_lowercase()));
+            let found = crate::compose::people(&mut self.mailbox, self.command.text(), skip).unwrap_or_default();
+            self.command.set_people(found);
+        }
+        let mut lists = command::Lists::default();
+        if self.command.results() {
+            match self.command.mode() {
+                crate::command::Mode::Command => {
+                    let screen = if self.screen == Screen::Calendar { keymap::Scope::Calendar } else { keymap::Scope::Mail };
+                    lists.commands = crate::palette::rows(self.command.text())
+                        .into_iter()
+                        .filter(|row| keymap::scope(row.id).meets(screen))
+                        .map(|row| {
+                            let refused = (!self.can_run(row.id) || soon::blocked(&ctx, row.id)).then(|| command::refusal(row.id));
+                            command::Listed { row, refused }
+                        })
+                        .collect();
+                }
+                crate::command::Mode::Mailbox => lists.mailboxes = command::mailboxes(&self.mailbox, self.command.text()),
+                // At most six, looked up only when the text changed.
+                crate::command::Mode::Person => lists.people = self.command.people().map(<[_]>::to_vec).unwrap_or_default(),
+                crate::command::Mode::Search => {}
+            }
+        }
+        let index = regions.index.right() + 1.0 - regions.command.left();
+        let mailbox = self.mailbox.title();
+        command::show(ui, theme, &self.keymap, &mut self.command, (regions.command, index, &mailbox), &lists, early)
+    }
+
     /// New message at the left of the command line (`ui`), while there is an account: the frames draw none, and until
     /// the command line is built it is the pointer's way to a new message. Whether it was pressed.
     fn new_message(&self, ui: &mut Ui, theme: &Theme) -> bool {
@@ -2761,8 +2798,8 @@ impl InboxApp {
         if self.calendar.is_empty() {
             return calendar::empty(ui, theme, &self.keymap, layers);
         }
-        // The palette lies over the screen's floats: it has the keys.
-        let over = self.palette.is_open();
+        // The command line's results lie over the screen's floats: they have the keys.
+        let over = self.command.results();
         calendar::screen(ui, theme, &self.keymap, &self.calendar, layers, over)
     }
 
@@ -3047,20 +3084,39 @@ impl InboxApp {
         toast::show(ui.ctx(), theme, &keys, id, &shown, place)
     }
 
-    /// Applies what was asked for in the palette; the action to run, when one was chosen.
-    fn apply_palette(&mut self, asked: palette::Asked) -> Option<&'static str> {
+    /// Applies what was asked for in the command line; the action to run, when one was chosen.
+    fn apply_command(&mut self, ctx: &egui::Context, asked: command::Asked) -> Option<&'static str> {
         match asked {
-            palette::Asked::Run(id) => {
-                self.palette.close();
+            command::Asked::Run(id) => {
+                self.command.close(ctx);
                 return Some(id);
             }
-            palette::Asked::Page(page) => self.palette_page(page),
-            palette::Asked::Step(down) => {
-                let count = self.palette.matches().len();
-                self.palette.step(down, count);
+            command::Asked::Page(page) => {
+                self.command.close(ctx);
+                self.palette_page(page);
             }
-            palette::Asked::Typed => self.palette.typed(),
-            palette::Asked::Close => self.palette.close(),
+            command::Asked::Person(address) => {
+                // Their mail: the search of the mail shown, by their address.
+                self.command.drop_scope();
+                self.command.set_text(&address);
+                self.command.close_results();
+                self.show_mail();
+                self.search(&address);
+            }
+            command::Asked::Mailbox(id) => {
+                self.command.close(ctx);
+                self.show_mail();
+                self.mailbox.open(Place::Folder(id));
+                self.search.clear();
+            }
+            command::Asked::Searched(text) => {
+                // A search shows the mail it fills.
+                if !text.is_empty() {
+                    self.show_mail();
+                }
+                self.search(&text);
+            }
+            command::Asked::Close => self.command.close_results(),
         }
         None
     }
@@ -3185,6 +3241,9 @@ fn start(reader: &mut Reader, mailbox: &mut Mailbox, id: u64, act: Act) {
 #[path = "appearance_tests.rs"]
 mod appearance_tests;
 #[cfg(test)]
+#[path = "command_tests.rs"]
+mod command_line_tests;
+#[cfg(test)]
 #[path = "compose_tests.rs"]
 mod compose_tests;
 #[cfg(test)]
@@ -3223,9 +3282,6 @@ mod onboard_tests;
 #[cfg(test)]
 #[path = "outbox_tests.rs"]
 mod outbox_tests;
-#[cfg(test)]
-#[path = "palette_tests.rs"]
-mod palette_tests;
 #[cfg(test)]
 #[path = "place_tests.rs"]
 mod place_tests;

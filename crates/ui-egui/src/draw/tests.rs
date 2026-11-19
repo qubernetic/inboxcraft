@@ -311,34 +311,38 @@ fn the_account_picker_narrows_to_one_account_with_its_address_in_the_header() {
 }
 
 #[test]
-fn typing_in_the_search_field_searches_and_clear_ends_it() {
+fn typing_in_the_command_line_searches_and_emptying_it_ends_the_search() {
     let mut harness = harness();
-    harness.get_by_role(Role::TextInput).focus();
+    harness.get_by_role_and_label(Role::TextInput, "Command line").focus();
     harness.run();
-    harness.get_by_role(Role::TextInput).type_text("logo");
+    harness.get_by_role_and_label(Role::TextInput, "Command line").type_text("logo");
     harness.run();
     assert_eq!(harness.state().mailbox().query(), "logo");
-    harness.get_by_label("Search");
     harness.get_by_label("All accounts · 2 messages");
-    harness.get_by_label("Clear").click();
-    harness.run();
+    for _ in 0..4 {
+        harness.key_press(Key::Backspace);
+        harness.run();
+    }
     assert_eq!(harness.state().mailbox().query(), "");
     assert_eq!(harness.state().search_text(), "");
     assert_eq!(harness.state().mailbox().messages().len(), 11);
 }
 
 #[test]
-fn ctrl_f_focuses_the_search_and_escape_empties_it() {
+fn ctrl_f_opens_the_command_line_on_the_mailbox_and_escape_keeps_the_search() {
     let mut harness = harness();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::F);
     harness.run();
-    assert!(harness.get_by_role(Role::TextInput).is_focused());
-    harness.get_by_role(Role::TextInput).type_text("odile");
+    assert!(harness.get_by_role_and_label(Role::TextInput, "Command line").is_focused());
+    harness.get_by_role_and_label(Role::TextInput, "Command line").type_text("odile");
     harness.run();
     assert_eq!(harness.state().mailbox().messages().len(), 3);
     harness.key_press(Key::Escape);
     harness.run();
-    assert_eq!(harness.state().mailbox().query(), "");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(!harness.get_by_role_and_label(Role::TextInput, "Command line").is_focused());
+    assert_eq!(harness.state().mailbox().query(), "odile", "the search stays, as the list shows it");
 }
 
 #[test]
@@ -347,7 +351,7 @@ fn a_rebound_find_key_focuses_the_search_and_the_old_one_does_nothing() {
     harness.state_mut().keymap_mut().bind(crate::keymap::FIND, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::K));
     harness.key_press_modifiers(Modifiers::COMMAND, Key::F);
     harness.run();
-    assert!(!harness.get_by_role(Role::TextInput).is_focused());
+    assert!(!harness.get_by_role_and_label(Role::TextInput, "Command line").is_focused());
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
     assert!(harness.get_by_role(Role::TextInput).is_focused());

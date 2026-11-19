@@ -1115,13 +1115,13 @@ fn a_palette_act_on_a_message_read_beside_the_docked_composer_leaves_the_keyboar
     assert!(docked_with(&harness).0, "docked again");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    harness.state_mut().palette_mut().set_query("Done");
+    harness.state_mut().command_mut().set_text(">Done");
     harness.run();
     harness.key_press(Key::Enter);
     for _ in 0..4 {
         harness.run();
     }
-    assert!(!harness.state().palette().is_open(), "the palette closed");
+    assert!(!harness.state().command().results(), "the palette closed");
     assert!(!harness.state().mailbox().messages().iter().any(|row| row.id == pressed), "done");
     let next = harness.state().mailbox().selected();
     assert!(next.is_some_and(|next| next != pressed), "it walked on");
@@ -1390,9 +1390,9 @@ fn ctrl_enter_in_the_calendar_event_editor_sends_nothing() {
 fn ctrl_enter_in_the_search_field_sends_nothing() {
     let mut harness = sending();
     let id = written(&mut harness);
-    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::search_id()));
+    harness.ctx.memory_mut(|memory| memory.request_focus(crate::command::field_id()));
     harness.run();
-    assert!(harness.ctx.memory(|memory| memory.has_focus(super::list::search_id())), "the search field has the keys");
+    assert!(harness.ctx.memory(|memory| memory.has_focus(crate::command::field_id())), "the search field has the keys");
     harness.event(egui::Event::Text("rota".to_owned()));
     harness.run();
     ctrl_enter(&mut harness);

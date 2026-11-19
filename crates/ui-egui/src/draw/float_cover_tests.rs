@@ -234,10 +234,10 @@ const KINDS: [Kind; 8] = [
 fn palette_comes_and_goes(harness: &mut Harness<'static, InboxApp>) {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     settle(harness);
-    assert!(harness.state().palette().is_open());
+    assert!(harness.state().command().results());
     harness.key_press(Key::Escape);
     settle(harness);
-    assert!(!harness.state().palette().is_open());
+    assert!(!harness.state().command().results());
 }
 
 /// The settings show and leave by their key (from a settings page: they leave and show again).

@@ -124,8 +124,8 @@ fn the_window_does_not_narrow_its_index_yet() {
     // The index's rows stand in the index, the list in the body.
     let home = harness.get_by_role_and_label(Role::Button, "Home").rect();
     assert!(laid.index.contains_rect(home), "{home:?} in {:?}", laid.index);
-    let search = harness.get_by_role(Role::TextInput).rect();
-    assert!(laid.body.contains_rect(search), "{search:?} in {:?}", laid.body);
+    let head = harness.get_by_label("the inbox").rect();
+    assert!(laid.body.contains_rect(head), "{head:?} in {:?}", laid.body);
 }
 
 #[test]
@@ -231,7 +231,7 @@ fn a_screen_reader_s_activate_on_the_index_runs_nothing_under_a_modal_surface() 
             _ => {
                 harness.state_mut().run_action(&ctx, keymap::PALETTE);
                 harness.run();
-                harness.state_mut().palette_mut().query_mut().push_str("zz");
+                harness.state_mut().command_mut().set_text(">zz");
                 harness.run();
             }
         }
@@ -253,8 +253,9 @@ fn a_screen_reader_s_activate_on_the_index_runs_nothing_under_a_modal_surface() 
                     assert_eq!(summary.as_deref(), Some("Kiln"), "{surface}: {name}: the editor stays with its typing");
                 }
                 _ => {
-                    assert!(harness.state().palette().is_open(), "{surface}: {name}: the palette stays");
-                    assert_eq!(harness.state().palette().query(), "zz", "{surface}: {name}: its typing whole");
+                    // The command line's results are no modal layer: the keyboard taken from its field closes them
+                    // (one surface); what was typed stays, and nothing under them ran (`under` above).
+                    assert_eq!(harness.state().command().text(), "zz", "{surface}: {name}: its typing whole");
                 }
             }
         }
@@ -295,7 +296,7 @@ fn tab_walks_new_message_in_the_command_line_before_the_index_under_it() {
         walked.push(focused(&harness).unwrap_or_default());
     }
     // Home is a place and a stop, first of the index.
-    assert_eq!(walked, ["New message", "Home", "Mail"], "the drawn order, top down");
+    assert_eq!(walked, ["New message", "Command line", "Home"], "the drawn order, top down");
     harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
     harness.run();
     harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);

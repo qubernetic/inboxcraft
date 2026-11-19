@@ -14,7 +14,7 @@ fn of(facts: Facts) -> Surfaces {
 /// Mail, the list shown.
 const MAIL: Facts = Facts {
     float: false,
-    palette: false,
+    command: false,
     capture: false,
     editor: false,
     composer: false,
@@ -57,10 +57,10 @@ fn stackings() -> Vec<(&'static str, Facts, Surface)> {
         ("a float over a settings page", Facts { float: true, ..SETTINGS }, Surface::Float),
         ("a capture on the settings", Facts { capture: true, ..SETTINGS }, Surface::Capture),
         ("a float over a capture on the settings", Facts { float: true, capture: true, ..SETTINGS }, Surface::Float),
-        ("the palette over the settings", Facts { palette: true, ..SETTINGS }, Surface::Palette),
-        ("a float over the palette over the settings", Facts { float: true, palette: true, ..SETTINGS }, Surface::Float),
-        ("the palette over the editor", Facts { palette: true, editor: true, ..CALENDAR }, Surface::Palette),
-        ("the palette over the composer", Facts { palette: true, composer: true, ..MAIL }, Surface::Palette),
+        ("the command results over the settings", Facts { command: true, ..SETTINGS }, Surface::Command),
+        ("a float over the command results over the settings", Facts { float: true, command: true, ..SETTINGS }, Surface::Float),
+        ("the command results over the editor", Facts { command: true, editor: true, ..CALENDAR }, Surface::Command),
+        ("the command results over the composer", Facts { command: true, composer: true, ..MAIL }, Surface::Command),
         ("a float over the full-width reader", Facts { float: true, full_width: true, ..MAIL }, Surface::Float),
         ("the full-width reader", Facts { full_width: true, ..MAIL }, Surface::FullWidth),
         ("the full width beside a docked composer", Facts { full_width: true, composer: true, ..MAIL }, Surface::FullWidth),
@@ -98,7 +98,7 @@ fn one_esc_closes_one_surface_in_every_stacking() {
 fn every_surface_at_once_is_held_in_eight_and_the_place_stays_last() {
     let all = Facts {
         float: true,
-        palette: true,
+        command: true,
         capture: true,
         editor: true,
         composer: true,
@@ -121,8 +121,9 @@ fn every_surface_at_once_is_held_in_eight_and_the_place_stays_last() {
 /// stacking: the actions it let run. Send is left out: its key needs the keyboard in the composer, which no surface
 /// is. Generated once from those functions (the test `draw::surface_old_tests`, removed with them), checked against
 /// `Surfaces::allows` there.
-const WINDOW: [&str; 22] = [
+const WINDOW: [&str; 23] = [
     "ui.palette.open",
+    "ui.command.open",
     "ui.search.focus",
     "ui.home.open",
     "ui.mail.show",
@@ -164,8 +165,9 @@ const LIST: [&str; 11] = [
 /// What runs on the settings, with a modifier only: the window's keys but those of the mail (Undo, the views, Back,
 /// the held-back message, Snooze, the composer's fold). Under the sheet New message did not run; on the settings it
 /// shows the place the owner came from and opens the composer there.
-const ON_SETTINGS: [&str; 15] = [
+const ON_SETTINGS: [&str; 16] = [
     "ui.palette.open",
+    "ui.command.open",
     "ui.search.focus",
     "ui.home.open",
     "ui.mail.show",
@@ -184,11 +186,12 @@ const ON_SETTINGS: [&str; 15] = [
 
 /// What runs on Home, with a modifier or without (Home has no field the letters are for): the window's keys but those
 /// of the mail, the same rule as on the settings.
-const ON_HOME: [&str; 15] = ON_SETTINGS;
+const ON_HOME: [&str; 16] = ON_SETTINGS;
 
 /// What runs with a modifier beside the composer in front: the window's keys but Undo, the composer's text's.
-const COMPOSER: [&str; 22] = [
+const COMPOSER: [&str; 23] = [
     "ui.palette.open",
+    "ui.command.open",
     "ui.search.focus",
     "ui.home.open",
     "ui.mail.show",
@@ -227,7 +230,7 @@ fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
     let rows: [Row; 24] = [
         ("place", MAIL, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("float", Facts { float: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
-        ("palette", Facts { palette: true, ..MAIL }, &[], &[]),
+        ("palette", Facts { command: true, ..MAIL }, &[], &[]),
         ("capture", Facts { capture: true, ..SETTINGS }, &[], &[]),
         ("settings", SETTINGS, &[], &[&ON_SETTINGS]),
         ("settings_with_the_full_width_kept", Facts { full_width: true, one_pane_reader: true, ..SETTINGS }, &[], &[&ON_SETTINGS]),
@@ -239,19 +242,19 @@ fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
         ("one_pane_reader", Facts { one_pane_reader: true, ..MAIL }, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("calendar", CALENDAR, &[&WINDOW], &[&WINDOW]),
         ("float_over_settings", Facts { float: true, ..SETTINGS }, &[], &[&ON_SETTINGS]),
-        ("palette_over_editor", Facts { palette: true, editor: true, ..CALENDAR }, &[], &[]),
+        ("palette_over_editor", Facts { command: true, editor: true, ..CALENDAR }, &[], &[]),
         ("float_over_full_width", Facts { float: true, full_width: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
         ("float_over_composer", Facts { float: true, composer: true, composer_drawn: true, ..MAIL }, &[], &[&COMPOSER]),
-        ("palette_over_composer", Facts { palette: true, composer: true, composer_drawn: true, ..MAIL }, &[], &[]),
+        ("palette_over_composer", Facts { command: true, composer: true, composer_drawn: true, ..MAIL }, &[], &[]),
         ("home", HOME, &[&ON_HOME], &[&ON_HOME]),
         ("float_over_home", Facts { float: true, ..HOME }, &[&ON_HOME], &[&ON_HOME]),
-        ("palette_over_home", Facts { palette: true, ..HOME }, &[], &[]),
+        ("palette_over_home", Facts { command: true, ..HOME }, &[], &[]),
         // The floating composer, on each place that draws it: its fold runs there.
         ("floating_composer", Facts { composer_drawn: true, ..MAIL }, &[&WINDOW, &LIST, &FOLD], &[&WINDOW, &LIST, &FOLD]),
         ("floating_composer_on_the_calendar", Facts { composer_drawn: true, ..CALENDAR }, &[&WINDOW, &FOLD], &[&WINDOW, &FOLD]),
         ("floating_composer_on_home", Facts { composer_drawn: true, ..HOME }, &[&ON_HOME, &FOLD], &[&ON_HOME, &FOLD]),
         ("float_over_the_floating_composer_on_home", Facts { float: true, composer_drawn: true, ..HOME }, &[&ON_HOME, &FOLD], &[&ON_HOME, &FOLD]),
-        ("palette_over_the_floating_composer_on_home", Facts { palette: true, composer_drawn: true, ..HOME }, &[], &[]),
+        ("palette_over_the_floating_composer_on_home", Facts { command: true, composer_drawn: true, ..HOME }, &[], &[]),
     ];
     rows.into_iter()
         .map(|(name, facts, bare, command)| {
@@ -285,7 +288,7 @@ fn the_list_has_the_keys_only_on_the_mail_with_nothing_over_it_and_shown() {
     for (name, facts) in [
         ("the calendar", CALENDAR),
         ("a float", Facts { float: true, ..MAIL }),
-        ("the palette", Facts { palette: true, ..MAIL }),
+        ("the palette", Facts { command: true, ..MAIL }),
         ("a capture", Facts { capture: true, ..SETTINGS }),
         ("the settings", SETTINGS),
         ("the composer in front", Facts { composer: true, ..MAIL }),
@@ -319,13 +322,13 @@ fn under_the_palette_a_key_with_a_modifier_runs_nothing() {
     let mut harness = window(|_| {});
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    assert!(harness.state().palette().is_open());
+    assert!(harness.state().command().results());
     for key in [Key::N, Key::Comma, Key::F] {
         harness.key_press_modifiers(Modifiers::COMMAND, key);
         harness.run();
         assert!(harness.state().composer().is_none(), "{key:?}: no new message under the palette");
         assert!(!harness.state().settings().is_open(), "{key:?}: no settings under the palette");
-        assert!(harness.state().palette().is_open(), "{key:?}: the palette stays");
+        assert!(harness.state().command().results(), "{key:?}: the palette stays");
     }
 }
 

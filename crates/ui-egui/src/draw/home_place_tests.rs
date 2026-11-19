@@ -127,8 +127,8 @@ fn home_s_key_its_row_and_the_palette_show_it_and_mail_s_key_leaves_it() {
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, keymap::PALETTE);
     harness.run();
-    assert!(harness.state().palette().is_open());
-    harness.state_mut().palette_mut().set_query("Show Home");
+    assert!(harness.state().command().results());
+    harness.state_mut().command_mut().set_text(">Show Home");
     harness.run();
     harness.key_press(Key::Enter);
     harness.run();

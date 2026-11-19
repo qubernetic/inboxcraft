@@ -17,14 +17,14 @@
 //! a single `Esc` may still find [`Surface::Float`] on top and close nothing. Whether the list is hidden beside the
 //! composer is known only once this frame lays the panes out, after the keys; it is no fact here. The composer in
 //! front ([`Surface::Composer`]) already takes the list's keys whenever the list is hidden, and `InboxApp::can_run`
-//! keeps its own `list_hidden` terms, read after the drawing, for the palette and `run_action`, so a list key or act
+//! keeps its own `list_hidden` terms, read after the drawing, for the command line's results and `run_action`, so a list key or act
 //! never runs in the frame the list hides. A rule that needs this frame's layout belongs in `can_run`, not here.
 
 use egui::Key;
 
 use crate::keymap::{self, Keymap};
 
-/// The most surfaces a frame holds: seven in front and the place. Eight surfaces exist, and the palette and a capture
+/// The most surfaces a frame holds: seven in front and the place. Eight surfaces exist, and the command line's results and a capture
 /// never stand together with all the rest; an eighth in front would drop the lowest, never the top.
 const MOST: usize = 8;
 
@@ -33,8 +33,8 @@ const MOST: usize = 8;
 pub(crate) enum Surface {
     /// A float: a menu, an open list, a picker.
     Float,
-    /// The command palette.
-    Palette,
+    /// The command line's results: they hold the keys.
+    Command,
     /// The Shortcuts page waiting for a key.
     Capture,
     /// The calendar's event editor.
@@ -55,8 +55,8 @@ pub(crate) enum Surface {
 pub(crate) struct Facts {
     /// A float showed in this pass or the last.
     pub float: bool,
-    /// The palette is open.
-    pub palette: bool,
+    /// The command line's results show.
+    pub command: bool,
     /// The Shortcuts page waits for a key.
     pub capture: bool,
     /// The calendar shows its event editor.
@@ -91,7 +91,7 @@ pub(crate) struct Surfaces {
 }
 
 impl Surfaces {
-    /// The surfaces of `facts`, top first: a float over everything; the palette and a capture, which take the keys;
+    /// The surfaces of `facts`, top first: a float over everything; the command line's results and a capture, which take the keys;
     /// the event editor; the reader's full width (its `Esc` comes before the composer's, as it did); the
     /// composer in front; the reader in one pane; the place.
     pub(crate) fn new(facts: Facts) -> Self {
@@ -100,7 +100,7 @@ impl Surfaces {
         let order = [
             (facts.float, Surface::Float),
             (facts.capture, Surface::Capture),
-            (facts.palette, Surface::Palette),
+            (facts.command, Surface::Command),
             (facts.editor, Surface::Editor),
             (facts.full_width && mail, Surface::FullWidth),
             (facts.composer, Surface::Composer),
@@ -133,9 +133,9 @@ impl Surfaces {
         self.all().contains(&surface)
     }
 
-    /// Whether the keys are held by a surface that reads them itself: the palette, or the Shortcuts page waiting.
+    /// Whether the keys are held by a surface that reads them itself: the command line's results, or the Shortcuts page waiting.
     pub(crate) fn held(&self) -> bool {
-        self.has(Surface::Palette) || self.has(Surface::Capture)
+        self.has(Surface::Command) || self.has(Surface::Capture)
     }
 
     /// Whether a key without Command, Ctrl or Alt runs nothing of the window, and Undo is not the window's: under the
@@ -145,14 +145,14 @@ impl Surfaces {
         self.held() || self.settings || self.has(Surface::Composer)
     }
 
-    /// Whether Undo rests, by every way in (its key, the palette's command, the toast's key and button): while the
+    /// Whether Undo rests, by every way in (its key, the command line's results's command, the toast's key and button): while the
     /// event editor is open, Undo would take back the event being edited.
     pub(crate) fn undo_rests(&self) -> bool {
         self.has(Surface::Editor)
     }
 
     /// The one surface an `Esc` pressed in this frame closes, or None when there was no `Esc` or it belongs to the
-    /// place (the reader gives the keyboard back to the list). A float, the palette, a capture and the event editor
+    /// place (the reader gives the keyboard back to the list). A float, the command line's results, a capture and the event editor
     /// take their `Esc` themselves; the window leaves the full width, and hands the rest to the place (the composer and
     /// the reader in one pane give the list its place back; the settings, a place, are not closed by it).
     pub(crate) fn escape(&self, ctx: &egui::Context) -> Option<Surface> {
@@ -163,7 +163,7 @@ impl Surfaces {
     }
 
     /// Whether the window's `action` may run with these surfaces in front, as its key (`keymap`'s, with a modifier or
-    /// without) is pressed. Not while the palette or a capture holds the keys; on the settings and on Home nothing of the mail
+    /// without) is pressed. Not while the command line's results or a capture holds the keys; on the settings and on Home nothing of the mail
     /// ([`mail_only`]); the composer's own only where a composer is drawn ([`of_the_composer`]); under the event editor only what comes over it ([`EDITOR_KEYS`]); a key without a modifier not
     /// under a quiet surface ([`Surfaces::quiet`]), and Undo neither there nor while it rests
     /// ([`Surfaces::undo_rests`]); the list's keys only while it has them ([`Surfaces::list_has_keyboard`]). The acts
@@ -201,7 +201,7 @@ impl Surfaces {
         self.allows(action, &Keymap::empty())
     }
 
-    /// Whether the list may have the keys: on the mail, shown, with nothing in front that takes them (the palette, a
+    /// Whether the list may have the keys: on the mail, shown, with nothing in front that takes them (the command line's results, a
     /// capture, the composer in the reader's place, a float, whose arrows are its own). Whether a row of it has them is
     /// the list's to say.
     pub(crate) fn list_has_keyboard(&self) -> bool {
@@ -237,7 +237,7 @@ const MAIL_ONLY: [&str; 7] =
 /// The acts on the selected row: the list takes their keys.
 const ROW_ACTS: [&str; 5] = [keymap::DONE, keymap::ARCHIVE, keymap::READ, keymap::FLAG, keymap::DELETE];
 
-/// The keys that run under the event editor: what comes over it (the palette, the settings, Shortcuts) and the look
+/// The keys that run under the event editor: what comes over it (the command line's results, the settings, Shortcuts) and the look
 /// of the window. Nothing opens, shows or acts on what lies under it, nor leaves the calendar while it is open.
 const EDITOR_KEYS: [&str; 7] =
     [keymap::PALETTE, keymap::SETTINGS, keymap::SHORTCUTS, keymap::LIGHT, keymap::DARK, keymap::SYSTEM_MODE, keymap::MOTION];

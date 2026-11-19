@@ -48,7 +48,7 @@ use crate::component::pill::pill;
 use crate::component::segmented::segmented_for;
 use crate::component::tag::TagKind;
 use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
-use crate::component::{avatar, button, field, galley, popup, tooltip};
+use crate::component::{avatar, button, galley, popup};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, Group, GroupKind, InboxView, Leaving, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState, Waiting};
@@ -58,11 +58,6 @@ use crate::tr;
 
 /// The rows a group shows before "Show all".
 pub(super) const GROUP_ROWS: usize = 3;
-
-/// The search field's id, so a shortcut can focus it.
-pub(super) fn search_id() -> egui::Id {
-    egui::Id::unique("mail-search")
-}
 
 /// What the header asked for this frame.
 #[derive(Debug, Default)]
@@ -164,34 +159,18 @@ fn search_head(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) {
     });
 }
 
-/// The header above the list: the title, whose mail and how many, the search field, and the pills under them.
-pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, search: &mut String) -> Header {
+/// The header above the list: the title, whose mail and how many, and the pills under them (the search is the command
+/// line's).
+pub(super) fn header(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Header {
     let p = &theme.palette;
-    let mut changed = None;
     ui.add_space(theme.spacing.s1);
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.label(RichText::new(mailbox.title()).font(theme.fonts.title.id()).color(p.ink));
             ui.label(theme.fonts.mono_s.rich(&subtitle(mailbox)).color(p.muted));
         });
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if !search.is_empty() && button::text(ui, theme, keymap, tr!("Clear"), None, false).clicked() {
-                search.clear();
-                changed = Some(String::new());
-            }
-            let field = field::search(ui, theme, search_id(), search, tr!("Search"), super::FOLDER_PANE * 0.75);
-            let response = tooltip::attach(field, theme, keymap, tr!("Search mail"), Some(keymap::FIND));
-            if response.changed() {
-                changed = Some(search.clone());
-            }
-            // Esc empties the field, unless a float over it takes the key.
-            if (response.has_focus() || response.lost_focus()) && popup::escape(ui.ctx()) {
-                search.clear();
-                changed = Some(String::new());
-            }
-        });
     });
-    let mut asked = Header { searched: changed, ..Header::default() };
+    let mut asked = Header::default();
     pills(ui, theme, mailbox, &mut asked);
     asked
 }
@@ -204,19 +183,17 @@ fn subtitle(mailbox: &Mailbox) -> String {
     }
 }
 
-/// The narrowest the list gets, its pane's left margin left out, with its own head (the title and the line under it
-/// beside the search field, and Clear while something is searched) and each group's head whole (index, name, how many
+/// The narrowest the list gets, its pane's left margin left out, with its own head (the title and the line under it)
+/// and each group's head whole (index, name, how many
 /// show and "show all" in Smart, "done all" and the unread count), as [`header`] and [`head`] lay them out: the head
 /// 16 in at each side, a group's head across the list, the line at its left. Never more than the list's default
 /// width: a head that does not fit there is not helped by hiding the list.
-pub(super) fn least_width(ui: &Ui, theme: &Theme, mailbox: &Mailbox, search: &str) -> f32 {
+pub(super) fn least_width(ui: &Ui, theme: &Theme, mailbox: &Mailbox) -> f32 {
     let s = &theme.spacing;
     let p = &theme.palette;
-    let gap = ui.spacing().item_spacing.x;
     let title = galley(ui, &mailbox.title(), theme.fonts.title, p.ink).size().x;
     let under = galley(ui, &subtitle(mailbox), theme.fonts.mono_s, p.muted).size().x;
-    let clear = if search.is_empty() { 0.0 } else { button::text_width(ui, theme, tr!("Clear")) + gap };
-    let head = s.s4 * 2.0 + title.max(under).ceil() + gap + super::FOLDER_PANE * 0.75 + clear;
+    let head = s.s4 * 2.0 + title.max(under).ceil();
     // The line at the list's left stands before its heads.
     (head.max(group_heads_width(ui, theme, mailbox)) + 1.0).min(super::LIST_WIDTH + 1.0)
 }

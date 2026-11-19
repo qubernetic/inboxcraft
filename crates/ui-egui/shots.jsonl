@@ -136,11 +136,11 @@
 {"out": "docs/images/list-toast-dark.png", "mode": "dark", "size": [1400, 860], "step": 1, "act": "done"}
 # The reader on the design system (E1.17b): the mail-action toolbar, the subject with who wrote, the
 # thread as cards and the open message's attachments with Reply, Reply all and Forward, in the full-width reader.
-# The command palette, the Shortcuts page (one action waiting for a key) and the calendar's empty state (E3.10).
-{"out": "docs/images/palette-light.png", "mode": "light", "size": [1200, 820], "palette": ""}
-{"out": "docs/images/palette-dark.png", "mode": "dark", "size": [1200, 820], "palette": ""}
-{"out": "docs/images/palette-mode-light.png", "mode": "light", "size": [1200, 820], "palette": "mode"}
-{"out": "docs/images/palette-mode-dark.png", "mode": "dark", "size": [1200, 820], "palette": "mode"}
+# The command line's commands, the Shortcuts page (one action waiting for a key) and the calendar's empty state (E3.10).
+{"out": "docs/images/command-line-light.png", "mode": "light", "size": [1200, 820], "command": ">"}
+{"out": "docs/images/command-line-dark.png", "mode": "dark", "size": [1200, 820], "command": ">"}
+{"out": "docs/images/command-line-mode-light.png", "mode": "light", "size": [1200, 820], "command": ">mode"}
+{"out": "docs/images/command-line-mode-dark.png", "mode": "dark", "size": [1200, 820], "command": ">mode"}
 {"out": "docs/images/shortcuts-light.png", "mode": "light", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
 {"out": "docs/images/shortcuts-dark.png", "mode": "dark", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
 {"out": "docs/images/calendar-empty-light.png", "mode": "light", "size": [1200, 820], "first": true, "calendar": true}

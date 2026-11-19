@@ -377,11 +377,11 @@ fn the_picture_credential_store_takes_and_keeps_nothing() {
 }
 
 #[test]
-fn a_shot_shows_the_palette_the_shortcuts_page_and_the_calendar() {
+fn a_shot_shows_the_command_line_the_shortcuts_page_and_the_calendar() {
     let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
     for place in [
-        r#""palette": """#,
-        r#""palette": "mode""#,
+        r#""command": ">""#,
+        r#""command": ">mode""#,
         r#""shortcuts": true"#,
         r#""shortcuts": true, "capture": "ui.calendar.show""#,
         r#""calendar": true"#,
@@ -393,7 +393,7 @@ fn a_shot_shows_the_palette_the_shortcuts_page_and_the_calendar() {
         let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", {bad}}}"#))).unwrap_err().to_string();
         assert!(error.contains("is not an action on the Shortcuts page"), "{error}");
     }
-    for place in [r#""palette": "x""#, r#""calendar": true"#, r#""shortcuts": true"#] {
+    for place in [r#""command": "x""#, r#""calendar": true"#, r#""shortcuts": true"#] {
         let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {place}}}"#))).unwrap_err().to_string();
         assert!(error.contains("has no window"), "{error}");
     }
