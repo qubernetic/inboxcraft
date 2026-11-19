@@ -281,8 +281,22 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
         };
         let note = note.map(|note| crate::component::galley(ui, &note, theme.fonts.mono_s, p.muted));
         let note_room = note.as_ref().map_or(0.0, |note| note.size().x + NOTE_GAP);
+        // Where the room is short the note gives way first, then the title takes its short form; only that is cut.
         let words = calendar.title();
-        let title = crate::component::cut(ui, &words, theme.fonts.heading, p.ink, (room - note_room).max(1.0));
+        let short = calendar.short_title();
+        let laid = |text: &str| crate::component::galley(ui, text, theme.fonts.heading, p.ink);
+        let (whole, brief) = (laid(&words), laid(&short));
+        let (title, note) = if whole.size().x + note_room <= room {
+            (whole, note)
+        } else if whole.size().x <= room {
+            (whole, None)
+        } else if brief.size().x + note_room <= room {
+            (brief, note)
+        } else if brief.size().x <= room {
+            (brief, None)
+        } else {
+            (crate::component::cut(ui, &short, theme.fonts.heading, p.ink, room.max(1.0)), None)
+        };
         let middle = inner.center().y;
         let wide = title.size().x;
         let ppp = ui.pixels_per_point();

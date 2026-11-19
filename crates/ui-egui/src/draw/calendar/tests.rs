@@ -399,6 +399,8 @@ fn the_week_drawn_follows_the_rule_set_in_the_session_with_today_in_it() {
         ),
     ] {
         let mut harness = on_calendar(egui::Theme::Light);
+        // The frame's 1440: beside the index, at 1200 the toolbar has no room for the week's note.
+        harness.set_size(vec2(1440.0, 900.0));
         {
             let (calendar, mailbox) = harness.state_mut().calendar_mut();
             mailbox.run("week.set", &serde_json::from_str(rule).unwrap()).unwrap();

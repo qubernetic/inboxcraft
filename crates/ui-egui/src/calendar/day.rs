@@ -237,6 +237,29 @@ pub fn short(day: Day) -> String {
     tr!("{date} {month}", date = day.date(), month = month_short(day.month()))
 }
 
+/// `day` short, without its year: `Thu 5 Nov`.
+#[must_use]
+pub fn short_dated(day: Day) -> String {
+    tr!("{weekday} {date} {month}", weekday = weekday_short(day.weekday()), date = day.date(), month = month_short(day.month()))
+}
+
+/// The days `first` to `last` short, without the year, for a title with little room: `2 – 8 Nov`, `30 Nov – 6 Dec`.
+#[must_use]
+pub fn span_short(first: Day, last: Day) -> String {
+    let to_month = month_short(last.month());
+    if first.month() == last.month() && first.year() == last.year() {
+        tr!("{from} – {to} {to_month}", from = first.date(), to = last.date(), to_month = to_month)
+    } else {
+        tr!(
+            "{from} {from_month} – {to} {to_month}",
+            from = first.date(),
+            from_month = month_short(first.month()),
+            to = last.date(),
+            to_month = to_month
+        )
+    }
+}
+
 #[cfg(test)]
 #[path = "day_tests.rs"]
 mod tests;

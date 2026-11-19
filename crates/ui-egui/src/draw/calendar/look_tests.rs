@@ -20,12 +20,15 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn window(view: View) -> Harness<'static, InboxApp> {
+    window_at(view, vec2(1440.0, 900.0), egui::Theme::Dark)
+}
+
+fn window_at(view: View, size: egui::Vec2, theme: egui::Theme) -> Harness<'static, InboxApp> {
     let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.show_calendar();
     let (calendar, mailbox) = app.calendar_mut();
     calendar.set_view(mailbox, view);
-    let mut harness =
-        Harness::builder().with_size(vec2(1440.0, 900.0)).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    let mut harness = Harness::builder().with_size(size).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness
 }
@@ -79,6 +82,51 @@ fn the_toolbar_s_note_stands_20_after_the_title() {
     let title = found.iter().find(|(_, _, text)| text == "2 – 8 November 2026").unwrap();
     let note = found.iter().find(|(_, _, text)| text.starts_with("week ")).unwrap();
     assert!((note.0 - (title.0 + title.1) - 20.0).abs() < 0.01, "title {title:?}, note {note:?}");
+}
+
+/// The texts of the last frame as drawn (a cut text shows its ellipsis): where each starts, how wide, what it shows.
+fn drawn(harness: &Harness<'static, InboxApp>) -> Vec<(f32, f32, String)> {
+    harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => {
+                let shown = text.galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+                Some((text.pos.x, text.galley.size().x, shown))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn in_the_pictures_window_the_title_stays_readable_its_note_giving_way_first() {
+    // The pictures' 1200 × 820 beside the index: the view is about 710 wide, its controls take all but about 140.
+    let cases = [
+        (View::Day, "Thursday 5 November 2026", "Thu 5 Nov", "Previous day"),
+        (View::Week, "2 – 8 November 2026", "2 – 8 Nov", "Previous week"),
+        (View::Month, "November 2026", "Nov 2026", "Previous month"),
+        (View::Agenda, "From today", "From today", "Earlier days"),
+    ];
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        for (view, full, short, back) in cases {
+            let harness = window_at(view, vec2(1200.0, 820.0), theme);
+            let back = harness.get_by_role_and_label(Role::Button, back).rect();
+            let found = drawn(&harness);
+            let title = found.iter().find(|(_, _, text)| text == full || text == short);
+            let Some((left, wide, _)) = title else { panic!("{view:?}: the title whole or short: {found:?}") };
+            assert!(left + wide <= back.left(), "{view:?}: the title {title:?} left of {back:?}");
+            let cut = found.iter().find(|(_, _, text)| text.ends_with('…') && short.chars().next().is_some_and(|first| text.starts_with(first)));
+            assert!(cut.is_none(), "{view:?}: nothing of the title cut: {cut:?}");
+            if let Some(note) = found.iter().find(|(_, _, text)| text.starts_with("week ") || text.ends_with(" days")) {
+                assert!(note.0 + note.1 <= back.left(), "{view:?}: a note shown is whole: {note:?}");
+            }
+        }
+    }
+    // At the frame's 1440 the whole title and its note stand as before.
+    let found = drawn(&window(View::Week));
+    assert!(found.iter().any(|(_, _, text)| text == "2 – 8 November 2026") && found.iter().any(|(_, _, text)| text == "week 45"), "{found:?}");
 }
 
 #[test]
