@@ -23,6 +23,7 @@ use egui::{Align, Id, Layout, Rect, Response, Role, ScrollArea, Sense, Ui, UiBui
 use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::{Appearance, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
+use inboxcraft_engine::shown::SettingsAsked;
 
 use super::paint::{Ring, focus_ring};
 use crate::component::button::{LinkSize, TextButton, link_sized};
@@ -1042,6 +1043,69 @@ pub(super) fn place(ui: &mut Ui, theme: &Theme, mut view: Sheet<'_>) -> Option<A
         }
     });
     asked
+}
+
+/// `ui.settings.open` with a page, as the palette's rows and the empty calendar's button run it, and the asks of the
+/// command whoever ran it (the control channel's too).
+impl super::InboxApp {
+    /// Runs `ui.settings.open` on `page` (a [`Section::id`]) as the window's own command, then shows what it asked.
+    pub(super) fn open_settings_on(&mut self, page: &'static str) {
+        // The command checks the page and answers every page: there is nothing for the banner.
+        let _answered = self.mailbox.run(crate::keymap::SETTINGS, &serde_json::json!({ "page": page }));
+        self.follow_settings_asked();
+    }
+
+    /// A page's row of the palette: the palette closes and the settings show that page.
+    pub(super) fn palette_page(&mut self, page: &'static str) {
+        self.palette.close();
+        self.open_settings_on(page);
+    }
+
+    /// Takes what `ui.settings.open` asked for since the last look: the owner's own asks are shown at once, in order;
+    /// of an agent's only the newest is kept, for [`Self::act_on_agent_ask`] at the frame's end.
+    pub fn follow_settings_asked(&mut self) {
+        for asked in self.mailbox.take_settings_asked() {
+            if asked.by_agent {
+                self.mailbox.hold_agent_ask(asked);
+            } else {
+                self.apply_settings_ask(asked);
+            }
+        }
+    }
+
+    /// Shows the agent's ask held, unless `owner_acted`: the owner's own key or press on the settings this frame wins,
+    /// and the ask goes. At most one agent's ask a frame.
+    pub fn act_on_agent_ask(&mut self, owner_acted: bool) {
+        if let Some(asked) = self.mailbox.take_agent_ask()
+            && !owner_acted
+        {
+            self.apply_settings_ask(asked);
+        }
+    }
+
+    /// Whether an agent's ask waits for the frame's end.
+    #[must_use]
+    pub fn holds_agent_ask(&self) -> bool {
+        self.mailbox.holds_agent_ask()
+    }
+
+    /// One ask of `ui.settings.open`, the one way the settings are shown by it and by their key. The owner's: the page
+    /// named, also while the settings show; a page that names none, the page last shown; bare (the key), the settings
+    /// on the page last shown or, while they show, the place the owner came from. An agent's takes nothing from the
+    /// owner: it never toggles away (bare, it shows the settings on the page last shown, and changes nothing while they
+    /// show), and it is passed over while the account form holds what the owner typed or a key is waited for.
+    pub(super) fn apply_settings_ask(&mut self, asked: SettingsAsked) {
+        if asked.by_agent {
+            if self.settings.capturing().is_some() || self.onboarding.holds_typing() {
+                return;
+            }
+            self.open_settings_page(asked.page);
+        } else if asked.bare && self.settings.is_open() {
+            self.leave_settings();
+        } else {
+            self.open_settings_page(asked.page);
+        }
+    }
 }
 
 #[cfg(test)]

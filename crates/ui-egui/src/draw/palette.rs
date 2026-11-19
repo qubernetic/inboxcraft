@@ -4,15 +4,17 @@
 //! The command palette over the dimmed window: a float near the top with the field, the actions that match it (each
 //! with its icon, its name and its key) and a line on the keys that work in it. Typing narrows the list, the arrow
 //! keys move the pick, Enter or a press runs an action; Escape or a press beside the float closes it. An action that
-//! cannot run here (Done with no message selected) is listed faded and runs nothing.
+//! cannot run here (Done with no message selected) is listed faded and runs nothing. A page of the settings
+//! ("Settings: Accounts") has no key of its own (its key column is empty) and would rest where Settings rests: it is
+//! checked against `runnable` by the same id, `ui.settings.open`, which no state of the window refuses today.
 
 use egui::{Area, Frame, Id, Key, Modifiers, Order, Rect, Role, ScrollArea, Sense, Shape, Ui, WidgetInfo, pos2, vec2};
 
 use crate::component::field;
 use crate::component::{cut, galley, margin};
 use crate::draw::paint::{self, FloatEdge};
-use crate::keymap::{Action, Keymap};
-use crate::palette::{MAX_CHARS, Palette};
+use crate::keymap::Keymap;
+use crate::palette::{MAX_CHARS, Palette, Row};
 use crate::theme::Theme;
 use crate::tr;
 
@@ -27,6 +29,8 @@ const ROWS: f32 = 8.0;
 pub(super) enum Asked {
     /// Run the action.
     Run(&'static str),
+    /// Show the settings on the page (`ui.settings.open` with its `page`).
+    Page(&'static str),
     /// Move the pick down (`true`) or up.
     Step(bool),
     /// The text changed.
@@ -39,13 +43,19 @@ pub(super) fn field_id() -> Id {
     Id::unique("palette-field")
 }
 
-/// One action's row: its icon, its name and its key; `picked` on the selection fill, faded when it cannot `run`.
-fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, picked: bool, run: bool) -> egui::Response {
+/// What running `row` asks for.
+fn run_row(row: &Row) -> Asked {
+    row.page.map_or(Asked::Run(row.id), Asked::Page)
+}
+
+/// One row: its icon, its name and its key (none for a page); `picked` on the selection fill, faded when it cannot
+/// `run`.
+fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Row, picked: bool, run: bool) -> egui::Response {
     let p = &theme.palette;
     let s = &theme.spacing;
     let height = theme.boxes().menu_row;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), if run { Sense::click() } else { Sense::hover() });
-    response.widget_info(|| WidgetInfo::selected(Role::MenuItem, run, picked, action.name));
+    response.widget_info(|| WidgetInfo::selected(Role::MenuItem, run, picked, &action.name));
     if picked {
         ui.scroll_to_rect(rect, None);
     }
@@ -59,14 +69,14 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, picked: boo
         let icon = Rect::from_center_size(pos2(rect.left() + s.s2 + side / 2.0, rect.center().y), vec2(side, side));
         crate::iconset::paint(painter, icon, action.icon, ink);
         let mut right = rect.right() - s.s2;
-        if let Some(chip) = keymap.chip(ui.ctx(), action.id) {
+        if let Some(chip) = keymap.chip(ui.ctx(), action.id).filter(|_| action.page.is_none()) {
             let chip = galley(ui, &chip, theme.fonts.caption, p.muted);
             right -= chip.size().x;
             painter.galley(pos2(right, rect.center().y - chip.size().y / 2.0), chip, p.muted);
             right -= s.s4;
         }
         let left = icon.right() + s.s2;
-        let name = cut(ui, action.name, theme.fonts.body, ink, right - left);
+        let name = cut(ui, &action.name, theme.fonts.body, ink, right - left);
         painter.galley(pos2(left, rect.center().y - name.size().y / 2.0), name, ink);
     }
     response
@@ -88,11 +98,11 @@ pub(super) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, palette:
         )
     });
     let matches = palette.matches();
-    let can = |action: &Action| runnable.contains(&action.id);
+    let can = |action: &Row| runnable.contains(&action.id);
     let mut asked = if escape {
         Some(Asked::Close)
     } else if enter {
-        palette.chosen().filter(|action| can(action)).map(|action| Asked::Run(action.id))
+        palette.chosen().filter(|action| can(action)).map(|action| run_row(&action))
     } else if down || up {
         Some(Asked::Step(down))
     } else {
@@ -145,7 +155,7 @@ pub(super) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, palette:
                 crate::component::scroll::show(ui, theme, ScrollArea::vertical().max_height(height).auto_shrink([false, true]), |ui| {
                     for (index, action) in matches.iter().enumerate() {
                         if row(ui, theme, keymap, action, index == palette.picked(), can(action)).clicked() {
-                            asked = Some(Asked::Run(action.id));
+                            asked = Some(run_row(action));
                         }
                     }
                 });

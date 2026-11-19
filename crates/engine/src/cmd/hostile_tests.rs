@@ -152,6 +152,31 @@ fn calendar_writes_with_one_hostile_field_never_panic() {
     }
 }
 
+/// `ui.settings.open` with a page that names no page: every junk value, 10 000 characters, a page with control
+/// characters or spaces round it, another case or a planned page. Each answers with no page (the window shows the page
+/// last shown) and never panics or echoes the junk.
+#[test]
+fn open_with_a_junk_page_never_panics() {
+    let mut pages = junk();
+    pages.extend(
+        ["accounts\u{0}", " accounts", "accounts ", "Accounts", "ACCOUNTS", "account", "ai", "plugins", "\u{202e}accounts", "accounts\r\n"]
+            .into_iter()
+            .map(|page| json!(page)),
+    );
+    pages.push(json!("a".repeat(10_000)));
+    pages.push(json!(format!("accounts{}", " ".repeat(10_000))));
+    for mut session in [session(), sample_session()] {
+        for page in &pages {
+            for caller in [Caller::Owner, Caller::Agent] {
+                let answer = session.run_as(caller, "ui.settings.open", &json!({ "page": page }));
+                assert_eq!(answer, Ok(json!({ "page": null, "window": false })), "{page}");
+            }
+            let asked = session.take_settings_asked();
+            assert!(asked.len() == 2 && asked.iter().all(|asked| asked.page.is_none() && (!asked.bare || page.is_null())), "{page}: {asked:?}");
+        }
+    }
+}
+
 /// Account 1's folders past the sending store's (INBOX 1, Sent 2, Archive 3, Drafts 6; account 2: INBOX 4, Sent 5).
 const TRASH: u64 = 7;
 const JUNK: u64 = 8;

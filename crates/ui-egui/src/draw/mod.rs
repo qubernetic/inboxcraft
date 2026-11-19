@@ -860,14 +860,8 @@ impl InboxApp {
                     composer.toggle_fold();
                 }
             }
-            // A place: pressed again it shows the place the owner came from.
-            keymap::SETTINGS => {
-                if self.settings.is_open() {
-                    self.leave_settings();
-                } else {
-                    self.open_settings();
-                }
-            }
+            // A place: pressed again it shows the place the owner came from (the owner's bare `ui.settings.open`).
+            keymap::SETTINGS => self.apply_settings_ask(inboxcraft_engine::shown::SettingsAsked { page: None, bare: true, by_agent: false }),
             keymap::SHORTCUTS => self.open_shortcuts(),
             keymap::UNDO => self.undo(),
             keymap::FULL_WIDTH => {
@@ -1244,9 +1238,11 @@ impl InboxApp {
 
     /// Applies what was pressed on the calendar screen.
     fn apply_calendar(&mut self, asked: Vec<calendar::Asked>) {
+        let accounts = asked.contains(&calendar::Asked::Accounts);
         let (calendar, mailbox) = (&mut self.calendar, &mut self.mailbox);
         for asked in asked {
             match asked {
+                calendar::Asked::Accounts => {}
                 calendar::Asked::View(view) => calendar.set_view(mailbox, view),
                 calendar::Asked::Step(forward) => calendar.step(mailbox, forward),
                 calendar::Asked::Today => calendar.go_today(mailbox),
@@ -1267,6 +1263,9 @@ impl InboxApp {
                     calendar.sync_now(mailbox);
                 }
             }
+        }
+        if accounts {
+            self.open_settings_on("accounts");
         }
     }
 
@@ -2653,8 +2652,7 @@ impl InboxApp {
     /// The calendar screen: its empty state on the calendar's card until there are calendars; what was pressed.
     fn calendar_screen(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes) -> Vec<calendar::Asked> {
         if self.calendar.is_empty() {
-            calendar::empty(ui, theme, layers);
-            return Vec::new();
+            return calendar::empty(ui, theme, &self.keymap, layers);
         }
         // The palette lies over the screen's floats: it has the keys.
         let over = self.palette.is_open();
@@ -2834,6 +2832,7 @@ impl InboxApp {
                 self.palette.close();
                 return Some(id);
             }
+            palette::Asked::Page(page) => self.palette_page(page),
             palette::Asked::Step(down) => {
                 let count = self.palette.matches().len();
                 self.palette.step(down, count);

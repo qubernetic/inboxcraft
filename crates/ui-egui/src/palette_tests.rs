@@ -71,8 +71,34 @@ fn a_screen_s_own_actions_are_listed_on_that_screen_alone() {
     let calendar_keys = |palette: &super::Palette| palette.matches().iter().filter(|action| keymap::CALENDAR_KEYS.contains(&action.id)).count();
     palette.set_screen(keymap::Scope::Mail);
     palette.set_query("calendar");
-    assert_eq!(palette.matches().iter().map(|action| action.id).collect::<Vec<_>>(), vec![keymap::CALENDAR], "on the mail");
+    let ids = |palette: &super::Palette| palette.matches().iter().map(|row| row.page.unwrap_or(row.id)).collect::<Vec<_>>();
+    assert_eq!(ids(&palette), vec![keymap::CALENDAR, "calendar"], "on the mail: the action and the settings' page");
     palette.set_screen(keymap::Scope::Calendar);
     assert_eq!(calendar_keys(&palette), keymap::CALENDAR_KEYS.len(), "on the calendar its six keys are listed");
     assert!(palette.matches().iter().any(|action| action.id == keymap::CALENDAR));
+}
+
+#[test]
+fn the_settings_nine_pages_follow_the_actions_in_the_settings_order() {
+    let all = super::rows("");
+    let pages: Vec<&str> = all.iter().filter_map(|row| row.page).collect();
+    assert_eq!(pages, inboxcraft_engine::shown::SETTINGS_PAGES, "one row a page, in order");
+    assert_eq!(all.len(), actions().len() + 9);
+    assert!(all.iter().skip(actions().len()).all(|row| row.page.is_some() && row.id == keymap::SETTINGS), "after every action");
+    assert!(all.iter().take(actions().len()).all(|row| row.page.is_none()));
+    assert_eq!(super::rows(""), all, "the same order every time");
+    let found = |query: &str| super::rows(query).into_iter().map(|row| (row.page, row.name.into_owned())).collect::<Vec<_>>();
+    assert_eq!(found("accounts"), vec![(Some("accounts"), "Settings: Accounts".to_owned())], "by the section's name");
+    assert_eq!(found("SETTINGS: TRIAGE"), vec![(Some("triage"), "Settings: Triage".to_owned())]);
+    let settings = found("settings");
+    assert_eq!(settings.first().map(|row| row.1.as_str()), Some("Settings"), "the action first, its name starting with the text");
+    assert_eq!(settings.iter().filter(|row| row.0.is_some()).count(), 9, "\"settings\" finds every page");
+}
+
+#[test]
+fn a_long_hostile_text_is_matched_on_its_first_characters_only() {
+    let head = format!("settings{}", " ".repeat(MAX_CHARS));
+    let hostile = format!("{head}zzz{}", "\u{202e}x".repeat(10_000));
+    assert_eq!(super::rows(&hostile), super::rows(&head), "nothing past the first {MAX_CHARS} characters is read");
+    assert_eq!(super::rows(&hostile).iter().filter(|row| row.page.is_some()).count(), 9);
 }

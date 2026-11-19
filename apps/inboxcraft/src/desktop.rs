@@ -31,6 +31,12 @@ use crate::control::Call;
 use crate::instance::Request;
 use crate::notify::{Click, Deliver, shown};
 
+/// What the settings show: whether, which page, and the action waiting for a key.
+fn settings_now(app: &InboxApp) -> (bool, inboxcraft_ui_egui::settings::Section, Option<&'static str>) {
+    let settings = app.settings();
+    (settings.is_open(), settings.section(), settings.capturing())
+}
+
 /// How often InboxCraft without a window looks for the workers' events.
 pub const WINDOWLESS_TICK: Duration = Duration::from_millis(500);
 
@@ -181,6 +187,21 @@ impl Desktop {
         }
         self.keep_in_step();
         self.app.wake_when_due(ctx);
+        if self.app.holds_agent_ask() {
+            ctx.request_repaint();
+        }
+    }
+
+    /// Draws a frame of the window, then shows an agent's ask that came in before it ([`InboxApp::act_on_agent_ask`])
+    /// unless the owner's own key or press changed the settings in this frame: the owner's wins.
+    pub fn frame(&mut self, ui: &mut egui::Ui) {
+        let before = settings_now(&self.app);
+        self.app.ui(ui);
+        let acted = self.app.holds_agent_ask();
+        self.app.act_on_agent_ask(settings_now(&self.app) != before);
+        if acted {
+            ui.ctx().request_repaint();
+        }
     }
 
     /// Without a window: waits up to `patience` for a request and answers it, then keeps the mail in step. With nobody
@@ -235,6 +256,12 @@ impl Desktop {
                 eprintln!("{line}");
             }
             call.answer(answer.map_err(|error| Failure::new(error.code(), error.to_string())));
+        }
+        // `ui.settings.open` asks the window to show the settings: the owner's at once, an agent's newest at the end of
+        // the next frame ([`Desktop::frame`]), or at once without a window, where the owner cannot act.
+        self.app.follow_settings_asked();
+        if !self.window {
+            self.app.act_on_agent_ask(false);
         }
         self.app.pump();
         let notices = self.app.mailbox_mut().take_notices();

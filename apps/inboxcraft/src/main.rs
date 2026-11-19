@@ -43,7 +43,7 @@ impl eframe::App for Window<'_> {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.0.app_mut().ui(ui);
+        self.0.frame(ui);
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {

@@ -41,15 +41,20 @@ pub fn empty_state(ui: &mut Ui, theme: &Theme, label: &str, title: &str, help: &
     block(ui, theme, label, title, help, None);
 }
 
+/// [`empty_state`], and the block's box: what a pane places under it (the empty calendar's button).
+pub fn empty_state_box(ui: &mut Ui, theme: &Theme, label: &str, title: &str, help: &str) -> Rect {
+    block(ui, theme, label, title, help, None).0
+}
+
 /// [`empty_state`] with `action` under the help, its lines on the left as its sheet draws them; the action's response.
 pub fn empty_state_with(ui: &mut Ui, theme: &Theme, label: &str, title: &str, help: &str, action: TextButton<'_>, keymap: &Keymap) -> Response {
-    let response = block(ui, theme, label, title, help, Some((action, keymap)));
+    let (_, response) = block(ui, theme, label, title, help, Some((action, keymap)));
     // `block` always draws a given action; a pane with no room for it still answers with the block's own response.
     response.unwrap_or_else(|| ui.response())
 }
 
-/// The block in the middle of `ui`'s room: the action's response when there is one.
-fn block(ui: &mut Ui, theme: &Theme, label: &str, title: &str, help: &str, action: Option<(TextButton<'_>, &Keymap)>) -> Option<Response> {
+/// The block in the middle of `ui`'s room: its box, and the action's response when there is one.
+fn block(ui: &mut Ui, theme: &Theme, label: &str, title: &str, help: &str, action: Option<(TextButton<'_>, &Keymap)>) -> (Rect, Option<Response>) {
     let p = &theme.palette;
     let f = &theme.fonts;
     let centred = action.is_none();
@@ -82,10 +87,10 @@ fn block(ui: &mut Ui, theme: &Theme, label: &str, title: &str, help: &str, actio
     } else {
         top += text_high + GAP;
     }
-    let (button, keymap) = action?;
+    let Some((button, keymap)) = action else { return (rect, None) };
     let at = Rect::from_min_size(pos2(rect.left() + PAD_X, top + ACTION_TOP), vec2(inner, control_side(theme)));
     let mut child = ui.new_child(UiBuilder::new().max_rect(at).layout(egui::Layout::left_to_right(Align::Center)));
-    Some(button.show(&mut child, theme, keymap))
+    (rect, Some(button.show(&mut child, theme, keymap)))
 }
 
 #[cfg(test)]

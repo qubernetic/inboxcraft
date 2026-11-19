@@ -196,3 +196,57 @@ fn the_desktop_s_frame_keeps_the_own_frame_last_on_to_come_back_to() {
         assert_eq!(answer["appearance"]["own_frame"], own.id());
     }
 }
+
+#[test]
+fn settings_open_is_safe_and_asks_the_window_for_the_page_named() {
+    use crate::shown::{SETTINGS_PAGES, SettingsAsked};
+    let mut session = session();
+    assert_eq!(session.registry().get("ui.settings.open").unwrap().class, Some(AgentClass::Safe));
+    for page in SETTINGS_PAGES {
+        let answer = session.run_as(Caller::Agent, "ui.settings.open", &json!({ "page": page })).unwrap();
+        assert_eq!(answer, json!({ "page": page, "window": false }));
+        assert_eq!(session.take_settings_asked(), vec![SettingsAsked { page: Some(page), bare: false, by_agent: true }], "{page}");
+    }
+    for bare in [json!({}), json!(null), json!({ "page": null })] {
+        assert_eq!(session.run_as(Caller::Agent, "ui.settings.open", &bare).unwrap(), json!({ "page": null, "window": false }), "{bare}");
+        assert_eq!(session.take_settings_asked(), vec![SettingsAsked { page: None, bare: true, by_agent: true }], "{bare}: as the key");
+    }
+    session.run_as(Caller::Owner, "ui.settings.open", &json!({ "page": "about" })).unwrap();
+    assert_eq!(session.take_settings_asked(), vec![SettingsAsked { page: Some("about"), bare: false, by_agent: false }], "the owner's own");
+    assert!(session.take_settings_asked().is_empty(), "taken once");
+}
+
+#[test]
+fn settings_open_refuses_other_parameters_in_its_own_words() {
+    let mut session = session();
+    let hostile = "\u{202e}\r\n\u{0}evil";
+    for params in [json!({ hostile: 1 }), json!({ "page": "accounts", hostile: true }), json!([hostile]), json!(hostile), json!(1)] {
+        let error = session.run_as(Caller::Agent, "ui.settings.open", &params).unwrap_err();
+        assert!(matches!(error, EngineError::BadParams { .. }), "{params}: {error:?}");
+        assert!(!error.to_string().contains("evil"), "the junk is not echoed: {error}");
+    }
+    assert!(session.take_settings_asked().is_empty(), "a refused call asks for nothing");
+}
+
+#[test]
+fn the_window_s_asks_are_kept_up_to_a_few_while_nobody_takes_them() {
+    use crate::shown::MAX_ASKED;
+    let mut session = session();
+    for _ in 0..MAX_ASKED * 3 {
+        session.run("ui.settings.open", &json!({ "page": "about" })).unwrap();
+    }
+    session.run("ui.settings.open", &json!({ "page": "accounts" })).unwrap();
+    let asked = session.take_settings_asked();
+    assert_eq!(asked.len(), MAX_ASKED);
+    assert_eq!(asked.last().and_then(|asked| asked.page), Some("accounts"), "the newest kept");
+}
+
+#[test]
+fn settings_open_says_whether_a_window_takes_the_ask() {
+    let mut session = session();
+    let headless = session.run_as(Caller::Agent, "ui.settings.open", &json!({ "page": "accounts" })).unwrap();
+    assert_eq!(headless["window"], json!(false), "on a store nothing is shown, and the answer says so");
+    session.set_window(true);
+    let shown = session.run_as(Caller::Agent, "ui.settings.open", &json!({ "page": "accounts" })).unwrap();
+    assert_eq!(shown, json!({ "page": "accounts", "window": true }));
+}
