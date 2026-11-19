@@ -842,6 +842,12 @@ impl InboxApp {
         }
     }
 
+    /// Whether the command line's `>` may run the action `id`: as [`InboxApp::can_run`], but Send sends whatever draft is
+    /// drawn, floating too: from the line the keyboard is never in the composer.
+    fn can_run_from_the_line(&self, id: &str) -> bool {
+        if id == keymap::SEND { self.composer_drawn() } else { self.can_run(id) }
+    }
+
     /// Runs the action `id` of [`keymap::actions`], as its key, the index or the palette do; an action that cannot run
     /// now ([`InboxApp::can_run`]) does nothing.
     pub fn run_action(&mut self, ctx: &egui::Context, id: &str) {
@@ -2726,7 +2732,7 @@ impl InboxApp {
                         .into_iter()
                         .filter(|row| keymap::scope(row.id).meets(screen))
                         .map(|row| {
-                            let refused = (!self.can_run(row.id) || soon::blocked(&ctx, row.id)).then(|| command::refusal(row.id));
+                            let refused = (!self.can_run_from_the_line(row.id) || soon::blocked(&ctx, row.id)).then(|| command::refusal(row.id));
                             command::Listed { row, refused }
                         })
                         .collect();
@@ -3073,6 +3079,15 @@ impl InboxApp {
     /// Applies what was asked for in the command line; the action to run, when one was chosen.
     fn apply_command(&mut self, ctx: &egui::Context, asked: command::Asked) -> Option<&'static str> {
         match asked {
+            // Send from the line sends the draft drawn, floating or docked, on the owner's Enter or press alone (the
+            // line runs nothing of an agent's); the keyboard is in the line, not in the composer, so the key's rule
+            // ([`InboxApp::can_run`]) is not the one that decides here.
+            command::Asked::Run(keymap::SEND) => {
+                self.command.close(ctx);
+                if self.can_run_from_the_line(keymap::SEND) && !soon::blocked(ctx, keymap::SEND) {
+                    self.send_composer();
+                }
+            }
             command::Asked::Run(id) => {
                 self.command.close(ctx);
                 return Some(id);

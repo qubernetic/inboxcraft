@@ -1906,3 +1906,32 @@ fn on_the_settings_the_undo_key_takes_back_a_send_during_its_countdown() {
     harness.run();
     assert!(harness.state().counting().is_none(), "Ctrl+Z takes the send back, as the countdown's Undo names it");
 }
+
+#[test]
+fn send_from_the_command_line_sends_a_floating_draft_and_an_agent_s_call_is_refused() {
+    let mut harness = sending();
+    let id = written(&mut harness);
+    // The draft floats over the mail, the keyboard out of it.
+    harness.state_mut().composer_mut().0.unwrap().set_floating(true);
+    harness.run();
+    let focused = harness.ctx.memory(|memory| memory.focused());
+    if let Some(focused) = focused {
+        harness.ctx.memory_mut(|memory| memory.surrender_focus(focused));
+    }
+    harness.run();
+    assert!(harness.state().composer().is_some_and(crate::compose::Composer::floating), "the draft floats");
+    // An agent's call to send it is refused, by the engine's command and by the window's: nothing goes.
+    let refused = harness.state_mut().mailbox_mut().run_for_agent("mail.send", &json!({ "id": id })).unwrap_err();
+    assert_eq!(refused.code(), "not_allowed");
+    assert!(harness.state_mut().mailbox_mut().run_for_agent(keymap::SEND, &json!({})).is_err(), "the window's Send is no agent's");
+    harness.run();
+    assert!(!queued(&mut harness, id), "an agent sent the draft");
+    // The owner's `>` Send sends it.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    harness.state_mut().command_mut().set_text(">send the message");
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(queued(&mut harness, id), "the owner's Send from the command line sent the floating draft");
+}

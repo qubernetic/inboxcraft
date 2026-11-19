@@ -123,7 +123,9 @@ fn palette_list(harness: &Harness<'static, InboxApp>, screen: keymap::Scope) -> 
         .into_iter()
         .filter(|row| keymap::scope(row.id).meets(screen))
         .map(|row| {
-            let runs = app.can_run(row.id) && !crate::component::soon::blocked(&harness.ctx, row.id);
+            // Send from the line sends any draft drawn, floating too.
+            let can = if row.id == keymap::SEND { app.composer().is_some() && !app.settings().is_open() } else { app.can_run(row.id) };
+            let runs = can && !crate::component::soon::blocked(&harness.ctx, row.id);
             (row.name.into_owned(), runs)
         })
         .collect()
