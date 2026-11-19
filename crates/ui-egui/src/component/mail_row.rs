@@ -120,6 +120,8 @@ pub struct MailRow<'a> {
     pub checked: bool,
     /// The hover action that gives way first when line one cannot hold them all ([`hover::actions_sparing`]).
     pub spare: Option<usize>,
+    /// A new row's unread square in its one blink's off phase (`docs/design.md`, "Motion", M4): not painted.
+    pub blink: bool,
 }
 
 /// What a mail row did this frame.
@@ -172,7 +174,7 @@ fn content(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &MailRow<'_>, drawn
     }
     if row.checked {
         check(ui, theme, rect);
-    } else if row.unread {
+    } else if row.unread && !row.blink {
         let square = Rect::from_min_size(pos2(rect.left() + SQUARE_LEFT, rect.top() + ((high - SQUARE) / 2.0).round()), vec2(SQUARE, SQUARE));
         ui.painter().rect_filled(square, 0.0, p.cyan_edge);
     }

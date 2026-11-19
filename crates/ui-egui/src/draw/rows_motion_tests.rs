@@ -275,3 +275,153 @@ fn at_off_a_snoozed_row_is_gone_at_once() {
     assert!(harness.query_by_role_and_label(Role::Button, "undo").is_some(), "the undo line shows");
     assert!(rests(&mut harness));
 }
+
+const ARRIVED: &str = "Teodor Vasquez";
+
+/// A new unread message from Teodor Vasquez comes in at the top of the list, as a sync brings it: its id.
+fn arrive(harness: &mut Harness<'static, InboxApp>) -> u64 {
+    let mut rows = harness.state().mailbox().messages().to_vec();
+    let mut new = rows[0].clone();
+    new.id = 9_999;
+    new.sender = ARRIVED.to_owned();
+    new.subject = "Draft logo for the bakery".to_owned();
+    new.seen = false;
+    rows.insert(0, new);
+    harness.state_mut().mailbox_mut().set_rows(rows);
+    harness.step();
+    9_999
+}
+
+/// The rect of message `id`'s row.
+fn row_of(harness: &Harness<'static, InboxApp>, id: u64) -> Rect {
+    let mailbox = harness.state().mailbox();
+    let row = mailbox.messages().iter().find(|row| row.id == id).unwrap();
+    harness.get_by_label(&mailbox.spoken(row)).rect()
+}
+
+/// The text of the row's line one that is as long as the sender's name, and its alpha.
+fn sender_in(harness: &Harness<'static, InboxApp>, rect: Rect) -> Option<(String, u8)> {
+    let count = ARRIVED.chars().count();
+    for clipped in &harness.output().shapes {
+        let mut found = None;
+        let mut look = |shape: &egui::Shape| {
+            if let egui::Shape::Text(text) = shape
+                && text.galley.job.text.chars().count() == count
+                && rect.contains(text.galley.rect.translate(text.pos.to_vec2()).center())
+            {
+                // An alpha of 0 to 255: the cast keeps it.
+                found = Some((text.galley.job.text.clone(), (text.opacity_factor * f32::from(text.fallback_color.a())) as u8));
+            }
+        };
+        match &clipped.shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(&mut look),
+            shape => look(shape),
+        }
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
+}
+
+/// Whether the unread square (6 × 6) is painted in `rect`, and its alpha.
+fn square_in(harness: &Harness<'static, InboxApp>, rect: Rect) -> Option<u8> {
+    let mut found = None;
+    for clipped in &harness.output().shapes {
+        let mut look = |shape: &egui::Shape| {
+            if let egui::Shape::Rect(square) = shape
+                && (square.rect.width() - 6.0).abs() < 0.1
+                && (square.rect.height() - 6.0).abs() < 0.1
+                && rect.contains(square.rect.center())
+                && square.fill.a() > 0
+            {
+                found = Some(square.fill.a());
+            }
+        };
+        match &clipped.shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(&mut look),
+            shape => look(shape),
+        }
+    }
+    found
+}
+
+/// How many of the sender's characters read, from the left.
+fn reads(seen: &str) -> usize {
+    seen.chars().zip(ARRIVED.chars()).take_while(|(a, b)| a == b).count()
+}
+
+#[test]
+fn at_off_a_new_row_is_there_in_the_frame_it_comes_in() {
+    let mut harness = window(Level::Off);
+    let count = harness.state().mailbox().list_count();
+    let id = arrive(&mut harness);
+    let rect = row_of(&harness, id);
+    assert_eq!(sender_in(&harness, rect).map(|(text, _)| text), Some(ARRIVED.to_owned()), "the row reads at once");
+    assert!(square_in(&harness, rect).is_some(), "unread, its square on");
+    assert_ne!(harness.state().mailbox().list_count(), count, "the count changed with it");
+    assert!(crate::component::tests::rests(&mut harness, 2));
+}
+
+#[test]
+fn at_full_a_new_row_decodes_in_over_300_ms_and_its_square_blinks_once() {
+    let mut harness = window(Level::Full);
+    let id = arrive(&mut harness);
+    let rect = row_of(&harness, id);
+    let (first, _) = sender_in(&harness, rect).unwrap();
+    assert_eq!(reads(&first), 0, "0 ms: in its place, every character a glyph: {first}");
+    harness.run_steps(12);
+    let (half, _) = sender_in(&harness, rect).unwrap();
+    assert!((3..=7).contains(&reads(&half)), "120 ms: resolving from the left: {half}");
+    harness.run_steps(12);
+    let (most, _) = sender_in(&harness, rect).unwrap();
+    assert!((10..14).contains(&reads(&most)), "240 ms: four fifths read: {most}");
+    assert!(square_in(&harness, rect).is_some(), "the square on while it decodes");
+    harness.run_steps(7);
+    assert_eq!(sender_in(&harness, rect).map(|(text, _)| text), Some(ARRIVED.to_owned()), "310 ms: it reads");
+    assert!(square_in(&harness, rect).is_none(), "300 to 425 ms: the square off");
+    harness.run_steps(12);
+    assert!(square_in(&harness, rect).is_some(), "430 ms: on again, for good");
+    assert!(crate::component::tests::rests(&mut harness, 4), "one blink, then rest");
+}
+
+#[test]
+fn at_reduced_a_new_row_fades_in_over_125_ms_and_its_square_blinks_once() {
+    let mut harness = window(Level::Reduced);
+    let id = arrive(&mut harness);
+    let rect = row_of(&harness, id);
+    let (_, rest) = {
+        let mut still = window(Level::Off);
+        let id = arrive(&mut still);
+        sender_in(&still, row_of(&still, id)).unwrap()
+    };
+    harness.run_steps(6);
+    let (words, alpha) = sender_in(&harness, rect).unwrap();
+    assert_eq!(words, ARRIVED, "60 ms: its words its own from the first frame");
+    assert!(f32::from(alpha) > f32::from(rest) * 0.35 && f32::from(alpha) < f32::from(rest) * 0.65, "60 ms: half way in: {alpha} of {rest}");
+    harness.run_steps(7);
+    assert_eq!(sender_in(&harness, rect).map(|(_, alpha)| alpha), Some(rest), "130 ms: there");
+    assert!(square_in(&harness, rect).is_none(), "125 to 250 ms: the square off");
+    harness.run_steps(13);
+    assert!(square_in(&harness, rect).is_some(), "260 ms: on again, for good");
+    assert!(crate::component::tests::rests(&mut harness, 4));
+}
+
+#[test]
+fn a_key_while_a_new_row_comes_in_acts_in_its_frame_and_the_row_is_there() {
+    for level in [Level::Full, Level::Reduced] {
+        let mut harness = window(level);
+        let id = arrive(&mut harness);
+        let rect = row_of(&harness, id);
+        harness.run_steps(4);
+        let selected = harness.state().mailbox().selected();
+        press(&mut harness, Key::J);
+        assert_ne!(harness.state().mailbox().selected(), selected, "{level:?}: J acted in the frame of its key");
+        let (words, _) = sender_in(&harness, rect).unwrap();
+        assert_eq!(words, ARRIVED, "{level:?}: the row reads in that frame");
+        assert!(square_in(&harness, rect).is_some(), "{level:?}: its square on");
+        harness.run_steps(50);
+        assert!(square_in(&harness, rect).is_some(), "{level:?}: and it stays on");
+        assert!(crate::component::tests::rests(&mut harness, 4), "{level:?}: and nothing moves after");
+    }
+}

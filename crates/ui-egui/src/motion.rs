@@ -311,6 +311,12 @@ fn input_came(ctx: &Context) -> Option<Came> {
     })
 }
 
+/// Whether a key or a click came in this pass, taken by now or not: a movement that leaves the layout as it is (a new
+/// row coming in) ends in it.
+pub(crate) fn input_now(ctx: &Context) -> bool {
+    interrupted(ctx).is_some()
+}
+
 /// What came in this pass, taken by now or not.
 fn interrupted(ctx: &Context) -> Option<Came> {
     let pass = ctx.cumulative_pass_nr();

@@ -555,6 +555,7 @@ impl Slot {
 
 /// One message row across `ui`'s width, the mail row of the design; a click selects it.
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool, slot: Slot) -> Drawn {
+    let arrival = Arrival::of(ui.ctx(), theme, message.id);
     let selected = mailbox.selected() == Some(message.id);
     let keyed = selected && mailbox.keyed();
     let text = row_text(ui.ctx(), mailbox, message);
@@ -591,12 +592,13 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         checked: false,
         // Beside the reader the 440 list holds three of the four: Read gives way, Delete stays.
         spare: Some(READ_ACTION),
+        blink: square_off(&arrival, !message.seen),
     };
     // Built only for the row whose group can show: the other rows hand the group nothing.
     let reach = keyed || ui.rect_contains_pointer(ui.available_rect_before_wrap());
     let built = reach.then(|| actions(message));
     let list: &[Action<'static>] = built.as_ref().map_or(&[], |built| built.as_slice());
-    let drawn = mail_row(ui, theme, keymap, &shown, keyed, list, None);
+    let drawn = arriving_row(ui, &arrival, |ui| mail_row(ui, theme, keymap, &shown, keyed, list, None));
     let response = &drawn.row.response;
     // egui does not scroll to what gains the focus: a row Tab reaches (the next one is always built, two below the
     // viewport) comes into sight, so Tab walks the whole list.
@@ -631,6 +633,136 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     // The focus its menu gives back as it closes is not a walk to the row: it selects nothing.
     let gained = response.gained_focus() && !closed;
     Drawn { clicked: response.clicked(), acted, focused: response.has_focus(), gained, presets }
+}
+
+/// The rows that came into the list with a sync while it was shown (`docs/design.md`, "Motion", M4), kept in the
+/// context: the list they came into (its place, search and account), the rows it held, and each new row with the time
+/// it came.
+#[derive(Debug, Clone, Default)]
+struct Arrivals {
+    /// The place, the search and the account the rows are of; none before the first frame.
+    list: Option<(Place, String, Option<u64>)>,
+    /// The list of rows they were last read from ([`Mailbox::rows_serial`]).
+    serial: u64,
+    /// Every message the list has held since it was opened: a row that comes back (an undo) is not new.
+    seen: HashSet<u64>,
+    /// The new unread rows and when each came, in seconds of the window's clock.
+    came: Vec<(u64, f64)>,
+}
+
+/// The most messages [`Arrivals::seen`] remembers before it starts again from the rows of the list.
+const SEEN_MOST: usize = 50_000;
+
+/// The most new rows that move at once: a sync that brings more lets the rest be there at once.
+const ARRIVING_MOST: usize = 64;
+
+fn arrivals_id() -> Id {
+    Id::unique("list-arrivals")
+}
+
+/// How long a new row moves at `level`, in seconds: at full it decodes in over `medium` and its square is off for
+/// `fast` after; at reduced it fades in over `fast` and its square is off for `fast` after; at off it does not move.
+fn arriving_for(level: motion::Level, theme: &Theme) -> f64 {
+    let fast = f64::from(theme.motion.fast);
+    match level {
+        motion::Level::Full => motion::MEDIUM + fast,
+        motion::Level::Reduced => fast + fast,
+        motion::Level::Off => 0.0,
+    }
+}
+
+/// Notes the rows that came into the list shown since the last frame: a message the list did not hold, unread, while
+/// the same place, search and account stay. Opening a list, and every row at off, comes at once. A key or a click
+/// ends every movement in that frame. A repaint is asked for while one runs.
+fn note_arrivals(ctx: &egui::Context, theme: &Theme, mailbox: &Mailbox) {
+    let now = ctx.input(|input| input.time);
+    let level = motion::level(ctx);
+    let whole = arriving_for(level, theme);
+    let ends = motion::input_now(ctx);
+    let moving = ctx.data_mut(|data| {
+        let kept = data.get_temp_mut_or_default::<Arrivals>(arrivals_id());
+        let same = kept
+            .list
+            .as_ref()
+            .is_some_and(|(place, query, narrowed)| *place == mailbox.place() && query == mailbox.query() && *narrowed == mailbox.narrowed());
+        if !same {
+            kept.list = Some((mailbox.place(), mailbox.query().to_owned(), mailbox.narrowed()));
+            kept.serial = mailbox.rows_serial();
+            kept.seen = mailbox.messages().iter().map(|row| row.id).collect();
+            kept.came.clear();
+        } else if kept.serial != mailbox.rows_serial() {
+            kept.serial = mailbox.rows_serial();
+            if kept.seen.len() > SEEN_MOST {
+                kept.seen.clear();
+            }
+            for row in mailbox.messages() {
+                if kept.seen.insert(row.id) && !row.seen && whole > 0.0 && kept.came.len() < ARRIVING_MOST {
+                    kept.came.push((row.id, now));
+                }
+            }
+        }
+        kept.came.retain(|(_, came)| !ends && whole > 0.0 && (now - came).is_finite() && now - came < whole && now >= *came);
+        !kept.came.is_empty()
+    });
+    if moving {
+        ctx.request_repaint();
+    }
+}
+
+/// A new row as it comes in this frame: how long ago it came, at the level the window moves at.
+#[derive(Debug, Clone, Copy)]
+struct Arrival {
+    age: Option<f64>,
+    level: motion::Level,
+    fast: f64,
+}
+
+impl Arrival {
+    /// Message `id`'s row as it comes in: none (`age`) when it is not new or has come.
+    fn of(ctx: &egui::Context, theme: &Theme, id: u64) -> Self {
+        let now = ctx.input(|input| input.time);
+        let age = ctx.data(|data| {
+            data.get_temp::<Arrivals>(arrivals_id()).and_then(|kept| kept.came.iter().find(|(row, _)| *row == id).map(|(_, came)| now - came))
+        });
+        Self { age, level: motion::level(ctx), fast: f64::from(theme.motion.fast) }
+    }
+}
+
+/// Whether a new row's unread square is in its blink's off phase: from the end of its decoding (full) or fading
+/// (reduced), for `fast`. Read rows have no square.
+fn square_off(arrival: &Arrival, unread: bool) -> bool {
+    let Some(age) = arrival.age.filter(|_| unread) else { return false };
+    let from = match arrival.level {
+        motion::Level::Full => motion::MEDIUM,
+        motion::Level::Reduced => arrival.fast,
+        motion::Level::Off => return false,
+    };
+    age >= from && age < from + arrival.fast
+}
+
+/// Draws a row with `draw` as it comes in: at full its texts resolve from the left out of the code set's glyphs over
+/// `medium`; at reduced it fades in over `fast`.
+fn arriving_row<R>(ui: &mut Ui, arrival: &Arrival, draw: impl FnOnce(&mut Ui) -> R) -> R {
+    let Some(age) = arrival.age else { return draw(ui) };
+    match arrival.level {
+        motion::Level::Full if age < motion::MEDIUM => {
+            let mark = crate::scramble::mark(ui.painter());
+            let drawn = draw(ui);
+            let share = motion::part(age, 0.0, motion::MEDIUM);
+            crate::scramble::painted_since(ui.painter(), mark, |painter, shape| {
+                crate::scramble::shape(painter, shape, share, crate::scramble::Side::Left)
+            });
+            drawn
+        }
+        motion::Level::Reduced if age < arrival.fast => {
+            let was = ui.opacity();
+            ui.multiply_opacity(motion::part(age, 0.0, arrival.fast));
+            let drawn = draw(ui);
+            ui.set_opacity(was);
+            drawn
+        }
+        _ => draw(ui),
+    }
 }
 
 /// What a mail row says, worked out once for a list of rows and kept while it stays ([`row_text`]).
@@ -961,6 +1093,7 @@ fn leaving_face(
         done: false,
         checked: false,
         spare: None,
+        blink: false,
     };
     let _ = mail_row(face, theme, keymap, &shown, false, &[], rest);
 }
@@ -2435,6 +2568,9 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
         }
         empty_list(ui, theme, keymap, mailbox);
         return Asked { out: true, server, ..Asked::default() };
+    }
+    if !outbox && !drafts {
+        note_arrivals(ui.ctx(), theme, mailbox);
     }
     let inbox = mailbox.place() == Place::View(Role::Inbox) && mailbox.query().is_empty();
     let wait = inbox && !mailbox.waiting().is_empty();
