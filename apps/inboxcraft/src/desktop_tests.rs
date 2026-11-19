@@ -18,7 +18,7 @@ use inboxcraft_ui_egui::sample;
 use inboxcraft_ui_egui::workers::Workers;
 use serde_json::json;
 
-use super::{Badge, Desktop, unread};
+use super::{Badge, Desktop, store_log, unread};
 use crate::control::Call;
 use crate::instance::Request;
 
@@ -444,4 +444,22 @@ fn a_click_on_an_alert_opens_its_event_on_the_calendar_and_brings_the_window_for
     click.send(Click::Event(id, i64::MAX)).unwrap();
     tick(&mut desktop, &ctx, false);
     assert_eq!(desktop.app().calendar().picked().map(|event| event.id), Some(id), "a time out of range moves nothing");
+}
+
+#[test]
+fn a_store_failure_s_words_go_to_the_log_once_and_only_its_words() {
+    use inboxcraft_engine::EngineError;
+    use inboxcraft_store::StoreError;
+    let mut logged = None;
+    let locked = EngineError::Store(StoreError::DatabaseBusy("database is locked".to_owned()));
+    assert_eq!(
+        store_log(&locked, &mut logged).as_deref(),
+        Some("inboxcraft: a command failed: the store is busy, try again (the database said: database is locked)")
+    );
+    assert_eq!(store_log(&locked, &mut logged), None, "the same words again are not written again");
+    let gone = EngineError::Store(StoreError::Database("no such table: body".to_owned()));
+    assert!(store_log(&gone, &mut logged).is_some_and(|line| line.ends_with("(the database said: no such table: body)")));
+    assert_eq!(store_log(&EngineError::Store(StoreError::Corrupt("a record")), &mut logged), None, "no words of the database");
+    assert_eq!(store_log(&EngineError::NothingToUndo, &mut logged), None);
+    assert_eq!(logged.as_deref(), Some("no such table: body"));
 }
