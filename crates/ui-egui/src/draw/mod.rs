@@ -527,10 +527,11 @@ impl InboxApp {
         surfaces: &Surfaces,
         (setting, corner): (bool, f32),
     ) -> (index::Asked, bool) {
-        let at = self.index_place(setting);
-        let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, false, Self::index_live(surfaces));
+        // The command line first: its New message stands above the index, and Tab walks the drawn order.
         self.own_frame_parts(command, theme, corner);
         let new_message = self.new_message(command, theme) && surfaces.allows(keymap::COMPOSE, &self.keymap);
+        let at = self.index_place(setting);
+        let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, false, Self::index_live(surfaces));
         let indexed = Self::index_allowed(surfaces, &self.keymap, indexed);
         if let Some(id) = indexed.toggle {
             index::toggle(index.ctx(), id);

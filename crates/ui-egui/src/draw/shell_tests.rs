@@ -269,3 +269,24 @@ fn under_the_sheet_a_place_of_the_index_does_what_its_key_does_there() {
     assert!(!harness.state().settings().is_open(), "the sheet closes first, as with Ctrl 2");
     assert_eq!(harness.state().screen(), crate::Screen::Calendar);
 }
+
+#[test]
+fn tab_walks_new_message_in_the_command_line_before_the_index_under_it() {
+    let mut harness = window(vec2(1300.0, 820.0));
+    let focused = |harness: &Harness<'static, InboxApp>| {
+        harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
+    };
+    let mut walked = Vec::new();
+    for _ in 0..3 {
+        harness.key_press(egui::Key::Tab);
+        harness.run();
+        walked.push(focused(&harness).unwrap_or_default());
+    }
+    // Home is coming soon and is no stop.
+    assert_eq!(walked, ["New message", "Mail", "Inbox, 4 unread"], "the drawn order, top down");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness).as_deref(), Some("New message"), "Shift Tab walks it back");
+}
