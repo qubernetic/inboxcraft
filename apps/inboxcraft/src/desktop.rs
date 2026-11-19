@@ -204,6 +204,8 @@ impl Desktop {
         for click in clicks {
             match click {
                 Click::Open(id) => {
+                    // The reader shows only on the mail: from Home, the calendar or the settings the window goes there.
+                    self.app.show_mail();
                     let (reader, mailbox) = self.app.reader_mut();
                     reader.open(mailbox, Some(id));
                     reader.set_full_width(true);

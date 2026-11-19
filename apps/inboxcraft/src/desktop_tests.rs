@@ -11,11 +11,11 @@ use inboxcraft_engine::Session;
 use inboxcraft_model::{Account, AccountId, EmailAddress, Event, Host, Job, JobKind, Security, Server};
 use inboxcraft_store::{Batch, Change, Memory, Storage};
 use inboxcraft_time::{Clock, FakeClock, Timestamp};
-use inboxcraft_ui_egui::InboxApp;
 use inboxcraft_ui_egui::mailbox::Mailbox;
 use inboxcraft_ui_egui::onboard::{NoDetect, NoKeychain};
 use inboxcraft_ui_egui::sample;
 use inboxcraft_ui_egui::workers::Workers;
+use inboxcraft_ui_egui::{InboxApp, Screen};
 use serde_json::json;
 
 use super::{Badge, Desktop, unread};
@@ -366,6 +366,7 @@ fn a_click_on_a_notification_opens_the_message_full_width_and_brings_the_window_
     let id = unread_message(&desktop);
     click.send(Click::Open(id)).unwrap();
     assert_eq!(tick(&mut desktop, &ctx, false), [ViewportCommand::Minimized(false), ViewportCommand::Focus]);
+    assert_eq!(desktop.app().screen(), Screen::Mail, "the reader shows only on the mail");
     assert_eq!(desktop.app().reader().open_id(), Some(id));
     assert!(desktop.app().reader().full_width());
     click.send(Click::Show).unwrap();
@@ -381,7 +382,58 @@ fn without_a_window_a_click_opens_one() {
     click.send(Click::Open(id)).unwrap();
     desktop.wait(SHORT);
     assert!(desktop.has_window());
+    assert_eq!(desktop.app().screen(), Screen::Mail);
     assert_eq!(desktop.app().reader().open_id(), Some(id));
+}
+
+/// Every way in from outside the window (a notification's click or button, the tray's or a second start's "show", an
+/// agent's call) leaves the window on a place where what it opened is in sight, and moves nothing it did not open.
+#[test]
+fn what_comes_from_outside_opens_where_it_is_seen_from_every_place() {
+    use crate::notify::Click;
+    let ctx = egui::Context::default();
+    let places: [fn(&mut InboxApp); 4] = [InboxApp::show_home, InboxApp::show_mail, InboxApp::show_calendar, |app| {
+        app.show_home();
+        app.open_settings();
+    }];
+    for (at, place) in places.iter().enumerate() {
+        let (mut desktop, send, click) = clicking();
+        place(desktop.app_mut());
+        let before = desktop.app().screen();
+        let id = unread_message(&desktop);
+        click.send(Click::Open(id)).unwrap();
+        tick(&mut desktop, &ctx, false);
+        assert_eq!(desktop.app().screen(), Screen::Mail, "place {at}: a message opens on the mail");
+        assert!(!desktop.app().settings().is_open(), "place {at}: nor under the settings");
+        assert_eq!(desktop.app().reader().open_id(), Some(id), "place {at}");
+
+        let (mut desktop, _send2, click) = clicking();
+        place(desktop.app_mut());
+        let event = {
+            let (calendar, mailbox) = desktop.app_mut().calendar_mut();
+            calendar.refresh(mailbox);
+            calendar.events().find(|event| event.summary == "Studio stand-up").unwrap().id
+        };
+        click.send(Click::Event(event, 1_793_869_200 + 4 * 86_400)).unwrap();
+        tick(&mut desktop, &ctx, false);
+        assert_eq!(desktop.app().screen(), Screen::Calendar, "place {at}: an event opens on the calendar");
+        assert!(!desktop.app().settings().is_open(), "place {at}: nor under the settings");
+        assert_eq!(desktop.app().calendar().picked().map(|event| event.id), Some(event), "place {at}");
+
+        // What opens nothing leaves the window where it was.
+        let (mut desktop, send_show, click) = clicking();
+        place(desktop.app_mut());
+        let settings = desktop.app().settings().is_open();
+        let id = unread_message(&desktop);
+        click.send(Click::Show).unwrap();
+        click.send(Click::Read(id)).unwrap();
+        click.send(Click::Done(id)).unwrap();
+        send_show.send(Request::Show).unwrap();
+        tick(&mut desktop, &ctx, false);
+        assert_eq!(desktop.app().screen(), before, "place {at}: show, read and done move nothing");
+        assert_eq!(desktop.app().settings().is_open(), settings, "place {at}");
+        drop(send);
+    }
 }
 
 #[test]
