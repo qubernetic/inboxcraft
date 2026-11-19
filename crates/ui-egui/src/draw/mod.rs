@@ -609,7 +609,8 @@ impl InboxApp {
         }
         let at = self.index_place(setting);
         let flags = (Self::index_live(surfaces), self.checking_elsewhere());
-        let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, false, flags);
+        let narrow = regions.index.width() < shell::INDEX;
+        let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, narrow, flags);
         let indexed = Self::index_allowed(surfaces, indexed);
         // A row of the index pressed while a key is waited for ends the wait first, then acts.
         let pressed = indexed.place.is_some() || indexed.mailbox.is_some() || indexed.account.is_some() || indexed.toggle.is_some();
@@ -2397,10 +2398,11 @@ impl InboxApp {
         let corner = self.window_corner(ui.ctx());
         ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
         // The frame's four regions ([`shell::regions`]): the command line (the title bar in the own frame), the index at the left,
-        // everything else in the body; the status line is reserved and holds nothing yet. The index stays wide until
-        // the widths slice turns its breakpoint on.
+        // everything else in the body, the status line across the foot. Under 1280 the index is the narrow one and the
+        // command field takes its room ([`shell::narrow`]).
         let window = ui.max_rect();
-        let regions = shell::regions_with(window.size(), &theme, ui.ctx().pixels_per_point(), false).translate(window.min.to_vec2());
+        let narrow = shell::narrow(ui.ctx());
+        let regions = shell::regions_with(window.size(), &theme, ui.ctx().pixels_per_point(), narrow).translate(window.min.to_vec2());
         shell::lay(ui.ctx(), regions);
         Self::shell_lines(ui, &theme, regions);
         let layout = *ui.layout();

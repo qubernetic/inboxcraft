@@ -572,11 +572,12 @@ fn home_stands_in_the_body_at_every_width_and_text_size() {
             app.set_text_scale(TextScale::from_percent(percent).unwrap());
             let mut harness = window_of(app, vec2(width, 900.0));
             harness.run();
-            // The body the window laid out this frame: the window less the index (232, wide at every width until the
-            // widths slice turns its breakpoint on), its hairline and the window's two edges.
+            // The body the window laid out this frame: the window less the index (232, 56 under 1280), its hairline
+            // and the window's two edges.
             let regions = super::shell::laid(&harness.ctx).unwrap();
             let body = regions.body;
-            assert_eq!((regions.index.width(), body.left()), (232.0, regions.index.right() + 1.0), "{width}/{percent}: the body beside the index");
+            let index = if width < 1280.0 { 56.0 } else { 232.0 };
+            assert_eq!((regions.index.width(), body.left()), (index, regions.index.right() + 1.0), "{width}/{percent}: the body beside the index");
             assert_eq!(body.right(), regions.command.right(), "{width}/{percent}: the body to the window's edge");
             println!("{width}/{percent}: the body {body:?}");
             let roles = [Role::Button, Role::Link, Role::ListItem];

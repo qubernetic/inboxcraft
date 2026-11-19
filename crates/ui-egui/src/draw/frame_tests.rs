@@ -94,10 +94,11 @@ fn line(harness: &Harness<'_, InboxApp>) -> Rect {
     super::shell::laid(&harness.ctx).unwrap().command
 }
 
-/// A point of the command line that only the title bar takes: the mark's column, beside the mark.
+/// A point of the command line that only the title bar takes: the mark's column, over the mark (which takes no press).
 fn free(harness: &Harness<'_, InboxApp>) -> Pos2 {
     let line = line(harness);
-    pos2(line.left() + 120.0, line.center().y)
+    // The middle of the mark's column, left of the field (the index's width: 232, or 56 under 1280).
+    pos2(((line.left() + field(harness).left()) / 2.0).round(), line.center().y)
 }
 
 /// The command field's box, as the command line keeps it for the tests.
