@@ -800,6 +800,8 @@ fn preset_text(name: &str) -> Option<&'static str> {
         "later_today" => Some(tr!("Later today")),
         "this_evening" => Some(tr!("This evening")),
         "tomorrow_morning" => Some(tr!("Tomorrow morning")),
+        "this_weekend" => Some(tr!("This weekend")),
+        "next_week" => Some(tr!("Next week")),
         _ => None,
     }
 }
