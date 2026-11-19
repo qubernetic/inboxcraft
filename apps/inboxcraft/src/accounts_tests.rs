@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::net::TcpListener;
 use std::num::NonZeroU16;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ use inboxcraft_model::{
     Account, AccountId, CalendarJob, CalendarReport, CheckStep, EmailAddress, ErrorKind, Event, EventKind, Host, Job, JobId, JobKind, Security,
     Server, StepStatus,
 };
-use inboxcraft_net::detect::{Candidate, Proposal as Found, Source as Where};
+use inboxcraft_net::detect::{Candidate, Checked, Proposal as Found, Source as Where};
 use inboxcraft_net::{Connector, Credentials, Password, TlsSettings, Trust, WorkerSettings};
 use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_testkit::imap::{FakeImap, PASSWORD, USER};
@@ -23,7 +23,7 @@ use inboxcraft_ui_egui::mailbox::Mailbox;
 use inboxcraft_ui_egui::onboard::{self, Keychain};
 use inboxcraft_ui_egui::workers::Workers;
 
-use super::{Entries, NetWorkers, OsKeychain, SERVICE, described, detect, entry_name, proposal};
+use super::{Entries, NetWorkers, OsKeychain, SERVICE, described, detect, entry_name, newer_run_stops, proposal};
 
 const SECRET: &str = "maple-Harbour-42-lantern";
 
@@ -185,8 +185,18 @@ fn found() -> Found {
     Found {
         mx: vec![Host::new("mx.example.org").unwrap()],
         imap: vec![
-            Candidate { server: server("imap.example.org", 993, Security::Tls), username: "carol@example.org".to_owned(), source: Where::Autoconfig },
-            Candidate { server: server("mail.example.org", 143, Security::StartTls), username: "carol".to_owned(), source: Where::Guess },
+            Candidate {
+                server: server("imap.example.org", 993, Security::Tls),
+                username: "carol@example.org".to_owned(),
+                source: Where::Autoconfig,
+                checked: Checked::Answered,
+            },
+            Candidate {
+                server: server("mail.example.org", 143, Security::StartTls),
+                username: "carol".to_owned(),
+                source: Where::Guess,
+                checked: Checked::Answered,
+            },
         ],
         submission: Vec::new(),
         asked: vec!["dns MX example.org".to_owned()],
@@ -227,8 +237,42 @@ fn a_detected_proposal_reads_as_the_form_shows_it() {
         candidate.source = source;
     }
     every.imap.push(Candidate { source: Where::Srv, ..every.imap[0].clone() });
+    every.imap.push(Candidate { source: Where::ProviderAutoconfig, ..every.imap[0].clone() });
+    every.imap.push(Candidate { source: Where::Provider, ..every.imap[0].clone() });
     let sources: Vec<onboard::Source> = proposal(&every).imap.iter().map(|suggestion| suggestion.source).collect();
-    assert_eq!(sources, [onboard::Source::AutoconfigRedirect, onboard::Source::Ispdb, onboard::Source::Srv]);
+    // What the MX record pointed to is a guess the owner confirms.
+    assert_eq!(
+        sources,
+        [onboard::Source::AutoconfigRedirect, onboard::Source::Ispdb, onboard::Source::Srv, onboard::Source::Guess, onboard::Source::Guess]
+    );
+}
+
+/// A named server no probe reached is shown, and the list says why it was not checked, by cause.
+#[test]
+fn a_named_server_no_probe_reached_is_shown_and_said_to_be_unchecked() {
+    for (checked, why) in [
+        (Checked::NoAnswer, "it did not answer from here"),
+        (Checked::Refused, "it refused the connection from here"),
+        (Checked::NoName, "its name was not found"),
+        (Checked::Clock, "its certificate does not fit this computer's clock"),
+    ] {
+        let mut found = found();
+        found.imap[0].checked = checked;
+        let shown = proposal(&found);
+        assert_eq!(shown.imap[0].host, "imap.example.org");
+        let line = format!("imap.example.org:993 (TLS) was not checked: {why}");
+        assert!(shown.failed.contains(&line), "{checked:?}: {:?}", shown.failed);
+        assert_eq!(shown.failed.len(), 2);
+    }
+}
+
+#[test]
+fn a_newer_detect_run_stops_the_older_one() {
+    static RUNS: AtomicU64 = AtomicU64::new(0);
+    let first = newer_run_stops(&RUNS);
+    assert!(!first());
+    let second = newer_run_stops(&RUNS);
+    assert!(first() && !second());
 }
 
 #[test]

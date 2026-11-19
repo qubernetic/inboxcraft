@@ -169,6 +169,11 @@ impl SmtpConnection {
         self.client.is_encrypted()
     }
 
+    /// Whether the server offers a sign-in the client can do: AUTH PLAIN or AUTH LOGIN.
+    pub(crate) fn offers_sign_in(&self) -> bool {
+        self.client.extensions().is_some_and(|extensions| extensions.offers_auth("PLAIN") || extensions.offers_auth("LOGIN"))
+    }
+
     /// Sends QUIT, waits for the answer and ends TLS with a `close_notify`; the connection is gone either way.
     pub fn quit(mut self) {
         if self.client.quit().is_ok() {

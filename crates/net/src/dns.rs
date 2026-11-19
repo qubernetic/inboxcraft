@@ -24,7 +24,7 @@ use hickory_proto::rr::{Name, RData, RecordType};
 use inboxcraft_model::{ErrorKind, Host};
 use inboxcraft_time::Timestamp;
 
-use crate::NetError;
+use crate::{Deadline, NetError};
 
 /// The most records of one answer kept.
 pub const MAX_RECORDS: usize = 16;
@@ -175,7 +175,16 @@ impl Resolver {
     ///
     /// As [`Resolver::ask`].
     pub fn mx(&self, domain: &Host) -> Result<Vec<Host>, NetError> {
-        Ok(self.ask(domain.as_str(), RecordType::MX)?.map_or_else(Vec::new, |answer| mx_of(&answer)))
+        Ok(self.ask(domain.as_str(), RecordType::MX, None)?.map_or_else(Vec::new, |answer| mx_of(&answer)))
+    }
+
+    /// As [`Resolver::mx`], every wait ending at `deadline` at the latest.
+    ///
+    /// # Errors
+    ///
+    /// As [`Resolver::ask`].
+    pub fn mx_by(&self, domain: &Host, deadline: &Deadline) -> Result<Vec<Host>, NetError> {
+        Ok(self.ask(domain.as_str(), RecordType::MX, Some(deadline))?.map_or_else(Vec::new, |answer| mx_of(&answer)))
     }
 
     /// The SRV records of `name` (`_imaps._tcp.example.org`), by priority and weight; none when there are none.
@@ -184,7 +193,21 @@ impl Resolver {
     ///
     /// As [`Resolver::ask`].
     pub fn srv(&self, name: &str) -> Result<Vec<Srv>, NetError> {
-        Ok(self.ask(name, RecordType::SRV)?.map_or_else(Vec::new, |answer| srv_of(&answer)))
+        Ok(self.ask(name, RecordType::SRV, None)?.map_or_else(Vec::new, |answer| srv_of(&answer)))
+    }
+
+    /// As [`Resolver::srv`], every wait ending at `deadline` at the latest.
+    ///
+    /// # Errors
+    ///
+    /// As [`Resolver::ask`].
+    pub fn srv_by(&self, name: &str, deadline: &Deadline) -> Result<Vec<Srv>, NetError> {
+        Ok(self.ask(name, RecordType::SRV, Some(deadline))?.map_or_else(Vec::new, |answer| srv_of(&answer)))
+    }
+
+    /// How long one wait may last: the timeout, or less before `deadline`.
+    fn wait(&self, deadline: Option<&Deadline>) -> Result<Duration, NetError> {
+        deadline.map_or(Ok(self.timeout), |deadline| deadline.wait(self.timeout))
     }
 
     /// The answer of the first server that gives one for `name` and `kind`; `None` for a name that does not exist.
@@ -193,8 +216,8 @@ impl Resolver {
     ///
     /// [`ErrorKind::HostNotFound`] for a name that is not one, or without a server; otherwise the last server's
     /// failure: [`ErrorKind::TimedOut`], [`ErrorKind::CommandRefused`] (it refused or failed), or
-    /// [`ErrorKind::Protocol`].
-    fn ask(&self, name: &str, kind: RecordType) -> Result<Option<Message>, NetError> {
+    /// [`ErrorKind::Protocol`]; [`ErrorKind::TimedOut`] once `deadline` has passed.
+    fn ask(&self, name: &str, kind: RecordType, deadline: Option<&Deadline>) -> Result<Option<Message>, NetError> {
         let mut name = Name::from_utf8(name).map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?;
         // As it comes back in the answer's question.
         name.set_fqdn(true);
@@ -205,9 +228,10 @@ impl Resolver {
         let bytes = query.to_vec().map_err(|error| NetError::new(ErrorKind::Protocol, error.to_string()))?;
         let mut last = NetError::new(ErrorKind::HostNotFound, "no name server");
         for server in &self.servers {
+            self.wait(deadline)?;
             let answer = self
-                .udp(*server, &bytes, id, &name, kind)
-                .and_then(|answer| if answer.metadata.truncation { self.tcp(*server, &bytes, id, &name, kind) } else { Ok(answer) });
+                .udp(*server, &bytes, id, &name, kind, deadline)
+                .and_then(|answer| if answer.metadata.truncation { self.tcp(*server, &bytes, id, &name, kind, deadline) } else { Ok(answer) });
             match answer.and_then(|answer| outcome(answer, *server)) {
                 Ok(found) => return Ok(found),
                 Err(error) => last = error,
@@ -216,14 +240,22 @@ impl Resolver {
         Err(last)
     }
 
-    fn udp(&self, server: SocketAddr, query: &[u8], id: u16, name: &Name, kind: RecordType) -> Result<Message, NetError> {
+    fn udp(
+        &self,
+        server: SocketAddr,
+        query: &[u8],
+        id: u16,
+        name: &Name,
+        kind: RecordType,
+        deadline: Option<&Deadline>,
+    ) -> Result<Message, NetError> {
         let local: SocketAddr = if server.is_ipv4() { SocketAddr::from(([0, 0, 0, 0], 0)) } else { SocketAddr::from(([0_u16; 8], 0)) };
         let socket = UdpSocket::bind(local).map_err(|error| io(&error))?;
-        socket.set_read_timeout(Some(self.timeout)).map_err(|error| io(&error))?;
         socket.connect(server).map_err(|error| io(&error))?;
         socket.send(query).map_err(|error| io(&error))?;
         let mut buffer = vec![0; UDP_BUFFER];
         for _ in 0..MAX_STRAYS {
+            socket.set_read_timeout(Some(self.wait(deadline)?)).map_err(|error| io(&error))?;
             let read = socket.recv(&mut buffer).map_err(|error| io(&error))?;
             if let Some(answer) = buffer.get(..read).and_then(|bytes| matching(bytes, id, name, kind)) {
                 return Ok(answer);
@@ -232,17 +264,42 @@ impl Resolver {
         Err(NetError::new(ErrorKind::Protocol, format!("no answer of {server} matched the query")))
     }
 
-    fn tcp(&self, server: SocketAddr, query: &[u8], id: u16, name: &Name, kind: RecordType) -> Result<Message, NetError> {
-        let mut stream = TcpStream::connect_timeout(&server, self.timeout).map_err(|error| io(&error))?;
-        stream.set_read_timeout(Some(self.timeout)).map_err(|error| io(&error))?;
-        stream.set_write_timeout(Some(self.timeout)).map_err(|error| io(&error))?;
+    fn tcp(
+        &self,
+        server: SocketAddr,
+        query: &[u8],
+        id: u16,
+        name: &Name,
+        kind: RecordType,
+        deadline: Option<&Deadline>,
+    ) -> Result<Message, NetError> {
+        let mut stream = TcpStream::connect_timeout(&server, self.wait(deadline)?).map_err(|error| io(&error))?;
+        let wait = self.wait(deadline)?;
+        stream.set_read_timeout(Some(wait)).map_err(|error| io(&error))?;
+        stream.set_write_timeout(Some(wait)).map_err(|error| io(&error))?;
         let length = u16::try_from(query.len()).map_err(|_| NetError::new(ErrorKind::TooLarge, "the query is too long"))?;
         stream.write_all(&[length.to_be_bytes().as_slice(), query].concat()).map_err(|error| io(&error))?;
         let mut prefix = [0_u8; 2];
-        stream.read_exact(&mut prefix).map_err(|error| io(&error))?;
+        self.read_all(&mut stream, &mut prefix, deadline)?;
         let mut answer = vec![0; usize::from(u16::from_be_bytes(prefix))];
-        stream.read_exact(&mut answer).map_err(|error| io(&error))?;
+        self.read_all(&mut stream, &mut answer, deadline)?;
         matching(&answer, id, name, kind).ok_or_else(|| NetError::new(ErrorKind::Protocol, format!("the answer of {server} did not match the query")))
+    }
+}
+
+impl Resolver {
+    /// Fills `buffer` from `stream`, each read waiting at most until `deadline`, however slowly the server sends.
+    fn read_all(&self, stream: &mut TcpStream, buffer: &mut [u8], deadline: Option<&Deadline>) -> Result<(), NetError> {
+        let mut filled = 0;
+        while let Some(rest) = buffer.get_mut(filled..).filter(|rest| !rest.is_empty()) {
+            stream.set_read_timeout(Some(self.wait(deadline)?)).map_err(|error| io(&error))?;
+            let read = stream.read(rest).map_err(|error| io(&error))?;
+            if read == 0 {
+                return Err(NetError::new(ErrorKind::ConnectionDropped, "the name server closed the connection"));
+            }
+            filled = filled.saturating_add(read);
+        }
+        Ok(())
     }
 }
 
