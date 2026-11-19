@@ -337,8 +337,8 @@ fn a_cid_the_message_has_no_part_for_is_never_asked() {
     reader.open(&mut mailbox, Some(1));
     assert_eq!(
         mailbox.runs() - before,
-        7,
-        "mail.thread, mail.open and the list, screener and outbox read again for the read row, and no mail.attachment"
+        8,
+        "mail.thread, mail.why, mail.open and the list, screener and outbox read again for the read row, and no mail.attachment"
     );
     assert!(reader.picture(&inline_key(1, "unknown0@example.org")).is_none());
 }
