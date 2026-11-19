@@ -15,14 +15,16 @@
 //! A host made up from a domain gets the registered pairs only: IMAP 993 with implicit TLS, then 143 with STARTTLS;
 //! submission 465 with implicit TLS, then 587 with STARTTLS. There is no candidate without encryption, none on port
 //! 25, none whose host is not a plain ASCII name of at least two labels ([`usable_host`]), and at most
-//! [`MAX_CANDIDATES`] of each kind; the first of two equal servers keeps its place.
+//! [`MAX_CANDIDATES`] of each kind; the first of two equal servers keeps its place. While the domain names servers
+//! of a kind (its autoconfig, the ISPDB or SRV: [`Source::is_named`]), the guesses of that kind (its own common host
+//! names and the MX providers': [`Source::is_guess`]) are left out.
 
 use std::num::NonZeroU16;
 
 use inboxcraft_model::{EmailAddress, Host, Security, Server};
 
 use crate::autoconfig::Autoconfig;
-use crate::detect::{Candidate, Source, base_domain};
+use crate::detect::{Candidate, Checked, Source, base_domain};
 use crate::dns::{MAX_RECORDS, Srv};
 use crate::probe::Service;
 
@@ -196,7 +198,7 @@ impl Candidates {
         if list.iter().any(|held| held.server == server) {
             return;
         }
-        list.push(Candidate { server, username: username.to_owned(), source });
+        list.push(Candidate { server, username: username.to_owned(), source, checked: Checked::NoAnswer });
     }
 
     fn file(&mut self, file: &Autoconfig, source: Source) {
@@ -252,6 +254,12 @@ pub fn candidates(address: &EmailAddress, lookups: &Lookups) -> Candidates {
                 list.file(file, Source::ProviderAutoconfig);
             }
             list.hosts(&provider, username, Source::Provider);
+        }
+    }
+    // While the domain names servers of a kind, no guess stands in their place.
+    for kind in [&mut list.imap, &mut list.submission] {
+        if kind.iter().any(|candidate| candidate.source.is_named()) {
+            kind.retain(|candidate| !candidate.source.is_guess());
         }
     }
     list

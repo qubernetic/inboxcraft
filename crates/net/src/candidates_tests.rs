@@ -38,71 +38,81 @@ fn rows(list: &Candidates) -> (Vec<String>, Vec<String>) {
 }
 
 /// The order and the de-duplication of the list, as a table: every source, a server repeated in a later source, a
-/// relay port and a provider that is the address's own domain.
+/// relay port, a provider that is the address's own domain, and no guess where the domain names servers.
 #[test]
 fn the_list_is_ordered_and_without_repeats() {
     let mut lookups = Lookups::default();
     lookups.set_mx([host("mx1.privateemail.com"), host("mx2.privateemail.com"), host("mx.example.org")]);
+    // The domain names IMAP servers; the only submission server it names is on the relay port.
     lookups.add_file(
         Source::Autoconfig,
-        Autoconfig {
-            imap: vec![offer("imap.example.org", 993, Security::Tls)],
-            submission: vec![offer("smtp.example.org", 25, Security::StartTls), offer("smtp.example.org", 587, Security::StartTls)],
-        },
+        Autoconfig { imap: vec![offer("imap.example.org", 993, Security::Tls)], submission: vec![offer("smtp.example.org", 25, Security::StartTls)] },
     );
     lookups.add_srv(SrvName::Imaps, [srv("imap.example.org", 993), srv("IMAP.srv.example.net", 993)]);
     lookups.add_srv(SrvName::Imap, [srv("imap.srv.example.net", 143)]);
     lookups.add_srv(SrvName::Submissions, []);
-    lookups.add_srv(SrvName::Submission, [srv("mail.privateemail.com", 587)]);
-    lookups
-        .add_provider_file("privateemail.com", Autoconfig { imap: vec![offer("imap.privateemail.com", 993, Security::Tls)], submission: Vec::new() });
+    lookups.add_srv(SrvName::Submission, []);
+    lookups.add_provider_file(
+        "privateemail.com",
+        Autoconfig {
+            imap: vec![offer("imap.privateemail.com", 993, Security::Tls)],
+            submission: vec![offer("mail.privateemail.com", 465, Security::Tls)],
+        },
+    );
     lookups.reach(Reached::Providers);
     let (imap, submission) = rows(&candidates(&address(), &lookups));
+    // Named by the domain: no guess of the domain or of the provider stands beside them.
+    let want_imap = ["imap.example.org:993 (TLS) Autoconfig", "imap.srv.example.net:993 (TLS) Srv", "imap.srv.example.net:143 (STARTTLS) Srv"];
+    assert_eq!(imap, want_imap);
+    let want_submission = [
+        "mail.example.org:465 (TLS) Guess",
+        "mail.example.org:587 (STARTTLS) Guess",
+        "smtp.example.org:465 (TLS) Guess",
+        "smtp.example.org:587 (STARTTLS) Guess",
+        "mail.privateemail.com:465 (TLS) ProviderAutoconfig",
+        "mail.privateemail.com:587 (STARTTLS) Provider",
+        "smtp.privateemail.com:465 (TLS) Provider",
+        "smtp.privateemail.com:587 (STARTTLS) Provider",
+    ];
+    assert_eq!(submission, want_submission);
+
+    // Nothing named: the domain's own hosts, then the provider's file and hosts, without repeats.
+    let mut lookups = Lookups::default();
+    lookups.set_mx([host("mx1.privateemail.com")]);
+    lookups
+        .add_provider_file("privateemail.com", Autoconfig { imap: vec![offer("IMAP.privateemail.com", 993, Security::Tls)], submission: Vec::new() });
+    lookups.reach(Reached::Providers);
     let want_imap = [
-        "imap.example.org:993 (TLS) Autoconfig",
-        "imap.srv.example.net:993 (TLS) Srv",
-        "imap.srv.example.net:143 (STARTTLS) Srv",
         "mail.example.org:993 (TLS) Guess",
         "mail.example.org:143 (STARTTLS) Guess",
+        "imap.example.org:993 (TLS) Guess",
         "imap.example.org:143 (STARTTLS) Guess",
         "imap.privateemail.com:993 (TLS) ProviderAutoconfig",
         "mail.privateemail.com:993 (TLS) Provider",
         "mail.privateemail.com:143 (STARTTLS) Provider",
         "imap.privateemail.com:143 (STARTTLS) Provider",
     ];
-    assert_eq!(imap, want_imap);
-    let want_submission = [
-        "smtp.example.org:587 (STARTTLS) Autoconfig",
-        "mail.privateemail.com:587 (STARTTLS) Srv",
-        "mail.example.org:465 (TLS) Guess",
-        "mail.example.org:587 (STARTTLS) Guess",
-        "smtp.example.org:465 (TLS) Guess",
-        "mail.privateemail.com:465 (TLS) Provider",
-        "smtp.privateemail.com:465 (TLS) Provider",
-        "smtp.privateemail.com:587 (STARTTLS) Provider",
-    ];
-    assert_eq!(submission, want_submission);
+    assert_eq!(rows(&candidates(&address(), &lookups)).0, want_imap);
 }
 
 #[test]
 fn the_list_holds_only_the_sources_reached() {
     let mut lookups = Lookups::default();
     lookups.set_mx([host("mx1.privateemail.com")]);
-    lookups.add_srv(SrvName::Imaps, [srv("imap.srv.example.net", 993)]);
     assert!(candidates(&address(), &lookups).imap.is_empty());
     lookups.reach(Reached::Srv);
-    assert_eq!(rows(&candidates(&address(), &lookups)).0, ["imap.srv.example.net:993 (TLS) Srv"]);
+    assert!(candidates(&address(), &lookups).imap.is_empty());
     lookups.reach(Reached::Own);
     let (imap, _) = rows(&candidates(&address(), &lookups));
-    assert_eq!(imap.len(), 5);
-    assert_eq!(imap[1], "mail.example.org:993 (TLS) Guess");
+    assert_eq!(imap.len(), 4);
+    assert_eq!(imap[0], "mail.example.org:993 (TLS) Guess");
     lookups.reach(Reached::Providers);
     let (imap, _) = rows(&candidates(&address(), &lookups));
-    assert_eq!(imap.len(), 9);
-    assert_eq!(imap[5], "mail.privateemail.com:993 (TLS) Provider");
+    assert_eq!(imap.len(), 8);
+    assert_eq!(imap[4], "mail.privateemail.com:993 (TLS) Provider");
     // Never back.
     lookups.reach(Reached::Files);
-    assert_eq!(candidates(&address(), &lookups).imap.len(), 9);
+    assert_eq!(candidates(&address(), &lookups).imap.len(), 8);
 }
 
 #[test]

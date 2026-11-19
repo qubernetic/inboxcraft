@@ -9,7 +9,7 @@ use std::time::Duration;
 use inboxcraft_model::{EmailAddress, ErrorKind, Host, Security, Server};
 use inboxcraft_time::{Clock, FakeClock, Timestamp};
 
-use super::{DetectConfig, ISPDB, Lookup, MAX_TRIES, Outside, Proposal, Source, base_domain, detect, https_host, within};
+use super::{Checked, DetectConfig, ISPDB, Lookup, MAX_TRIES, Outside, Proposal, Source, base_domain, detect, https_host, within};
 use crate::NetError;
 use crate::candidates::{MAX_MX, MAX_PROVIDERS};
 use crate::dns::Srv;
@@ -441,8 +441,10 @@ fn the_tries_are_capped() {
     let proposal = run_probed(&config, &dns, &FakeWeb::default(), &probe);
     assert_eq!(probe.tried().len(), 5);
     assert!(proposal.failed.contains(&("detect: the cap of 5 tries".to_owned(), ErrorKind::TooLarge)));
-    // Nothing is asked after the cap: the SRV records were the last lookup.
-    assert!(proposal.imap.is_empty());
+    // Nothing is asked after the cap; the first server the SRV records name stands, unchecked.
+    assert_eq!(imap(&proposal), ["imap0.example.net:993 (TLS) Srv"]);
+    assert_eq!(proposal.imap[0].checked, Checked::NoAnswer);
+    assert!(probe.tried().iter().all(|tried| tried.contains(".example.net")));
 }
 
 #[test]
@@ -490,4 +492,44 @@ fn hostile_names_from_the_resolver_and_the_files_are_left_out() {
     }
     // Only the domain's own hosts were left to probe.
     assert_eq!(imap(&proposal), ["mail.example.org:993 (TLS) Guess"]);
+}
+
+/// What the domain names is never thrown away: every port is blocked, so its autoconfig server is proposed unchecked.
+#[test]
+fn a_named_server_no_probe_reached_is_proposed_unchecked() {
+    let web = FakeWeb::default().page(AUTOCONFIG, &config("imap.example.org", 993, "SSL"));
+    let dns = FakeDns { mx: vec!["mx1.privateemail.com"], ..FakeDns::default() };
+    let probe = FakeProbe { fails_with: ErrorKind::TimedOut, ..FakeProbe::only(&[]) };
+    let proposal = run_probed(&DetectConfig::default(), &dns, &web, &probe);
+    assert_eq!(imap(&proposal), ["imap.example.org:993 (TLS) Autoconfig"]);
+    assert_eq!(proposal.imap[0].checked, Checked::NoAnswer);
+    assert_eq!(proposal.submission[0].server.to_string(), "smtp.imap.example.org:465 (TLS)");
+    assert_eq!(proposal.submission[0].checked, Checked::NoAnswer);
+    // No guess was probed in their place.
+    assert_eq!(probe.tried(), ["imap imap.example.org:993 (TLS)", "submission smtp.imap.example.org:465 (TLS)"]);
+}
+
+/// A guessable provider host that answers does not replace the server the domain names.
+#[test]
+fn a_guess_that_answers_does_not_replace_a_named_server() {
+    let web = FakeWeb::default().page(AUTOCONFIG, &config("imap.example.org", 993, "SSL"));
+    let dns = FakeDns { mx: vec!["mx1.privateemail.com"], ..FakeDns::default() };
+    let probe = FakeProbe {
+        fails_with: ErrorKind::ConnectionRefused,
+        ..FakeProbe::only(&["mail.privateemail.com:993 (TLS)", "mail.privateemail.com:465 (TLS)", "mail.example.org:993 (TLS)"])
+    };
+    let proposal = run_probed(&DetectConfig::default(), &dns, &web, &probe);
+    assert_eq!(imap(&proposal), ["imap.example.org:993 (TLS) Autoconfig"]);
+    assert_eq!(proposal.imap[0].checked, Checked::NoAnswer);
+    assert!(probe.tried().iter().all(|tried| !tried.contains("privateemail") && !tried.contains("mail.example.org")), "{:?}", probe.tried());
+}
+
+/// A named server that answered and was wrong (no STARTTLS) is not proposed, and no guess takes its place.
+#[test]
+fn a_named_server_that_answered_wrong_is_not_proposed() {
+    let web = FakeWeb::default().page(AUTOCONFIG, &config("imap.example.org", 143, "STARTTLS"));
+    let probe = FakeProbe { fails_with: ErrorKind::StartTlsMissing, ..FakeProbe::only(&["mail.example.org:993 (TLS)"]) };
+    let proposal = run_probed(&DetectConfig::default(), &FakeDns::default(), &web, &probe);
+    assert!(proposal.imap.is_empty() && proposal.submission.is_empty(), "{proposal:?}");
+    assert!(proposal.failed.contains(&("imap imap.example.org:143 (STARTTLS)".to_owned(), ErrorKind::StartTlsMissing)));
 }

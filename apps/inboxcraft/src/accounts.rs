@@ -20,7 +20,7 @@ use std::thread;
 use std::time::Duration;
 
 use inboxcraft_model::{Account, AccountId, EmailAddress, Event, EventKind, Job, Security};
-use inboxcraft_net::detect::{self, Candidate, DetectConfig, Outside, Proposal as Found, Source as Where};
+use inboxcraft_net::detect::{self, Candidate, Checked, DetectConfig, Outside, Proposal as Found, Source as Where};
 use inboxcraft_net::dns::Resolver;
 use inboxcraft_net::web::Https;
 use inboxcraft_net::{Connector, Credentials, Password, Timeouts, TlsSettings, Worker, WorkerSettings};
@@ -289,7 +289,11 @@ pub fn proposal(found: &Found) -> Proposal {
             })
             .collect()
     };
-    let failed = found.failed.iter().map(|(what, kind)| format!("{what}: {kind}")).collect();
+    let mut failed: Vec<String> = found.failed.iter().map(|(what, kind)| format!("{what}: {kind}")).collect();
+    // A server the domain names that no probe reached is still proposed; the form's list says it was not checked.
+    for candidate in found.imap.iter().chain(&found.submission).filter(|candidate| candidate.checked == Checked::NoAnswer) {
+        failed.push(format!("{} was not checked: it did not answer from here", candidate.server));
+    }
     Proposal { imap: suggestions(&found.imap), submission: suggestions(&found.submission), asked: found.asked.clone(), failed }
 }
 

@@ -444,7 +444,9 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   stage it probes the candidates it added, in that order: the list is a pure function of what the lookups returned
   (`net::candidates`: de-duplicated, capped, hosts made up from a domain only on 993 and 143, or 465 and 587, never
   without encryption, never port 25), and a candidate counts only when it greets and, encrypted, offers a sign-in
-  (`net::probe`, which sends no user name or password). It stops once it has an IMAP and a submission server, after
+  (`net::probe`, which sends no user name or password). A server the domain names (its autoconfig, the ISPDB, SRV)
+  that no probe reached is still proposed, marked `Checked::NoAnswer`, and while the domain names servers of a kind
+  no guess of that kind is tried. It stops once it has an IMAP and a submission server, after
   24 probes or after 120 seconds. DNS is `hickory-proto` messages over our own blocking UDP and TCP
   exchange with the resolver configuration of the system, HTTPS is `ureq` with `rustls` and the same trust as the
   mail connections, following no redirect and sending nothing but the URL. A candidate is detected settings

@@ -132,6 +132,30 @@ pub enum Source {
     Guess,
 }
 
+impl Source {
+    /// Whether the domain named the server: its own autoconfig file, the ISPDB's entry for it, or its SRV records.
+    #[must_use]
+    pub fn is_named(self) -> bool {
+        matches!(self, Self::Autoconfig | Self::Ispdb | Self::Srv)
+    }
+
+    /// Whether the server is a guess: a common host name of the domain, or anything from the MX hosts' provider.
+    #[must_use]
+    pub fn is_guess(self) -> bool {
+        matches!(self, Self::Guess | Self::Provider | Self::ProviderAutoconfig)
+    }
+}
+
+/// Whether a proposed server answered Detect's probe: one of a fixed set, never text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Checked {
+    /// It greeted and, encrypted, offered a sign-in.
+    Answered,
+    /// No probe reached it (no answer, a refused or dropped connection, no address, or no time left), but the domain
+    /// names it: proposed unchecked. The account check still verifies TLS before any password goes out.
+    NoAnswer,
+}
+
 /// A server Detect proposes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
@@ -141,6 +165,8 @@ pub struct Candidate {
     pub username: String,
     /// Where it came from.
     pub source: Source,
+    /// Whether it answered the probe.
+    pub checked: Checked,
 }
 
 impl Candidate {
@@ -157,9 +183,10 @@ impl Candidate {
 pub struct Proposal {
     /// The MX hosts of the domain, by preference, at most [`crate::candidates::MAX_MX`].
     pub mx: Vec<Host>,
-    /// The IMAP server that answered the probe; empty when none did.
+    /// The IMAP server that answered the probe, or else the first one the domain names that no probe could reach
+    /// ([`Checked::NoAnswer`]); empty when there is neither.
     pub imap: Vec<Candidate>,
-    /// The submission (SMTP) server that answered the probe; empty when none did.
+    /// The submission (SMTP) server, as [`Proposal::imap`].
     pub submission: Vec<Candidate>,
     /// Every DNS query, URL and probe, in order: `dns MX example.org`, `https://...`, `imap mail.example.org:993
     /// (TLS)`. What left the computer, for the owner; each URL and probe also means a name lookup of its host by the
@@ -211,18 +238,18 @@ pub fn detect(address: &EmailAddress, config: &DetectConfig, outside: &Outside<'
     }
     run.probe_new();
     if run.done() {
-        return run.proposal;
+        return run.finish();
     }
     run.srv(&domain);
     run.lookups.reach(Reached::Srv);
     run.probe_new();
     if run.done() {
-        return run.proposal;
+        return run.finish();
     }
     run.lookups.reach(Reached::Own);
     run.probe_new();
     if run.done() {
-        return run.proposal;
+        return run.finish();
     }
     let own = domain.as_str().to_lowercase();
     for provider in provider_domains(run.lookups.mx(), &own) {
@@ -243,7 +270,7 @@ pub fn detect(address: &EmailAddress, config: &DetectConfig, outside: &Outside<'
     }
     run.lookups.reach(Reached::Providers);
     run.probe_new();
-    run.proposal
+    run.finish()
 }
 
 struct Run<'a> {
@@ -253,8 +280,8 @@ struct Run<'a> {
     start: Duration,
     lookups: Lookups,
     proposal: Proposal,
-    /// Every server probed, for what.
-    tried: Vec<(Service, Server)>,
+    /// Every server probed, for what, and why it failed.
+    tried: Vec<(Service, Server, Option<ErrorKind>)>,
     /// Hosts that timed out or have no address: not probed again.
     unreachable: Vec<Host>,
     /// A cap was reached: nothing more is asked.
@@ -294,6 +321,34 @@ impl Run<'_> {
         }
     }
 
+    /// The proposal. For a kind no probe answered: the first server the domain names ([`Source::is_named`]) that was
+    /// not probed or whose probe got no answer (a network failure, not a server that spoke and was wrong), as
+    /// [`Checked::NoAnswer`].
+    fn finish(mut self) -> Proposal {
+        let list = candidates(self.address, &self.lookups);
+        for service in [Service::Imap, Service::Submission] {
+            if self.found(service) {
+                continue;
+            }
+            let unreached = |candidate: &&Candidate| {
+                let outcome =
+                    self.tried.iter().find(|(held, server, _)| *held == service && *server == candidate.server).map(|(_, _, failed)| *failed);
+                let host_down = self.unreachable.contains(candidate.server.host());
+                match outcome {
+                    None => true,
+                    Some(failed) => host_down || failed.is_some_and(no_answer),
+                }
+            };
+            let Some(named) = list.of(service).iter().filter(|candidate| candidate.source.is_named()).find(unreached) else { continue };
+            let named = Candidate { checked: Checked::NoAnswer, ..named.clone() };
+            match service {
+                Service::Imap => self.proposal.imap.push(named),
+                Service::Submission => self.proposal.submission.push(named),
+            }
+        }
+        self.proposal
+    }
+
     /// Found both, or out of time or tries.
     fn done(&self) -> bool {
         self.ended || (self.found(Service::Imap) && self.found(Service::Submission))
@@ -307,7 +362,7 @@ impl Run<'_> {
                 continue;
             }
             for candidate in list.of(service) {
-                if self.tried.iter().any(|(held, server)| *held == service && *server == candidate.server)
+                if self.tried.iter().any(|(held, server, _)| *held == service && *server == candidate.server)
                     || self.unreachable.contains(candidate.server.host())
                 {
                     continue;
@@ -315,18 +370,21 @@ impl Run<'_> {
                 if !self.may_try() {
                     return;
                 }
-                self.tried.push((service, candidate.server.clone()));
+
                 let what = format!("{} {}", service.word(), candidate.server);
                 self.proposal.asked.push(what.clone());
                 match self.outside.probe.probe(&candidate.server, service) {
                     Ok(()) => {
+                        self.tried.push((service, candidate.server.clone(), None));
+                        let answered = Candidate { checked: Checked::Answered, ..candidate.clone() };
                         match service {
-                            Service::Imap => self.proposal.imap.push(candidate.clone()),
-                            Service::Submission => self.proposal.submission.push(candidate.clone()),
+                            Service::Imap => self.proposal.imap.push(answered),
+                            Service::Submission => self.proposal.submission.push(answered),
                         }
                         break;
                     }
                     Err(error) => {
+                        self.tried.push((service, candidate.server.clone(), Some(error.kind())));
                         if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::PortTimedOut | ErrorKind::HostNotFound) {
                             self.unreachable.push(candidate.server.host().clone());
                         }
@@ -413,6 +471,19 @@ impl Run<'_> {
             }
         }
     }
+}
+
+/// Whether a probe's failure means that nothing answered, rather than a server that spoke and was wrong.
+fn no_answer(kind: ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::TimedOut
+            | ErrorKind::PortTimedOut
+            | ErrorKind::MailPortsBlocked
+            | ErrorKind::ConnectionRefused
+            | ErrorKind::ConnectionDropped
+            | ErrorKind::HostNotFound
+    )
 }
 
 /// The domain an MX host belongs to, by the rule of thumb of the module; lowercase.

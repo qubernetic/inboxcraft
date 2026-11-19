@@ -13,7 +13,7 @@ use inboxcraft_model::{
     Account, AccountId, CalendarJob, CalendarReport, CheckStep, EmailAddress, ErrorKind, Event, EventKind, Host, Job, JobId, JobKind, Security,
     Server, StepStatus,
 };
-use inboxcraft_net::detect::{Candidate, Proposal as Found, Source as Where};
+use inboxcraft_net::detect::{Candidate, Checked, Proposal as Found, Source as Where};
 use inboxcraft_net::{Connector, Credentials, Password, TlsSettings, Trust, WorkerSettings};
 use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_testkit::imap::{FakeImap, PASSWORD, USER};
@@ -185,8 +185,18 @@ fn found() -> Found {
     Found {
         mx: vec![Host::new("mx.example.org").unwrap()],
         imap: vec![
-            Candidate { server: server("imap.example.org", 993, Security::Tls), username: "carol@example.org".to_owned(), source: Where::Autoconfig },
-            Candidate { server: server("mail.example.org", 143, Security::StartTls), username: "carol".to_owned(), source: Where::Guess },
+            Candidate {
+                server: server("imap.example.org", 993, Security::Tls),
+                username: "carol@example.org".to_owned(),
+                source: Where::Autoconfig,
+                checked: Checked::Answered,
+            },
+            Candidate {
+                server: server("mail.example.org", 143, Security::StartTls),
+                username: "carol".to_owned(),
+                source: Where::Guess,
+                checked: Checked::Answered,
+            },
         ],
         submission: Vec::new(),
         asked: vec!["dns MX example.org".to_owned()],
@@ -235,6 +245,16 @@ fn a_detected_proposal_reads_as_the_form_shows_it() {
         sources,
         [onboard::Source::AutoconfigRedirect, onboard::Source::Ispdb, onboard::Source::Srv, onboard::Source::Guess, onboard::Source::Guess]
     );
+}
+
+#[test]
+fn a_named_server_no_probe_reached_is_shown_and_said_to_be_unchecked() {
+    let mut found = found();
+    found.imap[0].checked = Checked::NoAnswer;
+    let shown = proposal(&found);
+    assert_eq!(shown.imap[0].host, "imap.example.org");
+    assert!(shown.failed.contains(&"imap.example.org:993 (TLS) was not checked: it did not answer from here".to_owned()), "{:?}", shown.failed);
+    assert_eq!(shown.failed.len(), 2);
 }
 
 #[test]
