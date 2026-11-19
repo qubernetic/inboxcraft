@@ -154,7 +154,12 @@ pub fn status_message(ui: &mut Ui, theme: &Theme, keymap: &Keymap, message: &Sta
     let width = ui.available_width().max(1.0).floor();
     let high = theme.boxes().status;
     let (rect, response) = ui.allocate_exact_size(vec2(width, high), Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, heard(message.text)));
+    // A send counting down is heard with its seconds left, as it is seen.
+    let said = match message.kind {
+        Kind::Countdown { left: Some(left), .. } => tr!("{text}, {seconds}", text = heard(message.text), seconds = seconds(left)),
+        _ => heard(message.text),
+    };
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &said));
     let clip = rect.intersect(ui.clip_rect());
     let (edge, mark, ink) = message.kind.look(theme);
     let middle = rect.center().y;

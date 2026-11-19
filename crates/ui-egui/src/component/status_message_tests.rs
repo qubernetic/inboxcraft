@@ -19,6 +19,14 @@ const KEY: Option<&str> = Some("Ctrl Z");
 const LEFT: Option<Left> = Some(Left { seconds: 4, share: 0.8 });
 
 /// The sheet's kinds with their words.
+/// What a screen reader hears of `message`: its text, and a send countdown's seconds left after it.
+fn said(message: StatusMessage<'_>) -> String {
+    match message.kind {
+        Kind::Countdown { left: Some(left), .. } => format!("{}, {} s", message.text, left.seconds),
+        _ => message.text.to_owned(),
+    }
+}
+
 fn kinds() -> [(&'static str, StatusMessage<'static>); 5] {
     [
         ("undo", StatusMessage { kind: Kind::Undo { key: KEY, left: LEFT }, text: "done · Draft logo for the bakery" }),
@@ -127,8 +135,8 @@ fn every_kind_looks_as_its_sheet_says_in_dark_and_light() {
         let p = theme.palette;
         for (state, message) in kinds() {
             let harness = harness(theme, message, 560.0);
-            let rect = harness.get_by_label(message.text).rect();
-            let paint = painted(&harness, message.text);
+            let rect = harness.get_by_label(&said(message)).rect();
+            let paint = painted(&harness, &said(message));
             let at = format!("{mode:?} {state}: {paint:#?}");
             let want = expected(state, p);
             assert_eq!(rect.size(), vec2(560.0, 26.0), "{at}");
@@ -165,8 +173,8 @@ fn at_130_percent_the_message_is_34_high_and_its_paddings_and_bar_stay() {
         let p = theme.palette;
         for (state, message) in kinds() {
             let harness = harness(theme, message, 760.0);
-            let rect = harness.get_by_label(message.text).rect();
-            let paint = painted(&harness, message.text);
+            let rect = harness.get_by_label(&said(message)).rect();
+            let paint = painted(&harness, &said(message));
             let at = format!("{mode:?} {state}");
             assert_eq!(rect.size(), vec2(760.0, 34.0), "{at}");
             let fills = fills(&paint, rect);
@@ -260,8 +268,8 @@ fn without_a_bar_the_undo_line_has_no_countdown_and_its_text_takes_the_room() {
     let theme = Theme::new(Mode::Dark, TextScale::default());
     let message = StatusMessage { kind: Kind::Undo { key: None, left: None }, text: "done · Draft logo for the bakery" };
     let harness = harness(theme, message, 560.0);
-    let rect = harness.get_by_label(message.text).rect();
-    let paint = painted(&harness, message.text);
+    let rect = harness.get_by_label(&said(message)).rect();
+    let paint = painted(&harness, &said(message));
     assert!(!fills(&paint, rect).iter().any(|(r, _)| r.width() == 80.0), "no bar");
     assert!(!words(&paint, rect).iter().any(|(_, text, _)| text.ends_with(" s")), "no seconds");
     assert_eq!(harness.get_by_label("undo").rect().right(), rect.right() - 12.0, "undo at the end");
@@ -316,7 +324,7 @@ fn in_a_narrow_line_nothing_is_painted_past_the_message() {
     for (state, message) in kinds() {
         for width in [120.0, 1.0] {
             let harness = harness(theme, message, width);
-            let rect = harness.get_by_label(message.text).rect();
+            let rect = harness.get_by_label(&said(message)).rect();
             for (bounds, text) in shown(&harness) {
                 // The stage's ground stands under it.
                 if (bounds.contains_rect(rect) && bounds != rect) || !bounds.is_positive() {
@@ -339,8 +347,8 @@ fn the_countdown_draws_any_share_and_any_seconds_inside_the_message() {
             let message =
                 StatusMessage { kind: Kind::Countdown { key: KEY, left: Some(Left { seconds, share }) }, text: "sending · Re: Thursday workshop" };
             let harness = harness(theme, message, 560.0);
-            let rect = harness.get_by_label(message.text).rect();
-            let paint = painted(&harness, message.text);
+            let rect = harness.get_by_label(&said(message)).rect();
+            let paint = painted(&harness, &said(message));
             let at = format!("{seconds} {share}");
             let fills = fills(&paint, rect);
             let accent: Vec<_> = fills.iter().filter(|(r, c)| *c == p.cyan_edge && r.height() == 2.0 && r.top() > 0.0).collect();

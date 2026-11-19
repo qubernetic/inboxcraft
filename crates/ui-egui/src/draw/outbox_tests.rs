@@ -77,11 +77,12 @@ fn a_send_counts_down_in_its_toast_and_undo_opens_the_draft_again() {
         let mut harness = sending(&clock, theme);
         let draft = send(&mut harness, "Work party on Saturday");
         assert!(harness.state().composer().is_none(), "sent");
-        harness.get_by_label("sending · Work party on Saturday");
+        // A screen reader hears the seconds left with the subject.
+        harness.get_by_label("sending · Work party on Saturday, 5 s");
         assert_eq!(harness.state().counting(), Some((draft, 5)));
         clock.advance(Duration::from_secs(2));
         harness.run();
-        harness.get_by_label("sending · Work party on Saturday");
+        harness.get_by_label("sending · Work party on Saturday, 3 s");
         assert_eq!(harness.state().counting(), Some((draft, 3)), "counted down");
         harness.get_by_role_and_label(Role::Button, "undo").click();
         harness.run();
@@ -232,7 +233,7 @@ fn a_refused_send_shows_the_reply_and_can_be_edited_or_sent_again() {
         harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” again").click();
         harness.run();
         assert_eq!(harness.state().counting(), Some((draft, 5)), "held again, counted down");
-        harness.get_by_label("sending · Work party on Saturday");
+        harness.get_by_label("sending · Work party on Saturday, 5 s");
         clock.advance(Duration::from_secs(6));
         harness.state_mut().mailbox_mut().pump(&mut Scripted::default().refusing("451 4.3.0 Try again later"));
         harness.run();
