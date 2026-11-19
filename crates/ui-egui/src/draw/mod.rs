@@ -38,6 +38,7 @@
 mod accounts;
 mod calendar;
 mod change;
+mod picture;
 pub(crate) use self::calendar::{event_board, mini_month_board};
 mod command;
 mod compose;
@@ -274,6 +275,14 @@ pub struct InboxApp {
     list_hidden: bool,
     /// A change of place under way (M12): the old body going, the new one coming.
     change: Option<change::Change>,
+    /// The reader's place as it was before a message opened or a draft was sent (M7, M10), playing its movement.
+    picture: Option<picture::Picture>,
+    /// The window in the mode it left (M14), fading out over the new one.
+    mode_picture: Option<picture::Picture>,
+    /// Where the reader's place was drawn in this pass: the open message's card or the docked composer's.
+    reader_place: Option<Rect>,
+    /// Whether a draft was sent in this pass.
+    just_sent: bool,
     /// Where the list was drawn last, to tell whether the keyboard was in it when it goes.
     list_rect: Option<Rect>,
     /// For how many more frames the keyboard is given to the composer's text, the list having gone with it.
@@ -441,6 +450,10 @@ impl InboxApp {
             composer_keys: false,
             list_hidden: false,
             change: None,
+            picture: None,
+            mode_picture: None,
+            reader_place: None,
+            just_sent: false,
             list_rect: None,
             keys_to_text: 0,
             frame: 0,
@@ -1883,6 +1896,7 @@ impl InboxApp {
                     self.say(&tr!("Scheduled for {when}", when = when));
                 } else {
                     self.sending = Some(draft);
+                    self.just_sent = true;
                 }
                 // The engine holds the message now; it goes to the worker once the hold is over.
                 self.pump();
@@ -2163,6 +2177,7 @@ impl InboxApp {
         });
         // A press in the reader: someone reads there, and the list's keys rest until a row is pressed or keyed.
         let reader = shown.response.rect;
+        self.reader_place = Some(reader);
         self.focus_reader_tool(ui.ctx());
         #[cfg(test)]
         ui.data_mut(|data| data.insert_temp(egui::Id::unique("reader-rect"), reader));
@@ -2181,10 +2196,11 @@ impl InboxApp {
     fn composer_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, left: f32) -> Vec<compose::Asked> {
         let (keymap, mailbox) = (&self.keymap, &self.mailbox);
         let Some(composer) = self.composer.as_mut() else { return Vec::new() };
-        CentralPanel::no_frame()
+        let shown = CentralPanel::no_frame()
             .frame(around(left, theme.spacing.s2, theme.spacing.s2))
-            .show(ui, |ui| layers.card(ui, Margin::ZERO, |ui| compose::show(ui, theme, keymap, mailbox, composer)))
-            .inner
+            .show(ui, |ui| layers.card(ui, Margin::ZERO, |ui| compose::show(ui, theme, keymap, mailbox, composer)));
+        self.reader_place = Some(shown.response.rect);
+        shown.inner
     }
 
     /// The composer's floating panel while it is not `docked`; what was asked in it.
@@ -2373,11 +2389,18 @@ impl InboxApp {
         self.frame = ui.ctx().cumulative_frame_nr();
         // The list's rows as this frame draws them: a command of the frame that changes them draws the frame again.
         let rows_drawn = self.mailbox.rows_serial();
+        // And the reader's place and the mode: a command of the frame that changes them draws it again (M7, M10, M14).
+        let reader_drawn = self.reader_key();
+        let mode_drawn = theme.mode;
+        self.reader_place = None;
+        self.just_sent = false;
         // The command line's keys first: with its results shown, or the keyboard in it, they are its own.
         let command_keys = command::early(ui.ctx(), &mut self.command);
         // A key or a press during a change of place acts at once: the change jumps to its end.
         if crate::scramble::interrupted(ui.ctx()) {
             self.change = None;
+            self.picture = None;
+            self.mode_picture = None;
         }
         // And so do the movements of the rows and the cards, which read it after the keys were taken.
         motion::note_input(ui.ctx());
@@ -2621,6 +2644,8 @@ impl InboxApp {
         }
         self.change_place(ui.ctx(), drawn_place, regions.body, p.bg);
         self.rows_changed(ui.ctx(), rows_drawn);
+        self.reader_changed(ui.ctx(), reader_drawn, drawn_place, regions.status, &theme);
+        self.mode_changed(ui.ctx(), mode_drawn, ui.ctx().content_rect());
         self.follow_accounts_page();
         self.keep_keys();
         self.keep_triage();
@@ -2750,6 +2775,78 @@ impl InboxApp {
     fn rows_changed(&self, ctx: &egui::Context, drawn: u64) {
         if self.mailbox.rows_serial() != drawn && !ctx.will_discard() {
             ctx.request_discard("an act draws its list in the frame of its key");
+        }
+    }
+
+    /// What the reader's place shows, as state: the docked draft, else the message open on the mail (the selected one,
+    /// which the next [`InboxApp::sync`] opens).
+    fn reader_key(&self) -> (Option<u64>, Option<u64>) {
+        let docked = self.composer.as_ref().filter(|_| self.docked()).map(Composer::draft);
+        let open = if self.screen == Screen::Mail && docked.is_none() { self.mailbox.selected() } else { None };
+        (docked, open)
+    }
+
+    /// M7 and M10: when a command of this pass opened a message or sent the docked draft (the reader's place showed
+    /// `drawn`), what the place painted is kept for the movement of the level, and the frame is drawn again with the
+    /// change, so the owner never waits for it; while one runs, its frame is painted over the place.
+    fn reader_changed(&mut self, ctx: &egui::Context, drawn: (Option<u64>, Option<u64>), place: index::Place, status: Rect, theme: &Theme) {
+        let now = self.reader_key();
+        if ctx.current_pass_index() == 0 && now != drawn && self.index_place(self.settings.is_open()) == place {
+            let sent = drawn.0.is_some() && now.0.is_none() && self.just_sent;
+            let opened = drawn.0.is_none() && now.0.is_none() && now.1.is_some() && now.1 != drawn.1;
+            if sent || opened {
+                // From nothing drawn in the place (nothing was open) there is nothing to keep: the message wipes in over
+                // the ground, or is there.
+                let ground = theme.palette.bg;
+                let layers = [egui::LayerId::background()];
+                self.picture = self.reader_place.and_then(|rect| match (motion::level(ctx), sent) {
+                    (motion::Level::Off, _) => None,
+                    (motion::Level::Reduced, _) => picture::Picture::keep(ctx, rect, &layers, ground, picture::Form::Fade, picture::FAST, false),
+                    (motion::Level::Full, false) => picture::Picture::keep(ctx, rect, &layers, ground, picture::Form::Under, reader::WIPE, false),
+                    (motion::Level::Full, true) => {
+                        let form = picture::Form::Fold { onto: status, line: status.height() };
+                        picture::Picture::keep(ctx, rect, &layers, ground, form, picture::MEDIUM + picture::FAST, false)
+                    }
+                });
+                ctx.request_discard("a message opened or a draft sent shows in the frame of its key");
+                return;
+            }
+        }
+        let place = self.reader_place;
+        if self.picture.as_mut().is_some_and(|picture| !picture.paint(ctx, place)) {
+            self.picture = None;
+        }
+    }
+
+    /// M14: when a command of this pass changed the appearance (`drawn` was the mode it drew in `window`), it is put in
+    /// at once and the frame drawn again with it; a change of mode keeps the old window to fade out over the new one at
+    /// full (300 ms) and reduced (125 ms).
+    fn mode_changed(&mut self, ctx: &egui::Context, drawn: theme::Mode, window: Rect) {
+        if ctx.current_pass_index() == 0 && self.themed != Some(*self.mailbox.appearance()) {
+            self.install_theme(ctx);
+            // The context's mode follows its preference from the next pass: the one it will show.
+            let shown = match self.mailbox.appearance().theme {
+                ModePreference::Light => theme::Mode::Light,
+                ModePreference::Dark => theme::Mode::Dark,
+                ModePreference::System => {
+                    ctx.system_theme().map_or(drawn, |system| if system == egui::Theme::Light { theme::Mode::Light } else { theme::Mode::Dark })
+                }
+            };
+            if shown != drawn {
+                let seconds = match motion::level(ctx) {
+                    motion::Level::Full => Some(picture::MEDIUM),
+                    motion::Level::Reduced => Some(picture::FAST),
+                    motion::Level::Off => None,
+                };
+                let ground = theme::Palette::of(drawn).bg;
+                self.mode_picture = seconds
+                    .and_then(|seconds| picture::Picture::keep(ctx, window, &picture::every_layer(ctx), ground, picture::Form::Fade, seconds, true));
+            }
+            ctx.request_discard("an appearance chosen shows in the frame of its key");
+            return;
+        }
+        if self.mode_picture.as_mut().is_some_and(|picture| !picture.paint(ctx, None)) {
+            self.mode_picture = None;
         }
     }
 

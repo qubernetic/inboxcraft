@@ -18,7 +18,7 @@ use crate::{InboxApp, sample};
 const ODILE: &str = "Odile Brannock, Allotment rota for November, 08:35, unread";
 
 /// The window at the mail's simple list at `level`, at rest, frames 10 ms apart.
-pub(super) fn window(level: Level) -> Harness<'static, InboxApp> {
+pub(crate) fn window(level: Level) -> Harness<'static, InboxApp> {
     let clock = || Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()));
     let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
     mailbox.set_inbox_view(InboxView::List);
@@ -34,13 +34,13 @@ pub(super) fn window(level: Level) -> Harness<'static, InboxApp> {
 }
 
 /// A key pressed as one event: the frame of the key is the last drawn.
-pub(super) fn press(harness: &mut Harness<'static, InboxApp>, key: Key) {
+pub(crate) fn press(harness: &mut Harness<'static, InboxApp>, key: Key) {
     harness.event(egui::Event::Key { key, pressed: true, modifiers: Modifiers::NONE, repeat: false, physical_key: None });
     harness.step();
 }
 
 /// The texts painted with their middle inside `rect`, icons left out (they never change).
-pub(super) fn texts_in(harness: &Harness<'static, InboxApp>, rect: Rect) -> Vec<String> {
+pub(crate) fn texts_in(harness: &Harness<'static, InboxApp>, rect: Rect) -> Vec<String> {
     let icons = crate::theme::icon_font(1.0).family;
     let mut out = Vec::new();
     for clipped in &harness.output().shapes {

@@ -44,34 +44,13 @@ fn body_layers() -> [LayerId; 1] {
     [LayerId::background()]
 }
 
-/// Whether `clipped` is the body's: it is painted inside `body`.
-fn inside(clipped: &ClippedShape, body: Rect) -> bool {
-    let seen = clipped.shape.visual_bounding_rect().intersect(clipped.clip_rect);
-    seen.is_positive() && body.contains(seen.center())
-}
-
 /// Keeps what this frame painted in `body` (the old place, drawn before its change's command ran) for a change at
 /// `level`; none at off, or when the body painted more than [`MOST_SHAPES`].
 pub(crate) fn keep(ctx: &Context, body: Rect, level: Level) -> Option<Change> {
     if level == Level::Off {
         return None;
     }
-    let layers = body_layers();
-    let old = ctx.graphics(|graphics| {
-        let mut old = Vec::new();
-        for layer in &layers {
-            let Some(list) = graphics.get(*layer) else { continue };
-            for clipped in list.all_entries().filter(|clipped| inside(clipped, body)) {
-                if old.len() >= MOST_SHAPES {
-                    return None;
-                }
-                let mut kept = clipped.clone();
-                kept.clip_rect = kept.clip_rect.intersect(body);
-                old.push(kept);
-            }
-        }
-        Some(old)
-    })?;
+    let old = super::picture::shapes(ctx, body, &body_layers())?;
     Some(Change { started: None, old, body, level })
 }
 
@@ -133,7 +112,7 @@ impl Change {
                     if texts.len() >= MOST_SHAPES {
                         return texts;
                     }
-                    if matches!(clipped.shape, Shape::Text(_) | Shape::Vec(_)) && inside(clipped, self.body) {
+                    if matches!(clipped.shape, Shape::Text(_) | Shape::Vec(_)) && super::picture::inside(clipped, self.body) {
                         texts.push((*layer, index, clipped.shape.clone()));
                     }
                 }

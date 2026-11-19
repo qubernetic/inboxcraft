@@ -2658,7 +2658,7 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
 
 #[cfg(test)]
 #[path = "rows_motion_tests.rs"]
-mod rows_motion_tests;
+pub(crate) mod rows_motion_tests;
 
 #[cfg(test)]
 #[path = "card_motion_tests.rs"]
