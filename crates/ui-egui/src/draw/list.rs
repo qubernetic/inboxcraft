@@ -374,6 +374,12 @@ fn close_snooze(ctx: &egui::Context) {
     });
 }
 
+/// Whether one of the list's floats is open: a row's time picker or a group's menu on a row.
+pub(super) fn floats_open(ctx: &egui::Context, mailbox: &Mailbox) -> bool {
+    ctx.data(|data| data.get_temp::<SnoozeOpen>(snooze_open_id())).is_some()
+        || mailbox.messages().iter().any(|row| popup::is_open(ctx, group_menu_id(row.id)))
+}
+
 /// Closes the list's floats, a row's time picker and a group's menu on a row, without handing the keyboard back to
 /// the row; whether one was open.
 pub(super) fn close_floats(ctx: &egui::Context, mailbox: &Mailbox) -> bool {

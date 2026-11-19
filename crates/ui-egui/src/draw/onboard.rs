@@ -217,7 +217,9 @@ fn with_error<R>(ui: &mut Ui, theme: &Theme, errors: &[Option<&str>], notes: &[O
 /// says it under the row); its response. `key` tells it from a field of the same name on the page.
 fn line_field(ui: &mut Ui, theme: &Theme, (label, hint, key): (&str, &str, &str), text: &mut String, error: Option<&str>, width: f32) -> Response {
     part(ui, width, |ui| {
-        let id = ui.make_persistent_id(("onboard-field", label, key));
+        // Not from the page's place in the window: a field keeps its id, and the keyboard, when the page is laid out
+        // anew (the settings' sections column giving way in a narrow window). One form shows at a time.
+        let id = egui::Id::unique(("onboard-field", label, key));
         field::quietly(ui, |ui| field::text_field(ui, theme, id, text, &Field { error, ..Field::new(label, hint) }))
     })
 }

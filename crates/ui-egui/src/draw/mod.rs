@@ -1128,9 +1128,10 @@ impl InboxApp {
             }
             list::land(ctx, id);
         }
-        let free = ctx.memory(|memory| memory.focused().is_none()) || list::focused_row(ctx).is_some();
-        if crossed && single && message && free {
-            self.focus_reader = true;
+        // The keyboard on nothing, on a row or in a float of the list, which leaves with it: the reader takes it.
+        if crossed && single && message {
+            let free = ctx.memory(|memory| memory.focused().is_none()) || list::focused_row(ctx).is_some() || list::floats_open(ctx, &self.mailbox);
+            self.focus_reader |= free;
         }
         if (crossed || came)
             && list_shown
