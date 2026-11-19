@@ -36,8 +36,8 @@
 {"out": "docs/images/error-banner-strip-light.png", "mode": "light", "frame": "strip", "open": {"folder": 4242}}
 {"out": "docs/images/error-banner-strip-dark.png", "mode": "dark", "frame": "strip", "open": {"folder": 4242}}
 # The account picker open in a low window, so its list scrolls and shows its thumb (#233).
-{"out": "docs/images/account-picker-open-light.png", "mode": "light", "size": [1200, 180], "click": [184, 82]}
-{"out": "docs/images/account-picker-open-dark.png", "mode": "dark", "size": [1200, 180], "click": [184, 82]}
+{"out": "docs/images/account-picker-open-light.png", "mode": "light", "size": [1200, 600], "steps": [{"press": "Show mail of: mira@example.org"}]}
+{"out": "docs/images/account-picker-open-dark.png", "mode": "dark", "size": [1200, 600], "steps": [{"press": "Show mail of: mira@example.org"}]}
 # Acting on mail (#131): the open message archived, the next one open (and read) and the toast with Undo.
 {"out": "docs/images/reader-archive-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
 {"out": "docs/images/reader-archive-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
@@ -280,8 +280,8 @@
 {"out": "docs/images/reader-fitted-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "select": "Your bike is due for a service"}
 {"out": "docs/images/list-focus-thumb-light.png", "mode": "light", "size": [1200, 560], "view": "list", "steps": [{"focus": "Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged"}]}
 {"out": "docs/images/list-focus-thumb-dark.png", "mode": "dark", "size": [1200, 560], "view": "list", "steps": [{"focus": "Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged"}]}
-{"out": "docs/images/accounts-open-light.png", "mode": "light", "size": [1400, 860], "steps": [{"press": "Accounts"}]}
-{"out": "docs/images/accounts-open-dark.png", "mode": "dark", "size": [1400, 860], "steps": [{"press": "Accounts"}]}
+{"out": "docs/images/accounts-open-light.png", "mode": "light", "size": [1400, 860], "steps": [{"press": "Show mail of: mira@example.org"}]}
+{"out": "docs/images/accounts-open-dark.png", "mode": "dark", "size": [1400, 860], "steps": [{"press": "Show mail of: mira@example.org"}]}
 {"out": "docs/images/row-snooze-picker-light.png", "mode": "light", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}
 {"out": "docs/images/row-snooze-picker-dark.png", "mode": "dark", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}
 # An open list on the settings sheet: the add-account form's IMAP security select, its list open over the sheet (#238).
