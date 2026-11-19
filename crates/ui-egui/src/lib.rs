@@ -79,3 +79,7 @@ pub fn name() -> &'static str {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "glyph_sweep_tests.rs"]
+mod glyph_sweep_tests;
