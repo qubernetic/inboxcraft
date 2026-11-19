@@ -267,6 +267,8 @@ pub struct Field {
     warm: BTreeMap<Spot, Warm>,
     /// Updates so far.
     frame: u64,
+    /// The input time of the last update, in seconds: a cell the pointer was near then and is not now was left then.
+    last: Option<f64>,
     /// Flips so far: a flip's glyph is a hash of its cell and this.
     flips: u32,
     /// How many times the cells were built.
@@ -280,7 +282,7 @@ impl Field {
     /// that [`show`] is given.
     #[must_use]
     pub fn new(seed: u32) -> Self {
-        Self { seed, emblem: None, cells: None, look: None, warm: BTreeMap::new(), frame: 0, flips: 0, builds: 0, layouts: 0 }
+        Self { seed, emblem: None, cells: None, look: None, warm: BTreeMap::new(), frame: 0, last: None, flips: 0, builds: 0, layouts: 0 }
     }
 
     /// The same field with `emblem` on it, where [`Opts::emblem`] puts it.
@@ -375,13 +377,16 @@ impl Field {
                 self.touch(spot);
             }
         }
-        let frame = self.frame;
+        // A cell the pointer has left was left after the last update: if the field was not drawn for a while, the
+        // cells that have cooled since are cold at once.
+        let (frame, left) = (self.frame, self.last.unwrap_or(now).min(now));
         for warm in self.warm.values_mut() {
             if warm.seen != frame && warm.left.is_none() {
-                warm.left = Some(now);
+                warm.left = Some(left);
             }
         }
         self.warm.retain(|_, warm| warm.left.is_none_or(|left| now - left < warm.cool));
+        self.last = Some(now);
     }
 
     /// `spot` is within reach: it stays warm, or flips if it was not.

@@ -36,6 +36,8 @@ struct Stage {
     buttons: bool,
     /// Whether the button over the field and the one under its edge were hovered in the last frame.
     hovered: (bool, bool),
+    /// Whether the field is drawn.
+    shown: bool,
 }
 
 impl Stage {
@@ -52,6 +54,7 @@ impl Stage {
             keys: 0,
             buttons: false,
             hovered: (false, false),
+            shown: true,
         }
     }
 }
@@ -75,7 +78,9 @@ fn harness_at(stage: Stage, ppp: f32) -> Harness<'static, Stage> {
                         stage.under += 1;
                     }
                 }
-                show(ui, &theme, &mut stage.field, stage.rect, stage.level, stage.opts);
+                if stage.shown {
+                    show(ui, &theme, &mut stage.field, stage.rect, stage.level, stage.opts);
+                }
                 if ui.input(|input| input.key_pressed(Key::K)) {
                     stage.keys += 1;
                 }
@@ -491,6 +496,23 @@ fn the_pointer_leaving_the_window_cools_everything_and_the_field_rests() {
         assert!(warm(&harness).is_empty(), "{level:?}: still warm after the pointer left");
         assert!(rests(&mut harness, 3), "{level:?}: no rest after the pointer left");
     }
+}
+
+#[test]
+fn a_field_drawn_again_after_a_pause_shows_no_cell_that_cooled_meanwhile() {
+    let mut harness = harness(Stage::new(Level::Full, Opts::default()));
+    harness.hover_at(pos2(300.0, 300.0));
+    harness.step();
+    let held = field_spots(&warm(&harness));
+    assert!(!held.is_empty());
+    // Not drawn for 300 ms, the pointer gone elsewhere: drawn again, none of the cells it held is warm.
+    harness.state_mut().shown = false;
+    harness.hover_at(pos2(700.0, 300.0));
+    harness.run_steps(MS_200 + MS_100);
+    harness.state_mut().shown = true;
+    harness.step();
+    let stale: Vec<_> = field_spots(&warm(&harness)).into_iter().filter(|spot| held.contains(spot)).collect();
+    assert!(stale.is_empty(), "{} cells held before the pause are still warm", stale.len());
 }
 
 #[test]
