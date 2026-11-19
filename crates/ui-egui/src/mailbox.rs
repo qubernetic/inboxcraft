@@ -1178,6 +1178,7 @@ impl Mailbox {
             return Vec::new();
         }
         let (today_ends, week_ends) = self.later_bounds();
+        let now = self.now();
         let mut heads = [
             Group { icon: IconId::Snooze, name: tr!("Back today").to_owned(), messages: Vec::new() },
             Group { icon: IconId::Snooze, name: tr!("Back this week").to_owned(), messages: Vec::new() },
@@ -1185,8 +1186,10 @@ impl Mailbox {
         ];
         for row in &self.messages {
             let at = match row.snoozed_until {
-                Some(until) if today_ends.is_none_or(|end| until < end) => 0,
-                Some(until) if week_ends.is_none_or(|end| until < end) => 1,
+                // Where the calendar cannot tell when today or the week ends, only a row whose time has passed is back
+                // today, and the others are Later: never all of them under the first head.
+                Some(until) if until <= now || today_ends.is_some_and(|end| until < end) => 0,
+                Some(until) if week_ends.is_some_and(|end| until < end) => 1,
                 // No time to sort by: it comes back at none the owner can see.
                 _ => 2,
             };
