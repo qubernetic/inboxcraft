@@ -999,6 +999,11 @@ impl InboxApp {
             keymap::LAST => (true, usize::MAX),
             _ => (false, usize::MAX),
         };
+        if self.mailbox.drafts_listed() {
+            // The drafts place walks its kept drafts, not messages.
+            list::step_draft(ctx, &self.mailbox, forward, rows);
+            return;
+        }
         // The focused row is the keyed one; a selection made by the pointer counts from where it is.
         let landed = self.held_back.and_then(|held| held.land);
         if let Some(from) = self.list_row.filter(|from| self.mailbox.selected() != Some(*from) && landed != Some(*from)) {
@@ -1027,6 +1032,13 @@ impl InboxApp {
     /// `Enter` in the list: the keyed (or focused) message opens and the keyboard goes to the reader, so the list's keys
     /// rest until `Esc` there gives it back.
     fn open_from_list(&mut self, ctx: &egui::Context) {
+        if self.mailbox.drafts_listed() {
+            // The keyed draft opens in the composer to go on writing.
+            if let Some(draft) = list::focused_draft(ctx, &self.mailbox) {
+                self.open_draft(ctx, draft);
+            }
+            return;
+        }
         let Some(id) = self.list_row.or_else(|| self.mailbox.selected()) else { return };
         self.mailbox.read_preview(id);
         self.mailbox.select_keyed(id);
@@ -1260,7 +1272,8 @@ impl InboxApp {
         if !surfaces.list_has_keyboard() {
             return false;
         }
-        if self.list_row.is_some() {
+        // A row of the list has the keyboard: a message's, or a kept draft's in the drafts place.
+        if self.list_row.is_some() || (self.mailbox.drafts_listed() && list::focused_draft(ctx, &self.mailbox).is_some()) {
             return true;
         }
         let focused = ctx.memory(|memory| memory.focused().is_some());
@@ -1942,6 +1955,16 @@ impl InboxApp {
         }
     }
 
+    /// Opens the kept draft `draft` in the composer to go on writing (Home's draft rows, the drafts place), the keys
+    /// in its To line. Only when the draft opened: a refused switch (the draft being written could not be kept) leaves
+    /// the keys where they were.
+    fn open_draft(&mut self, ctx: &egui::Context, draft: u64) {
+        self.reopen(draft);
+        if self.composer.as_ref().is_some_and(|composer| composer.draft() == draft) {
+            ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
+        }
+    }
+
     /// Sends the refused draft `draft` again (`outbox.retry`), the countdown toast showing its hold.
     pub fn retry(&mut self, draft: u64) {
         match self.mailbox.retry(draft) {
@@ -2451,6 +2474,8 @@ impl InboxApp {
             // The list is hidden where the composer stands in its place: beside a composer too narrow for it, and in
             // one pane with the composer in front. Nothing of it acts then.
             let hidden = place == ListPlace::Hidden || (place == ListPlace::Away && self.composer_in_front());
+            self.mailbox.hide_draft(self.discarding());
+            self.mailbox.keep_drafts_fresh();
             let (mailbox, keymap) = (&self.mailbox, &self.keymap);
             let list = |ui: &mut Ui, layers: &mut Panes| {
                 layers.card(ui, Margin::ZERO, |ui| {
@@ -2534,7 +2559,8 @@ impl InboxApp {
         dismiss |= dismissed;
         ran.extend(line.hint);
         add |= line.open_account;
-        let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, screener: screener_mode, presets, gained } = listed;
+        let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, draft: drafted, screener: screener_mode, presets, gained } =
+            listed;
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
         let busy = dismiss
@@ -2542,6 +2568,7 @@ impl InboxApp {
             || acted.is_some()
             || line != status::Pressed::default()
             || outboxed.is_some()
+            || drafted.is_some()
             || screener_mode.is_some()
             || (out && leaving)
             || left_full
@@ -2568,6 +2595,11 @@ impl InboxApp {
             ui.ctx().request_repaint();
         }
         self.act(out, acted, undone, outboxed, screener_mode);
+        match drafted {
+            Some((draft, list::Drafted::Open)) => self.open_draft(ui.ctx(), draft),
+            Some((draft, list::Drafted::Discard)) => self.discard_draft(draft),
+            None => {}
+        }
         if presets {
             // A row's time picker opened: the presets still ahead, read as the reader's picker reads them.
             self.mailbox.load_presets();
@@ -2801,14 +2833,7 @@ impl InboxApp {
                 self.calendar.set_view(&mut self.mailbox, view);
                 self.calendar.go_today(&mut self.mailbox);
             }
-            Asked::OpenDraft(draft) => {
-                self.reopen(draft);
-                // Only when the draft opened: a refused switch (the draft being written could not be kept) leaves the
-                // keys where they were.
-                if self.composer.as_ref().is_some_and(|composer| composer.draft() == draft) {
-                    ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
-                }
-            }
+            Asked::OpenDraft(draft) => self.open_draft(ctx, draft),
             Asked::DiscardDraft(draft) => self.discard_draft(draft),
             Asked::ReadMail => return Some(keymap::MAIL),
             Asked::Write => return Some(keymap::COMPOSE),
@@ -3298,6 +3323,9 @@ mod compose_tests;
 #[cfg(test)]
 #[path = "cover_tests.rs"]
 mod cover_tests;
+#[cfg(test)]
+#[path = "drafts_tests.rs"]
+mod drafts_tests;
 #[cfg(test)]
 #[path = "fit_tests.rs"]
 mod fit_tests;

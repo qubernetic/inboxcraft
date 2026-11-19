@@ -477,6 +477,47 @@ pub struct OutboxRow {
     pub invite_answer: bool,
 }
 
+/// A kept draft as the drafts place lists it, from `compose.list`. Its words are the owner's own text, read capped
+/// and plain ([`crate::home::kept`]) when the list is built, never run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftItem {
+    /// The draft.
+    pub id: u64,
+    /// The account it is written from.
+    pub account: u64,
+    /// The subject; `None` when it has none yet.
+    pub subject: Option<String>,
+    /// Whom it goes to as the row says it: "to Sunniva Aalto", or "no recipient yet".
+    pub to: String,
+    /// When it was last saved, as the row says it: "edited 12:10".
+    pub when: String,
+    /// The start of its text, one line, for a screen reader.
+    pub start: String,
+}
+
+/// The characters of a draft's text a screen reader is told, at most.
+const DRAFT_START: usize = 80;
+
+/// A draft of `compose.list` as the drafts place lists it; `None` without an id. Every text is capped and made plain
+/// here, where the list is built, so a draft of 10 000 characters costs a frame no more than a short one.
+fn draft_item(mailbox: &Mailbox, row: &Value) -> Option<DraftItem> {
+    let id = row.get("id").and_then(Value::as_u64)?;
+    let account = row.get("account").and_then(Value::as_u64).unwrap_or(0);
+    let subject = row.get("subject").and_then(Value::as_str).map(crate::home::kept).filter(|subject| !subject.trim().is_empty());
+    let first = row.get("to").and_then(Value::as_array).and_then(|to| to.first()).and_then(|to| to.get("text")).and_then(Value::as_str);
+    let to = match first.map(|to| crate::home::kept(&recipient(to).0)).filter(|to| !to.trim().is_empty()) {
+        Some(to) => tr!("to {who}", who = to),
+        None => tr!("no recipient yet").to_owned(),
+    };
+    let saved = row.get("saved").and_then(Value::as_str).and_then(parse_date);
+    let when = saved.map_or_else(String::new, |saved| tr!("edited {when}", when = mailbox.short_date(saved)));
+    let text = row.get("text").and_then(Value::as_str).unwrap_or_default();
+    let (start, cut) = crate::component::capped(text.trim_start(), DRAFT_START);
+    let start = crate::component::plain(start).split_whitespace().collect::<Vec<_>>().join(" ");
+    let start = if cut { format!("{start}…") } else { start };
+    Some(DraftItem { id, account, subject, to, when, start })
+}
+
 /// A sender the screener holds back until the owner lets them in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Waiting {
@@ -649,6 +690,12 @@ pub struct Mailbox {
     presets: Vec<(String, Timestamp)>,
     /// The outbox, from `outbox.list`.
     outbox: Vec<OutboxRow>,
+    /// The drafts the drafts place lists, from `compose.list`, read while it shows.
+    drafts: Vec<DraftItem>,
+    /// [`Mailbox::writes`] when [`Mailbox::drafts`] was last read: a write since reads them again.
+    drafts_read: Option<u64>,
+    /// The draft whose discard waits behind its toast: the drafts place leaves it out until Undo or the discard.
+    hidden_draft: Option<u64>,
     /// The subjects of the sends that went late since [`Mailbox::take_late`] was last called.
     late: Vec<String>,
     /// The engine's notices since [`Mailbox::take_notices`] was last called.
@@ -904,6 +951,9 @@ impl Mailbox {
             piles: [0; 3],
             presets: Vec::new(),
             outbox: Vec::new(),
+            drafts: Vec::new(),
+            drafts_read: None,
+            hidden_draft: None,
             late: Vec::new(),
             notices: Vec::new(),
             after: After::Next,
@@ -1787,6 +1837,59 @@ impl Mailbox {
         Ok(())
     }
 
+    /// Reads the drafts the drafts place lists (`compose.list`), newest first, at most [`MAX_LIST`] of the accounts
+    /// shown. The engine answers only the newest asked for; the store still reads them all to pick those (#301 makes
+    /// it read only what is asked).
+    fn load_drafts(&mut self) -> Result<(), UiError> {
+        let answer = self.run("compose.list", &json!({ "account": self.narrowed, "limit": MAX_LIST }))?;
+        let drafts: Vec<DraftItem> = array("compose.list", &answer, "drafts")?.iter().filter_map(|row| draft_item(self, row)).collect();
+        if drafts != self.drafts {
+            self.drafts = drafts;
+            self.revision = self.revision.wrapping_add(1);
+        }
+        self.drafts_read = Some(self.writes);
+        Ok(())
+    }
+
+    /// While the drafts place shows, reads its drafts again when something was written since they were read (a draft
+    /// saved, sent or discarded); otherwise nothing, so a frame at rest runs no command.
+    pub fn keep_drafts_fresh(&mut self) {
+        if self.drafts_listed() && self.drafts_read != Some(self.writes) {
+            let read = self.load_drafts();
+            if let Err(error) = read {
+                // Not read again until the next write: a refused read is not asked for every frame.
+                self.drafts_read = Some(self.writes);
+                self.error = Some(error.to_string());
+            }
+        }
+    }
+
+    /// Whether the drafts place shows its drafts: Drafts open, nothing searched.
+    #[must_use]
+    pub fn drafts_listed(&self) -> bool {
+        self.place == Place::View(Role::Drafts) && self.query.is_empty()
+    }
+
+    /// The drafts the drafts place lists, newest first, the one whose discard waits left out.
+    pub fn drafts(&self) -> impl Iterator<Item = &DraftItem> {
+        self.drafts.iter().filter(|draft| Some(draft.id) != self.hidden_draft)
+    }
+
+    /// Leaves the draft `hidden` out of [`Mailbox::drafts`] (its discard waits behind its toast), or none.
+    pub fn hide_draft(&mut self, hidden: Option<u64>) {
+        self.hidden_draft = hidden;
+    }
+
+    /// What the drafts place's head says under its title: how many drafts it lists.
+    #[must_use]
+    pub fn drafts_count(&self) -> String {
+        match self.drafts().count() {
+            0 => tr!("no drafts").to_owned(),
+            1 => tr!("1 draft").to_owned(),
+            count => tr!("{count} drafts", count = count),
+        }
+    }
+
     /// Reads the outbox (`outbox.list`).
     fn load_outbox(&mut self) -> Result<(), UiError> {
         self.revision = self.revision.wrapping_add(1);
@@ -1800,6 +1903,12 @@ impl Mailbox {
         // The outbox shows while anything is in it, and gives way to the inbox after.
         let place = if place == Place::Outbox && self.outbox.is_empty() { Place::View(Role::Inbox) } else { place };
         let rows = if self.query.is_empty() { self.list(place)? } else { self.found()? };
+        if place == Place::View(Role::Drafts) && self.query.is_empty() {
+            self.load_drafts()?;
+        } else {
+            self.drafts = Vec::new();
+            self.drafts_read = None;
+        }
         self.place = place;
         self.messages = rows;
         self.rows_serial = self.rows_serial.wrapping_add(1);
@@ -1813,12 +1922,12 @@ impl Mailbox {
         let mut params = json!({ "account": self.narrowed, "limit": MAX_LIST });
         if let Value::Object(fields) = &mut params {
             match place {
+                // The outbox lists sends, not messages; the drafts place the kept drafts ([`Mailbox::drafts`]).
+                Place::Outbox | Place::View(Role::Drafts) => return Ok(Vec::new()),
                 Place::View(role) => fields.insert("role".to_owned(), Value::String(role.label().to_ascii_lowercase())),
                 Place::Folder(id) => fields.insert("folder".to_owned(), json!(id)),
                 Place::Senders => return self.senders(),
                 Place::Later(pile) => return self.later(pile),
-                // The outbox lists sends, not messages.
-                Place::Outbox => return Ok(Vec::new()),
             };
             if self.show_done {
                 fields.insert("done".to_owned(), Value::Bool(true));

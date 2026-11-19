@@ -28,6 +28,10 @@
 //! "Scheduled · Sat 08:00", "Sending…", or "Not sent" with the server's reply under the subject), and its buttons: Undo
 //! for a send in its hold and Edit for one scheduled, which take it back and open its draft, Edit and Send again for a
 //! refused one. A sent message a delivery report says did not get through is marked "Not delivered" in its row.
+//!
+//! The drafts place lists the kept drafts (`compose.list`), newest first, as draft rows: the subject, whom it goes to and
+//! when it was last saved. J, K and the arrows walk them, Enter or a press opens one in the composer to go on writing,
+//! and "discard" hides it behind a toast with Undo; the discard is carried out when the toast ends.
 
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -51,7 +55,7 @@ use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
 use crate::component::{avatar, button, galley, popup};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, Group, GroupKind, InboxView, Leaving, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState, Waiting};
+use crate::mailbox::{Act, DraftItem, Group, GroupKind, InboxView, Leaving, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState, Waiting};
 use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
@@ -89,7 +93,7 @@ fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) {
         search_head(ui, theme, mailbox);
         return;
     }
-    if matches!(mailbox.place(), Place::Senders | Place::Outbox) {
+    if matches!(mailbox.place(), Place::Senders | Place::Outbox) || mailbox.drafts_listed() {
         return;
     }
     ui.add_space(theme.spacing.s3);
@@ -115,11 +119,6 @@ fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) {
                 if let Some(view) = segmented_for(ui, theme, &options, mailbox.inbox_view(), Some(tr!("the inbox"))) {
                     asked.view = Some(view);
                 }
-            }
-            if mailbox.place() == Place::View(Role::Drafts) {
-                // The list of drafts is planned: its rows are drawn, coming soon.
-                let _ = crate::component::soon::soon_tag(ui, theme);
-                return;
             }
             if pill(ui, theme, tr!("Show done"), mailbox.show_done()).clicked() {
                 asked.show_done = Some(!mailbox.show_done());
@@ -177,6 +176,9 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Header {
 
 /// The line under the list's title: whose mail and how much, or the outbox's summary.
 fn subtitle(mailbox: &Mailbox) -> String {
+    if mailbox.drafts_listed() {
+        return mailbox.drafts_count();
+    }
     match mailbox.outbox_summary().filter(|_| mailbox.place() == Place::Outbox && mailbox.query().is_empty()) {
         Some(summary) => summary,
         None => tr!("{whose} · {shown}", whose = mailbox.subtitle(), shown = mailbox.list_count()),
@@ -1005,6 +1007,8 @@ pub(super) struct Asked {
     pub(super) done_all: Option<Vec<u64>>,
     /// A button of a send in the outbox, and its draft.
     pub(super) outbox: Option<(u64, Outbox)>,
+    /// A draft's row in the drafts place pressed, and what for.
+    pub(super) draft: Option<(u64, Drafted)>,
     /// A pill of the screener's mode under "New senders".
     pub(super) screener: Option<ScreenerMode>,
     /// The row that gained the keyboard's focus this frame (`Tab` onto it).
@@ -1098,6 +1102,8 @@ struct Rows<'a> {
     review: Cell<bool>,
     /// A button of a send in the outbox pressed, and its draft.
     outbox: Cell<Option<(u64, Outbox)>>,
+    /// A draft's row in the drafts place pressed, and what for.
+    draft: Cell<Option<(u64, Drafted)>>,
     /// The row that gained the focus this frame.
     gained: Cell<Option<u64>>,
 }
@@ -1200,8 +1206,8 @@ pub(super) enum Line<'a> {
     HeadLeaving(&'a Group, HeadState, Gone),
     /// A message's row.
     Mail(&'a MessageRow),
-    /// A draft's row in Drafts: drawn coming soon until the list of drafts is wired (stage I-2.9).
-    Draft(&'a MessageRow),
+    /// A kept draft's row in the drafts place.
+    Draft(&'a DraftItem),
     /// The row of a message that has just left the list, and how far it has gone.
     Leaving(&'a MessageRow, Gone),
     /// The screener card, while senders wait.
@@ -1291,9 +1297,13 @@ impl Listing<'_> {
         Some((*self.tops.get(index)?, *self.bottoms.get(index)?))
     }
 
-    /// The line of message `id`.
+    /// The line of message `id`, or in the drafts place of draft `id`.
     fn find(&self, id: u64) -> Option<usize> {
-        self.lines.iter().position(|line| matches!(line, Line::Mail(message) if message.id == id))
+        self.lines.iter().position(|line| match line {
+            Line::Mail(message) => message.id == id,
+            Line::Draft(draft) => draft.id == id,
+            _ => false,
+        })
     }
 }
 
@@ -1318,7 +1328,7 @@ impl<'a, 't> Stack<'a, 't> {
         listing.tops.push(top as f32);
         listing.bottoms.push(self.y as f32);
         listing.ranks.push(listing.rows);
-        if matches!(line, Line::Mail(_) | Line::Send(_)) {
+        if matches!(line, Line::Mail(_) | Line::Send(_) | Line::Draft(_)) {
             listing.rows = listing.rows.saturating_add(1);
         }
         listing.lines.push(line);
@@ -1407,14 +1417,9 @@ pub(super) fn lines<'a>(
     if wait {
         stack.push(Line::Card(mailbox.waiting()));
     }
-    // Drafts: the design's draft rows, coming soon.
-    let drafts = mailbox.place() == Place::View(Role::Drafts) && mailbox.query().is_empty();
     if view == InboxView::List || groups.is_empty() {
         for (line, _) in listed(mailbox, leaving) {
-            stack.push(match line {
-                Line::Mail(message) if drafts => Line::Draft(message),
-                line => line,
-            });
+            stack.push(line);
         }
         return stack.finish();
     }
@@ -1452,6 +1457,57 @@ fn sends<'a>(theme: &Theme, mailbox: &'a Mailbox) -> Listing<'a> {
         stack.push(Line::Send(row));
     }
     stack.finish()
+}
+
+/// The kept drafts of the drafts place as lines.
+fn drafted<'a>(theme: &Theme, mailbox: &'a Mailbox) -> Listing<'a> {
+    let mut stack = Stack::new(theme);
+    for draft in mailbox.drafts() {
+        stack.push(Line::Draft(draft));
+    }
+    stack.finish()
+}
+
+/// What a draft's row in the drafts place asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Drafted {
+    /// The row pressed (Enter or Space on it too), or its "open": the draft opens in the composer to go on writing.
+    Open,
+    /// Its "discard": the draft goes behind a toast with Undo.
+    Discard,
+}
+
+/// The id of draft `id`'s row in the drafts place, the one its focus is kept under.
+pub(super) fn draft_row_id(id: u64) -> Id {
+    Id::unique("list-draft-row").with(id)
+}
+
+/// The draft whose row in the drafts place has the keyboard, if one does.
+pub(super) fn focused_draft(ctx: &egui::Context, mailbox: &Mailbox) -> Option<u64> {
+    let focused = ctx.memory(|memory| memory.focused())?;
+    mailbox.drafts().map(|draft| draft.id).find(|id| draft_row_id(*id) == focused)
+}
+
+/// Moves the keyboard `rows` down (`forward`) or up the drafts place's rows, from the row that has it (from none: the
+/// first row down, the last up), and brings the row it lands on into sight, built or not.
+pub(super) fn step_draft(ctx: &egui::Context, mailbox: &Mailbox, forward: bool, rows: usize) {
+    let ids: Vec<u64> = mailbox.drafts().map(|draft| draft.id).collect();
+    let Some(last) = ids.len().checked_sub(1) else { return };
+    let at = focused_draft(ctx, mailbox).and_then(|focused| ids.iter().position(|id| *id == focused));
+    let to = match at {
+        Some(at) if forward => at.saturating_add(rows).min(last),
+        Some(at) => at.saturating_sub(rows),
+        None if forward => rows.saturating_sub(1).min(last),
+        None => last.saturating_sub(rows.saturating_sub(1)),
+    };
+    let Some(id) = ids.get(to).copied() else { return };
+    ctx.data_mut(|data| data.insert_temp(bring_id(), id));
+    ctx.memory_mut(|memory| {
+        // egui read the arrow as a move of its focus when the frame began: the list's key moves it instead.
+        memory.move_focus(egui::FocusDirection::None);
+        memory.request_focus(draft_row_id(id));
+    });
+    ctx.request_repaint();
 }
 
 /// What a group's head was pressed for.
@@ -1517,7 +1573,7 @@ fn salt(line: &Line<'_>) -> Id {
         Line::Head(group, _) => Id::unique("list-head").with(&group.name),
         Line::HeadLeaving(group, ..) => Id::unique("list-head-leaving").with(&group.name),
         Line::Mail(message) => Id::unique("list-mail").with(message.id),
-        Line::Draft(message) => Id::unique("list-draft").with(message.id),
+        Line::Draft(draft) => Id::unique("list-draft").with(draft.id),
         Line::Leaving(message, _) => Id::unique("list-leaving-line").with(message.id),
         Line::Card(_) => Id::unique("list-screener"),
         Line::Send(row) => Id::unique("list-send").with(row.draft),
@@ -1540,15 +1596,10 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, slot: Slot) {
         }
         Line::HeadLeaving(group, state, gone) => leaving_head(ui, theme, keymap, group, *state, *gone),
         Line::Mail(message) => rows.mail(ui, message, slot),
-        Line::Draft(message) => {
-            let subject = (!message.subject.is_empty()).then_some(message.subject.as_str());
-            let spoken = mailbox.spoken(message);
-            let when = tr!("edited {when}", when = mailbox.row_date(message));
-            let to = if message.sender.is_empty() { tr!("no recipient yet").to_owned() } else { tr!("to {whom}", whom = message.sender) };
-            let row = DraftRow { id: Id::unique("list-draft-row").with(message.id), spoken: &spoken, subject, to: &to, when: &when, last: false };
-            crate::component::soon::soon(ui, theme, |ui| {
-                let _ = draft_row(ui, theme, keymap, &row, false, None);
-            });
+        Line::Draft(draft) => {
+            if let Some(pressed) = kept_draft(ui, theme, keymap, mailbox, draft) {
+                rows.draft.set(Some((draft.id, pressed)));
+            }
         }
         Line::Leaving(message, gone) => leaving_row(ui, theme, keymap, mailbox, message, rows.account_marker, *gone),
         Line::Card(waiting) => {
@@ -1561,6 +1612,42 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, slot: Slot) {
                 rows.outbox.set(Some((row.draft, pressed)));
             }
         }
+    }
+}
+
+/// The kept draft `draft`'s row across `ui`, the design's draft row: the subject (or "(no subject)"), whom it goes to
+/// and when it was last saved; hovered or keyed "open" and "discard" in the time's place. A screen reader is also told
+/// the start of its text and, over more than one account, whose it is. What it was pressed for, if anything.
+fn kept_draft(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, draft: &DraftItem) -> Option<Drafted> {
+    let id = draft_row_id(draft.id);
+    // Where the keyboard was last frame: a row it is on (the row or one of its links) is keyed and shows "open" and
+    // "discard", so Tab reaches them; with Shift held, so is the row the control it is on stands under (less than a row
+    // below), so Shift Tab reaches them coming back.
+    let ctx = ui.ctx().clone();
+    let keyboard = ctx.memory(|memory| memory.focused()).and_then(|focused| ctx.read_response(focused)).map(|response| response.rect);
+    let shift = ui.input(|input| input.modifiers.shift);
+    let keyed = keyboard.zip(ctx.read_response(id).map(|response| response.rect)).is_some_and(|(keyboard, row)| {
+        let below = keyboard.top() - row.bottom();
+        row.expand(0.5).contains_rect(keyboard) || (shift && (-0.5..row.height()).contains(&below))
+    });
+    let subject = draft.subject.as_deref().unwrap_or(tr!("(no subject)"));
+    let whose = (mailbox.narrowed().is_none() && mailbox.accounts().len() > 1)
+        .then(|| mailbox.accounts().iter().find(|account| account.id == draft.account).map(|account| account.label.as_str()))
+        .flatten();
+    let mut spoken = format!("{subject}, {}, {}", draft.to, draft.when);
+    for more in [whose, Some(draft.start.as_str())].into_iter().flatten().filter(|more| !more.is_empty()) {
+        spoken.push_str(", ");
+        spoken.push_str(more);
+    }
+    let row = DraftRow { id, spoken: &spoken, subject: draft.subject.as_deref(), to: &draft.to, when: &draft.when, last: false };
+    let drawn = draft_row(ui, theme, keymap, &row, keyed, None);
+    keep_arrows(ui, &drawn.row.response);
+    if drawn.discard {
+        Some(Drafted::Discard)
+    } else if drawn.open || drawn.row.response.clicked() {
+        Some(Drafted::Open)
+    } else {
+        None
     }
 }
 
@@ -1706,8 +1793,11 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
         let from = first.saturating_sub(2);
         let to = end.saturating_add(2).min(listing.lines.len());
         // The rows are a list box of all the list's rows, of which only those built are in AccessKit's tree.
-        let sends = matches!(listing.lines.first(), Some(Line::Send(_)));
-        let (role, name) = if sends { (AccessRole::List, tr!("Sends")) } else { (AccessRole::ListBox, tr!("Messages")) };
+        let (role, name) = match listing.lines.first() {
+            Some(Line::Send(_)) => (AccessRole::List, tr!("Sends")),
+            Some(Line::Draft(_)) => (AccessRole::List, tr!("Drafts")),
+            _ => (AccessRole::ListBox, tr!("Messages")),
+        };
         let mut listed = ui.new_child(UiBuilder::new().id_salt("lines").max_rect(room).accessibility_role(role));
         let set = listed.unique_id();
         listed.ctx().accesskit_node_builder(set, |node| {
@@ -2240,7 +2330,14 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
         forget_answered(ui.ctx());
     }
     let outbox = mailbox.place() == Place::Outbox && mailbox.query().is_empty();
-    let none = if outbox { mailbox.outbox().is_empty() } else { mailbox.messages().is_empty() };
+    let drafts = mailbox.drafts_listed();
+    let none = if outbox {
+        mailbox.outbox().is_empty()
+    } else if drafts {
+        mailbox.drafts().next().is_none()
+    } else {
+        mailbox.messages().is_empty()
+    };
     // A list with nothing in it, the inbox with senders waiting aside: its empty state.
     let waits = mailbox.place() == Place::View(Role::Inbox) && mailbox.query().is_empty() && !mailbox.waiting().is_empty();
     // The last sender answered in New senders: their card leaves before the queue's empty state shows.
@@ -2267,6 +2364,7 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
         done_all: Cell::new(None),
         review: Cell::new(false),
         outbox: Cell::new(None),
+        draft: Cell::new(None),
         gained: Cell::new(None),
     };
     // "Other" stands over the messages no group holds: its "done all" marks those, built or not. Worked out once for a
@@ -2276,7 +2374,13 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
     // How far the row that left has gone (with motion off, at once); once gone it is let go.
     let gone = mailbox.left_row().map(|left| leaving(ui.ctx(), theme, left));
     let went = gone.is_none_or(|gone| gone.faded >= 1.0);
-    let listing = if outbox { sends(theme, mailbox) } else { lines(theme, mailbox, view, &groups, &other, wait, &open, gone.filter(|_| !went)) };
+    let listing = if outbox {
+        sends(theme, mailbox)
+    } else if drafts {
+        drafted(theme, mailbox)
+    } else {
+        lines(theme, mailbox, view, &groups, &other, wait, &open, gone.filter(|_| !went))
+    };
     // The drawn order, kept as it was while it is the same: a frame at rest allocates nothing for it.
     let drawn = || listing.lines.iter().filter_map(|line| if let Line::Mail(message) = line { Some(message.id) } else { None });
     let same = ui.data(|data| data.get_temp::<std::sync::Arc<[u64]>>(order_id())).is_some_and(|kept| kept.iter().copied().eq(drawn()));
@@ -2287,6 +2391,8 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
     let mut screener_mode = None;
     let built = if outbox {
         show_lines(ui, &rows, &listing, "outbox-list")
+    } else if drafts {
+        show_lines(ui, &rows, &listing, "drafts-list")
     } else if mailbox.place() == Place::Senders && mailbox.query().is_empty() {
         let (built, mode) = senders(ui, &rows);
         screener_mode = mode;
@@ -2305,6 +2411,7 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
         review: rows.review.get(),
         done_all: rows.done_all.take(),
         outbox: rows.outbox.get(),
+        draft: rows.draft.get(),
         screener: screener_mode,
         gained: rows.gained.get(),
         presets: rows.presets.get(),
