@@ -7,13 +7,14 @@ use inboxcraft_engine::{AgentClass, Registry};
 use inboxcraft_testkit::store;
 use serde_json::json;
 
-use super::{DEFAULT_LIMIT, ROLES, TOOLS};
-use crate::test_support::{call, fixture_server, text};
+use super::{DEFAULT_LIMIT, ROLES, TOOLS, WITHHELD};
+use crate::test_support::{call, call_withheld, fixture_server, request, text};
 
 #[test]
 fn every_tool_runs_a_safe_command() {
     let registry = Registry::builtin().unwrap();
-    for tool in &TOOLS {
+    // The withheld tools too: one is offered by moving it into the list.
+    for tool in TOOLS.iter().chain(&WITHHELD) {
         let spec = registry.get(tool.command).unwrap();
         assert_eq!(spec.class, Some(AgentClass::Safe), "{}", tool.name);
     }
@@ -134,7 +135,7 @@ fn a_failing_tool_answers_a_code_and_a_sentence() {
 #[test]
 fn mail_why_says_why_a_message_stands_where_it_does() {
     let (_dir, mut server) = fixture_server();
-    let (out, error) = text(&call(&mut server, "mail_why", json!({ "id": store::LUNCH })));
+    let (out, error) = text(&call_withheld(&mut server, "mail_why", json!({ "id": store::LUNCH })));
     assert!(!error, "{out}");
     assert_eq!(
         out,
@@ -144,7 +145,7 @@ fn mail_why_says_why_a_message_stands_where_it_does() {
             crate::render::UNTRUSTED
         )
     );
-    let (out, error) = text(&call(&mut server, "mail_why", json!({ "id": store::RECEIPT })));
+    let (out, error) = text(&call_withheld(&mut server, "mail_why", json!({ "id": store::RECEIPT })));
     assert!(!error, "{out}");
     assert!(out.ends_with(&format!("\ndefault | why.default | folder {}; role \"archive\"\n", store::ARCHIVE)), "{out}");
 }
@@ -167,13 +168,13 @@ fn mail_why_refuses_a_junk_id_as_the_other_tools_do() {
         (json!({ "id": 0 }), "error not_found: "),
         (json!([1]), "error bad_params: the arguments are one JSON object"),
     ] {
-        let (out, error) = text(&call(&mut server, "mail_why", arguments.clone()));
+        let (out, error) = text(&call_withheld(&mut server, "mail_why", arguments.clone()));
         assert!(error, "{arguments}: {out}");
         assert!(out.starts_with(says), "{arguments}: {out}");
         assert_eq!(out.lines().count(), 1, "{out}");
     }
     // An id past what the store keeps is the store's refusal, the same as `mail_read`'s.
-    let (why, error) = text(&call(&mut server, "mail_why", json!({ "id": u64::MAX })));
+    let (why, error) = text(&call_withheld(&mut server, "mail_why", json!({ "id": u64::MAX })));
     assert!(error && why.starts_with("error ") && why.lines().count() == 1, "{why}");
     let (read, _) = text(&call(&mut server, "mail_read", json!({ "id": u64::MAX })));
     assert_eq!(why.split(':').next(), read.split(':').next(), "{why} / {read}");
@@ -223,4 +224,21 @@ fn sync_status_reads_offline_on_a_store_and_takes_nothing() {
         let (out, error) = text(&call(&mut server, "sync_status", arguments.clone()));
         assert!(error && out.starts_with("error bad_params: ") && out.lines().count() == 1, "{arguments}: {out}");
     }
+}
+
+#[test]
+fn mail_why_is_not_offered_until_the_owner_decides() {
+    // What `mail_why` tells a client (the group and its rule, the owner's choice for the sender, the snooze times,
+    // whether the owner wrote in the thread) is the owner's to allow: offering it is a deliberate change of this test.
+    assert!(TOOLS.iter().all(|tool| tool.command != "mail.why" && tool.name != "mail_why"));
+    assert!(WITHHELD.iter().any(|tool| tool.command == "mail.why" && tool.name == "mail_why"));
+    let (_dir, mut server) = fixture_server();
+    let answer = request(
+        &mut server,
+        json!({ "jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": { "name": "mail_why", "arguments": { "id": store::LUNCH } } }),
+    );
+    assert_eq!(answer["error"]["code"], -32602, "{answer}");
+    assert!(answer["error"]["message"].as_str().unwrap().contains("is not offered yet"), "{answer}");
+    let answer = request(&mut server, json!({ "jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": { "name": "mail_whom" } }));
+    assert!(answer["error"]["message"].as_str().unwrap().starts_with("there is no tool"), "{answer}");
 }

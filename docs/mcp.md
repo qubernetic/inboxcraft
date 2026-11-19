@@ -51,11 +51,13 @@ letters, digits, `_` and `-` only.
 | `mail_search` | `mail.search` | `from`, `to`, `subject`, `text`, `since`, `before`, `account`, `folder`, `limit` (25 when left out) |
 | `thread_read` | `mail.thread` | `id` |
 | `account_check` | `account.check` | `account` |
-| `mail_why` | `mail.why` | `id` |
 | `week_settings` | `week.settings` | none |
 | `sync_status` | `sync.status` | none |
 
 The tools are this fixed list, not every `safe` command: the others run through the CLI and the control channel.
+`mail.why` is not offered until the owner has decided whether a client may read what it gives beyond `mail_list`:
+the grouped inbox's group and its rule, the owner's choice for the sender, the snooze times and whether the owner
+wrote in the thread.
 
 Each tool's `inputSchema` lists its arguments; unknown ones are refused. `mail_read` marks the message opened on this
 computer, as reading it in the app does, and changes nothing on the server.
@@ -87,13 +89,6 @@ id | date (UTC) | from | subject | flags
   the headers leave. A result still longer than 64 KiB is cut at a line break, and its last line says how long it
   was.
 - `account_check` lists the steps of the check as they stand. Headless, nothing runs the check, and the result says so.
-- `mail_why` says why a message stands where it does: at most four reasons, most specific first, one a line as
-  `kind | text_id | args`. The text id is the key the app words the reason with; the values are the sender's address
-  (quoted, it is the message's), the group and rule names, a date, a count or a folder. A value is cut at 254
-  characters and a reason gives at most four, so the result stays under about 1.6 KB. The sender's address is what
-  `mail_list` gives already; new to a client are the triage's own words about the message: its group and the rule
-  that gave it, the owner's choice for the sender, when a snooze ends or ended, and whether the owner wrote in the
-  thread.
 - `week_settings` gives the first day of the week, the first week of the year, the week of today (its number, its
   week-year and its first day) and the names each part of the rule can take.
 - `sync_status` gives the state (`synced`, `syncing`, `offline` or `failing`), the folder syncs done of all in the

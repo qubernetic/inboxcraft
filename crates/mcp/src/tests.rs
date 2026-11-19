@@ -58,7 +58,7 @@ fn the_tool_list_has_the_read_tools_with_schemas() {
     let answer = request(&mut server, json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
     let tools = answer["result"]["tools"].as_array().unwrap();
     let names: Vec<&str> = tools.iter().map(|tool| tool["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["mail_list", "mail_read", "mail_search", "thread_read", "account_check", "mail_why", "week_settings", "sync_status"]);
+    assert_eq!(names, ["mail_list", "mail_read", "mail_search", "thread_read", "account_check", "week_settings", "sync_status"]);
     for tool in tools {
         let name = tool["name"].as_str().unwrap();
         assert!(name.chars().all(|c| c.is_ascii_lowercase() || c == '_'), "{name}");
@@ -69,13 +69,10 @@ fn the_tool_list_has_the_read_tools_with_schemas() {
     }
     assert_eq!(tools[1]["inputSchema"]["required"], json!(["id"]));
     assert_eq!(tools[1]["annotations"]["readOnlyHint"], false, "mail_read marks the message opened");
-    assert_eq!(tools[5]["inputSchema"]["required"], json!(["id"]));
-    assert_eq!(tools[5]["inputSchema"]["properties"]["id"]["minimum"], 0);
-    assert_eq!(tools[5]["annotations"]["readOnlyHint"], true);
-    assert_eq!(tools[6]["inputSchema"]["properties"], json!({}));
-    assert_eq!(tools[6]["annotations"]["readOnlyHint"], true);
-    assert_eq!(tools[7]["inputSchema"]["properties"], json!({}));
-    assert_eq!(tools[7]["annotations"]["readOnlyHint"], true);
+    for tool in &tools[5..] {
+        assert_eq!(tool["inputSchema"]["properties"], json!({}), "{tool}");
+        assert_eq!(tool["annotations"]["readOnlyHint"], true, "{tool}");
+    }
 }
 
 #[test]

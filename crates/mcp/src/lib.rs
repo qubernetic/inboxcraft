@@ -8,7 +8,7 @@
 //! (`docs/control-protocol.md`), or with `--store <dir>` headless on a local store. It runs its tools on
 //! [`Commands`]: an engine [`Session`] or the CLI's client of the channel. The tools are read-only and map to `safe`
 //! commands, run as an agent (`Session::run_as`, and the app does the same): `mail_list`, `mail_read`,
-//! `mail_search`, `thread_read`, `account_check`, `mail_why`, `week_settings` and `sync_status`. A result is compact
+//! `mail_search`, `thread_read`, `account_check`, `week_settings` and `sync_status`. A result is compact
 //! text, one status line first and one line a message; everything a message brings (names, addresses, subjects,
 //! bodies, file names) is written as a quoted JSON string under a line that marks it untrusted, so no message text
 //! can pose as the server's own words.

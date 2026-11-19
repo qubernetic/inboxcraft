@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use inboxcraft_control_key::Failure;
 use serde_json::{Value, json};
 
-use crate::test_support::{call, request, text};
+use crate::test_support::{call, call_withheld, request, text};
 use crate::{Commands, Server};
 
 /// The commands that ran, with their params.
@@ -64,7 +64,9 @@ fn the_new_read_tools_run_their_commands_in_the_app() {
         [("mail_why", json!({ "id": 3 }), "mail.why"), ("week_settings", json!({}), "week.settings"), ("sync_status", json!({}), "sync.status")]
     {
         let (mut server, ran) = bridged(Ok(json!({})));
-        let (out, error) = text(&call(&mut server, tool, arguments.clone()));
+        let result =
+            if tool == "mail_why" { call_withheld(&mut server, tool, arguments.clone()) } else { call(&mut server, tool, arguments.clone()) };
+        let (out, error) = text(&result);
         assert!(!error, "{tool}: {out}");
         assert_eq!(ran.lock().unwrap().as_slice(), [(command.to_owned(), arguments)]);
     }

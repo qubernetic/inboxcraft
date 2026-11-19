@@ -47,7 +47,7 @@ fn mcp_serves_the_tools_on_the_store_until_the_input_ends() {
 }
 
 #[test]
-fn mcp_says_why_a_message_is_where_it_is_and_how_weeks_are_counted() {
+fn mcp_says_how_weeks_are_counted_and_withholds_mail_why() {
     let dir = tempfile::tempdir().unwrap();
     store::fixture(dir.path()).unwrap();
     let input = [
@@ -55,7 +55,7 @@ fn mcp_says_why_a_message_is_where_it_is_and_how_weeks_are_counted() {
         json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "mail_why", "arguments": { "id": store::LUNCH } } })
             .to_string(),
         json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "week_settings" } }).to_string(),
-        json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": { "name": "mail_why", "arguments": { "id": -1 } } }).to_string(),
+        json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": { "name": "sync_status" } }).to_string(),
     ]
     .join("\n");
     let (code, out, err) = mcp(&["--store", dir.path().to_str().unwrap(), "mcp"], &input);
@@ -63,10 +63,9 @@ fn mcp_says_why_a_message_is_where_it_is_and_how_weeks_are_counted() {
     let answers = answers(&out);
     assert_eq!(answers.len(), 4, "{out}");
     let text = |n: usize| answers[n]["result"]["content"][0]["text"].as_str().unwrap().to_owned();
-    assert!(text(1).starts_with(&format!("mail_why: message {}, 1 reason", store::LUNCH)), "{}", text(1));
+    assert!(answers[1]["error"]["message"].as_str().unwrap().contains("is not offered yet"), "{out}");
     assert!(text(2).starts_with("week_settings: weeks start on monday"), "{}", text(2));
-    assert_eq!(answers[3]["result"]["isError"], true);
-    assert!(text(3).starts_with("error bad_params: "), "{}", text(3));
+    assert!(text(3).starts_with("sync_status: offline\n"), "{}", text(3));
 }
 
 #[test]
