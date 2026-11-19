@@ -159,6 +159,7 @@ impl<T: Copy + PartialEq> Select<'_, T> {
             }
             Some(Some(chosen)) => {
                 *open = false;
+                popup::forget(ui.ctx(), id.with("popup"));
                 response.request_focus();
                 // The float held the keyboard this frame and the next: the field asks again until it has it.
                 ui.data_mut(|data| data.insert_temp(id.with("refocus"), 3_u8));

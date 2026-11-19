@@ -2962,6 +2962,9 @@ mod cover_tests;
 #[path = "fit_tests.rs"]
 mod fit_tests;
 #[cfg(test)]
+#[path = "float_cover_tests.rs"]
+mod float_cover_tests;
+#[cfg(test)]
 #[path = "frame_tests.rs"]
 mod frame_tests;
 #[cfg(test)]

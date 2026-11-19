@@ -1208,3 +1208,61 @@ fn a_menu_hung_by_its_right_edge_stays_in_the_window() {
         assert!(row.left() >= 3.0 && row.right() <= 597.0, "{row:?}");
     }
 }
+
+#[test]
+fn a_menu_closed_by_a_choice_opens_again_with_one_press_after_a_cover_came() {
+    let mut harness = menu_opener();
+    harness.get_by_label("Actions").click();
+    harness.run_ok();
+    assert!(harness.query_by_label("Delete").is_some(), "open");
+    harness.get_by_label("Delete").click();
+    harness.run_ok();
+    assert!(harness.query_by_label("Archive").is_none(), "closed by the choice");
+    // The palette comes over the window and goes (or the settings show and leave).
+    super::covered(&harness.ctx, [false, true]);
+    harness.run_ok();
+    super::covered(&harness.ctx, [false, false]);
+    harness.run_ok();
+    harness.get_by_label("Actions").click();
+    harness.run_ok();
+    harness.run_ok();
+    assert!(harness.query_by_label("Archive").is_some(), "one press opens the menu again");
+}
+
+#[test]
+fn a_menu_closed_by_a_choice_in_the_frame_before_a_cover_came_opens_again_with_one_press() {
+    let mut harness = menu_opener();
+    harness.get_by_label("Actions").click();
+    harness.run_ok();
+    harness.get_by_label("Delete").click();
+    // The choice and the cover in two frames one after the other: the choice ran a command that showed the settings.
+    harness.step();
+    super::covered(&harness.ctx, [true, false]);
+    harness.step();
+    super::covered(&harness.ctx, [false, false]);
+    harness.run_ok();
+    assert_eq!(*harness.state(), Some("Delete"));
+    harness.get_by_label("Actions").click();
+    harness.run_ok();
+    harness.run_ok();
+    assert!(harness.query_by_label("Archive").is_some(), "one press opens the menu again");
+}
+
+#[test]
+fn a_float_its_caller_stopped_drawing_opens_again_with_one_press_after_a_cover_came() {
+    let mut harness = opener();
+    harness.get_by_label("Open").click();
+    harness.run();
+    assert!(harness.query_by_label("First").is_some(), "open");
+    // Its caller closes it (a choice it read), without a word to the float.
+    *harness.state_mut() = false;
+    harness.run();
+    super::covered(&harness.ctx, [false, true]);
+    harness.run();
+    super::covered(&harness.ctx, [false, false]);
+    harness.run();
+    harness.get_by_label("Open").click();
+    harness.run();
+    harness.run();
+    assert!(*harness.state() && harness.query_by_label("First").is_some(), "one press opens it again and it stays open");
+}

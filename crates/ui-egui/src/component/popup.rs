@@ -103,9 +103,31 @@ fn cover_id() -> Id {
     Id::unique("inboxcraft-float-cover")
 }
 
+/// How many comings of a surface [`Cover`] remembers the pass of.
+const COMINGS: usize = 32;
+
+/// What [`covered`] keeps: whether a surface lies over the window now, how many times one came over it, and the pass
+/// each of the last [`COMINGS`] comings happened in (with the count it raised).
+#[derive(Clone, Default)]
+struct Cover {
+    now: [bool; 2],
+    count: u64,
+    came: Vec<(u64, u64)>,
+}
+
 /// How many times the palette came over the window or the settings took the place of what was shown.
 fn covers(ctx: &Context) -> u64 {
-    ctx.data(|data| data.get_temp::<([bool; 2], u64)>(cover_id())).map_or(0, |(_, count)| count)
+    ctx.data(|data| data.get_temp::<Cover>(cover_id())).map_or(0, |cover| cover.count)
+}
+
+/// Whether the float last drawn as `kept` was open when the next surface came over the window: it was drawn in the
+/// pass just before that coming (the cover is said before the floats are drawn). One closed earlier (by a choice, its
+/// caller no longer drawing it) was not, and opens afresh. A coming too old to be remembered counts as not.
+fn open_when_covered(ctx: &Context, kept: &Kept) -> bool {
+    let next = kept.cover.saturating_add(1);
+    ctx.data(|data| data.get_temp::<Cover>(cover_id()))
+        .and_then(|cover| cover.came.iter().find(|(count, _)| *count == next).map(|(_, pass)| *pass))
+        .is_some_and(|came| kept.pass.saturating_add(1) >= came)
 }
 
 /// Says, each frame before the floats are drawn, whether the settings are the place shown and whether the palette lies
@@ -115,10 +137,23 @@ fn covers(ctx: &Context) -> u64 {
 /// `Tab` or takes its Esc, and nothing opens again when the place it was on shows again. A [`held`] float (the event
 /// editor) stays as it is, quiet; a float opened afterwards (a list on a settings page) is not touched.
 pub fn covered(ctx: &Context, covered: [bool; 2]) {
-    let (was, count) = ctx.data(|data| data.get_temp::<([bool; 2], u64)>(cover_id())).unwrap_or(([false; 2], 0));
-    let came = covered.iter().zip(was).any(|(now, was)| *now && !was);
-    let count = if came { count.saturating_add(1) } else { count };
-    ctx.data_mut(|data| data.insert_temp(cover_id(), (covered, count)));
+    let mut cover = ctx.data(|data| data.get_temp::<Cover>(cover_id())).unwrap_or_default();
+    let came = covered.iter().zip(cover.now).any(|(now, was)| *now && !was);
+    if came {
+        cover.count = cover.count.saturating_add(1);
+        if cover.came.len() >= COMINGS {
+            cover.came.remove(0);
+        }
+        cover.came.push((cover.count, ctx.cumulative_pass_nr()));
+    }
+    cover.now = covered;
+    ctx.data_mut(|data| data.insert_temp(cover_id(), cover));
+}
+
+/// Forgets what the float `id` kept: it closed (by a choice, or its caller closed it), so the next time it shows it
+/// opens afresh, whatever came over the window meanwhile.
+pub fn forget(ctx: &Context, id: Id) {
+    ctx.data_mut(|data| data.remove::<Kept>(id.with("float-kept")));
 }
 
 /// How far the next row of the float being drawn has come in, 0 to 1 (1 outside a float); a row that takes a press
@@ -229,11 +264,14 @@ fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl F
     let key = float.id.with("float-kept");
     let pass = ctx.cumulative_pass_nr();
     let now = ctx.input(|input| input.time);
-    let stored = ctx.data(|data| data.get_temp::<Kept>(key));
-    let kept = stored.filter(|kept| kept.pass.saturating_add(1) >= pass);
     let cover = covers(ctx);
+    // What it kept from a float closed before a surface came is forgotten: that float is closed, and this is a fresh
+    // opening, which stays open.
+    let stored = ctx.data(|data| data.get_temp::<Kept>(key)).filter(|kept| kept.cover == cover || open_when_covered(ctx, kept));
+    let kept = stored.filter(|kept| kept.pass.saturating_add(1) >= pass);
     // A float whose place was not drawn for a while (the settings shown in its stead) is asked here again when its place
-    // shows: it closes too.
+    // shows: it closes too. Whether it was drawn last frame does not decide that, only whether it was open when the
+    // surface came.
     if mode == Mode::Closes && stored.is_some_and(|kept| kept.cover != cover) {
         // The palette came over it or the settings took its place ([`covered`]): it closes, choosing nothing, and leaves
         // the keyboard to that surface. Where the keyboard was in it, it goes to the control the float opened from in this
@@ -814,6 +852,9 @@ pub fn is_open(ctx: &Context, id: Id) -> bool {
 /// Opens or closes the float `id` ([`is_open`]).
 pub fn set_open(ctx: &Context, id: Id, open: bool) {
     ctx.data_mut(|data| data.insert_temp(id.with("open"), open));
+    if !open {
+        forget(ctx, id);
+    }
 }
 
 /// Whether `response` (the control the float `id` opens from) was clicked to open or close it: a click that is the
