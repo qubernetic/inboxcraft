@@ -135,22 +135,23 @@ fn the_window_does_not_narrow_its_index_yet() {
 }
 
 #[test]
-fn the_status_line_is_reserved_and_holds_nothing_yet() {
+fn the_status_line_holds_its_own_and_nothing_of_the_panes() {
     let mut harness = window(vec2(1300.0, 820.0));
     let status = shell::laid(&harness.ctx).unwrap().status;
-    let inside: Vec<String> = harness
-        .root()
-        .children_recursive()
-        .filter(|node| {
-            node.accesskit_node().bounding_box().is_some_and(|b| {
-                let ppp = harness.ctx.pixels_per_point();
-                let rect = Rect::from_min_max(pos2(b.x0 as f32 / ppp, b.y0 as f32 / ppp), pos2(b.x1 as f32 / ppp, b.y1 as f32 / ppp));
-                rect.intersects(status.shrink(0.5)) && !rect.contains_rect(status)
-            })
-        })
-        .map(|node| format!("{:?} {:?}", node.accesskit_node().role(), node.accesskit_node().label()))
-        .collect();
-    assert!(inside.is_empty(), "nothing stands in the status line: {inside:?}");
+    let ppp = harness.ctx.pixels_per_point();
+    let (mut own, mut strays) = (Vec::new(), Vec::new());
+    for node in harness.root().children_recursive() {
+        let Some(b) = node.accesskit_node().bounding_box() else { continue };
+        let rect = Rect::from_min_max(pos2(b.x0 as f32 / ppp, b.y0 as f32 / ppp), pos2(b.x1 as f32 / ppp, b.y1 as f32 / ppp));
+        let named = format!("{:?} {:?}", node.accesskit_node().role(), node.accesskit_node().label());
+        if status.expand(0.5).contains_rect(rect) {
+            own.push(named);
+        } else if rect.intersects(status.shrink(0.5)) && !rect.contains_rect(status) {
+            strays.push(named);
+        }
+    }
+    assert!(!own.is_empty(), "the line says its facts and keys");
+    assert!(strays.is_empty(), "nothing of the panes stands in the status line: {strays:?}");
     // A press there reaches nothing: nothing is selected, opened or shown.
     let (place, selected) = (harness.state().mailbox().place(), harness.state().mailbox().selected());
     let at = status.center();

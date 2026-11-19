@@ -77,18 +77,82 @@ fn a_send_counts_down_in_its_toast_and_undo_opens_the_draft_again() {
         let mut harness = sending(&clock, theme);
         let draft = send(&mut harness, "Work party on Saturday");
         assert!(harness.state().composer().is_none(), "sent");
-        harness.get_by_label("Sending “Work party on Saturday” in 5 s");
+        // A screen reader hears the seconds left with the subject.
+        harness.get_by_label("sending · Work party on Saturday, 5 s");
         assert_eq!(harness.state().counting(), Some((draft, 5)));
         clock.advance(Duration::from_secs(2));
         harness.run();
-        harness.get_by_label("Sending “Work party on Saturday” in 3 s");
-        harness.get_by_role_and_label(Role::Button, "Undo").click();
+        harness.get_by_label("sending · Work party on Saturday, 3 s");
+        assert_eq!(harness.state().counting(), Some((draft, 3)), "counted down");
+        harness.get_by_role_and_label(Role::Button, "undo").click();
         harness.run();
         assert!(harness.state().mailbox().outbox().is_empty(), "taken back");
         let composer = harness.state().composer().expect("the draft opens again");
         assert_eq!((composer.draft(), composer.subject()), (draft, "Work party on Saturday"));
-        assert!(harness.query_by_label_contains("Sending “").is_none(), "the countdown is gone");
+        assert!(harness.query_by_label_contains("sending · ").is_none(), "the countdown is gone");
     }
+}
+
+#[test]
+fn the_send_s_undo_stops_it_under_the_command_line_s_results() {
+    // Its time runs out under the results too: one press, a screen reader's activate or the key takes the send back,
+    // and the draft opens again as it does without them.
+    for how in ["press", "activate", "key"] {
+        let clock = clock();
+        let mut harness = sending(&clock, egui::Theme::Light);
+        let draft = send(&mut harness, "Work party on Saturday");
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        harness.state_mut().command_mut().set_text(">zz");
+        harness.run();
+        assert!(harness.state().command().results(), "{how}: the results show");
+        assert_eq!(harness.state().mailbox().outbox().len(), 1, "{how}: counting down");
+        match how {
+            "press" => harness.get_by_role_and_label(Role::Button, "undo").click(),
+            "activate" => harness.get_by_role_and_label(Role::Button, "undo").click_accesskit(),
+            _ => harness.key_press_modifiers(Modifiers::COMMAND, Key::Z),
+        }
+        harness.run();
+        assert!(harness.state().mailbox().outbox().is_empty(), "{how}: taken back by one");
+        assert_eq!(harness.state().composer().map(crate::compose::Composer::draft), Some(draft), "{how}: the draft opens again");
+    }
+}
+
+/// Opens the command line with Ctrl+K and types `>zz` in it one character a frame, so the field has edits to undo.
+fn type_in_the_command_line(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    for typed in [">", "z", "z"] {
+        harness.event(egui::Event::Text(typed.to_owned()));
+        harness.run();
+    }
+    assert_eq!(harness.state().command().text(), "zz", "typed");
+    assert!(harness.state().command().results(), "the results show");
+}
+
+#[test]
+fn ctrl_z_in_the_command_line_stops_the_send_and_leaves_the_field_as_typed() {
+    // One key, one thing: the send's time runs out, so its Undo takes the key, and the field's last edit stays.
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Light);
+    send(&mut harness, "Work party on Saturday");
+    type_in_the_command_line(&mut harness);
+    assert_eq!(harness.state().mailbox().outbox().len(), 1, "counting down");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(harness.state().mailbox().outbox().is_empty(), "the send is stopped");
+    assert_eq!(harness.state().command().text(), "zz", "the field keeps its text");
+}
+
+#[test]
+fn ctrl_z_in_the_command_line_without_a_countdown_is_the_field_s_own_undo() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Light);
+    type_in_the_command_line(&mut harness);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(harness.state().command().text(), "z", "the field takes its last edit back");
+    assert!(harness.state().command().results(), "the results stay");
 }
 
 #[test]
@@ -110,7 +174,7 @@ fn the_toast_goes_once_the_hold_is_over_and_the_send_is_on_its_way() {
     clock.advance(Duration::from_secs(6));
     harness.run();
     assert_eq!(harness.state().counting(), None);
-    assert!(harness.query_by_label_contains("Sending “").is_none());
+    assert!(harness.query_by_label_contains("sending · ").is_none());
     let state = harness.state().mailbox().outbox().first().map(|row| row.state.clone());
     assert_eq!(state, Some(SendState::Sending), "handed to the worker");
 }
@@ -206,7 +270,7 @@ fn a_refused_send_shows_the_reply_and_can_be_edited_or_sent_again() {
         harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” again").click();
         harness.run();
         assert_eq!(harness.state().counting(), Some((draft, 5)), "held again, counted down");
-        harness.get_by_label("Sending “Work party on Saturday” in 5 s");
+        harness.get_by_label("sending · Work party on Saturday, 5 s");
         clock.advance(Duration::from_secs(6));
         harness.state_mut().mailbox_mut().pump(&mut Scripted::default().refusing("451 4.3.0 Try again later"));
         harness.run();
@@ -307,7 +371,7 @@ fn a_refused_invitation_answer_offers_no_edit() {
         harness.run();
         // It goes at once: no hold, no countdown, no Undo.
         assert_eq!(harness.state().counting(), None);
-        assert!(harness.query_by_label_contains("Sending “").is_none());
+        assert!(harness.query_by_label_contains("sending · ").is_none());
         let state = harness.state().mailbox().outbox().first().map(|row| row.state.clone());
         assert_eq!(state, Some(SendState::Sending));
     }
@@ -359,17 +423,17 @@ fn a_countdown_toast_never_stands_over_the_docked_composer_s_send() {
         harness.run();
         send(&mut harness, "First of two");
         write(&mut harness, "Second of two");
-        let toast = harness.get_by_label_contains("Sending “First of two”").rect();
+        let toast = harness.get_by_label_contains("sending · First of two").rect();
         let send = harness.get_by_role_and_label(Role::Button, "Send").rect();
         assert!(!toast.intersects(send), "{width}: the toast {toast:?} over Send {send:?}");
     }
 }
 
-/// The float of the toast whose words hold `words`: its words and its Undo with the float's margins round them.
+/// The status line's message whose words hold `words`: its words and its Undo.
 fn toast_float(harness: &Harness<'static, InboxApp>, words: &str) -> egui::Rect {
     let said = harness.get_by_label_contains(words).rect();
-    let undo = harness.get_by_role_and_label(Role::Button, "Undo").rect();
-    said.union(undo).expand2(vec2(16.0, 4.0))
+    let undo = harness.get_by_role_and_label(Role::Button, "undo").rect();
+    said.union(undo)
 }
 
 /// A press and release of the pointer at `at`.
@@ -396,7 +460,7 @@ fn a_countdown_toast_with_a_long_subject_keeps_clear_of_send_at_every_width_and_
         harness.run();
         send(&mut harness, long);
         write(&mut harness, "Second of two");
-        let toast = toast_float(&harness, "Sending “The minutes");
+        let toast = toast_float(&harness, "sending · The minutes");
         let send = harness.get_by_role_and_label(Role::Button, "Send").rect();
         assert!(!toast.intersects(send), "{width} at {percent} %: the toast {toast:?} over Send {send:?}");
         assert!(toast.left() >= 0.0 && toast.right() <= width, "{width} at {percent} %: the toast {toast:?} inside the window");

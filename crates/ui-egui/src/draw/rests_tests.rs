@@ -467,7 +467,7 @@ fn undo_by(harness: &mut Harness<'static, InboxApp>, how: UndoBy) {
             harness.state_mut().command_mut().set_text(">Undo");
             harness.run();
             // Over the editor the line lists only the window's commands: Undo is not offered at all.
-            assert!(harness.query_by_role_and_label(Role::MenuItem, "Undo").is_none(), "the line offers no Undo under the editor");
+            assert!(harness.query_by_role_and_label(Role::MenuItem, "undo").is_none(), "the line offers no Undo under the editor");
             harness.key_press(Key::Enter);
             harness.run();
             let ctx = harness.ctx.clone();
@@ -475,7 +475,7 @@ fn undo_by(harness: &mut Harness<'static, InboxApp>, how: UndoBy) {
             harness.key_press(Key::Escape);
         }
         UndoBy::ToastButton => {
-            let undo = harness.get_by_role_and_label(Role::Button, "Undo");
+            let undo = harness.get_by_role_and_label(Role::Button, "undo");
             assert!(undo.accesskit_node().is_disabled(), "the toast's Undo rests under the editor");
             // As a screen reader presses it: a pointer's press here and another on the same spot after the editor
             // closes would be one double press.
@@ -570,7 +570,7 @@ fn undo_rests_while_the_event_editor_is_open_by_every_way_in() {
         assert!(harness.state().can_run(keymap::UNDO), "{how:?}: Undo can run again");
         match how {
             UndoBy::ToastButton => {
-                let undo = harness.get_by_role_and_label(Role::Button, "Undo");
+                let undo = harness.get_by_role_and_label(Role::Button, "undo");
                 assert!(!undo.accesskit_node().is_disabled(), "the toast's Undo works again");
                 undo.click();
             }
@@ -620,7 +620,7 @@ fn undo_in_the_frame_the_editor_opens_or_closes_keeps_the_event() {
     // Edit and the toast's Undo button in one frame: the toast drew its Undo available at the frame's start.
     let mut harness = an_added_event_open(true);
     harness.get_by_role_and_label(Role::Button, "Edit").click();
-    harness.get_by_role_and_label(Role::Button, "Undo").click_accesskit();
+    harness.get_by_role_and_label(Role::Button, "undo").click_accesskit();
     harness.run();
     assert!(harness.state().calendar().editor().is_some(), "Edit opened the editor");
     assert!(shows_pottery(&harness), "Edit and the toast's Undo in one frame: the event is kept");

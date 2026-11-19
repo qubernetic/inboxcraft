@@ -310,7 +310,7 @@ fn rows(harness: &Harness<'static, InboxApp>) -> Vec<String> {
 
 /// Frames until the toast's time has gone.
 fn wait_out_the_toast(harness: &mut Harness<'static, InboxApp>) {
-    let later = harness.ctx.input(|input| input.time) + super::TOAST_SECONDS + 1.0;
+    let later = harness.ctx.input(|input| input.time) + crate::status::UNDO_SECONDS + 1.0;
     while harness.ctx.input(|input| input.time) < later {
         harness.step();
     }
@@ -344,7 +344,7 @@ fn a_draft_row_s_discard_hides_it_at_once_and_discards_it_when_its_toast_ends() 
     assert_eq!(rows(&harness), ["Glaze order"], "the row goes at once");
     harness.get_by_label(&format!("all drafts ({}) →", before - 1));
     harness.get_by_label("Draft discarded");
-    harness.get_by_role_and_label(Role::Button, "Undo");
+    harness.get_by_role_and_label(Role::Button, "undo");
     assert_eq!(harness.state().screen(), Screen::Home, "discard leaves Home where it is");
     // Nothing is gone yet: a crash now leaves the draft where it was.
     assert!(exists(harness.state_mut(), older), "the discard waits for its toast");
@@ -374,7 +374,7 @@ fn undo_brings_the_discarded_draft_back_where_it_was_by_button_and_by_key() {
             harness.run();
             harness.run();
         } else {
-            press(&mut harness, "Undo");
+            press(&mut harness, "undo");
         }
         assert_eq!(harness.state().discarding(), None, "by key {by_key}");
         assert_eq!(rows(&harness), before, "by key {by_key}: the row is back where it was");
@@ -396,7 +396,7 @@ fn a_second_discard_while_one_waits_carries_the_first_out() {
     assert!(!exists(harness.state_mut(), older), "the first is carried out");
     assert!(exists(harness.state_mut(), newer), "the second waits");
     assert_eq!(harness.state().discarding(), Some(newer));
-    press(&mut harness, "Undo");
+    press(&mut harness, "undo");
     wait_out_the_toast(&mut harness);
     assert!(exists(harness.state_mut(), newer), "its Undo takes back the second only");
     assert!(!exists(harness.state_mut(), older));
@@ -439,33 +439,31 @@ fn discarding_the_draft_being_written_keeps_and_closes_it_first() {
     press_discard(&mut harness, "Workshop dates");
     assert!(harness.state().composer().is_none(), "the composer closes with its draft");
     assert_eq!(harness.state().discarding(), Some(older));
-    press(&mut harness, "Undo");
+    press(&mut harness, "undo");
     assert_eq!(subject_of(harness.state_mut(), older), "Workshop dates and kilns", "what was typed was kept first");
 }
 
 #[test]
-fn the_discard_s_toast_covers_no_control_of_home() {
+fn the_discard_s_message_covers_no_control_of_home() {
     for size in [vec2(1440.0, 900.0), vec2(1300.0, 900.0), vec2(1000.0, 900.0), vec2(800.0, 900.0)] {
         let mut app = sample_app(&clock());
         draft(&mut app, "Workshop dates");
         draft(&mut app, "Glaze order");
         let mut harness = window_of(app, size);
         press_discard(&mut harness, "Workshop dates");
-        // The toast's float, which takes the presses over it: the area its Undo stands on.
-        let undo = harness.get_by_role_and_label(Role::Button, "Undo").rect();
-        let layer = harness.ctx.layer_id_at(undo.center()).unwrap();
-        let float = harness.ctx.memory(|memory| memory.area_rect(layer.id)).unwrap();
-        assert!(float.contains_rect(harness.get_by_label("Draft discarded").rect()), "{float:?}");
+        // The message in the status line, its Undo in it.
+        let float = harness.get_by_label("Draft discarded").rect();
+        assert!(float.contains_rect(harness.get_by_role_and_label(Role::Button, "undo").rect()), "{float:?}");
         let home = harness.state().screen();
         assert_eq!(home, Screen::Home);
         for node in
             harness.query_all_by_role(Role::Button).chain(harness.query_all_by_role(Role::ListItem)).chain(harness.query_all_by_role(Role::Link))
         {
             let label = node.accesskit_node().label().unwrap_or_default().to_owned();
-            if label == "Undo" {
+            if label == "undo" {
                 continue;
             }
-            assert!(!node.rect().intersects(float), "{size:?}: the toast covers {label:?} at {:?} ({float:?})", node.rect());
+            assert!(!node.rect().intersects(float), "{size:?}: the message covers {label:?} at {:?} ({float:?})", node.rect());
         }
     }
 }

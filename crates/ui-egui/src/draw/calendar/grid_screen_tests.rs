@@ -490,7 +490,10 @@ fn the_details_show_the_whole_text_and_scroll_to_the_rest() {
         for _ in 0..60 {
             let rect = part(&harness);
             for clipped in &harness.output().shapes {
+                // Not the status line's words at the window's foot, under the part's clipped rect.
+                let status = crate::draw::shell::laid(&harness.ctx).unwrap().status;
                 if let egui::Shape::Text(text) = &clipped.shape
+                    && !status.contains(text.pos)
                     && text.pos.x >= side
                     && rect.y_range().contains(text.pos.y)
                     // In the panel's scrolling body, not its foot.

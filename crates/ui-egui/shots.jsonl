@@ -134,6 +134,11 @@
 {"out": "docs/images/list-slide-dark.png", "mode": "dark", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
 {"out": "docs/images/list-toast-light.png", "mode": "light", "size": [1400, 860], "step": 1, "act": "done"}
 {"out": "docs/images/list-toast-dark.png", "mode": "dark", "size": [1400, 860], "step": 1, "act": "done"}
+# The status line synced and syncing (#309): the sample is offline without the accounts' workers telling it otherwise.
+{"out": "docs/images/status-line-synced-light.png", "mode": "light", "size": [1400, 860], "sync": "synced"}
+{"out": "docs/images/status-line-synced-dark.png", "mode": "dark", "size": [1400, 860], "sync": "synced"}
+{"out": "docs/images/status-line-syncing-light.png", "mode": "light", "size": [1400, 860], "sync": "syncing"}
+{"out": "docs/images/status-line-syncing-dark.png", "mode": "dark", "size": [1400, 860], "sync": "syncing"}
 # The reader on the design system (E1.17b): the mail-action toolbar, the subject with who wrote, the
 # thread as cards and the open message's attachments with Reply, Reply all and Forward, in the full-width reader.
 # The command line's commands, the Shortcuts page (one action waiting for a key) and the calendar's empty state (E3.10).

@@ -505,20 +505,13 @@ pub(crate) fn rule(ui: &mut Ui, colour: Color32) -> Response {
 pub(crate) struct Panes {
     slot: ShapeIdx,
     rects: Vec<Rect>,
-    capped: Vec<Rect>,
 }
 
 impl Panes {
     /// Keeps the place for the panes in `painter`'s list, after what it holds now.
     #[must_use]
     pub(crate) fn begin(painter: &Painter) -> Self {
-        Self { slot: painter.add(Shape::Noop), rects: Vec::new(), capped: Vec::new() }
-    }
-
-    /// Notes `rect`, a strip above the panes that draws the line on its bottom edge itself (the error banner): a pane
-    /// that starts under it draws no line on its top.
-    pub(crate) fn capped(&mut self, rect: Option<Rect>) {
-        self.capped.extend(rect);
+        Self { slot: painter.add(Shape::Noop), rects: Vec::new() }
     }
 
     /// A pane over the whole of `ui`, with `add` drawing its content `inner` from its edges.
@@ -545,9 +538,7 @@ impl Panes {
             if !near(rect.right(), window.right()) && !followed {
                 shapes.push(edge_shape(whole, Side::Right, colour, ppp));
             }
-            // A strip's own bottom edge is the line between it and this pane.
-            let under_cap = self.capped.iter().any(|strip| near(strip.bottom(), rect.top()));
-            if !near(rect.top(), window.top()) && !under_cap {
+            if !near(rect.top(), window.top()) {
                 shapes.push(edge_shape(whole, Side::Top, colour, ppp));
             }
             // The pane under this one starts at its bottom: that pane's top line is the one line between them.

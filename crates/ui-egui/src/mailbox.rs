@@ -1610,6 +1610,13 @@ impl Mailbox {
         self.settle(Err(error));
     }
 
+    /// Applies `event` as an account's sync worker tells it, checked by the engine as every worker's is: for a picture
+    /// of the status line synced or syncing, which no sample account reaches without a server. Whether it changed
+    /// anything.
+    pub(crate) fn tell(&mut self, event: &inboxcraft_model::Event) -> Result<bool, UiError> {
+        Ok(self.session.apply(event)? == Applied::Changed)
+    }
+
     /// The owner's appearance choices, as the `ui.*.set` commands left them.
     #[must_use]
     pub fn appearance(&self) -> &Appearance {
@@ -1619,6 +1626,16 @@ impl Mailbox {
     /// Takes the appearance choices kept from an earlier run.
     pub(crate) fn restore_appearance(&mut self, appearance: Appearance) {
         self.session.set_appearance(appearance);
+    }
+
+    /// Runs `read`, the status line's reads of its facts (`safe` commands that change nothing), so that they count in
+    /// none of the window's tallies ([`Mailbox::runs`], [`Mailbox::last_run`], the refused command): those say what the
+    /// window ran for the owner, and the line reads at most once a second or when the mailbox changed.
+    pub(crate) fn quietly<R>(&mut self, read: impl FnOnce(&mut Self) -> R) -> R {
+        let (runs, writes, last, refused) = (self.runs, self.writes, self.last, self.refused);
+        let answer = read(self);
+        (self.runs, self.writes, self.last, self.refused) = (runs, writes, last, refused);
+        answer
     }
 
     /// Runs `command` for the window's caller; a command that may change something counts in [`Mailbox::writes`].

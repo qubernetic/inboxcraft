@@ -124,10 +124,12 @@ pub(super) fn misfits_within<S>(harness: &Harness<'_, S>, area: Rect) -> Vec<Str
         })
         .filter(|(rect, _)| rect.is_positive())
         .collect();
+    // The status line is a strip of its own: a row cut off by the body's foot lies over it, clipped, not drawn there.
+    let status = super::shell::laid(&harness.ctx).map_or(Rect::NOTHING, |regions| regions.status);
     for role in [Role::ListBoxOption, Role::Button] {
         for node in counted.iter().filter(|node| node.accesskit_node().role() == role && area.contains(node.rect().center())) {
             let control = node.rect();
-            for (rect, text) in visible.iter().filter(|(rect, _)| control.contains(rect.center())) {
+            for (rect, text) in visible.iter().filter(|(rect, _)| control.contains(rect.center()) && !status.contains(rect.center())) {
                 if !inside(*rect, control) {
                     found.push(format!("sticks out of {role:?} {:?}: {text:?} {rect:?} in {control:?}", node.accesskit_node().label()));
                 }

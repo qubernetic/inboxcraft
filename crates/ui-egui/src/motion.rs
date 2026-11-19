@@ -41,7 +41,13 @@ impl Motion {
 /// The motion tokens.
 pub const MOTION: Motion = Motion { hover_fade: 0.12, fast: 0.125, tooltip: 0.1, row_collapse: 0.18, card: 0.16, toast: 0.2 };
 
-/// No token is longer than this.
+/// The `undo` token, in seconds: how long an act or a discard can be taken back from the status line.
+pub const UNDO: f64 = 5.0;
+
+/// The `notice` token, in seconds: how long a notice shows in the status line.
+pub const NOTICE: f64 = 4.0;
+
+/// No animation token is longer than this.
 pub const LONGEST: f32 = 0.25;
 
 /// Where the flag lives in the context.

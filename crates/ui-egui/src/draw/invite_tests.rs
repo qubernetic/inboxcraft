@@ -224,7 +224,7 @@ fn a_cancellation_takes_the_event_out_of_the_calendar_with_undo() {
     harness.run();
     assert!(shows(&harness, "It is not in your calendar."));
     assert!(!button(&harness, "Remove from calendar"));
-    harness.get_by_role_and_label(Role::Button, "Undo").click();
+    harness.get_by_role_and_label(Role::Button, "undo").click();
     harness.run();
     assert!(button(&harness, "Remove from calendar"), "Undo puts the event back");
 }

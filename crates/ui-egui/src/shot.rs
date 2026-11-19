@@ -229,6 +229,10 @@ pub struct Shot {
     /// takes the row away as another device would: no act of the owner's, so nothing walks on.
     #[serde(default)]
     pub act: Option<String>,
+    /// How the sample's accounts sync, as their workers would tell it: `synced` (signed in, the last round two minutes
+    /// ago) or `syncing` (signed in, 27 of 50 folders done); the sample is offline without it.
+    #[serde(default)]
+    pub sync: Option<String>,
     /// Whether `act` (`done` or `delete`) is caught with its row sliding out, before the toast.
     #[serde(default)]
     pub slide: Option<bool>,
@@ -549,6 +553,27 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     Ok(())
 }
 
+/// With `shot.sync`, every account of `app` signed in, and synced two minutes ago or `syncing` 27 of 50 folders, as
+/// their workers would tell it.
+fn sync(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    use inboxcraft_model::{ConnectionState, Event, EventKind};
+    let Some(state) = shot.sync.as_deref() else { return Ok(()) };
+    let out = &shot.out;
+    let ago = app.mailbox().now().checked_sub(std::time::Duration::from_secs(120)).ok_or_else(|| bad(format!("{out}: no time two minutes ago")))?;
+    let told = match state {
+        "synced" => EventKind::SyncFinished { at: ago },
+        "syncing" => EventKind::SyncProgress { done: 27, of: 50 },
+        other => return Err(bad(format!("{out}: sync {other:?} is not synced or syncing"))),
+    };
+    let accounts: Vec<u64> = app.mailbox().accounts().iter().map(|account| account.id).collect();
+    for account in accounts {
+        let account = inboxcraft_model::AccountId::new(account);
+        app.mailbox_mut().tell(&Event::new(account, None, EventKind::Connection(ConnectionState::Online)))?;
+        app.mailbox_mut().tell(&Event::new(account, None, told.clone()))?;
+    }
+    Ok(())
+}
+
 /// Puts the calendar screen in the view of `shot` and picks its event.
 fn calendar(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     let (calendar, mailbox) = app.calendar_mut();
@@ -818,6 +843,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.showcase.is_some()
         || shot.step.is_some()
         || shot.act.is_some()
+        || shot.sync.is_some()
         || shot.slide.is_some()
         || shot.text_scale.is_some()
         || shot.size.is_some()
@@ -1792,6 +1818,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         return Err(bad(format!("{}: the reader settings need a selected row", shot.out)));
     }
     act(&mut app, shot)?;
+    sync(&mut app, shot)?;
     if let Some(typed) = &shot.picker {
         if app.mailbox().selected().is_none() {
             return Err(bad(format!("{}: the time picker needs a selected row", shot.out)));

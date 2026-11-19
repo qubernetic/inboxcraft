@@ -40,7 +40,7 @@ fn every_state_of_both_sets_is_on_the_page_and_tab_reaches_each_press() {
             "Studio: sign-in refused, mail is not being fetched",
             "sent 14:02 · Re: Thursday workshop",
         ] {
-            assert_eq!(harness.get_by_label(words).rect().width(), 560.0, "{words}");
+            assert_eq!(harness.get_by_label_contains(words).rect().width(), 560.0, "{words}");
         }
         let pressed = |name: &str| {
             harness.query_all_by_role(egui::accesskit::Role::Button).filter(|node| node.accesskit_node().label().as_deref() == Some(name)).count()

@@ -15,11 +15,12 @@ use inboxcraft_store::{Batch, Change, Storage as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
-use super::{InboxApp, Screen, TOAST_SECONDS};
+use super::{InboxApp, Screen};
 use crate::compose::Line;
 use crate::keymap;
 use crate::mailbox::Mailbox;
 use crate::sample;
+use crate::status::UNDO_SECONDS as TOAST_SECONDS;
 
 /// 2026-11-05T09:00:00Z.
 const NOW: i64 = 1_793_869_200;
@@ -245,7 +246,7 @@ fn send_sends_and_the_toast_says_so() {
     harness.run();
     assert!(harness.state().composer().is_none());
     assert!(harness.state().counting().is_some(), "the countdown shows in place of a notice");
-    harness.get_by_label("Sending “Hello” in 5 s");
+    harness.get_by_label("sending · Hello, 5 s");
 }
 
 #[test]

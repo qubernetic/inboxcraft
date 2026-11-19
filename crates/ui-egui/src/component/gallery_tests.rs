@@ -26,7 +26,7 @@ fn the_gallery_shows_every_component_in_both_modes() {
     {
         for mode in [Mode::Light, Mode::Dark] {
             let harness = harness(Theme::new(mode, TextScale::default()));
-            for name in ["Newsletters", "Screener: 3 new senders", "Unpin", "Unread", "People", "Marked as done", "Move to a folder"] {
+            for name in ["Newsletters", "Screener: 3 new senders", "Unpin", "Unread", "People", "Move to a folder"] {
                 harness.get_by_label(name);
             }
             // The archive button itself: its two tooltips on the tooltip board carry the name too.
@@ -38,7 +38,6 @@ fn the_gallery_shows_every_component_in_both_modes() {
             assert!(harness.query_by_label_contains("This morning").is_none(), "a preset behind is hidden");
             harness.get_by_role_and_label(Role::Switch, "Notify me when it comes back");
             harness.get_by_label("Ctrl F");
-            harness.get_by_label("Ctrl Z");
             for (name, _) in sample::people() {
                 assert!(harness.get_all_by_label(name).any(|node| node.accesskit_node().role() == Role::Image), "{name}");
             }
