@@ -1264,8 +1264,9 @@ impl Mailbox {
             }
             Act::Unsnooze => {
                 // Bringing it back early is no act of the history: Undo has nothing to take back.
-                self.run("mail.unsnooze", &one)?;
-                tr!("Back in the inbox")
+                // A message moved on meanwhile stays where the owner put it: only its snooze goes.
+                let answer = self.run("mail.unsnooze", &one)?;
+                if answer.get("back").and_then(Value::as_bool) == Some(true) { tr!("Back in the inbox") } else { tr!("Snooze taken off") }
             }
             Act::FollowUp(until) => {
                 self.write("mail.follow_up", &json!({ "id": id, "until": engine_date(until) }))?;
