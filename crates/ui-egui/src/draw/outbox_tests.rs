@@ -93,6 +93,31 @@ fn a_send_counts_down_in_its_toast_and_undo_opens_the_draft_again() {
 }
 
 #[test]
+fn the_send_s_undo_stops_it_under_the_command_line_s_results() {
+    // Its time runs out under the results too: one press, a screen reader's activate or the key takes the send back,
+    // and the draft opens again as it does without them.
+    for how in ["press", "activate", "key"] {
+        let clock = clock();
+        let mut harness = sending(&clock, egui::Theme::Light);
+        let draft = send(&mut harness, "Work party on Saturday");
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        harness.state_mut().command_mut().set_text(">zz");
+        harness.run();
+        assert!(harness.state().command().results(), "{how}: the results show");
+        assert_eq!(harness.state().mailbox().outbox().len(), 1, "{how}: counting down");
+        match how {
+            "press" => harness.get_by_role_and_label(Role::Button, "undo").click(),
+            "activate" => harness.get_by_role_and_label(Role::Button, "undo").click_accesskit(),
+            _ => harness.key_press_modifiers(Modifiers::COMMAND, Key::Z),
+        }
+        harness.run();
+        assert!(harness.state().mailbox().outbox().is_empty(), "{how}: taken back by one");
+        assert_eq!(harness.state().composer().map(crate::compose::Composer::draft), Some(draft), "{how}: the draft opens again");
+    }
+}
+
+#[test]
 fn ctrl_z_takes_the_send_back_while_it_counts_down() {
     let clock = clock();
     let mut harness = sending(&clock, egui::Theme::Light);

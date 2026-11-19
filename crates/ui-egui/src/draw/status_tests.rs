@@ -159,6 +159,39 @@ fn a_discard_from_home_waits_as_long_as_its_undo_shows() {
 }
 
 #[test]
+fn a_discard_s_undo_keeps_the_draft_under_the_command_line_s_results() {
+    // Its time runs out under the results too: one press, a screen reader's activate or the key keeps the draft.
+    for how in ["press", "activate", "key"] {
+        let (mut harness, _) = reading((1300.0, 872.0), 100);
+        let account = harness.state().mailbox().accounts().first().map(|account| account.id).unwrap();
+        let draft = harness.state_mut().mailbox_mut().run("compose.new", &serde_json::json!({ "account": account })).unwrap();
+        let draft = draft.get("id").and_then(serde_json::Value::as_u64).unwrap();
+        harness.state_mut().mailbox_mut().run("compose.update", &serde_json::json!({ "id": draft, "subject": "Glaze order" })).unwrap();
+        harness.state_mut().discard_draft(draft);
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        harness.state_mut().command_mut().set_text(">zz");
+        harness.run();
+        assert!(harness.state().command().results(), "{how}: the results show");
+        assert!(harness.state().discarding().is_some(), "{how}: the discard waits");
+        match how {
+            "press" => harness.get_by_role_and_label(Role::Button, "undo").click(),
+            "activate" => harness.get_by_role_and_label(Role::Button, "undo").click_accesskit(),
+            _ => harness.key_press_modifiers(Modifiers::COMMAND, Key::Z),
+        }
+        harness.run();
+        assert_eq!(harness.state().discarding(), None, "{how}: the discard is dropped by one");
+        let listed = harness.state_mut().mailbox_mut().run("compose.list", &serde_json::json!({})).unwrap();
+        let kept = listed
+            .get("drafts")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|drafts| drafts.iter().any(|row| row.get("id").and_then(serde_json::Value::as_u64) == Some(draft)));
+        assert!(kept, "{how}: the draft is kept");
+    }
+}
+
+#[test]
 fn rests() {
     // At rest, with no message: the line asks for no frame sooner than a second.
     let (mut harness, _) = reading((1300.0, 872.0), 100);

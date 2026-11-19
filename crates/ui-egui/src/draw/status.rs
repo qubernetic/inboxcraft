@@ -10,7 +10,7 @@
 //! The key hints are drawn first, from the right end: the facts and the message have what is left, cut and clipped to
 //! it, so no fact pushes a key out of the window.
 
-use egui::{Align, Layout, Rect, Ui, UiBuilder, pos2, vec2};
+use egui::{Align, Area, Id, Layout, Order, Rect, Ui, UiBuilder, pos2, vec2};
 use serde_json::{Value, json};
 
 use crate::component::key_hint::key_hint;
@@ -225,6 +225,8 @@ pub(crate) struct Shown<'a> {
     pub undo_key: bool,
     /// Whether Undo rests: drawn unavailable, its link and its key do nothing.
     pub rests: bool,
+    /// Whether the message lies over a modal surface's dimmed window, so a press reaches its Undo.
+    pub lifted: bool,
 }
 
 /// Draws the line in `rect`; what was pressed in it.
@@ -253,8 +255,21 @@ pub(crate) fn line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, rect: Rect, show
     if let Some(message) = shown.message {
         let wide = MESSAGE.min(room.width()).max(1.0);
         let at = Rect::from_min_size(room.min, vec2(wide, rect.height()));
-        let mut child = left.new_child(UiBuilder::new().id_salt("status-message").max_rect(at).layout(Layout::left_to_right(Align::Center)));
-        let pressed_in = message_in(&mut child, theme, keymap, message, shown);
+        let builder = UiBuilder::new().id_salt("status-message").max_rect(at).layout(Layout::left_to_right(Align::Center));
+        let pressed_in = if shown.lifted {
+            let area = Area::new(Id::unique("status-message-lifted")).order(Order::Middle).fixed_pos(at.min).constrain(false).fade_in(false).show(
+                ui.ctx(),
+                |ui| {
+                    let mut child = ui.new_child(builder);
+                    child.set_clip_rect(at.intersect(rect));
+                    message_in(&mut child, theme, keymap, message, shown)
+                },
+            );
+            ui.ctx().move_to_top(area.response.layer_id);
+            area.inner
+        } else {
+            message_in(&mut left.new_child(builder), theme, keymap, message, shown)
+        };
         pressed.undo = pressed_in == Some(status_message::Press::Undo);
         pressed.dismiss = pressed_in == Some(status_message::Press::Dismiss);
         left.advance_cursor_after_rect(at);

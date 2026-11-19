@@ -112,6 +112,15 @@ enum Undone {
     Nothing,
 }
 
+impl Undone {
+    /// The one exception to the gate under a modal surface ([`Surfaces::modal`]): the send's countdown and a draft's
+    /// discard keep their Undo, by press, key and a screen reader's activate. Their time runs out under the surface too,
+    /// and their Undo stops that loss and changes nothing else. The last act's Undo waits: its key reaches it after.
+    fn outlasts_the_gate(self) -> bool {
+        matches!(self, Self::Send(_) | Self::Discard)
+    }
+}
+
 /// What was asked of the mail in the index this frame: an account narrowed, a mailbox opened.
 #[derive(Debug, Default)]
 struct MailAsked {
@@ -2505,10 +2514,11 @@ impl InboxApp {
         // The one gate for the place under a modal surface ([`Surfaces::modal`]): whatever pressed it (the pointer, a key,
         // a screen reader's activate, which egui's layers do not stop), nothing the list, the reader, the composer, Home,
         // the calendar, the settings' page or the status line asked for in this frame is applied. The index has its own
-        // gate ([`InboxApp::index_allowed`]).
+        // gate ([`InboxApp::index_allowed`]). Its one exception is the Undo of a loss whose time runs out
+        // ([`Undone::outlasts_the_gate`]).
         if surfaces.modal() {
-            line = status::Pressed::default();
-            undid = None;
+            undid = undid.filter(|undone| undone.outlasts_the_gate());
+            line = status::Pressed { undo: line.undo && undid.is_some(), ..status::Pressed::default() };
             listed = list::Asked { out: listed.out, ..list::Asked::default() };
             header = list::Header::default();
             drawn.asked.clear();
@@ -2959,7 +2969,11 @@ impl InboxApp {
             .collect();
         let countdown_shown = matches!(shown, Some(crate::status::Message::Countdown { .. }));
         let rests = surfaces.undo_rests() && !countdown_shown;
-        let drawn = status::Shown { facts: &self.facts.0, message: shown.as_ref(), now, whole, hints: &hints, undo_key: !quiet, rests };
+        // Under a modal surface the Undo of a loss whose time runs out stays in reach: the message lies over the surface's
+        // dimmed window, and the field in front does not keep its key ([`Undone::outlasts_the_gate`]).
+        let lifted = surfaces.modal() && which.is_some_and(Undone::outlasts_the_gate);
+        let drawn =
+            status::Shown { facts: &self.facts.0, message: shown.as_ref(), now, whole, hints: &hints, undo_key: !quiet || lifted, rests, lifted };
         let pressed = status::line(ui, theme, &self.keymap, rect, &drawn);
         (pressed, which)
     }
