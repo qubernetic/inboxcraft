@@ -17,7 +17,8 @@
 //! 25, none whose host is not a plain ASCII name of at least two labels ([`usable_host`]), and at most
 //! [`MAX_CANDIDATES`] of each kind; the first of two equal servers keeps its place. While the domain names servers
 //! of a kind (its autoconfig, the ISPDB or SRV: [`Source::is_named`]), the guesses of that kind (its own common host
-//! names and the MX providers': [`Source::is_guess`]) are left out.
+//! names and the MX providers': [`Source::is_guess`]) are left out, until Detect opens the kind to them because
+//! every named server of it has failed for a definite reason ([`Lookups::open_guesses`]).
 
 use std::num::NonZeroU16;
 
@@ -112,6 +113,8 @@ pub struct Lookups {
     srv: Vec<(SrvName, Vec<Srv>)>,
     provider_files: Vec<(String, Autoconfig)>,
     reached: Reached,
+    /// The kinds whose guesses stay in the list although the domain names servers of them.
+    open: Vec<Service>,
 }
 
 impl Lookups {
@@ -157,6 +160,16 @@ impl Lookups {
     pub fn add_provider_file(&mut self, provider: &str, file: Autoconfig) {
         if self.files.len() + self.provider_files.len() < MAX_FILES {
             self.provider_files.push((provider.to_owned(), file));
+        }
+    }
+
+    /// Whether the guesses of `service` stay in the list while the domain names servers of it: Detect opens a kind
+    /// once every server the domain names for it has failed for a definite reason, and closes it again when a new
+    /// one is named.
+    pub fn open_guesses(&mut self, service: Service, open: bool) {
+        self.open.retain(|held| *held != service);
+        if open {
+            self.open.push(service);
         }
     }
 
@@ -256,9 +269,9 @@ pub fn candidates(address: &EmailAddress, lookups: &Lookups) -> Candidates {
             list.hosts(&provider, username, Source::Provider);
         }
     }
-    // While the domain names servers of a kind, no guess stands in their place.
-    for kind in [&mut list.imap, &mut list.submission] {
-        if kind.iter().any(|candidate| candidate.source.is_named()) {
+    // While the domain names servers of a kind that may still be fine, no guess stands in their place.
+    for (service, kind) in [(Service::Imap, &mut list.imap), (Service::Submission, &mut list.submission)] {
+        if !lookups.open.contains(&service) && kind.iter().any(|candidate| candidate.source.is_named()) {
             kind.retain(|candidate| !candidate.source.is_guess());
         }
     }

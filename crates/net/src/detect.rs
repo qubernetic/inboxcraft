@@ -20,6 +20,11 @@
 //! 5. The provider domains of the MX hosts ([`crate::candidates::provider_domains`]), last, as a guess about a third
 //!    party: their autoconfig over HTTPS, then `mail.`, `imap.` and `smtp.` of them.
 //!
+//! While the domain names servers of a kind, the guesses of that kind (steps 4 and 5) are tried only once every
+//! server it names for that kind has failed for a definite reason: the connection refused, no such name, a
+//! certificate that does not hold, no STARTTLS, no sign-in the app can do, or a server that spoke something else. A
+//! named server that only timed out or dropped the connection keeps the guesses away, and is proposed unchecked.
+//!
 //! A host whose name was not found is not probed again in the run, on any port; nor is one of the domain's own
 //! common host names whose probe timed out (a guess that drops packets is not worth more waits). Any other host whose
 //! probe timed out is not probed again on that port only: a network that drops 465 may let 587 through.
@@ -401,17 +406,22 @@ impl Run<'_> {
         self.ended || (self.found(Service::Imap) && self.found(Service::Submission))
     }
 
-    /// Probes, in order, the candidates not probed yet, until one of each kind answers.
+    /// Probes, in order, the candidates not probed yet, until one of each kind answers. The list is made again before
+    /// each probe: a named server's definite failure may open its kind to the guesses.
     fn probe_new(&mut self) {
-        let list = candidates(self.address, &self.lookups);
         for service in [Service::Imap, Service::Submission] {
-            if self.found(service) {
-                continue;
-            }
-            for candidate in list.of(service) {
-                if self.tried.iter().any(|(held, server, _)| *held == service && *server == candidate.server) || self.skipped(&candidate.server) {
-                    continue;
-                }
+            while !self.found(service) {
+                self.open_guesses(service);
+                let list = candidates(self.address, &self.lookups);
+                let next = list
+                    .of(service)
+                    .iter()
+                    .find(|candidate| {
+                        !self.tried.iter().any(|(held, server, _)| *held == service && *server == candidate.server)
+                            && !self.skipped(&candidate.server)
+                    })
+                    .cloned();
+                let Some(candidate) = next else { break };
                 if !self.may_try() {
                     return;
                 }
@@ -430,12 +440,32 @@ impl Run<'_> {
                     }
                     Err(error) => {
                         self.tried.push((service, candidate.server.clone(), Some(error.kind())));
-                        self.note_unreachable(candidate, error.kind());
+                        self.note_unreachable(&candidate, error.kind());
                         self.proposal.failed.push((what, error.kind()));
                     }
                 }
             }
         }
+    }
+
+    /// Opens `service` to the guesses when the domain names servers of it and every one has failed for a definite
+    /// reason ([`definite`]): its own probe, or no address for its host.
+    fn open_guesses(&mut self, service: Service) {
+        self.lookups.open_guesses(service, false);
+        let list = candidates(self.address, &self.lookups);
+        let mut named = list.of(service).iter().filter(|candidate| candidate.source.is_named()).peekable();
+        let open = named.peek().is_some()
+            && named.all(|candidate| {
+                let own = self.tried.iter().find(|(held, server, _)| *held == service && *server == candidate.server).map(|(_, _, failed)| *failed);
+                match own {
+                    Some(failed) => failed.is_some_and(definite),
+                    None => self
+                        .tried
+                        .iter()
+                        .any(|(_, server, failed)| server.host() == candidate.server.host() && *failed == Some(ErrorKind::HostNotFound)),
+                }
+            });
+        self.lookups.open_guesses(service, open);
     }
 
     /// Whether `server` is not probed again: its host has no address or is a guess that timed out, or its port timed
@@ -545,6 +575,12 @@ fn no_answer(kind: ErrorKind) -> bool {
             | ErrorKind::ConnectionDropped
             | ErrorKind::HostNotFound
     )
+}
+
+/// Whether a probe's failure says the server is not usable, rather than that it was not reached in time: anything
+/// but a timeout, blocked ports or a dropped connection.
+fn definite(kind: ErrorKind) -> bool {
+    !matches!(kind, ErrorKind::TimedOut | ErrorKind::PortTimedOut | ErrorKind::MailPortsBlocked | ErrorKind::ConnectionDropped)
 }
 
 /// The domain an MX host belongs to, by the rule of thumb of the module; lowercase.

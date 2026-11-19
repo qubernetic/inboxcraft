@@ -549,13 +549,14 @@ fn a_named_server_no_probe_reached_is_proposed_unchecked() {
     assert_eq!(probe.tried(), ["imap imap.example.org:993 (TLS)", "submission smtp.imap.example.org:465 (TLS)"]);
 }
 
-/// A guessable provider host that answers does not replace the server the domain names.
+/// A guessable host that answers does not replace a server the domain names that may merely be slow: it timed out,
+/// so it stands unchecked and no guess is probed.
 #[test]
 fn a_guess_that_answers_does_not_replace_a_named_server() {
     let web = FakeWeb::default().page(AUTOCONFIG, &config("imap.example.org", 993, "SSL"));
     let dns = FakeDns { mx: vec!["mx1.privateemail.com"], ..FakeDns::default() };
     let probe = FakeProbe {
-        fails_with: ErrorKind::ConnectionRefused,
+        fails_with: ErrorKind::TimedOut,
         ..FakeProbe::only(&["mail.privateemail.com:993 (TLS)", "mail.privateemail.com:465 (TLS)", "mail.example.org:993 (TLS)"])
     };
     let proposal = run_probed(&DetectConfig::default(), &dns, &web, &probe);
@@ -564,14 +565,50 @@ fn a_guess_that_answers_does_not_replace_a_named_server() {
     assert!(probe.tried().iter().all(|tried| !tried.contains("privateemail") && !tried.contains("mail.example.org")), "{:?}", probe.tried());
 }
 
-/// A named server that answered and was wrong (no STARTTLS) is not proposed, and no guess takes its place.
+/// A named server that refuses is known to be no use: a stale autoconfig does not keep the provider away. The
+/// provider's server that answers is proposed, and says it is a guess.
 #[test]
-fn a_named_server_that_answered_wrong_is_not_proposed() {
-    let web = FakeWeb::default().page(AUTOCONFIG, &config("imap.example.org", 143, "STARTTLS"));
-    let probe = FakeProbe { fails_with: ErrorKind::StartTlsMissing, ..FakeProbe::only(&["mail.example.org:993 (TLS)"]) };
-    let proposal = run_probed(&DetectConfig::default(), &FakeDns::default(), &web, &probe);
-    assert!(proposal.imap.is_empty() && proposal.submission.is_empty(), "{proposal:?}");
-    assert!(proposal.failed.contains(&("imap imap.example.org:143 (STARTTLS)".to_owned(), ErrorKind::StartTlsMissing)));
+fn a_named_server_that_refuses_lets_the_guesses_in() {
+    let web = FakeWeb::default().page(AUTOCONFIG, &config("imap.example.org", 993, "SSL"));
+    let dns = FakeDns { mx: vec!["mx1.privateemail.com"], ..FakeDns::default() };
+    let probe = FakeProbe {
+        fails_with: ErrorKind::ConnectionRefused,
+        ..FakeProbe::only(&["mail.privateemail.com:993 (TLS)", "mail.privateemail.com:465 (TLS)"])
+    };
+    let proposal = run_probed(&DetectConfig::default(), &dns, &web, &probe);
+    assert_eq!(imap(&proposal), ["mail.privateemail.com:993 (TLS) Provider"]);
+    assert_eq!(proposal.submission.iter().map(|candidate| candidate.server.to_string()).collect::<Vec<_>>(), ["mail.privateemail.com:465 (TLS)"]);
+    for candidate in proposal.imap.iter().chain(&proposal.submission) {
+        assert!(candidate.source.is_guess() && candidate.checked == Checked::Answered, "{candidate:?}");
+    }
+    // The named servers first, then the domain's own hosts, then the provider.
+    assert_eq!(
+        probe.tried().get(..3),
+        Some(
+            &[
+                "imap imap.example.org:993 (TLS)".to_owned(),
+                "submission smtp.imap.example.org:465 (TLS)".to_owned(),
+                "imap mail.example.org:993 (TLS)".to_owned()
+            ][..]
+        )
+    );
+}
+
+/// A named server that answered and was wrong (no STARTTLS, a certificate for another name) is not proposed, and the
+/// guesses are tried in its place: here the domain's own `mail.` answers.
+#[test]
+fn a_named_server_that_answered_wrong_lets_the_guesses_in() {
+    for kind in [ErrorKind::StartTlsMissing, ErrorKind::CertificateWrongHost] {
+        let web = FakeWeb::default().page(AUTOCONFIG, &config("imap.example.org", 143, "STARTTLS"));
+        let probe = FakeProbe { fails_with: kind, ..FakeProbe::only(&["mail.example.org:993 (TLS)"]) };
+        let proposal = run_probed(&DetectConfig::default(), &FakeDns::default(), &web, &probe);
+        assert_eq!(imap(&proposal), ["mail.example.org:993 (TLS) Guess"], "{kind:?}");
+        assert_eq!(proposal.imap[0].checked, Checked::Answered);
+        // Every submission server failed the same way: none is proposed, the named one neither.
+        assert!(proposal.submission.is_empty(), "{kind:?}: {proposal:?}");
+        assert!(proposal.failed.contains(&("imap imap.example.org:143 (STARTTLS)".to_owned(), kind)));
+        assert!(probe.tried().contains(&"submission mail.example.org:465 (TLS)".to_owned()), "{kind:?}");
+    }
 }
 
 /// A network that drops 465 but lets 587 through: the named host's timeout on 465 does not keep its 587 away, and
