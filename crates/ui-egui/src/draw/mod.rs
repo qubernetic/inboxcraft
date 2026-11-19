@@ -3208,6 +3208,15 @@ impl InboxApp {
         }
     }
 
+    /// Removes the account `account` as the owner's press of its form's question does, for a picture's setup: the form
+    /// opens, asks, and the question is answered. Whether it was removed.
+    pub(crate) fn remove_account_as_owner(&mut self, account: u64) -> bool {
+        self.onboarding.edit(&mut self.mailbox, account);
+        self.onboarding.ask_remove();
+        self.apply_page(onboard::Asked::Remove);
+        !self.mailbox.accounts().iter().any(|row| row.id == account)
+    }
+
     /// Applies what was asked for on the add-account form or the check.
     fn apply_page(&mut self, asked: onboard::Asked) {
         let (onboarding, mailbox) = (&mut self.onboarding, &mut self.mailbox);
@@ -3219,6 +3228,15 @@ impl InboxApp {
             onboard::Asked::Change => onboarding.change(mailbox),
             onboard::Asked::Close => onboarding.close(),
             onboard::Asked::Cancel => onboarding.cancel(),
+            onboard::Asked::AskRemove => onboarding.ask_remove(),
+            onboard::Asked::KeepAccount => onboarding.keep_account(),
+            onboard::Asked::Remove => {
+                // The owner's press of the question: the only way the form removes an account.
+                if let Some(said) = onboarding.remove(mailbox) {
+                    self.say(&said);
+                    self.settings.hand_to_nav();
+                }
+            }
         }
         // The new account's jobs go out in this frame.
         self.pump();
@@ -3280,6 +3298,9 @@ fn start(reader: &mut Reader, mailbox: &mut Mailbox, id: u64, act: Act) {
     }
 }
 
+#[cfg(test)]
+#[path = "account_remove_tests.rs"]
+mod account_remove_tests;
 #[cfg(test)]
 #[path = "appearance_tests.rs"]
 mod appearance_tests;

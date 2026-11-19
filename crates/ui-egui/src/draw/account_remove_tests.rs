@@ -1,0 +1,203 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Removing an account from its form: "Remove account…" at the form's right end asks in place, the question says first
+//! that it cannot be undone, and `account.remove` runs only on the owner's press of the question's "Remove account" —
+//! never from a hover, a focus, Enter on "Remove account…" alone, or Esc. The removal takes the account's password out
+//! of the system's credential store, says so in the status line and goes back to the list.
+
+use std::sync::Arc;
+
+use egui::accesskit::Role;
+use egui::{Key, Modifiers, vec2};
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use inboxcraft_time::{FakeClock, Timestamp};
+
+use crate::mailbox::Mailbox;
+use crate::onboard::tests::Kept;
+use crate::onboard::{NoDetect, Stage};
+use crate::workers::NoWorkers;
+use crate::{InboxApp, sample};
+
+fn clock() -> Box<FakeClock> {
+    Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()))
+}
+
+/// The sample window, its passwords in `kept`, on the form of Studio (account 2).
+fn on_studio(kept: &Kept) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())).with_accounts(
+        Arc::new(kept.clone()),
+        Box::new(NoDetect::default()),
+        Box::new(NoWorkers),
+    );
+    app.set_reduce_motion(true);
+    app.open_accounts();
+    let (onboarding, mailbox) = app.onboarding_mut();
+    onboarding.edit(mailbox, 2);
+    let mut harness = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_max_steps(40)
+        .with_theme(egui::Theme::Dark)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness
+}
+
+fn accounts(harness: &Harness<'static, InboxApp>) -> Vec<u64> {
+    harness.state().mailbox().accounts().iter().map(|account| account.id).collect()
+}
+
+fn focused(harness: &Harness<'static, InboxApp>) -> Option<String> {
+    harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).map(|node| node.accesskit_node().label().unwrap_or_default())
+}
+
+fn press(harness: &mut Harness<'static, InboxApp>, label: &str) {
+    harness.get_by_label(label).scroll_to_me();
+    harness.run();
+    harness.get_by_label(label).click();
+    harness.run();
+}
+
+fn key(harness: &mut Harness<'static, InboxApp>, key: Key) {
+    harness.key_press_modifiers(Modifiers::NONE, key);
+    harness.run();
+}
+
+const QUESTION: &str = "Remove Studio from this computer?";
+
+#[test]
+fn removing_asks_in_place_says_first_it_cannot_be_undone_and_runs_only_on_the_owner_s_press() {
+    let kept = Kept::default();
+    let mut harness = on_studio(&kept);
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(2));
+    // The keyboard on "Remove account…" and Enter there only ask.
+    harness.get_by_label("Remove account…").focus();
+    harness.run();
+    assert_eq!(focused(&harness).as_deref(), Some("Remove account…"));
+    assert_eq!(accounts(&harness), [1, 2], "a focus removes nothing");
+    key(&mut harness, Key::Enter);
+    let heading = harness.get_by_role_and_label(Role::Heading, QUESTION).rect();
+    assert_eq!(accounts(&harness), [1, 2], "Enter on Remove account… only asks");
+    // The question says first that it cannot be undone, then what goes and what stays.
+    let first = harness.get_by_label("This cannot be undone.").rect();
+    let goes = harness.get_by_label_contains("From this computer go:").rect();
+    let stays = harness.get_by_label_contains("Everything on the server stays:").rect();
+    assert!(heading.bottom() <= first.top() && first.bottom() <= goes.top() && goes.bottom() <= stays.top(), "{first:?} {goes:?} {stays:?}");
+    assert_eq!(focused(&harness).as_deref(), Some("Cancel"), "the question takes the keyboard on Cancel");
+    // A hover and the keyboard on the question's "Remove account" run nothing.
+    harness.get_by_label("Remove account").hover();
+    harness.run();
+    key(&mut harness, Key::Tab);
+    assert_eq!(focused(&harness).as_deref(), Some("Remove account"));
+    assert_eq!(accounts(&harness), [1, 2], "a focus or a hover removes nothing");
+    assert!(kept.forgotten.lock().unwrap().is_empty());
+    // Esc is the question's: it closes, the form stays, the keyboard goes back to Remove account….
+    key(&mut harness, Key::Escape);
+    assert!(harness.query_by_label("This cannot be undone.").is_none());
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(2), "Esc closes the question only");
+    assert!(harness.state().settings().is_open());
+    assert_eq!(focused(&harness).as_deref(), Some("Remove account…"));
+    assert_eq!(accounts(&harness), [1, 2]);
+    // The owner's press of the question removes the account and its password.
+    press(&mut harness, "Remove account…");
+    press(&mut harness, "Remove account");
+    assert_eq!(accounts(&harness), [1], "removed from this computer");
+    assert_eq!(kept.forgotten.lock().unwrap().as_slice(), [2], "its password leaves the credential store");
+    assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "back to the list");
+    assert_eq!(harness.state().notice(), Some("Studio removed from this computer"));
+    harness.get_by_label_contains("Your accounts · 1");
+    harness.run();
+    assert!(focused(&harness).is_some(), "the keyboard is not left on nothing");
+}
+
+#[test]
+fn cancel_keeps_the_account_and_hands_the_keyboard_back() {
+    let kept = Kept::default();
+    let mut harness = on_studio(&kept);
+    press(&mut harness, "Remove account…");
+    press(&mut harness, "Cancel");
+    assert_eq!(accounts(&harness), [1, 2]);
+    assert!(kept.forgotten.lock().unwrap().is_empty());
+    assert!(harness.query_by_label("This cannot be undone.").is_none());
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(2), "the form stays open");
+    assert_eq!(focused(&harness).as_deref(), Some("Remove account…"));
+}
+
+#[test]
+fn the_question_stands_in_the_buttons_place_and_does_not_outlast_the_page() {
+    let kept = Kept::default();
+    let mut harness = on_studio(&kept);
+    press(&mut harness, "Remove account…");
+    harness.get_by_role_and_label(Role::Heading, QUESTION);
+    assert!(harness.query_by_label("Save").is_none(), "nothing to save half-way through the question");
+    assert_eq!(harness.get_all_by_label("Cancel").count(), 1, "one Cancel on the page: the question's");
+    // Another page of the settings and back: the form asks nothing.
+    harness.state_mut().leave_settings();
+    harness.run();
+    harness.state_mut().open_accounts();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(2));
+    assert!(harness.query_by_label("This cannot be undone.").is_none(), "the question went with the page");
+    let (onboarding, mailbox) = harness.state_mut().onboarding_mut();
+    assert!(onboarding.remove(mailbox).is_none(), "not asked, not removed");
+    assert_eq!(accounts(&harness), [1, 2], "nothing removes an account the owner was not asked about");
+}
+
+#[test]
+fn the_list_has_no_coming_soon_row_for_removing_any_more() {
+    let kept = Kept::default();
+    let mut harness = on_studio(&kept);
+    harness.state_mut().onboarding_mut().0.close();
+    harness.run();
+    assert!(harness.query_by_label("Remove account").is_none(), "removing lives on each account's form");
+}
+
+/// `key` held down: one press, then `repeats` repeats, a frame each, then let go. With `fresh` off the press goes down
+/// while no control has the keyboard, which the control in `then` takes before the repeats: the key was already down
+/// when it got the keyboard.
+fn hold(harness: &mut Harness<'static, InboxApp>, key: Key, repeats: usize, fresh: bool, then: &str) {
+    let event = |pressed, repeat| egui::Event::Key { key, physical_key: None, pressed, repeat, modifiers: Modifiers::NONE };
+    if !fresh && let Some(id) = harness.ctx.memory(|memory| memory.focused()) {
+        harness.ctx.memory_mut(|memory| memory.surrender_focus(id));
+    }
+    harness.event(event(true, false));
+    harness.run();
+    if !fresh {
+        harness.get_by_label(then).focus();
+        harness.run();
+    }
+    for _ in 0..repeats {
+        harness.event(event(true, true));
+        harness.run();
+    }
+    harness.event(event(false, false));
+    harness.run();
+}
+
+#[test]
+fn a_held_key_never_removes_the_account() {
+    let kept = Kept::default();
+    let mut harness = on_studio(&kept);
+    // Enter held on "Remove account…": the press asks, its repeats never answer the question.
+    harness.get_by_label("Remove account…").focus();
+    harness.run();
+    for key in [Key::Enter, Key::Space] {
+        hold(&mut harness, key, 12, true, "");
+        assert_eq!(accounts(&harness), [1, 2], "a held {key:?} on Remove account… removes nothing");
+    }
+    // A key already down when the question's "Remove account" takes the keyboard: its repeats are no press.
+    if harness.query_by_label("This cannot be undone.").is_none() {
+        press(&mut harness, "Remove account…");
+    }
+    for key in [Key::Enter, Key::Space] {
+        hold(&mut harness, key, 12, false, "Remove account");
+        assert_eq!(accounts(&harness), [1, 2], "repeats of a held {key:?} on the question's Remove account remove nothing");
+    }
+    assert!(kept.forgotten.lock().unwrap().is_empty());
+    // A fresh press there is the owner's.
+    harness.get_by_label("Remove account").focus();
+    harness.run();
+    hold(&mut harness, Key::Enter, 0, true, "");
+    assert_eq!(accounts(&harness), [1]);
+}

@@ -25,7 +25,8 @@
 use std::sync::Arc;
 
 use egui::{
-    Align, CentralPanel, Color32, Frame, Galley, Layout, Margin, Pos2, Rect, Response, Role, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2,
+    Align, CentralPanel, Color32, Frame, Galley, Key, Layout, Margin, Modifiers, Pos2, Rect, Response, Role, ScrollArea, Sense, Ui, UiBuilder,
+    WidgetInfo, pos2, vec2,
 };
 
 use super::paint::{self, Panes};
@@ -42,7 +43,8 @@ use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
 use crate::onboard::{
-    Form, Found, Onboarding, Outcome, Secret, Security, Slot, Source, Stage, StepRow, StepState, kept_line, port_typed, unusual_encryption,
+    Form, Found, Onboarding, Outcome, RemoveHand, Secret, Security, Slot, Source, Stage, StepRow, StepState, kept_line, port_typed,
+    unusual_encryption,
 };
 use crate::theme::{Font, Theme};
 use crate::tr;
@@ -58,6 +60,12 @@ pub(super) enum Asked {
     Close,
     /// Cancel: closes, and the form forgets what it held.
     Cancel,
+    /// "Remove account…" on an account's form: asks, removes nothing.
+    AskRemove,
+    /// The question's Cancel, or Esc while it asks: the account stays.
+    KeepAccount,
+    /// The question's "Remove account": the owner's press, the only way `account.remove` runs from the form.
+    Remove,
 }
 
 /// The widest the form gets, in points.
@@ -627,6 +635,13 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     let (checks, note) = onboarding.save_summary();
     let label = if checks { tr!("Save and check") } else { tr!("Save") };
     let mut edited = Vec::new();
+    let asking = onboarding.asking_remove();
+    let hand = onboarding.take_remove_hand();
+    let question = Question { name: onboarding.removed_name(), address: crate::component::plain(onboarding.form().address.trim()).into_owned() };
+    // Esc while the question asks is the question's: the account stays, the form and the settings stay open.
+    if asking && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape)) {
+        asked = Some(Asked::KeepAccount);
+    }
     part(ui, width, |ui| {
         ui.spacing_mut().item_spacing.y = GAP;
         let form = onboarding.form_mut();
@@ -642,6 +657,12 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
             words(ui, text, f.caption, p.ink, width);
         }
         page_error(ui, theme, keymap, onboarding);
+        // The question stands in the buttons' place while it asks: one Cancel on the page, and nothing to save
+        // half-way through it.
+        if asking {
+            asked = remove_question(ui, theme, keymap, &question, hand, width).or(asked);
+            return;
+        }
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             if TextButton::new(label).primary().show(ui, theme, keymap).clicked() {
@@ -650,12 +671,84 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
             if TextButton::new(tr!("Cancel")).plain().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Cancel);
             }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let ask = TextButton::new(tr!("Remove account…")).danger().show(ui, theme, keymap);
+                if hand == Some(RemoveHand::Ask) {
+                    ask.request_focus();
+                }
+                if ask.clicked() {
+                    asked = Some(Asked::AskRemove);
+                }
+            });
         });
     });
     for slot in edited {
         onboarding.edited(slot);
     }
     asked
+}
+
+/// The words of the question whether to remove an account: its name and its address, each one plain line.
+struct Question {
+    name: String,
+    address: String,
+}
+
+/// The question whether to remove the account, in place under the form's buttons: first that it cannot be undone, then
+/// what goes from this computer and what stays on the server; Cancel takes the keyboard, "Remove account" removes.
+fn remove_question(ui: &mut Ui, theme: &Theme, keymap: &Keymap, question: &Question, hand: Option<RemoveHand>, width: f32) -> Option<Asked> {
+    let f = &theme.fonts;
+    let p = &theme.palette;
+    let mut asked = None;
+    ui.add_space(GAP);
+    let heading = tr!("Remove {name} from this computer?", name = question.name);
+    let shown = crate::component::label(ui, f.heading, &heading, p.ink);
+    shown.widget_info(|| WidgetInfo::labeled(Role::Heading, true, &heading));
+    words(ui, tr!("This cannot be undone."), f.body, p.ink, width);
+    words(
+        ui,
+        &tr!(
+            "From this computer go: the mail and folders of {name} kept here, its calendars, its drafts, and its password in your system's credential store.",
+            name = question.name
+        ),
+        f.body,
+        p.ink,
+        width,
+    );
+    words(
+        ui,
+        &tr!(
+            "Everything on the server stays: {address} keeps its mail and its calendars, and the account can be added again.",
+            address = question.address
+        ),
+        f.body,
+        p.muted,
+        width,
+    );
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = GAP;
+        let cancel = TextButton::new(tr!("Cancel")).secondary().show(ui, theme, keymap);
+        if hand == Some(RemoveHand::Cancel) {
+            cancel.request_focus();
+        }
+        if cancel.clicked() {
+            asked = Some(Asked::KeepAccount);
+        }
+        let remove = TextButton::new(tr!("Remove account")).danger().show(ui, theme, keymap);
+        // egui counts a held key's repeats as presses: a key already down when the button took the keyboard, or held
+        // on from the press that asked, is no answer. Only a fresh press, of the pointer or of a key, removes.
+        if remove.clicked() && !(remove.has_focus() && key_repeated(ui)) {
+            asked = Some(Asked::Remove);
+        }
+    });
+    asked
+}
+
+/// Whether Enter or Space came this frame as a held key's repeat.
+fn key_repeated(ui: &Ui) -> bool {
+    ui.input(|input| {
+        input.events.iter().any(|event| matches!(event, egui::Event::Key { key: Key::Enter | Key::Space, pressed: true, repeat: true, .. }))
+    })
 }
 
 /// A step's short name on its line, as a terminal prints it.

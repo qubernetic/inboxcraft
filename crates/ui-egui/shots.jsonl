@@ -242,6 +242,11 @@
 {"out": "docs/images/bounce-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "bounce"}
 {"out": "docs/images/account-settings-light.png", "mode": "light", "size": [1200, 820], "accounts": true, "edit_account": 1}
 {"out": "docs/images/account-settings-dark.png", "mode": "dark", "size": [1200, 820], "accounts": true, "edit_account": 1}
+# Removing an account (#317): the question in the buttons' place on Studio's form, and the list after the owner's press.
+{"out": "docs/images/account-remove-confirm-light.png", "mode": "light", "size": [1200, 820], "accounts": true, "edit_account": 2, "steps": [{"press": "Remove account…"}]}
+{"out": "docs/images/account-remove-confirm-dark.png", "mode": "dark", "size": [1200, 820], "accounts": true, "edit_account": 2, "steps": [{"press": "Remove account…"}]}
+{"out": "docs/images/account-remove-removed-light.png", "mode": "light", "size": [1200, 820], "accounts": true, "remove_account": 2}
+{"out": "docs/images/account-remove-removed-dark.png", "mode": "dark", "size": [1200, 820], "accounts": true, "remove_account": 2}
 {"out": "docs/images/inbox-smart-light.png", "mode": "light", "size": [1440, 900], "select": "Allotment rota for November"}
 {"out": "docs/images/inbox-grouped-light.png", "mode": "light", "size": [1440, 900], "view": "grouped", "select": "Allotment rota for November"}
 {"out": "docs/images/inbox-list-light.png", "mode": "light", "size": [1440, 900], "view": "list", "select": "Allotment rota for November"}

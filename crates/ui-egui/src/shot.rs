@@ -164,6 +164,9 @@ pub struct Shot {
     /// With `accounts`: the account whose settings form is open.
     #[serde(default)]
     pub edit_account: Option<u64>,
+    /// With `accounts`: the account removed before the picture, as the owner's press of the question removes it.
+    #[serde(default)]
+    pub remove_account: Option<u64>,
     /// Whether the settings show Shortcuts.
     #[serde(default)]
     pub shortcuts: Option<bool>,
@@ -1869,6 +1872,11 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if let Some(account) = shot.edit_account {
         let (onboarding, mailbox) = app.onboarding_mut();
         onboarding.edit(mailbox, account);
+    }
+    if let Some(account) = shot.remove_account
+        && !app.remove_account_as_owner(account)
+    {
+        return Err(bad(format!("{}: there is no account {account} to remove", shot.out)));
     }
     places(&mut app, shot)?;
     if let Some(scene) = &shot.outbox {

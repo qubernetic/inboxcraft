@@ -217,15 +217,6 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         settings_row_soon_with(
             ui,
             theme,
-            tr!("Remove account"),
-            tr!("Takes an account and its mail off this computer, after a question that says it cannot be undone."),
-            |ui| {
-                TextButton::new(tr!("Remove account")).danger().show(ui, theme, keymap);
-            },
-        );
-        settings_row_soon_with(
-            ui,
-            theme,
             tr!("Set up a phone"),
             tr!("A code on this screen sets up InboxCraft on your phone with the same accounts."),
             |ui| {

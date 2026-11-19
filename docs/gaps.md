@@ -320,7 +320,7 @@ time from the code as it is, not measured.
   stays. A one-column table is laid out as its cells' blocks; `colspan` and `rowspan` are not read (#29).
 - `--sample` shows an invented mailbox in memory that is forgotten on exit (#30). `inboxcraft` alone keeps the
   owner's store on disk with its accounts, so their passwords stay in the credential store
-  (`io.github.qubernetic.inboxcraft`, `account-<store id>-<id>`) until the account is removed in "Change settings";
+  (`io.github.qubernetic.inboxcraft`, `account-<store id>-<id>`) until the account is removed in "Change settings" or by "Remove account…" on its form;
   a crash or a store that refuses then leaves the entry behind, and `PRIVACY.md` says how to remove one by hand. An
   entry an older build left (`account-<id>`) is never read again and stays until removed by hand (#34, #113).
 - Dates in the list are shown in UTC: the `time` crate has no local time zone yet (#30).

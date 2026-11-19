@@ -792,6 +792,15 @@ pub enum Stage {
     Checking(u64),
 }
 
+/// Where the keyboard goes next on an account's form while removing it is asked or was just let be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoveHand {
+    /// The question's Cancel: it has just opened.
+    Cancel,
+    /// The form's "Remove account…": the question has just closed.
+    Ask,
+}
+
 /// How the check of the added account ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -977,6 +986,10 @@ pub struct Onboarding {
     /// The account being edited as it stood: set from [`Onboarding::edit`] until [`Onboarding::close`], through the
     /// check a save starts, so "Change settings" comes back here and removes nothing.
     held: Option<Held>,
+    /// Whether the account's form asks whether to remove it.
+    asking_remove: bool,
+    /// Where the keyboard goes next frame around that question.
+    remove_hand: Option<RemoveHand>,
 }
 
 impl fmt::Debug for Onboarding {
@@ -1014,6 +1027,8 @@ impl Onboarding {
             stored: BTreeSet::new(),
             detect,
             held: None,
+            asking_remove: false,
+            remove_hand: None,
         }
     }
 
@@ -1032,6 +1047,8 @@ impl Onboarding {
         self.sent.clear();
         self.steps.clear();
         self.held = None;
+        self.asking_remove = false;
+        self.remove_hand = None;
         self.stage = Stage::Form;
     }
 
@@ -1041,6 +1058,8 @@ impl Onboarding {
         self.form.password.clear();
         self.keep();
         self.held = None;
+        self.asking_remove = false;
+        self.remove_hand = None;
         self.stage = Stage::Closed;
     }
 
@@ -1048,6 +1067,9 @@ impl Onboarding {
     /// left it, its password forgotten, and Detect under way ends, as on every way out of the form; a check goes on and
     /// shows its result when the page shows again.
     pub fn leave_page(&mut self) {
+        // The question whether to remove the account does not outlast the page: back, the form asks nothing.
+        self.asking_remove = false;
+        self.remove_hand = None;
         if matches!(self.stage, Stage::Form | Stage::Edit(_)) {
             self.form.password.clear();
             self.end_run();
@@ -1145,6 +1167,8 @@ impl Onboarding {
         };
         // Found: only now is the form on the page left for the account's, so one that cannot open leaves it as it was.
         self.keep();
+        self.asking_remove = false;
+        self.remove_hand = None;
         let text = |value: Option<&Value>| value.and_then(Value::as_str).unwrap_or_default().to_owned();
         let port = |server: Option<&Value>| {
             server.and_then(|server| server.get("port")).and_then(Value::as_u64).map(|port| port.to_string()).unwrap_or_default()
@@ -1738,6 +1762,85 @@ impl Onboarding {
         };
     }
 
+    /// Whether the account's form asks whether to remove the account.
+    #[must_use]
+    pub fn asking_remove(&self) -> bool {
+        self.asking_remove && matches!(self.stage, Stage::Edit(_))
+    }
+
+    /// Asks, on the account's form, whether to remove the account; the question takes the keyboard on its Cancel.
+    /// Nothing is removed yet.
+    pub fn ask_remove(&mut self) {
+        if matches!(self.stage, Stage::Edit(_)) {
+            self.asking_remove = true;
+            self.remove_hand = Some(RemoveHand::Cancel);
+        }
+    }
+
+    /// Lets the question be: the account stays and the keyboard goes back to "Remove account…".
+    pub fn keep_account(&mut self) {
+        if self.asking_remove {
+            self.asking_remove = false;
+            self.remove_hand = Some(RemoveHand::Ask);
+        }
+    }
+
+    /// Where the keyboard goes this frame around the question, once.
+    pub fn take_remove_hand(&mut self) -> Option<RemoveHand> {
+        self.remove_hand.take()
+    }
+
+    /// The account's name in the question and the status line: its name as it stood when the form opened, else its
+    /// address; one plain line.
+    #[must_use]
+    pub fn removed_name(&self) -> String {
+        let label = self.held.as_ref().map(|held| held.label.trim()).filter(|label| !label.is_empty());
+        let name = crate::component::plain(label.unwrap_or_else(|| self.form.address.trim()));
+        cut_name(&name)
+    }
+
+    /// Removes the account whose form is open, on the owner's press of the question's "Remove account": `account.remove`
+    /// takes it and what this computer keeps of it out of the store, then its password leaves the system's credential
+    /// store ([`Keychain::forget`]; one the store refuses is tried again by [`Self::forget_passwords`]). The form
+    /// closes, nothing of it kept. What the status line says, or `None` when the engine refused, which the form says.
+    pub fn remove(&mut self, mailbox: &mut Mailbox) -> Option<String> {
+        let Stage::Edit(id) = self.stage else { return None };
+        if !self.asking_remove {
+            return None;
+        }
+        let name = self.removed_name();
+        self.asking_remove = false;
+        if let Err(error) = mailbox.run("account.remove", &json!({ "account": id })) {
+            self.error = Some(error.to_string());
+            self.remove_hand = Some(RemoveHand::Ask);
+            return None;
+        }
+        let forgotten = self.keychain.forget(id);
+        if forgotten.is_ok() {
+            self.stored.remove(&id);
+        } else {
+            self.stored.insert(id);
+        }
+        self.kept_edits.remove(&id);
+        self.form.password.clear();
+        self.form = Form::default();
+        self.held = None;
+        self.remove_hand = None;
+        self.error = None;
+        self.sent.clear();
+        self.steps.clear();
+        self.stage = Stage::Closed;
+        mailbox.refresh();
+        Some(match forgotten {
+            Ok(()) => tr!("{name} removed from this computer", name = name),
+            Err(refused) => tr!(
+                "{name} removed from this computer; the system's credential store did not let its password go: {reason}",
+                name = name,
+                reason = shown(&refused)
+            ),
+        })
+    }
+
     /// Shows the check of the account `id` with `steps`, `running` or not: a test's way to any check at all.
     #[cfg(test)]
     pub(crate) fn show_check(&mut self, id: u64, steps: Vec<StepRow>, running: bool) {
@@ -1759,6 +1862,17 @@ impl Onboarding {
     pub fn forget_passwords(&mut self) {
         let keychain = &self.keychain;
         self.stored.retain(|id| keychain.forget(*id).is_err());
+    }
+}
+
+/// The most characters of an account's name the question and the status line show; a longer one ends in one `…`.
+const NAME_SHOWN: usize = 60;
+
+/// `name` cut to [`NAME_SHOWN`] characters, one `…` at its end when it was longer.
+fn cut_name(name: &str) -> String {
+    match name.char_indices().nth(NAME_SHOWN) {
+        Some((at, _)) => format!("{}…", name.get(..at).unwrap_or_default()),
+        None => name.to_owned(),
     }
 }
 
