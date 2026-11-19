@@ -16,7 +16,7 @@ use crate::{Connector, Deadline, ImapConnection, NetError, SmtpConnection};
 
 /// One probe's deadline: the name lookup, the connection over all the addresses tried, TLS or STARTTLS, the greeting
 /// and the capabilities, however slowly the server sends.
-pub const PROBE_TIME: Duration = Duration::from_secs(20);
+pub const PROBE_TIME: Duration = Duration::from_secs(12);
 
 /// The most addresses of one host a probe tries.
 pub const PROBE_ADDRESSES: usize = 4;

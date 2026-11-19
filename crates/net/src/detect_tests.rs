@@ -383,14 +383,15 @@ fn a_domain_hosted_by_a_provider_is_found_through_its_mx() {
     assert!(!proposal.failed.iter().any(|(what, _)| what.starts_with("detect")));
 }
 
-/// The owner's case when the domain's hosts drop every packet: each probe takes 20 seconds, the probe's own cap. A
-/// host that timed out is not tried again, so the provider is reached within the run's 120 seconds.
+/// The owner's case when the domain's hosts drop every packet: each probe would wait 30 seconds and ends at the
+/// probe's own 12. A guessed host of the domain that timed out is not tried again, so the provider is reached within
+/// the run's 120 seconds.
 #[test]
 fn the_owners_case_fits_the_cap_when_the_domain_drops_packets() {
     let dns = FakeDns { mx: vec!["mx1.privateemail.com"], ..FakeDns::default() };
     let probe = FakeProbe {
         fails_with: ErrorKind::TimedOut,
-        step: Duration::from_secs(20),
+        step: Duration::from_secs(30),
         ..FakeProbe::only(&["mail.privateemail.com:993 (TLS)", "mail.privateemail.com:465 (TLS)"])
     };
     let proposal = run_probed(&DetectConfig::default(), &dns, &FakeWeb::default(), &probe);
@@ -406,8 +407,8 @@ fn the_owners_case_fits_the_cap_when_the_domain_drops_packets() {
             "submission mail.privateemail.com:465 (TLS)"
         ]
     );
-    // Five probes of 20 seconds: 100 seconds in all.
-    assert_eq!(probe.clock.monotonic(), Duration::from_secs(100));
+    // Five probes of 12 seconds: 60 seconds in all.
+    assert_eq!(probe.clock.monotonic(), Duration::from_secs(60));
 }
 
 #[test]
@@ -468,8 +469,8 @@ fn each_probe_has_a_deadline_of_its_own() {
     let dns = FakeDns { mx: vec!["mx1.privateemail.com"], ..FakeDns::default() };
     let probe = FakeProbe { step: Duration::from_secs(50), ..FakeProbe::only(&[]) };
     run_probed(&DetectConfig::default(), &dns, &FakeWeb::default(), &probe);
-    // Each probe ends after its 20 seconds: six of them fill the 120.
-    assert_eq!(probe.tried().len(), 6);
+    // Each probe ends after its 12 seconds: ten of them fill the 120.
+    assert_eq!(probe.tried().len(), 10);
     assert_eq!(probe.clock.monotonic(), Duration::from_secs(120));
 }
 
