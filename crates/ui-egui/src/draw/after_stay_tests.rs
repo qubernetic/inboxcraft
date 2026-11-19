@@ -112,3 +112,59 @@ fn the_triage_page_sets_what_follows_an_act_only_on_the_owner_s_press() {
     harness.run();
     assert_eq!(harness.state().mailbox().after(), After::List);
 }
+
+/// Presses D and lets the act and its landing settle.
+fn done_by_key(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press(Key::D);
+    for _ in 0..4 {
+        harness.run();
+    }
+}
+
+/// Under Stay, D three times in a row from `open`: each takes the row the keyboard is on, so three messages leave and
+/// none opens, none is read, the keyboard lands each time on the row that took the last one's place.
+fn three_in_a_row(harness: &mut Harness<'static, InboxApp>, open: u64) {
+    let before = harness.state().mailbox().messages().len();
+    let unread: Vec<u64> = harness.state().mailbox().messages().iter().filter(|row| !row.seen && row.id != open).map(|row| row.id).collect();
+    let mut gone = vec![open];
+    done_by_key(harness);
+    for _ in 0..2 {
+        let keyed = super::list::focused_row(&harness.ctx).expect("the keyboard is on a row after an act under Stay");
+        assert!(!gone.contains(&keyed), "the keyboard is on a row still listed");
+        done_by_key(harness);
+        assert!(!harness.state().mailbox().messages().iter().any(|row| row.id == keyed), "D took the keyed row {keyed}");
+        gone.push(keyed);
+    }
+    assert_eq!(harness.state().mailbox().messages().len(), before.saturating_sub(3), "three messages left the list");
+    assert_eq!(harness.state().reader().open_id(), None, "nothing opens");
+    assert_eq!(harness.state().mailbox().selected(), None, "nothing is selected");
+    for id in unread.iter().filter(|id| harness.state().mailbox().messages().iter().any(|row| row.id == **id)) {
+        assert!(!seen(harness, *id), "row {id} is not read");
+    }
+    let keyed = super::list::focused_row(&harness.ctx).expect("the keyboard is still on a row");
+    assert!(!gone.contains(&keyed), "the keyboard is on a row still listed");
+}
+
+#[test]
+fn stay_takes_three_messages_in_a_row_by_key_and_opens_none() {
+    let mut harness = window();
+    harness.state_mut().mailbox_mut().set_after(After::Stay);
+    let (open, _) = open_one(&mut harness);
+    three_in_a_row(&mut harness, open);
+}
+
+#[test]
+fn stay_takes_three_in_a_row_from_the_list_s_last_row() {
+    let mut harness = window();
+    harness.state_mut().mailbox_mut().set_after(After::Stay);
+    let last = *super::list::order(&harness.ctx).last().expect("the sample lists rows");
+    harness.state_mut().mailbox_mut().select(Some(last));
+    for _ in 0..3 {
+        harness.run();
+    }
+    assert_eq!(harness.state().reader().open_id(), Some(last));
+    // At the list's end each act lands on the row above, the new last row, which the next D takes.
+    three_in_a_row(&mut harness, last);
+    let order = super::list::order(&harness.ctx);
+    assert_eq!(super::list::focused_row(&harness.ctx), order.last().copied(), "the keyboard is on the list's last row");
+}

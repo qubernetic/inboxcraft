@@ -812,9 +812,11 @@ impl InboxApp {
         }
     }
 
-    /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row.
+    /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row; under Stay, with
+    /// nothing selected, on the row that has the keyboard, as the menu key takes it, so the acts go on down the list.
     fn row_act(&self, action: &str) -> Option<(u64, Act)> {
-        let row = self.mailbox.selected().and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
+        let keyed = self.list_row.filter(|_| self.mailbox.after() == crate::mailbox::After::Stay);
+        let row = self.mailbox.selected().or(keyed).and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
         let (_, act) = ROW_ACTS.into_iter().find(|(id, _)| *id == action)?;
         let act = match act {
             Act::Read if row.seen => Act::Unread,
@@ -825,9 +827,10 @@ impl InboxApp {
         Some((row.id, act))
     }
 
-    /// Whether the action `id` can run now: an act on a row needs a selected message, Undo an act in the history, the
-    /// reader's full width an open message; on the settings and on Home nothing of the mail and nothing of the calendar
-    /// runs; the composer's own (Send, fold) only where a composer is drawn; an id the window does not know never runs.
+    /// Whether the action `id` can run now: an act on a row needs a selected message (under Stay the keyed row), Undo
+    /// an act in the history, the reader's full width an open message; on the settings and on Home nothing of the mail
+    /// and nothing of the calendar runs; the composer's own (Send, fold) only where a composer is drawn; an id the
+    /// window does not know never runs.
     #[must_use]
     pub fn can_run(&self, id: &str) -> bool {
         let apart = self.settings.is_open() || self.screen == Screen::Home;
@@ -1712,6 +1715,12 @@ impl InboxApp {
             self.landed = self.land_held;
             // The owner's own act brings the list in front in one pane, with the keyboard on that row.
             self.bring_held = owner;
+        }
+        // Under Stay the owner's act on the row that had the keyboard and was not open: the keyboard lands on the row
+        // that took its place, so the next act goes on from there.
+        if let Some(keyed) = taken.filter(|id| stay && open != Some(*id) && self.list_row == Some(*id)) {
+            self.land_held = self.landing_after_removal(keyed);
+            self.landed = self.land_held;
         }
         if let (true, false, Some(pick)) = (gone, walking, self.mailbox.selected()) {
             // The rule's row is kept, not selected: no act lands on a message that is not shown.
