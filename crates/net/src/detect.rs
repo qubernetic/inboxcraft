@@ -20,7 +20,9 @@
 //! 5. The provider domains of the MX hosts ([`crate::candidates::provider_domains`]), last, as a guess about a third
 //!    party: their autoconfig over HTTPS, then `mail.`, `imap.` and `smtp.` of them.
 //!
-//! A host whose probe timed out or whose name was not found is not probed again in the run, on any port.
+//! A host whose name was not found is not probed again in the run, on any port; nor is one of the domain's own
+//! common host names whose probe timed out (a guess that drops packets is not worth more waits). Any other host whose
+//! probe timed out is not probed again on that port only: a network that drops 465 may let 587 through.
 //!
 //! The whole run is capped: at most [`DetectConfig::tries`] probes, and [`DetectConfig::within`] of time as a deadline
 //! every lookup and probe is given, so the run ends at its cap; each probe has its own deadline inside it
@@ -248,6 +250,7 @@ pub fn detect(address: &EmailAddress, config: &DetectConfig, outside: &Outside<'
         proposal: Proposal::default(),
         tried: Vec::new(),
         unreachable: Vec::new(),
+        blocked: Vec::new(),
         ended: false,
     };
     let Ok(domain) = Host::new(address.domain()) else { return run.proposal };
@@ -322,8 +325,10 @@ struct Run<'a> {
     proposal: Proposal,
     /// Every server probed, for what, and why it failed.
     tried: Vec<(Service, Server, Option<ErrorKind>)>,
-    /// Hosts that timed out or have no address: not probed again.
+    /// Hosts not probed again, on any port: no address, or a guess of the domain's own that timed out.
     unreachable: Vec<Host>,
+    /// Hosts and ports that timed out: not probed again on that port.
+    blocked: Vec<(Host, u16)>,
     /// A cap was reached: nothing more is asked.
     ended: bool,
 }
@@ -375,10 +380,10 @@ impl Run<'_> {
             let unreached = |candidate: &&Candidate| {
                 let outcome =
                     self.tried.iter().find(|(held, server, _)| *held == service && *server == candidate.server).map(|(_, _, failed)| *failed);
-                let host_down = self.unreachable.contains(candidate.server.host());
+                // Its own probe's answer, not its host's on another port.
                 match outcome {
                     None => true,
-                    Some(failed) => host_down || failed.is_some_and(no_answer),
+                    Some(failed) => failed.is_some_and(no_answer),
                 }
             };
             let Some(named) = list.of(service).iter().filter(|candidate| candidate.source.is_named()).find(unreached) else { continue };
@@ -404,9 +409,7 @@ impl Run<'_> {
                 continue;
             }
             for candidate in list.of(service) {
-                if self.tried.iter().any(|(held, server, _)| *held == service && *server == candidate.server)
-                    || self.unreachable.contains(candidate.server.host())
-                {
+                if self.tried.iter().any(|(held, server, _)| *held == service && *server == candidate.server) || self.skipped(&candidate.server) {
                     continue;
                 }
                 if !self.may_try() {
@@ -427,13 +430,29 @@ impl Run<'_> {
                     }
                     Err(error) => {
                         self.tried.push((service, candidate.server.clone(), Some(error.kind())));
-                        if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::PortTimedOut | ErrorKind::HostNotFound) {
-                            self.unreachable.push(candidate.server.host().clone());
-                        }
+                        self.note_unreachable(candidate, error.kind());
                         self.proposal.failed.push((what, error.kind()));
                     }
                 }
             }
+        }
+    }
+
+    /// Whether `server` is not probed again: its host has no address or is a guess that timed out, or its port timed
+    /// out.
+    fn skipped(&self, server: &Server) -> bool {
+        self.unreachable.contains(server.host()) || self.blocked.iter().any(|(host, port)| host == server.host() && *port == server.port().get())
+    }
+
+    /// After `candidate`'s probe failed with `kind`: a name not found skips its host; a timeout skips the host of the
+    /// domain's own guess, and only the port of any other.
+    fn note_unreachable(&mut self, candidate: &Candidate, kind: ErrorKind) {
+        let host = candidate.server.host();
+        match kind {
+            ErrorKind::HostNotFound => self.unreachable.push(host.clone()),
+            ErrorKind::TimedOut | ErrorKind::PortTimedOut if candidate.source == Source::Guess => self.unreachable.push(host.clone()),
+            ErrorKind::TimedOut | ErrorKind::PortTimedOut => self.blocked.push((host.clone(), candidate.server.port().get())),
+            _ => {}
         }
     }
 

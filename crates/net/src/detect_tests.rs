@@ -573,3 +573,24 @@ fn a_named_server_that_answered_wrong_is_not_proposed() {
     assert!(proposal.imap.is_empty() && proposal.submission.is_empty(), "{proposal:?}");
     assert!(proposal.failed.contains(&("imap imap.example.org:143 (STARTTLS)".to_owned(), ErrorKind::StartTlsMissing)));
 }
+
+/// A network that drops 465 but lets 587 through: the named host's timeout on 465 does not keep its 587 away, and
+/// 587 is proposed with STARTTLS.
+#[test]
+fn a_timeout_on_one_port_of_a_named_host_leaves_its_other_ports() {
+    let file = "<clientConfig><emailProvider>\
+        <incomingServer type=\"imap\"><hostname>imap.example.org</hostname><port>993</port><socketType>SSL</socketType></incomingServer>\
+        <outgoingServer type=\"smtp\"><hostname>smtp.example.org</hostname><port>465</port><socketType>SSL</socketType></outgoingServer>\
+        <outgoingServer type=\"smtp\"><hostname>smtp.example.org</hostname><port>587</port><socketType>STARTTLS</socketType></outgoingServer>\
+        </emailProvider></clientConfig>";
+    let web = FakeWeb::default().page(AUTOCONFIG, file);
+    let probe = FakeProbe { fails_with: ErrorKind::TimedOut, ..FakeProbe::only(&["imap.example.org:993 (TLS)", "smtp.example.org:587 (STARTTLS)"]) };
+    let proposal = run_probed(&DetectConfig::default(), &FakeDns::default(), &web, &probe);
+    let submission: Vec<String> =
+        proposal.submission.iter().map(|candidate| format!("{} {:?} {:?}", candidate.server, candidate.source, candidate.checked)).collect();
+    assert_eq!(submission, ["smtp.example.org:587 (STARTTLS) Autoconfig Answered"]);
+    assert_eq!(
+        probe.tried(),
+        ["imap imap.example.org:993 (TLS)", "submission smtp.example.org:465 (TLS)", "submission smtp.example.org:587 (STARTTLS)"]
+    );
+}
