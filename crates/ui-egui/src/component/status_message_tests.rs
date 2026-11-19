@@ -176,16 +176,37 @@ fn at_130_percent_the_message_is_34_high_and_its_paddings_and_bar_stay() {
             let left = if state == "error" { 18.0 + 15.0 + 10.0 } else { 18.0 + theme.mark_side() + 10.0 };
             assert_eq!(words[0].0.x, left, "{at}");
             assert_eq!(words[0].0.y, ((34.0 - theme.fonts.mono_s.line) / 2.0).round(), "{at}");
-            if state == "undo" {
-                assert!(
-                    fills.iter().any(|(r, c)| *c == p.stage && r.size() == vec2(80.0, 2.0) && r.top() == 16.0),
-                    "the bar 80 × 2, in the middle: {at}"
-                );
-                let seconds = words.iter().find(|(_, text, _)| text == "4 s").unwrap_or_else(|| panic!("{at}"));
-                let wide = crate::draw::paint::run_box(
-                    harness.ctx.fonts_mut(|fonts| fonts.layout_no_wrap("4 s".into(), theme.fonts.mono_s.id(), p.muted).size().x),
-                );
-                assert_eq!(seconds.0.x + wide, rect.width() - 12.0, "12 after the seconds: {at}");
+            let measure = |text: &str| {
+                crate::draw::paint::run_box(
+                    harness.ctx.fonts_mut(|fonts| fonts.layout_no_wrap(text.into(), theme.fonts.mono_s.id(), p.muted).size().x),
+                )
+            };
+            let at_x =
+                |part: &str| words.iter().find(|(_, text, _)| text == part).map(|(offset, ..)| offset.x).unwrap_or_else(|| panic!("{part}: {at}"));
+            let from = |name: &str| {
+                let node = harness.get_by_label(name).rect();
+                (node.left() - rect.left(), node.right() - rect.left())
+            };
+            match state {
+                "undo" | "send-countdown" => {
+                    // From the right: 12, the seconds, 10, the bar 80 × 2 in the middle, 10, undo, 6, its key's chip.
+                    let seconds = at_x("4 s");
+                    assert_eq!(seconds + measure("4 s"), 760.0 - 12.0, "12 after the seconds: {at}");
+                    let bar = seconds - 10.0 - 80.0;
+                    assert!(fills.contains(&(Rect::from_min_size(pos2(bar, 16.0), vec2(80.0, 2.0)), p.stage)), "the bar: {at}");
+                    assert!(fills.contains(&(Rect::from_min_size(pos2(bar, 16.0), vec2(64.0, 2.0)), p.cyan_edge)), "4 of 5 s: {at}");
+                    let (_, undo_right) = from("undo");
+                    assert_eq!(at_x("Ctrl Z"), undo_right + 6.0 + 5.0, "the chip 6 after undo, its key 5 in: {at}");
+                    assert!(at_x("Ctrl Z") + measure("Ctrl Z") <= bar - 10.0, "the chip before the bar: {at}");
+                }
+                "error" => {
+                    let (log_left, log_right) = from("open log");
+                    let (dismiss_left, dismiss_right) = from("dismiss");
+                    assert_eq!(dismiss_right, 760.0 - 12.0, "{at}");
+                    assert_eq!(dismiss_left, log_right + 16.0, "{at}");
+                    assert!(words[0].0.x + measure(&words[0].1) <= log_left - 10.0, "the text 10 before the links: {at}");
+                }
+                _ => assert_eq!(words.len(), 1, "the text alone: {at}"),
             }
         }
     }
@@ -302,6 +323,40 @@ fn in_a_narrow_line_nothing_is_painted_past_the_message() {
                     continue;
                 }
                 assert!(rect.expand(0.5).contains_rect(bounds), "{state} {width}: {text:?} at {bounds:?} leaves {rect:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_countdown_draws_any_share_and_any_seconds_inside_the_message() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let p = theme.palette;
+    // A share that is not a number or below 0 lights none of the bar, above 1 or infinite all of it; the seconds are
+    // written as given, the largest included.
+    for seconds in [0, u32::MAX] {
+        for (share, lit) in [(f32::NAN, 0.0), (-1.0, 0.0), (f32::NEG_INFINITY, 0.0), (2.0, 80.0), (f32::INFINITY, 80.0)] {
+            let message =
+                StatusMessage { kind: Kind::Countdown { key: KEY, left: Some(Left { seconds, share }) }, text: "sending · Re: Thursday workshop" };
+            let harness = harness(theme, message, 560.0);
+            let rect = harness.get_by_label(message.text).rect();
+            let paint = painted(&harness, message.text);
+            let at = format!("{seconds} {share}");
+            let fills = fills(&paint, rect);
+            let accent: Vec<_> = fills.iter().filter(|(r, c)| *c == p.cyan_edge && r.height() == 2.0 && r.top() > 0.0).collect();
+            assert_eq!(accent.iter().map(|(r, _)| r.width()).sum::<f32>(), lit, "{at}: {accent:?}");
+            let track = fills.iter().find(|(r, c)| *c == p.stage && r.size() == vec2(80.0, 2.0)).map(|(r, _)| *r).unwrap_or_else(|| panic!("{at}"));
+            for (r, _) in &accent {
+                assert!(track.contains_rect(*r), "{at}: the lit part {r:?} inside its track {track:?}");
+            }
+            let words = words(&paint, rect);
+            let written = format!("{seconds} s");
+            let (offset, ..) = words.iter().find(|(_, text, _)| *text == written).unwrap_or_else(|| panic!("{at}: {words:?}"));
+            assert!(offset.x >= 0.0 && rect.left() + offset.x < rect.right(), "{at}");
+            assert!(words[0].1.starts_with("sending"), "the text keeps its room: {at}");
+            for shape in &paint.shapes {
+                assert!(rect.expand(0.5).contains_rect(shape.rect) || !shape.inside, "{at}: {shape:?}");
+                assert!(!shape.overflows, "{at}: {shape:?}");
             }
         }
     }
