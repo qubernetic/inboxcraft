@@ -137,6 +137,23 @@ fn the_draft_saved_toast_stands_at_the_foot_of_the_window_s_middle_and_covers_th
     assert_eq!(table(Shown::DraftSaved), expected);
 }
 
+/// Words that name a control a stray press must never reach: one that deletes, files as done, junks or sends.
+const DESTRUCTIVE: [&str; 4] = ["delete", "done", "junk", "send"];
+
+#[test]
+fn no_control_that_deletes_files_junks_or_sends_lies_under_the_draft_saved_toast() {
+    // A press on the "Draft saved" float reaches what lies under it: at every tested size and text size that is an
+    // answer or a folded row of the thread, never a control whose name says delete, done, junk or send.
+    for size in SIZES {
+        for percent in PERCENTS {
+            let harness = with_toast(size, percent, Shown::DraftSaved);
+            let under: Vec<String> = covered(&harness, Shown::DraftSaved).into_iter().map(|(name, _)| name).collect();
+            let found: Vec<&String> = under.iter().filter(|name| DESTRUCTIVE.iter().any(|word| name.to_lowercase().contains(word))).collect();
+            assert!(found.is_empty(), "{size:?} {percent}: {found:?} under the toast");
+        }
+    }
+}
+
 #[test]
 fn an_act_s_toast_with_undo_stands_where_the_draft_saved_toast_does_and_covers_these_controls() {
     // Wider, with Undo and its key: at 1000 × 700 and 130 % it reaches the answers too.
