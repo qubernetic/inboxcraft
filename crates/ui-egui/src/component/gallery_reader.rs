@@ -49,7 +49,8 @@ fn why_lines(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         cells(ui, theme, |ui| {
             cell(ui, theme, state, |ui| {
                 ui.set_width(640.0);
-                why_line(ui, theme, keymap, reasons);
+                let parts: Vec<&str> = reasons.split(super::why_line::SEPARATOR).collect();
+                why_line(ui, theme, keymap, &parts);
             });
         });
     }

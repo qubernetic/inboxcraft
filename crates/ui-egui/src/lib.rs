@@ -59,6 +59,7 @@ pub mod save;
 pub mod settings;
 pub mod shot;
 pub mod theme;
+mod why;
 pub mod workers;
 
 pub use draw::{InboxApp, Screen, rows_built};

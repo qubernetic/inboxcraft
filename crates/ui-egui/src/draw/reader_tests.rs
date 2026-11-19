@@ -1359,22 +1359,56 @@ fn delete_and_more_stay_in_a_narrow_reader_at_130_percent() {
 }
 
 #[test]
-fn the_why_line_is_coming_soon_and_says_no_reason_of_its_own() {
+fn the_why_line_says_the_engines_reasons_asked_once_for_many_frames() {
     let fetch = Recorder::default();
-    let harness = opened(&fetch, None, "Photos from the coast walk");
-    // The engine will say why a message is here; until then the line is its row with the tag, and no reason.
-    let line = harness.get_by_label("Why here: coming soon").rect();
-    let tag = harness.query_all_by_label("coming soon").map(|node| node.rect()).find(|rect| line.contains_rect(*rect));
-    assert!(tag.is_some_and(|tag| tag.left() - line.left() == 83.0), "the tag in the reasons' place: {tag:?} {line:?}");
-    let said: Vec<String> = harness
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    let reasons = harness.state().reader.why().to_vec();
+    assert!(!reasons.is_empty(), "the engine says why");
+    let asked = harness.state().reader.asked_why;
+    let runs = harness.state().mailbox.runs();
+    for _ in 0..20 {
+        harness.step();
+    }
+    assert_eq!(harness.state().reader.asked_why, asked, "asked when the message opened, never per frame");
+    assert_eq!(harness.state().mailbox.runs(), runs, "no command per frame");
+    // The line says them, heard as one sentence, under the facts and over the body.
+    let name = crate::component::why_line::spoken(&reasons);
+    let line = harness.get_by_label(&name).rect();
+    let subject = harness.get_by_label("Photos from the coast walk").rect();
+    assert!(line.top() >= subject.bottom(), "{line:?} {subject:?}");
+    // Nothing of the message's own text is in it.
+    for made_up in ["Photos", "coast walk"] {
+        assert!(!name.contains(made_up), "{made_up}: {name}");
+    }
+}
+
+#[test]
+fn with_no_reason_the_head_keeps_no_line_for_it() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    let name = crate::component::why_line::spoken(harness.state().reader.why());
+    let line = harness.get_by_label(&name).rect();
+    let tools_before: Vec<egui::Rect> =
+        harness.query_all_by_role(Role::Button).map(|node| node.rect()).filter(|rect| rect.bottom() <= line.top()).collect();
+    // The first thing the reader shows under the line.
+    let first = harness
         .root()
         .children_recursive()
-        .filter(|node| node.accesskit_node().bounding_box().is_some() && line.contains_rect(node.rect()))
-        .filter_map(|node| node.accesskit_node().label())
-        .collect();
-    for made_up in ["grouped as", "new sender", "held by the screener", "in INBOX"] {
-        assert!(said.iter().all(|label| !label.contains(made_up)), "{made_up}: {said:?}");
-    }
+        .filter(|node| node.accesskit_node().bounding_box().is_some())
+        .filter_map(|node| node.accesskit_node().label().map(|label| (label, node.rect())))
+        .filter(|(_, rect)| rect.top() >= line.bottom() && rect.left() >= line.left() - 0.5 && rect.right() <= line.right() + 0.5)
+        .min_by(|a, b| a.1.top().total_cmp(&b.1.top()));
+    let (first, at) = first.expect("something under the line");
+    // The engine has nothing to say (the message is gone): no line, the head above it unmoved, what was below moves up.
+    harness.state_mut().reader.set_why(Vec::new());
+    harness.run();
+    assert!(harness.query_by_label(&name).is_none(), "no line");
+    assert!(harness.query_all_by_label_contains("Why here").next().is_none(), "no line at all");
+    let tools_after: Vec<egui::Rect> =
+        harness.query_all_by_role(Role::Button).map(|node| node.rect()).filter(|rect| rect.bottom() <= line.top()).collect();
+    assert_eq!(tools_before, tools_after, "the head above stays where it was");
+    let now = harness.get_by_label(&first).rect();
+    assert!(now.top() <= at.top() - line.height(), "{first:?} moves up by the line at least: {now:?} {at:?}");
 }
 
 /// Tab reaches every control of the scene, and the scene rests (asks for no repaint) once it is still.
@@ -2466,4 +2500,124 @@ fn a_flag_from_the_list_does_not_turn_a_later_removal_into_a_walk_on() {
     assert!(row_of(&harness, id).is_some(), "a flag leaves the row in the list");
     taken_away(&mut harness);
     assert_eq!(harness.state().mailbox().selected(), None, "nothing is selected");
+}
+
+/// The why line's reasons as the open reader holds them, and how many times it asked.
+fn why_now(harness: &Harness<'static, InboxApp>) -> (Vec<String>, u64) {
+    (harness.state().reader.why().to_vec(), harness.state().reader.asked_why)
+}
+
+/// A few frames, as the window draws them after an act.
+fn frames(harness: &mut Harness<'static, InboxApp>) {
+    for _ in 0..3 {
+        harness.run();
+    }
+}
+
+/// The open message's reasons are what the engine says now, and the line says them.
+fn fresh(harness: &mut Harness<'static, InboxApp>) -> Vec<String> {
+    let open = harness.state().reader.open_id().unwrap();
+    let held = harness.state().reader.why().to_vec();
+    let app = harness.state_mut();
+    let now = crate::why::ask(&mut app.mailbox, open);
+    assert_eq!(held, now, "the reasons are the engine's of now");
+    harness.get_by_label(&crate::component::why_line::spoken(&held));
+    held
+}
+
+#[test]
+fn a_group_chosen_from_the_lists_menu_changes_the_open_messages_reasons() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Allotment rota for November");
+    let id = harness.state().reader.open_id().unwrap();
+    let (before, asked) = why_now(&harness);
+    assert!(before.iter().all(|reason| !reason.contains("Notifications")), "{before:?}");
+    harness.state_mut().mailbox_mut().select_keyed(id);
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(id)));
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::F10);
+    harness.run();
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Notifications").click();
+    frames(&mut harness);
+    assert_eq!(harness.state().reader.open_id(), Some(id), "still open");
+    let (after, now) = why_now(&harness);
+    assert!(after.iter().any(|reason| reason.ends_with("in Notifications")), "{before:?} -> {after:?}");
+    assert_eq!(now, asked + 1, "asked once more");
+    fresh(&mut harness);
+    // Idle frames after: no more asking.
+    for _ in 0..10 {
+        harness.step();
+    }
+    assert_eq!(why_now(&harness).1, now);
+}
+
+#[test]
+fn not_done_with_show_done_on_keeps_the_message_open_and_says_where_it_is() {
+    let fetch = Recorder::default();
+    let mut app = app_with(&fetch);
+    app.mailbox_mut().set_show_done(true);
+    let id = app.mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").unwrap().id;
+    app.mailbox_mut().select(Some(id));
+    app.mailbox_mut().act(id, crate::mailbox::Act::Done);
+    let mut harness = harness_with(app, egui::Theme::Light);
+    frames(&mut harness);
+    let (before, asked) = why_now(&harness);
+    // Done, it is out of the grouped inbox: no group is a reason.
+    assert!(before.iter().all(|reason| !reason.starts_with("grouped as")), "{before:?}");
+    harness.get_by_role_and_label(Role::Button, "Not done").click();
+    frames(&mut harness);
+    assert_eq!(harness.state().reader.open_id(), Some(id), "still open");
+    let (after, now) = why_now(&harness);
+    assert_eq!(after.first().map(String::as_str), Some("grouped as People"), "back in the inbox: {before:?} -> {after:?}");
+    assert_eq!(now, asked + 1);
+    fresh(&mut harness);
+}
+
+#[test]
+fn brought_back_from_a_snooze_the_reader_says_the_engines_reasons_of_now() {
+    let fetch = Recorder::default();
+    let mut app = app_with(&fetch);
+    let id = app.mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").unwrap().id;
+    let later = app.mailbox().now().unix_seconds().saturating_add(2 * 86_400);
+    app.mailbox_mut().act(id, crate::mailbox::Act::Snooze(Timestamp::from_unix(later, 0).unwrap()));
+    app.mailbox_mut().open(crate::mailbox::Place::Later(crate::mailbox::Pile::Snoozed));
+    app.mailbox_mut().select(Some(id));
+    app.mailbox_mut().forget_undo();
+    let mut harness = harness_with(app, egui::Theme::Light);
+    let (before, _) = why_now(&harness);
+    assert!(before.iter().any(|reason| reason.starts_with("snoozed until")), "{before:?}");
+    harness.get_by_role_and_label(Role::Button, "More").click();
+    harness.run();
+    harness.get_by_label("Bring back now").click();
+    frames(&mut harness);
+    // The pile is empty: whatever is open says the engine's reasons of now, none of the snooze that ended.
+    if harness.state().reader.open_id().is_some() {
+        let after = fresh(&mut harness);
+        assert!(after.iter().all(|reason| !reason.starts_with("snoozed until")), "{after:?}");
+    } else {
+        assert!(harness.query_all_by_label_contains("snoozed until").next().is_none());
+    }
+}
+
+#[test]
+fn a_sender_let_in_from_the_lists_card_leaves_no_reason_stale() {
+    let fetch = Recorder::default();
+    for (open, card) in [("Winter swim at the harbour steps", 0), ("Bare-root fruit trees are in", 0)] {
+        let mut app = app_with(&fetch);
+        app.mailbox_mut().open(crate::mailbox::Place::Senders);
+        let id = app.mailbox().messages().iter().find(|row| row.subject == open).unwrap().id;
+        app.mailbox_mut().select(Some(id));
+        let mut harness = harness_with(app, egui::Theme::Light);
+        let (before, asked) = why_now(&harness);
+        assert_eq!(before, ["held back by the screener"], "{open}");
+        harness.query_all_by_role_and_label(Role::Button, "Let in").nth(card).unwrap().click();
+        frames(&mut harness);
+        let still = harness.state().reader.open_id() == Some(id);
+        let (_, now) = why_now(&harness);
+        if still {
+            // Another sender let in: this message did not move, nothing asked.
+            assert_eq!(now, asked, "{open}");
+        }
+        fresh(&mut harness);
+    }
 }

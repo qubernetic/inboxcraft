@@ -431,7 +431,7 @@ impl Session {
         self.fake.offers(cap)
             && match cap {
                 Capability::StartTls => signing_in && !self.tls && self.fake.starttls.is_some(),
-                Capability::LoginDisabled => signing_in && !self.tls,
+                Capability::LoginDisabled => signing_in && (!self.tls || self.fake.no_sign_in),
                 Capability::AuthPlain | Capability::SaslIr => signing_in && self.sign_in_allowed(),
                 Capability::CompressDeflate => !self.compressed,
                 _ => true,
@@ -444,7 +444,7 @@ impl Session {
     }
 
     fn sign_in_allowed(&self) -> bool {
-        self.tls || !self.fake.offers(Capability::LoginDisabled)
+        !self.fake.no_sign_in && (self.tls || !self.fake.offers(Capability::LoginDisabled))
     }
 
     fn login(&mut self, tag: &str, args: &[Token], out: &mut Vec<u8>) {

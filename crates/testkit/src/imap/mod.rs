@@ -71,6 +71,8 @@ pub struct FakeImap {
     user: String,
     password: String,
     preauth: bool,
+    /// LOGINDISABLED and no AUTH=PLAIN also over TLS: no sign-in a client can do.
+    no_sign_in: bool,
     starttls: Option<Arc<ServerConfig>>,
     rules: Rules,
     mailboxes: Vec<Mailbox>,
@@ -96,6 +98,7 @@ impl FakeImap {
             user: USER.to_owned(),
             password: PASSWORD.to_owned(),
             preauth: false,
+            no_sign_in: false,
             starttls: None,
             rules: Rules::default(),
             mailboxes: vec![Mailbox::new("INBOX")],
@@ -143,6 +146,12 @@ impl FakeImap {
     #[must_use]
     pub fn login(self, user: &str, password: &str) -> Self {
         Self { user: user.to_owned(), password: password.to_owned(), ..self }
+    }
+
+    /// Offers no sign-in at all: LOGINDISABLED and no AUTH=PLAIN, also over TLS, and LOGIN is refused.
+    #[must_use]
+    pub fn no_sign_in(self) -> Self {
+        Self { no_sign_in: true, ..self }
     }
 
     /// Greets with `PREAUTH`: the session starts signed in.

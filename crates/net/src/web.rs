@@ -21,7 +21,7 @@ use ureq::unversioned::resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver
 use ureq::unversioned::transport::{DefaultConnector, NextTimeout};
 use ureq::{Agent, Error};
 
-use crate::{NetError, TlsSettings, Trust, tls};
+use crate::{Deadline, NetError, TlsSettings, Trust, tls};
 
 /// The largest answer read, in bytes: one more than the largest autoconfig file, so a larger one is refused.
 pub const MAX_BODY: u64 = crate::autoconfig::MAX_FILE as u64 + 1;
@@ -46,12 +46,23 @@ pub trait Web: fmt::Debug + Send + Sync {
     /// A [`NetError`] with the cause: the name, the connection, TLS, a timeout, or an answer larger than
     /// [`MAX_BODY`] ([`ErrorKind::TooLarge`]).
     fn get(&self, url: &str) -> Result<WebAnswer, NetError>;
+
+    /// As [`Web::get`], over by `deadline` at the latest.
+    ///
+    /// # Errors
+    ///
+    /// As [`Web::get`]; [`ErrorKind::TimedOut`] once `deadline` has passed.
+    fn get_by(&self, url: &str, deadline: &Deadline) -> Result<WebAnswer, NetError> {
+        deadline.wait(Duration::MAX)?;
+        self.get(url)
+    }
 }
 
 /// HTTPS (and the one plain HTTP request Detect allows) through `ureq`.
 pub struct Https {
     agent: Agent,
     tls: TlsSettings,
+    timeout: Duration,
 }
 
 impl fmt::Debug for Https {
@@ -66,7 +77,7 @@ impl Https {
     #[must_use]
     pub fn new(tls: TlsSettings, timeout: Duration) -> Self {
         let agent = Agent::new_with_config(config(&tls, timeout));
-        Self { agent, tls }
+        Self { agent, tls, timeout }
     }
 
     /// As [`Https::new`], connecting to `addresses` whatever the host: for the tests, whose fake servers listen on
@@ -74,7 +85,7 @@ impl Https {
     #[must_use]
     pub fn with_addresses(tls: TlsSettings, timeout: Duration, addresses: Vec<SocketAddr>) -> Self {
         let agent = Agent::with_parts(config(&tls, timeout), DefaultConnector::default(), Fixed(addresses));
-        Self { agent, tls }
+        Self { agent, tls, timeout }
     }
 }
 
@@ -110,6 +121,17 @@ impl Web for Https {
         let now = self.tls.clock().now();
         let failed = |error: Error| failed(error, now);
         let mut response = self.agent.get(url).call().map_err(failed)?;
+        let status = response.status().as_u16();
+        let location = response.headers().get("location").and_then(|value| value.to_str().ok()).map(str::to_owned);
+        let body = response.body_mut().with_config().limit(MAX_BODY).read_to_vec().map_err(failed)?;
+        Ok(WebAnswer { status, location, body })
+    }
+
+    fn get_by(&self, url: &str, deadline: &Deadline) -> Result<WebAnswer, NetError> {
+        let wait = deadline.wait(self.timeout)?;
+        let now = self.tls.clock().now();
+        let failed = |error: Error| failed(error, now);
+        let mut response = self.agent.get(url).config().timeout_global(Some(wait)).build().call().map_err(failed)?;
         let status = response.status().as_u16();
         let location = response.headers().get("location").and_then(|value| value.to_str().ok()).map(str::to_owned);
         let body = response.body_mut().with_config().limit(MAX_BODY).read_to_vec().map_err(failed)?;
