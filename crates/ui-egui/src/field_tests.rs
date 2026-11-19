@@ -332,6 +332,30 @@ fn a_rect_drifting_by_parts_of_a_pixel_builds_once_and_keeps_its_warm_glyphs() {
     assert_eq!(harness.state().field.builds, 1, "a rect that only moved built the cells again");
 }
 
+/// Home's field and the emblem's place move together (its rect is the place): wherever within a pixel they stand, at
+/// every usual pixels per point, the emblem keeps its offset from the first cell, on a whole pixel, so the cells are
+/// never built again for a move alone.
+#[test]
+fn a_field_and_its_emblem_moving_together_by_parts_of_a_pixel_keep_their_cells() {
+    let emblem = block();
+    for ppp in [1.0, 1.25, 1.5, 1.75, 2.0] {
+        let at = |step: u16| {
+            let left = f32::from(step) / 200.0;
+            let rect = Rect::from_min_size(pos2(833.0 + left, 46.0 + left / 2.0), vec2(605.0, 826.0));
+            place_cells(rect, TextScale::default(), Some(rect), ppp, Some(&emblem))
+        };
+        let first = at(0);
+        assert!(first.emblem_at.is_some(), "{ppp}: no emblem");
+        let moved = (1..600).filter(|step| !at(*step).same_cells(&first)).count();
+        assert_eq!(moved, 0, "{ppp}: {moved} of 600 positions build the cells again");
+        for step in [0, 137, 599] {
+            let corner = at(step).emblem_at.unwrap() * ppp;
+            let off = (corner.x - corner.x.round()).abs().max((corner.y - corner.y.round()).abs());
+            assert!(off < 1e-3, "{ppp}: the emblem {off} px off a whole pixel");
+        }
+    }
+}
+
 #[test]
 fn a_rect_a_cell_wider_builds_again_and_the_warm_cells_keep_their_glyphs() {
     let mut harness = harness(Stage::new(Level::Full, Opts::default()));

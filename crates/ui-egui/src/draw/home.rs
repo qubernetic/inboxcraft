@@ -170,7 +170,10 @@ pub fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, rect: Rect
     if rect.width() > BRIEF {
         let place = Rect::from_min_max(pos2(brief.right(), rect.top()), rect.max);
         let emblem = stage.emblem.and_then(|emblem| emblem_place(place, emblem));
-        field::show(ui, theme, stage.field, place, stage.level, Opts { on_home: true, on_pane: false, emblem });
+        // The field centres the emblem in the place itself, from the place's own corner: a place moving by parts of a
+        // pixel keeps the emblem on the same cells (a whole-point corner handed in would not).
+        let area = emblem.map(|_| place);
+        field::show(ui, theme, stage.field, place, stage.level, Opts { on_home: true, on_pane: false, emblem: area });
         parts.stage = Some(place);
         parts.emblem = emblem;
     }
