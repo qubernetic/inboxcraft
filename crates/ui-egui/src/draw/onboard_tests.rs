@@ -547,19 +547,50 @@ fn add_account(harness: &mut Harness<'static, InboxApp>, address: &str) {
     harness.state_mut().pump();
 }
 
+/// A press on the window's control called `label` that lies off the settings (the index, the command line).
+fn press_off_the_settings(harness: &mut Harness<'static, InboxApp>, label: &str) {
+    let settings = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+    let node = harness
+        .query_all_by_role(Role::Button)
+        .find(|node| {
+            !settings.contains_rect(node.rect()) && node.accesskit_node().label().is_some_and(|name| name == label || name.starts_with(label))
+        })
+        .unwrap_or_else(|| panic!("no {label} off the settings"));
+    node.click();
+}
+
 #[test]
 fn the_typed_form_outlasts_every_way_out_of_the_settings() {
-    for way in ["settings' key", "Appearance", "back", "index", "palette"] {
-        let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
-        open_form(&mut harness);
+    let ways = ["settings' key", "Appearance", "back", "index place", "mailbox", "account picker", "New message", "palette"];
+    for way in ways {
+        // The ways by the index and the command line on the sample, whose index has its mailboxes and account picker and
+        // whose command line has New message.
+        let sample = matches!(way, "index place" | "mailbox" | "account picker" | "New message");
+        let app = if sample {
+            InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()))
+        } else {
+            app(&Kept::default(), FakeWorkers::passing())
+        };
+        let mut harness = harness(app, egui::Theme::Dark);
+        harness.state_mut().onboarding_mut().0.open();
+        super::tests::at_settings(harness.state_mut(), Section::Accounts);
+        harness.run();
         type_in(&mut harness);
         match way {
             "settings' key" => harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma),
             "Appearance" => harness.get_by_label("Appearance, settings page").click(),
             "back" => harness.get_by_label("Back to the accounts").click(),
             "palette" => harness.key_press_modifiers(Modifiers::COMMAND, Key::K),
-            _ => harness.state_mut().run_action(&egui::Context::default(), crate::keymap::CALENDAR),
+            "index place" => press_off_the_settings(&mut harness, "Calendar"),
+            "mailbox" => press_off_the_settings(&mut harness, "Sent"),
+            "New message" => press_off_the_settings(&mut harness, "New message"),
+            _ => {
+                press_off_the_settings(&mut harness, "Show mail of");
+                harness.run();
+                harness.get_by_role_and_label(Role::MenuItemRadio, "All accounts").click();
+            }
         }
+        harness.run();
         harness.run();
         let onboarding = harness.state().onboarding();
         if way == "palette" {
@@ -570,6 +601,9 @@ fn the_typed_form_outlasts_every_way_out_of_the_settings() {
             harness.key_press(Key::Escape);
             harness.run();
             continue;
+        }
+        if way != "Appearance" && way != "back" {
+            assert!(!harness.state().settings().is_open(), "{way}: the settings are left");
         }
         // Back closes the form into the kept ones; a change of page or place keeps it open as it is.
         let stage = if way == "back" { Stage::Closed } else { Stage::Form };
