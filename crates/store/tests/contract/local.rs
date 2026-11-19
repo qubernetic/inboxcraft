@@ -8,6 +8,7 @@ use inboxcraft_model::{
     JobKind, MessageState, OutboxState, Outgoing, ScheduleId, Scheduled, Screening, Sender,
 };
 use inboxcraft_store::{Change, Storage, StoreError};
+use inboxcraft_time::Timestamp;
 
 use super::{at, m, message, put, two_accounts};
 
@@ -107,6 +108,36 @@ pub fn drafts_read_back_per_account<S: Storage>(mut store: S) {
     put(&mut store, vec![Change::PutDraft(draft(3, 2, "moved")), Change::RemoveDraft(d(1)), Change::RemoveDraft(d(8))]).unwrap();
     assert!(store.drafts(AccountId::new(1)).unwrap().is_empty());
     assert_eq!(store.drafts(AccountId::new(2)).unwrap(), [draft(2, 2, "two"), draft(3, 2, "moved")], "the from account changed");
+}
+
+/// Draft `id` of `account`, saved `seconds` and `nanos` after 1970.
+fn saved(id: u64, account: u64, seconds: i64, nanos: u32) -> Draft {
+    Draft { saved: Timestamp::from_unix(seconds, nanos).unwrap(), ..draft(id, account, &format!("draft {id}")) }
+}
+
+pub fn the_newest_drafts_come_with_their_count<S: Storage>(mut store: S) {
+    two_accounts(&mut store);
+    let (one, two) = (AccountId::new(1), AccountId::new(2));
+    assert_eq!(store.newest_drafts(one, 2).unwrap(), (0, vec![]), "no draft");
+    put(&mut store, vec![Change::PutDraft(saved(5, 1, 100, 0))]).unwrap();
+    assert_eq!(store.newest_drafts(one, 2).unwrap(), (1, vec![saved(5, 1, 100, 0)]), "one");
+    assert_eq!(store.newest_drafts(one, 0).unwrap(), (1, vec![]), "a limit of none still counts");
+    put(&mut store, vec![Change::PutDraft(saved(2, 1, 100, 500))]).unwrap();
+    assert_eq!(store.newest_drafts(one, 2).unwrap(), (2, vec![saved(2, 1, 100, 500), saved(5, 1, 100, 0)]), "N of N, nanoseconds count");
+    put(&mut store, vec![Change::PutDraft(saved(7, 1, 100, 0))]).unwrap();
+    assert_eq!(store.newest_drafts(one, 2).unwrap(), (3, vec![saved(2, 1, 100, 500), saved(7, 1, 100, 0)]), "N of N + 1, the higher id first");
+    put(&mut store, vec![Change::PutDraft(saved(9, 1, 200, 0)), Change::PutDraft(saved(1, 1, 50, 0)), Change::PutDraft(saved(3, 2, 300, 0))])
+        .unwrap();
+    let all = vec![saved(9, 1, 200, 0), saved(2, 1, 100, 500), saved(7, 1, 100, 0), saved(5, 1, 100, 0), saved(1, 1, 50, 0)];
+    assert_eq!(store.newest_drafts(one, 3).unwrap(), (5, all[..3].to_vec()), "the other account's newer draft stays out");
+    assert_eq!(store.newest_drafts(one, usize::MAX).unwrap(), (5, all), "a huge limit reads them all");
+    assert_eq!(store.newest_drafts(two, 2).unwrap(), (1, vec![saved(3, 2, 300, 0)]));
+    put(&mut store, vec![Change::PutDraft(saved(1, 1, 400, 0)), Change::PutDraft(saved(9, 2, 200, 0))]).unwrap();
+    assert_eq!(store.newest_drafts(one, 1).unwrap(), (4, vec![saved(1, 1, 400, 0)]), "saved again, it comes first");
+    assert_eq!(store.newest_drafts(two, 5).unwrap(), (2, vec![saved(3, 2, 300, 0), saved(9, 2, 200, 0)]), "moved, it counts there");
+    put(&mut store, vec![Change::RemoveDraft(d(1))]).unwrap();
+    assert_eq!(store.newest_drafts(one, 1).unwrap(), (3, vec![saved(2, 1, 100, 500)]), "removed, it leaves the count");
+    assert_eq!(store.newest_drafts(AccountId::new(8), 5).unwrap(), (0, vec![]), "an unknown account has none");
 }
 
 pub fn a_draft_needs_its_account<S: Storage>(mut store: S) {
