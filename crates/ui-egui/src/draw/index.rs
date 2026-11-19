@@ -221,8 +221,9 @@ fn line(ui: &mut Ui, theme: &Theme, line: &Line<'_>, active: Option<mailbox::Pla
             response
         }
     };
-    // A press leaves the keyboard on the row pressed, never on nothing (from a field of the docked composer too).
-    if response.clicked() {
+    // A press on an account row shows no list: the keyboard stays on the row, never on nothing. A mailbox shows its
+    // list, which takes the keys (J, K, the arrows) as before.
+    if matches!(line, Line::Account(..)) && response.clicked() {
         response.request_focus();
     }
     if response.gained_focus() {
@@ -264,8 +265,9 @@ fn place(ui: &mut Ui, theme: &Theme, keymap: &Keymap, which: Place, at: Place, c
         Place::Home | Place::Settings => keymap::SETTINGS,
     };
     let response = tooltip::attach(nav_row::nav_row(ui, theme, &row, narrow, None), theme, keymap, label, Some(action));
-    // A press leaves the keyboard on the place pressed, never on nothing.
-    if response.clicked() {
+    // A press on Calendar shows no list: the keyboard stays on the place, never on nothing. Mail and Later show a list,
+    // which takes the keys as before.
+    if which == Place::Calendar && response.clicked() {
         response.request_focus();
     }
     response

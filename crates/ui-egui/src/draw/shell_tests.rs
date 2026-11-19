@@ -292,11 +292,13 @@ fn tab_walks_new_message_in_the_command_line_before_the_index_under_it() {
 }
 
 #[test]
-fn a_press_on_the_index_from_the_docked_composer_leaves_the_keyboard_on_the_row_pressed() {
+fn a_press_on_the_index_from_the_docked_composer_keeps_the_draft_and_the_keyboard_on_a_drawn_control() {
     let focused = |harness: &Harness<'static, InboxApp>| {
         harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
     };
-    for name in ["Sent", "Later", "Mail", "Studio"] {
+    // Beside the docked composer the list does not take keys: the keyboard goes back to the Subject; an account row
+    // shows no list and keeps it.
+    for (name, on) in [("Sent", "Subject"), ("Later", "Subject"), ("Mail", "Subject"), ("Studio", "Studio")] {
         let mut harness = window(vec2(1300.0, 820.0));
         let ctx = harness.ctx.clone();
         harness.state_mut().run_action(&ctx, crate::keymap::COMPOSE);
@@ -310,9 +312,29 @@ fn a_press_on_the_index_from_the_docked_composer_leaves_the_keyboard_on_the_row_
         let Some(row) = row else { panic!("no row {name}") };
         row.click();
         harness.run();
-        // The row keeps its name; an account row adds ", open" once its folders show.
-        let on = focused(&harness);
-        assert!(on.as_deref().is_some_and(|label| label.starts_with(name)), "{name}: the keyboard on the row pressed, not {on:?}");
+        let at = focused(&harness);
+        assert!(at.as_deref().is_some_and(|label| label.starts_with(on)), "{name}: the keyboard on {on}, not {at:?}");
         assert_eq!(harness.state().composer().map(|composer| composer.subject().to_owned()).as_deref(), Some("Plot"), "{name}: the draft kept");
+    }
+}
+
+#[test]
+fn after_a_press_on_the_index_the_list_takes_its_keys_at_once() {
+    for name in ["Inbox", "Mail", "Sent"] {
+        let mut harness = window(vec2(1300.0, 820.0));
+        let row = harness
+            .query_all_by_role(Role::Button)
+            .find(|node| node.accesskit_node().label().is_some_and(|label| label == name || label.starts_with(&format!("{name},"))));
+        let Some(row) = row else { panic!("no row {name}") };
+        row.click();
+        harness.run();
+        let mut picked = Vec::new();
+        for key in [egui::Key::J, egui::Key::ArrowDown, egui::Key::J] {
+            harness.key_press(key);
+            harness.run();
+            picked.push(harness.state().mailbox().selected());
+        }
+        assert!(picked.iter().all(Option::is_some), "{name}: the list took J, Down, J: {picked:?}");
+        assert!(picked[0] != picked[1] && picked[1] != picked[2], "{name}: each key moved the selection: {picked:?}");
     }
 }

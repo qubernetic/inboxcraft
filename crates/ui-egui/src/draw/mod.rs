@@ -95,6 +95,11 @@ pub(super) const ONE_PANE: f32 = 980.0;
 /// folder pane's default width, which the header kept when the pane went.
 pub(super) const FOLDER_PANE: f32 = 240.0;
 
+/// Where the keyboard last was, and whether that was in the composer.
+fn last_keyboard_id() -> egui::Id {
+    egui::Id::unique("window-last-keyboard")
+}
+
 /// Where the toasts of a frame stand: the body, and the composer drawn over it this pass with its foot.
 type ToastRoom = (Rect, Option<(Rect, Rect)>);
 
@@ -536,7 +541,39 @@ impl InboxApp {
         if let Some(id) = indexed.toggle {
             index::toggle(index.ctx(), id);
         }
+
         (indexed, new_message)
+    }
+
+    /// Whether what the index `asked` shows a list: a mailbox, Mail or Later.
+    fn shows_list(asked: &index::Asked) -> bool {
+        asked.mailbox.is_some() || matches!(asked.place, Some(index::Place::Mail | index::Place::Later))
+    }
+
+    /// The keyboard at the end of a frame: after a press on the index that showed a list (`to_list`) beside the docked
+    /// composer, back to the composer's field; and where it is now, kept for the next press.
+    fn keyboard_after_index(&self, ctx: &egui::Context, index_to_list: bool) {
+        // A press on the index that shows a list beside the docked composer, which holds the list's keys there: the
+        // keyboard goes back to the composer's field it was in, never to nothing (asked again until something has it,
+        // as the list may let go of the focus a frame later). Elsewhere the list takes the keys.
+        let field = ctx.data(|data| data.get_temp::<(egui::Id, bool)>(last_keyboard_id())).filter(|(_, in_composer)| *in_composer);
+        let pending = ctx.data(|data| data.get_temp::<bool>(last_keyboard_id().with("back"))).unwrap_or(false);
+        let back = (pending || index_to_list) && self.docked() && field.is_some();
+        match (back, field, ctx.memory(|memory| memory.focused())) {
+            (true, Some((field, _)), None) => {
+                ctx.memory_mut(|memory| memory.request_focus(field));
+                ctx.data_mut(|data| data.insert_temp(last_keyboard_id().with("back"), true));
+                ctx.request_repaint();
+            }
+            _ => {
+                ctx.data_mut(|data| data.insert_temp(last_keyboard_id().with("back"), false));
+            }
+        }
+        // Where the keyboard last was, and whether in the composer: a press elsewhere takes it away at once.
+        if let Some(focused) = ctx.memory(|memory| memory.focused()) {
+            let in_composer = compose::has_keys(ctx);
+            ctx.data_mut(|data| data.insert_temp(last_keyboard_id(), (focused, in_composer)));
+        }
     }
 
     /// Whether the index's mailboxes, account rows and account picker act: with no palette, capture, sheet or event
@@ -2239,6 +2276,7 @@ impl InboxApp {
         let (gap, half) = (0.0, 0.0);
         let (indexed, new_message) = self.index_and_command(&mut index, &mut command, &theme, &surfaces, (setting, corner));
         let index_settings = indexed.place == Some(index::Place::Settings);
+        let index_to_list = Self::shows_list(&indexed);
         ran.extend(indexed.place.and_then(Self::index_action).filter(|action| *action != keymap::SETTINGS));
         asked.open = indexed.mailbox;
         asked.narrow = indexed.account;
@@ -2412,6 +2450,9 @@ impl InboxApp {
         self.own_frame_over(ui.ctx(), &theme, corner);
         self.sync();
         // What runs after this pass, before the next frame, comes after everything this frame painted.
+        // A press on the index that shows a list beside the docked composer, which holds the list's keys there: the
+        // keyboard goes back to the composer's field it was in, never to nothing. Elsewhere the list takes the keys.
+        self.keyboard_after_index(ui.ctx(), index_to_list);
         self.frame = ui.ctx().cumulative_frame_nr().saturating_add(1);
     }
 
