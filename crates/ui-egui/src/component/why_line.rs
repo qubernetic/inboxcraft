@@ -9,7 +9,7 @@
 //! no reason is cut in the middle, except the first when it stands alone, which is cut between grapheme clusters with
 //! one ellipsis. The rule reads the width the line has, never the window's. A screen reader hears every reason as one
 //! sentence, the ones that left included. The log the link opens is not built yet: the link stands unavailable while
-//! the reasons keep at least its width beside it, and the `coming soon` tag stands in the room the reasons leave, or
+//! the first reason fits whole beside it, and the `coming soon` tag stands in the room the reasons leave, or
 //! where they go while there are none. Nothing paints past the line, nothing in it moves, and it takes no Tab stop.
 
 use std::sync::Arc;
@@ -86,10 +86,14 @@ pub fn why_line<S: AsRef<str>>(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reas
     let tag_width = super::tag::width(ui, theme, tr!("coming soon"));
     let left = rect.left() + PAD_X + label_width + PAD_X;
     let right = rect.right() - PAD_X;
-    // The link stands where the sheet puts it while the reasons keep at least its width beside it (with none, while the
-    // tag does); the reasons then leave whole from the end, and the first standing alone is cut.
+    // The link stands where the sheet puts it while the first reason fits whole beside it (with none, while the tag
+    // does): the reasons leave whole from the end first, then the link, which leads nowhere yet, and only then is the
+    // first reason, standing alone, cut.
     let link_left = right - link_width;
-    let wanted = if reasons.is_empty() { tag_width } else { link_width };
+    let wanted = match reasons.first() {
+        Some(first) => paint::run_box(super::fitted(ui, first.as_ref(), f.mono_s, p.muted, f32::INFINITY).size().x),
+        None => tag_width,
+    };
     let link = left + wanted <= link_left - PAD_X;
     let words_right = if link { link_left - PAD_X } else { right };
     let room = (words_right - left).max(0.0);

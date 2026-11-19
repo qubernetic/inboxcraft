@@ -233,3 +233,26 @@ fn in_a_narrow_line_nothing_overlaps_and_nothing_paints_past_it() {
         }
     }
 }
+
+#[test]
+fn the_link_that_leads_nowhere_yet_gives_way_before_the_first_reason_is_cut() {
+    const TWO: &[&str] = &["grouped as Notifications: sent automatically", "in a thread of 3 messages"];
+    for scale in [TextScale::default(), TextScale::ALL[4]] {
+        let theme = Theme::new(Mode::Dark, scale);
+        let mut whole_without_link = false;
+        for width in (120..=900).step_by(20) {
+            let width = width as f32;
+            let harness = harness_at(theme, TWO, width);
+            let name = spoken(TWO);
+            let link = harness.query_by_label("open log →").is_some();
+            let drawn = reasons_painted(&harness, &name);
+            let Some((text, ..)) = drawn.first() else { continue };
+            let at = format!("{scale:?} {width}: {text:?} link {link}");
+            // A cut reason never stands beside the link.
+            assert!(!(text.ends_with('…') && link), "{at}");
+            // The first whole with the link gone: the link left first.
+            whole_without_link |= text == TWO[0] && !link;
+        }
+        assert!(whole_without_link, "{scale:?}: some width keeps the first whole with no link");
+    }
+}
