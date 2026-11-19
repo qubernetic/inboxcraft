@@ -1905,13 +1905,13 @@ impl Mailbox {
         }
     }
 
-    /// The Drafts folders on the servers of the accounts shown that hold mail, or whose count is not known: the mail
-    /// there may be drafts written in another program, which the drafts place does not list.
+    /// The Drafts folders on the servers of the accounts shown that are known to hold mail: the mail there may be
+    /// drafts written in another program, which the drafts place does not list.
     pub fn server_drafts(&self) -> impl Iterator<Item = &FolderRow> {
         self.folders.iter().filter(|folder| {
             folder.role == Some(Role::Drafts)
                 && folder.selectable
-                && folder.messages != Some(0)
+                && folder.messages.is_some_and(|count| count > 0)
                 && self.narrowed.is_none_or(|narrowed| narrowed == folder.account)
         })
     }

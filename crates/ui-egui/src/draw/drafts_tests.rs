@@ -95,8 +95,8 @@ fn server_folder(harness: &Harness<'static, InboxApp>) -> u64 {
     mailbox.folders_of(account).iter().find(|folder| folder.role == Some(Folder::Drafts)).map(|folder| folder.id).unwrap()
 }
 
-/// What the row of [`server_folder`] says: its count, and whose it is over the sample's two accounts.
-const SERVER_ROW: &str = "1 in the server's Drafts folder · Personal";
+/// What the row of [`server_folder`] says: the folder, its size, and whose it is over the sample's two accounts.
+const SERVER_ROW: &str = "Drafts folder on the server · 1 message · Personal";
 
 /// Whether the row of [`server_folder`] has the keyboard.
 fn on_server_row(harness: &Harness<'static, InboxApp>) -> bool {

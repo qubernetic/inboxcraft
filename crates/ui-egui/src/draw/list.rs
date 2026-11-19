@@ -32,9 +32,9 @@
 //! The drafts place lists the kept drafts (`compose.list`), newest first, as draft rows: the subject, whom it goes to and
 //! when it was last saved. J, K and the arrows walk them, Enter or a press opens one in the composer to go on writing,
 //! and "discard" hides it behind a toast with Undo; the discard is carried out when the toast ends. Under them (with
-//! none, with the empty state) each account's Drafts folder on the server that holds mail has a row, "3 in the server's
-//! Drafts folder", which opens that folder: the mail there may be drafts written in another program. The walk goes on
-//! onto these rows.
+//! none, with the empty state) each account's Drafts folder on the server that holds mail has a row, "Drafts folder on
+//! the server · 3 messages", which opens that folder: the mail there may be drafts written in another program, and the
+//! copies of the drafts kept here are counted too. The walk goes on onto these rows.
 
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -1693,13 +1693,13 @@ fn kept_draft(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, dr
     }
 }
 
-/// The row of the Drafts folder `folder` on the server across `ui`, a mailbox's row of the index: "3 in the server's
-/// Drafts folder" (with no number when its count is not known) and, over more than one account, whose it is. Whether
+/// The row of the Drafts folder `folder` on the server across `ui`, a mailbox's row of the index: "Drafts folder on the
+/// server · 3 messages" and, over more than one account, whose it is. Whether
 /// it was pressed (Enter or Space on it too).
 fn server_drafts_row(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, folder: &FolderRow) -> bool {
-    let said = match folder.messages {
-        Some(count) => tr!("{count} in the server's Drafts folder", count = count),
-        None => tr!("In the server's Drafts folder").to_owned(),
+    let said = match folder.messages.unwrap_or(0) {
+        1 => tr!("Drafts folder on the server · 1 message").to_owned(),
+        count => tr!("Drafts folder on the server · {count} messages", count = count),
     };
     let whose = (mailbox.narrowed().is_none() && mailbox.accounts().len() > 1)
         .then(|| mailbox.accounts().iter().find(|account| account.id == folder.account))
