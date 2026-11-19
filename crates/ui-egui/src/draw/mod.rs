@@ -1488,7 +1488,7 @@ impl InboxApp {
             if self.screen == Screen::Calendar {
                 self.calendar.refresh(&mut self.mailbox);
             }
-            self.reader.refresh_invites(&mut self.mailbox);
+            self.reader.refresh_cards_and_why(&mut self.mailbox);
         }
         changed
     }
@@ -2713,7 +2713,7 @@ impl InboxApp {
         if self.screen == Screen::Calendar {
             self.calendar.refresh(&mut self.mailbox);
         }
-        self.reader.refresh_invites(&mut self.mailbox);
+        self.reader.refresh_cards_and_why(&mut self.mailbox);
     }
 
     /// The act whose key was pressed in this frame, on the selected row.
@@ -2936,7 +2936,7 @@ impl InboxApp {
 fn start(reader: &mut Reader, mailbox: &mut Mailbox, id: u64, act: Act) {
     mailbox.start(id, act);
     if matches!(act, Act::Accept { .. } | Act::Block) {
-        reader.refresh_invites(mailbox);
+        reader.refresh_cards_and_why(mailbox);
     }
 }
 

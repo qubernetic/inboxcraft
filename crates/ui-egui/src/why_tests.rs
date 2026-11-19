@@ -147,15 +147,15 @@ fn the_engine_is_asked_once_when_a_message_opens_and_again_only_when_its_place_c
     assert!(!reader.why().is_empty());
     // Nothing moved: the cards are read again, the reasons are kept.
     for _ in 0..5 {
-        reader.refresh_invites(&mut mailbox);
+        reader.refresh_cards_and_why(&mut mailbox);
     }
     assert_eq!(reader.asked_why, 1);
     // Snoozed while open: asked again, and it says so.
     mailbox.run("mail.snooze", &json!({ "id": id, "until": "2026-11-06T18:00:00Z" })).unwrap();
     mailbox.refresh();
-    reader.refresh_invites(&mut mailbox);
+    reader.refresh_cards_and_why(&mut mailbox);
     assert_eq!(reader.asked_why, 2);
-    reader.refresh_invites(&mut mailbox);
+    reader.refresh_cards_and_why(&mut mailbox);
     assert_eq!(reader.asked_why, 2, "once per change of place");
     // Closed: nothing to say, nothing asked.
     reader.open(&mut mailbox, None);
@@ -172,7 +172,7 @@ fn a_message_moved_while_open_says_where_it_went() {
     let before = reader.why().to_vec();
     let moved = mailbox.run("mail.archive", &json!({ "id": id }));
     mailbox.refresh();
-    reader.refresh_invites(&mut mailbox);
+    reader.refresh_cards_and_why(&mut mailbox);
     let archive = crate::mailbox::role_text(inboxcraft_model::Role::Archive);
     assert_eq!(reader.asked_why, 2, "{moved:?}");
     assert!(reader.why().iter().any(|reason| reason == &format!("in {archive}")), "{before:?} {:?} {moved:?}", reader.why());
