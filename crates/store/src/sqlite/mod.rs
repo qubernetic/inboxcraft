@@ -123,7 +123,7 @@ impl Sqlite {
         id.ok_or(StoreError::Corrupt("the store's id"))
     }
 
-    fn entries(&self, filter: &str, key: i64) -> Result<Vec<Entry>, StoreError> {
+    fn entries(&self, filter: &str, key: Option<i64>) -> Result<Vec<Entry>, StoreError> {
         let sql =
             format!("SELECT record, opened, EXISTS (SELECT 1 FROM body WHERE body.message = message.id) FROM message WHERE {filter} ORDER BY uid");
         let mut statement = self.conn.prepare(&sql)?;
@@ -161,17 +161,25 @@ fn phrase(words: &[String]) -> Option<String> {
     (!words.is_empty()).then(|| format!("\"{}\"", words.join(" ").replace('"', "\"\"")))
 }
 
-/// The key no row has: every key is written through [`stored`], from a `u64`, so none is negative.
-const NO_ROW: i64 = -1;
-
-/// An id as SQLite looks it up. An id past `i64::MAX` cannot be held, so it looks up [`NO_ROW`] and finds nothing,
-/// as an unknown id does: a read gives nothing, a change that needs the thing gives the kind's `Unknown…` error and a
-/// removal removes nothing. No caller has to tell the two apart.
+/// An id as SQLite looks it up: `None` past `i64::MAX`, which no key can be. `None` binds as NULL, and `= NULL` is
+/// true for no row whatever the file holds (a negative key in a damaged file too), so the lookup finds nothing, as for
+/// an unknown id: a read gives nothing, a change that needs the thing gives the kind's `Unknown…` error and a removal
+/// removes nothing. No caller has to tell the two apart.
 ///
-/// A value written as a reference to another row is the key read back from that row by the existence check before
-/// the write ([`exists`], `local::held`, [`folder_account`]), never this.
-fn key(id: u64) -> i64 {
-    i64::try_from(id).unwrap_or(NO_ROW)
+/// Bind it only in `= ?n`: `?n IS NULL` reads NULL as "no filter" ([`Storage::search`] answers such a filter
+/// itself). A value written as a reference to another row is the key read back from that row by the existence check
+/// before the write ([`exists`], `local::held`, [`folder_account`]), never this.
+fn key(id: u64) -> Option<i64> {
+    i64::try_from(id).ok()
+}
+
+/// A search filter on `id`: `None` when it can match nothing (an id no key can be), else the value for
+/// `?n IS NULL OR column = ?n`, `Some(None)` for no filter.
+fn filter(id: Option<u64>) -> Option<Option<i64>> {
+    match id {
+        None => Some(None),
+        Some(id) => key(id).map(Some),
+    }
 }
 
 /// A record's own id as SQLite stores it; [`StoreError::IdOutOfRange`] past `i64::MAX`.
@@ -203,7 +211,7 @@ fn exists(tx: &Transaction<'_>, id: MessageId) -> Result<i64, StoreError> {
 }
 
 /// The body rows (source files) below the rows `filter` picks, to remove once the batch commits.
-fn drop_bodies(tx: &Transaction<'_>, filter: &str, id: i64, files: &mut Files) -> Result<(), StoreError> {
+fn drop_bodies(tx: &Transaction<'_>, filter: &str, id: Option<i64>, files: &mut Files) -> Result<(), StoreError> {
     let sql = format!("SELECT body.id FROM body JOIN message ON message.id = body.message WHERE {filter}");
     let mut statement = tx.prepare(&sql)?;
     for row in statement.query_map([id], |row| row.get(0))? {
@@ -312,7 +320,7 @@ fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError
     let folder = message.folder();
     let account = match folder_account(tx, folder)? {
         None => return Err(StoreError::UnknownFolder(folder)),
-        Some(account) if account != key(message.account().get()) => {
+        Some(account) if Some(account) != key(message.account().get()) => {
             return Err(StoreError::WrongAccount { folder, account: message.account() });
         }
         Some(account) => account,
@@ -336,7 +344,7 @@ fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError
 }
 
 fn put_body(tx: &Transaction<'_>, sources: &Path, message: i64, body: &Body, files: &mut Files) -> Result<(), StoreError> {
-    drop_bodies(tx, "message.id = ?1", message, files)?;
+    drop_bodies(tx, "message.id = ?1", Some(message), files)?;
     files.removed |= !files.dropped.is_empty();
     tx.execute("DELETE FROM body WHERE message = ?1", [message])?;
     let length = i64::try_from(body.source().len()).map_err(|_| StoreError::TooLarge)?;
@@ -418,8 +426,10 @@ impl Storage for Sqlite {
     }
 
     fn search(&self, search: &Search) -> Result<Vec<MessageId>, StoreError> {
-        let account = search.account().map(|account| key(account.get()));
-        let folder = search.folder().map(|folder| key(folder.get()));
+        // A filter on an id no key can be matches nothing; bound as NULL it would match everything.
+        let (Some(account), Some(folder)) = (filter(search.account().map(AccountId::get)), filter(search.folder().map(FolderId::get))) else {
+            return Ok(Vec::new());
+        };
         let text = phrase(search.text());
         let limit = i64::try_from(search.limit()).unwrap_or(i64::MAX);
         self.ids(

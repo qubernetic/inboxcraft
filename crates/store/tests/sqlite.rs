@@ -506,6 +506,51 @@ fn of_every_kind(dir: &Path) {
     store.apply(&batch).unwrap();
 }
 
+/// A damaged or crafted file can hold a row at a negative key, which this code never writes. An id past what the store
+/// can hold reaches none of them: it finds, changes and removes nothing, whatever the file holds.
+#[test]
+fn an_id_past_the_largest_key_reaches_no_row_a_damaged_file_holds() {
+    let tmp = dir();
+    let dir = tmp.path();
+    of_every_kind(dir);
+    sql(
+        dir,
+        "PRAGMA foreign_keys = OFF;
+         INSERT INTO account SELECT -1, record FROM account WHERE id = 1;
+         CREATE TEMP TABLE f AS SELECT * FROM folder WHERE id = 1; UPDATE f SET id = -1, account = -1; INSERT INTO folder SELECT * FROM f;
+         CREATE TEMP TABLE m AS SELECT * FROM message WHERE id = 1; UPDATE m SET id = -1, account = -1, folder = -1;
+         INSERT INTO message SELECT * FROM m;
+         INSERT INTO message_state SELECT -1, record FROM message_state WHERE message = 1;
+         CREATE TEMP TABLE j AS SELECT * FROM job WHERE id = 1; UPDATE j SET seq = NULL, id = -1, account = -1; INSERT INTO job SELECT * FROM j;
+         CREATE TEMP TABLE d AS SELECT * FROM draft WHERE id = 1; UPDATE d SET id = -1, account = -1; INSERT INTO draft SELECT * FROM d;
+         INSERT INTO outbox SELECT -1, record FROM outbox WHERE draft = 1;
+         CREATE TEMP TABLE s AS SELECT * FROM schedule WHERE id = 1; UPDATE s SET id = -1, draft = -1; INSERT INTO schedule SELECT * FROM s;
+         CREATE TEMP TABLE c AS SELECT * FROM calendar WHERE id = 1; UPDATE c SET id = -1, account = -1; INSERT INTO calendar SELECT * FROM c;
+         CREATE TEMP TABLE e AS SELECT * FROM calendar_event WHERE id = 1; UPDATE e SET id = -1, calendar = -1;
+         INSERT INTO calendar_event SELECT * FROM e;
+         CREATE TEMP TABLE l AS SELECT * FROM alert WHERE id = 1; UPDATE l SET id = -1, event = -1; INSERT INTO alert SELECT * FROM l;",
+    );
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let before = dump(dir);
+    for table in ["account", "folder", "message", "job", "draft", "outbox", "schedule", "message_state", "calendar", "calendar_event", "alert"] {
+        let crafted = before.lines().any(|line| line.starts_with(&format!("{table} [")) && line.contains("Integer(-1)"));
+        assert!(crafted, "{table} has a row at -1:\n{before}");
+    }
+    for id in contract::FAR {
+        contract::reads_nothing(&store, id);
+        for (change, refused) in contract::refusals(id) {
+            let what = format!("{change:?}");
+            assert_eq!(store.apply(&Batch::new().with(change)), Err(refused), "{what}");
+        }
+        let mut removals = Batch::new();
+        for change in contract::removals(id) {
+            removals.push(change);
+        }
+        assert_eq!(store.apply(&removals), Ok(()), "{id}");
+    }
+    assert_eq!(dump(dir), before, "a far id reached a row at a negative key");
+}
+
 /// A write that links to another row (an outbox item to its draft, a schedule entry to what it names, an event to its
 /// calendar …) links only to a row it found: with an id past what the store can hold, it is refused and nothing is
 /// written.
