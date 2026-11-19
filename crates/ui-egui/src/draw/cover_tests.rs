@@ -111,7 +111,7 @@ fn open_settings_again(harness: &mut Harness<'static, InboxApp>) {
 fn open_palette(harness: &mut Harness<'static, InboxApp>) {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    assert!(harness.state().palette().is_open());
+    assert!(harness.state().command().results());
 }
 
 fn esc(harness: &mut Harness<'static, InboxApp>) {
@@ -167,7 +167,7 @@ fn the_palette_over_the_composer_closes_its_picker_and_one_esc_closes_the_palett
     let modal = harness.ctx.memory(|memory| memory.top_modal_layer());
     assert_ne!(modal, Some(LayerId::new(Order::Foreground, super::compose::later_popup())), "the picker holds no modal layer");
     esc(&mut harness);
-    assert!(!harness.state().palette().is_open(), "one Esc closes the palette");
+    assert!(!harness.state().command().results(), "one Esc closes the palette");
     assert!(!picker_open(&harness), "the picker stays closed");
     let composer = harness.state().composer();
     assert!(composer.is_some_and(|composer| composer.later().is_none()), "the closed picker picked no time");
@@ -209,7 +209,7 @@ fn on_the_settings_a_key_with_ctrl_runs_nothing_of_the_mail_and_new_message_leav
     open_palette(&mut harness);
     assert!(harness.state().settings().is_open(), "the palette leaves the settings shown");
     esc(&mut harness);
-    assert!(!harness.state().palette().is_open() && harness.state().settings().is_open(), "one Esc, the palette's");
+    assert!(!harness.state().command().results() && harness.state().settings().is_open(), "one Esc, the palette's");
     // New message, its button pressed, leaves the settings for the mail and begins a message.
     harness.get_by_role_and_label(Role::Button, "New message").click();
     harness.run();

@@ -52,8 +52,11 @@ pub const DELETE: &str = "ui.message.delete";
 /// Undo the act of the toast while it shows, else the newest act of the session.
 pub const UNDO: &str = "ui.undo";
 
-/// Open the command palette.
+/// Open the command line, empty (its id is the palette's it replaces, so a key kept for it stays).
 pub const PALETTE: &str = "ui.palette.open";
+
+/// Open the command line, empty, by a bare key: it runs only while no text field has the keyboard.
+pub const COMMAND_LINE: &str = "ui.command.open";
 
 /// Show the calendar (the rail's Calendar button).
 pub const CALENDAR: &str = "ui.calendar.show";
@@ -222,7 +225,8 @@ pub struct Action {
 pub fn actions() -> Vec<Action> {
     let action = |id, name, icon| Action { id, name, icon };
     vec![
-        action(PALETTE, tr!("Command palette"), IconId::Keyboard),
+        action(PALETTE, tr!("Command line"), IconId::Keyboard),
+        action(COMMAND_LINE, tr!("Command line, by a bare key"), IconId::Keyboard),
         action(FIND, tr!("Search mail"), IconId::Search),
         action(HOME, tr!("Show Home"), IconId::Home),
         action(MAIL, tr!("Show mail"), IconId::Inbox),
@@ -365,6 +369,7 @@ impl Default for Keymap {
         keymap.bind(DELETE, KeyboardShortcut::new(Modifiers::NONE, Key::Delete));
         keymap.bind(UNDO, KeyboardShortcut::new(Modifiers::COMMAND, Key::Z));
         keymap.bind(PALETTE, KeyboardShortcut::new(Modifiers::COMMAND, Key::K));
+        keymap.bind(COMMAND_LINE, KeyboardShortcut::new(Modifiers::NONE, Key::Slash));
         keymap.bind(CALENDAR, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num2));
         keymap.bind(COMPOSE, KeyboardShortcut::new(Modifiers::NONE, Key::C));
         keymap.bind(SEND, KeyboardShortcut::new(Modifiers::COMMAND, Key::Enter));

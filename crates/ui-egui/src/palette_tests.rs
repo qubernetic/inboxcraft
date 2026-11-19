@@ -83,9 +83,12 @@ fn the_settings_nine_pages_follow_the_actions_in_the_settings_order() {
     let all = super::rows("");
     let pages: Vec<&str> = all.iter().filter_map(|row| row.page).collect();
     assert_eq!(pages, inboxcraft_engine::shown::SETTINGS_PAGES, "one row a page, in order");
-    assert_eq!(all.len(), actions().len() + 9);
-    assert!(all.iter().skip(actions().len()).all(|row| row.page.is_some() && row.id == keymap::SETTINGS), "after every action");
-    assert!(all.iter().take(actions().len()).all(|row| row.page.is_none()));
+    // Every action but the command line's bare key, which opens what the palette's key opens (one row for the two).
+    let listed = actions().len() - 1;
+    assert!(all.iter().all(|row| row.id != keymap::COMMAND_LINE));
+    assert_eq!(all.len(), listed + 9);
+    assert!(all.iter().skip(listed).all(|row| row.page.is_some() && row.id == keymap::SETTINGS), "after every action");
+    assert!(all.iter().take(listed).all(|row| row.page.is_none()));
     assert_eq!(super::rows(""), all, "the same order every time");
     let found = |query: &str| super::rows(query).into_iter().map(|row| (row.page, row.name.into_owned())).collect::<Vec<_>>();
     assert_eq!(found("accounts"), vec![(Some("accounts"), "Settings: Accounts".to_owned())], "by the section's name");

@@ -1057,7 +1057,6 @@ impl super::InboxApp {
 
     /// A page's row of the palette: the palette closes and the settings show that page.
     pub(super) fn palette_page(&mut self, page: &'static str) {
-        self.palette.close();
         self.open_settings_on(page);
     }
 

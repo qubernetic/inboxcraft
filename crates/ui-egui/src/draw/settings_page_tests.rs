@@ -451,7 +451,7 @@ fn tab_to_a_control_below_the_page_s_view_scrolls_the_page_to_it() {
         harness.key_press(Key::Tab);
         harness.run();
         // The index's and the command line's stops lie beside the settings.
-        if let Some((label, rect)) = focused(&harness).filter(|(_, rect)| sheet.x_range().contains(rect.center().x)) {
+        if let Some((label, rect)) = focused(&harness).filter(|(label, rect)| sheet.x_range().contains(rect.center().x) && label != "Command line") {
             assert!(sheet.contains_rect(rect), "{label} {rect:?} has the keyboard out of sight of the settings {sheet:?}");
             seen.push(label);
         }

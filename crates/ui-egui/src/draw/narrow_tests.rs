@@ -89,9 +89,10 @@ fn overdrawn(harness: &Harness<'static, InboxApp>, band: Rect) -> Vec<String> {
     found
 }
 
-/// The list's search field, while the list is drawn.
+/// The list's head (its inbox views), while the list is drawn.
 fn search_box(harness: &Harness<'static, InboxApp>) -> Option<Rect> {
-    harness.query_all_by_role(Role::TextInput).map(|node| node.rect()).find(|rect| rect.top() < 100.0)
+    // The search is the command line's now: the list's head is found by the inbox's views in it.
+    harness.query_by_label("the inbox").map(|node| node.rect())
 }
 
 /// A band across the window from `left` on, `top` to `bottom`.
@@ -170,7 +171,6 @@ fn the_hidden_list_takes_no_tab_stop_and_no_key() {
         for _ in 0..120 {
             harness.key_press(Key::Tab);
             harness.run();
-            assert_ne!(harness.ctx.memory(|memory| memory.focused()), Some(super::list::search_id()), "{percent}: Tab reached the search field");
             if let Some(label) =
                 harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
             {
@@ -201,7 +201,7 @@ fn closing_the_composer_brings_the_list_back_with_its_place_and_its_pick() {
     harness.key_press(Key::Escape);
     harness.run();
     let row = |harness: &Harness<'static, InboxApp>| harness.query_all_by_label_contains("Your bike is due").next().map(|node| node.rect());
-    let list = search_box(&harness).unwrap().center() + vec2(-100.0, 300.0);
+    let list = search_box(&harness).unwrap().center() + vec2(0.0, 300.0);
     harness.event(egui::Event::PointerMoved(list));
     harness.event(egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,
@@ -225,9 +225,10 @@ fn closing_the_composer_brings_the_list_back_with_its_place_and_its_pick() {
 #[test]
 fn the_keyboard_in_the_list_when_it_goes_moves_to_the_composer() {
     let mut harness = composing(1100.0, 100);
-    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::search_id()));
+    // The keyboard on a row of the list (the search is the command line's now, which stays).
+    harness.query_all_by_role(Role::ListBoxOption).next().unwrap().focus();
     harness.run();
-    assert_eq!(harness.ctx.memory(|memory| memory.focused()), Some(super::list::search_id()));
+    assert!(super::list::focused_row(&harness.ctx).is_some(), "a row of the list has the keyboard");
     harness.set_size(vec2(720.0, 800.0));
     harness.run();
     assert!(search_box(&harness).is_none());

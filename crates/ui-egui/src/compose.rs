@@ -882,24 +882,7 @@ impl Composer {
         }
         let mut skip: BTreeSet<String> = Line::ALL.iter().flat_map(|line| self.chips(*line)).map(|chip| split(&chip.text).1.to_lowercase()).collect();
         skip.extend(mailbox.accounts().iter().map(|account| account.address.to_lowercase()));
-        let wanted = query.to_lowercase();
-        let mut found = Vec::new();
-        for field in ["from", "to"] {
-            let mut params = json!({ "limit": SEARCHED });
-            if let Value::Object(fields) = &mut params {
-                fields.insert(field.to_owned(), Value::String(query.clone()));
-            }
-            let answer = mailbox.run("mail.search", &params)?;
-            let messages = answer.get("messages").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
-            for person in messages.iter().flat_map(|message| ["from", "to"].into_iter().filter_map(|key| message.get(key)?.as_array()).flatten()) {
-                let name = shown(person.get("name").and_then(Value::as_str).unwrap_or_default());
-                let address = shown(person.get("address").and_then(Value::as_str).unwrap_or_default());
-                let matches = name.to_lowercase().contains(&wanted) || address.to_lowercase().contains(&wanted);
-                if found.len() < MAX_SUGGESTIONS && matches && !address.is_empty() && skip.insert(address.to_lowercase()) {
-                    found.push(Suggestion { name, address });
-                }
-            }
-        }
+        let found = people(mailbox, &query, skip)?;
         if !found.is_empty() {
             self.suggestions = found;
             self.suggesting = Some(line);
@@ -1010,6 +993,35 @@ impl Composer {
         mailbox.run("compose.discard", &json!({ "id": self.draft }))?;
         Ok(())
     }
+}
+
+/// The people in the mail whose name or address holds `query` (case left aside), at most [`MAX_SUGGESTIONS`], none
+/// whose address (lower case) is in `skip`: the composer's suggestions, and the command line's `@`.
+///
+/// # Errors
+///
+/// The engine's refusal of `mail.search`.
+pub(crate) fn people(mailbox: &mut Mailbox, query: &str, mut skip: BTreeSet<String>) -> Result<Vec<Suggestion>, UiError> {
+    let query = query.trim().to_owned();
+    let wanted = query.to_lowercase();
+    let mut found = Vec::new();
+    for field in ["from", "to"] {
+        let mut params = json!({ "limit": SEARCHED });
+        if let Value::Object(fields) = &mut params {
+            fields.insert(field.to_owned(), Value::String(query.clone()));
+        }
+        let answer = mailbox.run("mail.search", &params)?;
+        let messages = answer.get("messages").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+        for person in messages.iter().flat_map(|message| ["from", "to"].into_iter().filter_map(|key| message.get(key)?.as_array()).flatten()) {
+            let name = shown(person.get("name").and_then(Value::as_str).unwrap_or_default());
+            let address = shown(person.get("address").and_then(Value::as_str).unwrap_or_default());
+            let matches = name.to_lowercase().contains(&wanted) || address.to_lowercase().contains(&wanted);
+            if found.len() < MAX_SUGGESTIONS && matches && !address.is_empty() && skip.insert(address.to_lowercase()) {
+                found.push(Suggestion { name, address });
+            }
+        }
+    }
+    Ok(found)
 }
 
 #[cfg(test)]

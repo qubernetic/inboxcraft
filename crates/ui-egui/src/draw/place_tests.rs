@@ -109,6 +109,38 @@ fn leaving_settings_keeps_the_form_and_clears_the_password() {
     assert_eq!(harness.state().onboarding().form().address, "carol@example.org", "the form shows again as left");
 }
 
+#[test]
+fn typing_in_the_command_line_keeps_the_settings_and_the_password_until_enter() {
+    let mut harness = adding_window(FakeWorkers::passing());
+    harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), Section::Accounts);
+    let form = harness.state_mut().onboarding_mut().0.form_mut();
+    form.address = "carol@example.org".to_owned();
+    form.password = Secret::new(PASSWORD);
+    harness.run();
+    let kept = |harness: &Harness<'static, InboxApp>, step: &str| {
+        assert!(harness.state().settings().is_open(), "{step}: still on the settings");
+        assert!(!harness.state().onboarding().form().password.is_empty(), "{step}: the password kept");
+    };
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "Command line").type_text("a");
+    harness.run();
+    kept(&harness, "a word typed");
+    assert_eq!(harness.state().search_text(), "", "nothing searched under the settings");
+    harness.key_press(Key::Escape);
+    harness.run();
+    kept(&harness, "Esc");
+    harness.get_by_role_and_label(Role::TextInput, "Command line").type_text("b");
+    harness.run();
+    kept(&harness, "typed again");
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(!harness.state().settings().is_open(), "Enter leaves the settings");
+    assert_eq!((harness.state().screen(), harness.state().search_text()), (crate::Screen::Mail, "ab"), "for the mail searched");
+    assert!(harness.state().onboarding().form().password.is_empty(), "leaving them clears the password, as ever");
+}
+
 /// The 6 × 6 squares of `cyan_edge` painted inside `within`.
 fn squares(harness: &Harness<'static, InboxApp>, within: Rect) -> usize {
     let cyan = crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default()).palette.cyan_edge;
@@ -166,11 +198,11 @@ fn the_palette_no_longer_closes_settings() {
     harness.run();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    assert!(harness.state().palette().is_open());
+    assert!(harness.state().command().results());
     assert!(harness.state().settings().is_open(), "the palette comes over the settings");
     harness.key_press(Key::Escape);
     harness.run();
-    assert!(!harness.state().palette().is_open(), "one Esc: the palette");
+    assert!(!harness.state().command().results(), "one Esc: the palette");
     assert!(harness.state().settings().is_open(), "the settings stay, on their page");
     assert_eq!(harness.state().settings().section(), Section::Triage);
 }
@@ -214,12 +246,13 @@ pub(super) const OF_THE_MAIL: [&str; 29] = [
 pub(super) const OF_THE_COMPOSER: [&str; 2] = [keymap::SEND, keymap::FOLD];
 
 /// The window's own actions: they run on the settings as off them (a way to a place shows it, leaving the settings).
-pub(super) const THE_WINDOW_S: [&str; 15] = [
+pub(super) const THE_WINDOW_S: [&str; 16] = [
     keymap::FIND,
     keymap::HOME,
     keymap::MAIL,
     keymap::SETTINGS,
     keymap::PALETTE,
+    keymap::COMMAND_LINE,
     keymap::CALENDAR,
     keymap::SENT,
     keymap::LATER,

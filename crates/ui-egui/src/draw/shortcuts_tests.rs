@@ -58,7 +58,7 @@ fn the_shortcuts_page_lists_every_action_with_its_key() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let harness = on_shortcuts(theme);
         assert!(!harness.get_by_label("Shortcuts, settings page").accesskit_node().is_disabled());
-        harness.get_by_label("Key of Command palette: Ctrl K");
+        harness.get_by_label("Key of Command line: Ctrl K");
         harness.get_by_label("Key of Search mail: Ctrl F");
         harness.get_by_label("Show sent mail has no key");
         // The list's keys, each with its own: J and K, the arrows, the page keys, Enter, Shift F10 and the Menu key.
@@ -76,7 +76,7 @@ fn the_shortcuts_page_lists_every_action_with_its_key() {
         harness.get_by_label("Key of The message before in the list: K");
         harness.get_by_role_and_label(Role::TextInput, "Find a command");
         harness.get_by_role_and_label(Role::Button, "Reset all keys");
-        harness.get_by_role_and_label(Role::Button, "Remove the key of Command palette");
+        harness.get_by_role_and_label(Role::Button, "Remove the key of Command line");
         harness.check_accessibility();
     }
 }
@@ -109,9 +109,9 @@ fn a_key_another_action_had_moves_and_the_page_says_so() {
     harness.run();
     assert_eq!(harness.state().keymap().shortcut(keymap::SENT), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::K)));
     assert_eq!(harness.state().keymap().shortcut(keymap::PALETTE), None, "one key runs one action");
-    assert!(!harness.state().palette().is_open(), "the press gave a key and opened nothing");
-    harness.get_by_label("Ctrl K was the key of Command palette; it has none now.");
-    harness.get_by_label("Command palette has no key");
+    assert!(!harness.state().command().results(), "the press gave a key and opened nothing");
+    harness.get_by_label("Ctrl K was the key of Command line; it has none now.");
+    harness.get_by_label("Command line has no key");
     // Giving an action its own key again says nothing.
     press_chip(&mut harness, "Key of Show sent mail");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
@@ -122,7 +122,7 @@ fn a_key_another_action_had_moves_and_the_page_says_so() {
 #[test]
 fn escape_while_waiting_keeps_the_old_key_and_the_sheet() {
     let mut harness = on_shortcuts(egui::Theme::Light);
-    press_chip(&mut harness, "Key of Command palette");
+    press_chip(&mut harness, "Key of Command line");
     harness.key_press(Key::Escape);
     harness.run();
     assert_eq!(harness.state().settings().capturing(), None);
@@ -133,12 +133,12 @@ fn escape_while_waiting_keeps_the_old_key_and_the_sheet() {
 #[test]
 fn remove_takes_a_key_away_and_reset_gives_every_action_its_first_key() {
     let mut harness = on_shortcuts(egui::Theme::Light);
-    harness.get_by_role_and_label(Role::Button, "Remove the key of Command palette").click();
+    harness.get_by_role_and_label(Role::Button, "Remove the key of Command line").click();
     harness.run();
     assert_eq!(harness.state().keymap().shortcut(keymap::PALETTE), None);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    assert!(!harness.state().palette().is_open(), "a key taken away runs nothing");
+    assert!(!harness.state().command().results(), "a key taken away runs nothing");
     harness.get_by_role_and_label(Role::Button, "Reset all keys").click();
     harness.run();
     assert_eq!(harness.state().keymap(), &Keymap::default());
@@ -153,7 +153,7 @@ fn the_field_narrows_the_list() {
     harness.run();
     assert_eq!(harness.state().settings().find(), "sent");
     harness.get_by_label("Show sent mail has no key");
-    assert!(harness.query_by_label("Key of Command palette: Ctrl K").is_none());
+    assert!(harness.query_by_label("Key of Command line: Ctrl K").is_none());
     harness.get_by_role_and_label(Role::TextInput, "Find a command").type_text(" zzz");
     harness.run();
     harness.get_by_label("No command matches “sent zzz”.");
@@ -172,12 +172,12 @@ fn a_key_without_ctrl_or_alt_types_into_a_field_instead_of_running() {
     harness.state_mut().leave_settings();
     harness.run();
     harness.state_mut().search("");
-    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::search_id()));
+    harness.ctx.memory_mut(|memory| memory.request_focus(crate::command::field_id()));
     harness.run();
     harness.key_press(Key::G);
     harness.run();
     assert_eq!(harness.state().screen(), super::Screen::Mail, "G in the search field is typed");
-    harness.ctx.memory_mut(|memory| memory.surrender_focus(super::list::search_id()));
+    harness.ctx.memory_mut(|memory| memory.surrender_focus(crate::command::field_id()));
     harness.run();
     harness.key_press(Key::G);
     harness.run();
@@ -287,8 +287,8 @@ fn the_index_and_the_keys_that_show_another_place_leave_the_settings_and_keep_th
     harness.run();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    assert!(harness.state().palette().is_open());
-    harness.state_mut().palette_mut().close();
+    assert!(harness.state().command().results());
+    harness.state_mut().command_mut().close_results();
     harness.run();
     assert!(harness.state().settings().is_open(), "the palette leaves the settings shown");
     assert_eq!(harness.state().settings().find(), "show");

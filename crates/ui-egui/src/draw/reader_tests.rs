@@ -123,7 +123,7 @@ fn escape_leaves_the_full_width_reader() {
     assert!(harness.query_by_label("Show mail of: mira@example.org").is_some(), "the index stays");
     let reader = super::reader_rect(&harness.ctx).unwrap();
     assert!(reader.left() <= body.left() + 1.0 && reader.right() >= body.right() - 1.0, "the reader fills the body: {reader:?} in {body:?}");
-    assert!(harness.query_by_role(Role::TextInput).is_none(), "and the list with its search");
+    assert!(harness.query_by_label("the inbox").is_none(), "and the list with its head");
     harness.key_press(Key::Escape);
     harness.run();
     assert!(!harness.state().reader().full_width());
@@ -1799,7 +1799,7 @@ fn the_message_the_rule_names_opens_from_the_palette_and_a_bound_key_and_only_af
     let through_palette = |harness: &mut Harness<'static, InboxApp>| {
         harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::K);
         harness.run();
-        harness.get_by_role_and_label(Role::TextInput, "Command").type_text("the rule names");
+        harness.get_by_role_and_label(Role::TextInput, "Command line").type_text(">the rule names");
         harness.run();
         harness.key_press(Key::Enter);
         settle(harness);
@@ -1807,7 +1807,7 @@ fn the_message_the_rule_names_opens_from_the_palette_and_a_bound_key_and_only_af
     taken_away(&mut harness);
     assert!(harness.state().can_run(crate::keymap::OPEN_HELD), "after a message left it can run");
     through_palette(&mut harness);
-    assert!(!harness.state().palette().is_open());
+    assert!(!harness.state().command().results());
     assert_eq!(open_subject(&harness).as_deref(), Some(behind.as_str()), "the palette opens the message the rule names");
     assert!(!harness.state().can_run(crate::keymap::OPEN_HELD), "once it opened, nothing is held");
     // With nothing held the palette's Enter opens nothing: close the open one by Close, then run it.
