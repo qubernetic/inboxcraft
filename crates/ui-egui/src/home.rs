@@ -173,6 +173,8 @@ pub struct Home {
     pub drafts_total: u64,
     /// Which buttons.
     pub buttons: Buttons,
+    /// When the first of the rest of today's events ends: the agenda changes then, so Home is built again.
+    pub until: Option<Moment>,
 }
 
 /// `text` as the model keeps it: plain (no control characters, no bidi overrides) and at most [`MOST`] characters,
@@ -205,6 +207,7 @@ impl Home {
             drafts: Vec::new(),
             drafts_total: 0,
             buttons: Buttons::FirstRun,
+            until: None,
         }
     }
 
@@ -301,7 +304,7 @@ pub fn build(mailbox: &mut Mailbox) -> Home {
         let day = Day::new(civil.year(), civil.month(), civil.day())?;
         Some(Moment { day, minute: u16::from(civil.hour()).saturating_mul(60).saturating_add(u16::from(civil.minute())) })
     });
-    let (agenda, agenda_total, tomorrow) = now_moment.map(|now| agenda(mailbox, now)).unwrap_or_default();
+    let Agenda { lines: agenda, total: agenda_total, tomorrow, until } = now_moment.map(|now| agenda(mailbox, now)).unwrap_or_default();
     let name = mailbox.accounts().iter().find_map(|account| account.name.split_whitespace().next().map(kept));
     let date = civil.map_or_else(
         || tr!("Today").to_owned(),
@@ -333,6 +336,7 @@ pub fn build(mailbox: &mut Mailbox) -> Home {
         drafts,
         drafts_total,
         buttons: Buttons::ReadAndWrite,
+        until,
     };
     let quiet = home.is_quiet();
     home.lede = kept(&lede(read, screen, back, home.agenda.first(), quiet));
@@ -382,7 +386,7 @@ fn draft_line(mailbox: &Mailbox, row: &Value) -> Option<DraftLine> {
     Some(DraftLine { id, subject, to, when })
 }
 
-/// The rest of today and tomorrow's first event, read with one `event.list` of the two days Home needs (today and
+/// The rest of today, tomorrow's first event and when the first event left ends, read with one `event.list` of the two days Home needs (today and
 /// tomorrow on the owner's clock, a day either side because the engine counts from UTC midnights) and one
 /// `calendar.list` for the accounts' colours; nothing when a read was refused (Home puts no error in the window). The
 /// first [`AGENDA`] lines, how many in all, and tomorrow's first timed event when nothing is left today.
@@ -390,16 +394,17 @@ fn draft_line(mailbox: &Mailbox, row: &Value) -> Option<DraftLine> {
 /// An event belongs to the day it starts on: a timed event of today that has not ended is the rest of today, also when
 /// it runs past midnight; tomorrow's first is the first timed event that starts tomorrow. One that started before
 /// today is neither, since its time would read as a time of today. All-day events are not lines.
-fn agenda(mailbox: &mut Mailbox, now: Moment) -> (Vec<AgendaLine>, u64, Option<(String, String)>) {
+fn agenda(mailbox: &mut Mailbox, now: Moment) -> Agenda {
     let (today, next) = (now.day, now.day.plus(1));
     let params = json!({ "from": today.plus(-1).iso_midnight(), "to": today.plus(3).iso_midnight() });
-    let Ok(answer) = mailbox.run("event.list", &params) else { return (Vec::new(), 0, None) };
+    let Ok(answer) = mailbox.run("event.list", &params) else { return Agenda::default() };
     let rows = answer.get("events").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
     let timed: Vec<EventRow> =
         rows.iter().filter_map(EventRow::read).filter(|event| !event.all_day && event.start.day >= today && event.start.day <= next).collect();
     let mut left: Vec<&EventRow> = timed.iter().filter(|event| event.start.day == today && event.end > now).collect();
     left.sort_by_key(|event| (event.start, event.id));
     let total = u64::try_from(left.len()).unwrap_or(u64::MAX);
+    let until = left.iter().map(|event| event.end).min();
     let places = account_places(mailbox);
     let lines = left
         .iter()
@@ -421,7 +426,20 @@ fn agenda(mailbox: &mut Mailbox, now: Moment) -> (Vec<AgendaLine>, u64, Option<(
                 .map(|event| (event.start.clock(), kept(&event.summary)))
         })
         .flatten();
-    (lines, total, tomorrow)
+    Agenda { lines, total, tomorrow, until }
+}
+
+/// The rest of today as [`agenda`] reads it.
+#[derive(Default)]
+struct Agenda {
+    /// The first [`AGENDA`] lines.
+    lines: Vec<AgendaLine>,
+    /// How many events are left today.
+    total: u64,
+    /// Tomorrow's first timed event, when nothing is left today.
+    tomorrow: Option<(String, String)>,
+    /// When the first of today's events left ends.
+    until: Option<Moment>,
 }
 
 /// Each calendar's account's place among the accounts (which picks an agenda bar's colour), from `calendar.list`.
@@ -436,6 +454,75 @@ fn account_places(mailbox: &mut Mailbox) -> Vec<(u64, u64)> {
             Some((calendar, place))
         })
         .collect()
+}
+
+/// What a built Home was built from: the mailbox's [`Mailbox::revision`] and [`Mailbox::writes`], and the day and the
+/// hour on the owner's clock (the greeting, the date, the rest of today).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    revision: u64,
+    writes: u64,
+    hour: Option<(Day, u8)>,
+}
+
+/// Home as the window keeps it between frames: built while Home shows, and again only when the mailbox changed (a load,
+/// a draft kept, an event saved), the hour or the day turned, or the first of today's events left ended. While another
+/// place shows nothing is built; the first frame Home shows again builds it once ([`Kept::forget`]).
+#[derive(Debug, Default)]
+pub struct Kept {
+    home: Option<Home>,
+    stamp: Option<Stamp>,
+    builds: u64,
+}
+
+impl Kept {
+    /// Home for this frame, built again only when what it was built from changed.
+    pub fn current(&mut self, mailbox: &mut Mailbox) -> &Home {
+        let (now, offset) = (mailbox.now(), mailbox.offset());
+        let civil = now.to_civil(offset);
+        let hour = civil.and_then(|civil| Some((Day::new(civil.year(), civil.month(), civil.day())?, civil.hour())));
+        let stamp = Stamp { revision: mailbox.revision(), writes: mailbox.writes(), hour };
+        let moment = hour
+            .zip(civil)
+            .map(|((day, _), civil)| Moment { day, minute: u16::from(civil.hour()).saturating_mul(60).saturating_add(u16::from(civil.minute())) });
+        let ended = |home: &Home| home.until.zip(moment).is_some_and(|(until, now)| until <= now);
+        let stale = self.stamp != Some(stamp) || self.home.as_ref().is_none_or(ended);
+        if stale {
+            let home = build(mailbox);
+            self.builds = self.builds.saturating_add(1);
+            // The build read the mailbox: the stamp is taken after it, so its own reads count as seen.
+            self.stamp = Some(Stamp { revision: mailbox.revision(), writes: mailbox.writes(), hour });
+            self.home = Some(home);
+        }
+        self.home.get_or_insert_with(Home::first_run)
+    }
+
+    /// Home is not shown: the next frame it shows builds it again.
+    pub fn forget(&mut self) {
+        self.stamp = None;
+    }
+
+    /// How many times Home was built (for the tests).
+    #[must_use]
+    pub fn builds(&self) -> u64 {
+        self.builds
+    }
+
+    /// How long until Home must be built again by the clock alone (the hour turns, an event left today ends), from
+    /// `mailbox`'s now; `None` before the first build or when the clock cannot be read.
+    #[must_use]
+    pub fn due_in(&self, mailbox: &Mailbox) -> Option<std::time::Duration> {
+        let civil = mailbox.now().to_civil(mailbox.offset())?;
+        let into_hour = u64::from(civil.minute()) * 60 + u64::from(civil.second());
+        let to_hour = 3_600_u64.saturating_sub(into_hour).max(1);
+        let day = Day::new(civil.year(), civil.month(), civil.day())?;
+        let minute = i64::from(civil.hour()) * 60 + i64::from(civil.minute());
+        let to_end = self.home.as_ref().and_then(|home| home.until).map(|until| {
+            let minutes = until.day.since(day).saturating_mul(1_440).saturating_add(i64::from(until.minute)).saturating_sub(minute);
+            u64::try_from(minutes.saturating_mul(60).saturating_sub(i64::from(civil.second()))).unwrap_or(0).max(1)
+        });
+        Some(std::time::Duration::from_secs(to_end.map_or(to_hour, |end| end.min(to_hour))))
+    }
 }
 
 /// Home as the design file draws it in `state` (`today`, `nothing-to-do`, `overflow-counts`, `first-run`,
@@ -464,6 +551,7 @@ pub fn sample(state: &str) -> Option<Home> {
         drafts,
         drafts_total: 2,
         buttons: Buttons::ReadAndWrite,
+        until: None,
     };
     Some(match state {
         "today" => today,
