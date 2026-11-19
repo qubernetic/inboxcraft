@@ -986,8 +986,12 @@ pub(super) fn floating(
     let foot = above.filter(|top| top.is_finite()).map_or(screen.bottom(), |top| top.min(screen.bottom()).floor());
     let room = vec2((screen.width() - FLOATING_IN - CLEAR).max(1.0), (foot - screen.top() - FLOATING_IN - CLEAR).max(1.0));
     let folded_height = s.s3 * 2.0 + control_side(theme);
-    let size = vec2(FLOATING.x.min(room.x), if composer.folded() { folded_height } else { FLOATING.y }.min(room.y));
-    let corner = pos2(screen.right() - FLOATING_IN, foot - FLOATING_IN);
+    // Never taller than the room, never shorter than folded (while the body holds that): in a short window the panel
+    // stays in the body, over the reader's answers rather than over its head or the command line.
+    let least = folded_height.min((screen.height() - FLOATING_IN - CLEAR).max(1.0));
+    let size = vec2(FLOATING.x.min(room.x), if composer.folded() { folded_height } else { FLOATING.y }.min(room.y).max(least));
+    let bottom = (foot - FLOATING_IN).max(screen.top() + CLEAR + size.y).min(screen.bottom() - FLOATING_IN);
+    let corner = pos2(screen.right() - FLOATING_IN, bottom);
     let rect = Rect::from_min_size(corner - size, size);
     // The panel's card and the shadow it casts, on a layer of their own under it that takes no pointer: the shadow
     // falls on the window round the panel (its frames), under its foot too, over the reader's answers.
