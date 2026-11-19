@@ -47,6 +47,29 @@ fn mcp_serves_the_tools_on_the_store_until_the_input_ends() {
 }
 
 #[test]
+fn mcp_says_why_a_message_is_where_it_is_and_how_weeks_are_counted() {
+    let dir = tempfile::tempdir().unwrap();
+    store::fixture(dir.path()).unwrap();
+    let input = [
+        INITIALIZE.to_owned(),
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "mail_why", "arguments": { "id": store::LUNCH } } })
+            .to_string(),
+        json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "week_settings" } }).to_string(),
+        json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": { "name": "mail_why", "arguments": { "id": -1 } } }).to_string(),
+    ]
+    .join("\n");
+    let (code, out, err) = mcp(&["--store", dir.path().to_str().unwrap(), "mcp"], &input);
+    assert_eq!((code, err.as_str()), (0, ""));
+    let answers = answers(&out);
+    assert_eq!(answers.len(), 4, "{out}");
+    let text = |n: usize| answers[n]["result"]["content"][0]["text"].as_str().unwrap().to_owned();
+    assert!(text(1).starts_with(&format!("mail_why: message {}, 1 reason", store::LUNCH)), "{}", text(1));
+    assert!(text(2).starts_with("week_settings: weeks start on monday"), "{}", text(2));
+    assert_eq!(answers[3]["result"]["isError"], true);
+    assert!(text(3).starts_with("error bad_params: "), "{}", text(3));
+}
+
+#[test]
 fn mcp_takes_no_parameters_and_its_store_must_hold_one() {
     let dir = tempfile::tempdir().unwrap();
     for (args, code, says) in [

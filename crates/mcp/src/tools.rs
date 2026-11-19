@@ -34,7 +34,7 @@ pub(crate) struct Tool {
 }
 
 /// Every tool, in the order `tools/list` gives them.
-pub(crate) const TOOLS: [Tool; 5] = [
+pub(crate) const TOOLS: [Tool; 7] = [
     Tool {
         name: "mail_list",
         command: "mail.list",
@@ -84,6 +84,27 @@ they stand.",
         paged: false,
         render: render::check,
     },
+    Tool {
+        name: "mail_why",
+        command: "mail.why",
+        description: "Say why a message stands where it does, at most four reasons, most specific first: a snooze, the grouped \
+inbox's rule, the owner's choice for the sender, the screener, the thread, else the folder. Each reason is a kind, a text id \
+and its values.",
+        schema: id_schema,
+        read_only: true,
+        paged: false,
+        render: render::why,
+    },
+    Tool {
+        name: "week_settings",
+        command: "week.settings",
+        description: "Show how weeks are counted: the first day of the week, the first week of the year, the names each can \
+take, and the week of today.",
+        schema: no_schema,
+        read_only: true,
+        paged: false,
+        render: render::week,
+    },
 ];
 
 /// The roles `mail_list` takes.
@@ -113,6 +134,10 @@ fn list_schema() -> Value {
 
 fn id_schema() -> Value {
     json!({ "type": "object", "properties": { "id": id("The message.") }, "required": ["id"], "additionalProperties": false })
+}
+
+fn no_schema() -> Value {
+    json!({ "type": "object", "properties": {}, "additionalProperties": false })
 }
 
 fn search_schema() -> Value {
