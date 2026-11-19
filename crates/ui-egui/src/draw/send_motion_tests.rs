@@ -149,7 +149,7 @@ fn a_key_while_the_composer_folds_acts_in_its_frame_and_it_is_gone() {
 }
 
 /// A click at `at`: pressed in one frame, let go in the next.
-fn click_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
+pub(crate) fn click_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
     let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
     harness.event(egui::Event::PointerMoved(at));
     harness.event(button(true));

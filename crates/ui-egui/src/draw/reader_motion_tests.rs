@@ -140,7 +140,7 @@ fn a_key_while_a_message_comes_in_acts_in_its_frame_and_the_movement_is_at_its_e
 #[test]
 fn a_press_while_a_message_comes_in_reaches_nothing_under_the_old_one() {
     // The new message's controls stand under the old one's picture: what lies over the reader takes the press instead.
-    let shield = egui::LayerId::new(egui::Order::Middle, egui::Id::unique("reader-shield"));
+    let shield = egui::LayerId::new(egui::Order::Background, egui::Id::unique("reader-shield"));
     for level in [Level::Full, Level::Reduced] {
         let mut harness = first_open(level);
         press(&mut harness, Key::J);
@@ -150,5 +150,34 @@ fn a_press_while_a_message_comes_in_reaches_nothing_under_the_old_one() {
         assert_eq!(harness.ctx.layer_id_at(low), Some(shield), "{level:?}: the picture's place takes a press");
         harness.run_steps(50);
         assert_ne!(harness.ctx.layer_id_at(low), Some(shield), "{level:?}: at rest the message takes it");
+    }
+}
+
+#[test]
+fn a_press_on_the_floating_composer_while_a_message_comes_in_reaches_it() {
+    // The shield stands over the reader's place only: a float over it, the floating composer, takes its own presses,
+    // and the keys that follow type there, not on the list.
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable as _;
+    for level in [Level::Full, Level::Reduced] {
+        let mut harness = first_open(level);
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, crate::keymap::COMPOSE);
+        harness.run();
+        harness.state_mut().composer_mut().0.unwrap().set_floating(true);
+        harness.ctx.memory_mut(|memory| memory.stop_text_input());
+        harness.run();
+        assert!(harness.state().composer().is_some_and(crate::compose::Composer::floating), "{level:?}: the composer floats");
+        let count = harness.state().mailbox().messages().len();
+        press(&mut harness, Key::J);
+        harness.step();
+        let at = harness.get_by_role_and_label(Role::TextInput, "Subject").rect().center();
+        super::send_motion_tests::click_at(&mut harness, at);
+        assert_eq!(harness.ctx.memory(|memory| memory.focused()), Some(crate::draw::compose::subject_id()), "{level:?}: Subject has the keyboard");
+        harness.event(egui::Event::Key { key: Key::D, pressed: true, modifiers: egui::Modifiers::NONE, repeat: false, physical_key: None });
+        harness.event(egui::Event::Text("d".to_owned()));
+        harness.run();
+        assert_eq!(harness.state().composer().map(crate::compose::Composer::subject), Some("d"), "{level:?}: D typed there");
+        assert_eq!(harness.state().mailbox().messages().len(), count, "{level:?}: the message stays");
     }
 }

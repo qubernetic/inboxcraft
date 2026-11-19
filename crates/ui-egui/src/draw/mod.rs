@@ -2866,6 +2866,8 @@ impl InboxApp {
     /// While the reader's place plays a kept picture, and for egui's double-click time after a send from it, a press on
     /// the place reaches nothing: not the new message's controls hidden under the picture, nor what now stands where
     /// Send stood (a double click on Send would open a reply). A press during a picture ends it, and is let go with it.
+    /// It stands at the background's order, over the place only: a float over the reader (the floating composer) keeps
+    /// its presses.
     fn shield(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
         self.sent_place = self.sent_place.filter(|(_, until)| now < *until);
@@ -2875,7 +2877,7 @@ impl InboxApp {
         }
         let Some(rect) = self.picture.as_ref().map(picture::Picture::rect).or(self.sent_place.map(|(rect, _)| rect)) else { return };
         let id = egui::Id::unique("reader-shield");
-        egui::Area::new(id).order(egui::Order::Middle).fixed_pos(rect.min).constrain(false).movable(false).fade_in(false).show(ctx, |ui| {
+        egui::Area::new(id).order(egui::Order::Background).fixed_pos(rect.min).constrain(false).movable(false).fade_in(false).show(ctx, |ui| {
             // Allocated, so the area is as large as the place and stands over it as a layer too.
             let _ = ui.allocate_rect(rect, egui::Sense::CLICK);
         });
