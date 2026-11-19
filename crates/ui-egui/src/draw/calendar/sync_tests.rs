@@ -398,6 +398,68 @@ fn click_at<State>(harness: &mut Harness<'_, State>, at: egui::Pos2) {
 }
 
 #[test]
+fn an_edit_of_an_event_stays_whole_while_a_sync_changes_that_event_and_fails() {
+    let feed = Feed::default();
+    let mut harness = on_calendar(egui::Theme::Dark, &feed);
+    harness.get_by_label_contains("sync now").click();
+    frames(&mut harness);
+    let mut done = Vec::new();
+    feed.answer_all(&mut done);
+    frames(&mut harness);
+    // The existing event in the editor, its title edited, the caret three letters from the end.
+    harness.query_all(by().role(Role::Button).label_contains("Allotment work party")).next().unwrap().click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    assert!(
+        harness.state().calendar().editor().is_some(),
+        "Edit opened the editor; picked {:?}",
+        harness.state().calendar().picked().map(|event| &event.summary)
+    );
+    harness.get_by_role_and_label(Role::TextInput, "Title").focus();
+    harness.run();
+    harness.key_press(Key::End);
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "Title").type_text(" day");
+    harness.run();
+    for _ in 0..3 {
+        harness.key_press(Key::ArrowLeft);
+        harness.run();
+    }
+    // The server changes that very event in Personal, and Choir's sync fails.
+    for (id, account, job) in feed.calendar_jobs() {
+        if done.contains(&id) {
+            continue;
+        }
+        done.push(id);
+        let CalendarJob::Sync { calendar, url, .. } = job else { continue };
+        let report = if url.ends_with("/personal/") {
+            let ical = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:allotment@example.org\r\nDTSTAMP:20261105T000000Z\r\n\
+                        DTSTART:20261105T150000Z\r\nDTEND:20261105T160000Z\r\nSUMMARY:Allotment moved by the server\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+            let fetched =
+                inboxcraft_model::FetchedEvent { url: format!("{url}allotment.ics"), etag: Some("\"9\"".to_owned()), ical: ical.to_owned() };
+            CalendarReport::Synced { calendar, changed: vec![fetched], removed: Vec::new(), token: None, full: false }
+        } else {
+            CalendarReport::Failed { calendar: Some(calendar), kind: ErrorKind::LoginRefused }
+        };
+        feed.answer(account, id, report);
+    }
+    frames(&mut harness);
+    assert!(matches!(state(&harness), SyncState::Failed { .. }), "{:?}", state(&harness));
+    assert!(harness.query_by_label_contains("Allotment moved by the server").is_some(), "the server's change came in under the editor");
+    assert!(harness.state().calendar().editor().is_some(), "the editor is still open");
+    let title = harness.get_by_role_and_label(Role::TextInput, "Title");
+    assert!(title.accesskit_node().is_focused(), "the keyboard is still in the title");
+    title.type_text("X");
+    harness.run();
+    assert_eq!(
+        harness.get_by_role_and_label(Role::TextInput, "Title").value().as_deref(),
+        Some("Allotment work party Xday"),
+        "the text and its caret are whole"
+    );
+}
+
+#[test]
 fn calendars_found_on_another_server_end_as_a_failure_in_the_window_s_words() {
     let feed = Feed::default();
     let mut harness = on_calendar(egui::Theme::Light, &feed);
