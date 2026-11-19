@@ -260,7 +260,8 @@ hands over with `Session::set_offsets` (UTC until then); a wall-clock time the c
 change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries with what a row shows of each, read from the store
 (the account, the subject or an alert's event title, and who: a send's recipients, a snooze's sender, a follow-up's
 recipient; for an alert also its event, when the occurrence starts and the minutes before), each one short line
-without control characters or invisible marks, and `schedule.cancel` (`owner`) takes one off; no undo brings a
+without control characters or invisible marks; an entry whose target the store cannot read is left out and counted
+(`skipped`), so one bad row never refuses the list. `schedule.cancel` (`owner`) takes one off; no undo brings a
 cancelled entry back.
 
 Weeks are counted by the owner's week rule (`inboxcraft_time::WeekRule`): the first day of the week (Monday by

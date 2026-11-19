@@ -49,17 +49,23 @@ fn presets(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError
 fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let NoParams {} = decode(LIST.id, params)?;
     let mut entries = Vec::new();
+    // An entry whose draft, message or alert the store cannot read is left out and counted, not the whole list refused.
+    let mut skipped: u64 = 0;
     for entry in context.store().schedule()? {
+        let Ok(about) = about(context, &entry) else {
+            skipped = skipped.saturating_add(1);
+            continue;
+        };
         let mut fields = Map::new();
         fields.insert("id".to_owned(), json!(entry.id.get()));
         fields.insert("due".to_owned(), json::date(entry.due));
         if let Value::Object(what) = what(&entry.what) {
             fields.extend(what);
         }
-        fields.extend(about(context, &entry)?);
+        fields.extend(about);
         entries.push(Value::Object(fields));
     }
-    Ok(Outcome::new(json!({ "entries": entries })))
+    Ok(Outcome::new(json!({ "entries": entries, "skipped": skipped })))
 }
 
 /// What a row of the scheduled list shows of `entry`, read from the store: the account, the subject (an alert's event
