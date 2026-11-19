@@ -21,6 +21,8 @@ pub struct Toast<'a> {
     pub text: &'a str,
     /// The undo action of a reversible action: an Undo button and its key.
     pub undo: Option<&'a str>,
+    /// Undo rests: drawn unavailable, its button and its key do nothing (the toast still says what happened).
+    pub rests: bool,
 }
 
 /// Draws the toast's float and content into `ui`; whether Undo was pressed (the button or its key).
@@ -36,8 +38,8 @@ pub fn panel(ui: &mut Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>) -> 
             ui.spacing_mut().item_spacing.x = s.s2;
             ui.label(galley(ui, toast.text, theme.fonts.body, p.ink));
             if let Some(action) = toast.undo {
-                let undo = button::link(ui, theme, keymap, tr!("Undo"));
-                undone = undo.clicked() || (!soon::is_soon(ui) && keymap.pressed(ui.ctx(), action));
+                let undo = button::link_with(ui, theme, keymap, tr!("Undo"), button::LinkSize::Line, !toast.rests, None);
+                undone = !toast.rests && (undo.clicked() || (!soon::is_soon(ui) && keymap.pressed(ui.ctx(), action)));
                 if let Some(chip) = keymap.chip(ui.ctx(), action) {
                     key::key_chip(ui, theme, &chip, key::ChipState::Default);
                 }

@@ -132,6 +132,12 @@ impl Surfaces {
         self.held() || self.has(Surface::Sheet) || self.has(Surface::Composer)
     }
 
+    /// Whether Undo rests, by every way in (its key, the palette's command, the toast's key and button): while the
+    /// event editor is open, Undo would take back the event being edited.
+    pub(crate) fn undo_rests(&self) -> bool {
+        self.has(Surface::Editor)
+    }
+
     /// The one surface an `Esc` pressed in this frame closes, or None when there was no `Esc` or it belongs to the
     /// place (the reader gives the keyboard back to the list). A float, the palette, a capture and the event editor
     /// take their `Esc` themselves; the window closes the sheet or leaves the full width, and hands the rest to the
@@ -145,14 +151,15 @@ impl Surfaces {
 
     /// Whether the window's `action` may run with these surfaces in front, as its key (`keymap`'s, with a modifier or
     /// without) is pressed. Not while the palette or a capture holds the keys; under the sheet only the sheet's and the
-    /// window's own ([`SHEET_KEYS`]); under the event editor only what comes over it ([`EDITOR_KEYS`]); a key without a modifier, and Undo, not under a quiet surface ([`Surfaces::quiet`]);
+    /// window's own ([`SHEET_KEYS`]); under the event editor only what comes over it ([`EDITOR_KEYS`]); a key without a modifier not under a quiet surface
+    /// ([`Surfaces::quiet`]), and Undo neither there nor while it rests ([`Surfaces::undo_rests`]);
     /// the list's keys only while it has them ([`Surfaces::list_has_keyboard`]). The acts on a row and the calendar's
     /// keys are not the window's: the list and the calendar take those.
     pub(crate) fn allows(&self, action: &str, keymap: &Keymap) -> bool {
         if self.held() || ROW_ACTS.contains(&action) || keymap::CALENDAR_KEYS.contains(&action) {
             return false;
         }
-        if action == keymap::UNDO && self.quiet() {
+        if action == keymap::UNDO && (self.quiet() || self.undo_rests()) {
             return false;
         }
         if self.has(Surface::Sheet) && !SHEET_KEYS.contains(&action) {

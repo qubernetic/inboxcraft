@@ -20,7 +20,7 @@ fn harness(reduce: bool) -> Harness<'static, u32> {
     let mut harness = builder().build_ui_state(
         move |ui, undone: &mut u32| {
             motion::set_reduced(ui.ctx(), reduce);
-            let toast = Toast { text: "Marked as done", undo: Some(UNDO) };
+            let toast = Toast { text: "Marked as done", undo: Some(UNDO), rests: false };
             if show(ui.ctx(), &theme, &keymap, Id::unique("toast"), &toast, pos2(300.0, 400.0)) {
                 *undone += 1;
             }
@@ -57,7 +57,7 @@ fn a_toast_rises_into_place_and_with_reduced_motion_is_there_at_once() {
     let mut moving = builder().build_ui_state(
         move |ui, shown: &mut bool| {
             if *shown {
-                let toast = Toast { text: "Archived", undo: None };
+                let toast = Toast { text: "Archived", undo: None, rests: false };
                 show(ui.ctx(), &theme, &Keymap::default(), Id::unique("toast"), &toast, pos2(300.0, 400.0));
             }
         },

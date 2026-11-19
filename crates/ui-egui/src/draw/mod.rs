@@ -678,7 +678,8 @@ impl InboxApp {
             // With the list hidden nothing acts on a row the owner cannot see, by a key or from the palette; Undo, which
             // may take back an act on such a row, rests too.
             keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => !self.list_hidden && self.row_act(id).is_some(),
-            keymap::UNDO => !self.list_hidden && self.mailbox.can_undo(),
+            // Under the event editor Undo rests too: it would take back the event being edited ([`Surfaces::undo_rests`]).
+            keymap::UNDO => !self.list_hidden && !self.editing_event() && self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
             // The held-back message opens as a press on its row does (it floats a docked composer); with the list
             // hidden it rests, as every command of the list does.
@@ -1025,6 +1026,11 @@ impl InboxApp {
         self.reading || !self.mailbox.keyed()
     }
 
+    /// Whether the calendar shows its event editor ([`Surface::Editor`]).
+    fn editing_event(&self) -> bool {
+        self.screen == Screen::Calendar && self.calendar.editor().is_some()
+    }
+
     /// What stands in front this frame, read before its keys ([`Surfaces`]).
     fn surfaces(&self, ctx: &egui::Context) -> Surfaces {
         let mail = self.screen == Screen::Mail;
@@ -1033,7 +1039,7 @@ impl InboxApp {
             palette: self.palette.is_open(),
             capture: self.settings.capturing().is_some(),
             sheet: self.settings.is_open(),
-            editor: self.screen == Screen::Calendar && self.calendar.editor().is_some(),
+            editor: self.editing_event(),
             composer: self.composer_in_front(),
             full_width: self.reader.full_width(),
             one_pane_reader: mail && one_pane(ctx) && !self.docked() && self.message_in_front() && self.reader.open_id().is_some(),
@@ -1970,7 +1976,7 @@ impl InboxApp {
         self.notice = Some((text.clone(), Some(since)));
         ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
         let bottom = Self::toast_bottom(ui, theme);
-        toast::show(ui.ctx(), theme, &self.keymap, egui::Id::unique("compose-toast"), &Toast { text: &text, undo: None }, bottom);
+        toast::show(ui.ctx(), theme, &self.keymap, egui::Id::unique("compose-toast"), &Toast { text: &text, undo: None, rests: false }, bottom);
     }
 
     /// The owner's appearance choices.
@@ -2255,7 +2261,7 @@ impl InboxApp {
             None
         };
         composed.extend(self.floating_composer(ui, &theme, docked));
-        let (undone, unsent) = self.toasts(ui, &theme, quiet);
+        let (undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests());
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
         let busy = dismiss
@@ -2560,10 +2566,11 @@ impl InboxApp {
     }
 
     /// The toasts of the frame: the countdown while a send waits for its hold, else the act's; then the composer's
-    /// notice. Whether the act's Undo was pressed, and whether the countdown's took a send back.
-    fn toasts(&mut self, ui: &Ui, theme: &Theme, quiet: bool) -> (bool, bool) {
+    /// notice. Whether the act's Undo was pressed, and whether the countdown's took a send back. The act's Undo `rests`
+    /// (its button and its key) while the event editor is open ([`Surfaces::undo_rests`]).
+    fn toasts(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool) -> (bool, bool) {
         let unsent = self.send_toast(ui, theme, quiet);
-        let undone = if unsent || self.counting().is_some() { false } else { self.toast(ui, theme, quiet) };
+        let undone = if unsent || self.counting().is_some() { false } else { self.toast(ui, theme, quiet, rests) };
         self.notice_toast(ui, theme);
         (undone, unsent)
     }
@@ -2598,7 +2605,7 @@ impl InboxApp {
         }
         let bottom = Self::toast_bottom(ui, theme);
         let id = egui::Id::unique("send-toast").with(draft);
-        let undone = toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &text, undo: Some(keymap::UNDO) }, bottom);
+        let undone = toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &text, undo: Some(keymap::UNDO), rests: false }, bottom);
         if undone {
             self.unsend(draft);
         }
@@ -2607,8 +2614,9 @@ impl InboxApp {
 
     /// The toast after the last act, rising from the bottom edge, for [`TOAST_SECONDS`]; after it Ctrl+Z still takes
     /// acts back, one at a time. Whether Undo was pressed (its key works while nothing is `quiet`: no text field has the
-    /// focus, no sheet or palette is open).
-    fn toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool) -> bool {
+    /// focus, no sheet or palette is open). While Undo `rests` the toast still shows, its Undo drawn resting, and works
+    /// again for what is left of its time once the reason has gone.
+    fn toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool) -> bool {
         let Some(undo) = self.mailbox.undoable().cloned() else {
             self.toast = None;
             return false;
@@ -2627,12 +2635,13 @@ impl InboxApp {
         self.toast = Some((undo.serial, since));
         ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
         let mut keys = self.keymap.clone();
-        if quiet {
+        if quiet || rests {
             keys.unbind(keymap::UNDO);
         }
         let bottom = Self::toast_bottom(ui, theme);
         let id = egui::Id::unique("act-toast").with(undo.serial);
-        toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &undo.text, undo: undo.undoable.then_some(keymap::UNDO) }, bottom)
+        let shown = Toast { text: &undo.text, undo: undo.undoable.then_some(keymap::UNDO), rests };
+        toast::show(ui.ctx(), theme, &keys, id, &shown, bottom)
     }
 
     /// Applies what was asked for in the palette; the action to run, when one was chosen.
