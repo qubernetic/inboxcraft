@@ -283,3 +283,6 @@
 # An open list on the settings sheet: the add-account form's IMAP security select, its list open over the sheet (#238).
 {"out": "docs/images/settings-select-open-light.png", "mode": "light", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
 {"out": "docs/images/settings-select-open-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
+# The command line's sets on their own page: the command field, the key hint and the window controls (#286).
+{"out": "docs/images/components-commands-light.png", "mode": "light", "command_sets": true}
+{"out": "docs/images/components-commands-dark.png", "mode": "dark", "command_sets": true}
