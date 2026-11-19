@@ -475,6 +475,7 @@ macro_rules! contract_tests {
             an_id_past_what_a_store_holds_reads_as_unknown,
             a_change_that_needs_an_id_past_what_a_store_holds_is_refused_as_unknown,
             a_removal_of_an_id_past_what_a_store_holds_removes_nothing,
+            an_id_past_what_a_store_holds_reaches_no_edge_row,
         );
     };
     ($make:expr; $($name:ident),+ $(,)?) => {
