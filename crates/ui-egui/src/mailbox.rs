@@ -1610,6 +1610,13 @@ impl Mailbox {
         self.settle(Err(error));
     }
 
+    /// Applies `event` as an account's sync worker tells it, checked by the engine as every worker's is: for a picture
+    /// of the status line synced or syncing, which no sample account reaches without a server. Whether it changed
+    /// anything.
+    pub(crate) fn tell(&mut self, event: &inboxcraft_model::Event) -> Result<bool, UiError> {
+        Ok(self.session.apply(event)? == Applied::Changed)
+    }
+
     /// The owner's appearance choices, as the `ui.*.set` commands left them.
     #[must_use]
     pub fn appearance(&self) -> &Appearance {
