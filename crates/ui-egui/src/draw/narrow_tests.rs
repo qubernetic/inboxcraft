@@ -441,8 +441,9 @@ fn under_1280_the_calendar_s_toolbar_drops_its_note_and_under_980_its_side_panel
         harness
     };
     assert!(calendar(1440.0).query_by_label_contains("week ").is_some(), "1440: the week's note");
-    let harness = calendar(1100.0);
-    assert!(harness.query_by_label_contains("week ").is_none(), "1100: no note");
+    // Just under 1280 the toolbar has room for the note; the rule drops it there too.
+    let harness = calendar(1270.0);
+    assert!(harness.query_by_label_contains("week ").is_none(), "1270: no note");
     assert!(harness.query_by_label("Calendars").is_some() || harness.query_all_by_label_contains("calendar").count() > 0);
     let mut harness = calendar(900.0);
     assert!(harness.query_by_label("Close the details").is_none(), "nothing picked: the week");
@@ -561,6 +562,20 @@ fn dragging_across_both_breakpoints_keeps_a_half_filled_account_form() {
             harness.query_all_by_role(Role::TextInput).any(|node| node.value().is_some_and(|value| value == "odile@example.org")),
             "{width}: shown"
         );
+    }
+    // A message was open before the settings came: crossing 980 does not give its row the keyboard behind them.
+    let mut harness = window(DRAG[0], 100);
+    open_message(&mut harness);
+    harness.state_mut().open_accounts();
+    harness.run();
+    harness.get_by_label("Accounts, settings page").focus();
+    harness.run();
+    let on = harness.ctx.memory(|memory| memory.focused());
+    assert!(on.is_some(), "the settings' nav has the keyboard");
+    for width in DRAG {
+        harness.set_size(vec2(width, 800.0));
+        harness.run();
+        assert_eq!(harness.ctx.memory(|memory| memory.focused()), on, "{width}: the settings keep the keyboard");
     }
 }
 
