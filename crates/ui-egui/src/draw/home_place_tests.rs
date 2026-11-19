@@ -279,6 +279,8 @@ fn the_buttons_do_what_they_say() {
     press(&mut harness, "Write");
     assert_eq!(harness.state().screen(), Screen::Mail, "Write");
     assert!(harness.state().composer().is_some_and(|composer| !composer.floating()), "a new message in the reader's place");
+    let to = super::compose::field_id(crate::compose::Line::To);
+    assert!(harness.ctx.memory(|memory| memory.has_focus(to)), "Write by the pointer gives To the keyboard");
 }
 
 /// A press on the discard of the draft row whose name starts with `subject`.
