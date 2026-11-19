@@ -166,7 +166,10 @@ const NO_ROW: i64 = -1;
 
 /// An id as SQLite looks it up. An id past `i64::MAX` cannot be held, so it looks up [`NO_ROW`] and finds nothing,
 /// as an unknown id does: a read gives nothing, a change that needs the thing gives the kind's `Unknown…` error and a
-/// removal removes nothing. No caller has to tell the two apart. Never bound where a row is written.
+/// removal removes nothing. No caller has to tell the two apart.
+///
+/// A value written as a reference to another row is the key read back from that row by the existence check before
+/// the write ([`exists`], `local::held`, [`folder_account`]), never this.
 fn key(id: u64) -> i64 {
     i64::try_from(id).unwrap_or(NO_ROW)
 }
@@ -193,11 +196,10 @@ fn folder_account(tx: &Transaction<'_>, folder: FolderId) -> Result<Option<i64>,
     Ok(tx.query_row("SELECT account FROM folder WHERE id = ?1", [key(folder.get())], |row| row.get(0)).optional()?)
 }
 
-/// The key of a held message.
+/// The key of a held message, as its row holds it.
 fn exists(tx: &Transaction<'_>, id: MessageId) -> Result<i64, StoreError> {
-    let held = key(id.get());
-    let found = tx.query_row("SELECT 1 FROM message WHERE id = ?1", [held], |_| Ok(())).optional()?;
-    found.map(|()| held).ok_or(StoreError::UnknownMessage(id))
+    let found = tx.query_row("SELECT id FROM message WHERE id = ?1", [key(id.get())], |row| row.get(0)).optional()?;
+    found.ok_or(StoreError::UnknownMessage(id))
 }
 
 /// The body rows (source files) below the rows `filter` picks, to remove once the batch commits.
@@ -249,10 +251,11 @@ fn change(tx: &Transaction<'_>, sources: &Path, change: &Change, files: &mut Fil
         }
         Change::PutMessage(message) => put_message(tx, message)?,
         Change::SetFlags(id, flags) => {
-            let id_key = key(id.get());
-            let held: Option<String> = tx.query_row("SELECT record FROM message WHERE id = ?1", [id_key], record).optional()?;
-            let message: Message = parse(&held.ok_or(StoreError::UnknownMessage(*id))?)?;
-            tx.execute("UPDATE message SET record = ?2 WHERE id = ?1", params![id_key, json(&with_flags(&message, flags))?])?;
+            let held: Option<(i64, String)> =
+                tx.query_row("SELECT id, record FROM message WHERE id = ?1", [key(id.get())], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
+            let (row, text) = held.ok_or(StoreError::UnknownMessage(*id))?;
+            let message: Message = parse(&text)?;
+            tx.execute("UPDATE message SET record = ?2 WHERE id = ?1", params![row, json(&with_flags(&message, flags))?])?;
         }
         Change::RemoveMessage(id) => {
             let id = key(id.get());

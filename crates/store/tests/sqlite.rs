@@ -470,3 +470,64 @@ fn a_record_whose_own_id_is_past_the_largest_key_is_refused() {
     store.apply(&Batch::new().with(Change::PutAccount(account(largest))).with(Change::PutFolder(folder(largest, largest, "Last")))).unwrap();
     assert_eq!(store.folders(AccountId::new(largest)).unwrap(), [folder(largest, largest, "Last")]);
 }
+
+/// Every row of every table that holds an id, read straight from the file.
+fn dump(dir: &Path) -> String {
+    let conn = rusqlite::Connection::open(dir.join(DATABASE_FILE)).unwrap();
+    let mut all = String::new();
+    for table in
+        ["account", "folder", "message", "body", "job", "draft", "outbox", "schedule", "message_state", "calendar", "calendar_event", "alert"]
+    {
+        let mut statement = conn.prepare(&format!("SELECT * FROM {table} ORDER BY rowid")).unwrap();
+        let columns = statement.column_count();
+        let rows = statement
+            .query_map([], |row| (0..columns).map(|column| row.get::<_, rusqlite::types::Value>(column)).collect::<Result<Vec<_>, _>>())
+            .unwrap();
+        for row in rows {
+            all.push_str(&format!("{table} {:?}\n", row.unwrap()));
+        }
+    }
+    all
+}
+
+/// A store with a row of every kind at id 1, as this code writes them.
+fn of_every_kind(dir: &Path) {
+    let mut store = with_body(dir);
+    let pinned = MessageState { pinned: true, ..MessageState::default() };
+    let batch = Batch::new()
+        .with(Change::SetMessageState(m(1), pinned))
+        .with(Change::QueueJob(Job::new(JobId::new(1), AccountId::new(1), JobKind::SyncFolderList)))
+        .with(Change::PutDraft(contract::draft(1, 1, "near")))
+        .with(Change::PutOutgoing(contract::outgoing(1, OutboxState::Waiting)))
+        .with(Change::PutScheduled(contract::scheduled(1, 1, Due::Send(DraftId::new(1)))))
+        .with(Change::PutCalendar(contract::calendar(1, 1, "home")))
+        .with(Change::PutCalendarEvent(contract::event(1, 1)))
+        .with(Change::PutAlert(contract::alert(1, 1, 1)));
+    store.apply(&batch).unwrap();
+}
+
+/// A write that links to another row (an outbox item to its draft, a schedule entry to what it names, an event to its
+/// calendar …) links only to a row it found: with an id past what the store can hold, it is refused and nothing is
+/// written.
+#[test]
+fn a_write_with_a_reference_past_the_largest_key_writes_nothing() {
+    let tmp = dir();
+    let dir = tmp.path();
+    of_every_kind(dir);
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let before = dump(dir);
+    for id in contract::FAR {
+        let (draft, message) = (DraftId::new(id), m(id));
+        for (change, refused) in [
+            (Change::PutOutgoing(contract::outgoing(id, OutboxState::Waiting)), StoreError::UnknownDraft(draft)),
+            (Change::PutScheduled(contract::scheduled(7, 1, Due::Send(draft))), StoreError::UnknownDraft(draft)),
+            (Change::PutScheduled(contract::scheduled(7, 1, Due::FollowUp(message))), StoreError::UnknownMessage(message)),
+            (Change::SetMessageState(message, MessageState { pinned: true, ..MessageState::default() }), StoreError::UnknownMessage(message)),
+            (Change::PutCalendarEvent(contract::event(7, id)), StoreError::UnknownCalendar(CalendarId::new(id))),
+        ] {
+            let what = format!("{change:?}");
+            assert_eq!(store.apply(&Batch::new().with(change)), Err(refused), "{what}");
+        }
+    }
+    assert_eq!(dump(dir), before);
+}
