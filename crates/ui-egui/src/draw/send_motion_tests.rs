@@ -7,7 +7,7 @@
 use egui::accesskit::Role;
 use egui::{Key, Modifiers, Rect, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_engine::Session;
 use inboxcraft_model::{AccountId, Host, Security, Server};
 use inboxcraft_store::{Batch, Change, Storage as _};
@@ -187,5 +187,27 @@ fn a_draft_scheduled_from_the_docked_composer_leaves_in_the_frame_of_its_key() {
         assert_eq!(subject(&harness), None, "{level:?}: the composer is gone in that frame");
         let status = seen(&harness, regions(&harness).1);
         assert!(status.iter().any(|(text, _, _)| text.starts_with("Scheduled for")), "{level:?}: the status line says so in that frame");
+    }
+}
+
+#[test]
+fn a_new_composer_opened_at_once_after_a_send_takes_a_click() {
+    // The shield after a send keeps a double click on Send off what the reader shows again; a new message written in
+    // that place at once is not under it.
+    for level in [Level::Full, Level::Reduced, Level::Off] {
+        let (mut harness, _) = written_over(level, true);
+        send(&mut harness);
+        assert!(harness.state().composer().is_none(), "{level:?}: sent");
+        // The new message's key, C, ends the picture in its frame; the click comes 0.1 s after the send.
+        harness.event(egui::Event::Key { key: Key::C, pressed: true, modifiers: Modifiers::NONE, repeat: false, physical_key: None });
+        harness.step();
+        assert!(harness.state().composer().is_some(), "{level:?}: a new message");
+        harness.run_steps(7);
+        let at = harness.get_by_role_and_label(Role::TextInput, "To").rect().center();
+        click_at(&mut harness, at);
+        assert!(
+            harness.get_by_role_and_label(Role::TextInput, "To").accesskit_node().is_focused(),
+            "{level:?}: To has the keyboard 0.1 s after the send"
+        );
     }
 }

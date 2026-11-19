@@ -175,6 +175,9 @@ struct Held {
 /// Which list is shown: its place, the account it is narrowed to (none: all), its search.
 type ListOf = (Place, Option<u64>, String);
 
+/// What the reader's place shows: the docked draft, else the open message ([`InboxApp::reader_key`]).
+type ReaderKey = (Option<u64>, Option<u64>);
+
 /// The InboxCraft window's content over a [`Mailbox`].
 pub struct InboxApp {
     mailbox: Mailbox,
@@ -285,8 +288,9 @@ pub struct InboxApp {
     reader_place: Option<Rect>,
     /// Whether a draft was sent in this pass.
     just_sent: bool,
-    /// Where the docked draft was sent from and until when (egui's double-click time) a press there reaches nothing.
-    sent_place: Option<(Rect, f64)>,
+    /// Where the docked draft was sent from, until when (egui's double-click time) a press there reaches nothing, and
+    /// what the place showed after the send: once it shows something else (a new composer), presses reach it again.
+    sent_place: Option<(Rect, f64, ReaderKey)>,
     /// Where the list was drawn last, to tell whether the keyboard was in it when it goes.
     list_rect: Option<Rect>,
     /// For how many more frames the keyboard is given to the composer's text, the list having gone with it.
@@ -2820,7 +2824,7 @@ impl InboxApp {
 
     /// What the reader's place shows, as state: the docked draft, else the message open on the mail (the selected one,
     /// which the next [`InboxApp::sync`] opens).
-    fn reader_key(&self) -> (Option<u64>, Option<u64>) {
+    fn reader_key(&self) -> ReaderKey {
         let docked = self.composer.as_ref().filter(|_| self.docked()).map(Composer::draft);
         let open = if self.screen == Screen::Mail && docked.is_none() { self.mailbox.selected() } else { None };
         (docked, open)
@@ -2829,7 +2833,7 @@ impl InboxApp {
     /// M7 and M10: when a command of this pass opened a message or sent the docked draft (the reader's place showed
     /// `drawn`), what the place painted is kept for the movement of the level, and the frame is drawn again with the
     /// change, so the owner never waits for it; while one runs, its frame is painted over the place.
-    fn reader_changed(&mut self, ctx: &egui::Context, drawn: (Option<u64>, Option<u64>), place: index::Place, status: Rect, theme: &Theme) {
+    fn reader_changed(&mut self, ctx: &egui::Context, drawn: ReaderKey, place: index::Place, status: Rect, theme: &Theme) {
         let now = self.reader_key();
         if ctx.current_pass_index() == 0 && now != drawn && self.index_place(self.settings.is_open()) == place {
             let sent = drawn.0.is_some() && now.0.is_none() && self.just_sent;
@@ -2850,7 +2854,7 @@ impl InboxApp {
                 });
                 if sent {
                     let until = ctx.input(|input| input.time) + ctx.options(|options| options.input_options.max_double_click_delay);
-                    self.sent_place = self.reader_place.map(|rect| (rect, until));
+                    self.sent_place = self.reader_place.map(|rect| (rect, until, now));
                 }
                 draw_reader_again(ctx);
                 return;
@@ -2870,12 +2874,13 @@ impl InboxApp {
     /// its presses.
     fn shield(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
-        self.sent_place = self.sent_place.filter(|(_, until)| now < *until);
-        if let Some((_, until)) = self.sent_place {
+        let shows = self.reader_key();
+        self.sent_place = self.sent_place.filter(|(_, until, after)| now < *until && *after == shows);
+        if let Some((_, until, _)) = self.sent_place {
             // Gone at its time, even with nothing else to draw: a shield left standing would take the next press.
             ctx.request_repaint_after(std::time::Duration::try_from_secs_f64(until - now).unwrap_or_default());
         }
-        let Some(rect) = self.picture.as_ref().map(picture::Picture::rect).or(self.sent_place.map(|(rect, _)| rect)) else { return };
+        let Some(rect) = self.picture.as_ref().map(picture::Picture::rect).or(self.sent_place.map(|(rect, _, _)| rect)) else { return };
         let id = egui::Id::unique("reader-shield");
         egui::Area::new(id).order(egui::Order::Background).fixed_pos(rect.min).constrain(false).movable(false).fade_in(false).show(ctx, |ui| {
             // Allocated, so the area is as large as the place and stands over it as a layer too.
