@@ -175,7 +175,10 @@ accounts. `mail.pin` (`safe`) pins a message: it stays in its lists, and `pin.li
 the accounts. Done takes the pin off unless the owner keeps pins through done (`pin.set`, `owner`; the session keeps
 it and the front end hands it back at the start, `Session::pins_outlast_done`). Each list row says `done`, `parked`
 and `pinned`. `history.undo` takes each act back: the state as it was and, for done, the message back where it was
-when that folder still holds mail.
+when that folder still holds mail. What the window does after an act takes the open message out of the list is
+the owner's choice, `after.set` (`owner`): open the next or the previous message, go back to the list, or stay, the
+keyboard on the row that took its place and nothing opened (`after::After`; the session keeps it and the front end
+hands it back at the start).
 
 Snooze (`mail.snooze`, `safe`, in `engine::cmd::triage`; the stage and the return in `engine::arrive::snooze`) puts
 a message away until a time, given as `until` or a preset of `schedule.presets`. The message goes to the account's

@@ -61,7 +61,9 @@
 //!   message in the archive and keeps where it was, where "show done" (`mail.list` with `done`) lists it;
 //!   `mail.park` and `mail.pin` (`safe`) put it on the park pile (`park.list`; `mail.list` leaves it out and counts
 //!   it) or in the pins view (`pin.list`). Done takes a pin off unless `pin.set` (`owner`) keeps it
-//!   ([`Session::pins_outlast_done`]). `history.undo` takes each back.
+//!   ([`Session::pins_outlast_done`]). `history.undo` takes each back. What follows an act on the open message is the
+//!   owner's choice, `after.set` (`owner`): the next, the previous, the list, or stay on the next row unopened
+//!   ([`Session::after`]).
 //! - Snooze: `mail.snooze` (`safe`) puts a message in `InboxCraft/Snoozed` until a time, in a new copy that carries
 //!   the time in InboxCraft's own header field so another InboxCraft sees it; [`Session::tick`] brings it back to the
 //!   inbox unread and marked as returned, and `mail.unsnooze` (`safe`) at once.
@@ -97,6 +99,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod act;
+pub mod after;
 pub mod appearance;
 mod arrive;
 mod calendar;

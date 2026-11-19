@@ -65,12 +65,12 @@ use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
 pub(crate) const COMMANDS: &[CommandSpec] =
-    &[ACCEPT, BLOCK, LIST, MODE, GROUP_SET, GROUP_ACCOUNT, GROUP_LIST, DONE, PARK, PIN, PARK_LIST, PIN_LIST, PIN_SET, SNOOZE, UNSNOOZE, FOLLOW_UP, CANCEL_FOLLOW_UP];
+    &[ACCEPT, BLOCK, LIST, MODE, GROUP_SET, GROUP_ACCOUNT, GROUP_LIST, DONE, PARK, PIN, PARK_LIST, PIN_LIST, PIN_SET, AFTER_SET, SNOOZE, UNSNOOZE, FOLLOW_UP, CANCEL_FOLLOW_UP];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
 pub(crate) const FIELDS: &[&str] =
-    &["address", "group", "then", "mode", "account", "grouped", "id", "done", "parked", "pinned", "limit", "offset", "keep_on_done", "until", "preset"];
+    &["address", "group", "then", "mode", "account", "grouped", "id", "done", "parked", "pinned", "limit", "offset", "keep_on_done", "until", "preset", "after"];
 
 /// `screener.mode`: what the screener does with the first mail of a sender the owner does not know.
 pub(crate) const MODE: CommandSpec = CommandSpec {
@@ -582,6 +582,28 @@ pub(crate) const PIN_LIST: CommandSpec =
 /// `pin.set`: whether done leaves a pin on.
 pub(crate) const PIN_SET: CommandSpec =
     CommandSpec { id: "pin.set", class: Some(AgentClass::Owner), summary: "Keep a pin when its message is done, or take it off", run: pin_set };
+
+/// `after.set`: what follows an act that takes the open message out of the list.
+pub(crate) const AFTER_SET: CommandSpec = CommandSpec {
+    id: "after.set",
+    class: Some(AgentClass::Owner),
+    summary: "Choose what follows an act on the open message: the next, the previous, the list, or stay",
+    run: after_set,
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AfterParams {
+    /// `next`, `previous`, `list` or `stay`.
+    after: String,
+}
+
+fn after_set(_: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: AfterParams = decode(AFTER_SET.id, params)?;
+    let after =
+        crate::after::After::named(&params.after).ok_or_else(|| EngineError::bad_params(AFTER_SET.id, "after is next, previous, list or stay"))?;
+    Ok(Outcome::new(json!({ "after": after.name() })).with_after(after))
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
