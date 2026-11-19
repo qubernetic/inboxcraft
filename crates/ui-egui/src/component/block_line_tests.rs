@@ -16,7 +16,7 @@ use super::BlockLine;
 use crate::component::Shown;
 use crate::component::gallery::keymap;
 use crate::component::gallery_home::{BLOCK_WIDTH, LineState, line, line_states};
-use crate::component::tests::{Look, builder, own, painted, staged};
+use crate::component::tests::{Look, builder, own, painted, stage, staged};
 use crate::motion;
 use crate::theme::{Mode, TextScale, Theme};
 
@@ -34,6 +34,18 @@ fn harness(theme: Theme, state: LineState) -> Harness<'static> {
             line(ui, theme, &keymap, &state, BLOCK_WIDTH);
         },
     )
+}
+
+/// [`harness`] `width` wide that draws a letter its faces lack as a box (as the app does) instead of failing.
+fn glyphless(theme: Theme, state: LineState, width: f32) -> Harness<'static> {
+    let mut harness = builder().allow_missing_glyphs().with_size(vec2(BLOCK_WIDTH + 48.0, 160.0)).build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), true);
+        stage(ui, theme.palette.bg, |ui| {
+            line(ui, &theme, &keymap(), &state, width);
+        });
+    });
+    harness.run();
+    harness
 }
 
 /// Every text the widget `name` painted: `(rect, text, colour, size)`.
@@ -137,11 +149,13 @@ fn a_hostile_empty_text_stays_in_the_line_on_three_lines_at_most_cut_once() {
         format!("No\u{0}\r\ndrafts \u{202E}{}", "x ".repeat(5_000)),
         format!("e{}", "\u{301}".repeat(10_000)),
         format!("\u{2067}{}\u{2069}", "abc ".repeat(2_500)),
+        "שלום עולם, ".repeat(1_000),
+        "مرحبا ".repeat(2_000),
     ];
     for text in texts_of {
         let text: &'static str = Box::leak(text.into_boxed_str());
         let state = LineState { name: "hostile", line: BlockLine::Empty(text), shown: Shown::Rest };
-        let harness = harness(theme, state);
+        let harness = glyphless(theme, state, BLOCK_WIDTH);
         let node = harness
             .root()
             .children_recursive()
@@ -157,6 +171,27 @@ fn a_hostile_empty_text_stays_in_the_line_on_three_lines_at_most_cut_once() {
         for (at, words, _, _) in found {
             assert!(rect.contains_rect(at), "{at:?} in {rect:?}");
             assert!(words.matches('…').count() <= 1, "cut once at most");
+        }
+    }
+}
+
+#[test]
+fn the_more_link_is_cut_inside_its_line_and_takes_no_press_outside_it() {
+    // A 10 000-letter word at the sheet's 320, and the sheet's words on a line narrower than they are.
+    let long: &'static str = Box::leak(format!("all\u{202E}{}", "d".repeat(10_000)).into_boxed_str());
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    for (words, width) in [(long, BLOCK_WIDTH), ("all drafts (5) →", 80.0), ("שלום עולם ".repeat(40).leak() as &str, BLOCK_WIDTH)] {
+        let state = LineState { name: "long", line: BlockLine::More(words), shown: Shown::Hover };
+        let harness = glyphless(theme, state, width);
+        let line = Rect::from_min_size(AT, vec2(width, theme.size(32.0)));
+        let link = harness.get_by_role(Role::Button);
+        let name = link.accesskit_node().label().unwrap_or_default();
+        let at = link.rect();
+        assert!(line.shrink2(vec2(16.0, 0.0)).expand(0.5).contains_rect(at), "the press stays in the line: {at:?} in {line:?}");
+        assert_eq!(name.matches('…').count(), 1, "cut once: {name:?}");
+        assert!(!name.contains('\u{202E}'), "drawn plain");
+        for shape in &painted(&harness, &name).shapes {
+            assert!(line.contains_rect(shape.rect), "{:?} paints outside the line {line:?}", shape.rect);
         }
     }
 }

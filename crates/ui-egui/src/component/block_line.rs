@@ -87,7 +87,11 @@ pub fn block_line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, line: &BlockLine<
                 pos2(rect.left() + PAD_X, (rect.center().y - link_high / 2.0).round()),
                 pos2(rect.right() - PAD_X, (rect.center().y + link_high / 2.0).round()),
             );
-            let words = super::plain(super::capped(words, super::MOST).0);
+            // Cut with one `…` to the line's room, so the link neither paints nor takes a press outside it.
+            let words = super::fit_capped(ui, &super::plain(super::capped(words, super::MOST).0), theme.fonts.mono_s, place.width());
+            if words.is_empty() {
+                return false;
+            }
             ui.scope_builder(UiBuilder::new().max_rect(place).layout(egui::Layout::left_to_right(Align::Center)), |ui| {
                 link_with(ui, theme, keymap, &words, LinkSize::Small, true, shown).clicked()
             })
