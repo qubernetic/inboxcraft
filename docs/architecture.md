@@ -499,15 +499,16 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   removed only after that row is gone; opening the store removes the files a kill left behind. Removed mail is
   zeroed in the database (`secure_delete`, FTS5 `secure-delete`) and the write-ahead log is emptied after the batch
   that removed it. The store does no network I/O and parses no mail: the caller hands in each body's text.
-- Beside the mail the store keeps the local records (`model::local`, schema version 4): the job queue, drafts, the
-  outbox, the schedule, senders (known, the screener's decision, the group), each message's own state (done,
-  parked, pinned, snoozed, follow-up) and the calendars with their sync token, events (ETag and iCalendar text) and
-  alerts. Each row holds its record as JSON, so a new field needs no migration; removing an account, folder,
-  message, draft, alert, calendar or event removes what hangs below it. A schedule entry hangs below the draft,
-  message or alert it names, so it never acts on a later record that got the same id. Senders are kept across
-  accounts. The store has an id of its own, random and kept for good (`Sqlite::id`). The desktop app keeps its
-  store in `inboxcraft/store` in the owner's data folder (`%LOCALAPPDATA%` on Windows, else `XDG_DATA_HOME`,
-  `~/.var/app/<app id>/data` in the Flatpak); the sample stays in memory.
+- Beside the mail the store keeps the local records (`model::local`, schema version 5): the job queue, drafts, the
+  outbox, the schedule, senders (known, the screener's decision, the group), each message's own state (done, parked,
+  pinned, snoozed, follow-up) and the calendars with their sync token, events (ETag and iCalendar text) and alerts.
+  Each row holds its record as JSON, so a new field needs no migration; a draft's save time is a column of its own
+  too, so the newest drafts of an account and their count are read through an index without reading every draft
+  (`Storage::newest_drafts`); removing an account, folder, message, draft, alert, calendar or event removes what hangs
+  below it. A schedule entry hangs below the draft, message or alert it names, so it never acts on a later record that
+  got the same id. Senders are kept across accounts. The store has an id of its own, random and kept for good
+  (`Sqlite::id`). The desktop app keeps its store in `inboxcraft/store` in the owner's data folder (`%LOCALAPPDATA%`
+  on Windows, else `XDG_DATA_HOME`, `~/.var/app/<app id>/data` in the Flatpak); the sample stays in memory.
 - Kept jobs: a command that queues a job with `Outcome::with_kept_job` (the acts on mail) writes it into the
   store's job queue in the same batch as its changes, so a kill keeps both or neither. The job leaves the queue with
   its last event (the answer, or `Failed`); `Session::start` hands the jobs an earlier run left over again, under

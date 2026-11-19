@@ -173,7 +173,7 @@ fn a_version_3_store_gets_the_local_tables_with_its_mail_kept() {
     let dir = tmp.path();
     version_3(dir);
     let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 4);
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
     assert_eq!(store.accounts().unwrap(), [account(1)]);
     assert!(store.message(m(1)).unwrap().unwrap().opened());
     assert_eq!(store.search(&Search::new().with_text("draft budget")).unwrap(), [m(1)]);
@@ -233,4 +233,31 @@ fn the_local_tables_are_the_ones_the_epic_needs() {
             "sender"
         ]
     );
+}
+
+/// What version 5 added, taken off again: a store as version 4 left it, with its rows.
+const BACK_TO_VERSION_4: &str = "DROP INDEX draft_newest;
+    ALTER TABLE draft DROP COLUMN saved;
+    ALTER TABLE draft DROP COLUMN saved_nanos;
+    PRAGMA user_version = 4;";
+
+#[test]
+fn a_version_4_store_gets_the_save_time_of_its_drafts() {
+    let tmp = dir();
+    let dir = tmp.path();
+    let saved = |id: u64, seconds: i64, nanos: u32| inboxcraft_model::Draft {
+        saved: inboxcraft_time::Timestamp::from_unix(seconds, nanos).unwrap(),
+        ..contract::draft(id, 1, "kept")
+    };
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let mut batch = Batch::new().with(Change::PutAccount(account(1)));
+    for (id, seconds, nanos) in [(1, 300, 0), (2, 100, 0), (3, 300, 7), (4, 200, 0)] {
+        batch = batch.with(Change::PutDraft(saved(id, seconds, nanos)));
+    }
+    store.apply(&batch).unwrap();
+    drop(store);
+    Connection::open(dir.join(DATABASE_FILE)).unwrap().execute_batch(BACK_TO_VERSION_4).unwrap();
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    assert_eq!(store.newest_drafts(AccountId::new(1), 3).unwrap(), (4, vec![saved(3, 300, 7), saved(1, 300, 0), saved(4, 200, 0)]));
 }

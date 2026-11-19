@@ -36,9 +36,10 @@ pub(super) fn queue_job(tx: &Transaction<'_>, job: &Job) -> Result<(), StoreErro
 pub(super) fn put_draft(tx: &Transaction<'_>, draft: &Draft) -> Result<(), StoreError> {
     let account = account(tx, draft.account)?;
     tx.execute(
-        "INSERT INTO draft (id, account, record) VALUES (?1, ?2, ?3)
-         ON CONFLICT (id) DO UPDATE SET account = excluded.account, record = excluded.record",
-        params![stored(draft.id.get())?, account, json(draft)?],
+        "INSERT INTO draft (id, account, saved, saved_nanos, record) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (id) DO UPDATE SET account = excluded.account, saved = excluded.saved, saved_nanos = excluded.saved_nanos,
+           record = excluded.record",
+        params![stored(draft.id.get())?, account, draft.saved.unix_seconds(), draft.saved.subsec_nanos(), json(draft)?],
     )?;
     Ok(())
 }

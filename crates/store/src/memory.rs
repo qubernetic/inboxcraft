@@ -356,6 +356,19 @@ impl Storage for Memory {
         Ok(self.state.drafts.values().filter(|draft| draft.account == account).cloned().collect())
     }
 
+    fn newest_drafts(&self, account: AccountId, limit: usize) -> Result<(u64, Vec<Draft>), StoreError> {
+        let mut drafts: Vec<&Draft> = self.state.drafts.values().filter(|draft| draft.account == account).collect();
+        let total = u64::try_from(drafts.len()).unwrap_or(u64::MAX);
+        let newest = |a: &&Draft, b: &&Draft| b.saved.cmp(&a.saved).then(b.id.cmp(&a.id));
+        // The newest `limit` first, in time linear in the drafts; only those are sorted and cloned.
+        if limit < drafts.len() {
+            drafts.select_nth_unstable_by(limit, newest);
+            drafts.truncate(limit);
+        }
+        drafts.sort_by(newest);
+        Ok((total, drafts.into_iter().cloned().collect()))
+    }
+
     fn draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError> {
         Ok(self.state.drafts.get(&id).cloned())
     }
