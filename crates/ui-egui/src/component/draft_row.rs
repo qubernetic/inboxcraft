@@ -68,6 +68,7 @@ pub fn draft_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &DraftRow<'_>
     let rect = drawn.rect;
     let (mut open, mut discard) = (false, false);
     if !ui.is_rect_visible(rect) {
+        ui.skip_ahead_auto_ids(2);
         return Drawn { row: drawn, open, discard };
     }
     // Without the line under it, the row's middle: where its one line stands.
@@ -98,6 +99,8 @@ pub fn draft_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &DraftRow<'_>
         }
         right -= total;
     } else {
+        // The ids the two links' children would have taken: whatever comes after the row keeps its id, lit or not.
+        ui.skip_ahead_auto_ids(2);
         right = paint::run_right(ui.painter(), right, at(f.mono_s.line), super::galley(ui, row.when, f.mono_s, p.muted), p.muted);
     }
     let to = super::fitted(ui, row.to, f.caption, p.muted, TO_WIDEST);

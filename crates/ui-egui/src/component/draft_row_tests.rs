@@ -165,3 +165,30 @@ fn a_lit_row_does_not_move_the_row_under_it_at_100_and_130_percent() {
         assert_eq!(second_top(theme, true, false), still, "keyed: {scale:?}");
     }
 }
+
+/// The id the next widget after a row takes when it asks `ui` for one, the row lit (`keyed`) or not.
+fn next_auto_id(keyed: bool) -> egui::Id {
+    use crate::component::draft_row::{DraftRow, draft_row};
+    let keymap = keymap();
+    let after = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let kept = std::sync::Arc::clone(&after);
+    let _harness = staged(
+        Theme::new(Mode::Light, TextScale::default()),
+        |p| p.surface,
+        vec2(ROW_WIDTH + 48.0, 200.0),
+        move |ui, theme| {
+            ui.set_width(ROW_WIDTH);
+            let row =
+                DraftRow { id: egui::Id::unique("auto"), spoken: "a draft", subject: None, to: "to Sunniva Aalto", when: "edited 12:10", last: true };
+            draft_row(ui, theme, &keymap, &row, keyed, None);
+            *kept.lock().unwrap() = Some(ui.next_auto_id());
+        },
+    );
+    after.lock().unwrap().unwrap()
+}
+
+#[test]
+fn a_lit_row_leaves_the_ids_after_it_as_they_are() {
+    // A control after the row keeps its id when the row's links come and go, so the keyboard on it stays there.
+    assert_eq!(next_auto_id(true), next_auto_id(false));
+}
