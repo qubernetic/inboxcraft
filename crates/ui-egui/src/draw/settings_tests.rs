@@ -30,7 +30,7 @@ fn harness() -> Harness<'static, InboxApp> {
 
 fn opened() -> Harness<'static, InboxApp> {
     let mut harness = harness();
-    harness.get_by_label("Appearance settings").click();
+    harness.get_by_role_and_label(egui::accesskit::Role::Button, "Settings").click();
     harness.run();
     assert!(harness.state().settings().is_open());
     harness
@@ -86,7 +86,7 @@ fn the_sheet_opens_over_the_dimmed_window_a_press_beside_it_or_close_or_escape_l
     assert!(!harness.state().settings().is_open());
     assert!(harness.query_all_by_label_contains("Draft logo for the bakery").count() > 0, "the list is back");
 
-    harness.get_by_label("Appearance settings").click();
+    harness.get_by_role_and_label(egui::accesskit::Role::Button, "Settings").click();
     harness.run();
     harness.key_press(Key::Escape);
     harness.run();
@@ -212,7 +212,7 @@ fn the_window_frame_row_runs_ui_frame_set() {
     let mut harness =
         Harness::builder().with_size(vec2(1200.0, 1400.0)).with_theme(egui::Theme::Light).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
-    harness.get_by_label("Appearance settings").click();
+    harness.get_by_role_and_label(egui::accesskit::Role::Button, "Settings").click();
     harness.run();
     // The design's two frames: InboxCraft's own (the strip by default) and the desktop's.
     assert!(selected(&harness, "Own"), "the app's own frame by default");

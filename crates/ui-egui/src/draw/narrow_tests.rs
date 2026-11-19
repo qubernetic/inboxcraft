@@ -109,8 +109,8 @@ fn at_every_width_nothing_in_the_list_s_or_the_composer_s_heads_stands_over_anyt
             harness.get_by_role_and_label(Role::TextInput, "To").type_text("odile@example.org,");
             harness.run();
             let at = format!("{percent} % {width}");
-            // Right of the folder pane: the list's head and its cards' heads, when the list is drawn.
-            let folders = harness.get_by_label("Accounts").rect().right() + 1.0;
+            // Right of the index: the list's head and its cards' heads, when the list is drawn.
+            let folders = super::shell::laid(&harness.ctx).unwrap().body.left() + 1.0;
             if let Some(search) = search_box(&harness) {
                 assert_eq!(overdrawn(&harness, band(folders, 0.0, search.bottom() + 24.0)), Vec::<String>::new(), "{at}: the list's head");
                 // Each group's head whole: nothing over anything, no word of it cut.
@@ -193,7 +193,8 @@ fn the_hidden_list_takes_no_tab_stop_and_no_key() {
 
 #[test]
 fn closing_the_composer_brings_the_list_back_with_its_place_and_its_pick() {
-    let mut harness = window(720.0, 100);
+    // 800, the least the window is laid out at (a narrower one is clipped).
+    let mut harness = window(800.0, 100);
     harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
     harness.run();
     // One pane: the message opened in the list's place; Esc brings the list back in front, the row picked.
@@ -231,47 +232,6 @@ fn the_keyboard_in_the_list_when_it_goes_moves_to_the_composer() {
     harness.run();
     assert!(search_box(&harness).is_none());
     assert!(super::compose::has_keys(&harness.ctx), "the keys went with the list");
-}
-
-/// Drags the folder pane's edge, 12 right of its Accounts box (its card's pad), 800 to the right.
-fn widen_folders(harness: &mut Harness<'static, InboxApp>) {
-    let edge = harness.get_by_label("Accounts").rect().right() + 12.0;
-    let mut at = egui::pos2(edge - 1.0, 400.0);
-    harness.event(egui::Event::PointerMoved(at));
-    harness.step();
-    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
-    harness.step();
-    for _ in 0..16 {
-        at.x += 50.0;
-        harness.event(egui::Event::PointerMoved(at));
-        harness.step();
-    }
-    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
-    harness.run();
-}
-
-#[test]
-fn a_folder_pane_dragged_wide_leaves_the_composer_its_send_whole() {
-    for percent in [100, 130] {
-        for width in [720.0, 800.0, 1100.0] {
-            let mut harness = composing(width, percent);
-            let accounts = harness.get_by_label("Accounts").rect().right();
-            widen_folders(&mut harness);
-            let at = format!("{percent} % {width}");
-            if width >= 1100.0 {
-                assert!(harness.get_by_label("Accounts").rect().right() > accounts + 40.0, "{at}: the pane was dragged wider");
-            }
-            let composer = super::compose::drawn_rect(&harness.ctx).unwrap();
-            assert!(composer.right() <= width, "{at}: {composer:?} in the window");
-            for label in ["Send", "Send later", "Discard the draft"] {
-                let rect = harness.get_by_label(label).rect();
-                assert!(composer.contains_rect(rect) && rect.right() <= width, "{at}: {label} {rect:?} in {composer:?}");
-            }
-            for text in texts(&harness) {
-                assert!(text.0.right() <= width + 0.5, "{at}: {text:?} past the window");
-            }
-        }
-    }
 }
 
 #[test]
@@ -348,137 +308,5 @@ fn where_the_list_stands_at_its_least_a_group_s_head_hovered_stands_whole() {
             assert!(!words.iter().any(|text| text.contains('…')), "{percent}: cut, {words:?}");
             assert_eq!(overdrawn(&harness, inside), Vec::<String>::new(), "{percent}: a group's head");
         }
-    }
-}
-
-/// Drags the folder pane's edge `by` points to the right, in steps of 10.
-fn drag_folders(harness: &mut Harness<'static, InboxApp>, by: f32) {
-    let edge = harness.get_by_label("Accounts").rect().right() + 12.0;
-    let mut at = egui::pos2(edge - 1.0, 400.0);
-    harness.event(egui::Event::PointerMoved(at));
-    harness.step();
-    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
-    harness.step();
-    let steps = (by / 10.0).round() as u32;
-    for _ in 0..steps {
-        at.x += 10.0;
-        harness.event(egui::Event::PointerMoved(at));
-        harness.step();
-    }
-    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
-    harness.run();
-}
-
-#[test]
-fn the_folder_pane_the_owner_widened_comes_back_to_the_pixel_when_the_composer_closes() {
-    for (width, by) in [(720.0, 120.0), (1000.0, 300.0)] {
-        let mut harness = window(width, 100);
-        let before = harness.get_by_label("Accounts").rect().right();
-        drag_folders(&mut harness, by);
-        let widened = harness.get_by_label("Accounts").rect().right();
-        assert!(widened > before + by / 2.0, "{width}: the pane was dragged wider: {before} then {widened}");
-        harness.get_by_role_and_label(Role::Button, "New message").click();
-        harness.run();
-        let squeezed = harness.get_by_label("Accounts").rect().right();
-        assert!(squeezed < widened, "{width}: the composer's least width squeezes the pane: {squeezed}");
-        harness.get_by_label("Close; the draft is kept").click();
-        harness.run();
-        harness.run();
-        assert_eq!(harness.get_by_label("Accounts").rect().right(), widened, "{width}: the owner's width back, to the pixel");
-    }
-}
-
-#[test]
-fn the_folder_pane_the_owner_widened_comes_back_to_the_pixel_after_a_slow_window_resize() {
-    // A window edge dragged slowly moves the cap by less than half a point a frame: one physical pixel at 300 %, or
-    // a quarter point; the squeezed pane follows the cap, and none of it is the owner's.
-    for (scale, steps) in [(3.0, vec![1.0 / 3.0; 30]), (1.0, [vec![-0.25; 40], vec![0.25; 40]].concat())] {
-        let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
-        app.set_text_scale(crate::theme::TextScale::from_percent(100).unwrap());
-        let mut harness = Harness::builder()
-            .with_size(vec2(1000.0, 800.0))
-            .with_pixels_per_point(scale)
-            .with_max_steps(12)
-            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
-        harness.run();
-        drag_folders(&mut harness, 300.0);
-        let widened = harness.get_by_label("Accounts").rect().right();
-        harness.get_by_role_and_label(Role::Button, "New message").click();
-        harness.run();
-        let squeezed = harness.get_by_label("Accounts").rect().right();
-        assert!(squeezed < widened, "{scale}: the composer's least width squeezes the pane: {widened} then {squeezed}");
-        let mut width = 1000.0_f32;
-        for step in steps {
-            width += step;
-            harness.set_size(vec2(width, 800.0));
-            harness.step();
-        }
-        harness.run();
-        harness.get_by_label("Close; the draft is kept").click();
-        harness.run();
-        harness.run();
-        assert_eq!(harness.get_by_label("Accounts").rect().right(), widened, "{scale}: the owner's width back, to the pixel");
-    }
-}
-
-#[test]
-fn a_screen_reader_s_steps_narrow_the_squeezed_folder_pane_and_it_keeps_that_width() {
-    let mut harness = window(1000.0, 100);
-    drag_folders(&mut harness, 300.0);
-    harness.get_by_role_and_label(Role::Button, "New message").click();
-    harness.run();
-    let squeezed = harness.get_by_label("Accounts").rect().right();
-    let (splitter, tree) = harness.query_all_by_role(Role::Splitter).next().unwrap().accesskit_node().locate();
-    for _ in 0..3 {
-        harness.event(egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
-            action: egui::accesskit::Action::Decrement,
-            target_tree: tree,
-            target_node: splitter,
-            data: None,
-        }));
-        harness.step();
-        harness.step();
-    }
-    harness.run();
-    harness.run();
-    let stepped = harness.get_by_label("Accounts").rect().right();
-    assert!(stepped < squeezed - 20.0, "three Decrements narrow the pane: {squeezed} then {stepped}");
-    harness.get_by_label("Close; the draft is kept").click();
-    harness.run();
-    harness.run();
-    assert_eq!(harness.get_by_label("Accounts").rect().right(), stepped, "after Close, the width the screen reader left");
-}
-
-#[test]
-fn the_folder_pane_the_cap_squeezes_can_still_be_narrowed_and_keeps_that_width() {
-    // At 720 the squeezed pane stands 42 above the least its folders take (egui gives a pane its content's width back
-    // on release), so the drag there is 30; at 1000 it is 80.
-    for (width, by, back) in [(720.0, 120.0, 3), (1000.0, 300.0, 8)] {
-        let mut harness = window(width, 100);
-        drag_folders(&mut harness, by);
-        harness.get_by_role_and_label(Role::Button, "New message").click();
-        harness.run();
-        let squeezed = harness.get_by_label("Accounts").rect().right();
-        // To the left, the button still held: where the pane stands then is where it is dropped.
-        let mut at = egui::pos2(squeezed + 11.0, 400.0);
-        harness.event(egui::Event::PointerMoved(at));
-        harness.step();
-        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
-        harness.step();
-        for _ in 0..back {
-            at.x -= 10.0;
-            harness.event(egui::Event::PointerMoved(at));
-            harness.step();
-        }
-        let held = harness.get_by_label("Accounts").rect().right();
-        assert!(held < squeezed - 20.0 && held > squeezed - 90.0, "{width}: the drag narrows the pane: {squeezed} then {held}");
-        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
-        harness.run();
-        harness.run();
-        assert_eq!(harness.get_by_label("Accounts").rect().right(), held, "{width}: the pane stays where it was dropped");
-        harness.get_by_label("Close; the draft is kept").click();
-        harness.run();
-        harness.run();
-        assert_eq!(harness.get_by_label("Accounts").rect().right(), held, "{width}: after Close, the width the owner dropped it at");
     }
 }

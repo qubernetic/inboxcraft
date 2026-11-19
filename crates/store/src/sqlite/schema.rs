@@ -136,9 +136,19 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
         return Err(StoreError::NewerSchema { found, known: SCHEMA_VERSION });
     }
     for migration in MIGRATIONS.iter().skip(usize::try_from(found).unwrap_or(usize::MAX)) {
-        tx.execute_batch(migration)?;
+        tx.execute_batch(migration).map_err(migration_failed)?;
     }
-    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION).map_err(migration_failed)?;
     tx.commit()?;
     Ok(())
+}
+
+/// A migration step's failure: a busy, full or damaged database keeps its kind; any other is the migration's. A
+/// constraint a step meets (a new unique index over rows already there) is the migration's too: the owner changed
+/// nothing, so "the store refused the change" would mislead.
+pub(super) fn migration_failed(error: rusqlite::Error) -> StoreError {
+    match StoreError::from(error) {
+        StoreError::Database(detail) | StoreError::DatabaseRefused(detail) => StoreError::Migration(detail),
+        kept => kept,
+    }
 }

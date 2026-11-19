@@ -3,7 +3,7 @@
 
 use inboxcraft_time::{FirstWeek, Offset, Timestamp, WeekRule, Weekday};
 
-use super::{Day, dated, long, month_name, span, weekday_letter, weekday_short};
+use super::{Day, dated, long, month_name, short_dated, span, span_short, weekday_letter, weekday_short};
 
 fn day(year: i32, month: u8, date: u8) -> Day {
     Day::new(year, month, date).unwrap()
@@ -93,4 +93,14 @@ fn a_week_out_of_the_years_known_is_no_week_and_starts_on_the_day_itself() {
     let saturday = WeekRule { first_day: Weekday::Saturday, first_week: FirstWeek::WeekOf1January };
     assert_eq!(first.week_start(saturday), first);
     assert_eq!(first.week_number(saturday), Some(1));
+}
+
+#[test]
+fn the_short_titles_leave_the_year_out_and_shorten_the_names() {
+    assert_eq!(short_dated(day(2026, 11, 5)), "Thu 5 Nov");
+    assert_eq!(span_short(day(2026, 11, 2), day(2026, 11, 8)), "2 – 8 Nov");
+    assert_eq!(span_short(day(2026, 11, 30), day(2026, 12, 6)), "30 Nov – 6 Dec");
+    assert_eq!(span_short(day(2026, 12, 28), day(2027, 1, 3)), "28 Dec – 3 Jan");
+    // The same month a year apart is still two months.
+    assert_eq!(span_short(day(2026, 11, 2), day(2027, 11, 8)), "2 Nov – 8 Nov");
 }

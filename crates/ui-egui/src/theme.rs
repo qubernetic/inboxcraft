@@ -489,6 +489,19 @@ impl Fonts {
         Font { face: Face::SansSemiBold, size: self.body.size * 13.0 / 14.0, line: self.body.size * 17.0 / 14.0, ..self.body }
     }
 
+    /// A glyph of the character field: Plex Mono 13.33/15, whose advance is the cell's 8 points; at every text scale,
+    /// since the field's cells grow and its dots do not.
+    #[must_use]
+    pub fn field(&self) -> Font {
+        Font { size: 40.0 / 3.0, line: 15.0, ..self.mono }
+    }
+
+    /// A glyph of the emblem: Plex Mono 12/12.5, at the emblem's one size.
+    #[must_use]
+    pub fn emblem(&self) -> Font {
+        Font { size: 12.0, line: 12.5, ..self.mono }
+    }
+
     /// The mark of a ticked check box, `×`: Plex Mono SemiBold 14/16.
     #[must_use]
     pub fn check_mark(&self) -> Font {

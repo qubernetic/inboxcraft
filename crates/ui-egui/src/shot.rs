@@ -47,8 +47,11 @@
 //! ([`crate::component::gallery_screens`]), `calendar_sets` set to `true` the page of the calendar's sets
 //! ([`crate::component::gallery_calendar`]), `reader` set to `true` the page of the reader's sets
 //! ([`crate::component::gallery_reader`]), `lists` set to `true` the page of the mail lists' rows
-//! ([`crate::component::gallery_lists`]), `status_sets` set to `true` the page of the status line's sets
-//! ([`crate::component::gallery_status`]). The typeface and the icons are fixed, so a script that names a
+//! ([`crate::component::gallery_lists`]), `index` set to `true` the page of the index's rows
+//! ([`crate::component::gallery_index`]), `character_field` set to `true` the page of the character field
+//! ([`crate::component::gallery_field`]), where `pointer` may rest, `status_sets` set to `true` the page of the
+//! status line's sets ([`crate::component::gallery_status`]). The typeface and the icons are fixed, so a script
+//! that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
 //! before the picture, so what that opens (a menu, a list) is in it; `put_away` set to `true` snoozes, pins, parks and marks
@@ -79,7 +82,7 @@ use crate::calendar::{EventRow, View};
 use crate::component::gallery;
 use crate::compose::Line;
 use crate::mailbox::{Act, GroupKind, InboxView, Mailbox, Pile, Place};
-use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
+use crate::onboard::{Checked, Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
 use crate::theme::{self, Mode, TextScale, Theme};
 use crate::workers::Scripted;
@@ -246,6 +249,12 @@ pub struct Shot {
     /// The page of the mail lists' rows instead of the window.
     #[serde(default)]
     pub lists: Option<bool>,
+    /// The page of the index's rows instead of the window.
+    #[serde(default)]
+    pub index: Option<bool>,
+    /// The page of the character field instead of the window; `pointer` may rest on it.
+    #[serde(default)]
+    pub character_field: Option<bool>,
     /// The page of the status line's sets (status item, status message) instead of the window.
     #[serde(default)]
     pub status_sets: Option<bool>,
@@ -419,6 +428,7 @@ fn pictured_proposal() -> Proposal {
         security,
         username: "robin@example.org".to_owned(),
         source: Source::Autoconfig,
+        checked: Checked::Answered,
     };
     Proposal {
         imap: vec![suggestion("imap.example.org", 993, Security::Tls), suggestion("imap.example.org", 143, Security::StartTls)],
@@ -800,16 +810,23 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.menu.is_some()
         || shot.outbox.is_some()
         || shot.steps.is_some()
-        || [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists]
-            .iter()
-            .filter(|page| **page == Some(true))
-            .count()
-            > 1
-        || (shot.calendar_sets == Some(true)
-            && [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists].contains(&Some(true)))
-        || (shot.status_sets == Some(true)
-            && [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.calendar_sets, shot.reader, shot.lists]
-                .contains(&Some(true)));
+        || [
+            shot.icons,
+            shot.components,
+            shot.blocks,
+            shot.fields,
+            shot.screens,
+            shot.calendar_sets,
+            shot.reader,
+            shot.lists,
+            shot.index,
+            shot.character_field,
+            shot.status_sets,
+        ]
+        .iter()
+        .filter(|page| **page == Some(true))
+        .count()
+            > 1;
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
     }
@@ -920,6 +937,41 @@ fn lists_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
         crate::component::gallery_lists::page(ui, &theme, &keymap);
+    })
+}
+
+/// The page of the index's rows of `shot` in `mode`.
+fn index_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of the index's rows")?;
+    let theme = Theme::new(mode, TextScale::default());
+    let mut fonts = true;
+    paint(crate::component::gallery_index::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_index::page(ui, &theme);
+    })
+}
+
+/// The page of the character field of `shot` in `mode`, the pointer resting where `pointer` says.
+fn field_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of the character field")?;
+    let size = crate::component::gallery_field::size();
+    if let Some([x, y]) = shot.pointer
+        && !((0.0..=size.x).contains(&x) && (0.0..=size.y).contains(&y))
+    {
+        return Err(bad(format!("{}: pointer [{x}, {y}] is not on the page", shot.out)));
+    }
+    let theme = Theme::new(mode, TextScale::default());
+    let mut fonts = true;
+    let pointer = Pointer { rest: shot.pointer.map(|[x, y]| pos2(x, y)), click: None };
+    paint_pointed(size, shot.scale.unwrap_or(1.0), mode, pointer, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_field::page(ui, &theme);
     })
 }
 
@@ -1529,6 +1581,12 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if shot.lists == Some(true) {
         return lists_gallery(shot, mode);
+    }
+    if shot.index == Some(true) {
+        return index_gallery(shot, mode);
+    }
+    if shot.character_field == Some(true) {
+        return field_gallery(shot, mode);
     }
     if shot.status_sets == Some(true) {
         return status_gallery(shot, mode);

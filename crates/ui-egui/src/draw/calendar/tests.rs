@@ -297,6 +297,9 @@ fn a_picked_event_shows_both_dates_and_its_own_zone_labelled() {
 #[test]
 fn a_block_over_several_days_shows_both_dates_and_a_second_press_lets_it_go() {
     let mut harness = on_calendar(egui::Theme::Light);
+    // A month's days as high as an 820 window gave them before the command and status lines took their 74.
+    harness.set_size(vec2(1200.0, 894.0));
+    harness.run();
     press(&mut harness, "Month");
     pick(&mut harness, "Coast trip");
     harness.get_by_label("Monday 16 November – Wednesday 18 November");
@@ -396,6 +399,8 @@ fn the_week_drawn_follows_the_rule_set_in_the_session_with_today_in_it() {
         ),
     ] {
         let mut harness = on_calendar(egui::Theme::Light);
+        // The frame's 1440: beside the index, at 1200 the toolbar has no room for the week's note.
+        harness.set_size(vec2(1440.0, 900.0));
         {
             let (calendar, mailbox) = harness.state_mut().calendar_mut();
             mailbox.run("week.set", &serde_json::from_str(rule).unwrap()).unwrap();

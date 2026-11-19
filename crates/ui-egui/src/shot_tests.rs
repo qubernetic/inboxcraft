@@ -44,7 +44,8 @@ fn the_sample_window_is_drawn_in_the_tokens_of_each_mode() {
             assert_eq!((picture.width(), picture.height()), (1000, 700));
             let palette = Theme::new(mode, TextScale::default()).palette;
             // Below the list's rows: the flat surface of its pane.
-            let pane = picture.pixel(980, 686).unwrap();
+            // (The body ends at 672, over the status line.)
+            let pane = picture.pixel(980, 660).unwrap();
             assert_eq!(pane, palette.surface, "{name}: the pane below the list is the flat surface");
             let mut colours = std::collections::BTreeSet::new();
             for y in (0..700).step_by(7) {
