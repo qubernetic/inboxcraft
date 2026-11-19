@@ -194,9 +194,13 @@ impl Source {
 pub enum Checked {
     /// It greeted and, encrypted, offered a sign-in.
     Answered,
-    /// No probe reached it (no answer, a refused or dropped connection, no address, or no time left), but the domain
-    /// names it: proposed unchecked. The account check still verifies TLS before any password goes out.
+    /// No probe reached it (no answer in time, a dropped connection, or no time or tries left), but the domain names
+    /// it: proposed unchecked. The account check still verifies TLS before any password goes out.
     NoAnswer,
+    /// As [`Checked::NoAnswer`], but its probe was refused the connection.
+    Refused,
+    /// As [`Checked::NoAnswer`], but its host's name was not found.
+    NoName,
 }
 
 /// A server Detect proposes.
@@ -402,13 +406,27 @@ impl<'a> Run<'a> {
                 }
             };
             let Some(named) = list.of(service).iter().filter(|candidate| candidate.source.is_named()).find(unreached) else { continue };
-            let named = Candidate { checked: Checked::NoAnswer, ..named.clone() };
+            let named = Candidate { checked: self.unchecked(service, named), ..named.clone() };
             match service {
                 Service::Imap => self.proposal.imap.push(named),
                 Service::Submission => self.proposal.submission.push(named),
             }
         }
         self.proposal
+    }
+
+    /// Why `candidate`, proposed unchecked, was not checked: its own probe's failure, or its host's name not found
+    /// by another probe.
+    fn unchecked(&self, service: Service, candidate: &Candidate) -> Checked {
+        let own = self.tried.iter().find(|(held, server, _)| *held == service && *server == candidate.server).and_then(|(_, _, failed)| *failed);
+        let no_name =
+            || self.tried.iter().any(|(_, server, failed)| server.host() == candidate.server.host() && *failed == Some(ErrorKind::HostNotFound));
+        match own {
+            Some(ErrorKind::ConnectionRefused) => Checked::Refused,
+            Some(ErrorKind::HostNotFound) => Checked::NoName,
+            None if no_name() => Checked::NoName,
+            _ => Checked::NoAnswer,
+        }
     }
 
     /// Found both, or out of time or tries.

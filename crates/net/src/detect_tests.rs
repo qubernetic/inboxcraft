@@ -448,7 +448,7 @@ fn the_tries_are_capped() {
     assert!(proposal.failed.contains(&("detect: the cap of 5 tries".to_owned(), ErrorKind::TooLarge)));
     // Nothing is asked after the cap; the first server the SRV records name stands, unchecked.
     assert_eq!(imap(&proposal), ["imap0.example.net:993 (TLS) Srv"]);
-    assert_eq!(proposal.imap[0].checked, Checked::NoAnswer);
+    assert_eq!(proposal.imap[0].checked, Checked::Refused);
     assert!(probe.tried().iter().all(|tried| tried.contains(".example.net")));
 }
 
@@ -672,4 +672,19 @@ fn a_named_server_on_a_guessed_host_that_timed_out_is_still_probed() {
         proposal.submission.iter().map(|candidate| format!("{} {:?} {:?}", candidate.server, candidate.source, candidate.checked)).collect();
     assert_eq!(submission, ["mail.example.org:587 (STARTTLS) Srv Answered"]);
     assert!(probe.tried().contains(&"submission mail.example.org:587 (STARTTLS)".to_owned()));
+}
+
+/// A named server proposed unchecked says why: no answer in time, the connection refused, or its name not found.
+#[test]
+fn an_unchecked_named_server_says_why() {
+    for (kind, checked) in
+        [(ErrorKind::TimedOut, Checked::NoAnswer), (ErrorKind::ConnectionRefused, Checked::Refused), (ErrorKind::HostNotFound, Checked::NoName)]
+    {
+        let web = FakeWeb::default().page(AUTOCONFIG, &config("imap.example.org", 993, "SSL"));
+        let probe = FakeProbe { fails_with: kind, ..FakeProbe::only(&[]) };
+        let proposal = run_probed(&DetectConfig::default(), &FakeDns::default(), &web, &probe);
+        assert_eq!(imap(&proposal), ["imap.example.org:993 (TLS) Autoconfig"], "{kind:?}");
+        assert_eq!(proposal.imap[0].checked, checked, "{kind:?}");
+        assert_eq!(proposal.submission[0].checked, checked, "{kind:?}");
+    }
 }

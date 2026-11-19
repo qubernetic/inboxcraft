@@ -292,8 +292,14 @@ pub fn proposal(found: &Found) -> Proposal {
     };
     let mut failed: Vec<String> = found.failed.iter().map(|(what, kind)| format!("{what}: {kind}")).collect();
     // A server the domain names that no probe reached is still proposed; the form's list says it was not checked.
-    for candidate in found.imap.iter().chain(&found.submission).filter(|candidate| candidate.checked == Checked::NoAnswer) {
-        failed.push(format!("{} was not checked: it did not answer from here", candidate.server));
+    for candidate in found.imap.iter().chain(&found.submission) {
+        let why = match candidate.checked {
+            Checked::Answered => continue,
+            Checked::NoAnswer => "it did not answer from here",
+            Checked::Refused => "it refused the connection from here",
+            Checked::NoName => "its name was not found",
+        };
+        failed.push(format!("{} was not checked: {why}", candidate.server));
     }
     Proposal { imap: suggestions(&found.imap), submission: suggestions(&found.submission), asked: found.asked.clone(), failed }
 }

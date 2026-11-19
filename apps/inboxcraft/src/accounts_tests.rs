@@ -247,14 +247,22 @@ fn a_detected_proposal_reads_as_the_form_shows_it() {
     );
 }
 
+/// A named server no probe reached is shown, and the list says why it was not checked, by cause.
 #[test]
 fn a_named_server_no_probe_reached_is_shown_and_said_to_be_unchecked() {
-    let mut found = found();
-    found.imap[0].checked = Checked::NoAnswer;
-    let shown = proposal(&found);
-    assert_eq!(shown.imap[0].host, "imap.example.org");
-    assert!(shown.failed.contains(&"imap.example.org:993 (TLS) was not checked: it did not answer from here".to_owned()), "{:?}", shown.failed);
-    assert_eq!(shown.failed.len(), 2);
+    for (checked, why) in [
+        (Checked::NoAnswer, "it did not answer from here"),
+        (Checked::Refused, "it refused the connection from here"),
+        (Checked::NoName, "its name was not found"),
+    ] {
+        let mut found = found();
+        found.imap[0].checked = checked;
+        let shown = proposal(&found);
+        assert_eq!(shown.imap[0].host, "imap.example.org");
+        let line = format!("imap.example.org:993 (TLS) was not checked: {why}");
+        assert!(shown.failed.contains(&line), "{checked:?}: {:?}", shown.failed);
+        assert_eq!(shown.failed.len(), 2);
+    }
 }
 
 #[test]
