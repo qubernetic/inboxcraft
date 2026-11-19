@@ -81,7 +81,7 @@ fn any_size_from_the_desktop_lays_out_as_at_least_800_wide() {
         vec2(799.0, 1.0),
     ];
     for size in sizes {
-        for ppp in [1.0, 1.5, 0.0, -1.0, f32::NAN, f32::INFINITY] {
+        for ppp in [1.0, 1.5, 0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 1.0e-6, 1.0e-30, f32::MIN_POSITIVE, 1.0e37, f32::MAX] {
             for percent in [90, 100, 130] {
                 let regions = shell::regions(size, &theme(percent), ppp);
                 for (name, rect) in every(&regions) {

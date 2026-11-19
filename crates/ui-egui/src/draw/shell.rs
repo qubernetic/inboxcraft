@@ -47,7 +47,9 @@ pub(crate) fn regions(size: Vec2, theme: &Theme, ppp: f32) -> Regions {
 
 /// [`regions`] with the index `narrow` or not, whatever the width.
 pub(crate) fn regions_with(size: Vec2, theme: &Theme, ppp: f32, narrow: bool) -> Regions {
-    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
+    // A scale from the desktop is kept to one a screen can have: far outside it, a pixel count overflows or rounds to
+    // nothing, and the bounds below would cross.
+    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp.clamp(LEAST_PPP, MOST_PPP) } else { 1.0 };
     // In physical pixels; one hairline is one point rounded to whole pixels, at least one.
     let px = |points: f32| (points * ppp).round().max(0.0);
     let line = ppp.round().max(1.0);
@@ -58,7 +60,7 @@ pub(crate) fn regions_with(size: Vec2, theme: &Theme, ppp: f32, narrow: bool) ->
     // The least height: the outline, the two lines and their hairlines, and a body of none.
     let least_height = (command + status + 4.0 * line) / ppp;
     let width = px(number(size.x, LEAST_WIDTH).clamp(LEAST_WIDTH, MOST));
-    let height = px(number(size.y, least_height).clamp(least_height, MOST));
+    let height = px(number(size.y, least_height).max(least_height).min(MOST.max(least_height)));
     let middle_top = line + command + line;
     let status_top = (height - line - status).max(middle_top + line);
     let middle_bottom = status_top - line;
@@ -75,6 +77,10 @@ pub(crate) fn regions_with(size: Vec2, theme: &Theme, ppp: f32, narrow: bool) ->
 
 /// The largest size laid out, in points: beyond it a size is no window's.
 const MOST: f32 = 1.0e6;
+
+/// The least and the most physical pixels per point laid out: any screen's scale lies between.
+const LEAST_PPP: f32 = 0.25;
+const MOST_PPP: f32 = 16.0;
 
 /// `value`, or `or` when it is no number.
 fn number(value: f32, or: f32) -> f32 {
