@@ -203,7 +203,7 @@ fn entry_row(
         take(hand, &Hand::Cancel(row.id), &cancel);
         let spoken = tr!("Cancel the {kind} {when}: {subject}", kind = row.kind.word(), when = when, subject = title);
         ui.ctx().accesskit_node_builder(cancel.id, |node| node.set_label(spoken.as_str()));
-        if cancel.clicked() {
+        if crate::component::button::owner_pressed(ui, &cancel) {
             asked = Some(Asked::AskCancelScheduled(row.id));
         }
     });
@@ -261,7 +261,7 @@ fn confirmation(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &ScheduledRow,
             if keep.clicked() {
                 asked = Some(Asked::KeepScheduled);
             }
-            if cancel.clicked() {
+            if crate::component::button::owner_pressed(ui, &cancel) {
                 asked = Some(Asked::CancelScheduled(row.id));
             }
         });

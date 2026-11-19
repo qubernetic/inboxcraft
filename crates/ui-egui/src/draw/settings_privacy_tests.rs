@@ -168,3 +168,15 @@ fn a_hostile_address_is_one_plain_capped_row_and_junk_is_none() {
         assert_eq!(privacy.rows(), Some(&[][..]), "{junk}");
     }
 }
+
+#[test]
+fn a_held_key_on_ask_again_forgets_one_sender_only() {
+    for key in [Key::Enter, Key::Space] {
+        let mut harness = on_privacy(&THREE);
+        harness.get_by_label(&again(THREE[0])).focus();
+        harness.run();
+        // The press forgets the first sender; its repeats land on the row that took its place and forget nothing.
+        crate::component::tests::hold_key(&mut harness, key, 6);
+        assert_eq!(kept(&mut harness), THREE[1..], "a held {key:?} on ask again forgets one sender");
+    }
+}

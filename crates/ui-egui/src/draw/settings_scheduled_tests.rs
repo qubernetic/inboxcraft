@@ -299,3 +299,27 @@ fn a_frame_formats_the_time_of_the_rows_it_draws_only() {
     let formatted = crate::scheduled::WHENS.with(std::cell::Cell::get);
     assert!(formatted > 0 && formatted < 60, "a frame formats the rows near the view and the two ends, not all 200: {formatted}");
 }
+
+#[test]
+fn a_held_key_cancels_at_most_once_and_never_by_its_repeats() {
+    use crate::component::tests::{held_on, hold_key};
+    for key in [Key::Enter, Key::Space] {
+        let mut harness = four();
+        // Held on a row's cancel: the press asks, the keyboard lands on Keep it, and the repeats cancel nothing.
+        harness.get_by_label(SEND).focus();
+        harness.run();
+        hold_key(&mut harness, key, 6);
+        assert_eq!(kept(&mut harness).len(), 4, "a held {key:?} on a row's cancel cancels nothing");
+        // A key already down when the danger button takes the keyboard: its repeats are no press.
+        if harness.query_by_label("Cancel the send").is_none() {
+            press(&mut harness, SEND);
+        }
+        held_on(&mut harness, key, 6, |harness| harness.get_by_label("Cancel the send").focus());
+        assert_eq!(kept(&mut harness).len(), 4, "repeats of a held {key:?} on the danger button cancel nothing");
+        // A fresh press, held: one cancel, whatever the keyboard lands on next.
+        harness.get_by_label("Cancel the send").focus();
+        harness.run();
+        hold_key(&mut harness, key, 6);
+        assert_eq!(kept(&mut harness).len(), 3, "a held {key:?} on the danger button cancels once");
+    }
+}

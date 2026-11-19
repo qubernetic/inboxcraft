@@ -103,7 +103,7 @@ fn sender_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &SenderRow, ends
         }
         let spoken = tr!("Ask again before the pictures of {address} load", address = row.shown);
         ui.ctx().accesskit_node_builder(again.id, |node| node.set_label(spoken.as_str()));
-        if again.clicked() {
+        if crate::component::button::owner_pressed(ui, &again) {
             asked = Some(Asked::AskAgain(row.address.clone()));
         }
     });

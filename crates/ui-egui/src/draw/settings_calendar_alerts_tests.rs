@@ -93,3 +93,26 @@ fn the_page_rests_with_alerts_on_and_off() {
     harness.run();
     assert!(crate::component::tests::rests(&mut harness, 4));
 }
+
+#[test]
+fn a_held_key_on_the_calendar_page_sets_each_choice_once() {
+    use crate::component::tests::{held_on, hold_key};
+    let mut harness = on_calendar();
+    // Space held on the switch: the press turns alerts off, its repeats do not turn them on and off again.
+    harness.get_by_role_and_label(Role::Switch, "Calendar alerts").focus();
+    harness.run();
+    let before = harness.state().mailbox().writes();
+    hold_key(&mut harness, Key::Space, 5);
+    assert!(!alerts(&mut harness), "a held Space turns alerts off once");
+    assert_eq!(harness.state().mailbox().writes() - before, 1, "one notify.set for one press");
+    // A key already down when the switch takes the keyboard: no press at all.
+    held_on(&mut harness, Key::Space, 5, |harness| harness.get_by_role_and_label(Role::Switch, "Calendar alerts").focus());
+    assert!(!alerts(&mut harness));
+    assert_eq!(harness.state().mailbox().writes() - before, 1);
+    // Enter held on a segment of the week: one week.set, however long it is held.
+    harness.get_by_role_and_label(Role::RadioButton, "Week of 1 January").focus();
+    harness.run();
+    let before = harness.state().mailbox().writes();
+    hold_key(&mut harness, Key::Enter, 5);
+    assert_eq!(harness.state().mailbox().writes() - before, 1, "one week.set for one press");
+}

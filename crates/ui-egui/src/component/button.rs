@@ -625,3 +625,22 @@ fn link_drawn(
     }
     tooltip::attach(response, theme, keymap, name, None)
 }
+
+/// Whether `response` was the owner's own press: clicked, and not by a held Enter or Space repeating while it has the
+/// keyboard. egui counts a held key's repeats as presses, so a key held on from an earlier press (one that asked, or
+/// one that ran the row before this one took its place) would run an owner's command again and again. Only a fresh
+/// press, of the pointer or of a key, counts. Every button that runs an owner command asks this, not `clicked`.
+#[must_use]
+pub fn owner_pressed(ui: &Ui, response: &Response) -> bool {
+    response.clicked() && !(response.has_focus() && key_repeated(ui))
+}
+
+/// Whether Enter or Space came this frame as a held key's repeat.
+fn key_repeated(ui: &Ui) -> bool {
+    ui.input(|input| {
+        input
+            .events
+            .iter()
+            .any(|event| matches!(event, egui::Event::Key { key: egui::Key::Enter | egui::Key::Space, pressed: true, repeat: true, .. }))
+    })
+}

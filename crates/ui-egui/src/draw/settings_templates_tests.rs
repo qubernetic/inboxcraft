@@ -266,3 +266,27 @@ fn shift_tab_round_a_long_list_reaches_the_last_template_and_keeps_it() {
     key(&mut harness, Key::Tab, Modifiers::SHIFT);
     assert!(focused(&harness).is_some_and(|label| label.starts_with("Edit the template")), "and the edit before it");
 }
+
+#[test]
+fn a_held_key_deletes_at_most_once_and_never_by_its_repeats() {
+    use crate::component::tests::{held_on, hold_key};
+    for key in [Key::Enter, Key::Space] {
+        let mut harness = on_templates(&FIVE);
+        // Held on a row's delete: the press asks, the keyboard lands on Cancel, and the repeats delete nothing.
+        harness.get_by_label("Delete the template Out of town").focus();
+        harness.run();
+        hold_key(&mut harness, key, 6);
+        assert_eq!(kept(&mut harness).len(), 5, "a held {key:?} on a row's delete deletes nothing");
+        // A key already down when the danger button takes the keyboard: its repeats are no press.
+        if harness.query_by_label("Delete template").is_none() {
+            press(&mut harness, "Delete the template Out of town");
+        }
+        held_on(&mut harness, key, 6, |harness| harness.get_by_label("Delete template").focus());
+        assert_eq!(kept(&mut harness).len(), 5, "repeats of a held {key:?} on Delete template delete nothing");
+        // A fresh press, held: one delete, whatever the keyboard lands on next.
+        harness.get_by_label("Delete template").focus();
+        harness.run();
+        hold_key(&mut harness, key, 6);
+        assert_eq!(kept(&mut harness).len(), 4, "a held {key:?} on Delete template deletes once");
+    }
+}

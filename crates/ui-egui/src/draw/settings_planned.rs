@@ -38,7 +38,8 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
             tr!("Off: no event notifies. The alerts stay on their events and come back with the switch.")
         };
         settings_row(ui, theme, tr!("Calendar alerts"), Some(help), |ui| {
-            if crate::component::switch::switch(ui, theme, tr!("Calendar alerts"), on).clicked() {
+            let pressed = crate::component::switch::switch(ui, theme, tr!("Calendar alerts"), on);
+            if crate::component::button::owner_pressed(ui, &pressed) {
                 asked = Some(Asked::Alerts(!on));
             }
         });

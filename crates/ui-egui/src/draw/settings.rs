@@ -26,7 +26,7 @@ use inboxcraft_engine::notify::Level;
 use inboxcraft_engine::shown::SettingsAsked;
 
 use super::paint::{Ring, focus_ring};
-use crate::component::button::{LinkSize, TextButton, link_sized};
+use crate::component::button::{LinkSize, TextButton, link_sized, owner_pressed};
 use crate::component::field;
 use crate::component::key::{Chip, ChipState};
 use crate::component::label::section_label;
@@ -945,7 +945,8 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
         let keep = mailbox.pins_outlast_done();
         let pins_note = tr!("Off, Done takes the pin off; on, a pinned message stays in Pins after it is done.");
         settings_row(ui, theme, tr!("Keep pins on done mail"), Some(pins_note), |ui| {
-            if switch(ui, theme, tr!("Keep pins on done mail"), keep).clicked() {
+            let pressed = switch(ui, theme, tr!("Keep pins on done mail"), keep);
+            if owner_pressed(ui, &pressed) {
                 asked = Some(Asked::KeepPins(!keep));
             }
         });
@@ -967,7 +968,8 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
             culled(ui, theme, Id::unique("settings-grouped").with(account.id), ends, |ui| {
                 let name = tr!("Group the inbox of {account}", account = account.label);
                 settings_row(ui, theme, &name, Some(&account.address), |ui| {
-                    if switch(ui, theme, &name, account.grouped).clicked() {
+                    let pressed = switch(ui, theme, &name, account.grouped);
+                    if owner_pressed(ui, &pressed) {
                         asked = Some(Asked::Grouped(account.id, !account.grouped));
                     }
                 });
@@ -1014,7 +1016,8 @@ fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Setti
         let chosen = mailbox.notify_settings();
         let (returns, reminders) = (chosen.returns, chosen.reminders);
         settings_row(ui, theme, tr!("Returned snoozes"), Some(tr!("A snoozed message that comes back notifies you.")), |ui| {
-            if switch(ui, theme, tr!("Returned snoozes"), returns).clicked() {
+            let pressed = switch(ui, theme, tr!("Returned snoozes"), returns);
+            if owner_pressed(ui, &pressed) {
                 asked = Some(Asked::Returns(!returns));
             }
         });
@@ -1024,7 +1027,8 @@ fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Setti
             tr!("Follow-up reminders"),
             Some(tr!("A message you asked to be reminded of, when no reply came, notifies you.")),
             |ui| {
-                if switch(ui, theme, tr!("Follow-up reminders"), reminders).clicked() {
+                let pressed = switch(ui, theme, tr!("Follow-up reminders"), reminders);
+                if owner_pressed(ui, &pressed) {
                     asked = Some(Asked::Reminders(!reminders));
                 }
             },

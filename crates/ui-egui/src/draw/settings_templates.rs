@@ -239,7 +239,7 @@ fn template_row(
         if edit.clicked() {
             asked = Some(Asked::EditTemplate(row.account, row.name.clone()));
         }
-        if delete.clicked() {
+        if crate::component::button::owner_pressed(ui, &delete) {
             asked = Some(Asked::AskDeleteTemplate(row.account, row.name.clone()));
         }
     });
@@ -278,7 +278,7 @@ fn confirmation(
             if cancel.clicked() {
                 asked = Some(Asked::KeepTemplate);
             }
-            if delete.clicked() {
+            if crate::component::button::owner_pressed(ui, &delete) {
                 asked = Some(Asked::DeleteTemplate(row.account, row.name.clone()));
             }
         });
@@ -387,7 +387,7 @@ fn form(
                 let save = TextButton::new(tr!("Save")).primary();
                 let save =
                     if named { save.show(ui, theme, keymap) } else { save.unavailable(tr!("A template needs a name")).show(ui, theme, keymap) };
-                if named && save.clicked() {
+                if named && crate::component::button::owner_pressed(ui, &save) {
                     *asked = Some(Asked::SaveTemplate);
                 }
                 if TextButton::new(tr!("Cancel")).plain().show(ui, theme, keymap).clicked() {

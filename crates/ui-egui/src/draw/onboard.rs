@@ -32,7 +32,7 @@ use egui::{
 use super::paint::{self, Panes};
 use crate::component;
 use crate::component::banner::{BannerKind, banner};
-use crate::component::button::TextButton;
+use crate::component::button::{TextButton, owner_pressed};
 use crate::component::check_step::{self, check_step_named};
 use crate::component::checkbox::checkbox_wrapping;
 use crate::component::field::{self, Field};
@@ -735,20 +735,12 @@ fn remove_question(ui: &mut Ui, theme: &Theme, keymap: &Keymap, question: &Quest
             asked = Some(Asked::KeepAccount);
         }
         let remove = TextButton::new(tr!("Remove account")).danger().show(ui, theme, keymap);
-        // egui counts a held key's repeats as presses: a key already down when the button took the keyboard, or held
-        // on from the press that asked, is no answer. Only a fresh press, of the pointer or of a key, removes.
-        if remove.clicked() && !(remove.has_focus() && key_repeated(ui)) {
+        // A key already down when the button took the keyboard, or held on from the press that asked, is no answer.
+        if owner_pressed(ui, &remove) {
             asked = Some(Asked::Remove);
         }
     });
     asked
-}
-
-/// Whether Enter or Space came this frame as a held key's repeat.
-fn key_repeated(ui: &Ui) -> bool {
-    ui.input(|input| {
-        input.events.iter().any(|event| matches!(event, egui::Event::Key { key: Key::Enter | Key::Space, pressed: true, repeat: true, .. }))
-    })
 }
 
 /// A step's short name on its line, as a terminal prints it.
