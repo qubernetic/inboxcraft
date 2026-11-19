@@ -85,8 +85,11 @@ fn sending(harness: &Harness<'static, InboxApp>) -> bool {
 fn at_off_the_status_line_prints_in_the_frame_of_the_send_and_the_composer_is_gone() {
     let mut harness = written(Level::Off);
     assert!(subject(&harness).is_some() && !sending(&harness));
+    let before = harness.ctx.cumulative_pass_nr();
     send(&mut harness);
     assert!(harness.state().composer().is_none(), "sent");
+    let asked = harness.ctx.data(|data| data.get_temp::<u64>(egui::Id::unique("reader-discard")));
+    assert!(asked.is_some_and(|pass| pass >= before), "the reader asked the frame of the key drawn again: {asked:?} {before}");
     assert!(sending(&harness), "the owner never waits: the status line prints in the frame of the key");
     assert_eq!(subject(&harness), None, "the composer is gone in that frame");
     assert!(crate::component::tests::rests(&mut harness, 2) || sending(&harness), "and rests but for the hold's seconds");

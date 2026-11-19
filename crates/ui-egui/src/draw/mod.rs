@@ -2817,7 +2817,7 @@ impl InboxApp {
                     let until = ctx.input(|input| input.time) + ctx.options(|options| options.input_options.max_double_click_delay);
                     self.sent_place = self.reader_place.map(|rect| (rect, until));
                 }
-                ctx.request_discard("a message opened or a draft sent shows in the frame of its key");
+                draw_reader_again(ctx);
                 return;
             }
         }
@@ -3514,3 +3514,14 @@ mod triage_tests;
 #[cfg(test)]
 #[path = "week_tests.rs"]
 mod week_tests;
+
+/// Asks the frame drawn again with the message opened or the draft sent (M7, M10), so the owner never waits for it. The
+/// rows ask the same for a send (it reloads the list): the tests tell this ask apart by the pass it was made in.
+fn draw_reader_again(ctx: &egui::Context) {
+    #[cfg(test)]
+    {
+        let pass = ctx.cumulative_pass_nr();
+        ctx.data_mut(|data| data.insert_temp(egui::Id::unique("reader-discard"), pass));
+    }
+    ctx.request_discard("a message opened or a draft sent shows in the frame of its key");
+}
