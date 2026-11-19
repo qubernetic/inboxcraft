@@ -22,8 +22,10 @@
 //! how long each cools and the glyph each flips to are hashes too, chosen once per flip: a flipped cell never
 //! changes its glyph until it has cooled.
 //!
-//! The cells are built once, at the first [`show`], for the rect, the seed, the text scale, the pixels per point and
-//! the emblem's area, and again only when one of these changes; the row texts are built once for the theme's mode.
+//! The cells are built once, at the first [`show`], for as many whole cells as the rect holds, the seed, the text
+//! scale, the pixels per point and where the emblem stands on them, and again only when one of these changes: a rect
+//! that moves moves the cells and builds nothing, and the cells warm under the pointer keep their glyphs (when the
+//! cells are built again, the warm ones still there keep theirs); the row texts are built once for the theme's mode.
 //! A frame at rest paints them (one text a row, each found again in egui's galley cache) and builds nothing; while
 //! cells are warm, only the rows that hold one are built again, and a repaint is asked for only while a cell cools. The field
 //! takes no click, no key and no focus, and shows nothing to a screen reader: it only paints.
@@ -198,13 +200,13 @@ const DOT: u8 = 1;
 /// Under one of the emblem's cells: stays empty, never flips.
 const UNDER: u8 = 2;
 
-/// The cells of a field as they were built, and what they were built for.
+/// The cells of a field as they were built, and where they stand this frame.
 #[derive(Debug, Clone)]
 struct Cells {
-    /// The rect asked for.
+    /// The rect asked for this frame.
     rect: Rect,
     scale: TextScale,
-    area: Option<Rect>,
+    /// The pixels per point, sanitised: 1 for a value that is not a usable one.
     ppp: f32,
     /// The top left corner of the first cell, on a whole pixel.
     origin: Pos2,
@@ -216,6 +218,24 @@ struct Cells {
     held: Vec<u8>,
     /// Where the emblem's top left corner stands, if it is drawn.
     emblem_at: Option<Pos2>,
+}
+
+impl Cells {
+    /// Where the emblem stands from the first cell, in whole pixels: which cells it covers depends on this, not on
+    /// where the two stand.
+    fn emblem_offset(&self) -> Option<[f32; 2]> {
+        self.emblem_at.map(|corner| [((corner.x - self.origin.x) * self.ppp).round(), ((corner.y - self.origin.y) * self.ppp).round()])
+    }
+
+    /// Whether `other` holds the same cells: as many columns and rows, of the same height, at the same pixels per
+    /// point, with the emblem at the same place on them. Where they stand does not count.
+    fn same_cells(&self, other: &Self) -> bool {
+        self.columns == other.columns
+            && self.rows == other.rows
+            && self.scale == other.scale
+            && self.ppp.to_bits() == other.ppp.to_bits()
+            && self.emblem_offset() == other.emblem_offset()
+    }
 }
 
 /// The row texts built for one mode and one build, as jobs: egui's galley cache turns a job it laid out last frame
@@ -266,20 +286,25 @@ impl Field {
         self
     }
 
-    /// Builds the cells again if the rect, the text scale, the emblem's area or the pixels per point changed.
+    /// Builds the cells again if their columns or rows, the text scale, the pixels per point or where the emblem
+    /// stands on them changed. A rect that only moved moves the cells, and the warm ones keep their glyph and their
+    /// time; when the cells are built again, the warm ones that are still there keep theirs.
     fn build(&mut self, rect: Rect, scale: TextScale, area: Option<Rect>, ppp: f32) {
-        let same = self.cells.as_ref().is_some_and(|cells| {
-            bits(Some(cells.rect)) == bits(Some(rect))
-                && cells.scale == scale
-                && bits(cells.area) == bits(area)
-                && cells.ppp.to_bits() == ppp.to_bits()
-        });
-        if same {
+        let mut placed = place_cells(rect, scale, area, ppp, self.emblem.as_ref());
+        if let Some(cells) = &mut self.cells
+            && cells.same_cells(&placed)
+        {
+            cells.rect = placed.rect;
+            cells.origin = placed.origin;
+            cells.emblem_at = placed.emblem_at;
             return;
         }
-        self.cells = Some(cells(rect, scale, area, ppp, self.seed, self.emblem.as_ref()));
+        fill(&mut placed, self.seed, self.emblem.as_ref());
+        let before = self.cells.as_ref().map_or(0, |cells| cells.columns);
+        let warm = std::mem::take(&mut self.warm);
+        self.warm = warm.into_iter().filter_map(|(spot, warm)| Some((still_there(spot, before, &placed)?, warm))).collect();
+        self.cells = Some(placed);
         self.look = None;
-        self.warm.clear();
         self.builds = self.builds.saturating_add(1);
     }
 
@@ -449,11 +474,6 @@ pub fn show(ui: &mut Ui, theme: &Theme, field: &mut Field, rect: Rect, level: Le
     field.paint(ui, theme, opts);
 }
 
-/// The bits of a rect's corners: rects compared without `==`, which does not hold for a rect of NaN.
-fn bits(rect: Option<Rect>) -> Option<[u32; 4]> {
-    rect.map(|rect| [rect.min.x.to_bits(), rect.min.y.to_bits(), rect.max.x.to_bits(), rect.max.y.to_bits()])
-}
-
 /// A cell's height at `scale`: 15 points × the scale, to the whole point.
 fn cell_height(scale: TextScale) -> f32 {
     (CELL_HEIGHT * scale.factor()).round().max(1.0)
@@ -482,23 +502,28 @@ const fn spot_index(spot: Spot) -> u32 {
     }
 }
 
-/// The cells of a field over `rect` at `scale`, the emblem centred in `area` if it fits there whole, at `ppp`.
-fn cells(rect: Rect, scale: TextScale, area: Option<Rect>, ppp: f32, seed: u32, emblem: Option<&Emblem>) -> Cells {
+/// Where the cells of a field over `rect` at `scale` stand, the emblem centred in `area` if it fits there whole, at
+/// `ppp`: everything but what they hold, at no cost.
+fn place_cells(rect: Rect, scale: TextScale, area: Option<Rect>, ppp: f32, emblem: Option<&Emblem>) -> Cells {
     let height = cell_height(scale);
     let ppp_ok = ppp.is_finite() && ppp > 0.0;
     let ppp = if ppp_ok { ppp } else { 1.0 };
-    let mut built = Cells { rect, scale, area, ppp, origin: rect.min, height, columns: 0, rows: 0, held: Vec::new(), emblem_at: None };
+    let mut placed = Cells { rect, scale, ppp, origin: rect.min, height, columns: 0, rows: 0, held: Vec::new(), emblem_at: None };
     if !(ppp_ok && rect.is_finite() && rect.width() > 0.0 && rect.height() > 0.0) {
-        return built;
+        return placed;
     }
     let origin = pos2(ceil_px(rect.min.x, ppp), ceil_px(rect.min.y, ppp));
     // Clamped to the caps first, so the casts lose nothing.
-    let columns = ((rect.max.x - origin.x) / CELL_WIDTH).floor().clamp(0.0, MAX_COLUMNS as f32) as usize;
-    let rows = ((rect.max.y - origin.y) / height).floor().clamp(0.0, MAX_ROWS as f32) as usize;
-    built.origin = origin;
-    built.columns = columns;
-    built.rows = rows;
-    built.emblem_at = emblem.zip(area).and_then(|(emblem, area)| place(emblem, area, rect, ppp));
+    placed.columns = ((rect.max.x - origin.x) / CELL_WIDTH).floor().clamp(0.0, MAX_COLUMNS as f32) as usize;
+    placed.rows = ((rect.max.y - origin.y) / height).floor().clamp(0.0, MAX_ROWS as f32) as usize;
+    placed.origin = origin;
+    placed.emblem_at = emblem.zip(area).and_then(|(emblem, area)| place(emblem, area, rect, ppp));
+    placed
+}
+
+/// What the `built` cells hold in the pattern of `seed`, the field's cells under the emblem empty.
+fn fill(built: &mut Cells, seed: u32, emblem: Option<&Emblem>) {
+    let (columns, rows) = (built.columns, built.rows);
     built.held = vec![EMPTY; columns * rows];
     for row in 0..rows {
         for column in 0..columns {
@@ -511,9 +536,26 @@ fn cells(rect: Rect, scale: TextScale, area: Option<Rect>, ppp: f32, seed: u32, 
         }
     }
     if let (Some(emblem), Some(corner)) = (emblem, built.emblem_at) {
-        cover(&mut built, emblem, corner);
+        cover(built, emblem, corner);
     }
-    built
+}
+
+/// Where the warm `spot`, of cells `columns` wide before, is among the `built` cells: `None` if it is not there any
+/// more.
+fn still_there(spot: Spot, columns: usize, built: &Cells) -> Option<Spot> {
+    match spot {
+        Spot::Field(index) => {
+            let index = usize::try_from(index).ok()?;
+            let (row, column) = (index.checked_div(columns)?, index.checked_rem(columns)?);
+            if column >= built.columns || row >= built.rows {
+                return None;
+            }
+            let at = row * built.columns + column;
+            built.held.get(at).filter(|held| **held != UNDER)?;
+            u32::try_from(at).ok().map(Spot::Field)
+        }
+        Spot::Emblem(_) => built.emblem_at.map(|_| spot),
+    }
 }
 
 /// Where `emblem`'s top left corner stands centred in `area`, on a whole pixel, if it fits there whole and inside the

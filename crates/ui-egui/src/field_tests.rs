@@ -99,6 +99,13 @@ fn harness(stage: Stage) -> Harness<'static, Stage> {
     harness_at(stage, 1.0)
 }
 
+/// The cells of a field over `rect` at `scale`, the emblem centred in `area` if it fits there whole, at `ppp`.
+fn cells(rect: Rect, scale: TextScale, area: Option<Rect>, ppp: f32, seed: u32, emblem: Option<&Emblem>) -> Cells {
+    let mut built = place_cells(rect, scale, area, ppp, emblem);
+    fill(&mut built, seed, emblem);
+    built
+}
+
 /// The cells a field over `rect` holds with `seed` at `scale`, one pixel a point.
 fn built(rect: Rect, seed: u32, scale: TextScale) -> Cells {
     cells(rect, scale, None, 1.0, seed, None)
@@ -255,6 +262,68 @@ fn the_cells_are_built_once_and_a_frame_at_rest_lays_out_nothing() {
     harness.state_mut().rect = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0));
     harness.run_steps(2);
     assert_eq!(harness.state().field.builds, 2);
+}
+
+/// The warm cells of the field by their column and row, whatever its columns: their glyph and whether they cool.
+fn warm_by_place(harness: &Harness<'static, Stage>) -> Vec<((usize, usize), char, bool)> {
+    let columns = harness.state().field.cells.as_ref().unwrap().columns;
+    let mut found: Vec<_> = warm(harness)
+        .into_iter()
+        .filter_map(|(spot, glyph, cooling)| match spot {
+            Spot::Field(index) => Some(((index as usize % columns, index as usize / columns), glyph, cooling)),
+            Spot::Emblem(_) => None,
+        })
+        .collect();
+    found.sort_by_key(|(place, ..)| *place);
+    found
+}
+
+#[test]
+fn a_rect_drifting_by_parts_of_a_pixel_builds_once_and_keeps_its_warm_glyphs() {
+    // 964 points wide: 120 columns wherever within a pixel the rect starts.
+    let rect = |left: f32| Rect::from_min_size(pos2(left, 0.0), vec2(964.0, 600.0));
+    let mut stage = Stage::new(Level::Full, Opts::default());
+    stage.rect = rect(0.0);
+    let mut harness = harness(stage);
+    harness.hover_at(pos2(300.0, 300.0));
+    harness.step();
+    let first = warm_by_place(&harness);
+    assert!(!first.is_empty() && first.iter().all(|(.., cooling)| !cooling));
+    // 0.3 points a frame for 30 frames, the pointer kept where it stands on the cells.
+    for frame in 1..=30 {
+        let left = frame as f32 * 0.3;
+        harness.state_mut().rect = rect(left);
+        harness.hover_at(pos2(300.0 + left.ceil(), 300.0));
+        harness.step();
+        assert_eq!(warm_by_place(&harness), first, "frame {frame}: the warm cells changed as the rect moved");
+    }
+    // The pointer still, the rect's right edge jittering by a hundredth of a point.
+    for frame in 0..30 {
+        harness.state_mut().rect.max.x = 973.0 + if frame % 2 == 0 { 0.01 } else { 0.0 };
+        harness.step();
+        assert_eq!(warm_by_place(&harness), first, "frame {frame}: the warm cells changed as the rect jittered");
+    }
+    assert_eq!(harness.state().field.builds, 1, "a rect that only moved built the cells again");
+}
+
+#[test]
+fn a_rect_a_cell_wider_builds_again_and_the_warm_cells_keep_their_glyphs() {
+    let mut harness = harness(Stage::new(Level::Full, Opts::default()));
+    harness.hover_at(pos2(300.0, 300.0));
+    harness.step();
+    let first = warm_by_place(&harness);
+    assert!(!first.is_empty());
+    assert_eq!(harness.state().field.cells.as_ref().unwrap().columns, 120);
+    harness.state_mut().rect.max.x += CELL_WIDTH;
+    harness.step();
+    assert_eq!(harness.state().field.cells.as_ref().unwrap().columns, 121);
+    assert_eq!(harness.state().field.builds, 2);
+    assert_eq!(warm_by_place(&harness), first, "the warm cells changed when the field grew a column");
+    // A row more: the same.
+    harness.state_mut().rect.max.y += CELL_HEIGHT;
+    harness.step();
+    assert_eq!(harness.state().field.builds, 3);
+    assert_eq!(warm_by_place(&harness), first, "the warm cells changed when the field grew a row");
 }
 
 #[test]
