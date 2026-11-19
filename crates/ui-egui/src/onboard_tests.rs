@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 use inboxcraft_engine::Session;
 use inboxcraft_model::{Account, AccountId, CheckStep, ErrorKind, Host, Job, JobKind, StepStatus};
@@ -13,8 +13,8 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::json;
 
 use super::{
-    Form, Keychain, MAX_PASSWORD_CHARS, NoDetect, NoKeychain, Onboarding, Outcome, Proposal, Proposed, Secret, Security, Slot, Source, Stage,
-    StepState, Suggestion,
+    Checked, Form, Keychain, MAX_PASSWORD_CHARS, NoDetect, NoKeychain, Onboarding, Outcome, Proposal, Proposed, Secret, Security, Slot, Source,
+    Stage, StepState, Suggestion,
 };
 use crate::mailbox::Mailbox;
 use crate::workers::{NoWorkers, Scripted, Workers};
@@ -68,8 +68,22 @@ pub(crate) fn proposal(source: Source) -> Proposal {
     Proposal {
         submission: vec![],
         imap: vec![
-            Suggestion { host: "imap.example.org".to_owned(), port: 993, security: Security::Tls, username: "carol@example.org".to_owned(), source },
-            Suggestion { host: "mail.example.org".to_owned(), port: 143, security: Security::StartTls, username: "carol".to_owned(), source },
+            Suggestion {
+                host: "imap.example.org".to_owned(),
+                port: 993,
+                security: Security::Tls,
+                username: "carol@example.org".to_owned(),
+                source,
+                checked: Checked::Answered,
+            },
+            Suggestion {
+                host: "mail.example.org".to_owned(),
+                port: 143,
+                security: Security::StartTls,
+                username: "carol".to_owned(),
+                source,
+                checked: Checked::Answered,
+            },
         ],
         asked: vec!["dns MX example.org".to_owned(), "https://autoconfig.example.org/mail/config-v1.1.xml\r\n".to_owned()],
         failed: vec![],
@@ -120,8 +134,14 @@ fn the_form_sends_the_outgoing_server_and_refuses_a_bad_caldav_address() {
 
 #[test]
 fn detect_fills_the_outgoing_server_and_flags_a_guess() {
-    let guess =
-        Suggestion { host: "smtp.example.org".to_owned(), port: 465, security: Security::Tls, username: String::new(), source: Source::Guess };
+    let guess = Suggestion {
+        host: "smtp.example.org".to_owned(),
+        port: 465,
+        security: Security::Tls,
+        username: String::new(),
+        source: Source::Guess,
+        checked: Checked::Answered,
+    };
     let found = Proposal { submission: vec![guess], ..proposal(Source::Autoconfig) };
     let mut onboarding = Onboarding::new(Arc::new(NoKeychain), Box::new(Proposed::new(found)));
     onboarding.open();
@@ -475,10 +495,15 @@ fn detect_that_finds_nothing_leaves_the_form_as_it_was() {
 
 #[test]
 fn every_source_has_its_words_and_only_redirects_and_guesses_are_doubtful() {
-    for source in [Source::Autoconfig, Source::AutoconfigRedirect, Source::Ispdb, Source::Srv, Source::Guess] {
+    let every = [Source::Autoconfig, Source::AutoconfigRedirect, Source::Ispdb, Source::Srv, Source::Provider, Source::Guess];
+    for source in every {
         assert!(!source.text().is_empty());
-        assert_eq!(source.doubtful(), matches!(source, Source::AutoconfigRedirect | Source::Guess));
+        assert_eq!(source.doubtful(), matches!(source, Source::AutoconfigRedirect | Source::Provider | Source::Guess));
+        assert_eq!(every.iter().filter(|other| other.text() == source.text()).count(), 1, "{source:?} has words of its own");
     }
+    // The MX provider's servers are a guess, said so, from the MX records.
+    let provider = Source::Provider.text();
+    assert!(provider.contains("guess") && provider.contains("MX") && provider.contains("check"), "{provider}");
     assert_eq!((Security::Tls.text(), Security::StartTls.text()), ("TLS", "STARTTLS"));
     assert_eq!((Security::Tls.imap_port(), Security::StartTls.imap_port()), (993, 143));
 }
@@ -749,14 +774,15 @@ fn a_threaded_detect_answers_from_its_thread_and_wakes_the_window() {
 
     let woken = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&woken);
-    let run: super::Run = Arc::new(|address: &str, ispdb: bool| Proposal { asked: vec![format!("{address} {ispdb}")], ..Proposal::default() });
+    let run: super::Run =
+        Arc::new(|address: &str, ispdb: bool, _stop: &super::RunStop| Proposal { asked: vec![format!("{address} {ispdb}")], ..Proposal::default() });
     let wake: crate::fetch::Wake = Arc::new(move || {
         counter.fetch_add(1, Ordering::SeqCst);
     });
     let mut detect = super::Threaded::new(run, Some(wake));
     assert!(format!("{detect:?}").starts_with("Threaded"));
     assert!(super::Detect::finished(&mut detect).is_none());
-    super::Detect::start(&mut detect, 7, "carol@example.org", true);
+    super::Detect::start(&mut detect, 7, "carol@example.org", true, super::RunStop::default());
     let mut answer = None;
     for _ in 0..2000 {
         answer = super::Detect::finished(&mut detect);
@@ -872,6 +898,7 @@ fn detect_keeps_what_the_owner_typed_and_refills_what_it_put_there() {
             security: Security::Tls,
             username: String::new(),
             source: Source::Srv,
+            checked: Checked::Answered,
         }],
         ..proposal(Source::Srv)
     };
@@ -902,27 +929,30 @@ fn detect_keeps_what_the_owner_typed_and_refills_what_it_put_there() {
 /// A Detect whose runs answer only when the test lets them: each start takes the next queued proposal, and
 /// [`Held::answer`] hands the oldest started run's answer over at the next poll.
 #[derive(Clone, Default)]
-struct Held {
+pub(crate) struct Held {
     queued: Arc<Mutex<std::collections::VecDeque<Proposal>>>,
     started: Arc<Mutex<std::collections::VecDeque<(u64, Proposal)>>>,
     ready: Arc<Mutex<std::collections::VecDeque<(u64, Proposal)>>>,
+    /// The stop of each run started, in order.
+    pub(crate) stops: Arc<Mutex<Vec<super::RunStop>>>,
 }
 
 impl Held {
-    fn new(answers: Vec<Proposal>) -> Self {
+    pub(crate) fn new(answers: Vec<Proposal>) -> Self {
         let held = Self::default();
         held.queued.lock().unwrap().extend(answers);
         held
     }
 
-    fn answer(&self) {
+    pub(crate) fn answer(&self) {
         let next = self.started.lock().unwrap().pop_front().unwrap();
         self.ready.lock().unwrap().push_back(next);
     }
 }
 
 impl super::Detect for Held {
-    fn start(&mut self, run: u64, _address: &str, _ispdb: bool) {
+    fn start(&mut self, run: u64, _address: &str, _ispdb: bool, stop: super::RunStop) {
+        self.stops.lock().unwrap().push(stop);
         let next = self.queued.lock().unwrap().pop_front().unwrap_or_default();
         self.started.lock().unwrap().push_back((run, next));
     }
@@ -933,9 +963,15 @@ impl super::Detect for Held {
 }
 
 /// What Detect finds at `host` (and `smtp`, when given) for the user `user`.
-fn found_at(host: &str, smtp: Option<&str>, user: &str) -> Proposal {
-    let suggestion =
-        |host: &str, port, security| Suggestion { host: host.to_owned(), port, security, username: user.to_owned(), source: Source::Autoconfig };
+pub(crate) fn found_at(host: &str, smtp: Option<&str>, user: &str) -> Proposal {
+    let suggestion = |host: &str, port, security| Suggestion {
+        host: host.to_owned(),
+        port,
+        security,
+        username: user.to_owned(),
+        source: Source::Autoconfig,
+        checked: Checked::Answered,
+    };
     Proposal {
         imap: vec![suggestion(host, 993, Security::Tls)],
         submission: smtp.map(|host| vec![suggestion(host, 465, Security::Tls)]).unwrap_or_default(),
@@ -1342,4 +1378,259 @@ fn the_earlier_detect_line_names_the_user_name_while_it_is_still_detects() {
     onboarding.form_mut().username = "a@first.example.org".to_owned();
     onboarding.form_mut().host = "imap.second.example.org".to_owned();
     assert!(!onboarding.detect_older() && !onboarding.detect_older_user_name());
+}
+
+#[test]
+fn a_server_detect_did_not_reach_says_why_beside_its_row() {
+    for (checked, imap, outgoing) in [
+        (Checked::NoAnswer, "Not checked: imap.example.org did not answer from here.", "Not checked: smtp.example.org did not answer from here."),
+        (
+            Checked::Refused,
+            "Not checked: imap.example.org refused the connection from here.",
+            "Not checked: smtp.example.org refused the connection from here.",
+        ),
+        (Checked::NoName, "Not checked: the name imap.example.org was not found.", "Not checked: the name smtp.example.org was not found."),
+        (
+            Checked::Clock,
+            "Not checked: the certificate of imap.example.org does not fit this computer's clock, which may be what is off.",
+            "Not checked: the certificate of smtp.example.org does not fit this computer's clock, which may be what is off.",
+        ),
+    ] {
+        let mut answer = found_at("imap.example.org", Some("smtp.example.org"), "carol@example.org");
+        answer.imap[0].checked = checked;
+        answer.submission[0].checked = checked;
+        let (mut onboarding, detect) = detecting(vec![answer]);
+        detect_now(&mut onboarding, &detect, "carol@example.org");
+        // The fields hold what the domain names, for the owner to see and edit.
+        assert_eq!((onboarding.form().host.as_str(), onboarding.form().smtp_host.as_str()), ("imap.example.org", "smtp.example.org"));
+        assert_eq!(onboarding.unchecked(), [Some(imap.to_owned()), Some(outgoing.to_owned())], "{checked:?}");
+    }
+    // A server that answered says nothing.
+    let (mut onboarding, detect) = detecting(vec![found_at("imap.example.org", Some("smtp.example.org"), "carol@example.org")]);
+    detect_now(&mut onboarding, &detect, "carol@example.org");
+    assert_eq!(onboarding.unchecked(), [None, None]);
+}
+
+/// Detect answers for carol@example.org with both servers not reached; the form open and filled.
+fn unchecked_both() -> (Onboarding, Held) {
+    let mut answer = found_at("imap.example.org", Some("smtp.example.org"), "carol@example.org");
+    answer.imap[0].checked = Checked::NoAnswer;
+    answer.submission[0].checked = Checked::Refused;
+    let (mut onboarding, detect) = detecting(vec![answer, Proposal::default()]);
+    detect_now(&mut onboarding, &detect, "carol@example.org");
+    assert!(onboarding.unchecked().iter().all(Option::is_some));
+    (onboarding, detect)
+}
+
+/// An edit of the form, named.
+type Edit = (&'static str, fn(&mut Form));
+
+#[test]
+fn the_unchecked_line_goes_when_its_row_is_edited() {
+    let edits: [Edit; 6] = [
+        ("imap host", |form| form.host = "imap2.example.org".to_owned()),
+        ("imap port", |form| form.port = "994".to_owned()),
+        ("imap security", |form| form.security = Some(Security::StartTls)),
+        ("smtp host", |form| form.smtp_host = "smtp2.example.org".to_owned()),
+        ("smtp port", |form| form.smtp_port = "466".to_owned()),
+        ("smtp security", |form| form.smtp_security = Some(Security::StartTls)),
+    ];
+    for (at, (what, edit)) in edits.into_iter().enumerate() {
+        let (mut onboarding, _detect) = unchecked_both();
+        edit(onboarding.form_mut());
+        let lines = onboarding.unchecked();
+        // The edited row's line goes; the other row's stays.
+        let row = at / 3;
+        assert!(lines[row].is_none(), "{what}: {lines:?}");
+        assert!(lines[1 - row].is_some(), "{what}: {lines:?}");
+    }
+}
+
+#[test]
+fn the_unchecked_line_goes_when_detect_runs_again_even_if_that_run_is_left() {
+    let (mut onboarding, detect) = unchecked_both();
+    onboarding.detect();
+    assert_eq!(onboarding.unchecked(), [None, None], "not while Detect asks");
+    // The owner leaves while it asks, and comes back: the earlier answer's lines do not come back with the form.
+    onboarding.close();
+    onboarding.open();
+    assert_eq!(onboarding.form().host, "imap.example.org");
+    assert_eq!(onboarding.unchecked(), [None, None]);
+    drop(detect);
+}
+
+#[test]
+fn a_hostile_host_name_in_the_unchecked_line_is_cleaned_and_cut_with_one_ellipsis() {
+    let host = format!("\u{202e}evil\u{0}\r\n{}.example.org\u{2066}", "a".repeat(300));
+    let mut answer = found_at(&host, None, "carol@example.org");
+    answer.imap[0].checked = Checked::NoName;
+    let (mut onboarding, detect) = detecting(vec![answer]);
+    detect_now(&mut onboarding, &detect, "carol@example.org");
+    let [Some(line), None] = onboarding.unchecked() else { panic!("{:?}", onboarding.unchecked()) };
+    assert_eq!(line.matches('…').count(), 1, "{line}");
+    assert!(!line.chars().any(|c| c.is_control() || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')), "{line:?}");
+    let named = line.trim_start_matches("Not checked: the name ").trim_end_matches(" was not found.");
+    assert_eq!(named.chars().count(), super::MOST_HOST_CHARS, "{named}");
+    assert!(named.starts_with("evil "), "{named}");
+}
+
+#[test]
+fn cancel_while_detect_asks_stops_the_run_and_its_late_answer_is_dropped() {
+    let (mut onboarding, detect) = detecting(vec![
+        found_at("imap.late.example.org", Some("smtp.late.example.org"), "carol@example.org"),
+        found_at("imap.example.org", None, "carol@example.org"),
+    ]);
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.detect();
+    assert!(onboarding.detecting());
+    let stop = detect.stops.lock().unwrap()[0].clone();
+    assert!(!stop.is_stopped());
+    onboarding.cancel();
+    assert!(stop.is_stopped(), "Cancel stops the run");
+    assert!(!onboarding.detecting());
+    // The stopped run's answer comes late: nothing of it is written anywhere.
+    detect.answer();
+    assert!(!onboarding.poll());
+    onboarding.open();
+    assert!(!onboarding.detecting(), "Detect and Check and add are back");
+    assert_eq!((onboarding.form().host.as_str(), onboarding.form().smtp_host.as_str()), ("", ""));
+    assert!(onboarding.found().is_none());
+    // A second Detect works, with a stop of its own.
+    detect_now(&mut onboarding, &detect, "carol@example.org");
+    assert_eq!(onboarding.form().host, "imap.example.org");
+    let stops = detect.stops.lock().unwrap();
+    assert_eq!(stops.len(), 2);
+    assert!(!stops[1].is_stopped());
+}
+
+#[test]
+fn leaving_the_form_while_detect_asks_stops_the_run_and_its_late_answer_is_dropped() {
+    let (mut onboarding, detect) = detecting(vec![found_at("imap.late.example.org", None, "carol@example.org")]);
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.detect();
+    let stop = detect.stops.lock().unwrap()[0].clone();
+    onboarding.close();
+    assert!(stop.is_stopped(), "leaving stops the run");
+    detect.answer();
+    assert!(!onboarding.poll());
+    onboarding.open();
+    assert!(!onboarding.detecting());
+    assert_eq!((onboarding.form().address.as_str(), onboarding.form().host.as_str()), ("carol@example.org", ""));
+}
+
+#[test]
+fn a_newer_detect_stops_the_run_before_it() {
+    let (mut onboarding, detect) = detecting(vec![Proposal::default(), Proposal::default()]);
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.detect();
+    onboarding.detect();
+    let stops = detect.stops.lock().unwrap();
+    assert!(stops[0].is_stopped() && !stops[1].is_stopped());
+}
+
+/// A threaded Detect whose run asks one question per permit, and looks at its stop before each.
+fn gated() -> (Onboarding, mpsc::Sender<()>, Arc<Mutex<Vec<String>>>) {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let (permit, gate) = mpsc::channel::<()>();
+    let gate = Mutex::new(gate);
+    let written = Arc::clone(&log);
+    let run: super::Run = Arc::new(move |_address: &str, _ispdb: bool, stop: &super::RunStop| {
+        for n in 1..=100 {
+            if gate.lock().unwrap().recv().is_err() {
+                written.lock().unwrap().push("closed".to_owned());
+                break;
+            }
+            if stop.is_stopped() {
+                written.lock().unwrap().push("stopped".to_owned());
+                break;
+            }
+            written.lock().unwrap().push(format!("lookup {n}"));
+        }
+        found_at("imap.example.org", None, "carol@example.org")
+    });
+    let mut onboarding = Onboarding::new(Arc::new(NoKeychain), Box::new(super::Threaded::new(run, None)));
+    onboarding.open();
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    (onboarding, permit, log)
+}
+
+fn wait_until(mut what: impl FnMut() -> bool) {
+    for _ in 0..2000 {
+        if what() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("never came");
+}
+
+#[test]
+fn cancel_stops_a_threaded_run_before_its_next_lookup_and_a_second_detect_works() {
+    let (mut onboarding, permit, log) = gated();
+    onboarding.detect();
+    permit.send(()).unwrap();
+    permit.send(()).unwrap();
+    wait_until(|| log.lock().unwrap().len() == 2);
+    onboarding.cancel();
+    // The run comes to its next lookup: it sees the stop and asks nothing more.
+    permit.send(()).unwrap();
+    wait_until(|| log.lock().unwrap().len() == 3);
+    assert_eq!(*log.lock().unwrap(), ["lookup 1", "lookup 2", "stopped"]);
+    // Its answer is dropped when it comes.
+    for _ in 0..40 {
+        assert!(!onboarding.poll());
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    onboarding.open();
+    assert_eq!(onboarding.form().host, "");
+    // A second Detect after the Cancel runs and fills the form.
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.detect();
+    drop(permit);
+    wait_until(|| onboarding.poll());
+    assert_eq!(onboarding.form().host, "imap.example.org");
+    assert_eq!(log.lock().unwrap().last().map(String::as_str), Some("closed"));
+}
+
+#[test]
+fn a_server_detect_left_out_for_the_owners_says_why_it_was_not_checked() {
+    for (checked, cause) in [
+        (Checked::NoAnswer, "it did not answer from here"),
+        (Checked::Refused, "it refused the connection from here"),
+        (Checked::NoName, "its name was not found"),
+        (Checked::Clock, "its certificate does not fit this computer's clock, which may be what is off"),
+    ] {
+        let mut answer = found_at("imap.example.org", Some("smtp.example.org"), "carol@example.org");
+        answer.imap[0].checked = checked;
+        answer.submission[0].checked = checked;
+        let (mut onboarding, detect) = detecting(vec![answer]);
+        onboarding.form_mut().host = "mail.mine.example.org".to_owned();
+        onboarding.form_mut().smtp_host = "smtp.mine.example.org".to_owned();
+        detect_now(&mut onboarding, &detect, "carol@example.org");
+        // The owner's servers stay, and nothing is said beside their rows: they are not Detect's.
+        assert_eq!(onboarding.form().host, "mail.mine.example.org");
+        assert_eq!(onboarding.unchecked(), [None, None]);
+        let found = onboarding.found().unwrap();
+        assert_eq!(found.kept_unchecked, [Some(checked), Some(checked)]);
+        assert_eq!(
+            super::kept_line(found.kept_imap.as_deref().unwrap(), found.kept_unchecked[0], false),
+            format!("Detect found imap.example.org but did not check it: {cause}. The IMAP server you typed stays.")
+        );
+        assert_eq!(
+            super::kept_line(found.kept_outgoing.as_deref().unwrap(), found.kept_unchecked[1], true),
+            format!("Detect found smtp.example.org but did not check it: {cause}. The outgoing server you typed stays.")
+        );
+    }
+    // One that answered says only that the owner's stays.
+    let (mut onboarding, detect) = detecting(vec![found_at("imap.example.org", None, "carol@example.org")]);
+    onboarding.form_mut().host = "mail.mine.example.org".to_owned();
+    detect_now(&mut onboarding, &detect, "carol@example.org");
+    let found = onboarding.found().unwrap();
+    assert_eq!(found.kept_unchecked, [None, None]);
+    assert_eq!(super::kept_line("imap.example.org", None, false), "Detect found imap.example.org; the IMAP server you typed stays.");
+    // A hostile host is cleaned and cut as in the line under a row.
+    let host = format!("\u{202e}{}.example.org\u{0}", "h".repeat(300));
+    let said = super::kept_line(&super::shown(&host), Some(Checked::NoName), false);
+    assert_eq!(said.matches('…').count(), 1, "{said}");
+    assert!(!said.contains('\u{202e}') && !said.contains('\u{0}'), "{said:?}");
 }

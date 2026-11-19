@@ -29,7 +29,9 @@
 //! and the note says Detect's server was left out. A Detect that finds nothing takes out what an earlier one put there.
 //! While the server rows still hold what Detect put there and the address has changed since it answered, a line says
 //! they come from an earlier Detect (and the user name, while it is Detect's too), until Detect runs again or a server
-//! field is edited by hand.
+//! field is edited by hand. A server Detect proposes without having reached it ([`Checked`]) says why beside its row,
+//! until that row is edited or Detect runs again. Leaving the add form any way, Cancel too, while Detect asks sets the
+//! run's [`RunStop`]: it starts no further lookup or probe, and its answer is thrown away when it comes.
 //! A field whose text is wrong says so under itself ([`Slot`]): a port or a CalDAV address as it is
 //! typed, a missing address, password or IMAP server when the form is sent.
 //!
@@ -39,6 +41,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 
@@ -148,7 +151,9 @@ pub enum Source {
     Ispdb,
     /// An SRV record.
     Srv,
-    /// A common host name: a guess.
+    /// The mail provider the domain's MX records point to: its settings file or its usual host names. A guess.
+    Provider,
+    /// A common host name of the domain: a guess.
     Guess,
 }
 
@@ -163,6 +168,7 @@ impl Source {
             }
             Self::Ispdb => tr!("Found in Mozilla's list of providers."),
             Self::Srv => tr!("Found in your domain's DNS records."),
+            Self::Provider => tr!("A guess from the mail provider your domain's MX records point to: check the servers before you add."),
             Self::Guess => tr!("A common server name: a guess, not something your provider said. Make sure it is right."),
         }
     }
@@ -170,7 +176,92 @@ impl Source {
     /// Whether the owner should look twice before using it.
     #[must_use]
     pub const fn doubtful(self) -> bool {
-        matches!(self, Self::AutoconfigRedirect | Self::Guess)
+        matches!(self, Self::AutoconfigRedirect | Self::Provider | Self::Guess)
+    }
+}
+
+/// Whether Detect reached a server it proposes, and why not when it did not. Fixed ids: the form words them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Checked {
+    /// It answered Detect's probe as a mail server of its kind.
+    #[default]
+    Answered,
+    /// The domain names it, and it did not answer from here.
+    NoAnswer,
+    /// It refused the connection from here.
+    Refused,
+    /// Its name was not found.
+    NoName,
+    /// Its certificate does not fit this computer's clock.
+    Clock,
+}
+
+/// The most characters of a host name a line about it shows; a longer one is cut with one `…`.
+pub const MOST_HOST_CHARS: usize = 48;
+
+/// `host` made fit for a line of the form: cleaned as [`shown`] does, and cut to [`MOST_HOST_CHARS`] with one `…`.
+fn host_in_line(host: &str) -> String {
+    let host = shown(host);
+    if host.chars().count() <= MOST_HOST_CHARS {
+        return host;
+    }
+    host.chars().take(MOST_HOST_CHARS.saturating_sub(1)).chain(std::iter::once('…')).collect()
+}
+
+/// What the form says beside a server Detect proposes without having reached it: why, with the host named. `None` for
+/// a server that answered.
+#[must_use]
+pub fn unchecked_line(checked: Checked, host: &str) -> Option<String> {
+    let host = host_in_line(host);
+    Some(match checked {
+        Checked::Answered => return None,
+        Checked::NoAnswer => tr!("Not checked: {host} did not answer from here.", host = host),
+        Checked::Refused => tr!("Not checked: {host} refused the connection from here.", host = host),
+        Checked::NoName => tr!("Not checked: the name {host} was not found.", host = host),
+        Checked::Clock => {
+            tr!("Not checked: the certificate of {host} does not fit this computer's clock, which may be what is off.", host = host)
+        }
+    })
+}
+
+/// What the form says of a server Detect found at `host` and left out because the owner typed another (the outgoing one
+/// when `outgoing`): that the owner's stays, and, when Detect did not reach it (`unchecked`), that it was not checked and
+/// why, the host then cut as in [`unchecked_line`].
+#[must_use]
+pub fn kept_line(host: &str, unchecked: Option<Checked>, outgoing: bool) -> String {
+    let cause = match unchecked {
+        None | Some(Checked::Answered) => None,
+        Some(Checked::NoAnswer) => Some(tr!("it did not answer from here")),
+        Some(Checked::Refused) => Some(tr!("it refused the connection from here")),
+        Some(Checked::NoName) => Some(tr!("its name was not found")),
+        Some(Checked::Clock) => Some(tr!("its certificate does not fit this computer's clock, which may be what is off")),
+    };
+    match (cause, outgoing) {
+        (None, false) => tr!("Detect found {host}; the IMAP server you typed stays.", host = host),
+        (None, true) => tr!("Detect found {host}; the outgoing server you typed stays.", host = host),
+        (Some(cause), false) => {
+            tr!("Detect found {host} but did not check it: {cause}. The IMAP server you typed stays.", host = host_in_line(host), cause = cause)
+        }
+        (Some(cause), true) => {
+            tr!("Detect found {host} but did not check it: {cause}. The outgoing server you typed stays.", host = host_in_line(host), cause = cause)
+        }
+    }
+}
+
+/// The stop of one Detect run: once set, the run starts no further lookup or probe and ends as soon as it can.
+#[derive(Debug, Clone, Default)]
+pub struct RunStop(Arc<AtomicBool>);
+
+impl RunStop {
+    /// Stops the run.
+    pub fn stop(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether the run was stopped.
+    #[must_use]
+    pub fn is_stopped(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
     }
 }
 
@@ -187,6 +278,8 @@ pub struct Suggestion {
     pub username: String,
     /// Where it came from.
     pub source: Source,
+    /// Whether Detect reached it.
+    pub checked: Checked,
 }
 
 /// What Detect found.
@@ -205,8 +298,8 @@ pub struct Proposal {
 /// Runs Detect for the form.
 pub trait Detect: Send {
     /// Starts Detect's run `run` for `address`, asking Mozilla's ISPDB too when `ispdb` is on; the answer comes from
-    /// [`Detect::finished`], with the run it answers.
-    fn start(&mut self, run: u64, address: &str, ispdb: bool);
+    /// [`Detect::finished`], with the run it answers. Once `stop` is set, the run starts no further lookup or probe.
+    fn start(&mut self, run: u64, address: &str, ispdb: bool, stop: RunStop);
 
     /// A run that ended: its number and its proposal. Each run answers once.
     fn finished(&mut self) -> Option<(u64, Proposal)>;
@@ -219,7 +312,7 @@ pub struct NoDetect {
 }
 
 impl Detect for NoDetect {
-    fn start(&mut self, run: u64, _address: &str, _ispdb: bool) {
+    fn start(&mut self, run: u64, _address: &str, _ispdb: bool, _stop: RunStop) {
         self.done = Some(run);
     }
 
@@ -229,8 +322,8 @@ impl Detect for NoDetect {
     }
 }
 
-/// The function a [`Threaded`] Detect runs: the address and whether the ISPDB is on, to the proposal.
-pub type Run = Arc<dyn Fn(&str, bool) -> Proposal + Send + Sync>;
+/// The function a [`Threaded`] Detect runs: the address, whether the ISPDB is on and the run's stop, to the proposal.
+pub type Run = Arc<dyn Fn(&str, bool, &RunStop) -> Proposal + Send + Sync>;
 
 /// Runs Detect on a thread of its own, so the window does not wait for the name servers and the web; `wake` draws
 /// the window again when it ended. The desktop app gives it `net`'s Detect.
@@ -257,11 +350,11 @@ impl Threaded {
 }
 
 impl Detect for Threaded {
-    fn start(&mut self, number: u64, address: &str, ispdb: bool) {
+    fn start(&mut self, number: u64, address: &str, ispdb: bool, stop: RunStop) {
         let (run, wake, sender, address) = (Arc::clone(&self.run), self.wake.clone(), self.sender.clone(), address.to_owned());
         let spawned = thread::Builder::new().name("inboxcraft-detect".to_owned()).spawn(move || {
             // A closed window no longer listens; nothing to tell it then.
-            let _ = sender.send((number, run(&address, ispdb)));
+            let _ = sender.send((number, run(&address, ispdb, &stop)));
             if let Some(wake) = wake {
                 wake();
             }
@@ -284,6 +377,8 @@ pub struct Proposed {
     pub proposal: Proposal,
     /// Each address it was asked for, and whether the ISPDB was on.
     pub asked: Arc<std::sync::Mutex<Vec<(String, bool)>>>,
+    /// The stop of each run started, in order.
+    pub stops: Arc<std::sync::Mutex<Vec<RunStop>>>,
     /// The runs started and not answered yet, the oldest first.
     pending: std::collections::VecDeque<u64>,
 }
@@ -297,9 +392,15 @@ impl Proposed {
 }
 
 impl Detect for Proposed {
-    fn start(&mut self, run: u64, address: &str, ispdb: bool) {
+    fn start(&mut self, run: u64, address: &str, ispdb: bool, stop: RunStop) {
         if let Ok(mut asked) = self.asked.lock() {
             asked.push((address.to_owned(), ispdb));
+        }
+        if let Ok(mut stops) = self.stops.lock() {
+            // Bounded like the runs a test starts: a picture starts one.
+            if stops.len() < MOST_LINES {
+                stops.push(stop);
+            }
         }
         self.pending.push_back(run);
     }
@@ -716,6 +817,8 @@ pub struct Found {
     pub kept_imap: Option<String>,
     /// The outgoing server Detect found and left out, because the owner typed another.
     pub kept_outgoing: Option<String>,
+    /// Why Detect did not reach the server it left out (IMAP, outgoing), when it did not.
+    pub kept_unchecked: [Option<Checked>; 2],
     /// The encryption Detect set in the IMAP row and in the outgoing row where it replaced one the owner had picked.
     pub encryption_set: [Option<Security>; 2],
     /// What Detect asked: what left the computer; the first [`MOST_LINES`].
@@ -781,6 +884,9 @@ struct Detected {
     /// The rows (IMAP, outgoing) whose encryption the owner picked since Detect last answered: the line that Detect set
     /// it is not said there, whichever encryption the owner picked.
     picked: [bool; 2],
+    /// The rows (IMAP, outgoing) Detect filled with a server it did not reach, and why: said beside the row while it
+    /// stands as Detect put it ([`Onboarding::unchecked`]); a new Detect takes them away.
+    unchecked: [Option<(Checked, String)>; 2],
 }
 
 /// The add form as the owner left it, kept while onboarding is closed or on an account's form: the form, what Detect
@@ -845,6 +951,8 @@ pub struct Onboarding {
     /// Detect's run under way for the add form, and the address it asked about: only its answer is taken, and only
     /// while the add form is open and still holds that address.
     asking: Option<(u64, String)>,
+    /// The stop of the run under way: set when the add form is left or cancelled, or another run starts.
+    stop: Option<RunStop>,
     /// The number of Detect's last run.
     runs: u64,
     found: Option<Arc<Found>>,
@@ -891,6 +999,7 @@ impl Onboarding {
             stage: Stage::Closed,
             form: Form::default(),
             asking: None,
+            stop: None,
             runs: 0,
             found: None,
             detected: Detected::default(),
@@ -967,8 +1076,8 @@ impl Onboarding {
         if self.stage != Stage::Form {
             return;
         }
-        // Detect under way ends with the page: its answer is thrown away when it comes.
-        self.asking = None;
+        // Detect under way ends with the page: it is stopped, and its answer is thrown away if one still comes.
+        self.end_run();
         self.form.password.clear();
         let form = std::mem::take(&mut self.form);
         self.kept = Some(Kept { form, found: self.found.take(), detected: std::mem::take(&mut self.detected) });
@@ -1293,9 +1402,24 @@ impl Onboarding {
         }
         self.error = None;
         self.sent.clear();
+        // A run still under way asks no more: only the new one's answer is taken.
+        self.end_run();
+        // What the last answer said of the servers it did not reach goes with it.
+        self.detected.unchecked = [None, None];
         self.runs = self.runs.wrapping_add(1);
-        self.detect.start(self.runs, &address, self.form.ispdb);
+        let stop = RunStop::default();
+        self.detect.start(self.runs, &address, self.form.ispdb, stop.clone());
         self.asking = Some((self.runs, address));
+        self.stop = Some(stop);
+    }
+
+    /// Ends Detect's run under way, if one is: its stop is set, so it starts no further lookup or probe, and its answer
+    /// is thrown away when it comes.
+    fn end_run(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            stop.stop();
+        }
+        self.asking = None;
     }
 
     /// Takes Detect's answer when it came: its first IMAP and outgoing server fill their rows of the form, and its user
@@ -1313,6 +1437,7 @@ impl Onboarding {
                 continue;
             }
             changed = true;
+            self.stop = None;
             if self.stage == Stage::Form && self.form.address.trim() == address {
                 self.take(proposal);
                 self.detected.address = Some(address);
@@ -1359,10 +1484,30 @@ impl Onboarding {
         let kept_imap = best.filter(|_| imap == Filled::Owner).map(|best| shown(&best.host));
         let in_form = outgoing_best.filter(|_| outgoing == Filled::Detect).map(|best| (shown(&best.host), best.source));
         let kept_outgoing = outgoing_best.filter(|_| outgoing == Filled::Owner).map(|best| shown(&best.host));
+        let kept_why = |best: Option<&Suggestion>, filled: Filled| {
+            best.filter(|best| filled == Filled::Owner && best.checked != Checked::Answered).map(|best| best.checked)
+        };
+        let kept_unchecked = [kept_why(best, imap), kept_why(outgoing_best, outgoing)];
+        // A server Detect put into a row without having reached it: the row says so, and why.
+        let unchecked = |best: Option<&Suggestion>, filled: Filled| {
+            best.filter(|best| filled == Filled::Detect && best.checked != Checked::Answered).map(|best| (best.checked, host_in_line(&best.host)))
+        };
+        self.detected.unchecked = [unchecked(best, imap), unchecked(outgoing_best, outgoing)];
         let (asked, failed, column, alone) = Found::lines(&proposal.asked, &proposal.failed);
         let asked_count = proposal.asked.len();
-        self.found =
-            Some(Arc::new(Found { source, outgoing: in_form, kept_imap, kept_outgoing, encryption_set, asked, failed, asked_count, column, alone }));
+        self.found = Some(Arc::new(Found {
+            source,
+            outgoing: in_form,
+            kept_imap,
+            kept_outgoing,
+            kept_unchecked,
+            encryption_set,
+            asked,
+            failed,
+            asked_count,
+            column,
+            alone,
+        }));
         self.detected.picked = [false; 2];
     }
 
@@ -1404,6 +1549,28 @@ impl Onboarding {
         let set = self.found.as_ref().map_or([None, None], |found| found.encryption_set);
         let [imap, outgoing] = self.detected.picked;
         [set[0].filter(|_| !imap), set[1].filter(|_| !outgoing)]
+    }
+
+    /// What each server row (IMAP, outgoing) says of the server Detect put there without having reached it: why it was
+    /// not checked. Only while the add form is open, no Detect runs, and the row's host, port and encryption stand as
+    /// Detect put them; an edit of any of them takes the line away.
+    #[must_use]
+    pub fn unchecked(&self) -> [Option<String>; 2] {
+        if self.stage != Stage::Form || self.detecting() {
+            return [None, None];
+        }
+        let form = &self.form;
+        let detected = &self.detected;
+        let rows = [
+            (detected.imap.as_ref(), (&form.host, &form.port, form.security)),
+            (detected.submission.as_ref(), (&form.smtp_host, &form.smtp_port, form.smtp_security)),
+        ];
+        let mut lines = [None, None];
+        for ((line, (row, (host, port, security))), said) in detected.unchecked.iter().zip(rows).zip(lines.iter_mut()) {
+            let stands = row.is_some_and(|(was_host, was_port, was_security)| was_host == host && was_port == port && *was_security == security);
+            *said = line.as_ref().filter(|_| stands).and_then(|(checked, host)| unchecked_line(*checked, host));
+        }
+        lines
     }
 
     /// The owner picked the encryption of server row `row` (0 IMAP, 1 outgoing): Detect's line there is not said again.

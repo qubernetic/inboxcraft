@@ -1716,3 +1716,153 @@ fn a_line_under_a_server_row_says_when_its_encryption_is_unusual_for_its_port_an
         assert_eq!(kept, (port, Some(security)));
     }
 }
+
+/// The add form open over a Detect that answers `proposal`, at `percent` text, carol@example.org typed and Detect pressed.
+fn detected_by(proposal: crate::onboard::Proposal, theme: egui::Theme, percent: u16) -> Harness<'static, InboxApp> {
+    let mut app =
+        InboxApp::new(mailbox()).with_accounts(Arc::new(Kept::default()), Box::new(Proposed::new(proposal)), Box::new(FakeWorkers::passing()));
+    app.set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+    let mut harness = harness(app, theme);
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    harness.state_mut().onboarding_mut().0.form_mut().address = "carol@example.org".to_owned();
+    harness.run();
+    press(&mut harness, "Detect");
+    harness.run();
+    harness
+}
+
+#[test]
+fn detect_s_note_says_how_the_servers_were_found_for_each_source() {
+    for source in [Source::Autoconfig, Source::AutoconfigRedirect, Source::Ispdb, Source::Srv, Source::Provider, Source::Guess] {
+        let harness = detected_by(proposal(source), egui::Theme::Light, 100);
+        harness.get_by_label(source.text());
+        for other in [Source::Autoconfig, Source::Ispdb, Source::Srv, Source::Provider, Source::Guess].into_iter().filter(|other| *other != source) {
+            assert!(harness.query_by_label(other.text()).is_none(), "{source:?} says only its own words, not {other:?}'s");
+        }
+    }
+}
+
+#[test]
+fn an_outgoing_server_guessed_from_the_provider_says_so() {
+    let mut found = crate::onboard::tests::found_at("imap.example.org", Some("mail.provider.example.net"), "carol@example.org");
+    found.submission[0].source = Source::Provider;
+    let harness = detected_by(found, egui::Theme::Light, 100);
+    harness.get_by_label("mail.provider.example.net was a guess from your domain's mail provider: check it.");
+}
+
+/// Detect's answer with both servers not reached: the IMAP one did not answer, the outgoing one's certificate misfits
+/// the clock.
+fn unchecked_answer(host: &str) -> crate::onboard::Proposal {
+    let mut found = crate::onboard::tests::found_at(host, Some("smtp.example.org"), "carol@example.org");
+    found.imap[0].checked = crate::onboard::Checked::NoAnswer;
+    found.submission[0].checked = crate::onboard::Checked::Clock;
+    found
+}
+
+const IMAP_UNCHECKED: &str = "Not checked: imap.example.org did not answer from here.";
+const SMTP_UNCHECKED: &str = "Not checked: the certificate of smtp.example.org does not fit this computer's clock, which may be what is off.";
+
+#[test]
+fn a_server_not_checked_says_why_under_its_own_row_at_130_percent_without_overflow() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        let harness = detected_by(unchecked_answer("imap.example.org"), theme, 130);
+        let imap = harness.get_by_label(IMAP_UNCHECKED).rect();
+        let smtp = harness.get_by_label(SMTP_UNCHECKED).rect();
+        let ports: Vec<egui::Rect> = harness.query_all_by_label("Port").map(|node| node.rect()).collect();
+        let (first, last) = (ports[0], ports[ports.len() - 1]);
+        let caldav = harness.get_by_label("CalDAV address, for calendars").rect();
+        // Each under its own row, over the next one: nothing overlaps.
+        assert!(imap.top() >= first.bottom() && imap.bottom() <= last.top(), "{theme:?}: {imap:?} between {first:?} and {last:?}");
+        assert!(smtp.top() >= last.bottom() && smtp.bottom() <= caldav.top(), "{theme:?}: {smtp:?} between {last:?} and {caldav:?}");
+        // In the form's column, no wider than its fields.
+        let hint = harness.get_by_label("The password goes into your system's credential store, never into InboxCraft's files.").rect();
+        for line in [imap, smtp] {
+            assert!(line.left() >= hint.left() - 0.5 && line.right() <= hint.left() + 560.5, "{theme:?}: {line:?} in the form from {hint:?}");
+        }
+        // The buttons stand under it all, in the window.
+        let add = harness.get_by_role_and_label(Role::Button, "Check and add").rect();
+        assert!(add.top() >= caldav.bottom(), "{theme:?}: {add:?}");
+        // A screen reader hears each line with its host field.
+        let hosts: Vec<String> = harness
+            .query_all_by_role(Role::TextInput)
+            .filter_map(|node| node.accesskit_node().description().map(|said| said.to_string()))
+            .filter(|said| said.starts_with("Not checked"))
+            .collect();
+        assert_eq!(hosts, [IMAP_UNCHECKED, SMTP_UNCHECKED], "{theme:?}");
+    }
+}
+
+#[test]
+fn the_unchecked_line_goes_once_its_row_is_edited_or_detect_runs_again() {
+    let mut harness = detected_by(unchecked_answer("imap.example.org"), egui::Theme::Dark, 100);
+    harness.get_by_label(IMAP_UNCHECKED);
+    harness.state_mut().onboarding_mut().0.form_mut().host = "imap2.example.org".to_owned();
+    harness.run();
+    assert!(harness.query_by_label(IMAP_UNCHECKED).is_none(), "the row edited");
+    harness.get_by_label(SMTP_UNCHECKED);
+    harness.state_mut().onboarding_mut().0.form_mut().smtp_port = "466".to_owned();
+    harness.run();
+    assert!(harness.query_by_label(SMTP_UNCHECKED).is_none(), "the row edited");
+}
+
+#[test]
+fn a_hostile_host_name_in_the_unchecked_line_stays_in_the_form() {
+    let host = format!("\u{202e}{}.example.org\u{0}", "h".repeat(300));
+    let harness = detected_by(unchecked_answer(&host), egui::Theme::Light, 130);
+    let node = harness.get_by_label_contains("Not checked: hhh");
+    let said = node.accesskit_node().label().filter(|label| !label.is_empty()).or_else(|| node.accesskit_node().value()).unwrap_or_default();
+    assert_eq!(said.matches('…').count(), 1, "{said}");
+    assert!(!said.contains('\u{202e}') && !said.contains('\u{0}'), "{said:?}");
+    let line = node.rect();
+    let hint = harness.get_by_label("The password goes into your system's credential store, never into InboxCraft's files.").rect();
+    assert!(line.left() >= hint.left() - 0.5 && line.right() <= hint.left() + 560.5, "{line:?} in the form from {hint:?}");
+    let caldav = harness.get_by_label("CalDAV address, for calendars").rect();
+    assert!(line.bottom() <= caldav.top(), "{line:?} over {caldav:?}");
+}
+
+#[test]
+fn leaving_the_form_while_detect_asks_stops_the_run_and_the_buttons_come_back() {
+    let held = crate::onboard::tests::Held::new(vec![crate::onboard::tests::found_at("imap.late.example.org", None, "carol@example.org")]);
+    let app = InboxApp::new(mailbox()).with_accounts(Arc::new(Kept::default()), Box::new(held.clone()), Box::new(FakeWorkers::passing()));
+    let mut harness = harness(app, egui::Theme::Dark);
+    open_form(&mut harness);
+    harness.state_mut().onboarding_mut().0.form_mut().address = "carol@example.org".to_owned();
+    harness.run();
+    press(&mut harness, "Detect");
+    assert!(harness.get_by_role_and_label(Role::Button, "Check and add").accesskit_node().is_disabled(), "waits while Detect asks");
+    let stop = held.stops.lock().unwrap()[0].clone();
+    // Esc leaves the form, and the owner comes back to it.
+    leave_and_come_back(&mut harness);
+    assert!(stop.is_stopped(), "leaving the form stops the run");
+    on_sheet(&harness, "Add account").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    // The stopped run's answer comes late.
+    held.answer();
+    harness.run();
+    harness.run();
+    assert!(!harness.get_by_role_and_label(Role::Button, "Detect").accesskit_node().is_disabled());
+    assert!(!harness.get_by_role_and_label(Role::Button, "Check and add").accesskit_node().is_disabled());
+    assert_eq!(harness.state().onboarding().form().host, "", "the late answer is dropped");
+}
+
+#[test]
+fn a_server_detect_left_out_for_the_owners_says_in_its_note_that_it_was_not_checked() {
+    let mut found = crate::onboard::tests::found_at("imap.example.org", None, "carol@example.org");
+    found.imap[0].checked = crate::onboard::Checked::Refused;
+    let mut app = InboxApp::new(mailbox()).with_accounts(Arc::new(Kept::default()), Box::new(Proposed::new(found)), Box::new(FakeWorkers::passing()));
+    app.set_text_scale(crate::theme::TextScale::from_percent(100).unwrap());
+    let mut harness = harness(app, egui::Theme::Light);
+    harness.state_mut().onboarding_mut().0.open();
+    {
+        let form = harness.state_mut().onboarding_mut().0.form_mut();
+        form.address = "carol@example.org".to_owned();
+        form.host = "mail.mine.example.org".to_owned();
+    }
+    harness.run();
+    press(&mut harness, "Detect");
+    harness.run();
+    harness.get_by_label("Detect found imap.example.org but did not check it: it refused the connection from here. The IMAP server you typed stays.");
+    assert!(harness.query_by_label_contains("Not checked:").is_none(), "nothing under the owner's row");
+}

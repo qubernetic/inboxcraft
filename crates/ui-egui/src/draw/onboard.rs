@@ -10,7 +10,9 @@
 //! one, for a guess or an unencrypted redirect); while Detect runs, a progress line stands there and the server rows
 //! wait, disabled. Under a server row whose encryption is unusual for its port (STARTTLS on 993, TLS on 143, …) one
 //! muted caption line says so; saving is not held back. Under Detect's note one line says when the server rows are
-//! an earlier Detect's, for another address than the one typed now.
+//! an earlier Detect's, for another address than the one typed now. Under a row Detect filled with a server it did not
+//! reach, one line in the same style says why (no answer, refused, no such name, a certificate that misfits the clock),
+//! until that row is edited or Detect runs again.
 //!
 //! The check prints its seven steps as `check-step` lines, one by one as they run (motion M13: the line of the step
 //! running is printed when it starts and takes its answer when it ends; the steps after it are not shown yet), in a
@@ -39,7 +41,9 @@ use crate::component::soon::{soon, soon_tag};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
-use crate::onboard::{Form, Found, Onboarding, Outcome, Secret, Security, Slot, Stage, StepRow, StepState, port_typed, unusual_encryption};
+use crate::onboard::{
+    Form, Found, Onboarding, Outcome, Secret, Security, Slot, Source, Stage, StepRow, StepState, kept_line, port_typed, unusual_encryption,
+};
 use crate::theme::{Font, Theme};
 use crate::tr;
 
@@ -253,7 +257,9 @@ fn security(ui: &mut Ui, theme: &Theme, name: &str, chosen: Security, drop: f32)
 
 /// One server's row, `width` wide: its host, its port (`usual` as the hint) and its security, with the error of its
 /// host or port under the whole row, and a line saying so while the row holds the encryption Detect `set` over one the
-/// owner had picked, and one while its encryption is unusual for its port. What the owner changed in it.
+/// owner had picked, one while its encryption is unusual for its port, and one while it holds a server Detect proposed
+/// without having reached it (`unchecked`, which a screen reader also hears with the host field). What the owner
+/// changed in it.
 #[allow(clippy::too_many_arguments)]
 fn server_row(
     ui: &mut Ui,
@@ -262,7 +268,7 @@ fn server_row(
     (caption, placeholder, name, slots): (&str, &str, &str, [Option<Slot>; 2]),
     (host, port_text, chosen): (&mut String, &mut String, &mut Option<Security>),
     usual: fn(Security) -> u16,
-    set: Option<Security>,
+    (set, unchecked): (Option<Security>, Option<&str>),
     width: f32,
 ) -> Vec<Slot> {
     let mut edited = Vec::new();
@@ -291,12 +297,17 @@ fn server_row(
     let mut job = egui::text::LayoutJob::single_section(label.text(caption), label.format(theme.palette.muted));
     job.wrap = egui::text::TextWrapping { max_width: room.max(1.0), ..Default::default() };
     let drop = (ui.painter().layout_job(job).size().y.max(label.line) - label.line).max(0.0);
-    with_error(ui, theme, &said, &[note.as_deref(), unusual.as_deref()], width, |ui| {
+    with_error(ui, theme, &said, &[note.as_deref(), unusual.as_deref(), unchecked], width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             let response = line_field(ui, theme, (caption, placeholder, name), host, errors[0], room);
             if let Some(slot) = host_slot {
                 faults.mark(ui, slot, &response);
+            }
+            // The host field is read with the line that says its server was not checked, after its error if it has one.
+            if let Some(unchecked) = unchecked {
+                let heard = errors[0].map_or_else(|| unchecked.to_owned(), |error| format!("{error} {unchecked}"));
+                ui.ctx().accesskit_node_builder(response.id, |node| node.set_description(heard));
             }
             if response.changed() {
                 edited.extend(host_slot);
@@ -347,7 +358,14 @@ fn names(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: f3
 
 /// The incoming server, and the outgoing server and the CalDAV address, which are optional; waiting, disabled, while
 /// Detect runs. What the owner changed.
-fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, (width, detecting): (f32, bool), set: [Option<Security>; 2]) -> Vec<Slot> {
+fn servers(
+    ui: &mut Ui,
+    theme: &Theme,
+    faults: &Faults,
+    form: &mut Form,
+    (width, detecting): (f32, bool),
+    (set, unchecked): ([Option<Security>; 2], &[Option<String>; 2]),
+) -> Vec<Slot> {
     ui.add_enabled_ui(!detecting, |ui| {
         ui.spacing_mut().item_spacing.y = GAP;
         let mut edited = server_row(
@@ -357,7 +375,7 @@ fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, (width,
             (tr!("IMAP server"), "imap.example.org", tr!("IMAP security"), [Some(Slot::Host), Some(Slot::Port)]),
             (&mut form.host, &mut form.port, &mut form.security),
             Security::imap_port,
-            set[0],
+            (set[0], unchecked[0].as_deref()),
             width,
         );
         edited.extend(server_row(
@@ -367,7 +385,7 @@ fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, (width,
             (tr!("Outgoing server (SMTP), to send"), "smtp.example.org", tr!("Outgoing security"), [None, Some(Slot::SmtpPort)]),
             (&mut form.smtp_host, &mut form.smtp_port, &mut form.smtp_security),
             Security::submission_port,
-            set[1],
+            (set[1], unchecked[1].as_deref()),
             width,
         ));
         let error = faults.of_slot(Slot::Caldav);
@@ -390,16 +408,20 @@ fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, (width,
 fn found_note(ui: &mut Ui, theme: &Theme, keymap: &Keymap, found: &Found) {
     let (kind, text) = match (found.source, found.kept_imap.as_deref()) {
         (Some(source), _) => (if source.doubtful() { BannerKind::Careful } else { BannerKind::Notice }, source.text().to_owned()),
-        (None, Some(host)) => (BannerKind::Notice, tr!("Detect found {host}; the IMAP server you typed stays.", host = host)),
+        (None, Some(host)) => (BannerKind::Notice, kept_line(host, found.kept_unchecked[0], false)),
         (None, None) => (BannerKind::Notice, tr!("Detect found no server: type the settings in.").to_owned()),
     };
     banner(ui, theme, keymap, kind, &text, &[]);
     let first_doubtful = found.source.is_some_and(|source| source.doubtful());
-    if let Some((host, _)) = found.outgoing.as_ref().filter(|(_, source)| source.doubtful() && !first_doubtful) {
-        banner(ui, theme, keymap, BannerKind::Careful, &tr!("{host} was a guess from common names: check it.", host = host), &[]);
+    if let Some((host, source)) = found.outgoing.as_ref().filter(|(_, source)| source.doubtful() && !first_doubtful) {
+        let text = match source {
+            Source::Provider => tr!("{host} was a guess from your domain's mail provider: check it.", host = host),
+            _ => tr!("{host} was a guess from common names: check it.", host = host),
+        };
+        banner(ui, theme, keymap, BannerKind::Careful, &text, &[]);
     }
     if let Some(host) = found.kept_outgoing.as_deref() {
-        banner(ui, theme, keymap, BannerKind::Notice, &tr!("Detect found {host}; the outgoing server you typed stays.", host = host), &[]);
+        banner(ui, theme, keymap, BannerKind::Notice, &kept_line(host, found.kept_unchecked[1], true), &[]);
     }
 }
 
@@ -533,6 +555,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
     let faults = Faults::of(onboarding);
     let found = onboarding.found_shared();
     let said = onboarding.encryption_said();
+    let unchecked = onboarding.unchecked();
     let mut edited = Vec::new();
     let mut picked = Vec::new();
     let mut form_part = |ui: &mut Ui| {
@@ -548,7 +571,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
         let form = onboarding.form_mut();
         edited.extend(names(ui, theme, &faults, form, width, (tr!("Password"), "")));
         let before = [form.security, form.smtp_security];
-        edited.extend(servers(ui, theme, &faults, form, (width, detecting), said));
+        edited.extend(servers(ui, theme, &faults, form, (width, detecting), (said, &unchecked)));
         // A row whose encryption the owner picked: Detect's line there is said no more.
         picked.extend([form.security, form.smtp_security].iter().zip(before).enumerate().filter(|(_, (now, was))| **now != *was).map(|(row, _)| row));
         words(ui, tr!("The password goes into your system's credential store, never into InboxCraft's files."), f.caption, p.muted, width);
@@ -613,7 +636,7 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
             field::text_field(ui, theme, id, &mut address, &Field { read_only: true, ..Field::new(tr!("Address"), "") });
         });
         edited.extend(names(ui, theme, &faults, form, width, (tr!("New password"), tr!("empty keeps the stored one"))));
-        edited.extend(servers(ui, theme, &faults, form, (width, false), [None, None]));
+        edited.extend(servers(ui, theme, &faults, form, (width, false), ([None, None], &[None, None])));
         words(ui, tr!("A new password goes into your system's credential store. The stored one is never shown."), f.caption, p.muted, width);
         if let Some(text) = &note {
             words(ui, text, f.caption, p.ink, width);
