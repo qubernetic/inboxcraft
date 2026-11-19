@@ -233,7 +233,13 @@ fn mail_why_is_not_offered_until_the_owner_decides() {
     // What `mail_why` tells a client (the group and its rule, the owner's choice for the sender, the snooze times,
     // whether the owner wrote in the thread) is the owner's to allow: offering it is a deliberate change of this test.
     assert!(TOOLS.iter().all(|tool| tool.command != "mail.why" && tool.name != "mail_why"));
-    assert!(WITHHELD.iter().any(|tool| tool.command == "mail.why" && tool.name == "mail_why"));
+    let why = WITHHELD.iter().find(|tool| tool.command == "mail.why" && tool.name == "mail_why").unwrap();
+    // Its definition stays ready to offer: the message's id, required, a whole number; read-only.
+    let schema = (why.schema)();
+    assert_eq!(schema["required"], json!(["id"]), "{schema}");
+    assert_eq!(schema["properties"]["id"]["type"], "integer", "{schema}");
+    assert_eq!(schema["additionalProperties"], false, "{schema}");
+    assert!(why.read_only);
     let (_dir, mut server) = fixture_server();
     let answer = request(
         &mut server,
