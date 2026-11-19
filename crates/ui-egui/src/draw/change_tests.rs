@@ -153,3 +153,48 @@ fn a_key_during_the_change_ends_it_in_that_frame() {
         assert!(calendar.is_subset(&seen) && mail.is_disjoint(&seen), "{level:?}: the key acts and the change is at its end, {seen:?}");
     }
 }
+
+#[test]
+fn a_press_on_the_index_changes_the_place_in_the_frame_of_the_press() {
+    let (mail, calendar, _) = ends();
+    for level in [Level::Full, Level::Reduced] {
+        let mut harness = window(level);
+        harness.get_by_role_and_label(Role::Button, "Calendar").click();
+        harness.step();
+        assert!(on_calendar(&harness), "{level:?}: the index is on Calendar in the frame of the press");
+        let seen = words(&body(&harness));
+        assert!(mail.is_subset(&seen), "{level:?} 0 ms: the old body stands over the new, {seen:?}");
+        assert!(crate::component::tests::rests(&mut harness, 60), "{level:?}: and rests");
+        assert!(calendar.is_subset(&words(&body(&harness))), "{level:?}: the calendar at the end");
+    }
+}
+
+#[test]
+fn a_floating_composer_is_neither_painted_over_nor_scrambled_by_a_change() {
+    let mut harness = window(Level::Full);
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::COMPOSE);
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "Subject").type_text("Seedlings");
+    harness.run();
+    harness.state_mut().run_action(&ctx, crate::keymap::CALENDAR);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Back to the reader's place");
+    if let Some(focused) = harness.ctx.memory(|memory| memory.focused()) {
+        harness.ctx.memory_mut(|memory| memory.surrender_focus(focused));
+    }
+    harness.run();
+    assert!(body(&harness).iter().any(|(text, _)| text == "Seedlings"), "at rest the draft's subject shows");
+    harness.event(egui::Event::Key { key: Key::Num0, pressed: true, modifiers: Modifiers::COMMAND, repeat: false, physical_key: None });
+    harness.step();
+    for frame in 0..40 {
+        let seen = body(&harness);
+        assert!(
+            seen.iter().any(|(text, alpha)| text == "Seedlings" && *alpha == 255),
+            "frame {frame}: the draft's subject whole and in front, {seen:?}"
+        );
+        harness.step();
+    }
+}

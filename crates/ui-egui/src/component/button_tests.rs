@@ -728,7 +728,12 @@ fn fade_of(mode: Mode, index: usize, reduced: bool) -> (Own, Own, Vec<Own>, Vec<
     let mut harness = crate::component::tests::staged_motion(theme, reduced, faded()[index].2, egui::vec2(400.0, 120.0), draw);
     let (on, off) = crate::component::tests::hover_frames(&mut harness, label, 10);
     assert!(crate::component::tests::rests(&mut harness, 2), "{mode:?} {label} asks for no repaint once the fade has ended");
-    (still(Shown::Rest), still(Shown::Hover), reads(on, label), reads(off, label))
+    // At full a label scrambles on hover (M3); with reduced motion it never does, and its text is checked as drawn.
+    if reduced {
+        (still(Shown::Rest), still(Shown::Hover), on, off)
+    } else {
+        (still(Shown::Rest), still(Shown::Hover), reads(on, label), reads(off, label))
+    }
 }
 
 /// `looks` with every text as long as `label` read as it: at full a label scrambles on hover (M3, `scramble_tests.rs`); these looks

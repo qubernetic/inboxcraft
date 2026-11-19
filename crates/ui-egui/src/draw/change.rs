@@ -11,7 +11,7 @@
 //! takes input, it is paint only.
 
 use egui::epaint::ClippedShape;
-use egui::{Color32, Context, Id, LayerId, Order, Rect, Shape};
+use egui::{Color32, Context, LayerId, Rect, Shape};
 
 use crate::motion::Level;
 use crate::scramble::{self, Side};
@@ -38,13 +38,10 @@ pub(crate) struct Change {
     level: Level,
 }
 
-/// The layers a body paints in: the window's own and the panels and areas under the floats.
-fn body_layers(ctx: &Context) -> Vec<LayerId> {
-    let mut layers = vec![LayerId::background()];
-    ctx.memory(|memory| {
-        layers.extend(memory.layer_ids().filter(|layer| matches!(layer.order, Order::Background | Order::Middle) && *layer != LayerId::background()));
-    });
-    layers
+/// The layer a body paints in: the window's own, under every float (a floating composer, a menu), which a change
+/// neither keeps, nor paints over, nor scrambles.
+fn body_layers() -> [LayerId; 1] {
+    [LayerId::background()]
 }
 
 /// Whether `clipped` is the body's: it is painted inside `body`.
@@ -59,7 +56,7 @@ pub(crate) fn keep(ctx: &Context, body: Rect, level: Level) -> Option<Change> {
     if level == Level::Off {
         return None;
     }
-    let layers = body_layers(ctx);
+    let layers = body_layers();
     let old = ctx.graphics(|graphics| {
         let mut old = Vec::new();
         for layer in &layers {
@@ -95,7 +92,8 @@ impl Change {
         ctx.request_repaint();
         // Shares of a fraction of a second: the casts lose nothing that shows.
         let out = ((age / OUT) as f32).clamp(0.0, 1.0);
-        let painter = ctx.layer_painter(LayerId::new(Order::Middle, Id::unique("inboxcraft-place-change")));
+        // Last in the window's own layer: over the body, under every float.
+        let painter = ctx.layer_painter(LayerId::background());
         match (self.level, age < OUT) {
             (Level::Full, true) => {
                 // The old body stands over the new one, its text going to glyphs from the right.
@@ -125,7 +123,7 @@ impl Change {
 
     /// The new body's text, resolved from the left to `share`.
     fn resolve(&self, ctx: &Context, painter: &egui::Painter, share: f32) {
-        let layers = body_layers(ctx);
+        let layers = body_layers();
         // Read first, laid out outside the paint's lock, then written back.
         let texts: Vec<(LayerId, usize, Shape)> = ctx.graphics(|graphics| {
             let mut texts = Vec::new();
