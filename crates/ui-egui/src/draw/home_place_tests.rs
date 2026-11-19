@@ -765,3 +765,61 @@ fn off_home_ctrl_z_brings_the_discarded_draft_back_and_not_an_older_act() {
         assert!(harness.state().mailbox().messages().iter().all(|row| row.id != archived), "{name}: still archived");
     }
 }
+
+/// What the owner sees of the window, in short: the place, the mailbox or pile shown, the calendar's view, the draft in
+/// the composer, the settings and their page, a waiting discard.
+fn seen(app: &InboxApp) -> String {
+    format!(
+        "{:?} {:?} {:?} {:?} {} {:?} {:?}",
+        app.screen(),
+        app.mailbox().place(),
+        app.calendar().view(),
+        app.composer().map(crate::compose::Composer::draft),
+        app.settings().is_open(),
+        app.settings().section(),
+        app.discarding(),
+    )
+}
+
+/// Every ask a press on Home can make, run as the window runs it ([`InboxApp::apply_home`], then the action it gives
+/// back through `run_action`), changes what the owner sees, but the sample mail's, which is drawn coming soon and asks
+/// nothing (`draw::home::tests::no_pressable_control_on_home_is_a_no_op`). An arm emptied fails it.
+#[test]
+fn every_ask_of_home_changes_what_the_owner_sees() {
+    use super::home::Asked;
+    use crate::home::Counted;
+    let asks = |draft: u64| {
+        [
+            Asked::Count(Counted::ToRead),
+            Asked::Count(Counted::ToScreen),
+            Asked::Count(Counted::BackToday),
+            Asked::Count(Counted::Outbox),
+            Asked::Count(Counted::NotSent),
+            Asked::OpenOutbox,
+            Asked::AllDrafts,
+            Asked::Week,
+            Asked::Today,
+            Asked::OpenDraft(draft),
+            Asked::DiscardDraft(draft),
+            Asked::ReadMail,
+            Asked::Write,
+            Asked::Calendar,
+            Asked::AddAccount,
+            Asked::OpenAccount,
+        ]
+    };
+    for at in 0..asks(0).len() {
+        let mut app = sample_app(&clock());
+        let kept = draft(&mut app, "Workshop dates");
+        let Some(&ask) = asks(kept).get(at) else { continue };
+        let mut harness = window(app);
+        let ctx = harness.ctx.clone();
+        assert_eq!(harness.state().screen(), Screen::Home);
+        let before = seen(harness.state());
+        if let Some(action) = harness.state_mut().apply_home(&ctx, ask) {
+            harness.state_mut().run_action(&ctx, action);
+        }
+        harness.run();
+        assert_ne!(seen(harness.state()), before, "{ask:?} changes nothing the owner sees");
+    }
+}
