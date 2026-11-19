@@ -77,7 +77,12 @@ pub fn block<R>(ui: &mut Ui, theme: &Theme, block: &Block<'_>, shown: Option<Sho
     let response = block.presses.then(|| {
         let response = ui.interact(Rect::from_min_size(top, vec2(width, remembered)), block.id, Sense::click());
         // Its word: the section label in it is heard as well, with its number.
-        response.widget_info(|| WidgetInfo::labeled(Role::Button, true, block.word));
+        let word = super::plain(super::capped(block.word, super::MOST).0);
+        response.widget_info(|| {
+            let mut info = WidgetInfo::labeled(Role::Button, true, &word);
+            info.selected = Some(block.selected);
+            info
+        });
         response
     });
     let lit = response.as_ref().map(|response| lit(ui, theme, response, true, shown, Hover::AtOnce)).unwrap_or_default();
@@ -86,7 +91,10 @@ pub fn block<R>(ui: &mut Ui, theme: &Theme, block: &Block<'_>, shown: Option<Sho
     let label_place = Rect::from_min_size(pos2(top.x + PAD_X, top.y + ((head - label_high) / 2.0).round()), vec2(width - PAD_X * 2.0, label_high));
     let mut child = ui.new_child(UiBuilder::new().max_rect(label_place).layout(egui::Layout::left_to_right(egui::Align::Center)));
     child.set_clip_rect(label_place.intersect(ui.clip_rect()));
-    super::label::section_label(&mut child, theme, block.index, block.word, false);
+    // The app's words, but laid out no longer than a line can show.
+    let index = super::plain(super::capped(block.index, super::MOST).0);
+    let word = super::plain(super::capped(block.word, super::MOST).0);
+    super::label::section_label(&mut child, theme, &index, &word, false);
     paint::hairline(ui.painter(), pos2(top.x, top.y + head), pos2(top.x + width, top.y + head), p.panel_line);
     // The content under the hairline.
     let (inner_x, inner_y, gap) = match block.inset {

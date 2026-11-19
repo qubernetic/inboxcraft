@@ -17,7 +17,7 @@ use crate::component::Shown;
 use crate::component::block_line::{BlockLine, block_line};
 use crate::component::gallery::keymap;
 use crate::component::gallery_home::{AGENDA, BLOCK_WIDTH, BlockState, agenda, block_states};
-use crate::component::tests::{Look, builder, own, painted, staged};
+use crate::component::tests::{Look, builder, own, painted, stage, staged};
 use crate::motion;
 use crate::theme::{Mode, TextScale, Theme};
 
@@ -31,6 +31,16 @@ fn harness(theme: Theme, state: BlockState) -> Harness<'static> {
             agenda(ui, theme, &state);
         },
     )
+}
+
+/// A `bg` stage 320 wide in `theme` that draws a letter its faces lack as a box (as the app does) instead of failing.
+fn glyphless(theme: Theme, add: impl Fn(&mut egui::Ui, &Theme) + 'static) -> Harness<'static> {
+    let mut harness = builder().allow_missing_glyphs().with_size(vec2(BLOCK_WIDTH + 48.0, 220.0)).build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), true);
+        stage(ui, theme.palette.bg, |ui| add(ui, &theme));
+    });
+    harness.run();
+    harness
 }
 
 /// Every text the widget `name` painted: `(rect, text, colour, size)`.
@@ -154,26 +164,26 @@ fn a_block_rests_once_its_height_is_known() {
 
 /// Hostile lines: control characters, bidi overrides, 10 000 characters, 10 000 combining marks.
 fn hostile() -> Vec<&'static str> {
-    [format!("10:00\u{0}\r\n\u{202E}Work{}", "x".repeat(10_000)), format!("e{}", "\u{301}".repeat(10_000))]
-        .into_iter()
-        .map(|text| &*Box::leak(text.into_boxed_str()))
-        .collect()
+    [
+        format!("10:00\u{0}\r\n\u{202E}Work{}", "x".repeat(10_000)),
+        format!("e{}", "\u{301}".repeat(10_000)),
+        "שלום עולם, ".repeat(1_000),
+        "مرحبا ".repeat(2_000),
+    ]
+    .into_iter()
+    .map(|text| &*Box::leak(text.into_boxed_str()))
+    .collect()
 }
 
 #[test]
 fn a_hostile_line_stays_one_line_in_the_block_cut_once() {
     let theme = Theme::new(Mode::Dark, TextScale::default());
     for line in hostile() {
-        let harness = staged(
-            theme,
-            |p| p.bg,
-            vec2(BLOCK_WIDTH + 48.0, 220.0),
-            move |ui, theme| {
-                ui.set_width(BLOCK_WIDTH);
-                let shown = Block { id: Id::unique("hostile"), index: "[ 02 ]", word: "Agenda", inset: Inset::Text, presses: true, selected: false };
-                block(ui, theme, &shown, None, |ui| text_line(ui, theme, line));
-            },
-        );
+        let harness = glyphless(theme, move |ui, theme| {
+            ui.set_width(BLOCK_WIDTH);
+            let shown = Block { id: Id::unique("hostile"), index: "[ 02 ]", word: "Agenda", inset: Inset::Text, presses: true, selected: false };
+            block(ui, theme, &shown, None, |ui| text_line(ui, theme, line));
+        });
         let rect = harness.get_by_role_and_label(Role::Button, NAME).rect();
         assert_eq!(rect.height(), 36.0 + 1.0 + 12.0 + 20.0 + 12.0, "one line");
         let paint = painted(&harness, NAME);
@@ -188,4 +198,41 @@ fn a_hostile_line_stays_one_line_in_the_block_cut_once() {
             assert_eq!(words.matches('…').count(), 1, "cut once: {:?}", words.chars().rev().take(8).collect::<String>());
         }
     }
+}
+
+#[test]
+fn a_selected_block_is_heard_as_selected() {
+    for state in block_states() {
+        let harness = harness(Theme::new(Mode::Light, TextScale::default()), state);
+        let node = harness.get_by_role_and_label(Role::Button, NAME);
+        // egui says a widget's selection as AccessKit's toggled state, as its selectable labels do.
+        assert_eq!(node.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True), state.selected, "{}", state.name);
+    }
+}
+
+#[test]
+fn a_hostile_head_lays_out_no_more_than_the_cap() {
+    // The head's words are the app's; still, a long or hostile one costs no more than a line.
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let word: &'static str = Box::leak(format!("Agen\u{0}\r\n\u{202E}da{}", "y".repeat(10_000)).into_boxed_str());
+    let index: &'static str = Box::leak(format!("[ {} ]", "9".repeat(10_000)).into_boxed_str());
+    let harness = glyphless(theme, move |ui, theme| {
+        ui.set_width(BLOCK_WIDTH);
+        let shown = Block { id: Id::unique("long head"), index, word, inset: Inset::Text, presses: true, selected: false };
+        block(ui, theme, &shown, None, |ui| text_line(ui, theme, "10:00  Workshop prep"));
+    });
+    let most = crate::component::MOST;
+    let button = harness.get_by_role(Role::Button);
+    let name = button.accesskit_node().label().unwrap_or_default();
+    assert!(name.chars().count() <= most, "the block's name is capped: {}", name.chars().count());
+    assert!(!name.contains(['\0', '\r', '\n', '\u{202E}']), "and plain");
+    let rect = button.rect();
+    let paint = painted(&harness, &name);
+    for shape in &paint.shapes {
+        if let Look::Text { text, .. } = &shape.look {
+            assert!(text.chars().count() <= most, "laid out: {} characters", text.chars().count());
+            assert!(!text.contains(['\0', '\r', '\n', '\u{202E}']), "drawn plain");
+        }
+    }
+    assert_eq!(rect.size(), vec2(320.0, 36.0 + 1.0 + 12.0 + 20.0 + 12.0), "the head keeps its height");
 }
