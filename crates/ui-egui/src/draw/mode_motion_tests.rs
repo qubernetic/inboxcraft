@@ -108,3 +108,20 @@ fn a_key_during_the_cross_fade_acts_and_ends_it_in_its_frame() {
         assert!(harness.state().mailbox().selected().is_some(), "{level:?}: and acts");
     }
 }
+
+#[test]
+fn a_key_the_command_line_takes_ends_the_cross_fade_in_its_frame() {
+    // ↓ is the command line's own while its results show; it ends the movement all the same.
+    let mut harness = dark(Level::Full);
+    light(&mut harness);
+    // The results open with no key of their own (as a slash typed in a field would open them).
+    harness.state_mut().command_mut().open_with(">");
+    harness.run_steps(4);
+    assert!(harness.state().command().results(), "the results show");
+    assert!(dark_over(&harness).is_some(), "40 ms, still fading");
+    let picked = harness.state().command().picked();
+    harness.event(egui::Event::Key { key: Key::ArrowDown, pressed: true, modifiers: Modifiers::NONE, repeat: false, physical_key: None });
+    harness.step();
+    assert_ne!(harness.state().command().picked(), picked, "the command line took the key");
+    assert_eq!(dark_over(&harness), None, "and the key ended the cross-fade in its frame");
+}

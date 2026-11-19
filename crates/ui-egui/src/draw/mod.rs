@@ -2400,9 +2400,11 @@ impl InboxApp {
         // The command line's keys first: with its results shown, or the keyboard in it, they are its own.
         // The movements read whether a key came after the keys were taken (the command line's first): noted now.
         motion::note_input(ui.ctx());
+        // A key or a press during a change of place acts at once: the change jumps to its end. Read before the command
+        // line takes its keys, so they end it too.
+        let interrupted = crate::scramble::interrupted(ui.ctx());
         let command_keys = command::early(ui.ctx(), &mut self.command);
-        // A key or a press during a change of place acts at once: the change jumps to its end.
-        if crate::scramble::interrupted(ui.ctx()) {
+        if interrupted {
             self.change = None;
             self.picture = None;
             self.mode_picture = None;
