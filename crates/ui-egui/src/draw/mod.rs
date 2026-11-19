@@ -4,9 +4,10 @@
 //! The window's content, laid out in the frame's regions ([`shell::regions`]): the index on the left, the header with the search field and the message list, the
 //! reader of the selected message on the right, and an error banner on top while a command's error stands. The
 //! reader can fill the window (full width); Escape leaves that. A window that can add accounts shows "Add account"
-//! in the empty window, which opens the settings sheet on Accounts; accounts are added and listed there.
-//! The index holds the places and the mailboxes: its SETTINGS (or its key) opens the settings sheet over the window;
-//! Escape, its close button or the index's MAIL leave it, and an account being added with it.
+//! in the empty window, which shows the settings on Accounts; accounts are added and listed there.
+//! The index holds the places and the mailboxes: its SETTINGS (or its key) shows the settings, a place of their own, in
+//! the body; another place, a mailbox, New message or SETTINGS again leave them, and a form being typed stays as it was
+//! left, all but its password.
 //!
 //! The hover actions, the reader's toolbar and their keys (D Done, A Archive, R read or unread, S flag, Delete) act on
 //! the hovered or selected message, on a real account as on the sample; a row that leaves the list slides out first.
@@ -529,9 +530,10 @@ impl InboxApp {
 
     /// Draws the index and the command line; what of the index was asked for and whether New message was pressed, both
     /// through the one gate of the two: whatever pressed them (the pointer, a key, a screen reader's activate, which
-    /// egui's modal layers do not stop), nothing of it runs unless the `surfaces` in front allow it. A place runs as its
-    /// key would; a mailbox, an account or an account row changes the mail under the surface, so none of them runs
-    /// under the palette, a capture, the sheet or the event editor. An account row's press is applied here.
+    /// egui's modal layers do not stop), nothing of it runs unless the `surfaces` in front allow it. A place runs as a
+    /// press may run its action ([`Surfaces::allows_press`]); a mailbox, an account or an account row changes the mail
+    /// under the surface, so none of them runs under the palette or the event editor. A press on the index while a key
+    /// is waited for ends the wait first. An account row's press is applied here.
     fn index_and_command(
         &mut self,
         index: &mut Ui,
@@ -646,8 +648,8 @@ impl InboxApp {
         })
     }
 
-    /// Takes the desk's answer on starting with the computer, when it came: a refusal is a note on the open sheet, or
-    /// in the error banner once the sheet is closed.
+    /// Takes the desk's answer on starting with the computer, when it came: a refusal is a note on the settings shown,
+    /// or in the error banner once they are left.
     fn hear_desk(&mut self) {
         let Some(answer) = self.desk.as_mut().and_then(|desk| desk.answer()) else { return };
         match answer {
@@ -1388,7 +1390,7 @@ impl InboxApp {
         keymap::actions()
             .into_iter()
             .map(|action| action.id)
-            // The acts on a row (the list takes those), the calendar's keys (`calendar::keys`), what the sheet, the
+            // The acts on a row (the list takes those), the calendar's keys (`calendar::keys`), what the settings, the
             // palette, a capture or the composer in front keep from the window.
             .filter(|id| surfaces.allows(id, &self.keymap))
             .filter(|id| *id != keymap::UNDO || !(focused || toasted))
@@ -2618,7 +2620,7 @@ impl InboxApp {
         .inner
     }
 
-    /// The place the index shows selected: Settings while the sheet is open (`setting`), else the calendar, Later
+    /// The place the index shows selected: Settings while they are shown (`setting`), else the calendar, Later
     /// while a pile is shown, or the mail.
     fn index_place(&self, setting: bool) -> index::Place {
         if setting {
@@ -2793,8 +2795,8 @@ impl InboxApp {
     }
 
     /// The toast after the last act, rising from the bottom edge, for [`TOAST_SECONDS`]; after it Ctrl+Z still takes
-    /// acts back, one at a time. Whether Undo was pressed (its key works while nothing is `quiet`: no text field has the
-    /// focus, no sheet or palette is open). While Undo `rests` the toast still shows, its Undo drawn resting, and works
+    /// acts back, one at a time. Whether Undo was pressed (its key works while nothing is `quiet`: no control has the
+    /// focus, no palette, capture or composer has the keys). While Undo `rests` the toast still shows, its Undo drawn resting, and works
     /// again for what is left of its time once the reason has gone.
     fn toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool, room: ToastRoom) -> bool {
         let Some(undo) = self.mailbox.undoable().cloned() else {
