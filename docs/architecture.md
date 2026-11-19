@@ -445,15 +445,20 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   (`net::candidates`: de-duplicated, capped, hosts made up from a domain only on 993 and 143, or 465 and 587, never
   without encryption, never port 25), and a candidate counts only when it greets and, encrypted, offers a sign-in
   (`net::probe`, which sends no user name or password). A server the domain names (its autoconfig, the ISPDB, SRV)
-  that no probe reached is still proposed, marked `Checked::NoAnswer`, and while the domain names servers of a kind
-  no guess of that kind is tried. It stops once it has an IMAP and a submission server, after
+  that no probe reached is still proposed, marked `Checked::NoAnswer`. While the domain names servers of a kind, a
+  guess of that kind is tried only once every named one has failed for a definite reason (refused, no such name, a
+  certificate that does not hold, no STARTTLS, no sign-in); one that only timed out keeps the guesses away. A host
+  is skipped on every port when its name is not found or when it is a guess of the domain's own that timed out; any
+  other host that timed out is skipped on that port only. It stops once it has an IMAP and a submission server, after
   24 probes, or at its deadline of 120 seconds, which every lookup and probe is given (`net::Deadline`, with a stop
-  the app sets when a newer run starts); a probe has 20 seconds of its own and tries at most four addresses, and
-  the connector ends every connect, handshake and read at the deadline however slowly a server sends. DNS is `hickory-proto` messages over our own blocking UDP and TCP
-  exchange with the resolver configuration of the system, HTTPS is `ureq` with `rustls` and the same trust as the
-  mail connections, following no redirect and sending nothing but the URL. A candidate is detected settings
-  (`CheckTarget::detected`): the check signs in to it only after the owner has seen it and its certificate
-  verified.
+  the app sets when a newer run starts); a probe has 12 seconds of its own and tries at most four addresses. The
+  connector ends every connect at the deadline, and the socket under TLS (`Timed` in `net::connect`) every read and
+  write, inside rustls' own loops too, however slowly a server sends or reads; the system's name lookup runs on a
+  thread waited for until the deadline, at most eight of them at once across runs. DNS is `hickory-proto` messages
+  over our own blocking UDP and TCP exchange with the resolver configuration of the system, HTTPS is `ureq` with
+  `rustls` and the same trust as the mail connections, following no redirect and sending nothing but the URL. A
+  candidate is detected settings (`CheckTarget::detected`): the check signs in to it only after the owner has seen
+  it and its certificate verified.
 - Code that needs the time takes an `inboxcraft_time::Clock`; tests hand it a `FakeClock`. `Instant::now` and
   `SystemTime::now` are banned in `clippy.toml` (they trap on wasm); `SystemClock` is the one place that reads them.
   Code that works in the owner's wall-clock time takes an `inboxcraft_time::Offsets` the same way: a fixed `Offset`,
