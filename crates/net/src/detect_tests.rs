@@ -702,3 +702,18 @@ fn a_clock_fault_keeps_the_named_server_and_the_guesses_away() {
         assert!(probe.tried().iter().all(|tried| !tried.contains("mail.example.org")), "{kind:?}: {:?}", probe.tried());
     }
 }
+
+/// A named server never probed because its host's name was not found on another port has failed for a definite
+/// reason: the guesses of its kind are tried.
+#[test]
+fn a_named_server_whose_host_has_no_name_lets_the_guesses_in() {
+    let file = "<clientConfig><emailProvider>\
+        <incomingServer type=\"imap\"><hostname>imap.example.org</hostname><port>993</port><socketType>SSL</socketType></incomingServer>\
+        <incomingServer type=\"imap\"><hostname>imap.example.org</hostname><port>143</port><socketType>STARTTLS</socketType></incomingServer>\
+        </emailProvider></clientConfig>";
+    let web = FakeWeb::default().page(AUTOCONFIG, file);
+    let probe = FakeProbe { fails_with: ErrorKind::HostNotFound, ..FakeProbe::only(&["mail.example.org:993 (TLS)"]) };
+    let proposal = run_probed(&DetectConfig::default(), &FakeDns::default(), &web, &probe);
+    assert_eq!(imap(&proposal), ["mail.example.org:993 (TLS) Guess"]);
+    assert!(!probe.tried().contains(&"imap imap.example.org:143 (STARTTLS)".to_owned()), "{:?}", probe.tried());
+}
