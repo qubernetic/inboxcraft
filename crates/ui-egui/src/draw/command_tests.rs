@@ -563,9 +563,6 @@ fn every_action_runs_through_run_action_and_an_unknown_one_does_nothing() {
     assert_eq!(app.appearance().theme, ThemeMode::Light);
     app.run_action(&ctx, keymap::SYSTEM_MODE);
     assert_eq!(app.appearance().theme, ThemeMode::System);
-    let reduce = app.reduce_motion();
-    app.run_action(&ctx, keymap::MOTION);
-    assert_eq!(app.reduce_motion(), !reduce);
     assert!(!app.can_run(keymap::FULL_WIDTH), "no message is open");
     app.run_action(&ctx, keymap::CALENDAR);
     assert_eq!(app.screen(), Screen::Calendar);

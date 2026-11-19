@@ -358,15 +358,30 @@ fn a_rebound_find_key_focuses_the_search_and_the_old_one_does_nothing() {
 }
 
 #[test]
-fn the_window_installs_its_reduced_motion_flag_every_frame() {
+fn the_window_installs_its_motion_level_every_frame() {
+    use crate::motion::{Level, level};
     let mut harness = harness();
-    assert!(!harness.state().reduce_motion(), "motion is on where the system cannot be read");
-    assert!(!crate::motion::reduced(&harness.ctx));
-    harness.state_mut().set_reduce_motion(true);
-    harness.run();
-    assert!(harness.state().reduce_motion());
+    // As the app starts: Reduced, not chosen, and the desktop cannot read the computer's wish. Reduced lands every
+    // movement at its end until the levels have movements of their own.
+    assert_eq!(level(&harness.ctx), Level::Reduced);
     assert!(crate::motion::reduced(&harness.ctx));
     assert_eq!(harness.ctx.global_style().animation_time, 0.0);
+    harness.state_mut().set_motion_level(Level::Full);
+    harness.run();
+    assert_eq!(level(&harness.ctx), Level::Full);
+    assert!(!crate::motion::reduced(&harness.ctx), "Full runs today's motion");
+    assert!(harness.ctx.global_style().animation_time > 0.0);
+    harness.state_mut().set_motion_level(Level::Off);
+    harness.run();
+    assert_eq!(level(&harness.ctx), Level::Off);
+    assert!(crate::motion::reduced(&harness.ctx));
+    assert_eq!(harness.ctx.global_style().animation_time, 0.0);
+    // The old toggle's id, from a kept key or a client that still names it, runs nothing.
+    let ctx = harness.ctx.clone();
+    let before = *harness.state().appearance();
+    harness.state_mut().run_action(&ctx, "ui.motion.toggle");
+    harness.run();
+    assert_eq!(*harness.state().appearance(), before);
 }
 
 #[test]

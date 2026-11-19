@@ -7,7 +7,7 @@ use egui::accesskit::{Role, Toggled};
 use egui::{Key, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
-use inboxcraft_engine::appearance::{Motion, ThemeMode, WindowFrame};
+use inboxcraft_engine::appearance::{MotionLevel, ThemeMode, WindowFrame};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
@@ -94,19 +94,19 @@ fn every_control_runs_its_command() {
     assert_eq!(harness.state().appearance().text_scale, 120);
     assert_eq!(harness.get_by_role_and_label(Role::Slider, "Text size").accesskit_node().numeric_value(), Some(120.0));
 
-    // Motion, the design's three levels: Full is not built yet; Reduced is today's motion, Off today's reduced one.
+    // Motion, the design's three levels, each one press: Reduced until the owner chooses.
     let level = |harness: &Harness<'static, InboxApp>, name: &str| harness.get_by_role_and_label(Role::RadioButton, name).accesskit_node().toggled();
-    assert!(harness.get_by_role_and_label(Role::RadioButton, "Full for Motion").accesskit_node().is_disabled(), "Full comes later");
-    assert_eq!(level(&harness, "Reduced for Motion"), Some(Toggled::True), "until the owner chooses, the motion that runs");
+    assert_eq!(level(&harness, "Reduced for Motion"), Some(Toggled::True), "until the owner chooses");
     // Below the fold at 120 %: pressed the way a screen reader presses it.
-    harness.get_by_role_and_label(Role::RadioButton, "Off for Motion").click_accesskit();
-    harness.run();
-    assert_eq!(harness.state().mailbox().last_run(), Some("ui.motion.set"));
-    assert_eq!(harness.state().appearance().motion, Motion::Reduce);
-    assert_eq!(level(&harness, "Off for Motion"), Some(Toggled::True));
-    harness.get_by_role_and_label(Role::RadioButton, "Reduced for Motion").click_accesskit();
-    harness.run();
-    assert_eq!(harness.state().appearance().motion, Motion::Full);
+    for (name, chosen) in [("Off for Motion", MotionLevel::Off), ("Full for Motion", MotionLevel::Full), ("Reduced for Motion", MotionLevel::Reduced)]
+    {
+        harness.get_by_role_and_label(Role::RadioButton, name).click_accesskit();
+        harness.run();
+        assert_eq!(harness.state().mailbox().last_run(), Some("ui.motion.set"));
+        let appearance = harness.state().appearance();
+        assert_eq!((appearance.motion_level(), appearance.motion_chosen()), (chosen, true), "{name}");
+        assert_eq!(level(&harness, name), Some(Toggled::True), "{name}");
+    }
     assert!(harness.query_by_label("Custom").is_none());
 }
 

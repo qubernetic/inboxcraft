@@ -65,7 +65,19 @@ pub fn segmented_but<T: Copy + PartialEq>(
     unavailable: &[T],
 ) -> Option<T> {
     let off: Vec<usize> = options.iter().enumerate().filter(|(_, (value, ..))| unavailable.contains(value)).map(|(index, _)| index).collect();
-    segmented_core(ui, theme, options, current, about, None, &off)
+    segmented_core(ui, theme, options, current, about, None, &off, false)
+}
+
+/// [`segmented_for`], also answering a press on the option already shown: for a row whose shown value may not be
+/// the owner's choice yet, where that press records it.
+pub(crate) fn segmented_again<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    theme: &Theme,
+    options: &[(T, &str, Font)],
+    current: T,
+    about: Option<&str>,
+) -> Option<T> {
+    segmented_core(ui, theme, options, current, about, None, &[], true)
 }
 
 /// [`segmented_for`] with the option at the index of `shown` drawn hovered or pressed, or the control focused, whatever
@@ -78,10 +90,12 @@ pub(crate) fn segmented_with<T: Copy + PartialEq>(
     about: Option<&str>,
     shown: Option<(Shown, usize)>,
 ) -> Option<T> {
-    segmented_core(ui, theme, options, current, about, shown, &[])
+    segmented_core(ui, theme, options, current, about, shown, &[], false)
 }
 
-/// The control, the options at the indices in `off` unavailable.
+/// The control, the options at the indices in `off` unavailable; with `again`, a press on the option already shown
+/// answers it too.
+#[expect(clippy::too_many_arguments, reason = "the variants' arguments and how a press on the option shown counts")]
 fn segmented_core<T: Copy + PartialEq>(
     ui: &mut Ui,
     theme: &Theme,
@@ -90,6 +104,7 @@ fn segmented_core<T: Copy + PartialEq>(
     about: Option<&str>,
     shown: Option<(Shown, usize)>,
     off: &[usize],
+    again: bool,
 ) -> Option<T> {
     if options.is_empty() {
         return None;
@@ -213,7 +228,7 @@ fn segmented_core<T: Copy + PartialEq>(
     if visible && lit.focus {
         paint::focus_ring(&painter, theme, track, Ring::Outside);
     }
-    chosen.filter(|index| Some(*index) != now).and_then(|index| options.get(index)).map(|(value, ..)| *value)
+    chosen.filter(|index| again || Some(*index) != now).and_then(|index| options.get(index)).map(|(value, ..)| *value)
 }
 
 #[cfg(test)]

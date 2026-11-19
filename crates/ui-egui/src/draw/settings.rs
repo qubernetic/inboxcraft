@@ -30,7 +30,7 @@ use crate::component::button::{LinkSize, TextButton, link_sized};
 use crate::component::field;
 use crate::component::key::{Chip, ChipState};
 use crate::component::label::section_label;
-use crate::component::segmented::{segmented, segmented_but, segmented_for};
+use crate::component::segmented::{segmented, segmented_again, segmented_for};
 use crate::component::settings_row::{page as on_page, settings_row, settings_row_soon_with};
 use crate::component::slider;
 use crate::component::switch::switch;
@@ -109,7 +109,8 @@ const FIND_GAP: f32 = 16.0;
 pub(super) enum Asked {
     Mode(ThemeMode),
     Scale(TextScale),
-    ReduceMotion(bool),
+    /// The motion level, chosen by the owner.
+    Motion(crate::motion::Level),
     Frame(WindowFrame),
     /// Another page of the settings.
     Section(Section),
@@ -156,7 +157,8 @@ pub(super) struct Sheet<'a> {
     pub(super) keymap: &'a Keymap,
     pub(super) settings: &'a mut Settings,
     pub(super) current: &'a Appearance,
-    pub(super) reduce: bool,
+    /// The motion level the window moves at this frame.
+    pub(super) level: crate::motion::Level,
     pub(super) mailbox: &'a Mailbox,
     pub(super) onboarding: &'a mut Onboarding,
     /// Whether the window can add accounts.
@@ -188,15 +190,33 @@ fn mode_name(mode: ThemeMode) -> &'static str {
     }
 }
 
-/// A level of motion as the design names them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MotionLevel {
-    /// The showpiece, with its text effects: not built yet.
-    Full,
-    /// What explains a change, without the text effects: the motion that runs today.
-    Reduced,
-    /// Every change at once: today's reduced motion.
-    Off,
+/// The motion levels in the order the page shows them.
+const LEVELS: [crate::motion::Level; 3] = [crate::motion::Level::Full, crate::motion::Level::Reduced, crate::motion::Level::Off];
+
+/// The name of a motion level.
+fn motion_name(level: crate::motion::Level) -> &'static str {
+    match level {
+        crate::motion::Level::Full => tr!("Full"),
+        crate::motion::Level::Reduced => tr!("Reduced"),
+        crate::motion::Level::Off => tr!("Off"),
+    }
+}
+
+/// What a motion level does, under the control: two lines at every level, so nothing under it moves.
+fn motion_help(level: crate::motion::Level) -> &'static str {
+    match level {
+        crate::motion::Level::Full => {
+            tr!("Full: the character field reacts wherever it shows, labels scramble and rows decode in. The showpiece; nothing turns it on but you.")
+        }
+        crate::motion::Level::Reduced => {
+            tr!("Reduced keeps what explains a change and drops the text effects. Until you choose, the computer's reduce-motion setting gives Off.")
+        }
+        crate::motion::Level::Off => {
+            tr!(
+                "Off: every change happens at once and the sync bar becomes words. It is what the computer's reduce-motion setting gives until you choose."
+            )
+        }
+    }
 }
 
 /// The inbox views in the order Appearance offers them, each with the name the design gives it: Grouped opens every
@@ -408,7 +428,7 @@ struct Laid {
 }
 
 /// The Appearance page: Look, then Layout.
-fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool, view: InboxView) -> Option<Asked> {
+fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, level: crate::motion::Level, view: InboxView) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
     head(ui, theme, Section::Appearance, &[], |_| {});
@@ -420,23 +440,15 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool, vi
                 asked = Some(Asked::Mode(mode));
             }
         });
-        // The design's three levels. Full, with its text effects, is not built yet; Reduced is the motion that runs
-        // today, Off lands every motion at its end at once (today's reduced motion).
-        let levels =
-            [(MotionLevel::Full, tr!("Full"), f.button), (MotionLevel::Reduced, tr!("Reduced"), f.button), (MotionLevel::Off, tr!("Off"), f.button)];
-        let level = if reduce { MotionLevel::Off } else { MotionLevel::Reduced };
-        let said =
-            if reduce { tr!("Off: every change happens at once.") } else { tr!("Reduced keeps what explains a change and drops the text effects.") };
-        // The second sentence stands whether or not the owner chose, as the design's help has it.
-        let motion_help = tr!("{level} Until you choose, the computer's reduce-motion setting gives Off.", level = said);
-        settings_row(ui, theme, tr!("Motion"), Some(&motion_help), |ui| {
-            // Full, the first option, is planned: the coming-soon mark stands just before it (the row's control room
-            // runs right to left).
-            ui.spacing_mut().item_spacing.x = theme.spacing.s2;
-            if let Some(chosen) = segmented_but(ui, theme, &levels, level, Some(tr!("Motion")), &[MotionLevel::Full]) {
-                asked = Some(Asked::ReduceMotion(chosen == MotionLevel::Off));
+        // The design's three levels; the help says what the level shown does (until the owner chooses, the
+        // computer's wish for less motion shows Off).
+        let levels = LEVELS.map(|level| (level, motion_name(level), f.button));
+        settings_row(ui, theme, tr!("Motion"), Some(motion_help(level)), |ui| {
+            // Until the owner chooses, a press on the level shown chooses it; once chosen, that press asks nothing.
+            let pressed = segmented_again(ui, theme, &levels, level, Some(tr!("Motion")));
+            if let Some(chosen) = pressed.filter(|chosen| *chosen != level || !current.motion_chosen()) {
+                asked = Some(Asked::Motion(chosen));
             }
-            crate::component::soon::soon_tag(ui, theme);
         });
         let now = TextScale::from_percent(current.text_scale).unwrap_or_default();
         settings_row(ui, theme, tr!("Text size"), Some(tr!("90 % to 130 %. Rows and bars follow the type.")), |ui| {
@@ -461,7 +473,7 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool, vi
         });
         // The design's two frames: InboxCraft's own (the command line is the title bar) and the desktop's title bar.
         let frames = [(WindowFrame::Own, tr!("Own"), f.button), (WindowFrame::System, tr!("System"), f.button)];
-        let frame_help = tr!("InboxCraft's own frame, or the desktop's title bar above it.");
+        let frame_help = tr!("InboxCraft's own frame, where the command line is the title bar, or the desktop's title bar above it.");
         settings_row(ui, theme, tr!("Window frame"), Some(frame_help), |ui| {
             if let Some(frame) = segmented(ui, theme, &frames, current.frame) {
                 asked = Some(Asked::Frame(frame));
@@ -559,7 +571,7 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
     let keymap = view.keymap;
     let mailbox = view.mailbox;
     match view.settings.section() {
-        Section::Appearance => appearance(ui, theme, view.current, view.reduce, mailbox.inbox_view()),
+        Section::Appearance => appearance(ui, theme, view.current, view.level, mailbox.inbox_view()),
         Section::Accounts => super::accounts::page(ui, theme, keymap, mailbox, view.onboarding, view.can_add),
         Section::Shortcuts => shortcuts(ui, theme, keymap, view.settings),
         Section::Sending => sending(ui, theme, keymap, view.settings, mailbox),

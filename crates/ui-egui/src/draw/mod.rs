@@ -58,7 +58,7 @@ pub use list::rows_built;
 use std::sync::Arc;
 
 use egui::{CentralPanel, Frame, Key, Margin, Panel, Rect, Ui, pos2};
-use inboxcraft_engine::appearance::{Appearance, Motion, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
@@ -939,10 +939,6 @@ impl InboxApp {
             keymap::LIGHT => self.set_mode(ModePreference::Light),
             keymap::DARK => self.set_mode(ModePreference::Dark),
             keymap::SYSTEM_MODE => self.set_mode(ModePreference::System),
-            keymap::MOTION => {
-                let reduce = !self.reduce_motion();
-                self.set_reduce_motion(reduce);
-            }
             keymap::VIEW_GROUPED => self.mailbox.set_inbox_view(InboxView::Grouped),
             keymap::VIEW_SMART => self.mailbox.set_inbox_view(InboxView::Smart),
             keymap::VIEW_LIST => self.mailbox.set_inbox_view(InboxView::List),
@@ -978,6 +974,11 @@ impl InboxApp {
             keymap::LAST => (true, usize::MAX),
             _ => (false, usize::MAX),
         };
+        if self.mailbox.drafts_listed() {
+            // The drafts place walks its kept drafts, not messages.
+            list::step_draft(ctx, &self.mailbox, forward, rows);
+            return;
+        }
         // The focused row is the keyed one; a selection made by the pointer counts from where it is.
         let landed = self.held_back.and_then(|held| held.land);
         if let Some(from) = self.list_row.filter(|from| self.mailbox.selected() != Some(*from) && landed != Some(*from)) {
@@ -1006,6 +1007,15 @@ impl InboxApp {
     /// `Enter` in the list: the keyed (or focused) message opens and the keyboard goes to the reader, so the list's keys
     /// rest until `Esc` there gives it back.
     fn open_from_list(&mut self, ctx: &egui::Context) {
+        if self.mailbox.drafts_listed() {
+            // The keyed draft opens in the composer to go on writing; the keyed Drafts folder on the server opens.
+            if let Some(draft) = list::focused_draft(ctx, &self.mailbox) {
+                self.open_draft(ctx, draft);
+            } else if let Some(folder) = list::focused_server(ctx, &self.mailbox) {
+                self.open_server_drafts(folder);
+            }
+            return;
+        }
         let Some(id) = self.list_row.or_else(|| self.mailbox.selected()) else { return };
         self.mailbox.read_preview(id);
         self.mailbox.select_keyed(id);
@@ -1240,7 +1250,10 @@ impl InboxApp {
         if !surfaces.list_has_keyboard() {
             return false;
         }
-        if self.list_row.is_some() {
+        // A row of the list has the keyboard: a message's, or in the drafts place a kept draft's or a server folder's.
+        let drafts =
+            self.mailbox.drafts_listed() && (list::focused_draft(ctx, &self.mailbox).is_some() || list::focused_server(ctx, &self.mailbox).is_some());
+        if self.list_row.is_some() || drafts {
             return true;
         }
         let focused = ctx.memory(|memory| memory.focused().is_some());
@@ -1922,6 +1935,38 @@ impl InboxApp {
         }
     }
 
+    /// Opens the kept draft `draft` in the composer to go on writing (Home's draft rows, the drafts place), the keys
+    /// in its To line. Only when the draft opened: a refused switch (the draft being written could not be kept) leaves
+    /// the keys where they were.
+    fn open_draft(&mut self, ctx: &egui::Context, draft: u64) {
+        self.reopen(draft);
+        if self.composer.as_ref().is_some_and(|composer| composer.draft() == draft) {
+            ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
+        }
+    }
+
+    /// Applies what was pressed in the drafts place: a kept draft's row or its links (`drafted`), or the row of a Drafts
+    /// folder on the server (`server`).
+    fn apply_drafts(&mut self, ctx: &egui::Context, drafted: Option<(u64, list::Drafted)>, server: Option<u64>) {
+        match drafted {
+            Some((draft, list::Drafted::Open)) => self.open_draft(ctx, draft),
+            Some((draft, list::Drafted::Discard)) => self.discard_draft(draft),
+            None => {}
+        }
+        if let Some(folder) = server {
+            self.open_server_drafts(folder);
+        }
+    }
+
+    /// Opens the Drafts folder `folder` on the server from the drafts place: its mail, as any folder's. Once: Enter on
+    /// its row also presses it in the same frame.
+    fn open_server_drafts(&mut self, folder: u64) {
+        if self.mailbox.place() != Place::Folder(folder) {
+            self.mailbox.open(Place::Folder(folder));
+            self.search.clear();
+        }
+    }
+
     /// Sends the refused draft `draft` again (`outbox.retry`), the countdown toast showing its hold.
     pub fn retry(&mut self, draft: u64) {
         match self.mailbox.retry(draft) {
@@ -2265,20 +2310,15 @@ impl InboxApp {
         &mut self.keymap
     }
 
-    /// Whether every animation lands at its end at once: the owner's choice, or the system's wish where it can be
-    /// read (not on the desktop, where motion then runs).
-    #[must_use]
-    pub fn reduce_motion(&self) -> bool {
-        match self.appearance().motion {
-            Motion::Reduce => true,
-            Motion::Full => false,
-            Motion::System => motion::system_default(None),
-        }
+    /// Sets the owner's motion level, chosen, from the next frame (`ui.motion.set level=`).
+    pub fn set_motion_level(&mut self, level: motion::Level) {
+        self.appear("ui.motion.set", &json!({ "level": level.kept().id() }));
     }
 
-    /// Turns reduced motion on or off, from the next frame (`ui.motion.set`).
+    /// [`InboxApp::set_motion_level`] for a picture or a test that wants motion on or off: `reduce` is
+    /// [`motion::Level::Off`], else [`motion::Level::Full`].
     pub fn set_reduce_motion(&mut self, reduce: bool) {
-        self.appear("ui.motion.set", &json!({ "reduce": if reduce { "on" } else { "off" } }));
+        self.set_motion_level(if reduce { motion::Level::Off } else { motion::Level::Full });
     }
 
     /// Installs the fonts once, and the appearance in the context when it changed; keeps a changed appearance.
@@ -2308,7 +2348,8 @@ impl InboxApp {
     /// Draws one frame into `ui` and applies what the person asked for.
     pub fn ui(&mut self, ui: &mut Ui) {
         self.install_theme(ui.ctx());
-        motion::set_reduced(ui.ctx(), self.reduce_motion());
+        let appearance = self.appearance();
+        motion::follow(ui.ctx(), appearance.motion_level(), appearance.motion_chosen());
         self.apply_frame(ui.ctx());
         let theme = Theme::current(ui.ctx(), &Look::of(self.mailbox.appearance()));
         ui.set_style(theme.style());
@@ -2408,6 +2449,8 @@ impl InboxApp {
             // The list is hidden where the composer stands in its place: in one pane with the composer in front.
             // Nothing of it acts then.
             let hidden = place == ListPlace::Away && self.composer_in_front();
+            self.mailbox.hide_draft(self.discarding());
+            self.mailbox.keep_drafts_fresh();
             let (mailbox, keymap) = (&self.mailbox, &self.keymap);
             let list = |ui: &mut Ui, layers: &mut Panes| {
                 layers.card(ui, Margin::ZERO, |ui| {
@@ -2490,7 +2533,8 @@ impl InboxApp {
         dismiss |= dismissed;
         ran.extend(line.hint);
         add |= line.open_account;
-        let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, screener: screener_mode, presets, gained } = listed;
+        let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, draft: drafted, server, screener: screener_mode, presets, gained } =
+            listed;
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
         let busy = dismiss
@@ -2498,6 +2542,8 @@ impl InboxApp {
             || acted.is_some()
             || line != status::Pressed::default()
             || outboxed.is_some()
+            || drafted.is_some()
+            || server.is_some()
             || screener_mode.is_some()
             || (out && leaving)
             || left_full
@@ -2524,6 +2570,7 @@ impl InboxApp {
             ui.ctx().request_repaint();
         }
         self.act(out, acted, undone, outboxed, screener_mode);
+        self.apply_drafts(ui.ctx(), drafted, server);
         if presets {
             // A row's time picker opened: the presets still ahead, read as the reader's picker reads them.
             self.mailbox.load_presets();
@@ -2712,7 +2759,7 @@ impl InboxApp {
     /// changes what it shows. What was pressed on it.
     fn home_place(&mut self, ui: &mut Ui, theme: &Theme) -> Option<home::Asked> {
         let rect = ui.available_rect_before_wrap();
-        let level = self.motion_level();
+        let level = motion::level(ui.ctx());
         let hidden = self.discarding();
         let shown = self.home.current(&mut self.mailbox, hidden);
         let stage = home::Stage { field: &mut self.field, emblem: None, level };
@@ -2757,14 +2804,7 @@ impl InboxApp {
                 self.calendar.set_view(&mut self.mailbox, view);
                 self.calendar.go_today(&mut self.mailbox);
             }
-            Asked::OpenDraft(draft) => {
-                self.reopen(draft);
-                // Only when the draft opened: a refused switch (the draft being written could not be kept) leaves the
-                // keys where they were.
-                if self.composer.as_ref().is_some_and(|composer| composer.draft() == draft) {
-                    ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
-                }
-            }
+            Asked::OpenDraft(draft) => self.open_draft(ctx, draft),
             Asked::DiscardDraft(draft) => self.discard_draft(draft),
             Asked::ReadMail => return Some(keymap::MAIL),
             Asked::Write => return Some(keymap::COMPOSE),
@@ -2776,28 +2816,16 @@ impl InboxApp {
         None
     }
 
-    /// The level the window moves at, as the settings keep it ([`inboxcraft_engine::appearance::effective`]): the
-    /// owner's level once chosen, else none while the computer asks for less motion, else the default.
-    fn motion_level(&self) -> crate::field::Level {
-        use inboxcraft_engine::appearance::{MotionLevel, effective};
-        let appearance = self.appearance();
-        match effective(appearance.motion_level(), appearance.motion_chosen(), motion::system_default(None)) {
-            MotionLevel::Full => crate::field::Level::Full,
-            MotionLevel::Reduced => crate::field::Level::Reduced,
-            MotionLevel::Off => crate::field::Level::Off,
-        }
-    }
-
     /// The settings in the body; what was asked on them.
     fn settings_place(&mut self, ui: &mut Ui, theme: &Theme) -> Option<settings::Asked> {
-        let reduce = self.reduce_motion();
+        let level = motion::level(ui.ctx());
         let desk = self.desk_view();
         let view = settings::Sheet {
             desk,
             keymap: &self.keymap,
             settings: &mut self.settings,
             current: self.mailbox.appearance(),
-            reduce,
+            level,
             mailbox: &self.mailbox,
             onboarding: &mut self.onboarding,
             can_add: self.can_add,
@@ -3131,7 +3159,7 @@ impl InboxApp {
         match asked {
             settings::Asked::Mode(mode) => self.set_mode(mode),
             settings::Asked::Scale(scale) => self.set_text_scale(scale),
-            settings::Asked::ReduceMotion(reduce) => self.set_reduce_motion(reduce),
+            settings::Asked::Motion(level) => self.set_motion_level(level),
             settings::Asked::Frame(frame) => self.set_frame(frame),
             settings::Asked::Section(section) => self.settings.show(section),
             settings::Asked::Add => self.onboarding.open(),
@@ -3254,6 +3282,9 @@ mod compose_tests;
 #[cfg(test)]
 #[path = "cover_tests.rs"]
 mod cover_tests;
+#[cfg(test)]
+#[path = "drafts_tests.rs"]
+mod drafts_tests;
 #[cfg(test)]
 #[path = "fit_tests.rs"]
 mod fit_tests;

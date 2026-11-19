@@ -1316,6 +1316,8 @@ fn the_composer_wipes_in_over_300_ms_then_rests() {
         .with_max_steps(60)
         .with_step_dt(0.05)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+    // The wipe runs at Full; Reduced, the level the app starts with, lands it at once.
+    harness.state_mut().set_motion_level(crate::motion::Level::Full);
     harness.run();
     crate::draw::tests::new_message(&mut harness);
     harness.step();
@@ -1344,6 +1346,8 @@ fn typing_during_the_wipe_ends_it_at_once() {
         .with_max_steps(60)
         .with_step_dt(0.02)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+    // The wipe runs at Full; Reduced, the level the app starts with, lands it at once.
+    harness.state_mut().set_motion_level(crate::motion::Level::Full);
     harness.run();
     crate::draw::tests::new_message(&mut harness);
     harness.step();
@@ -1448,6 +1452,8 @@ fn answered_to_all() -> (Harness<'static, InboxApp>, u64) {
         .with_max_steps(60)
         .with_step_dt(1.0 / 60.0)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
+    // The wipe runs at Full; Reduced, the level the app starts with, lands it at once.
+    harness.state_mut().set_motion_level(crate::motion::Level::Full);
     harness.run();
     let rota = harness.state().mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id).unwrap();
     // Opened as an act of the window does it, after a frame was drawn: the next frame is the first to paint it.
@@ -1584,6 +1590,8 @@ fn wiping() -> Harness<'static, InboxApp> {
         .with_max_steps(60)
         .with_step_dt(0.02)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+    // The wipe runs at Full; Reduced, the level the app starts with, lands it at once.
+    harness.state_mut().set_motion_level(crate::motion::Level::Full);
     harness.run();
     crate::draw::tests::new_message(&mut harness);
     harness.step();
@@ -1625,8 +1633,7 @@ fn with_reduced_motion_the_composer_is_there_at_once() {
         .with_step_dt(0.02)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
     harness.run();
-    let ctx = harness.ctx.clone();
-    harness.state_mut().run_action(&ctx, keymap::MOTION);
+    harness.state_mut().set_motion_level(crate::motion::Level::Off);
     harness.run();
     assert!(crate::motion::reduced(&harness.ctx), "motion reduced");
     crate::draw::tests::new_message(&mut harness);

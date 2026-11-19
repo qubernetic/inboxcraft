@@ -303,21 +303,17 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         return Err(EngineError::bad_params(LIST.id, "limit is a whole number from 1"));
     }
     let accounts = crate::view::accounts(context, params.account.map(AccountId::new))?;
+    // Without a limit every draft; with one, the store reads only the newest that many of each account.
+    let limit = params.limit.map_or(usize::MAX, |limit| usize::try_from(limit.min(crate::MAX_LIST)).unwrap_or(1));
     let mut drafts = Vec::new();
+    let mut total = 0_u64;
     for account in accounts {
-        drafts.extend(context.store().drafts(account)?);
+        let (count, newest) = context.store().newest_drafts(account, limit)?;
+        total = total.saturating_add(count);
+        drafts.extend(newest);
     }
-    let total = drafts.len();
-    let newest = |a: &Draft, b: &Draft| b.saved.cmp(&a.saved).then(b.id.cmp(&a.id));
-    if let Some(limit) = params.limit {
-        // The newest `limit` first, in time linear in the drafts, then only those are sorted and answered.
-        let limit = usize::try_from(limit.min(crate::MAX_LIST)).unwrap_or(1);
-        if limit < drafts.len() {
-            drafts.select_nth_unstable_by(limit, newest);
-            drafts.truncate(limit);
-        }
-    }
-    drafts.sort_by(newest);
+    drafts.sort_by(|a: &Draft, b: &Draft| b.saved.cmp(&a.saved).then(b.id.cmp(&a.id)));
+    drafts.truncate(limit);
     let drafts = drafts.iter().map(|draft| draft_json(context.store(), draft)).collect::<Result<Vec<_>, _>>()?;
     Ok(Outcome::new(json!({ "drafts": drafts, "total": total })))
 }

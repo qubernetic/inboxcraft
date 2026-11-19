@@ -147,6 +147,14 @@ pub trait Storage {
     /// As [`Storage::accounts`].
     fn drafts(&self, account: AccountId) -> Result<Vec<Draft>, StoreError>;
 
+    /// How many drafts `account` has, and the newest `limit` of them: by `saved`, latest first, then by id, highest
+    /// first. Reads only what it answers, not every draft of the account.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn newest_drafts(&self, account: AccountId, limit: usize) -> Result<(u64, Vec<Draft>), StoreError>;
+
     /// One draft.
     ///
     /// # Errors
