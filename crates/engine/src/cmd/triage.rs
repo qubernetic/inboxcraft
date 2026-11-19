@@ -31,7 +31,8 @@
 //! by UID EXPUNGE: on a server that has not said it can (`EventKind::Abilities`), and for a message whose body is not
 //! kept yet, the message is moved there without the field (`written` in the answer). At the time [`crate::Session::tick`]
 //! brings it back to the inbox unread, marked as returned and listed as if it arrived then; `mail.unsnooze` (`safe`)
-//! brings it back at once. A snoozed message the owner moves on from the snoozed folder stays where it was put.
+//! brings it back at once. A snoozed message the owner moves on from the snoozed folder stays where it was put, at
+//! its time and on `mail.unsnooze` alike: only its time and schedule entry go.
 //! `history.undo` takes a snooze back: the message where it was, its time as it was.
 //!
 //! `mail.follow_up` (`safe`) sets a follow-up reminder on a message the owner sent (in a Sent folder, or from one of
@@ -902,9 +903,15 @@ fn unsnooze(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineErro
         return Ok(Outcome::new(json!({ "id": params.id, "folder": message.folder().get(), "changed": false })));
     }
     let mut effects = Effects::default();
-    let inbox = snoozing::back(store, state, &message, &mut Mover::default(), &mut effects)?;
-    let folder = inbox.map_or(message.folder(), |inbox| inbox.id());
-    effects.change(Change::SetMessageState(message.id(), MessageState { snoozed_until: None, returned: Some(context.now()), ..was }));
+    // Only a message still in Snoozed comes back; one the owner moved, archived or deleted meanwhile stays where it
+    // is, read as it is, and loses only its snooze time and entry, as when its time comes.
+    let (folder, returned) = if snoozing::is_snoozed(state, &message) {
+        let inbox = snoozing::back(store, state, &message, &mut Mover::default(), &mut effects)?;
+        (inbox.map_or(message.folder(), |inbox| inbox.id()), Some(context.now()))
+    } else {
+        (message.folder(), was.returned)
+    };
+    effects.change(Change::SetMessageState(message.id(), MessageState { snoozed_until: None, returned, ..was }));
     effects.changes.extend(schedule::reschedule(store, Due::Unsnooze(message.id()), None, context.next_schedule_id())?);
     Ok(Outcome::new(json!({ "id": params.id, "folder": folder.get(), "changed": true })).with_effects(effects))
 }

@@ -66,7 +66,8 @@
 //!   ([`Session::after`]).
 //! - Snooze: `mail.snooze` (`safe`) puts a message in `InboxCraft/Snoozed` until a time, in a new copy that carries
 //!   the time in InboxCraft's own header field so another InboxCraft sees it; [`Session::tick`] brings it back to the
-//!   inbox unread and marked as returned, and `mail.unsnooze` (`safe`) at once.
+//!   inbox unread and marked as returned, and `mail.unsnooze` (`safe`) at once; a message moved on from the snoozed
+//!   folder stays where it was put either way.
 //! - Sending (`send`): `mail.send` (`owner`) holds a draft in the outbox for the owner's [`Hold`] (`send.set`,
 //!   `owner`; `send.settings`, `safe`) and `mail.send_later` (`owner`) until a time; `mail.unsend` (`owner`) takes it
 //!   back until then, the draft as it was. [`Session::tick`] sends it at its time; nothing goes while InboxCraft is

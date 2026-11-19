@@ -197,7 +197,8 @@ snoozed folder, so a message another InboxCraft snoozed,
 or our own copy back without a UID, is snoozed until its time here too; elsewhere the field is ignored. When the
 entry fires, a message still in the snoozed folder comes back to the inbox unread, with `returned` set to the time
 (`mail.list` sorts it as if it arrived then and says `returned` and `snoozed_until` on each row); one the owner moved
-on stays where it was put. `mail.unsnooze` (`safe`) brings a message back at once; `history.undo` takes a snooze
+on stays where it was put. `mail.unsnooze` (`safe`) brings a message back at once, with the same care: one moved on
+loses only its time and schedule entry, where it is and read as it is; `history.undo` takes a snooze
 back, its time and schedule entry included.
 
 Follow-up reminders (`mail.follow_up`, `safe`, in `engine::cmd::triage`; the stage in `engine::arrive::followup`):

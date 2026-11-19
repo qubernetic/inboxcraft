@@ -370,6 +370,37 @@ fn unsnooze_brings_it_back_now() {
     assert_eq!(session.run("mail.unsnooze", &json!({ "id": 2 })).unwrap()["changed"], json!(false));
 }
 
+/// Snoozes message 2, runs `act` on it, then `mail.unsnooze`: the message stays in `folder`, read as it was, and only
+/// its snooze time and schedule entry go, as when its time comes.
+fn unsnoozed_after(act: &str, folder: u64) {
+    let (mut session, clock) = session();
+    change(&mut session, Change::SetFlags(MessageId::new(2), flags(&[Flag::Seen])));
+    snooze(&mut session, 2, "2026-11-05T18:00:00Z");
+    session.run(act, &json!({ "id": 2 })).unwrap();
+    session.take_jobs();
+    assert_eq!(held(&session, 2).folder(), FolderId::new(folder), "{act}");
+    let seen = held(&session, 2).summary().flags().is_seen();
+    assert!(seen, "{act}: read before, so a return would show");
+    clock.advance(Duration::from_secs(60));
+    let answer = session.run("mail.unsnooze", &json!({ "id": 2 })).unwrap();
+    assert_eq!(answer, json!({ "id": 2, "folder": folder, "changed": true }), "{act}");
+    assert_eq!(held(&session, 2).folder(), FolderId::new(folder), "{act}: the owner put it there");
+    assert_eq!(held(&session, 2).summary().flags().is_seen(), seen, "{act}: its read state is the owner's");
+    assert!(state(&session, 2).is_empty(), "{act}: {:?}", state(&session, 2));
+    assert_eq!(schedule(&session), [], "{act}");
+    assert!(session.take_jobs().is_empty(), "{act}: nothing goes to the server");
+}
+
+#[test]
+fn unsnoozing_a_message_the_owner_deleted_leaves_it_in_the_trash() {
+    unsnoozed_after("mail.delete", 6);
+}
+
+#[test]
+fn unsnoozing_a_message_the_owner_archived_leaves_it_in_the_archive() {
+    unsnoozed_after("mail.archive", 3);
+}
+
 #[test]
 fn a_preset_names_the_time() {
     let (mut session, _) = session();
