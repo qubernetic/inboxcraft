@@ -175,6 +175,68 @@ fn the_palette_no_longer_closes_settings() {
     assert_eq!(harness.state().settings().section(), Section::Triage);
 }
 
+/// Every action that touches a message, a thread, the list, the reader, the composer or the calendar: none runs on the
+/// settings, which show none of them. The test's own list, so that an id dropped from the window's rule fails it.
+const OF_THE_MAIL: [&str; 31] = [
+    keymap::DONE,
+    keymap::SNOOZE,
+    keymap::ARCHIVE,
+    keymap::READ,
+    keymap::FLAG,
+    keymap::DELETE,
+    keymap::UNDO,
+    keymap::BACK,
+    keymap::OPEN_HELD,
+    keymap::VIEW_GROUPED,
+    keymap::VIEW_SMART,
+    keymap::VIEW_LIST,
+    keymap::SEND,
+    keymap::FOLD,
+    keymap::NEXT,
+    keymap::PREVIOUS,
+    keymap::DOWN,
+    keymap::UP,
+    keymap::PAGE_DOWN,
+    keymap::PAGE_UP,
+    keymap::FIRST,
+    keymap::LAST,
+    keymap::OPEN,
+    keymap::MENU,
+    keymap::MENU_KEY,
+    keymap::CALENDAR_LEFT,
+    keymap::CALENDAR_RIGHT,
+    keymap::CALENDAR_UP,
+    keymap::CALENDAR_DOWN,
+    keymap::CALENDAR_OPEN,
+    keymap::CALENDAR_CLOSE,
+];
+
+/// The window's own actions: they run on the settings as off them (a way to a place shows it, leaving the settings).
+const THE_WINDOW_S: [&str; 14] = [
+    keymap::FIND,
+    keymap::MAIL,
+    keymap::SETTINGS,
+    keymap::PALETTE,
+    keymap::CALENDAR,
+    keymap::SENT,
+    keymap::LATER,
+    keymap::SHORTCUTS,
+    keymap::FULL_WIDTH,
+    keymap::LIGHT,
+    keymap::DARK,
+    keymap::SYSTEM_MODE,
+    keymap::MOTION,
+    keymap::COMPOSE,
+];
+
+#[test]
+fn every_action_is_of_the_mail_or_the_window_s_and_none_twice() {
+    for action in keymap::actions() {
+        let (mail, window) = (OF_THE_MAIL.contains(&action.id), THE_WINDOW_S.contains(&action.id));
+        assert!(mail != window, "{}: classify it in exactly one of the two lists", action.id);
+    }
+}
+
 #[test]
 fn nothing_of_the_mail_runs_on_the_settings_place() {
     let mut harness = sample_window();
@@ -185,9 +247,8 @@ fn nothing_of_the_mail_runs_on_the_settings_place() {
     super::tests::at_settings(harness.state_mut(), Section::Appearance);
     harness.run();
     for (id, could) in before {
-        let mail = crate::surface::mail_only(id) || keymap::CALENDAR_KEYS.contains(&id);
         let can = harness.state().can_run(id);
-        if mail {
+        if OF_THE_MAIL.contains(&id) {
             assert!(!can, "{id}: acts on the mail or the calendar, which the settings do not show");
         } else {
             assert_eq!(can, could, "{id}: the window's own runs on the settings as off them");
