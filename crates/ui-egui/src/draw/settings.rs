@@ -1047,6 +1047,19 @@ pub(super) fn place(ui: &mut Ui, theme: &Theme, mut view: Sheet<'_>) -> Option<A
 /// `ui.settings.open` with a page, as the palette's rows and the empty calendar's button run it, and the asks of the
 /// command whoever ran it (the control channel's too).
 impl super::InboxApp {
+    /// Runs `ui.settings.open` on `page` (a [`Section::id`]) as the window's own command, then shows what it asked.
+    pub(super) fn open_settings_on(&mut self, page: &'static str) {
+        // The command checks the page and answers every page: there is nothing for the banner.
+        let _answered = self.mailbox.run(crate::keymap::SETTINGS, &serde_json::json!({ "page": page }));
+        self.follow_settings_asked();
+    }
+
+    /// A page's row of the palette: the palette closes and the settings show that page.
+    pub(super) fn palette_page(&mut self, page: &'static str) {
+        self.palette.close();
+        self.open_settings_on(page);
+    }
+
     /// Shows what `ui.settings.open` asked for since the last look, in order: the page named, while the settings show
     /// too, and the page last shown for a page that names none; without a page, as their key: the settings on the page
     /// last shown, or, while they show, the place the owner came from.

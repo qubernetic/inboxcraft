@@ -2834,6 +2834,7 @@ impl InboxApp {
                 self.palette.close();
                 return Some(id);
             }
+            palette::Asked::Page(page) => self.palette_page(page),
             palette::Asked::Step(down) => {
                 let count = self.palette.matches().len();
                 self.palette.step(down, count);
