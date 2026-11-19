@@ -16,36 +16,7 @@ fn validity() -> UidValidity {
     UidValidity::new(7).unwrap()
 }
 
-const EVERY_ERROR: [ErrorKind; 28] = [
-    ErrorKind::HostNotFound,
-    ErrorKind::ConnectionRefused,
-    ErrorKind::TimedOut,
-    ErrorKind::PortTimedOut,
-    ErrorKind::MailPortsBlocked,
-    ErrorKind::ConnectionDropped,
-    ErrorKind::CertificateUnknownIssuer,
-    ErrorKind::CertificateExpired,
-    ErrorKind::CertificateNotYetValid,
-    ErrorKind::CertificateWrongHost,
-    ErrorKind::ClockFarOff,
-    ErrorKind::Tls,
-    ErrorKind::StartTlsMissing,
-    ErrorKind::LoginRefused,
-    ErrorKind::LoginUnanswered,
-    ErrorKind::NoLoginMethod,
-    ErrorKind::CredentialMissing,
-    ErrorKind::CommandRefused,
-    ErrorKind::Protocol,
-    ErrorKind::TooLarge,
-    ErrorKind::FolderGone,
-    ErrorKind::MessageGone,
-    ErrorKind::MessageRefused,
-    ErrorKind::NoSubmissionServer,
-    ErrorKind::SendUnanswered,
-    ErrorKind::NotEncrypted,
-    ErrorKind::OtherServer,
-    ErrorKind::NoCalendarServer,
-];
+const EVERY_ERROR: [ErrorKind; 28] = ErrorKind::ALL;
 
 #[test]
 fn every_event_kind_round_trips_and_names_its_folder() {
@@ -157,4 +128,13 @@ fn what_needs_the_owner_is_what_no_later_attempt_mends() {
     for kind in [ErrorKind::PortTimedOut, ErrorKind::MailPortsBlocked, ErrorKind::TimedOut, ErrorKind::FolderGone] {
         assert!(!kind.needs_the_owner(), "{kind:?}");
     }
+}
+
+#[test]
+fn every_error_kind_is_in_the_list_of_all_once() {
+    // Serde names every kind it knows when it is given one it does not: the list must hold each of them, once.
+    let refused = serde_json::from_str::<ErrorKind>("\"NoSuchKind\"").unwrap_err().to_string();
+    let named: Vec<&str> = refused.split('`').skip(3).step_by(2).collect();
+    let listed: Vec<String> = ErrorKind::ALL.iter().map(|kind| serde_json::to_string(kind).unwrap().trim_matches('"').to_owned()).collect();
+    assert_eq!(named, listed, "{refused}");
 }

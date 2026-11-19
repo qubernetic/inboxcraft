@@ -55,20 +55,38 @@ impl NetError {
     /// need the owner.
     #[must_use]
     pub fn is_transient(&self) -> bool {
-        // What needs the owner is one list, in the model, which the engine's sync state reads too; the other kinds
-        // that are not transient are a job's own or a diagnosis that a later attempt does not change.
-        !self.kind.needs_the_owner()
-            && !matches!(
-                self.kind,
-                ErrorKind::PortTimedOut
-                    | ErrorKind::MailPortsBlocked
-                    | ErrorKind::FolderGone
-                    | ErrorKind::MessageGone
-                    | ErrorKind::MessageRefused
-                    | ErrorKind::NoSubmissionServer
-                    | ErrorKind::SendUnanswered
-                    | ErrorKind::NoCalendarServer
-            )
+        // The transient kinds are a list of their own: a kind left off it stops the worker and is not retried, so no
+        // password goes out again for it. Every kind is named, so a new one does not build until it is put on a side.
+        match self.kind {
+            ErrorKind::HostNotFound
+            | ErrorKind::ConnectionRefused
+            | ErrorKind::TimedOut
+            | ErrorKind::ConnectionDropped
+            | ErrorKind::CommandRefused
+            | ErrorKind::Protocol
+            | ErrorKind::TooLarge => true,
+            ErrorKind::PortTimedOut
+            | ErrorKind::MailPortsBlocked
+            | ErrorKind::CertificateUnknownIssuer
+            | ErrorKind::CertificateExpired
+            | ErrorKind::CertificateNotYetValid
+            | ErrorKind::CertificateWrongHost
+            | ErrorKind::ClockFarOff
+            | ErrorKind::Tls
+            | ErrorKind::StartTlsMissing
+            | ErrorKind::LoginRefused
+            | ErrorKind::LoginUnanswered
+            | ErrorKind::NoLoginMethod
+            | ErrorKind::CredentialMissing
+            | ErrorKind::FolderGone
+            | ErrorKind::MessageGone
+            | ErrorKind::MessageRefused
+            | ErrorKind::NoSubmissionServer
+            | ErrorKind::SendUnanswered
+            | ErrorKind::NotEncrypted
+            | ErrorKind::OtherServer
+            | ErrorKind::NoCalendarServer => false,
+        }
     }
 
     /// `error` came after the password went out and before the server answered it: [`ErrorKind::LoginUnanswered`].

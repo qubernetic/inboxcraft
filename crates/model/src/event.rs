@@ -129,28 +129,77 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
+    /// Every kind, in the order they are declared; a test checks it against the kinds serde knows, so a test over
+    /// every kind sees a new one.
+    pub const ALL: [Self; 28] = [
+        Self::HostNotFound,
+        Self::ConnectionRefused,
+        Self::TimedOut,
+        Self::PortTimedOut,
+        Self::MailPortsBlocked,
+        Self::ConnectionDropped,
+        Self::CertificateUnknownIssuer,
+        Self::CertificateExpired,
+        Self::CertificateNotYetValid,
+        Self::CertificateWrongHost,
+        Self::ClockFarOff,
+        Self::Tls,
+        Self::StartTlsMissing,
+        Self::LoginRefused,
+        Self::LoginUnanswered,
+        Self::NoLoginMethod,
+        Self::CredentialMissing,
+        Self::CommandRefused,
+        Self::Protocol,
+        Self::TooLarge,
+        Self::FolderGone,
+        Self::MessageGone,
+        Self::MessageRefused,
+        Self::NoSubmissionServer,
+        Self::SendUnanswered,
+        Self::NotEncrypted,
+        Self::OtherServer,
+        Self::NoCalendarServer,
+    ];
+
     /// Whether the account stops on this failure until the owner acts: a password or a setting to mend, a certificate
     /// or encryption refused. The worker does not sign in again after one, and the engine's `sync.status` reads it as
     /// `failing` even with no account connected. A server out of reach (no route, a timeout, a refused or dropped
     /// connection, a port that is likely wrong or a network that blocks mail) is not.
+    ///
+    /// Every kind is named, with no catch-all: a new kind does not build until it is put on one side.
     #[must_use]
     pub const fn needs_the_owner(self) -> bool {
-        matches!(
-            self,
+        match self {
             Self::LoginRefused
-                | Self::LoginUnanswered
-                | Self::NoLoginMethod
-                | Self::CredentialMissing
-                | Self::CertificateUnknownIssuer
-                | Self::CertificateExpired
-                | Self::CertificateNotYetValid
-                | Self::CertificateWrongHost
-                | Self::ClockFarOff
-                | Self::Tls
-                | Self::StartTlsMissing
-                | Self::NotEncrypted
-                | Self::OtherServer
-        )
+            | Self::LoginUnanswered
+            | Self::NoLoginMethod
+            | Self::CredentialMissing
+            | Self::CertificateUnknownIssuer
+            | Self::CertificateExpired
+            | Self::CertificateNotYetValid
+            | Self::CertificateWrongHost
+            | Self::ClockFarOff
+            | Self::Tls
+            | Self::StartTlsMissing
+            | Self::NotEncrypted
+            | Self::OtherServer => true,
+            Self::HostNotFound
+            | Self::ConnectionRefused
+            | Self::TimedOut
+            | Self::PortTimedOut
+            | Self::MailPortsBlocked
+            | Self::ConnectionDropped
+            | Self::CommandRefused
+            | Self::Protocol
+            | Self::TooLarge
+            | Self::FolderGone
+            | Self::MessageGone
+            | Self::MessageRefused
+            | Self::NoSubmissionServer
+            | Self::SendUnanswered
+            | Self::NoCalendarServer => false,
+        }
     }
 
     /// Whether trying again later can help on its own: passing network trouble. Everything else needs the owner, the
