@@ -116,9 +116,16 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
             kept
         }
         EventKind::Connection(connection) => {
+            use inboxcraft_model::ConnectionState::{Offline, Online, Watching};
             let held = plan.state.accounts.entry(account).or_default();
+            let signed_in = matches!(held.connection, Some(Online | Watching));
             held.connection = Some(*connection);
-            if matches!(connection, inboxcraft_model::ConnectionState::Online | inboxcraft_model::ConnectionState::Watching) {
+            // The connection is gone: the round it served may never end, and the worker tells the next one afresh.
+            if *connection == Offline {
+                held.progress = None;
+            }
+            // A sign-in ends the failure; the worker's turns between watching and a job do not.
+            if *connection == Online && !signed_in {
                 held.failure = None;
             }
             true
@@ -130,10 +137,16 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
             plan.state.accounts.entry(account).or_default().uid_expunge = *uid_expunge;
             true
         }
+        EventKind::SyncProgress { done, of } => {
+            crate::cmd::sync_progress(&mut plan.state, account, *done, *of);
+            true
+        }
+        EventKind::SyncFinished { at } => crate::cmd::sync_finished(&mut plan.state, account, *at, context.now()),
         EventKind::Failed { kind, folder } => {
-            plan.state.accounts.entry(account).or_default().failure = Some((*kind, *folder));
-            if let Some(job) = event.job {
-                plan.state.fetching.remove(&job);
+            // A body fetch that failed is the message's, which the reader shows; it says nothing of the account.
+            let fetch = event.job.and_then(|job| plan.state.fetching.remove(&job));
+            if fetch.is_none() {
+                plan.state.accounts.entry(account).or_default().failure = Some((*kind, *folder));
             }
             write::failed(store, &mut plan, account, event.job)?;
             true

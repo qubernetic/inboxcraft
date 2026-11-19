@@ -50,20 +50,56 @@ pub(crate) fn named(text: &str) -> Option<Group> {
     ALL.into_iter().find(|group| name(*group) == text)
 }
 
+/// Which of the classifier's rules gave a message its group, the numbers of the list above.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rule {
+    /// 1: a `text/calendar` message or part.
+    Calendar,
+    /// 2: `Auto-Submitted` other than `no`.
+    Automatic,
+    /// 3: a list field, or `Precedence: list` or `bulk`.
+    List,
+    /// 4: `Precedence: junk`.
+    Junk,
+    /// 4: a sender that reads no reply, or a delivery report's.
+    Robot,
+    /// 5: anything else.
+    Other,
+}
+
+/// The rule's name, as commands write it.
+pub(crate) const fn rule_name(rule: Rule) -> &'static str {
+    match rule {
+        Rule::Calendar => "calendar",
+        Rule::Automatic => "automatic",
+        Rule::List => "list",
+        Rule::Junk => "junk",
+        Rule::Robot => "robot",
+        Rule::Other => "other",
+    }
+}
+
 /// The group our classifier gives a message with `envelope`.
 pub(crate) fn classify(envelope: &Envelope) -> Group {
+    classify_by(envelope).0
+}
+
+/// The group our classifier gives a message with `envelope`, and the rule that gave it.
+pub(crate) fn classify_by(envelope: &Envelope) -> (Group, Rule) {
     let signs = envelope.signs();
     let precedence = signs.precedence();
     if signs.calendar() || signs.calendar_type() {
-        Group::Invitations
+        (Group::Invitations, Rule::Calendar)
     } else if signs.automatic() {
-        Group::Updates
+        (Group::Updates, Rule::Automatic)
     } else if signs.list() || matches!(precedence, Some(Precedence::List | Precedence::Bulk)) {
-        Group::Newsletters
-    } else if precedence == Some(Precedence::Junk) || envelope.from().first().is_some_and(|from| robot(from.email())) {
-        Group::Updates
+        (Group::Newsletters, Rule::List)
+    } else if precedence == Some(Precedence::Junk) {
+        (Group::Updates, Rule::Junk)
+    } else if envelope.from().first().is_some_and(|from| robot(from.email())) {
+        (Group::Updates, Rule::Robot)
     } else {
-        Group::People
+        (Group::People, Rule::Other)
     }
 }
 
@@ -104,6 +140,12 @@ impl<'a> Grouping<'a> {
 
     /// The group of `message`; `None` when its account is not grouped.
     pub(crate) fn of(&mut self, message: &Message) -> Result<Option<Group>, EngineError> {
+        Ok(self.of_by(message)?.map(|(group, _)| group))
+    }
+
+    /// The group of `message` and the classifier's rule that gave it, `None` for the owner's choice of the sender;
+    /// `None` when its account is not grouped.
+    pub(crate) fn of_by(&mut self, message: &Message) -> Result<Option<(Group, Option<Rule>)>, EngineError> {
         if !self.accounts.iter().any(|account| account.id() == message.account() && account.grouped()) {
             return Ok(None);
         }
@@ -117,11 +159,12 @@ impl<'a> Grouping<'a> {
                     chosen
                 }
             };
-            if chosen.is_some() {
-                return Ok(chosen);
+            if let Some(chosen) = chosen {
+                return Ok(Some((chosen, None)));
             }
         }
-        Ok(Some(classify(message.summary().envelope())))
+        let (group, rule) = classify_by(message.summary().envelope());
+        Ok(Some((group, Some(rule))))
     }
 }
 

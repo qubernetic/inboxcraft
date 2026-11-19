@@ -6,7 +6,8 @@
 //! the presentation's `.row:hover .acts` has no transition. Its buttons follow the row in the `Tab` order.
 //!
 //! The group stands in the line it is given and never left of it: the actions that do not fit give way from the end,
-//! the first (Done) last. A row gives it the right part of its first line and keeps the rest (its middle) to itself.
+//! the first (Done) last; a row may name one that gives way before the others (the list's Read). A row gives it the
+//! right part of its first line and keeps the rest (its middle) to itself.
 //!
 //! An action at rest is its `muted` icon and its chip; under the pointer a 1 px `muted` edge and an `ink` icon; with
 //! the keyboard focus the edge is `cyan_edge`. Held down (the sheet draws no pressed look) it takes the secondary
@@ -84,29 +85,44 @@ pub fn width(ui: &Ui, theme: &Theme, keymap: &Keymap, list: &[Action<'_>]) -> f3
     laid.iter().map(|action| action.width).sum::<f32>() + gaps
 }
 
-/// How many of `laid`, from the first, fit side by side `gap` apart in `room` points, and how wide they are: the actions
-/// that do not fit give way from the end (Delete before Read, Read before Snooze, Snooze before Done).
-fn fitted(laid: &[Laid], gap: f32, room: f32) -> (usize, f32) {
+/// Which of `laid` show side by side `gap` apart in `room` points, as bits by place, and how wide they are: all of them
+/// when they fit; else the `spare` one gives way first, then the others from the end (Delete before Read, Read before
+/// Snooze, Snooze before Done).
+fn fitted(laid: &[Laid], gap: f32, room: f32, spare: Option<usize>) -> (u32, f32) {
+    let all = fit(laid, gap, room, None);
+    let every = laid.iter().take(MOST).count();
+    match spare {
+        Some(spare) if all.0.count_ones() as usize != every && spare < every => fit(laid, gap, room, Some(spare)),
+        _ => all,
+    }
+}
+
+/// The actions of `laid` but `skipped`, from the first, that fit side by side `gap` apart in `room`, as bits by place,
+/// and how wide they are.
+fn fit(laid: &[Laid], gap: f32, room: f32, skipped: Option<usize>) -> (u32, f32) {
     let mut total = 0.0;
-    let mut count = 0;
-    for action in laid {
-        let next = if count == 0 { action.width } else { total + gap + action.width };
+    let mut shown = 0_u32;
+    for (index, action) in laid.iter().enumerate().take(MOST) {
+        if Some(index) == skipped {
+            continue;
+        }
+        let next = if shown == 0 { action.width } else { total + gap + action.width };
         if next > room + 0.01 {
             break;
         }
         total = next;
-        count += 1;
+        shown |= 1 << index;
     }
-    (count, total)
+    (shown, total)
 }
 
 /// The box of the group of `list` on `line`: its right edge on the line's, as high as an action and centred on the
 /// line, as wide as the actions that fit in the line (none: an empty box at the line's right end). What a row covers
-/// under the group, and nothing more.
+/// under the group, and nothing more. `spare`: the action that gives way first when not all fit ([`actions_sparing`]).
 #[must_use]
-pub fn place(ui: &Ui, theme: &Theme, keymap: &Keymap, line: Rect, list: &[Action<'_>]) -> Rect {
+pub fn place(ui: &Ui, theme: &Theme, keymap: &Keymap, line: Rect, list: &[Action<'_>], spare: Option<usize>) -> Rect {
     let laid = lay(ui, theme, keymap, list, soon::is_soon(ui));
-    let (_, total) = fitted(&laid, theme.spacing.s1, line.width());
+    let (_, total) = fitted(&laid, theme.spacing.s1, line.width(), spare);
     group_box(theme, line, total)
 }
 
@@ -120,7 +136,23 @@ fn group_box(theme: &Theme, line: Rect, total: f32) -> Rect {
 /// The group `id` of `list` at the right end of `line` (the row's first line: the group's right edge on the line's,
 /// centred on it), when `shown`.
 pub fn actions(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: Id, line: Rect, shown: bool, list: &[Action<'_>]) -> Shown {
-    actions_with(ui, theme, keymap, id, line, shown, list, None)
+    group(ui, theme, keymap, id, line, shown, list, None, None)
+}
+
+/// [`actions`], where the action at `spare` gives way first when the line cannot hold them all (the list's Read, so
+/// that Delete stays beside the reader); the others keep their places, their ids and what [`Shown::clicked`] names.
+#[expect(clippy::too_many_arguments, reason = "the group's arguments and the action that gives way first")]
+pub fn actions_sparing(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    id: Id,
+    line: Rect,
+    shown: bool,
+    list: &[Action<'_>],
+    spare: Option<usize>,
+) -> Shown {
+    group(ui, theme, keymap, id, line, shown, list, spare, None)
 }
 
 /// [`actions`], with the action at a place drawn in a state whatever the pointer and the keyboard do (the gallery's
@@ -136,6 +168,22 @@ pub(crate) fn actions_with(
     list: &[Action<'_>],
     forced: Option<(usize, super::Shown)>,
 ) -> Shown {
+    group(ui, theme, keymap, id, line, shown, list, None, forced)
+}
+
+/// The group, with the action that gives way first and the state a board forces.
+#[expect(clippy::too_many_arguments, reason = "the group's arguments, the action that gives way first and the state a board forces")]
+fn group(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    id: Id,
+    line: Rect,
+    shown: bool,
+    list: &[Action<'_>],
+    spare: Option<usize>,
+    forced: Option<(usize, super::Shown)>,
+) -> Shown {
     if !shown || list.is_empty() {
         return Shown { clicked: None, left: line.right(), openness: 0.0 };
     }
@@ -143,9 +191,9 @@ pub(crate) fn actions_with(
     let soon = soon::is_soon(ui);
     let laid = lay(ui, theme, keymap, list, soon);
     let gap = theme.spacing.s1;
-    // The group never runs left of its line: what does not fit gives way from the end.
-    let (count, total) = fitted(&laid, gap, line.width());
-    if count == 0 {
+    // The group never runs left of its line: what does not fit gives way, the spare first, then from the end.
+    let (fits, total) = fitted(&laid, gap, line.width(), spare);
+    if fits == 0 {
         return Shown { clicked: None, left: line.right(), openness: 0.0 };
     }
     let group = group_box(theme, line, total);
@@ -154,7 +202,7 @@ pub(crate) fn actions_with(
     let mut x = group.left();
     let left = x;
     let mut clicked = None;
-    for (index, (action, laid)) in list.iter().zip(laid).take(count).enumerate() {
+    for (index, (action, laid)) in list.iter().zip(laid).enumerate().filter(|(index, _)| fits & (1 << index) != 0) {
         let rect = Rect::from_min_size(pos2(x, top), vec2(laid.width, high));
         x += laid.width + gap;
         let enabled = !soon && action.unavailable.is_none() && ui.is_enabled();

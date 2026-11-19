@@ -1594,3 +1594,127 @@ fn a_failed_sign_in_or_calendar_step_names_only_the_cause_the_check_reported() {
     }
     assert!(words("smtp_login", Some("tls")).contains("mail.example.org"), "the outgoing server named");
 }
+
+const OLDER: &str = "The servers below come from an earlier Detect, for another address.";
+const OLDER_USER: &str = "The servers and the user name below come from an earlier Detect, for another address.";
+
+/// The add form open, `address` typed and Detect run on it.
+fn detected(address: &str) -> Harness<'static, InboxApp> {
+    let mut harness = form_open(egui::Theme::Light, FakeWorkers::passing());
+    harness.state_mut().onboarding_mut().0.form_mut().address = address.to_owned();
+    harness.run();
+    press(&mut harness, "Detect");
+    harness.run();
+    assert_eq!(harness.state().onboarding().form().host, "imap.example.org");
+    harness
+}
+
+#[test]
+fn a_line_says_the_servers_come_from_an_earlier_detect_until_detect_or_a_server_field_changes() {
+    let mut harness = detected("carol@example.org");
+    assert!(harness.query_by_label(OLDER).is_none() && harness.query_by_label(OLDER_USER).is_none(), "Detect answered for the address in the form");
+    harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
+    harness.run();
+    // Detect filled the user name too, and it is still Detect's: the line names it.
+    harness.get_by_label(OLDER_USER);
+    assert!(harness.query_by_label(OLDER).is_none(), "one line, not two");
+    // The user name typed by hand: the line names the servers only.
+    harness.state_mut().onboarding_mut().0.form_mut().username = "dave".to_owned();
+    harness.run();
+    assert!(harness.query_by_label(OLDER_USER).is_none(), "the user name is the owner's now");
+    let line = harness.get_by_label(OLDER).rect();
+    // The form's hint style: one caption line, 18 high, in the form's column.
+    assert_eq!(line.height(), 18.0, "{line:?}");
+    // A server field edited by hand: the line goes.
+    harness.state_mut().onboarding_mut().0.form_mut().host = "imap.dave.example.org".to_owned();
+    harness.run();
+    assert!(harness.query_by_label(OLDER).is_none(), "the IMAP server typed by hand");
+    // Detect again, for the address now in the form: the line goes too.
+    let mut harness = detected("carol@example.org");
+    harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
+    harness.run();
+    harness.get_by_label(OLDER_USER);
+    press(&mut harness, "Detect");
+    harness.run();
+    assert!(harness.query_by_label(OLDER).is_none() && harness.query_by_label(OLDER_USER).is_none(), "Detect ran again");
+}
+
+#[test]
+fn a_form_filled_by_hand_never_says_detect_filled_it() {
+    let mut harness = form_open(egui::Theme::Light, FakeWorkers::passing());
+    {
+        let form = harness.state_mut().onboarding_mut().0.form_mut();
+        form.address = "carol@example.org".to_owned();
+        form.host = "imap.example.org".to_owned();
+        form.smtp_host = "smtp.example.org".to_owned();
+    }
+    harness.run();
+    harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
+    harness.run();
+    assert!(harness.query_by_label(OLDER).is_none() && harness.query_by_label(OLDER_USER).is_none());
+}
+
+#[test]
+fn a_long_address_does_not_widen_the_earlier_detect_line_or_the_form() {
+    let mut harness = detected("carol@example.org");
+    let hint = "The password goes into your system's credential store, never into InboxCraft's files.";
+    let before = harness.get_by_label(hint).rect();
+    harness.state_mut().onboarding_mut().0.form_mut().address = format!("{}@example.org", "d".repeat(10_000));
+    harness.run();
+    let line = harness.get_by_label(OLDER_USER).rect();
+    let after = harness.get_by_label(hint).rect();
+    assert_eq!(after.width(), before.width(), "the form keeps its width");
+    assert!(line.left() >= after.left() && line.right() <= after.left() + 720.0, "{line:?} in the form's column from {after:?}");
+}
+
+#[test]
+fn a_line_under_a_server_row_says_when_its_encryption_is_unusual_for_its_port_and_saving_stays() {
+    let line = |port: u16, usual: &str, chosen: &str| format!("Port {port} usually goes with {usual}, not {chosen}: check both with your provider.");
+    // (outgoing row, port, encryption, the line or none)
+    let cases = [
+        (false, "143", Security::Tls, Some(line(143, "STARTTLS", "TLS"))),
+        (false, "993", Security::StartTls, Some(line(993, "TLS", "STARTTLS"))),
+        (false, "587", Security::Tls, Some(line(587, "STARTTLS", "TLS"))),
+        (false, "993", Security::Tls, None),
+        (false, "", Security::StartTls, None),
+        (true, "465", Security::StartTls, Some(line(465, "TLS", "STARTTLS"))),
+        (true, "25", Security::Tls, Some(line(25, "STARTTLS", "TLS"))),
+        (true, "587", Security::StartTls, None),
+        (true, "0", Security::Tls, None),
+        (true, "65535", Security::StartTls, None),
+        (false, "imap", Security::Tls, None),
+    ];
+    for (outgoing, port, security, said) in cases {
+        let mut harness = form_open(egui::Theme::Light, FakeWorkers::passing());
+        {
+            let form = harness.state_mut().onboarding_mut().0.form_mut();
+            form.address = "carol@example.org".to_owned();
+            form.host = "imap.example.org".to_owned();
+            form.smtp_host = "smtp.example.org".to_owned();
+            let (field, chosen) = if outgoing { (&mut form.smtp_port, &mut form.smtp_security) } else { (&mut form.port, &mut form.security) };
+            *field = port.to_owned();
+            *chosen = Some(security);
+        }
+        harness.run();
+        let shown: Vec<String> = harness
+            .query_all_by_label_contains(" usually goes with ")
+            .map(|node| node.accesskit_node().label().filter(|label| !label.is_empty()).or_else(|| node.accesskit_node().value()).unwrap_or_default())
+            .collect();
+        assert_eq!(shown, said.clone().into_iter().collect::<Vec<_>>(), "{outgoing} {port:?} {security:?}");
+        if said.is_some() {
+            // It stands under its own row: below that row's port field, above the next row's or the CalDAV field.
+            let at = harness.get_by_label(said.as_deref().unwrap()).rect();
+            let ports: Vec<egui::Rect> = harness.query_all_by_label("Port").map(|node| node.rect()).collect();
+            let own = if outgoing { ports.last() } else { ports.first() }.copied().unwrap();
+            assert!(at.top() >= own.bottom(), "{port}: {at:?} under its port {own:?}");
+            let next = if outgoing { harness.get_by_label("CalDAV address, for calendars").rect() } else { ports[ports.len() - 1] };
+            assert!(at.bottom() <= next.top(), "{port}: {at:?} over {next:?}");
+        }
+        // Saving is not held back for it, and nothing in the form was changed.
+        let add = harness.get_by_role_and_label(Role::Button, "Check and add");
+        assert!(!add.accesskit_node().is_disabled(), "{port}: Check and add stays");
+        let form = harness.state().onboarding().form();
+        let kept = if outgoing { (form.smtp_port.as_str(), form.smtp_security) } else { (form.port.as_str(), form.security) };
+        assert_eq!(kept, (port, Some(security)));
+    }
+}

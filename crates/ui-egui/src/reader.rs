@@ -6,7 +6,8 @@
 //! pictures.
 //!
 //! Everything comes through the engine's commands (`mail.thread`, `mail.open` for the message opened, which marks it
-//! read, `mail.read` for the rest of the thread, `mail.attachment`, `remote.allow`).
+//! read, `mail.read` for the rest of the thread, `mail.attachment`, `remote.allow`, and `mail.why` once for the
+//! message opened and again only when its place changes, see [`crate::why`]).
 //! The text of a message is data: it is shown and never acted on. Remote pictures stay blocked until the owner
 //! allows them for this message once ([`Reader::allow_once`]) or for the sender always ([`Reader::allow_always`]);
 //! only then does the document name their addresses and only then does the reader ask its [`Fetch`]. Pictures inside
@@ -297,9 +298,10 @@ fn remote_pictures<'a>(blocks: &'a [Block], out: &mut Vec<&'a str>) {
     }
 }
 
-/// The card of the invitation message `id` carries; none when it carries none, or the engine cannot tell.
-fn invite(mailbox: &mut Mailbox, id: u64) -> Option<Invite> {
-    mailbox.run("invite.show", &json!({ "id": id })).ok().and_then(|answer| Invite::read(id, &answer))
+/// The card of the invitation message `id` (sent `from`) carries; none when it carries none, or the engine cannot tell.
+fn invite(mailbox: &mut Mailbox, id: u64, from: &[Person]) -> Option<Invite> {
+    let sender = from.first().map(|person| person.address.as_str());
+    mailbox.run("invite.show", &json!({ "id": id })).ok().and_then(|answer| Invite::read(id, &answer)).map(|invite| invite.sent_by(sender))
 }
 
 /// The reader's state.
@@ -323,6 +325,11 @@ pub struct Reader {
     saves: BTreeMap<(u64, u64), Result<String, String>>,
     /// The invitations whose answer the owner is changing: their card offers the three answers again.
     changing: BTreeSet<u64>,
+    /// Why the open message is here, in the window's words, and where it stood when the engine was asked.
+    why: (Vec<String>, Option<crate::why::Place>),
+    /// How many times the engine was asked why.
+    #[cfg(test)]
+    pub(crate) asked_why: u64,
 }
 
 impl std::fmt::Debug for Reader {
@@ -356,6 +363,9 @@ impl Reader {
             failed: false,
             saves: BTreeMap::new(),
             changing: BTreeSet::new(),
+            why: (Vec::new(), None),
+            #[cfg(test)]
+            asked_why: 0,
         }
     }
 
@@ -371,6 +381,7 @@ impl Reader {
         self.changing.clear();
         self.saves.clear();
         self.notice = None;
+        self.why = (Vec::new(), None);
         let Some(id) = id else {
             self.full_width = false;
             return;
@@ -401,7 +412,37 @@ impl Reader {
         if self.thread.iter().all(|row| row.id != id) {
             self.thread.push(ThreadRow { id, sender: String::new(), address: String::new(), preview: String::new(), date: None, opened: None });
         }
+        self.ask_why(mailbox, id);
         self.expand(mailbox, id);
+    }
+
+    /// Asks the engine once why open message `id` is here, and keeps the answer with where the message stood.
+    fn ask_why(&mut self, mailbox: &mut Mailbox, id: u64) {
+        #[cfg(test)]
+        {
+            self.asked_why = self.asked_why.saturating_add(1);
+        }
+        self.why = (crate::why::ask(mailbox, id), crate::why::place(mailbox, id));
+    }
+
+    /// Why the open message is here, in the window's words, most specific first; empty when the engine cannot say.
+    #[must_use]
+    pub fn why(&self) -> &[String] {
+        &self.why.0
+    }
+
+    /// Whether the open message no longer stands where it stood when the engine said why it is here: its folder, its
+    /// group, its sender's screening, done or its snooze changed in the list (one row of the list read, no command).
+    /// The head asks for the reasons again then, by unfolding the open message ([`Reader::expand`]).
+    #[must_use]
+    pub fn why_moved(&self, mailbox: &Mailbox) -> bool {
+        self.open.is_some_and(|id| crate::why::place(mailbox, id) != self.why.1)
+    }
+
+    /// Says the open message is here for `why`, as if the engine had said so.
+    #[cfg(test)]
+    pub(crate) fn set_why(&mut self, why: Vec<String>) {
+        self.why.0 = why;
     }
 
     /// Unfolds message `id` of the thread (reading it the first time), or folds it again. The open message stays
@@ -410,6 +451,9 @@ impl Reader {
         if self.expanded.contains(&id) {
             if Some(id) != self.open {
                 self.expanded.remove(&id);
+            } else if self.why_moved(mailbox) {
+                // The open message stays unfolded; asked for, the reader looks again at why it is here.
+                self.ask_why(mailbox, id);
             }
             return;
         }
@@ -499,7 +543,7 @@ impl Reader {
             })
             .unwrap_or_default();
         if body.is_some() && message.get("invitation").and_then(Value::as_bool) == Some(true) {
-            opened.invite = invite(mailbox, id);
+            opened.invite = invite(mailbox, id, &opened.header.from);
             // Its calendar part is the card, not a file.
             if opened.invite.is_some() {
                 opened.files.retain(|file| !file.media_type.eq_ignore_ascii_case("text/calendar"));
@@ -547,7 +591,12 @@ impl Reader {
     /// Reads the cards of the thread's messages again: an answer, a new version or an undo changes them.
     pub fn refresh_invites(&mut self, mailbox: &mut Mailbox) {
         for opened in self.thread.iter_mut().filter_map(|row| row.opened.as_mut()).filter(|opened| opened.invite.is_some()) {
-            opened.invite = invite(mailbox, opened.id);
+            opened.invite = invite(mailbox, opened.id, &opened.header.from);
+        }
+
+        // Why the open message is here changes only with its place: moved, snoozed, its sender let in or blocked.
+        if let Some(id) = self.open.filter(|_| self.why_moved(mailbox)) {
+            self.ask_why(mailbox, id);
         }
     }
 

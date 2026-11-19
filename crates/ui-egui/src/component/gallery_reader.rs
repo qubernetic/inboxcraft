@@ -49,7 +49,8 @@ fn why_lines(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         cells(ui, theme, |ui| {
             cell(ui, theme, state, |ui| {
                 ui.set_width(640.0);
-                why_line(ui, theme, keymap, reasons);
+                let parts: Vec<&str> = reasons.split(super::why_line::SEPARATOR).collect();
+                why_line(ui, theme, keymap, &parts);
             });
         });
     }
@@ -204,6 +205,7 @@ fn invite_cards(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         place: "Room 3",
         who: "Marit Solheim (organiser), Teodor Vasquez, Ines Okafor and you",
         cal: "Studio",
+        not_from_organiser: false,
     };
     let goes = "marit@example.org";
     let replies = [

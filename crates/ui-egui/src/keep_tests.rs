@@ -6,7 +6,14 @@ use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
 use super::{FILE, KEYS_FILE, Keep, KeepFile, MAX_FILE, NoKeep};
 
 fn chosen() -> Appearance {
-    Appearance { theme: ThemeMode::Dark, text_scale: 120, motion: Motion::Reduce, frame: WindowFrame::TopRow, own_frame: WindowFrame::TopRow }
+    Appearance {
+        theme: ThemeMode::Dark,
+        text_scale: 120,
+        motion: Motion::Reduce,
+        motion_reduced: false,
+        frame: WindowFrame::TopRow,
+        own_frame: WindowFrame::TopRow,
+    }
 }
 
 #[test]

@@ -298,11 +298,11 @@ time from the code as it is, not measured.
   verified it (#28).
 - Detect's MX domain is the MX host's last two labels, or three under a two-letter country label: a rule of thumb
   without the public suffix list, so a provider under a longer public suffix is not recognised by its MX (#28).
-- Detect stops at the first source that names an IMAP server and does not probe the candidates; the common host
-  names are hints, never checked until the owner asks. Detect proposes no CalDAV address: the CalDAV SRV records and
-  `/.well-known/caldav` at the address's domain (RFC 6764) are not asked, and no CardDAV (#28, #145).
+- Detect proposes no CalDAV address: the CalDAV SRV records and `/.well-known/caldav` at the address's domain
+  (RFC 6764) are not asked, and no CardDAV (#28, #145).
 - The ISPDB is off by default, so Detect tells Mozilla nothing unless the owner switches it on; with it off, a
-  domain whose provider publishes no autoconfig and no SRV records gets only the common host names as hints (#28).
+  domain whose provider publishes no autoconfig and no SRV records is found only through its own common host names and
+  its MX hosts' provider, when one of them answers the probe (#28, #260).
 
 - `html` reads no CSS beyond whether an element is hidden: colours, fonts, sizes, alignment and the message's
   `<style>` blocks are ignored, so a message keeps its words and structure but not its look. Text hidden by other

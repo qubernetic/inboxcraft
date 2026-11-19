@@ -386,8 +386,11 @@ fn keyboard_selection_shows_the_same_actions_on_the_selected_row() {
     let rect = harness.get_by_label(&spoken).rect();
     let done: Vec<_> = harness.query_all_by_role_and_label(Role::Button, "Done").map(|node| node.rect()).collect();
     assert!(done.iter().any(|done| rect.contains(done.center())), "{done:?} in {rect:?}");
-    // A read row offers to mark it unread.
-    harness.get_by_role_and_label(Role::Button, if row.seen { "Mark as unread" } else { "Mark as read" });
+    // Beside the reader the keyed row holds three: Read gives way to Delete and stays on its key.
+    let names: Vec<String> = acts_on(&harness, rect).into_iter().map(|(name, _)| name).collect();
+    assert_eq!(names, ["Done", "Snooze", "Delete"], "{rect:?}");
+    let read = if row.seen { "Mark as unread" } else { "Mark as read" };
+    assert!(buttons_in(&harness, rect, read).is_empty(), "{read} gives way");
 }
 
 #[test]
@@ -3704,4 +3707,57 @@ fn a_new_landing_forgets_where_the_last_one_went() {
     ctx.data_mut(|data| data.insert_temp(super::list::landed_on_id(), (5_u64, 9_u64)));
     super::list::land(&ctx, 5);
     assert_eq!(super::list::landed_on(&ctx, 5), None, "the second landing has not landed yet: no row is its");
+}
+
+/// The hover acts drawn on the row `rect`, left to right: their names and rects.
+fn acts_on(harness: &Harness<'static, InboxApp>, rect: egui::Rect) -> Vec<(String, egui::Rect)> {
+    let mut acts: Vec<_> = ["Done", "Not done", "Snooze", "Mark as read", "Mark as unread", "Delete"]
+        .into_iter()
+        .flat_map(|name| buttons_in(harness, rect, name).into_iter().map(move |at| (name.to_owned(), at)))
+        .collect();
+    acts.sort_by(|a, b| a.1.left().total_cmp(&b.1.left()));
+    acts
+}
+
+#[test]
+fn beside_the_reader_a_row_with_room_for_three_acts_offers_done_snooze_and_delete() {
+    // The owner's ruling: where the 440 list holds three of the four, Read gives way, not Delete; it stays reachable by
+    // its key (R) and the command palette. Where all four fit (100 %), nothing changes.
+    for (percent, wanted) in [(130, &["Done", "Snooze", "Delete"][..]), (100, &["Done", "Snooze", "Mark as read", "Delete"][..])] {
+        let mut harness = beside_the_reader();
+        harness.state_mut().set_reduce_motion(true);
+        harness.state_mut().set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+        harness.run();
+        let rect = harness.get_by_label(ODILE).rect();
+        assert_eq!(rect.width(), 440.0, "{percent}: the list beside the reader");
+        harness.hover_at(rect.center());
+        harness.run();
+        let acts = acts_on(&harness, rect);
+        let names: Vec<&str> = acts.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, wanted, "{percent} %: the acts drawn, in order");
+        // Nothing of the row runs under an act: a text that touches one is its own chip, inside it.
+        for (at, words) in texts_in(&harness, rect) {
+            for (name, act) in &acts {
+                assert!(!at.intersects(*act) || act.contains_rect(at), "{percent} %: {words:?} at {at:?} under {name} {act:?}");
+            }
+        }
+        for pair in acts.windows(2) {
+            assert!(pair[0].1.right() < pair[1].1.left(), "{percent} %: {pair:?} overlap");
+        }
+        // Tab from the row walks the acts as they are drawn.
+        let id = id_with(&harness, "Allotment rota for November");
+        harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(id)));
+        harness.run();
+        harness.run();
+        let mut walked = Vec::new();
+        for _ in 0..acts.len() {
+            harness.key_press(Key::Tab);
+            harness.run();
+            walked.push(harness.ctx.memory(egui::Memory::focused).and_then(|id| harness.ctx.read_response(id)).map(|response| response.rect));
+        }
+        let row = harness.ctx.read_response(super::list::row_id(id)).unwrap().rect;
+        let now: Vec<_> = acts_on(&harness, row).into_iter().map(|(_, at)| Some(at)).collect();
+        assert_eq!(now.len(), acts.len(), "{percent} %: the same acts while Tab walks them");
+        assert_eq!(walked, now, "{percent} %: Tab walks the acts in the drawn order");
+    }
 }

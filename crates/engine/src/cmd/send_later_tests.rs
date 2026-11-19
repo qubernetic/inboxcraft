@@ -213,6 +213,13 @@ fn send_later_takes_a_preset_and_refuses_a_time_gone() {
     assert_eq!(answer["at"], json!("2026-11-05T20:00:00Z"));
     // Taken back, then given another time.
     session.run("mail.unsend", &json!({ "id": id })).unwrap();
+    let answer = session.run("mail.send_later", &json!({ "id": id, "preset": "this_weekend" })).unwrap();
+    assert_eq!(answer["at"], json!("2026-11-07T09:00:00Z"));
+    session.run("mail.unsend", &json!({ "id": id })).unwrap();
+    session.run("week.set", &json!({ "first_day": "sunday" })).unwrap();
+    let answer = session.run("mail.send_later", &json!({ "id": id, "preset": "next_week" })).unwrap();
+    assert_eq!(answer["at"], json!("2026-11-08T09:00:00Z"), "the week's first day by the setting");
+    session.run("mail.unsend", &json!({ "id": id })).unwrap();
     for params in [
         json!({ "id": id, "at": "2026-11-05T08:00:00Z" }),
         json!({ "id": id, "at": "2026-11-05T09:00:00Z" }),

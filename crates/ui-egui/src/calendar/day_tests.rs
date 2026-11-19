@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use inboxcraft_time::{Offset, Timestamp, Weekday};
+use inboxcraft_time::{FirstWeek, Offset, Timestamp, WeekRule, Weekday};
 
 use super::{Day, dated, long, month_name, span, weekday_letter, weekday_short};
 
@@ -14,9 +14,12 @@ fn a_day_knows_its_date_weekday_week_and_month() {
     let thursday = day(2026, 11, 5);
     assert_eq!((thursday.year(), thursday.month(), thursday.date()), (2026, 11, 5));
     assert_eq!(thursday.weekday(), Weekday::Thursday);
-    assert_eq!(thursday.weekday_index(), 3);
-    assert_eq!(thursday.monday(), day(2026, 11, 2));
-    assert_eq!(day(2026, 11, 8).monday(), day(2026, 11, 2), "Sunday ends the week");
+    let iso = WeekRule::default();
+    assert_eq!(thursday.week_start(iso), day(2026, 11, 2));
+    assert_eq!(day(2026, 11, 8).week_start(iso), day(2026, 11, 2), "Sunday ends the week");
+    let sunday = WeekRule { first_day: Weekday::Sunday, first_week: FirstWeek::FirstFourDayWeek };
+    assert_eq!(thursday.week_start(sunday), day(2026, 11, 1));
+    assert_eq!(day(2026, 11, 8).week_start(sunday), day(2026, 11, 8), "Sunday starts the week");
     assert_eq!(thursday.first_of_month(), day(2026, 11, 1));
     assert_eq!(thursday.plus(27), day(2026, 12, 2));
     assert_eq!(day(2026, 12, 2).since(thursday), 27);
@@ -57,7 +60,7 @@ fn the_names_of_days_months_and_spans() {
     assert_eq!(month_name(99), "December");
     assert_eq!((1..=11).map(month_name).collect::<Vec<_>>().len(), 11);
     assert_eq!(weekday_short(Weekday::Monday), "Mon");
-    let letters: String = (0..7).map(weekday_letter).collect();
+    let letters: String = Weekday::ALL.into_iter().map(weekday_letter).collect();
     assert_eq!(letters, "MTWTFSS");
     for weekday in [Weekday::Tuesday, Weekday::Wednesday, Weekday::Thursday, Weekday::Friday, Weekday::Saturday, Weekday::Sunday] {
         assert_eq!(weekday_short(weekday).len(), 3);
@@ -72,10 +75,22 @@ fn the_names_of_days_months_and_spans() {
 #[test]
 fn the_week_number_is_iso_8601_s_and_months_have_short_names() {
     let day = |year, month, date| Day::new(year, month, date).unwrap();
-    assert_eq!(day(2026, 11, 16).iso_week(), 47);
-    assert_eq!(day(2026, 11, 5).iso_week(), 45);
-    assert_eq!(day(2027, 1, 1).iso_week(), 53, "1 January 2027 is a Friday: still in 2026's last week");
-    assert_eq!(day(2026, 1, 1).iso_week(), 1);
+    let iso = WeekRule::default();
+    assert_eq!(day(2026, 11, 16).week_number(iso), Some(47));
+    assert_eq!(day(2026, 11, 5).week_number(iso), Some(45));
+    assert_eq!(day(2027, 1, 1).week_number(iso), Some(53), "1 January 2027 is a Friday: still in 2026's last week");
+    assert_eq!(day(2026, 1, 1).week_number(iso), Some(1));
     assert_eq!(super::month_short(12), "Dec");
     assert_eq!(super::short(day(2026, 11, 16)), "16 Nov");
+}
+
+#[test]
+fn a_week_out_of_the_years_known_is_no_week_and_starts_on_the_day_itself() {
+    // 1 January of year 0 is a Saturday: its week from Monday would start in year -1.
+    let first = day(0, 1, 1);
+    assert_eq!(first.week_start(WeekRule::default()), first);
+    assert_eq!(first.week_number(WeekRule::default()), None);
+    let saturday = WeekRule { first_day: Weekday::Saturday, first_week: FirstWeek::WeekOf1January };
+    assert_eq!(first.week_start(saturday), first);
+    assert_eq!(first.week_number(saturday), Some(1));
 }

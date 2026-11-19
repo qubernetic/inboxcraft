@@ -48,6 +48,7 @@ struct Words {
     when: String,
     place: String,
     who: String,
+    not_from_organiser: bool,
 }
 
 impl Words {
@@ -62,6 +63,7 @@ impl Words {
             when: invite.card_when(),
             place: invite.event.location.clone(),
             who,
+            not_from_organiser: invite.not_from_organiser,
         }
     }
 
@@ -75,6 +77,7 @@ impl Words {
             place: &self.place,
             who: &self.who,
             cal: "",
+            not_from_organiser: self.not_from_organiser,
         }
     }
 }

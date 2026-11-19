@@ -377,6 +377,13 @@ fn a_preset_names_the_time() {
     assert_eq!(answer["until"], json!("2026-11-05T20:00:00Z"));
     let answer = session.run("mail.snooze", &json!({ "id": 2, "preset": "tomorrow_morning" })).unwrap();
     assert_eq!(answer["until"], json!("2026-11-06T08:00:00Z"));
+    let answer = session.run("mail.snooze", &json!({ "id": 2, "preset": "this_weekend" })).unwrap();
+    assert_eq!(answer["until"], json!("2026-11-07T09:00:00Z"));
+    let answer = session.run("mail.snooze", &json!({ "id": 2, "preset": "next_week" })).unwrap();
+    assert_eq!(answer["until"], json!("2026-11-09T09:00:00Z"));
+    session.run("week.set", &json!({ "first_day": "saturday" })).unwrap();
+    let answer = session.run("mail.snooze", &json!({ "id": 2, "preset": "next_week" })).unwrap();
+    assert_eq!(answer["until"], json!("2026-11-07T09:00:00Z"), "the week's first day by the setting");
 }
 
 #[test]

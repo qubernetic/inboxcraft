@@ -186,3 +186,26 @@ fn the_card_says_when_as_the_design_writes_it() {
     let invite = Invite::read(7, &answer).unwrap();
     assert_eq!((invite.weekday(), invite.card_when()), (String::new(), String::new()));
 }
+
+#[test]
+fn the_organisers_address_is_capped_and_flat_where_the_card_is_read() {
+    let mut answer = update();
+    answer["invite"]["organizer"]["address"] = json!(format!("\u{202e}a\r\nb\u{0}{}@example.org", "o".repeat(10_000)));
+    let invite = Invite::read(7, &answer).unwrap();
+    let address = invite.organizer_address.unwrap();
+    assert!(address.chars().count() <= crate::mailbox::MAX_SHOWN, "{} characters", address.chars().count());
+    assert!(!address.contains(['\u{202e}', '\r', '\n', '\0']), "{address:?}");
+}
+
+#[test]
+fn the_card_knows_whether_the_organiser_sent_the_message() {
+    let invite = Invite::read(7, &update()).unwrap();
+    assert!(!invite.not_from_organiser, "as read, the card is as before");
+    assert!(!invite.clone().sent_by(Some("odile@example.org")).not_from_organiser);
+    assert!(!invite.clone().sent_by(Some(" ODILE@example.org ")).not_from_organiser, "the case of an address is no other person");
+    assert!(invite.clone().sent_by(Some("teodor@example.org")).not_from_organiser);
+    assert!(invite.clone().sent_by(None).not_from_organiser, "no sender: say whom it goes to");
+    let mut answer = update();
+    answer["invite"]["organizer"] = json!(null);
+    assert!(!Invite::read(7, &answer).unwrap().sent_by(Some("teodor@example.org")).not_from_organiser, "no organiser, no line");
+}

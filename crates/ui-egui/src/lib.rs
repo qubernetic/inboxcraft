@@ -60,6 +60,7 @@ pub mod settings;
 pub mod shot;
 mod surface;
 pub mod theme;
+mod why;
 pub mod workers;
 
 pub use draw::{InboxApp, Screen, rows_built};

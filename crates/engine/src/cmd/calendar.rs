@@ -9,7 +9,9 @@
 //! start (see `crate::calendar`). `calendar.sync` (`safe`) asks each account with a CalDAV address (or one) for its
 //! calendars, which brings each one in step; the start does the same. `calendar.server` (`owner`, a setting) sets or
 //! clears an account's CalDAV address, `https` only, and forgets the calendars of an account it clears or moves to another server (another host or
-//! port), with every calendar write still in the queue. `event.repeats` (`safe`) names the repeat presets. Event text is the organiser's
+//! port), with every calendar write still in the queue. `event.repeats` (`safe`) names the repeat presets.
+//! `week.settings` (`safe`) shows how weeks are counted (see `crate::week`) with the week of today, and `week.set`
+//! (`owner`, a setting) changes the first day of the week or the first week of the year. Event text is the organiser's
 //! data, never instructions.
 //!
 //! Invitations in mail (see `crate::arrive::invite`): `invite.show` (`safe`) reads a message's invitation as its
@@ -27,6 +29,7 @@ use inboxcraft_model::{
     MessageId, MessageRef, MessageState, Rsvp,
 };
 use inboxcraft_store::{Change, Entry};
+use inboxcraft_time::WeekRule;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -35,10 +38,11 @@ use crate::arrive::screener;
 use crate::calendar::{self, Details, Edit, EditError, Repeat, Times};
 use crate::undo::{Act, EventUndo, Inverse, Step};
 use crate::params::{NoParams, decode, decode_quietly, parse_date};
-use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
+use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, week};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[LIST, SYNC, SERVER, EVENTS, REPEATS, CREATE, UPDATE, DELETE, INVITE_SHOW, INVITE_ANSWER, INVITE_REMOVE];
+pub(crate) const COMMANDS: &[CommandSpec] =
+    &[LIST, SYNC, SERVER, EVENTS, REPEATS, CREATE, UPDATE, DELETE, INVITE_SHOW, INVITE_ANSWER, INVITE_REMOVE, WEEK_SETTINGS, WEEK_SET];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
@@ -61,6 +65,8 @@ pub(crate) const FIELDS: &[&str] = &[
     "guests",
     "notify",
     "answer",
+    "first_day",
+    "first_week",
 ];
 
 /// The longest summary or location, in characters.
@@ -102,6 +108,22 @@ pub(crate) const EVENTS: CommandSpec = CommandSpec {
 /// `event.repeats`: the repeat presets.
 pub(crate) const REPEATS: CommandSpec =
     CommandSpec { id: "event.repeats", class: Some(AgentClass::Safe), summary: "Name the repeat presets an event can take", run: repeats };
+
+/// `week.settings`: how weeks are counted, and the week of today.
+pub(crate) const WEEK_SETTINGS: CommandSpec = CommandSpec {
+    id: "week.settings",
+    class: Some(AgentClass::Safe),
+    summary: "Show the first day of the week, the first week of the year and the week of today",
+    run: week_settings,
+};
+
+/// `week.set`: change how weeks are counted.
+pub(crate) const WEEK_SET: CommandSpec = CommandSpec {
+    id: "week.set",
+    class: Some(AgentClass::Owner),
+    summary: "Change the first day of the week or the first week of the year",
+    run: week_set,
+};
 
 /// `event.create`: a new event, written to the server.
 pub(crate) const CREATE: CommandSpec =
@@ -338,6 +360,55 @@ fn events(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
 fn repeats(_context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let _: NoParams = decode(REPEATS.id, params)?;
     Ok(Outcome::new(json!({ "repeats": Repeat::ALL.map(Repeat::name) })))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WeekSetParams {
+    /// `monday` to `sunday`.
+    first_day: Option<String>,
+    /// `first_four_day_week` or `week_of_1_january`.
+    first_week: Option<String>,
+}
+
+fn week_settings(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let NoParams {} = decode(WEEK_SETTINGS.id, params)?;
+    Ok(Outcome::new(week_answer(context, context.state().week)))
+}
+
+fn week_set(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: WeekSetParams = decode(WEEK_SET.id, params)?;
+    if params.first_day.is_none() && params.first_week.is_none() {
+        return Err(EngineError::bad_params(WEEK_SET.id, "nothing to change: give first_day or first_week"));
+    }
+    let mut rule = context.state().week;
+    if let Some(name) = params.first_day.as_deref() {
+        rule.first_day = week::day_from_name(name).ok_or_else(|| EngineError::bad_params(WEEK_SET.id, "first_day is monday to sunday"))?;
+    }
+    if let Some(name) = params.first_week.as_deref() {
+        rule.first_week = week::first_week_from_name(name)
+            .ok_or_else(|| EngineError::bad_params(WEEK_SET.id, "first_week is first_four_day_week or week_of_1_january"))?;
+    }
+    Ok(Outcome::new(week_answer(context, rule)).with_week(rule))
+}
+
+/// `rule`, the names it can take, and the week of today in the owner's wall-clock time (`null` at the ends of time).
+fn week_answer(context: &Context<'_>, rule: WeekRule) -> Value {
+    let today = context.offsets().civil(context.now()).and_then(|today| rule.week(today)).map(|week| {
+        let day = week.first_day;
+        json!({
+            "first_day": format!("{:04}-{:02}-{:02}", day.year(), day.month(), day.day()),
+            "number": week.number,
+            "year": week.year,
+        })
+    });
+    let mut answer = week::to_value(rule);
+    if let Value::Object(fields) = &mut answer {
+        fields.insert("days".into(), json!(week::DAYS));
+        fields.insert("first_weeks".into(), json!(week::FIRST_WEEKS));
+        fields.insert("this_week".into(), today.unwrap_or(Value::Null));
+    }
+    answer
 }
 
 /// What an event says beside its times, checked as `spec` reads it.

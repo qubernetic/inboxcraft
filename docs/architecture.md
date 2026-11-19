@@ -91,6 +91,20 @@ fetches a remote picture: the front end asks its fetch for the pictures the owne
 fetch is `net::picture` on threads of its own (HTTPS only, a fixed user agent, no cookies or referrer, public
 addresses only), so the engine stays free of network I/O.
 
+`mail.why` (`safe`, `id`) says why a message stands where it does, from what the triage already decided and keeps:
+at most four reasons, most specific first, each a `kind` (`snooze`, `rule`, `sender`, `screener`, `thread`,
+`default`), a `text_id` from a fixed set (`why.snooze.returned`, `why.snooze.until`, `why.rule.group`,
+`why.sender.group`, `why.sender.accepted`, `why.sender.blocked`, `why.screener.held`, `why.screener.blocked`,
+`why.screener.new`, `why.screener.known`, `why.thread.yours`, `why.thread.other`, `why.default`) that the front end
+words in its own language, and `args` with a fixed set of keys per `text_id`: times, a group or rule name, the
+sender's address, a count, a folder id and role. Every text in `args` is cleaned of control characters and invisible
+marks and cut at a character boundary: an address at 254 characters, a group, rule or role name at 64. No text of the message goes
+into the answer. `rule` names the grouped inbox classifier's rule (`calendar`, `automatic`, `list`, `junk`, `robot`,
+`other`), or `why.sender.group` the owner's choice of group for the sender, only for mail in the inbox of a grouped
+account; a return from a snooze counts while the message is in the inbox, as the store keeps
+when it came back but not where to. One decision gives one reason: a sender blocked leaves out `why.screener.blocked`,
+a group chosen for the sender leaves out `why.sender.accepted`, before the four are counted. `default` (the folder) comes only when nothing else does.
+
 The appearance commands (`ui.theme.set`, `ui.text_scale.set`, `ui.motion.set`, `ui.frame.set`, all `safe`) change
 one choice each of the session's `Appearance` (`engine::appearance`) and answer the whole of it. The colours, the
 typeface and the icons are fixed, so there is no command for them. The engine checks the values; it keeps nothing
@@ -235,11 +249,21 @@ into the horizon in time; an alert whose time came stays for the tick. A fired a
 entry.
 
 `schedule.presets` (`safe`) answers the presets still ahead: later today (three hours
-on, rounded to the nearest half hour of the wall clock, while still today), this evening (20:00) and tomorrow
-morning (08:00). They are in the computer's wall-clock time, from the `inboxcraft_time::Offsets` the front end
+on, rounded to the nearest half hour of the wall clock, while still today), this evening (20:00), tomorrow
+morning (08:00), this weekend (the coming Saturday at 09:00; from 09:00 on a Saturday, and on a Sunday, the next
+Saturday) and next week (09:00 on the first day of the next week, by the week rule below). Snooze, follow-up and
+send later take the same preset ids. They are in the computer's wall-clock time, from the `inboxcraft_time::Offsets` the front end
 hands over with `Session::set_offsets` (UTC until then); a wall-clock time the clock skips in spring lands after the
 change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries and `schedule.cancel`
 (`owner`) takes one off.
+
+Weeks are counted by the owner's week rule (`inboxcraft_time::WeekRule`): the first day of the week (Monday by
+default) and the year's first week, the first one with four days in the year (ISO 8601 with Monday, the default)
+or the one that holds 1 January. `WeekRule::week` gives a date's week: its first day, its number and the week-year
+it is counted in; a week that starts before year 0 has none. `week.settings` (`safe`) shows the rule and the week
+of today on the owner's wall clock, `week.set` (`owner`) changes it; the front end keeps it
+(`engine::week::to_value`) and hands it back at the start (`Session::set_week_rule`), and a kept value it cannot
+read falls back to the default part by part. "Next week" counts by it.
 
 The calendars in the engine (`engine::calendar`, `cmd/calendar.rs`) keep each event as the iCalendar text the server
 sent and read it with `ical` whenever it is shown, so nothing of it is lost on the way back. The start, and
@@ -437,12 +461,30 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   the other mail ports of the same address (the network blocks mail, or the port is wrong, or the server is down).
   The certificate's issuer and dates come from our own small DER reader, fed by a verifier that keeps the
   certificate and asks the real one; the dates give the clock check where the platform's verifier gives none.
-- Detect (`net::detect`) only proposes: MX, autoconfig at the domain over HTTPS, the ISPDB when switched on (off by
-  default), SRV, and common host names as a hint. DNS is `hickory-proto` messages over our own blocking UDP and TCP
-  exchange with the resolver configuration of the system, HTTPS is `ureq` with `rustls` and the same trust as the
-  mail connections, following no redirect and sending nothing but the URL. A candidate is detected settings
-  (`CheckTarget::detected`): the check signs in to it only after the owner has seen it and its certificate
-  verified.
+- Detect (`net::detect`) only proposes. It asks in stages: MX; autoconfig at the domain over HTTPS, then the ISPDB
+  when switched on (off by default); SRV (RFC 6186); `mail.`, `imap.` and `smtp.` of the address's domain; and
+  last, as a guess about a third party, the provider domains of the MX hosts (their autoconfig over HTTPS, then
+  `mail.`, `imap.` and `smtp.` of them). After each
+  stage it probes the candidates it added, in that order: the list is a pure function of what the lookups returned
+  (`net::candidates`: de-duplicated, capped, hosts made up from a domain only on 993 and 143, or 465 and 587, never
+  without encryption, never port 25), and a candidate counts only when it greets and, encrypted, offers a sign-in
+  (`net::probe`, which sends no user name or password). A server the domain names (its autoconfig, the ISPDB, SRV)
+  that no probe reached is still proposed, marked unchecked. While the domain names servers of a kind, a
+  guess of that kind is tried only once every named one has failed for a definite reason (refused, no such name, a
+  certificate that does not hold, no STARTTLS, no sign-in); one that only timed out, dropped the connection or whose
+  certificate does not fit this computer's clock keeps the guesses away, and is proposed with the cause
+  (`Checked::NoAnswer`, `Refused`, `NoName`, `Clock`). A host is skipped on every port when its name is not found;
+  a guess of the domain's own that timed out skips the guesses on its host, not a server the domain names there; any
+  other host that timed out is skipped on that port only. It stops once it has an IMAP and a submission server, after
+  24 probes, or at its deadline of 120 seconds, which every lookup and probe is given (`net::Deadline`, with a stop
+  the app sets when a newer run starts); a probe has 12 seconds of its own and tries at most four addresses. The
+  connector ends every connect at the deadline, and the socket under TLS (`Timed` in `net::connect`) every read and
+  write, inside rustls' own loops too, however slowly a server sends or reads; the system's name lookup runs on a
+  thread waited for until the deadline, at most eight of them at once across runs. DNS is `hickory-proto` messages
+  over our own blocking UDP and TCP exchange with the resolver configuration of the system, HTTPS is `ureq` with
+  `rustls` and the same trust as the mail connections, following no redirect and sending nothing but the URL. A
+  candidate is detected settings (`CheckTarget::detected`): the check signs in to it only after the owner has seen
+  it and its certificate verified.
 - Code that needs the time takes an `inboxcraft_time::Clock`; tests hand it a `FakeClock`. `Instant::now` and
   `SystemTime::now` are banned in `clippy.toml` (they trap on wasm); `SystemClock` is the one place that reads them.
   Code that works in the owner's wall-clock time takes an `inboxcraft_time::Offsets` the same way: a fixed `Offset`,
