@@ -2819,7 +2819,11 @@ impl InboxApp {
             }
             Asked::OpenDraft(draft) => {
                 self.reopen(draft);
-                ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
+                // Only when the draft opened: a refused switch (the draft being written could not be kept) leaves the
+                // keys where they were.
+                if self.composer.as_ref().is_some_and(|composer| composer.draft() == draft) {
+                    ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
+                }
             }
             Asked::DiscardDraft(draft) => self.discard_draft(draft),
             Asked::ReadMail => return Some(keymap::MAIL),

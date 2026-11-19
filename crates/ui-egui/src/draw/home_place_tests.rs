@@ -705,3 +705,34 @@ fn the_zoom_keys_change_nothing_and_ctrl_0_shows_home_at_a_zoom_of_one() {
     assert_eq!(harness.state().screen(), Screen::Home, "Ctrl+0 is Home");
     assert_eq!(harness.ctx.zoom_factor(), 1.0);
 }
+
+/// A draft row pressed while the draft being written cannot be kept (the store refuses `compose.update`; here because
+/// the draft was taken away underneath, as an agent's `compose.discard` would): the switch is refused, what was typed
+/// stays on screen, the owner is told, and the keyboard is not sent to the To line of a composer that did not change.
+#[test]
+fn a_switch_to_another_draft_is_refused_while_the_one_being_written_cannot_be_kept() {
+    let mut app = sample_app(&clock());
+    let other = draft(&mut app, "Workshop dates");
+    let mut harness = window(app);
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::COMPOSE);
+    harness.run();
+    if harness.state().screen() != Screen::Home {
+        command(&mut harness, Key::Num0);
+    }
+    harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
+    harness.run();
+    let typing = harness.state().composer().map(crate::compose::Composer::draft).unwrap();
+    let subject = harness.ctx.memory(|memory| memory.focused());
+    // No frame between: what was typed is not kept yet, and keeping it is refused.
+    if let (Some(composer), _) = harness.state_mut().composer_mut() {
+        composer.subject_mut().push_str("Typed, not kept");
+    }
+    harness.state_mut().mailbox_mut().run("compose.discard", &json!({ "id": typing })).unwrap();
+    harness.state_mut().apply_home(&ctx, super::home::Asked::OpenDraft(other));
+    let composer = harness.state().composer().unwrap();
+    assert_eq!(composer.draft(), typing, "the switch is refused");
+    assert_eq!(composer.subject(), "Typed, not kept", "what was typed stays on screen");
+    assert!(harness.state().mailbox().error().is_some(), "the owner is told");
+    assert_eq!(harness.ctx.memory(|memory| memory.focused()), subject, "the keys stay where they were");
+}
