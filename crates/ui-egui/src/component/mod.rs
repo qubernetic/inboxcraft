@@ -14,6 +14,7 @@
 //! - [`tooltip`]: the bubble with the action's name and its key chip.
 //! - [`key`]: the chip of a key, its words read from a shortcut.
 //! - [`key_hint`]: a key chip and the word of its action, in the status line.
+//! - [`command_field`]: the command line's field, its prompt, scope, text, caret and key.
 //! - [`tag`]: a short mark in a 1 px box, and the coming-soon mark.
 //! - [`label`]: the bracketed section label and the written form of a count.
 //! - [`avatar`]: a person's initials, `muted` on a `stage` square.
@@ -50,6 +51,7 @@ pub mod calendar_sync;
 pub mod card;
 pub mod check_step;
 pub mod checkbox;
+pub mod command_field;
 pub mod content_bar;
 pub mod draft_file;
 pub mod draft_row;
