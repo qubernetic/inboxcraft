@@ -2655,42 +2655,28 @@ fn the_list_keys_rest_under_a_rows_open_menu() {
 }
 
 #[test]
-#[ignore = "its trigger, the error banner over the list, moved into the status line (#309); a window shrinking in the pass after a key does not scroll by that pass's viewport: to be taken up"]
+#[ignore = "an old one-pass slip (list.rs untouched by #309): when the window shrinks in the pass after a step, the keyed row lies below that pass's viewport for one pass and is whole from the next; the in-app trigger (the error banner) is gone with #309, a window resize is the one left"]
 fn a_step_in_the_pass_the_list_shrinks_scrolls_by_that_passs_viewport() {
     /// Each pass's viewport, the keyed message and its row's rect as the pass built it.
     type Seen = Vec<(egui::Rect, Option<u64>, Option<egui::Rect>)>;
     let mut app = InboxApp::at_mail(ten_thousand_mailbox(InboxView::List));
     app.set_reduce_motion(true);
     let mut harness = Harness::builder().with_size(vec2(1300.0, 900.0)).with_context_setup(install_fonts).with_max_steps(240).build_ui_state(
-        |ui, (app, seen, armed): &mut (InboxApp, Seen, u8)| {
-            // Armed (1), from the pass after the one that read J the window is 60 shorter, which takes room from the
-            // list: the list scrolls to the keyed row in the pass after the key, and its viewport there is not the last
-            // pass's, as when the window shrinks right after a key.
-            if *armed == 2 {
-                *armed = 3;
-            }
-            if *armed == 1 && ui.input(|input| input.key_pressed(Key::J)) {
-                *armed = 2;
-            }
-            if *armed == 3 {
-                let shorter = egui::Rect::from_min_max(ui.max_rect().min, ui.max_rect().max - vec2(0.0, 60.0));
-                app.ui(&mut ui.new_child(egui::UiBuilder::new().max_rect(shorter)));
-            } else {
-                app.ui(ui);
-            }
+        |ui, (app, seen): &mut (InboxApp, Seen)| {
+            app.ui(ui);
             let row = |id: u64| ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(super::list::row_id(id)).map(|widget| widget.rect));
             let keyed = app.mailbox().selected();
             if let Some(view) = super::list::view_rect(ui.ctx()) {
                 seen.push((view, keyed, keyed.and_then(row)));
             }
         },
-        (app, Vec::new(), 0),
+        (app, Vec::new()),
     );
     harness.run();
     harness.key_press(Key::Home);
     harness.run();
     let view = harness.state().1.last().unwrap().0;
-    // Keyed: a row whose next one stands whole in the viewport, less than a banner's height above its bottom.
+    // Keyed: a row whose next one stands whole in the viewport, less than 60 above its bottom.
     let order = super::list::order(&harness.ctx);
     let mut at = 0;
     loop {
@@ -2706,9 +2692,11 @@ fn a_step_in_the_pass_the_list_shrinks_scrolls_by_that_passs_viewport() {
     }
     let next = order[at + 1];
     harness.state_mut().1.clear();
-    harness.state_mut().2 = 1;
+    // J, and the window 60 shorter from the pass after the one that read it: the list scrolls to the keyed row by a
+    // viewport that is not the last pass's.
     harness.key_press(Key::J);
     harness.step();
+    harness.set_size(vec2(1300.0, 840.0));
     harness.run();
     let (shrunk, _, row) =
         harness.state().1.iter().find(|(shown, keyed, _)| *keyed == Some(next) && shown.height() < view.height() - 1.0).copied().unwrap();
