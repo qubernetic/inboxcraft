@@ -30,10 +30,11 @@
 //!
 //! The folder syncs the worker takes while none is waiting make a round: it tells how far the round has come
 //! ([`EventKind::SyncProgress`], done of all) when it starts and as each of its folders ends, synced or failed, and
-//! when the last one ended and no job or connection failed during the round, that the account was current
-//! ([`EventKind::SyncFinished`]). A resync of the watched folder outside a round tells the same, unless something
-//! failed since the last sign-in or the last round that ended so. A round counts what the worker knows already: the jobs it
-//! holds, no request to the server.
+//! when the last one ended and no job or connection failed during the round (a body fetch aside, which is the
+//! message's), that the account was current ([`EventKind::SyncFinished`]). A resync of the watched folder outside a
+//! round tells the same, unless something failed since the last sign-in, the last round that ended so or the resync
+//! before it: the resync right after a failure tells no end, the next clean one does. A round counts what the worker
+//! knows already: the jobs it holds, no request to the server.
 //!
 //! After each sign-in the worker tells what the server can do as far as the engine chooses by it
 //! ([`EventKind::Abilities`]): whether it removes only the messages named.
@@ -321,8 +322,8 @@ struct Run<'a> {
     tries: HashMap<JobId, u32>,
     /// The folder syncs of the round under way.
     round: Round,
-    /// The failures told when the account was last current: at the last sign-in, or the last round that ended with
-    /// nothing failed in it.
+    /// The failures told at the last point to measure from: the last sign-in, the last round that ended with nothing
+    /// failed in it, or the last resync of the watched folder.
     current: u64,
 }
 
@@ -655,10 +656,12 @@ impl Run<'_> {
         sync::run(open, &job, &self.settings.sync, now, &mut |event| out.emit(event))?;
         self.stale = false;
         self.attempt = 0;
-        // After a failure, only a whole round that ends clean, or a new sign-in, makes the account current again.
+        // The account is current when nothing failed since the last sign-in, the last round that ended clean or the
+        // resync before this one: the resync right after a failure tells no end, the next clean one does.
         if self.round.of == 0 && self.out.failures == self.current {
             self.out.say(None, EventKind::SyncFinished { at: now });
         }
+        self.current = self.out.failures;
         Ok(())
     }
 

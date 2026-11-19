@@ -116,13 +116,16 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
             kept
         }
         EventKind::Connection(connection) => {
+            use inboxcraft_model::ConnectionState::{Offline, Online, Watching};
             let held = plan.state.accounts.entry(account).or_default();
+            let signed_in = matches!(held.connection, Some(Online | Watching));
             held.connection = Some(*connection);
             // The connection is gone: the round it served may never end, and the worker tells the next one afresh.
-            if *connection == inboxcraft_model::ConnectionState::Offline {
+            if *connection == Offline {
                 held.progress = None;
             }
-            if matches!(connection, inboxcraft_model::ConnectionState::Online | inboxcraft_model::ConnectionState::Watching) {
+            // A sign-in ends the failure; the worker's turns between watching and a job do not.
+            if *connection == Online && !signed_in {
                 held.failure = None;
             }
             true

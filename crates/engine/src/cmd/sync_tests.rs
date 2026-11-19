@@ -107,8 +107,10 @@ fn the_worst_state_wins_through_a_sequence_of_events() {
     assert_eq!(status(&mut session), json!({ "state": "syncing", "done": 1, "of": 4, "last_synced": "2026-11-05T08:50:00Z", "failing_accounts": 0 }));
     failed(&mut session, 2);
     assert_eq!(status(&mut session)["state"], "failing", "failing wins over syncing");
+    connection(&mut session, 2, ConnectionState::Offline);
+    connection(&mut session, 2, ConnectionState::Connecting);
     connection(&mut session, 2, ConnectionState::Online);
-    assert_eq!(status(&mut session)["state"], "syncing", "online again ends the failure");
+    assert_eq!(status(&mut session)["state"], "syncing", "a sign-in ends the failure");
     progress(&mut session, 1, 4, 4);
     assert_eq!(status(&mut session)["state"], "synced", "a round with nothing left is not syncing");
     progress(&mut session, 1, 0, 2);
@@ -321,4 +323,47 @@ fn changed_settings_end_the_round_of_the_old_worker() {
     session.run("account.update", &json!({ "account": 1, "recheck": true })).unwrap();
     let answer = status(&mut session);
     assert_eq!((answer["state"].clone(), answer["of"].clone()), (json!("synced"), json!(0)), "{answer}");
+}
+
+fn failure(session: &mut Session, account: u64) -> Value {
+    let listed = session.run("account.list", &json!({})).unwrap();
+    listed["accounts"].as_array().unwrap().iter().find(|held| held["id"] == account).unwrap()["failure"].clone()
+}
+
+#[test]
+fn a_failure_lasts_through_the_workers_turns_until_a_sign_in_or_a_clean_end() {
+    let mut session = session();
+    current(&mut session);
+    failed(&mut session, 2);
+    for _ in 0..3 {
+        connection(&mut session, 2, ConnectionState::Online);
+        connection(&mut session, 2, ConnectionState::Watching);
+    }
+    assert_eq!(state(&mut session), "failing");
+    assert_eq!(failure(&mut session, 2)["kind"], "timed_out");
+    finished(&mut session, 2, NOW);
+    assert_eq!(state(&mut session), "synced", "a clean end");
+    assert_eq!(failure(&mut session, 2), Value::Null);
+    failed(&mut session, 2);
+    connection(&mut session, 2, ConnectionState::Offline);
+    connection(&mut session, 2, ConnectionState::Connecting);
+    connection(&mut session, 2, ConnectionState::Online);
+    assert_eq!(failure(&mut session, 2), Value::Null, "a sign-in");
+}
+
+#[test]
+fn an_account_whose_first_round_failed_reads_failing_until_a_clean_end() {
+    let mut session = single();
+    connection(&mut session, 1, ConnectionState::Connecting);
+    connection(&mut session, 1, ConnectionState::Online);
+    progress(&mut session, 1, 0, 2);
+    failed_with(&mut session, 1, ErrorKind::CommandRefused);
+    progress(&mut session, 1, 2, 2);
+    for _ in 0..3 {
+        connection(&mut session, 1, ConnectionState::Watching);
+        connection(&mut session, 1, ConnectionState::Online);
+    }
+    assert_eq!(status(&mut session), json!({ "state": "failing", "done": 0, "of": 0, "last_synced": null, "failing_accounts": 1 }));
+    finished(&mut session, 1, NOW);
+    assert_eq!(state(&mut session), "synced");
 }
