@@ -37,6 +37,12 @@ const UNDER: f32 = 2.0;
 /// The room between the title and its tag, in points.
 const TAG_GAP: f32 = 8.0;
 
+/// The least width the words keep beside the control; with less, the control stands under them, in points.
+const WORDS_LEAST: f32 = 160.0;
+
+/// The room between the words and a control under them, in points.
+const STACKED_GAP: f32 = 8.0;
+
 /// The most lines the help takes.
 const ROWS: usize = 4;
 
@@ -98,21 +104,24 @@ pub(crate) fn settings_row_with<R>(
     let size_id = id.with("control");
     let control_size: Vec2 = ui.data(|data| data.get_temp(size_id)).unwrap_or(Vec2::ZERO);
     let control_room = if control_size.x > 0.0 { GAP + control_size.x } else { 0.0 };
-    let words_width = (width - PAD_X * 2.0 - control_room).max(1.0);
+    // In a page too narrow for the words beside the control (a narrow window, large text), the control stands under
+    // the words, at the row's right end, and the words take the row's width.
+    let stacked = control_size.x > 0.0 && width - PAD_X * 2.0 - control_room < WORDS_LEAST;
+    let words_width = if stacked { width - PAD_X * 2.0 } else { width - PAD_X * 2.0 - control_room }.max(1.0);
     let ink = super::soon::ink(ui, theme, p.ink);
     let tag_width = if tagged { TAG_GAP + super::galley(ui, crate::tr!("coming soon"), f.mono_s, p.muted).size().x.ceil() + 12.0 } else { 0.0 };
     let title_galley = super::cut(ui, title, f.strong, ink, (words_width - tag_width).max(1.0));
     let title_width = title_galley.size().x.ceil();
     let help_galley = help.map(|help| super::wrapped(ui, &super::plain(help), f.caption, p.muted, words_width, ROWS, Align::LEFT));
     let words_high = f.strong.line + help_galley.as_ref().map_or(0.0, |help| UNDER + help.size().y);
-    let content = words_high.max(control_size.y);
+    let content = if stacked { words_high + STACKED_GAP + control_size.y } else { words_high.max(control_size.y) };
     let high = (PAD_Y + content + PAD_Y).max(theme.boxes().settings_row).ceil();
     let slot = ui.painter().add(Shape::Noop);
     let (_, rect) = ui.allocate_space(vec2(width, high));
     let response = ui.interact(rect, id, Sense::hover());
     // A screen reader hears the row's help with its title.
     response.widget_info(|| WidgetInfo::labeled(Role::Group, ui.is_enabled(), spoken(title, help)));
-    let top = (rect.center().y - words_high / 2.0).round();
+    let top = if stacked { rect.top() + PAD_Y } else { (rect.center().y - words_high / 2.0).round() };
     let left = rect.left() + PAD_X;
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
@@ -130,7 +139,7 @@ pub(crate) fn settings_row_with<R>(
     }
     // The control at the right end, centred on the row, in a room as high as it was the frame before (a horizontal
     // layout gives each widget the room's whole height, so a room as high as the row would measure the row).
-    let room_top = (rect.center().y - control_size.y / 2.0).round();
+    let room_top = if stacked { top + words_high + STACKED_GAP } else { (rect.center().y - control_size.y / 2.0).round() };
     let room = Rect::from_min_max(pos2(left, room_top), pos2(rect.right() - PAD_X, room_top + control_size.y));
     let mut child = ui.new_child(UiBuilder::new().id_salt(id.with("control-ui")).max_rect(room).layout(Layout::right_to_left(Align::Center)));
     let given = control(&mut child);

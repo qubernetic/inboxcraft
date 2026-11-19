@@ -35,8 +35,10 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
             super::culled(ui, theme, egui::Id::unique("settings-calendars").with(account.id), ends, |ui| calendars(ui, theme, keymap, account));
         }
         group(ui, theme, "C", tr!("Week"), None);
-        settings_row(ui, theme, tr!("Week starts on"), Some(tr!("Fixed: it cannot be changed yet.")), |ui| {
-            crate::component::label(ui, theme.fonts.mono, tr!("Monday"), theme.palette.muted);
+        let first = crate::mailbox::weekday_text(mailbox.week_rule().first_day);
+        let note = tr!("The week follows the week rule (week.set); its own rows here are coming.");
+        settings_row(ui, theme, tr!("Week starts on"), Some(note), |ui| {
+            crate::component::label(ui, theme.fonts.mono, first, theme.palette.muted);
         });
     });
     None

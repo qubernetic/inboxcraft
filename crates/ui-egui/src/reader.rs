@@ -560,7 +560,7 @@ impl Reader {
                 self.changing.remove(&id);
                 self.set_notice(tr!("Your answer is on its way.").to_owned());
                 mailbox.refresh();
-                self.refresh_invites(mailbox);
+                self.refresh_cards_and_why(mailbox);
             }
             Err(error) => self.fail(error.to_string()),
         }
@@ -583,13 +583,14 @@ impl Reader {
     /// and Undo, and reads the cards of the thread again.
     pub fn remove_invite(&mut self, mailbox: &mut Mailbox, id: u64) {
         match mailbox.event_act("invite.remove", &json!({ "id": id }), tr!("Removed from your calendar")) {
-            Ok(_) => self.refresh_invites(mailbox),
+            Ok(_) => self.refresh_cards_and_why(mailbox),
             Err(error) => self.fail(error.to_string()),
         }
     }
 
-    /// Reads the cards of the thread's messages again: an answer, a new version or an undo changes them.
-    pub fn refresh_invites(&mut self, mailbox: &mut Mailbox) {
+    /// Reads the cards of the thread's messages again (an answer, a new version or an undo changes them) and asks again
+    /// why the open message is here when its place changed.
+    pub fn refresh_cards_and_why(&mut self, mailbox: &mut Mailbox) {
         for opened in self.thread.iter_mut().filter_map(|row| row.opened.as_mut()).filter(|opened| opened.invite.is_some()) {
             opened.invite = invite(mailbox, opened.id, &opened.header.from);
         }

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Esc goes to the surface on top alone (the palette, the settings sheet, a list, a float, then the editor, then the
-//! picked event): one Esc never closes two things and never reaches what lies under the surface that has the keyboard.
+//! Esc goes to the surface on top alone (the palette, a list, a float, then the editor, then the picked event; the
+//! settings, a place, take none): one Esc never closes two things and never reaches what lies under the surface that has the keyboard.
 
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, vec2};
@@ -73,7 +73,7 @@ fn esc_with_the_palette_over_the_editor_closes_the_palette_alone() {
 }
 
 #[test]
-fn esc_with_the_settings_sheet_over_the_calendar_closes_the_sheet_alone() {
+fn esc_on_the_settings_shown_from_the_calendar_closes_nothing_and_the_pick_stays() {
     let mut harness = window();
     harness.key_press(Key::ArrowDown);
     harness.run();
@@ -82,23 +82,29 @@ fn esc_with_the_settings_sheet_over_the_calendar_closes_the_sheet_alone() {
     harness.state_mut().open_settings();
     harness.run();
     esc(&mut harness);
-    assert!(!harness.state().settings().is_open(), "the sheet takes the Esc");
-    assert_eq!(harness.state().calendar().picked().map(|event| event.summary.clone()), picked, "the pick under the sheet stays");
-    // Then the pick is on top: Esc lets it go.
+    assert!(harness.state().settings().is_open(), "a place is not closed by an Esc");
+    assert_eq!(harness.state().calendar().picked().map(|event| event.summary.clone()), picked, "the pick of the calendar left stays");
+    // Back on the calendar, the pick is on top: Esc lets it go.
+    harness.state_mut().leave_settings();
+    harness.run();
     esc(&mut harness);
     assert!(harness.state().calendar().picked().is_none());
 }
 
 #[test]
-fn esc_with_the_settings_sheet_over_the_editor_closes_the_sheet_alone() {
+fn esc_on_the_settings_shown_from_the_editor_reaches_no_editor_and_the_typing_stays() {
     let mut harness = window();
     typed(&mut harness);
     harness.state_mut().open_settings();
     harness.run();
     esc(&mut harness);
-    assert!(!harness.state().settings().is_open());
+    assert!(harness.state().settings().is_open());
     assert_eq!(summary(&harness).as_deref(), Some("Kiln"));
-    assert!(!warned(&harness), "the editor under the sheet never saw the Esc");
+    assert!(!warned(&harness), "the editor, not drawn on the settings, never saw the Esc");
+    harness.state_mut().leave_settings();
+    harness.run();
+    assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "back on the calendar the editor is as it was left");
+    assert!(!warned(&harness));
 }
 
 /// Twelve events at one hour on Thursday 5 November: the week shows four and "+N more".

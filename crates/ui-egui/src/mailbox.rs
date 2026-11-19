@@ -669,6 +669,11 @@ pub struct Mailbox {
     refused: Option<&'static str>,
     /// The calendars' sync: the owner's press, its jobs and its events ([`crate::calendar::sync`]).
     calendar_sync: SyncHandle,
+    /// The database's words of the last store failure of the window's commands written to standard error.
+    logged: Option<String>,
+    /// How many lines the window's commands wrote to standard error, for the tests.
+    #[cfg(test)]
+    logged_lines: u64,
 }
 
 impl std::fmt::Debug for Mailbox {
@@ -905,6 +910,9 @@ impl Mailbox {
             caller: Caller::Owner,
             refused: None,
             calendar_sync: SyncHandle::default(),
+            logged: None,
+            #[cfg(test)]
+            logged_lines: 0,
         };
         mailbox.refresh();
         mailbox
@@ -1440,7 +1448,6 @@ impl Mailbox {
                 false
             }
         };
-        changed |= self.sync_calendars();
         for _ in 0..MAX_PUMP_ROUNDS {
             if !self.pump_once(workers) {
                 break;
@@ -1454,11 +1461,11 @@ impl Mailbox {
         changed
     }
 
-    /// Runs `calendar.sync` when the owner pressed "sync now" at the calendar's foot since the last round, and only
-    /// then: the press is all that asks for it. The accounts it asked are followed from here
-    /// ([`crate::calendar::sync::Tracker`]). Whether a press was taken.
-    fn sync_calendars(&mut self) -> bool {
-        if !sync::with(&self.calendar_sync, Tracker::take_asked) {
+    /// Runs `calendar.sync` for the owner's press on "sync now" (or "try again") at the calendar's foot, the only thing
+    /// that asks for it, unless a sync is under way. The accounts it asked are followed from here
+    /// ([`crate::calendar::sync::Tracker`]). Whether it ran.
+    pub(crate) fn sync_calendars(&mut self) -> bool {
+        if !sync::with(&self.calendar_sync, |tracker| tracker.can_start()) {
             return false;
         }
         match self.run("calendar.sync", &json!({})) {
@@ -1583,6 +1590,16 @@ impl Mailbox {
         let answer = self.session.run_as(self.caller, command, params);
         if let Err(EngineError::NotAllowed { command, .. }) = &answer {
             self.refused = self.refused.or(Some(*command));
+        }
+        // The banner says the store's fixed sentence; the database's own words go to the app's standard error, once.
+        if let Err(error) = &answer
+            && let Some(line) = crate::store_log(error, &mut self.logged)
+        {
+            eprintln!("{line}");
+            #[cfg(test)]
+            {
+                self.logged_lines = self.logged_lines.saturating_add(1);
+            }
         }
         Ok(answer?)
     }
@@ -2387,13 +2404,13 @@ impl Mailbox {
 
     /// The week rule as it is kept between runs ([`inboxcraft_engine::week::to_value`]).
     #[must_use]
-    pub fn kept_week(&self) -> Value {
+    pub(crate) fn kept_week(&self) -> Value {
         inboxcraft_engine::week::to_value(self.session.week_rule())
     }
 
     /// Takes the week rule kept from an earlier run, read as outside data: what cannot be read is the default, never
     /// an error ([`inboxcraft_engine::week::from_value`]).
-    pub fn restore_week(&mut self, kept: &Value) {
+    pub(crate) fn restore_week(&mut self, kept: &Value) {
         self.session.set_week_rule(inboxcraft_engine::week::from_value(kept));
     }
 }
@@ -2407,6 +2424,9 @@ mod notify_tests;
 #[cfg(test)]
 #[path = "outbox_tests.rs"]
 mod outbox_tests;
+#[cfg(test)]
+#[path = "store_log_tests.rs"]
+mod store_log_tests;
 #[cfg(test)]
 #[path = "mailbox_tests.rs"]
 mod tests;

@@ -8,9 +8,9 @@
 //! answers it with the calendars found, the engine then queues a sync job for each calendar, and the worker answers
 //! each with what changed or why it failed. The [`Tracker`] follows the jobs of one press by their ids as the
 //! [`crate::mailbox::Mailbox`] hands them out and hears their events: the sync is under way while one of them is out,
-//! and it ends synced, or failed with the first failure heard. A press runs nothing itself: it is noted
-//! ([`Tracker::ask`]) and the mailbox runs the command on its next round; a press while a sync is under way is
-//! ignored, so there is never a second sync of the owner's at once.
+//! and it ends synced, or failed with the first failure heard. The press is one of the calendar's own presses: the
+//! window runs the command for it ([`crate::mailbox::Mailbox::sync_calendars`]) unless a sync is under way
+//! ([`Tracker::can_start`]), so there is never a second sync of the owner's at once.
 //!
 //! A failure is shown in the window's own words, one of a fixed set ([`Why`]); no text of a server reaches the panel.
 //! An account's name is cleaned and capped when the sync starts ([`MOST_NAME`]); the jobs followed are capped too
@@ -175,8 +175,6 @@ struct Running {
 /// The calendars' sync, kept by the mailbox and read by the side panel ([`SyncHandle`]).
 #[derive(Debug, Default)]
 pub struct Tracker {
-    /// The owner pressed and the command has not run yet.
-    asked: bool,
     running: Option<Running>,
     view: SyncView,
     /// How many times the command ran for a press.
@@ -195,19 +193,10 @@ pub fn with<R>(handle: &SyncHandle, f: impl FnOnce(&mut Tracker) -> R) -> R {
 }
 
 impl Tracker {
-    /// The owner's press: noted for the mailbox's next round, unless a sync is under way or already asked. Whether it
-    /// was noted.
-    pub fn ask(&mut self) -> bool {
-        if self.asked || self.running.is_some() {
-            return false;
-        }
-        self.asked = true;
-        true
-    }
-
-    /// Takes the press noted, if there is one: the mailbox runs the command now.
-    pub fn take_asked(&mut self) -> bool {
-        std::mem::take(&mut self.asked)
+    /// Whether the owner's press may start a sync: none is under way.
+    #[must_use]
+    pub fn can_start(&self) -> bool {
+        self.running.is_none()
     }
 
     /// The command ran and asked `accounts` (ids with their names) to sync: their jobs are followed from now on.
@@ -303,12 +292,6 @@ impl Tracker {
     #[must_use]
     pub fn started(&self) -> u64 {
         self.started
-    }
-
-    /// Whether a press waits for the mailbox to run the command.
-    #[must_use]
-    pub fn is_asked(&self) -> bool {
-        self.asked
     }
 }
 

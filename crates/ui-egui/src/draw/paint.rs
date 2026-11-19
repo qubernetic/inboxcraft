@@ -309,8 +309,8 @@ pub(crate) enum FloatEdge {
     Quiet,
 }
 
-/// The shapes of [`float`], for a place kept before the float's content was drawn: the one shadow, the `surface`
-/// fill and a 1 px edge inside, all square.
+/// The shapes of a float, for a place kept before the float's content was drawn: the one shadow, the `surface` fill
+/// and a 1 px edge inside, all square.
 pub(crate) fn float_shapes(theme: &Theme, rect: Rect, edge: FloatEdge) -> Vec<Shape> {
     let p = theme.palette;
     let colour = match edge {
@@ -411,30 +411,8 @@ pub(crate) fn shadow_box(mesh: &egui::epaint::Mesh) -> Option<Rect> {
     black.then(|| Rect::from_points(&mesh.vertices.iter().map(|v| v.pos).collect::<Vec<_>>()).shrink(reach))
 }
 
-/// Paints a float over `rect`: the one shadow, the `surface` fill and its edge, both on whole physical pixels at the
-/// painter's scale: the fill [`snapped`], the edge a pane's band on each side ([`edge_shape`]), a [`hairline`]'s
-/// pixels thick, so no side has a half-tone fringe at 1.25, 1.5 or 1.75. At 1 a float on whole points is painted as
-/// [`float_shapes`] paints it.
-pub(crate) fn float(painter: &Painter, theme: &Theme, rect: Rect, edge: FloatEdge) {
-    painter.extend(float_at(theme, rect, edge, painter.pixels_per_point()));
-}
-
-/// The shapes of a [`float`] over `rect` at `ppp` (a scale that is not a positive number counts as 1, [`line_pixels`]).
-fn float_at(theme: &Theme, rect: Rect, edge: FloatEdge, ppp: f32) -> Vec<Shape> {
-    let (ppp, _) = line_pixels(ppp);
-    let p = theme.palette;
-    let colour = match edge {
-        FloatEdge::Keyboard => p.cyan_edge,
-        FloatEdge::Quiet => p.line,
-    };
-    let whole = snapped(rect, ppp);
-    let mut shapes = vec![Shape::mesh(shadow_mesh(rect)), Shape::rect_filled(whole, 0.0, p.surface)];
-    shapes.extend([Side::Left, Side::Top, Side::Right, Side::Bottom].map(|side| edge_shape(whole, side, colour, ppp)));
-    shapes
-}
-
 /// A box over `rect` with no shadow: its `fill` and a 1 px `edge` inside it, both on whole physical pixels at the
-/// painter's scale, as a [`float`]'s.
+/// painter's scale.
 pub(crate) fn boxed(painter: &Painter, rect: Rect, fill: Color32, edge: Color32) {
     painter.extend(boxed_at(rect, fill, edge, painter.pixels_per_point()));
 }
@@ -457,12 +435,6 @@ fn outline_at(rect: Rect, edge: Color32, ppp: f32) -> [Shape; 4] {
     let (ppp, _) = line_pixels(ppp);
     let whole = snapped(rect, ppp);
     [Side::Left, Side::Top, Side::Right, Side::Bottom].map(|side| edge_shape(whole, side, edge, ppp))
-}
-
-/// The inside of a [`float`] over `rect` at `ppp`: its fill less the edge's band on every side, on whole pixels.
-pub(crate) fn float_inside(rect: Rect, ppp: f32) -> Rect {
-    let (ppp, pixels) = line_pixels(ppp);
-    snapped(rect, ppp).shrink(pixels / ppp)
 }
 
 /// The scale `ppp` made safe (a scale that is not a positive number counts as 1), and how many whole physical pixels a

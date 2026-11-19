@@ -1044,6 +1044,22 @@ impl Onboarding {
         self.stage = Stage::Closed;
     }
 
+    /// The Accounts page is not shown (another page of the settings, or another place): the form stays open as the owner
+    /// left it, its password forgotten, and Detect under way ends, as on every way out of the form; a check goes on and
+    /// shows its result when the page shows again.
+    pub fn leave_page(&mut self) {
+        if matches!(self.stage, Stage::Form | Stage::Edit(_)) {
+            self.form.password.clear();
+            self.end_run();
+        }
+    }
+
+    /// Whether the check of an added or changed account is under way.
+    #[must_use]
+    pub fn checking(&self) -> bool {
+        matches!(self.stage, Stage::Checking(_)) && self.outcome() == Outcome::Running
+    }
+
     /// Closes onboarding as [`Self::close`] does, and drops what the form open held: the owner's Cancel.
     pub fn cancel(&mut self) {
         let stage = self.stage;

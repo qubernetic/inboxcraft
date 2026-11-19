@@ -231,7 +231,7 @@ fn the_grouped_list_puts_each_group_under_its_heading_and_the_rest_under_other()
 
 fn settings_on_triage() -> Harness<'static, InboxApp> {
     let mut app = app();
-    app.settings_mut().open_at(Section::Triage);
+    super::tests::at_settings(&mut app, Section::Triage);
     harness_of(app)
 }
 

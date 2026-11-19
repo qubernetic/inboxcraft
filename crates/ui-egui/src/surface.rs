@@ -24,7 +24,7 @@ use egui::Key;
 
 use crate::keymap::{self, Keymap};
 
-/// The most surfaces a frame holds: seven in front and the place. Nine surfaces exist, but the palette and a capture
+/// The most surfaces a frame holds: seven in front and the place. Eight surfaces exist, and the palette and a capture
 /// never stand together with all the rest; an eighth in front would drop the lowest, never the top.
 const MOST: usize = 8;
 
@@ -37,8 +37,6 @@ pub(crate) enum Surface {
     Palette,
     /// The Shortcuts page waiting for a key.
     Capture,
-    /// The settings sheet.
-    Sheet,
     /// The calendar's event editor.
     Editor,
     /// The composer in the reader's place, in front.
@@ -47,7 +45,7 @@ pub(crate) enum Surface {
     FullWidth,
     /// In one pane, the open message in the list's place.
     OnePaneReader,
-    /// The place itself (the mail, the calendar): always the last.
+    /// The place itself (the mail, the calendar, the settings): always the last.
     Place,
 }
 
@@ -61,8 +59,6 @@ pub(crate) struct Facts {
     pub palette: bool,
     /// The Shortcuts page waits for a key.
     pub capture: bool,
-    /// The settings sheet is open.
-    pub sheet: bool,
     /// The calendar shows its event editor.
     pub editor: bool,
     /// The composer stands in the reader's place, in front of the list.
@@ -73,6 +69,8 @@ pub(crate) struct Facts {
     pub one_pane_reader: bool,
     /// The mail is the place shown.
     pub mail: bool,
+    /// The settings are the place shown.
+    pub settings: bool,
 }
 
 /// What stands in front, top first, the place last. Built once a frame ([`Surfaces::new`]); copies, allocates nothing.
@@ -81,20 +79,22 @@ pub(crate) struct Surfaces {
     stack: [Surface; MOST],
     len: usize,
     mail: bool,
+    settings: bool,
 }
 
 impl Surfaces {
     /// The surfaces of `facts`, top first: a float over everything; the palette and a capture, which take the keys;
-    /// the sheet; the event editor; the reader's full width (its `Esc` comes before the composer's, as it did); the
+    /// the event editor; the reader's full width (its `Esc` comes before the composer's, as it did); the
     /// composer in front; the reader in one pane; the place.
     pub(crate) fn new(facts: Facts) -> Self {
+        // The settings are a place of their own: the mail is not shown under them.
+        let mail = facts.mail && !facts.settings;
         let order = [
             (facts.float, Surface::Float),
             (facts.capture, Surface::Capture),
             (facts.palette, Surface::Palette),
-            (facts.sheet, Surface::Sheet),
             (facts.editor, Surface::Editor),
-            (facts.full_width && facts.mail, Surface::FullWidth),
+            (facts.full_width && mail, Surface::FullWidth),
             (facts.composer, Surface::Composer),
             (facts.one_pane_reader, Surface::OnePaneReader),
         ];
@@ -107,7 +107,7 @@ impl Surfaces {
                 len += 1;
             }
         }
-        Self { stack, len: len + 1, mail: facts.mail }
+        Self { stack, len: len + 1, mail, settings: facts.settings }
     }
 
     /// The surfaces, top first, the place last.
@@ -131,9 +131,10 @@ impl Surfaces {
     }
 
     /// Whether a key without Command, Ctrl or Alt runs nothing of the window, and Undo is not the window's: under the
-    /// palette, a capture, the sheet, or the composer in front, whose fields and lists the letters are for.
+    /// palette, a capture or the composer in front, whose fields and lists the letters are for, and on the settings,
+    /// whose pages the letters are for.
     pub(crate) fn quiet(&self) -> bool {
-        self.held() || self.has(Surface::Sheet) || self.has(Surface::Composer)
+        self.held() || self.settings || self.has(Surface::Composer)
     }
 
     /// Whether Undo rests, by every way in (its key, the palette's command, the toast's key and button): while the
@@ -144,8 +145,8 @@ impl Surfaces {
 
     /// The one surface an `Esc` pressed in this frame closes, or None when there was no `Esc` or it belongs to the
     /// place (the reader gives the keyboard back to the list). A float, the palette, a capture and the event editor
-    /// take their `Esc` themselves; the window closes the sheet or leaves the full width, and hands the rest to the
-    /// place (the composer and the reader in one pane give the list its place back).
+    /// take their `Esc` themselves; the window leaves the full width, and hands the rest to the place (the composer and
+    /// the reader in one pane give the list its place back; the settings, a place, are not closed by it).
     pub(crate) fn escape(&self, ctx: &egui::Context) -> Option<Surface> {
         if !ctx.input(|input| input.key_pressed(Key::Escape)) {
             return None;
@@ -154,19 +155,19 @@ impl Surfaces {
     }
 
     /// Whether the window's `action` may run with these surfaces in front, as its key (`keymap`'s, with a modifier or
-    /// without) is pressed. Not while the palette or a capture holds the keys; under the sheet only the sheet's and the
-    /// window's own ([`SHEET_KEYS`]); under the event editor only what comes over it ([`EDITOR_KEYS`]); a key without
-    /// a modifier not under a quiet surface ([`Surfaces::quiet`]), and Undo neither there nor while it rests
+    /// without) is pressed. Not while the palette or a capture holds the keys; on the settings nothing of the mail
+    /// ([`mail_only`]); under the event editor only what comes over it ([`EDITOR_KEYS`]); a key without a modifier not
+    /// under a quiet surface ([`Surfaces::quiet`]), and Undo neither there nor while it rests
     /// ([`Surfaces::undo_rests`]); the list's keys only while it has them ([`Surfaces::list_has_keyboard`]). The acts
     /// on a row and the calendar's keys are not the window's: the list and the calendar take those.
     pub(crate) fn allows(&self, action: &str, keymap: &Keymap) -> bool {
         if self.held() || ROW_ACTS.contains(&action) || keymap::CALENDAR_KEYS.contains(&action) {
             return false;
         }
-        if action == keymap::UNDO && (self.quiet() || self.undo_rests()) {
+        if self.settings && mail_only(action) {
             return false;
         }
-        if self.has(Surface::Sheet) && !SHEET_KEYS.contains(&action) {
+        if action == keymap::UNDO && (self.quiet() || self.undo_rests()) {
             return false;
         }
         if self.has(Surface::Editor) && !EDITOR_KEYS.contains(&action) {
@@ -182,34 +183,49 @@ impl Surfaces {
         !(self.quiet() && bare)
     }
 
-    /// Whether the list may have the keys: on the mail, shown, with nothing in front that takes them (the palette, the
-    /// sheet, a capture, the composer in the reader's place, a float, whose arrows are its own). Whether a row of it has
-    /// them is the list's to say.
+    /// Whether a press on the window's own control for `action` (the pointer's, or a screen reader's activate) may run
+    /// it: as [`Surfaces::allows`] says for the action, without the rest of a key with no modifier under a quiet
+    /// surface, which is for keys alone (the letters are the fields'; a press on a button is not a letter).
+    pub(crate) fn allows_press(&self, action: &str) -> bool {
+        self.allows(action, &Keymap::empty())
+    }
+
+    /// Whether the list may have the keys: on the mail, shown, with nothing in front that takes them (the palette, a
+    /// capture, the composer in the reader's place, a float, whose arrows are its own). Whether a row of it has them is
+    /// the list's to say.
     pub(crate) fn list_has_keyboard(&self) -> bool {
-        self.mail && !self.held() && !self.has(Surface::Sheet) && !self.has(Surface::Composer) && !self.has(Surface::Float)
+        self.mail && !self.held() && !self.has(Surface::Composer) && !self.has(Surface::Float)
+    }
+
+    /// Whether the settings are the place shown.
+    pub(crate) fn on_settings(&self) -> bool {
+        self.settings
     }
 }
 
+/// Whether `action` acts on the mail alone, so it rests while another place is shown that has no mail (the settings):
+/// the list's keys and the acts on a row, Undo (of the mail's acts), the views of the inbox, Back, the held-back
+/// message, Snooze and the composer's Send and fold. The ways to a place (Mail, Sent, Later, Find, the reader's full
+/// width) show the mail first, so they are not among them.
+pub(crate) fn mail_only(action: &str) -> bool {
+    keymap::LIST_KEYS.contains(&action) || ROW_ACTS.contains(&action) || MAIL_ONLY.contains(&action)
+}
+
+/// The window's actions that act on the mail shown, besides the list's keys and the acts on a row.
+const MAIL_ONLY: [&str; 9] = [
+    keymap::UNDO,
+    keymap::VIEW_GROUPED,
+    keymap::VIEW_SMART,
+    keymap::VIEW_LIST,
+    keymap::BACK,
+    keymap::OPEN_HELD,
+    keymap::SNOOZE,
+    keymap::SEND,
+    keymap::FOLD,
+];
+
 /// The acts on the selected row: the list takes their keys.
 const ROW_ACTS: [&str; 5] = [keymap::DONE, keymap::ARCHIVE, keymap::READ, keymap::FLAG, keymap::DELETE];
-
-/// The keys of the settings sheet and of the window as a whole: the sheet's own, the palette, the mode and motion, and
-/// the ways to a place of the window, which close the sheet first. None acts on what lies under the sheet.
-const SHEET_KEYS: [&str; 13] = [
-    keymap::SETTINGS,
-    keymap::SHORTCUTS,
-    keymap::PALETTE,
-    keymap::LIGHT,
-    keymap::DARK,
-    keymap::SYSTEM_MODE,
-    keymap::MOTION,
-    keymap::MAIL,
-    keymap::SENT,
-    keymap::LATER,
-    keymap::CALENDAR,
-    keymap::FIND,
-    keymap::FULL_WIDTH,
-];
 
 /// The keys that run under the event editor: what comes over it (the palette, the settings, Shortcuts) and the look
 /// of the window. Nothing opens, shows or acts on what lies under it, nor leaves the calendar while it is open.

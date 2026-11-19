@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings sheet and the window's own controls over the calendar's surfaces: the sheet over the event editor
-//! with typing takes the keys (nothing typed lands in the editor, `Tab` stays in the sheet, one Esc closes the sheet
-//! alone); over the floating composer Send's key does nothing and nothing typed is lost; the window's controls stand
-//! over the editor's ground and do what they do without losing the typing.
+//! The settings shown from the calendar's surfaces, and the window's own controls over them: from the event editor with
+//! typing nothing typed lands in the editor and Esc reaches neither the place nor the editor; from the floating composer
+//! Send's key does nothing and nothing typed is lost; the settings' key again shows both as they were left. The
+//! window's controls stand over the editor's ground and do what they do without losing the typing.
 
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, ViewportCommand, vec2};
@@ -81,8 +81,8 @@ fn queued(harness: &mut Harness<'static, InboxApp>) -> bool {
     outbox.to_string().contains("\"draft\"")
 }
 
-/// Opens the settings sheet by its key, as a person does with the keyboard in a field.
-fn open_sheet(harness: &mut Harness<'static, InboxApp>) {
+/// Shows the settings by their key, as a person does with the keyboard in a field.
+fn open_settings(harness: &mut Harness<'static, InboxApp>) {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
     assert!(harness.state().settings().is_open());
@@ -94,34 +94,41 @@ fn type_anywhere(harness: &mut Harness<'static, InboxApp>, text: &str) {
     harness.run();
 }
 
-/// Whether the control with the keyboard lies in the settings sheet.
-fn focus_in_the_sheet(harness: &Harness<'static, InboxApp>) -> bool {
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+/// Whether the control with the keyboard lies on the settings.
+fn focus_in_the_settings(harness: &Harness<'static, InboxApp>) -> bool {
+    let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     let Some(focused) = harness.ctx.memory(|memory| memory.focused()) else { return false };
     harness.ctx.read_response(focused).is_some_and(|response| sheet.contains_rect(response.rect))
 }
 
 #[test]
-fn the_sheet_over_the_editor_with_typing_keeps_the_keys_and_one_esc_closes_it_alone() {
+fn the_settings_shown_from_the_editor_with_typing_take_nothing_of_it_and_its_key_comes_back_to_it() {
     let mut harness = window();
     typed(&mut harness, "Kiln");
-    open_sheet(&mut harness);
+    open_settings(&mut harness);
     type_anywhere(&mut harness, "zz");
-    assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "typing under the sheet never lands in the editor");
-    for step in 0..40 {
+    assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "typing on the settings never lands in the editor");
+    let mut on_page = false;
+    for _ in 0..40 {
         harness.key_press(Key::Tab);
         harness.run();
-        assert!(focus_in_the_sheet(&harness), "Tab {step} left the sheet");
+        on_page |= focus_in_the_settings(&harness);
     }
+    assert!(on_page, "Tab reaches the settings' controls");
+    assert!(harness.state().settings().is_open(), "Tab walks the place, it does not leave it");
+    assert_eq!(summary(&harness).as_deref(), Some("Kiln"));
     harness.key_press(Key::Escape);
     harness.run();
-    assert!(!harness.state().settings().is_open(), "Esc closes the sheet");
+    assert!(harness.state().settings().is_open(), "Esc closes no place");
+    assert!(!harness.state().calendar().editor().is_some_and(|editor| editor.warned()), "the editor never saw that Esc");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    assert!(!harness.state().settings().is_open(), "the settings' key again shows the calendar");
     assert_eq!(summary(&harness).as_deref(), Some("Kiln"), "and the editor keeps its typing");
-    assert!(!harness.state().calendar().editor().is_some_and(|editor| editor.warned()), "that Esc was the sheet's");
 }
 
 #[test]
-fn the_sheet_over_the_floating_composer_sends_nothing_and_loses_nothing() {
+fn the_settings_shown_from_the_floating_composer_send_nothing_and_lose_nothing() {
     let mut harness = window();
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);
@@ -135,14 +142,15 @@ fn the_sheet_over_the_floating_composer_sends_nothing_and_loses_nothing() {
     harness.get_by_role_and_label(Role::TextInput, "Subject").type_text("Plot");
     harness.run();
     assert!(harness.state().can_run(keymap::SEND), "the keyboard is in the floating composer");
-    open_sheet(&mut harness);
-    assert!(!harness.state().can_run(keymap::SEND), "under the sheet Send's key rests");
+    open_settings(&mut harness);
+    assert!(!harness.state().can_run(keymap::SEND), "on the settings Send's key rests");
+    assert!(harness.query_by_label("Fold the draft Plot").is_none(), "the settings draw no composer");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     harness.run();
     type_anywhere(&mut harness, "zz");
     assert!(!queued(&mut harness), "nothing sent");
     assert_eq!(subject(&harness).as_deref(), Some("Plot"), "nothing typed lands in the composer, nothing is lost");
-    harness.key_press(Key::Escape);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
     assert!(!harness.state().settings().is_open());
     assert_eq!(subject(&harness).as_deref(), Some("Plot"));

@@ -39,6 +39,12 @@ fn harness() -> Harness<'static, InboxApp> {
 }
 
 /// Whether the last frame of `output` drew `id`: its glyph in the icon family.
+/// Shows the settings on `section`, as `ui.settings.open` with its page does: the one way the tests built on the
+/// settings open them.
+pub(super) fn at_settings(app: &mut InboxApp, section: crate::settings::Section) {
+    app.open_settings_page(Some(section.id()));
+}
+
 pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId) -> bool {
     fn texts<'a>(shape: &'a egui::Shape, found: &mut Vec<&'a egui::epaint::TextShape>) {
         match shape {

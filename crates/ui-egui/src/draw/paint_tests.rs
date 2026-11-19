@@ -892,59 +892,12 @@ fn touching_panes_share_one_line_on_whole_pixels_at_every_scale() {
     }
 }
 
-/// The physical pixels across of the `cyan_edge` painted by [`super::float`] over `rect` at `ppp`, tessellated without
-/// feathering: the distinct columns and rows its vertices stand on.
-fn float_edge_at(ppp: f32, rect: egui::Rect) -> (Vec<f32>, Vec<f32>) {
-    let ctx = egui::Context::default();
-    let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1600.0, 1000.0))), ..Default::default() };
-    input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
-    let theme = Theme::new(Mode::Dark, TextScale::default());
-    let mut output = ctx.run_ui(input, |ui| super::float(ui.painter(), &theme, rect, FloatEdge::Keyboard));
-    output.textures_delta.clear();
-    assert_eq!(output.pixels_per_point, ppp, "the pass ran at {ppp}");
-    let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
-    let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
-    let mut points = Vec::new();
-    for clipped in tessellator.tessellate_shapes(output.shapes) {
-        let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
-        points.extend(
-            mesh.vertices.iter().filter(|vertex| vertex.color == theme.palette.cyan_edge).map(|vertex| pos2(vertex.pos.x * ppp, vertex.pos.y * ppp)),
-        );
-    }
-    let distinct = |mut all: Vec<f32>| {
-        all.sort_by(f32::total_cmp);
-        all.dedup_by(|a, b| (*a - *b).abs() < 1e-3);
-        all
-    };
-    (distinct(points.iter().map(|at| at.x).collect()), distinct(points.iter().map(|at| at.y).collect()))
-}
-
 #[test]
-fn a_float_s_edge_stands_on_whole_pixels_at_every_scale() {
-    // The settings sheet's place in a window of 1440 × 900: whole points, not whole pixels at 1.25, 1.5 and 1.75.
-    let rect = egui::Rect::from_min_size(pos2(203.0, 61.0), vec2(1035.0, 780.0));
-    for ppp in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
-        let (columns, rows) = float_edge_at(ppp, rect);
-        let pixels = super::line_pixels(ppp).1;
-        for (across, ends) in [(&columns, (rect.left(), rect.right())), (&rows, (rect.top(), rect.bottom()))] {
-            assert!(across.iter().all(|at| (at - at.round()).abs() < 1e-3), "{ppp}: the edge on whole pixels: {across:?}");
-            // Each side one band a hairline's pixels thick, the outermost of the float: two lines either side.
-            let (low, high) = ((ends.0 * ppp).round(), (ends.1 * ppp).round());
-            let want = [low, low + pixels, high - pixels, high];
-            assert_eq!(across.len(), 4, "{ppp}: {across:?} against {want:?}");
-            assert!(across.iter().zip(want).all(|(got, want)| (got - want).abs() < 1e-3), "{ppp}: {across:?} against {want:?}");
-        }
-    }
-}
-
-#[test]
-fn a_float_a_box_and_an_outline_at_a_scale_of_0_nan_or_infinity_have_finite_rects() {
-    let theme = Theme::new(Mode::Dark, TextScale::default());
+fn a_box_and_an_outline_at_a_scale_of_0_nan_or_infinity_have_finite_rects() {
     let rect = egui::Rect::from_min_size(pos2(10.3, 20.7), vec2(120.4, 80.2));
     let (fill, edge) = (egui::Color32::WHITE, egui::Color32::BLACK);
     for ppp in [0.0, f32::NAN, f32::INFINITY] {
-        let mut shapes = super::float_at(&theme, rect, FloatEdge::Keyboard, ppp);
-        shapes.extend(super::boxed_at(rect, fill, edge, ppp));
+        let mut shapes = super::boxed_at(rect, fill, edge, ppp);
         shapes.extend(super::outline_at(rect, edge, ppp));
         for shape in &shapes {
             let bounds = shape.visual_bounding_rect();

@@ -179,3 +179,16 @@ fn a_change_of_the_rule_shows_at_the_next_frame_and_keeps_the_view_and_the_pick(
     }
     assert_eq!(calendar.serial(), serial, "once read, the next frames read nothing again");
 }
+
+#[test]
+fn a_calendar_never_read_follows_no_rule_until_its_first_read() {
+    let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
+    mailbox.run("week.set", &names(SUN, JAN1)).unwrap();
+    let mut calendar = Calendar::default();
+    let serial = calendar.serial();
+    calendar.follow_week(&mut mailbox);
+    assert_eq!(calendar.serial(), serial, "a calendar not read yet reads nothing");
+    assert_eq!(calendar.week_rule(), WeekRule::default());
+    calendar.refresh(&mut mailbox);
+    assert_eq!(calendar.week_rule(), WeekRule { first_day: SUN, first_week: JAN1 }, "the first read takes the rule");
+}

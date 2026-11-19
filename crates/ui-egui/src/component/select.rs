@@ -145,7 +145,12 @@ impl<T: Copy + PartialEq> Select<'_, T> {
             Some(note) => tooltip::attach_note(response, theme, &Keymap::empty(), self.name, None, Some(note)),
             None => response,
         };
-        if !*open || !list {
+        if !*open {
+            // However it closed (a choice, the field pressed again, its caller), it opens afresh next time.
+            popup::forget(ui.ctx(), id.with("popup"));
+            return (response, None);
+        }
+        if !list {
             return (response, None);
         }
         let opened_now = ui.data_mut(|data| data.remove_temp::<()>(id.with("opened"))).is_some();

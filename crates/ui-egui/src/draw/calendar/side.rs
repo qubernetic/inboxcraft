@@ -78,8 +78,9 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
     let pressed = ui
         .scope_builder(UiBuilder::new().max_rect(sync).id_salt("calendar-sync"), |ui| calendar_sync::calendar_sync(ui, theme, keymap, &view, drawn))
         .inner;
-    // The press is noted for the mailbox, which runs `calendar.sync` on its next round; a frame is asked for it.
-    if pressed && calendar.ask_sync() {
+    // The press runs `calendar.sync` where the calendar's other presses run; a frame is asked for its first jobs.
+    if pressed {
+        asked.push(Asked::Sync);
         ui.ctx().request_repaint();
     }
 }

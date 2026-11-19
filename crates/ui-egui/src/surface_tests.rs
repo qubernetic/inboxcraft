@@ -16,16 +16,19 @@ const MAIL: Facts = Facts {
     float: false,
     palette: false,
     capture: false,
-    sheet: false,
     editor: false,
     composer: false,
     full_width: false,
     one_pane_reader: false,
     mail: true,
+    settings: false,
 };
 
 /// The calendar.
 const CALENDAR: Facts = Facts { mail: false, ..MAIL };
+
+/// The settings, shown from the mail: a place, not a surface in front.
+const SETTINGS: Facts = Facts { settings: true, ..MAIL };
 
 /// Whether `ctx`, in a pass with `events`, gives `escape` its answer; the pass is ended.
 fn in_a_pass<R>(events: Vec<Event>, run: impl FnOnce(&egui::Context) -> R) -> R {
@@ -46,11 +49,11 @@ fn esc() -> Vec<Event> {
 fn stackings() -> Vec<(&'static str, Facts, Surface)> {
     vec![
         ("a float over the list", Facts { float: true, ..MAIL }, Surface::Float),
-        ("a float over the sheet", Facts { float: true, sheet: true, ..MAIL }, Surface::Float),
-        ("the sheet over a list", Facts { sheet: true, ..MAIL }, Surface::Sheet),
-        ("the sheet over the composer", Facts { sheet: true, composer: true, ..MAIL }, Surface::Sheet),
-        ("the sheet over the event editor", Facts { sheet: true, editor: true, ..CALENDAR }, Surface::Sheet),
-        ("a capture on the sheet", Facts { capture: true, sheet: true, ..MAIL }, Surface::Capture),
+        ("a float over a settings page", Facts { float: true, ..SETTINGS }, Surface::Float),
+        ("a capture on the settings", Facts { capture: true, ..SETTINGS }, Surface::Capture),
+        ("a float over a capture on the settings", Facts { float: true, capture: true, ..SETTINGS }, Surface::Float),
+        ("the palette over the settings", Facts { palette: true, ..SETTINGS }, Surface::Palette),
+        ("a float over the palette over the settings", Facts { float: true, palette: true, ..SETTINGS }, Surface::Float),
         ("the palette over the editor", Facts { palette: true, editor: true, ..CALENDAR }, Surface::Palette),
         ("the palette over the composer", Facts { palette: true, composer: true, ..MAIL }, Surface::Palette),
         ("a float over the full-width reader", Facts { float: true, full_width: true, ..MAIL }, Surface::Float),
@@ -79,6 +82,11 @@ fn one_esc_closes_one_surface_in_every_stacking() {
     // Nothing in front: the Esc is the place's (the reader gives the list the keyboard back).
     assert_eq!(in_a_pass(esc(), |ctx| of(MAIL).escape(ctx)), None);
     assert_eq!(of(MAIL).all(), &[Surface::Place]);
+    // The settings are a place: an Esc with nothing in front closes nothing of them.
+    assert_eq!(in_a_pass(esc(), |ctx| of(SETTINGS).escape(ctx)), None);
+    assert_eq!(of(SETTINGS).all(), &[Surface::Place]);
+    // The full width and the reader in one pane are the mail's: the settings stand in their place.
+    assert_eq!(of(Facts { full_width: true, ..SETTINGS }).all(), &[Surface::Place]);
 }
 
 #[test]
@@ -87,12 +95,12 @@ fn every_surface_at_once_is_held_in_eight_and_the_place_stays_last() {
         float: true,
         palette: true,
         capture: true,
-        sheet: true,
         editor: true,
         composer: true,
         full_width: true,
         one_pane_reader: true,
         mail: true,
+        settings: false,
     };
     let surfaces = of(all);
     assert_eq!(surfaces.all().len(), 8);
@@ -146,13 +154,16 @@ const LIST: [&str; 11] = [
     "ui.list.last",
 ];
 
-/// What runs under the sheet, with a modifier only.
-const SHEET: [&str; 13] = [
+/// What runs on the settings, with a modifier only: the window's keys but those of the mail (Undo, the views, Back,
+/// the held-back message, Snooze, the composer's fold). Under the sheet New message did not run; on the settings it
+/// shows the place the owner came from and opens the composer there.
+const ON_SETTINGS: [&str; 14] = [
     "ui.palette.open",
     "ui.search.focus",
     "ui.mail.show",
     "ui.sent.show",
     "ui.later.show",
+    "ui.compose.new",
     "ui.calendar.show",
     "ui.reader.full_width",
     "ui.settings.open",
@@ -196,12 +207,13 @@ const EDITOR: [&str; 7] =
 type Row = (&'static str, Facts, &'static [&'static [&'static str]], &'static [&'static [&'static str]]);
 
 fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
-    let rows: [Row; 17] = [
+    let rows: [Row; 16] = [
         ("place", MAIL, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("float", Facts { float: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
         ("palette", Facts { palette: true, ..MAIL }, &[], &[]),
-        ("capture", Facts { capture: true, sheet: true, ..MAIL }, &[], &[]),
-        ("sheet", Facts { sheet: true, ..MAIL }, &[], &[&SHEET]),
+        ("capture", Facts { capture: true, ..SETTINGS }, &[], &[]),
+        ("settings", SETTINGS, &[], &[&ON_SETTINGS]),
+        ("settings_with_the_full_width_kept", Facts { full_width: true, one_pane_reader: true, ..SETTINGS }, &[], &[&ON_SETTINGS]),
         // Before #254's fix every window key ran under the editor (`WINDOW`, also with a modifier): New message
         // opened under it. Now only what comes over it.
         ("editor", Facts { editor: true, ..CALENDAR }, &[&EDITOR], &[&EDITOR]),
@@ -209,13 +221,10 @@ fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
         ("full_width", Facts { full_width: true, ..MAIL }, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("one_pane_reader", Facts { one_pane_reader: true, ..MAIL }, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("calendar", CALENDAR, &[&WINDOW], &[&WINDOW]),
-        ("float_over_sheet", Facts { float: true, sheet: true, ..MAIL }, &[], &[&SHEET]),
-        ("sheet_over_composer", Facts { sheet: true, composer: true, ..MAIL }, &[], &[&SHEET]),
+        ("float_over_settings", Facts { float: true, ..SETTINGS }, &[], &[&ON_SETTINGS]),
         ("palette_over_editor", Facts { palette: true, editor: true, ..CALENDAR }, &[], &[]),
         ("float_over_full_width", Facts { float: true, full_width: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
         ("float_over_composer", Facts { float: true, composer: true, ..MAIL }, &[], &[&COMPOSER]),
-        // Three deep: what the sheet keeps holds over the composer under it too.
-        ("float_over_sheet_over_composer", Facts { float: true, sheet: true, composer: true, ..MAIL }, &[], &[&SHEET]),
         ("palette_over_composer", Facts { palette: true, composer: true, ..MAIL }, &[], &[]),
     ];
     rows.into_iter()
@@ -251,8 +260,8 @@ fn the_list_has_the_keys_only_on_the_mail_with_nothing_over_it_and_shown() {
         ("the calendar", CALENDAR),
         ("a float", Facts { float: true, ..MAIL }),
         ("the palette", Facts { palette: true, ..MAIL }),
-        ("a capture", Facts { capture: true, sheet: true, ..MAIL }),
-        ("the sheet", Facts { sheet: true, ..MAIL }),
+        ("a capture", Facts { capture: true, ..SETTINGS }),
+        ("the settings", SETTINGS),
         ("the composer in front", Facts { composer: true, ..MAIL }),
     ] {
         assert!(!of(facts).list_has_keyboard(), "{name}");
@@ -309,9 +318,9 @@ fn under_the_event_editor_a_key_with_a_modifier_runs_only_what_comes_over_it() {
         assert_eq!(harness.state().screen(), crate::Screen::Calendar, "{key:?}: the calendar stays");
         assert!(harness.state().calendar().editor().is_some(), "{key:?}: the editor stays");
     }
-    // The settings come over it.
+    // The settings are shown in its place; the editor waits, as it was, for the calendar's return.
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
-    assert!(harness.state().settings().is_open(), "the settings come over the editor");
-    assert!(harness.state().calendar().editor().is_some(), "the editor stays under them");
+    assert!(harness.state().settings().is_open(), "the settings are shown");
+    assert!(harness.state().calendar().editor().is_some(), "the editor is kept");
 }

@@ -249,3 +249,28 @@ fn the_notification_choices_are_kept_beside_the_appearance_and_come_back() {
     assert!(KeepFile::new(std::path::PathBuf::from("/")).store_notify(&chosen).is_err());
     assert_eq!(KeepFile::new(std::path::PathBuf::from("/")).load_notify(), None);
 }
+
+#[test]
+fn the_week_rule_is_kept_beside_the_appearance_and_comes_back() {
+    use super::WEEK_FILE;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested").join(FILE);
+    let mut keep = KeepFile::new(path.clone());
+    assert_eq!(keep.load_week(), None, "nothing kept yet");
+    let chosen = serde_json::json!({ "first_day": "sunday", "first_week": "week_of_1_january" });
+    keep.store_week(&chosen).unwrap();
+    assert_eq!(KeepFile::new(path.clone()).load_week(), Some(chosen.clone()));
+    let kept = dir.path().join("nested").join(WEEK_FILE);
+    std::fs::write(&kept, b"\xff not json").unwrap();
+    assert_eq!(keep.load_week(), None);
+    std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();
+    assert_eq!(keep.load_week(), None);
+    let mut none = NoKeep;
+    none.store_week(&chosen).unwrap();
+    assert_eq!(none.load_week(), None);
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"a file where the folder should be").unwrap();
+    assert!(KeepFile::new(blocker.join(FILE)).store_week(&chosen).is_err());
+    assert!(KeepFile::new(std::path::PathBuf::from("/")).store_week(&chosen).is_err());
+}

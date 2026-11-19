@@ -1881,3 +1881,28 @@ fn at_every_width_the_foot_s_controls_stand_apart_inside_the_composer_and_a_pres
         }
     }
 }
+
+#[test]
+fn on_the_settings_the_undo_key_takes_back_a_send_during_its_countdown() {
+    let mut harness = sending();
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    type_into(&mut harness, "To", "odile@example.org");
+    type_into(&mut harness, "Subject", "Hello");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run();
+    assert!(harness.state().counting().is_some(), "the send waits its hold");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    assert!(harness.state().settings().is_open());
+    harness.ctx.memory_mut(|memory| {
+        if let Some(focused) = memory.focused() {
+            memory.surrender_focus(focused);
+        }
+    });
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    harness.run();
+    assert!(harness.state().counting().is_none(), "Ctrl+Z takes the send back, as the countdown's Undo names it");
+}

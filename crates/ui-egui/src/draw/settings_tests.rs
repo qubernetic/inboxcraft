@@ -30,7 +30,7 @@ fn harness() -> Harness<'static, InboxApp> {
 
 fn opened() -> Harness<'static, InboxApp> {
     let mut harness = harness();
-    harness.get_by_role_and_label(egui::accesskit::Role::Button, "Settings").click();
+    super::tests::at_settings(harness.state_mut(), crate::settings::Section::Appearance);
     harness.run();
     assert!(harness.state().settings().is_open());
     harness
@@ -44,53 +44,33 @@ fn press(harness: &mut Harness<'static, InboxApp>, label: &str) -> &'static str 
     harness.state().mailbox().last_run().unwrap_or("nothing")
 }
 
-/// Moves the pointer to `at`, then presses and releases the primary button there.
-fn press_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
-    harness.hover_at(at);
-    harness.run();
-    for pressed in [true, false] {
-        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
-        harness.run();
-    }
-}
-
 fn selected(harness: &Harness<'static, InboxApp>, label: &str) -> bool {
     let node = harness.query_by_role_and_label(Role::RadioButton, label).unwrap_or_else(|| harness.get_by_role_and_label(Role::Button, label));
     node.accesskit_node().toggled() == Some(Toggled::True)
 }
 
 #[test]
-fn the_sheet_opens_over_the_dimmed_window_a_press_beside_it_or_close_or_escape_leave_it() {
+fn the_settings_take_the_body_beside_the_index_and_their_row_again_shows_the_mail() {
     let mut harness = opened();
-    harness.get_by_role_and_label(Role::Dialog, "Settings");
+    let place = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     harness.get_by_label("Appearance");
     // Every section opens; those not built yet show their page as coming soon.
     assert!(!harness.get_by_label("Calendar, settings page").accesskit_node().is_disabled());
     assert!(!harness.get_by_label("Accounts, settings page").accesskit_node().is_disabled());
     assert!(!harness.get_by_label("Appearance, settings page").accesskit_node().is_disabled());
-    // The list lies under the sheet: a press there selects nothing, and the sheet stays.
-    let before = harness.state().mailbox().selected();
-    let row = harness.query_all_by_label_contains("Draft logo for the bakery").next().expect("the list is behind the sheet").rect();
-    press_at(&mut harness, row.center());
-    assert_eq!(harness.state().mailbox().selected(), before, "the sheet takes the press");
-    assert!(harness.state().settings().is_open());
-    // Beside the sheet the dim takes the press, and the sheet goes.
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-    press_at(&mut harness, egui::pos2(sheet.left() / 2.0, sheet.center().y));
-    assert_eq!(harness.state().mailbox().selected(), before, "the dim takes the press");
-    assert!(!harness.state().settings().is_open(), "a press beside the sheet closes it");
-    harness.state_mut().open_settings();
+    // The settings stand in the mail's place: no list, no reader; the index beside them.
+    assert!(harness.query_all_by_label_contains("Draft logo for the bakery").next().is_none(), "the list is not drawn");
+    let index = harness.get_by_role_and_label(Role::Button, "Settings").rect();
+    assert!(index.right() <= place.left(), "the index {index:?} beside the settings {place:?}");
+    assert!(harness.query_by_role_and_label(Role::Button, "Close").is_none(), "a place has no Close");
+    // Esc closes no place; the index's SETTINGS again shows the mail.
+    harness.key_press(Key::Escape);
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "Close").click();
+    assert!(harness.state().settings().is_open(), "Esc closes no place");
+    harness.get_by_role_and_label(Role::Button, "Settings").click();
     harness.run();
     assert!(!harness.state().settings().is_open());
     assert!(harness.query_all_by_label_contains("Draft logo for the bakery").count() > 0, "the list is back");
-
-    harness.get_by_role_and_label(egui::accesskit::Role::Button, "Settings").click();
-    harness.run();
-    harness.key_press(Key::Escape);
-    harness.run();
-    assert!(!harness.state().settings().is_open());
 }
 
 #[test]
@@ -146,16 +126,21 @@ fn the_appearance_page_has_no_accent_typeface_or_icon_choice() {
 }
 
 #[test]
-fn the_add_account_form_opens_on_the_accounts_page_and_appearance_closes_it() {
+fn the_add_account_form_forces_no_page_and_another_page_keeps_it_without_its_password() {
     let mut harness = opened();
     harness.state_mut().onboarding_mut().0.open();
+    harness.state_mut().onboarding_mut().0.form_mut().password = crate::onboard::Secret::new("hunter2");
     harness.run();
-    assert!(harness.state().settings().is_open(), "the form opens on the sheet");
-    assert_eq!(harness.state().settings().section(), Section::Accounts);
-    harness.state_mut().open_settings();
+    assert_eq!(harness.state().settings().section(), Section::Appearance, "nothing forces the Accounts page");
+    assert!(harness.state().onboarding().form().password.is_empty(), "the form's page does not show: no password kept");
+    harness.state_mut().open_accounts();
     harness.run();
-    assert_eq!(harness.state().settings().section(), Section::Appearance);
-    assert_eq!(harness.state().onboarding().stage(), crate::onboard::Stage::Closed);
+    assert_eq!(harness.state().onboarding().stage(), crate::onboard::Stage::Form, "the form shows on Accounts as it was");
+    harness.state_mut().onboarding_mut().0.form_mut().password = crate::onboard::Secret::new("hunter2");
+    harness.get_by_label("Appearance, settings page").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), crate::onboard::Stage::Form, "another page keeps the form");
+    assert!(harness.state().onboarding().form().password.is_empty(), "and drops its password");
 }
 
 #[test]

@@ -32,6 +32,11 @@ fn float_id() -> Id {
     Id::unique("calendar-more-on-day")
 }
 
+/// The float is closed: it opens afresh next time ([`popup::forget`]).
+pub(super) fn forget(ctx: &Context) {
+    popup::forget(ctx, float_id());
+}
+
 /// Where "+N more" of `day` was drawn last, and its id: the float hangs from it and gives it the keyboard back.
 fn anchor_id(day: Day) -> Id {
     Id::unique(("calendar-more-anchor", day))

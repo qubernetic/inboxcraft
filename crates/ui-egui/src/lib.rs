@@ -67,7 +67,7 @@ mod why;
 pub mod workers;
 
 pub use draw::{InboxApp, Screen, rows_built};
-pub use error::UiError;
+pub use error::{UiError, store_log};
 
 /// The crate's package name.
 ///

@@ -50,15 +50,11 @@ fn moment(minutes: i64) -> Option<Moment> {
 }
 
 #[test]
-fn a_press_is_noted_once_and_none_while_a_sync_is_under_way() {
+fn a_press_may_start_a_sync_and_none_while_a_sync_is_under_way() {
     let mut tracker = Tracker::default();
-    assert!(tracker.ask());
-    assert!(!tracker.ask(), "a second press before the command ran asks for nothing more");
-    assert!(tracker.take_asked());
-    assert!(!tracker.take_asked());
+    assert!(tracker.can_start());
     tracker.start(&[(1, "Personal")]);
-    assert!(!tracker.ask(), "a press while the sync is under way does nothing");
-    assert!(!tracker.is_asked());
+    assert!(!tracker.can_start(), "a press while the sync is under way does nothing");
     assert_eq!(tracker.started(), 1);
 }
 
@@ -82,7 +78,7 @@ fn a_sync_runs_until_every_job_of_its_accounts_comes_back() {
     assert!(tracker.sent(&[], &[1, 2, 3], at(3), utc()));
     assert_eq!(tracker.view().state, SyncState::Synced { at: moment(3) });
     assert_eq!(tracker.view().read, moment(3));
-    assert!(tracker.ask(), "once it ended the owner can sync again");
+    assert!(tracker.can_start(), "once it ended the owner can sync again");
 }
 
 #[test]
@@ -95,7 +91,7 @@ fn the_first_failure_is_kept_and_named_after_its_account() {
     tracker.sent(&[], &[1, 2], at(1), utc());
     assert_eq!(tracker.view().state, SyncState::Failed { account: Some("Studio".to_owned()), why: Why::SignIn });
     assert_eq!(tracker.view().read, None, "nothing was read");
-    assert!(tracker.ask(), "a failure offers the press again");
+    assert!(tracker.can_start(), "a failure offers the press again");
 }
 
 #[test]

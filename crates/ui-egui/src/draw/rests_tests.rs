@@ -79,7 +79,7 @@ fn what_keys_change(harness: &Harness<'static, InboxApp>) -> (Option<u64>, Inbox
 }
 
 #[test]
-fn under_the_settings_sheet_no_key_of_the_list_back_or_the_views_runs() {
+fn on_the_settings_no_key_of_the_list_back_or_the_views_runs() {
     // Two panes, the list keyed; and one pane with a message in front, where Back would run.
     for width in [1440.0, 900.0] {
         let mut harness = window(width);
@@ -98,15 +98,18 @@ fn under_the_settings_sheet_no_key_of_the_list_back_or_the_views_runs() {
             assert!(harness.state().keymap().shortcut(id).is_some(), "{id} has a key");
         }
         press_every_epic_key(&mut harness, true);
-        assert!(harness.state().settings().is_open(), "{width}: the sheet stays");
-        // Esc on the sheet closes only the sheet: the window under it is as it was.
+        assert!(harness.state().settings().is_open(), "{width}: the settings stay");
+        // Esc on the settings closes nothing; their key again shows the mail as it was left.
         harness.key_press(Key::Escape);
         harness.run();
+        assert!(harness.state().settings().is_open(), "{width}: a place is not closed by an Esc");
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+        harness.run();
         assert!(!harness.state().settings().is_open());
-        assert_eq!(what_keys_change(&harness), before, "{width}: nothing under the sheet moved");
+        assert_eq!(what_keys_change(&harness), before, "{width}: nothing of the mail moved");
         assert_eq!(harness.state().mailbox().selected(), Some(keyed));
         if width < 980.0 {
-            assert!(super::reader_rect(&harness.ctx).is_some(), "{width}: Back did not run under the sheet");
+            assert!(super::reader_rect(&harness.ctx).is_some(), "{width}: Back did not run on the settings");
         }
     }
 }
@@ -210,10 +213,11 @@ fn the_arrow_moves_the_list_one_row_once() {
     assert_eq!(harness.state().mailbox().selected(), order.get(at + 1).copied(), "from a pressed row: one row on, not two");
 }
 
-/// The sheet open on the add-account form with its IMAP security list open: a list float over the sheet.
+/// The settings on the add-account form with its IMAP security list open: a list float over a settings page.
 fn float_over_the_sheet() -> Harness<'static, InboxApp> {
     let mut harness = window(1440.0);
     harness.state_mut().onboarding_mut().0.open();
+    super::tests::at_settings(harness.state_mut(), crate::settings::Section::Accounts);
     harness.run();
     assert!(harness.state().settings().is_open());
     harness.get_by_label("IMAP security").scroll_to_me();
@@ -225,19 +229,20 @@ fn float_over_the_sheet() -> Harness<'static, InboxApp> {
 }
 
 #[test]
-fn one_esc_closes_one_surface_a_list_over_the_sheet_the_sheet_over_a_list_and_the_palette_that_closed_both() {
-    // A list float over the sheet: the first Esc closes the list, the second the sheet.
+fn one_esc_closes_one_surface_a_list_over_a_settings_page_a_menu_left_and_the_palette_over_both() {
+    // A list float over a settings page: the first Esc closes the list, the second closes nothing.
     let mut harness = float_over_the_sheet();
     harness.key_press(Key::Escape);
     harness.run();
     assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "STARTTLS").is_none(), "the list closed");
-    assert!(harness.state().settings().is_open(), "the sheet stays under it");
+    assert!(harness.state().settings().is_open(), "the settings stay under it");
     harness.key_press(Key::Escape);
     harness.run();
-    assert!(!harness.state().settings().is_open(), "the second Esc closes the sheet");
+    assert!(harness.state().settings().is_open(), "the second Esc closes no place");
+    assert_eq!(harness.state().onboarding().stage(), crate::onboard::Stage::Form, "nor the form");
 
-    // The sheet over a list float (a row's group menu): the sheet closed the menu as it came; one Esc closes the
-    // sheet, and the menu does not come back.
+    // The settings shown over a list float of the mail (a row's group menu): the menu closes and does not come back
+    // when the mail shows again.
     let mut harness = window(1440.0);
     let keyed = keyed_first_row(&mut harness);
     harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
@@ -246,14 +251,17 @@ fn one_esc_closes_one_surface_a_list_over_the_sheet_the_sheet_over_a_list_and_th
     assert!(popup::is_open(&harness.ctx, menu), "the row's group menu is open");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
-    assert!(harness.state().settings().is_open() && !popup::is_open(&harness.ctx, menu), "the sheet over it, the menu closed");
+    assert!(harness.state().settings().is_open() && !popup::any_open(&harness.ctx), "the settings shown, no menu drawn");
     harness.key_press(Key::Escape);
     harness.run();
-    assert!(!harness.state().settings().is_open(), "one Esc: the sheet");
+    assert!(harness.state().settings().is_open(), "Esc closes no place");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    assert!(!harness.state().settings().is_open(), "the settings' key: the mail again");
     assert!(!popup::is_open(&harness.ctx, menu) && !popup::any_open(&harness.ctx), "the menu does not come back");
     assert_eq!(harness.state().mailbox().selected(), Some(keyed));
 
-    // The palette coming over them closes both, the list and the sheet; one Esc closes the palette alone.
+    // The palette coming over a list on a settings page closes the list; one Esc closes the palette alone.
     let mut harness = float_over_the_sheet();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
@@ -262,7 +270,7 @@ fn one_esc_closes_one_surface_a_list_over_the_sheet_the_sheet_over_a_list_and_th
     harness.run();
     assert!(!harness.state().palette().is_open(), "one Esc: the palette");
     assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "STARTTLS").is_none() && !popup::any_open(&harness.ctx), "no list");
-    assert!(!harness.state().settings().is_open(), "the palette closed the sheet as it came, as before");
+    assert!(harness.state().settings().is_open(), "the palette leaves the settings shown");
 }
 
 /// Drags the thumb of the bar over the content by `down` points, from its middle.
