@@ -370,8 +370,26 @@ fn a_hostile_size_is_capped_or_draws_nothing() {
     let huge = cells(Rect::from_min_size(Pos2::ZERO, vec2(1e9, 1e9)), TextScale::default(), None, 1.0, 7, None);
     assert_eq!((huge.columns, huge.rows), (MAX_COLUMNS, MAX_ROWS));
     // The pixels per point are hostile too.
-    for ppp in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+    for ppp in [0.0, -1.0, f32::NAN, f32::INFINITY, MAX_PPP * 2.0, f32::MAX] {
         assert!(cells(RECT, TextScale::default(), None, ppp, 7, None).held.is_empty());
+    }
+    // A rect across all of f32 at 1, 1.25 and 2 pixels a point: capped, and every place in it finite.
+    for ppp in [1.0, 1.25, 2.0] {
+        for reach in [f32::MAX, 3e38] {
+            let rect = Rect::from_min_max(pos2(-reach, -reach), pos2(reach, reach));
+            let cells = cells(rect, TextScale::default(), Some(rect), ppp, 7, Some(&block()));
+            assert_eq!((cells.columns, cells.rows), (MAX_COLUMNS, MAX_ROWS), "{ppp}, {reach}");
+            assert!(cells.origin.x.is_finite() && cells.origin.y.is_finite(), "{ppp}, {reach}: the origin is {:?}", cells.origin);
+            assert!(cells.emblem_at.is_none_or(|at| at.x.is_finite() && at.y.is_finite()), "{ppp}, {reach}: {:?}", cells.emblem_at);
+            let mut stage = Stage::new(Level::Full, Opts { on_home: true, on_pane: false, emblem: Some(rect) });
+            stage.rect = rect;
+            stage.field = Field::new(7).with_emblem(block());
+            let mut harness = harness_at(stage, ppp);
+            harness.hover_at(pos2(50.0, 50.0));
+            harness.run_steps(2);
+            harness.hover_at(pos2(500.0, 300.0));
+            harness.run_steps(2);
+        }
     }
     // Shown, none of them panics, the pointer on them or not.
     for rect in nothing.into_iter().chain([Rect::from_min_size(Pos2::ZERO, vec2(1e9, 1e9))]) {

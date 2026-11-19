@@ -79,6 +79,13 @@ pub const MAX_COLUMNS: usize = 1024;
 /// The most rows a field has: 7 680 points at 15 a row. A taller rect is covered from its top edge up to this.
 pub const MAX_ROWS: usize = 512;
 
+/// The most pixels per point a field is built at; more are taken as not usable, and nothing is built.
+pub const MAX_PPP: f32 = 1024.0;
+
+/// The farthest a field's corner or its emblem's area reaches from 0, in points, either way: a rect reaching farther is
+/// clamped to it.
+pub const MAX_COORDINATE: f32 = 1.0e7;
+
 /// The most cells warm at once; past it no further cell flips until some have cooled. The pointer's reach holds
 /// about a hundred at a time.
 pub const MAX_WARM: usize = 4096;
@@ -506,12 +513,16 @@ const fn spot_index(spot: Spot) -> u32 {
 /// `ppp`: everything but what they hold, at no cost.
 fn place_cells(rect: Rect, scale: TextScale, area: Option<Rect>, ppp: f32, emblem: Option<&Emblem>) -> Cells {
     let height = cell_height(scale);
-    let ppp_ok = ppp.is_finite() && ppp > 0.0;
+    let ppp_ok = ppp.is_finite() && ppp > 0.0 && ppp <= MAX_PPP;
     let ppp = if ppp_ok { ppp } else { 1.0 };
     let mut placed = Cells { rect, scale, ppp, origin: rect.min, height, columns: 0, rows: 0, held: Vec::new(), emblem_at: None };
     if !(ppp_ok && rect.is_finite() && rect.width() > 0.0 && rect.height() > 0.0) {
         return placed;
     }
+    // Clamped before any arithmetic, so no corner or origin overflows to an infinity.
+    let rect = within_reach(rect);
+    let area = area.map(within_reach);
+    placed.rect = rect;
     let origin = pos2(ceil_px(rect.min.x, ppp), ceil_px(rect.min.y, ppp));
     // Clamped to the caps first, so the casts lose nothing.
     placed.columns = ((rect.max.x - origin.x) / CELL_WIDTH).floor().clamp(0.0, MAX_COLUMNS as f32) as usize;
@@ -519,6 +530,13 @@ fn place_cells(rect: Rect, scale: TextScale, area: Option<Rect>, ppp: f32, emble
     placed.origin = origin;
     placed.emblem_at = emblem.zip(area).and_then(|(emblem, area)| place(emblem, area, rect, ppp));
     placed
+}
+
+/// `rect` with its corners clamped to [`MAX_COORDINATE`] either way: far off any screen, and far from overflowing
+/// once multiplied by up to [`MAX_PPP`] pixels per point.
+fn within_reach(rect: Rect) -> Rect {
+    let clamp = |at: Pos2| pos2(at.x.clamp(-MAX_COORDINATE, MAX_COORDINATE), at.y.clamp(-MAX_COORDINATE, MAX_COORDINATE));
+    Rect::from_min_max(clamp(rect.min), clamp(rect.max))
 }
 
 /// What the `built` cells hold in the pattern of `seed`, the field's cells under the emblem empty.
