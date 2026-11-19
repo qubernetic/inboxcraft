@@ -107,8 +107,14 @@ fn any_size_from_the_desktop_lays_out_as_at_least_800_wide() {
 
 /// The sample window `size` points large, drawn once.
 fn window(size: egui::Vec2) -> Harness<'static, InboxApp> {
+    window_of(size, false)
+}
+
+/// [`window`]; on the sample whose first account can send, when `sending`.
+fn window_of(size: egui::Vec2, sending: bool) -> Harness<'static, InboxApp> {
     let clock = || Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()));
-    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let session = if sending { sample::sending(clock()) } else { sample::session(clock()) };
+    let app = InboxApp::at_mail(Mailbox::new(session.unwrap(), clock()));
     let mut harness =
         Harness::builder().with_size(size).with_context_setup(crate::theme::install_fonts).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
@@ -253,13 +259,100 @@ fn a_screen_reader_s_activate_on_the_index_runs_nothing_under_a_modal_surface() 
                     assert_eq!(summary.as_deref(), Some("Kiln"), "{surface}: {name}: the editor stays with its typing");
                 }
                 _ => {
-                    // The command line's results are no modal layer: the keyboard taken from its field closes them
-                    // (one surface); what was typed stays, and nothing under them ran (`under` above).
+                    // The keyboard taken from the field comes back to it: the results stay, with their typing.
+                    assert!(harness.state().command().results(), "{surface}: {name}: the results stay");
                     assert_eq!(harness.state().command().text(), "zz", "{surface}: {name}: its typing whole");
                 }
             }
         }
     }
+    // Under the command line's results the body is gated too, at one point: Send (the composer docked and floating),
+    // the screener's Review, a list row, a reader's button, a Home tile and a calendar day.
+    for (case, name) in [
+        ("docked", "Send"),
+        ("floating", "Send"),
+        ("mail", "Review"),
+        ("mail", "row"),
+        ("reader", "Reply"),
+        ("home", " To read"),
+        ("calendar", "day"),
+        ("calendar", "New event"),
+    ] {
+        let mut harness = window_of(vec2(1300.0, 820.0), name == "Send");
+        body_before(&mut harness, case);
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, keymap::PALETTE);
+        harness.run();
+        harness.state_mut().command_mut().set_text(">zz");
+        harness.run();
+        let before = body(&harness);
+        let node = harness
+            .query_all_by_role(Role::Button)
+            .chain(harness.query_all_by_role(Role::ListBoxOption))
+            .find(|node| {
+                let label = node.accesskit_node().label().unwrap_or_default();
+                match name {
+                    "row" => node.accesskit_node().role() == Role::ListBoxOption,
+                    "day" => label.ends_with(", today"),
+                    " To read" => label.ends_with(name),
+                    _ => label == name,
+                }
+            })
+            .unwrap_or_else(|| panic!("{case}: no {name}"));
+        node.click_accesskit();
+        harness.run();
+        harness.run();
+        assert_eq!(body(&harness), before, "{case}: an activate on {name} changed what lies under the results");
+        assert!(harness.state().command().results(), "{case}: {name}: the results stay");
+        assert_eq!(harness.state().command().text(), "zz", "{case}: {name}: its typing whole");
+    }
+}
+
+/// The window set up for `case`: a written message in the composer, docked or floating; a message open; Home or the
+/// calendar shown; or the mail as it opens.
+fn body_before(harness: &mut Harness<'static, InboxApp>, case: &str) {
+    use crate::compose::Line;
+    let ctx = harness.ctx.clone();
+    match case {
+        "docked" | "floating" => {
+            harness.state_mut().run_action(&ctx, crate::keymap::COMPOSE);
+            harness.run();
+            let app = harness.state_mut();
+            let (Some(composer), mailbox) = app.composer_mut() else { panic!("no composer") };
+            "Odile Brannock <odile@example.org>".clone_into(composer.typing_mut(Line::To).unwrap());
+            composer.take(mailbox, Line::To).unwrap();
+            "Plot".clone_into(composer.subject_mut());
+            composer.edited();
+            composer.save(mailbox).unwrap();
+            composer.set_floating(case == "floating");
+        }
+        "reader" => {
+            let row = harness.query_all_by_role(Role::ListBoxOption).next().unwrap();
+            row.click();
+        }
+        "home" => harness.state_mut().show_home(),
+        "calendar" => harness.state_mut().show_calendar(),
+        _ => {}
+    }
+    harness.run();
+    harness.run();
+}
+
+/// What an activate under the command line's results must not change: the place, the mail shown and selected, the
+/// message open, the composer and the outbox, the calendar's view and its editor.
+fn body(harness: &Harness<'static, InboxApp>) -> String {
+    let app = harness.state();
+    format!(
+        "{:?} {:?} {:?} {:?} {:?} {} {:?} {}",
+        app.screen(),
+        app.mailbox().place(),
+        app.mailbox().selected(),
+        app.reader().open_id(),
+        app.composer().map(|composer| (composer.draft(), composer.floating())),
+        app.mailbox().outbox().len(),
+        app.calendar().view(),
+        app.calendar().editor().is_some(),
+    )
 }
 
 #[test]

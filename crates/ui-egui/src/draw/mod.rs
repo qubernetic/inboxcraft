@@ -2430,7 +2430,7 @@ impl InboxApp {
         asked.narrow = indexed.account;
         ran.extend(new_message.then_some(keymap::COMPOSE));
         let late = self.error_banner(&mut body, &theme, corner, true);
-        let (dismiss, banner) = (early.0 | late.0, early.1.or(late.1));
+        let (mut dismiss, banner) = (early.0 | late.0, early.1.or(late.1));
         layers.capped(banner);
         let mut on_calendar = Vec::new();
         let mut on_home = None;
@@ -2491,7 +2491,6 @@ impl InboxApp {
             }
             self.hide_list(body.ctx(), hidden);
         }
-        let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, screener: screener_mode, presets, gained } = listed;
         let mut drawn = reader::Drawn::default();
         let mut composed = Vec::new();
         // A texture lives no longer than the picture the reader keeps for it.
@@ -2516,6 +2515,22 @@ impl InboxApp {
         }
         // The toasts keep clear of the composer drawn this pass, docked or floating ([`compose::drawn_now`]).
         let (undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests(), regions.body);
+        // The one gate for the place under a modal surface ([`Surfaces::modal`]): whatever pressed it (the pointer, a key,
+        // a screen reader's activate, which egui's layers do not stop), nothing the list, the reader, the composer, Home,
+        // the calendar, the settings' page or the error banner asked for in this frame is applied. The index has its own
+        // gate ([`InboxApp::index_allowed`]).
+        if surfaces.modal() {
+            listed = list::Asked { out: listed.out, ..list::Asked::default() };
+            header = list::Header::default();
+            drawn.asked.clear();
+            composed.clear();
+            on_calendar.clear();
+            on_home = None;
+            changed = None;
+            add = false;
+            dismiss = false;
+        }
+        let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, screener: screener_mode, presets, gained } = listed;
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
         let busy = dismiss
@@ -2559,7 +2574,7 @@ impl InboxApp {
             self.mailbox.done_all(&ids);
         }
         self.apply_calendar(on_calendar);
-        ran.extend(self.settle_home(ui.ctx(), &surfaces, on_home));
+        ran.extend(self.settle_home(ui.ctx(), on_home));
         for asked in drawn.asked {
             self.apply(ui, asked);
         }
@@ -2819,10 +2834,10 @@ impl InboxApp {
         drawn.asked
     }
 
-    /// After a frame: what was pressed on Home applied, under nothing that holds the keys (a screen reader's activate
-    /// reaches it there); Home not shown, its next frame builds it again. The action to run, if one was asked.
-    fn settle_home(&mut self, ctx: &egui::Context, surfaces: &Surfaces, asked: Option<home::Asked>) -> Option<&'static str> {
-        let action = asked.filter(|_| !surfaces.held()).and_then(|asked| self.apply_home(ctx, asked));
+    /// After a frame: what was pressed on Home applied (under the command line's results the window's one gate has
+    /// dropped it already); Home not shown, its next frame builds it again. The action to run, if one was asked.
+    fn settle_home(&mut self, ctx: &egui::Context, asked: Option<home::Asked>) -> Option<&'static str> {
+        let action = asked.and_then(|asked| self.apply_home(ctx, asked));
         if self.settings.is_open() || self.screen != Screen::Home {
             self.home.forget();
         }

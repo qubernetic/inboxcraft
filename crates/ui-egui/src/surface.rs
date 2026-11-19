@@ -138,6 +138,13 @@ impl Surfaces {
         self.has(Surface::Command) || self.has(Surface::Capture)
     }
 
+    /// Whether a modal surface stands in front: the command line's results. Nothing of the place under them runs while
+    /// they show, whatever pressed it. A capture holds the keys, not the pointer (a press on its page ends the wait);
+    /// the event editor's own asks come with the calendar's, which it lies over.
+    pub(crate) fn modal(&self) -> bool {
+        self.has(Surface::Command)
+    }
+
     /// Whether a key without Command, Ctrl or Alt runs nothing of the window, and Undo is not the window's: under the
     /// palette, a capture or the composer in front, whose fields and lists the letters are for, and on the settings,
     /// whose pages the letters are for.
