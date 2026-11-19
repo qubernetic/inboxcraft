@@ -302,3 +302,15 @@
 # The command line's sets on their own page: the command field, the key hint and the window controls (#286).
 {"out": "docs/images/components-commands-light.png", "mode": "light", "command_sets": true}
 {"out": "docs/images/components-commands-dark.png", "mode": "dark", "command_sets": true}
+# Home, the page, in its five states, not yet behind a place (#299).
+{"out": "docs/images/home-today-light.png", "mode": "light", "home": "today"}
+{"out": "docs/images/home-today-dark.png", "mode": "dark", "home": "today"}
+{"out": "docs/images/home-today-130-dark.png", "mode": "dark", "home": "today@130"}
+{"out": "docs/images/home-nothing-to-do-light.png", "mode": "light", "home": "nothing-to-do"}
+{"out": "docs/images/home-nothing-to-do-dark.png", "mode": "dark", "home": "nothing-to-do"}
+{"out": "docs/images/home-overflow-counts-light.png", "mode": "light", "home": "overflow-counts"}
+{"out": "docs/images/home-overflow-counts-dark.png", "mode": "dark", "home": "overflow-counts"}
+{"out": "docs/images/home-first-run-light.png", "mode": "light", "home": "first-run"}
+{"out": "docs/images/home-first-run-dark.png", "mode": "dark", "home": "first-run"}
+{"out": "docs/images/home-everything-failing-light.png", "mode": "light", "home": "everything-failing"}
+{"out": "docs/images/home-everything-failing-dark.png", "mode": "dark", "home": "everything-failing"}

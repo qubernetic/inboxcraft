@@ -28,7 +28,7 @@ pub(crate) const COMMANDS: &[CommandSpec] = &[NEW, UPDATE, SHOW, LIST, DISCARD, 
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["id", "account", "answers", "to", "cc", "bcc", "typed", "subject", "text", "signature", "name"];
+pub(crate) const FIELDS: &[&str] = &["id", "account", "answers", "to", "cc", "bcc", "typed", "subject", "text", "signature", "name", "limit"];
 
 /// The most recipients in one of `to`, `cc` and `bcc`.
 pub(crate) const MAX_RECIPIENTS: usize = 500;
@@ -80,7 +80,8 @@ pub(crate) const UPDATE: CommandSpec =
 pub(crate) const SHOW: CommandSpec =
     CommandSpec { id: "compose.show", class: Some(AgentClass::Safe), summary: "Show a draft with its recipients checked", run: show };
 
-/// `compose.list`: the drafts, newest first.
+/// `compose.list`: the drafts, newest first, and `total`, how many there are in all; with `limit` (1 to
+/// [`crate::MAX_LIST`], more is cut to it) only that many of the newest. Without it every draft, as before `limit`.
 pub(crate) const LIST: CommandSpec = CommandSpec { id: "compose.list", class: Some(AgentClass::Safe), summary: "List the drafts, newest first", run: list };
 
 /// `compose.discard`: removes a draft here and its copy on the server.
@@ -292,18 +293,33 @@ fn show(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
 struct ListParams {
     /// Only the drafts of this account.
     account: Option<u64>,
+    /// Only the newest this many; every draft when left out.
+    limit: Option<u64>,
 }
 
 fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: ListParams = decode_quietly(LIST.id, params)?;
+    if params.limit == Some(0) {
+        return Err(EngineError::bad_params(LIST.id, "limit is a whole number from 1"));
+    }
     let accounts = crate::view::accounts(context, params.account.map(AccountId::new))?;
     let mut drafts = Vec::new();
     for account in accounts {
         drafts.extend(context.store().drafts(account)?);
     }
-    drafts.sort_by(|a, b| b.saved.cmp(&a.saved).then(b.id.cmp(&a.id)));
+    let total = drafts.len();
+    let newest = |a: &Draft, b: &Draft| b.saved.cmp(&a.saved).then(b.id.cmp(&a.id));
+    if let Some(limit) = params.limit {
+        // The newest `limit` first, in time linear in the drafts, then only those are sorted and answered.
+        let limit = usize::try_from(limit.min(crate::MAX_LIST)).unwrap_or(1);
+        if limit < drafts.len() {
+            drafts.select_nth_unstable_by(limit, newest);
+            drafts.truncate(limit);
+        }
+    }
+    drafts.sort_by(newest);
     let drafts = drafts.iter().map(|draft| draft_json(context.store(), draft)).collect::<Result<Vec<_>, _>>()?;
-    Ok(Outcome::new(json!({ "drafts": drafts })))
+    Ok(Outcome::new(json!({ "drafts": drafts, "total": total })))
 }
 
 fn discard(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {

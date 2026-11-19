@@ -236,6 +236,34 @@ fn list_shows_the_drafts_newest_first_and_show_one() {
 }
 
 #[test]
+fn list_with_a_limit_answers_that_many_of_ten_thousand_and_the_total() {
+    let mut store = store();
+    let mut batch = Batch::new();
+    for id in 1..=10_000_u64 {
+        let saved = at(NOW - i64::try_from(id).unwrap());
+        batch = batch.with(Change::PutDraft(inboxcraft_model::Draft::new(DraftId::new(id), AccountId::new(1 + id % 2), saved)));
+    }
+    store.apply(&batch).unwrap();
+    let clock = FakeClock::new(at(NOW));
+    let mut session = session_at(store, &clock);
+    let answer = session.run_as(Caller::Agent, "compose.list", &json!({ "limit": 2 })).unwrap();
+    let ids: Vec<u64> = answer["drafts"].as_array().unwrap().iter().map(draft_id).collect();
+    assert_eq!(ids, [1, 2], "the two newest");
+    assert_eq!(answer["total"], json!(10_000));
+    let all = session.run("compose.list", &json!({})).unwrap();
+    assert_eq!((all["drafts"].as_array().unwrap().len(), all["total"].clone()), (10_000, json!(10_000)), "no limit: every draft");
+    let one = session.run("compose.list", &json!({ "account": 2, "limit": 1 })).unwrap();
+    assert_eq!((one["drafts"].as_array().unwrap().iter().map(draft_id).collect::<Vec<_>>(), one["total"].clone()), (vec![1], json!(5_000)));
+    let capped = session.run("compose.list", &json!({ "limit": u64::MAX })).unwrap();
+    assert_eq!(capped["drafts"].as_array().unwrap().len(), usize::try_from(crate::MAX_LIST).unwrap(), "capped at MAX_LIST");
+    assert_eq!(capped["total"], json!(10_000));
+    for limit in [json!(0), json!(-1), json!(1.5), json!("2"), json!(1e30), json!([2]), json!({})] {
+        assert!(bad(session.run("compose.list", &json!({ "limit": limit }))), "{limit}");
+    }
+    assert_eq!(session.run("compose.list", &json!({ "limit": null })).unwrap()["total"], json!(10_000), "null is left out");
+}
+
+#[test]
 fn discard_removes_the_draft_and_its_copy_on_the_server() {
     let (mut session, _) = session();
     let id = draft_id(&session.run("compose.new", &json!({})).unwrap());

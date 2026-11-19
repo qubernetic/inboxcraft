@@ -240,7 +240,7 @@ impl EventRow {
         Some(tr!("Event zone {zone}: {times}", zone = zone.name, times = times))
     }
 
-    fn read(value: &Value) -> Option<Self> {
+    pub(crate) fn read(value: &Value) -> Option<Self> {
         let text = |key: &str| line(value.get(key).and_then(Value::as_str).unwrap_or_default());
         let moment = |key: &str| value.get(key).and_then(Value::as_str).and_then(Moment::parse);
         let day = |key: &str| value.get(key).and_then(Value::as_str).and_then(Day::parse);

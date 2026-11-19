@@ -266,6 +266,10 @@ pub struct Shot {
     /// The page of the command line's sets (command field, key hint, window controls) instead of the window.
     #[serde(default)]
     pub command_sets: Option<bool>,
+    /// Home, the page, in one of its states (`today`, `nothing-to-do`, `overflow-counts`, `first-run`,
+    /// `everything-failing`; `@130` after it for 130 % text) in the body of a 1440 × 872 window, instead of the window.
+    #[serde(default)]
+    pub home: Option<String>,
     /// The app's own window frame, as a native window draws it: `strip` or `top_row`; none when left out.
     #[serde(default)]
     pub frame: Option<String>,
@@ -832,6 +836,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
             shot.status_sets,
             shot.home_sets,
             shot.command_sets,
+            shot.home.as_ref().map(|_| true),
         ]
         .iter()
         .filter(|page| **page == Some(true))
@@ -1012,6 +1017,28 @@ fn home_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
         crate::component::gallery_home::page(ui, &theme, &keymap);
+    })
+}
+
+/// Home, the page, of `shot` in `mode` in `state` (with `@130`: at 130 % text), in the body of a 1440 × 872 window.
+fn home_page(shot: &Shot, mode: Mode, state: &str) -> Result<Picture, UiError> {
+    no_window(shot, "Home")?;
+    let (state, scale) = state.split_once('@').map_or((state, 100), |(state, scale)| (state, scale.parse().unwrap_or(0)));
+    if crate::home::sample(state).is_none() {
+        return Err(bad(format!("{}: Home has no state {state:?}", shot.out)));
+    }
+    let scale = TextScale::from_percent(scale).ok_or_else(|| bad(format!("{}: Home has no text scale {scale}", shot.out)))?;
+    let theme = Theme::new(mode, scale);
+    let keymap = gallery::keymap();
+    let mut field = crate::field::Field::new(0);
+    let size = egui::vec2(1205.0, 826.0);
+    let mut fonts = true;
+    paint(size, shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::draw::home::gallery(ui, &theme, &keymap, state, &mut field, size);
     })
 }
 
@@ -1636,6 +1663,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if shot.command_sets == Some(true) {
         return commands_gallery(shot, mode);
+    }
+    if let Some(state) = &shot.home {
+        return home_page(shot, mode, state);
     }
     if shot.icons == Some(true) {
         return icon_sheet(shot, mode);

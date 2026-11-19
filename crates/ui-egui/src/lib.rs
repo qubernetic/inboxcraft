@@ -43,6 +43,7 @@ mod error;
 pub mod fetch;
 pub mod field;
 mod fitted_text;
+pub mod home;
 pub mod i18n;
 pub mod icons;
 pub mod iconset;

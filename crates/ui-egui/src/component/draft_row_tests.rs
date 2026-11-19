@@ -120,3 +120,75 @@ fn a_draft_row_is_the_scaled_height_at_130_percent() {
     let rect = harness.get_by_label(&draft_spoken(&state)).rect();
     assert_eq!(rect.size(), vec2(440.0, theme.size(44.0)));
 }
+
+/// Two rows stacked in a top-down ui, the first `keyed`: where the second row stands, after the first is hovered when
+/// `hover`.
+fn second_top(theme: Theme, keyed: bool, hover: bool) -> f32 {
+    use crate::component::draft_row::{DraftRow, draft_row};
+    let keymap = keymap();
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(ROW_WIDTH + 48.0, 200.0),
+        move |ui, theme| {
+            ui.set_width(ROW_WIDTH);
+            for (index, spoken) in ["first draft", "second draft"].into_iter().enumerate() {
+                let row = DraftRow {
+                    id: egui::Id::unique(("stacked", index)),
+                    spoken,
+                    subject: Some(spoken),
+                    to: "to Sunniva Aalto",
+                    when: "edited 12:10",
+                    last: index == 1,
+                };
+                draft_row(ui, theme, &keymap, &row, keyed && index == 0, None);
+            }
+        },
+    );
+    if hover {
+        harness.get_by_label("first draft").hover();
+        harness.run();
+    }
+    assert!(hover || keyed || harness.query_by_label("discard").is_none(), "the links show only when lit");
+    let first = harness.get_by_label("first draft").rect();
+    let second = harness.get_by_label("second draft").rect();
+    assert!(second.top() >= first.bottom(), "the second row under the first: {first:?} {second:?}");
+    second.top()
+}
+
+#[test]
+fn a_lit_row_does_not_move_the_row_under_it_at_100_and_130_percent() {
+    for scale in [TextScale::default(), TextScale::ALL[4]] {
+        let theme = Theme::new(Mode::Light, scale);
+        let still = second_top(theme, false, false);
+        assert_eq!(second_top(theme, false, true), still, "hovered: {scale:?}");
+        assert_eq!(second_top(theme, true, false), still, "keyed: {scale:?}");
+    }
+}
+
+/// The id the next widget after a row takes when it asks `ui` for one, the row lit (`keyed`) or not.
+fn next_auto_id(keyed: bool) -> egui::Id {
+    use crate::component::draft_row::{DraftRow, draft_row};
+    let keymap = keymap();
+    let after = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let kept = std::sync::Arc::clone(&after);
+    let _harness = staged(
+        Theme::new(Mode::Light, TextScale::default()),
+        |p| p.surface,
+        vec2(ROW_WIDTH + 48.0, 200.0),
+        move |ui, theme| {
+            ui.set_width(ROW_WIDTH);
+            let row =
+                DraftRow { id: egui::Id::unique("auto"), spoken: "a draft", subject: None, to: "to Sunniva Aalto", when: "edited 12:10", last: true };
+            draft_row(ui, theme, &keymap, &row, keyed, None);
+            *kept.lock().unwrap() = Some(ui.next_auto_id());
+        },
+    );
+    after.lock().unwrap().unwrap()
+}
+
+#[test]
+fn a_lit_row_leaves_the_ids_after_it_as_they_are() {
+    // A control after the row keeps its id when the row's links come and go, so the keyboard on it stays there.
+    assert_eq!(next_auto_id(true), next_auto_id(false));
+}
