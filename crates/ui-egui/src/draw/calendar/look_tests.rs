@@ -133,10 +133,10 @@ fn in_the_pictures_window_the_title_stays_readable_its_note_giving_way_first() {
 
 #[test]
 fn where_even_the_short_title_has_no_room_the_side_panel_gives_way_first() {
-    // 900: one pane, the week alone (the side panel swaps with it). At 1100 the index is narrow and the view beside the
-    // 252 side panel keeps the title's room.
+    // 900: one pane, the week alone (the side panel swaps with it). At 1000 two panes, but the view beside the 252
+    // side panel would cut the title: the panel gives way. From 1050 the narrow index leaves the title its room.
     for (view, full, back) in [(View::Week, "2 – 8 November 2026", "Previous week"), (View::Day, "Thursday 5 November 2026", "Previous day")] {
-        for (width, side) in [(900.0, false), (1100.0, true), (1150.0, true), (1440.0, true)] {
+        for (width, side) in [(900.0, false), (1000.0, false), (1050.0, true), (1100.0, true), (1150.0, true), (1440.0, true)] {
             let harness = window_at(view, vec2(width, 820.0), egui::Theme::Light);
             let found = drawn(&harness);
             assert_eq!(found.iter().any(|(_, _, text)| text == "CALENDARS"), side, "{view:?} at {width}: the side panel shown {side}");
