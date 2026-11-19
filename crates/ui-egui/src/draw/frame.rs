@@ -2,115 +2,50 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The app's own window frame, drawn only when the native window has no title bar of the desktop's
-//! ([`WindowFrame::TopRow`] or [`WindowFrame::Strip`]): the window controls (minimise, maximise, close), a slim strip
-//! with the window's title that moves the window, and the edges that resize it. Every control asks the window through
-//! a viewport command; nothing here runs a command of the engine.
+//! ([`WindowFrame::Own`]): the command line is the title bar. A press and a drag on it where no control takes the
+//! press moves the window, a double press maximises or restores it, and the window controls (minimise, maximise,
+//! close) stand at its right end; the edges resize the window. Every control asks the window through a viewport
+//! command; nothing here runs a command of the engine. The app's mark at the command line's left is drawn in every
+//! frame ([`mark`]).
 
 use egui::{
-    Align2, Area, Context, CornerRadius, CursorIcon, Id, LayerId, Order, Pos2, Rect, ResizeDirection, Response, Role, Sense, Stroke, StrokeKind, Ui,
-    ViewportCommand, WidgetInfo, pos2, vec2,
+    Area, ColorImage, Context, CornerRadius, CursorIcon, Id, LayerId, Order, Pos2, Rect, ResizeDirection, Response, Sense, Stroke, StrokeKind,
+    TextureHandle, TextureOptions, Ui, ViewportCommand, pos2, vec2,
 };
 use inboxcraft_engine::appearance::WindowFrame;
 
-use crate::component::tooltip;
-use crate::keymap::Keymap;
-use crate::theme::Theme;
-use crate::tr;
-
-/// A window control's width and height, in points.
-const CONTROL: [f32; 2] = [34.0, 28.0];
-
-/// How far inside a window control its hover fill stays, in points.
-pub(super) const HOVER_INSET: f32 = 2.0;
+use crate::component::window_controls::{self, Control, Window};
+use crate::icons::{self, TrayInk};
+use crate::theme::{Mode, Theme};
 
 /// How far from the window's edge a press resizes it, in points.
 const EDGE: f32 = 5.0;
 
-/// A window control.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Control {
-    Minimise,
-    Maximise,
-    Close,
-}
+/// The room the window controls keep at the command line's right end, in points: the 12 before them, their three
+/// cells and the 4 after them.
+pub(super) const CONTROLS_ROOM: f32 = GAP_BEFORE + window_controls::CELL * 3.0 + GAP_AFTER;
 
-impl Control {
-    fn name(self, maximised: bool) -> &'static str {
-        match self {
-            Self::Minimise => tr!("Minimise"),
-            Self::Maximise if maximised => tr!("Restore"),
-            Self::Maximise => tr!("Maximise"),
-            Self::Close => tr!("Close the window"),
-        }
-    }
-}
+/// The room between the command field and the window controls, in points.
+const GAP_BEFORE: f32 = 12.0;
+
+/// The room between the window controls and the window's right edge, in points.
+const GAP_AFTER: f32 = 4.0;
+
+/// The room at the command line's right end when no window controls stand there: as much as before them.
+pub(super) const NO_CONTROLS_ROOM: f32 = GAP_BEFORE;
+
+/// The mark's side, and how far in from the command line's left it stands, in points.
+const MARK: f32 = 22.0;
+const MARK_IN: f32 = 16.0;
 
 /// Whether the window is maximised now.
 fn maximised(ctx: &Context) -> bool {
     ctx.input(|input| input.viewport().maximized.unwrap_or(false))
 }
 
-/// One control: its lines in the text colour, a hover fill (the error colour behind Close). While a surface that keeps
-/// the keyboard is open (the settings sheet, a popup), the controls stand above it for the pointer only: `Tab` goes
-/// round that surface's controls, not on to the window's.
-fn control(ui: &mut Ui, theme: &Theme, keymap: &Keymap, which: Control) -> Response {
-    let p = &theme.palette;
-    let maximised = maximised(ui.ctx());
-    let kept = ui.ctx().memory(|memory| memory.top_modal_layer()).is_some();
-    let sense = if kept { Sense::CLICK } else { Sense::click() };
-    let (rect, response) = ui.allocate_exact_size(vec2(CONTROL[0], CONTROL[1]), sense);
-    let name = which.name(maximised);
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
-    if ui.is_rect_visible(rect) {
-        let lit = response.hovered() || response.has_focus();
-        let ink = if lit && which == Control::Close { p.bg } else { p.ink };
-        if lit {
-            let fill = if which == Control::Close { p.minus } else { p.stage };
-            // A little smaller than the control, so the fill keeps clear of the strip's edges and the window's corner.
-            ui.painter().rect_filled(rect.shrink2(vec2(HOVER_INSET, HOVER_INSET)), 0.0, fill);
-        }
-        let c = rect.center();
-        let r = 5.0;
-        let stroke = Stroke::new(1.2, ink);
-        let painter = ui.painter();
-        match which {
-            Control::Minimise => {
-                painter.line_segment([pos2(c.x - r, c.y), pos2(c.x + r, c.y)], stroke);
-            }
-            Control::Maximise if maximised => {
-                painter.rect_stroke(Rect::from_center_size(c + vec2(-1.5, 1.5), vec2(r * 1.6, r * 1.6)), 1.5, stroke, egui::StrokeKind::Middle);
-                painter.line_segment([pos2(c.x - r + 3.0, c.y - r), pos2(c.x + r, c.y - r)], stroke);
-                painter.line_segment([pos2(c.x + r, c.y - r), pos2(c.x + r, c.y + r - 3.0)], stroke);
-            }
-            Control::Maximise => {
-                painter.rect_stroke(Rect::from_center_size(c, vec2(r * 2.0, r * 2.0)), 1.5, stroke, egui::StrokeKind::Middle);
-            }
-            Control::Close => {
-                painter.line_segment([pos2(c.x - r, c.y - r), pos2(c.x + r, c.y + r)], stroke);
-                painter.line_segment([pos2(c.x - r, c.y + r), pos2(c.x + r, c.y - r)], stroke);
-            }
-        }
-    }
-    let response = tooltip::attach(response, theme, keymap, name, None);
-    if response.clicked() {
-        let command = match which {
-            Control::Minimise => ViewportCommand::Minimized(true),
-            Control::Maximise => ViewportCommand::Maximized(!maximised),
-            Control::Close => ViewportCommand::Close,
-        };
-        ui.ctx().send_viewport_cmd(command);
-    }
-    response
-}
-
-/// The three controls in a row, Close last.
-fn controls(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        for which in [Control::Minimise, Control::Maximise, Control::Close] {
-            control(ui, theme, keymap, which);
-        }
-    });
+/// Whether the window is in front now; a window that does not say counts as in front.
+fn focused(ctx: &Context) -> bool {
+    ctx.input(|input| input.viewport().focused.unwrap_or(true))
 }
 
 /// How far the pointer goes with the button down on a handle before the window moves, in points; less is a click.
@@ -123,7 +58,8 @@ const MOVE_AFTER: f32 = 3.0;
 fn moves_the_window(ctx: &Context, response: &Response) {
     let id = response.id.with("pressed-at");
     let (pressed, released, at) = ctx.input(|input| (input.pointer.primary_pressed(), input.pointer.primary_released(), input.pointer.latest_pos()));
-    if pressed && response.contains_pointer() {
+    // Hovered, not only under the pointer: where the field or a control stands over the handle, the press is theirs.
+    if pressed && response.hovered() {
         ctx.data_mut(|data| data.insert_temp(id, at));
     } else if released {
         ctx.data_mut(|data| data.insert_temp(id, None::<Pos2>));
@@ -138,114 +74,73 @@ fn moves_the_window(ctx: &Context, response: &Response) {
     }
 }
 
-/// The width of the three controls and the room between them.
-const CONTROLS: f32 = CONTROL[0] * 3.0 + 4.0;
-
-/// The strip over the whole of `ui`: a flat band with a line under it, `title` in the middle in the muted
-/// colour, the controls at the right; pressing anywhere else on it moves the window. Its top right corner follows the
-/// window's `corner`.
-pub(super) fn strip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, title: &str, corner: f32) {
-    let p = &theme.palette;
-    let rect = ui.max_rect();
-    ui.painter().rect_filled(rect, top_right_corner(corner), p.surface);
-    // Pressed, dragged and double-pressed by the pointer only: a handle that moves the window is no Tab stop.
-    let handle = ui.interact(rect, Id::unique("window-strip"), Sense::CLICK | Sense::DRAG);
+/// The handle that makes the command line `line` the title bar: registered before the field and the controls, which
+/// take the press where they stand, so a press anywhere else on the line (the mark's column, the gaps) moves the
+/// window, and a double press maximises or restores it. By the pointer only: a handle is no Tab stop.
+pub(super) fn title_bar(ui: &Ui, line: Rect) {
+    let handle = ui.interact(line, title_bar_id(), Sense::CLICK | Sense::DRAG);
     moves_the_window(ui.ctx(), &handle);
-    let galley = ui.painter().layout_no_wrap(title.to_owned(), theme.fonts.caption.id(), p.muted);
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.muted);
-    // As much room above the controls as below them, and as much again between Close and the window's edge.
-    let right = rect.right() - (rect.height() - CONTROL[1]) / 2.0;
-    let at = Rect::from_min_max(pos2(right - CONTROLS, rect.center().y - CONTROL[1] / 2.0), pos2(right, rect.center().y + CONTROL[1] / 2.0));
-    // On a layer of their own above everything, a sheet over the window (the settings) too, which keeps clear of them.
-    let ctx = ui.ctx().clone();
-    let shown = Area::new(Id::unique("window-strip-controls")).order(Order::Foreground).fixed_pos(at.min).show(&ctx, |ui| {
-        controls(ui, theme, keymap);
-    });
+}
+
+/// The title bar's handle.
+pub(super) fn title_bar_id() -> Id {
+    Id::unique("window-title-bar")
+}
+
+/// The window controls at the right end of the command line `line`, 4 from the window's edge and centred in its
+/// height. On a layer of their own above everything, so a float or the event editor never covers them and Close
+/// always closes; while a surface keeps the keyboard (a float, the editor) they are the pointer's only and `Tab` goes
+/// round that surface. Pressed, by the pointer or by Enter or Space, they ask the window to minimise, maximise or
+/// restore, and close.
+pub(super) fn controls(ctx: &Context, theme: &Theme, line: Rect) {
+    let high = window_controls::height(theme);
+    let at = pos2(line.right() - GAP_AFTER - window_controls::CELL * 3.0, (line.center().y - high / 2.0).round());
+    let keyboard = ctx.memory(|memory| memory.top_modal_layer()).is_none();
+    let window = Window { maximised: maximised(ctx), focused: focused(ctx) };
+    let shown = Area::new(Id::unique("window-controls"))
+        .order(Order::Foreground)
+        .fixed_pos(at)
+        .show(ctx, |ui| window_controls::window_controls_keyed(ui, theme, Id::unique("window-control"), window, keyboard));
     ctx.move_to_top(shown.response.layer_id);
-    ctx.data_mut(|data| data.insert_temp(strip_place_id(), Some(at)));
+    let command = match shown.inner {
+        Some(Control::Minimise) => ViewportCommand::Minimized(true),
+        Some(Control::Maximise) => ViewportCommand::Maximized(!window.maximised),
+        Some(Control::Close) => ViewportCommand::Close,
+        None => return,
+    };
+    ctx.send_viewport_cmd(command);
 }
 
-/// How high the band at the top of the window is that moves it in the top row: the panes' first rows.
-const BAND: f32 = 68.0;
-
-/// How near the window's right edge a pane's first row ends when the controls of the top row sit at its end.
-const REACH: f32 = 64.0;
-
-/// Where the top row's controls go this frame, kept by the pane under them.
-fn place_id() -> Id {
-    Id::unique("window-controls-place")
-}
-
-/// Where the strip's controls stand this frame, kept by [`strip`].
-fn strip_place_id() -> Id {
-    Id::unique("window-strip-controls-place")
-}
-
-/// Whether the top row is on, for the panes' first rows; set each frame before the panes are drawn.
-fn on_id() -> Id {
-    Id::unique("window-top-row")
-}
-
-/// Starts the top row's frame: tells the panes that it is on, and makes the band at the top of `ui` move the window
-/// where no pane takes the press (between and above the panes, beside their titles).
-pub(super) fn top_row_begins(ui: &mut Ui, on: bool) {
-    ui.ctx().data_mut(|data| {
-        data.insert_temp(on_id(), on);
-        data.insert_temp(place_id(), None::<Rect>);
-        data.insert_temp(strip_place_id(), None::<Rect>);
-    });
-    if !on {
+/// The app's mark, 22 points a side, 16 in from the command line's left and centred in its height: the brand's
+/// compact mark with its flap in cyan, drawn light on the dark look and dark on the light one. It takes no press (in
+/// the own frame the title bar's handle under it does).
+pub(super) fn mark(ui: &Ui, theme: &Theme, line: Rect) {
+    let rect = Rect::from_min_size(pos2(line.left() + MARK_IN, (line.center().y - MARK / 2.0).round()), vec2(MARK, MARK));
+    if !ui.is_rect_visible(rect) {
         return;
     }
-    let free = ui.available_rect_before_wrap();
-    let band = Rect::from_min_max(free.min, pos2(free.right(), free.top() + BAND));
-    // By the pointer only, as the strip: no Tab stop.
-    let handle = ui.interact(band, Id::unique("window-top-band"), Sense::CLICK | Sense::DRAG);
-    moves_the_window(ui.ctx(), &handle);
+    let Some(texture) = mark_texture(ui.ctx(), theme.mode) else { return };
+    let uv = Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0));
+    ui.painter().image(texture.id(), rect, uv, crate::theme::NO_TINT);
 }
 
-/// Draws `add` as a pane's first row and, when the top row is on and the row ends at the window's right, leaves room
-/// at its right end for the window controls, which are drawn there.
-pub(super) fn beside<R>(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui) -> R) -> R {
-    let on = ui.ctx().data(|data| data.get_temp::<bool>(on_id())).unwrap_or(false);
-    let whole = ui.max_rect();
-    if !on || whole.right() < ui.ctx().content_rect().right() - REACH {
-        return add(ui);
+/// The mark's picture for `mode`, decoded once and kept in the context; none when the built-in file does not decode.
+fn mark_texture(ctx: &Context, mode: Mode) -> Option<TextureHandle> {
+    let id = Id::unique("window-mark").with(mode == Mode::Dark);
+    if let Some(kept) = ctx.data(|data| data.get_temp::<TextureHandle>(id)) {
+        return Some(kept);
     }
-    let room = float_width() + theme.spacing.s2;
-    let inner = ui.scope(|ui| {
-        ui.set_max_width((ui.available_width() - room).max(0.0));
-        add(ui)
-    });
-    let row = inner.response.rect;
-    let place = Rect::from_min_max(pos2(whole.right() - float_width(), row.top()), pos2(whole.right(), row.bottom()));
-    ui.ctx().data_mut(|data| data.insert_temp(place_id(), Some(place)));
-    inner.inner
+    let ink = if mode == Mode::Dark { TrayInk::Dark } else { TrayInk::Light };
+    let icon = icons::tray_icon(MARK_PIXELS, ink, true).ok()?;
+    let size = [usize::try_from(icon.width).ok()?, usize::try_from(icon.height).ok()?];
+    let image = ColorImage::from_rgba_unmultiplied(size, &icon.rgba);
+    let texture = ctx.load_texture("window-mark", image, TextureOptions::LINEAR);
+    ctx.data_mut(|data| data.insert_temp(id, texture.clone()));
+    Some(texture)
 }
 
-/// The width of the controls on their float.
-fn float_width() -> f32 {
-    CONTROLS + 2.0 * (f32::from(FLOAT_MARGIN) + 1.0)
-}
-
-/// The controls in the top row, on a small float at the end of the right pane's first row (kept by [`beside`] this
-/// frame), or at the window's top right when no pane kept a place.
-pub(super) fn top_row(ctx: &Context, theme: &Theme, keymap: &Keymap) {
-    let place = ctx.data(|data| data.get_temp::<Option<Rect>>(place_id())).flatten();
-    let area = Area::new(Id::unique("window-controls")).order(Order::Foreground);
-    let area = match place {
-        Some(place) => area.pivot(Align2::RIGHT_CENTER).fixed_pos(place.right_center()),
-        None => {
-            let gap = theme.spacing.s2;
-            area.anchor(Align2::RIGHT_TOP, vec2(-gap * 2.0, gap * 2.0))
-        }
-    };
-    let shown = area.show(ctx, |ui| {
-        Frame::float(theme).show(ui, |ui| controls(ui, theme, keymap));
-    });
-    // Above a sheet over the window (the settings), too.
-    ctx.move_to_top(shown.response.layer_id);
-}
+/// The side, in pixels, of the brand's file the mark is drawn from.
+const MARK_PIXELS: u32 = 24;
 
 /// The edges of the window resize it, its corners in both directions; the pointer shows which way. The window's rect
 /// comes from the context: on Wayland the desktop keeps the window's place to itself, and egui's `inner_rect` stays
@@ -341,29 +236,8 @@ fn round(corner: f32) -> CornerRadius {
     CornerRadius::same(corner.clamp(0.0, 255.0) as u8)
 }
 
-/// `corner` on the top right corner only, for what touches the window's top right (the strip).
-fn top_right_corner(corner: f32) -> CornerRadius {
-    CornerRadius { ne: round(corner).ne, ..CornerRadius::ZERO }
-}
-
 /// Whether the app draws its own frame for `frame` in a window that `owns` one.
 #[must_use]
 pub(super) fn drawn(owns: bool, frame: WindowFrame) -> bool {
     owns && frame != WindowFrame::System
-}
-
-/// The margin inside the float of the top row's controls, in points.
-const FLOAT_MARGIN: i8 = 2;
-
-/// A float's frame in `theme`, for the controls in the top row.
-struct Frame;
-
-impl Frame {
-    fn float(theme: &Theme) -> egui::Frame {
-        egui::Frame::new()
-            .fill(theme.palette.surface)
-            .stroke(Stroke::new(1.0, theme.palette.line))
-            .corner_radius(0)
-            .inner_margin(egui::Margin::same(FLOAT_MARGIN))
-    }
 }

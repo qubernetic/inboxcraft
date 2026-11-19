@@ -1,72 +1,56 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The app's own window frame: drawn only in a native window that lets the app draw it, never in pictures.
+//! The app's own window frame, the command line as the title bar: drawn only in a native window that lets the app draw
+//! it, never in pictures. The four `window-frame/*` frames are state tests here.
 
 use egui::accesskit::Role;
-use egui::{Event, Modifiers, PointerButton, Pos2, Rect, ResizeDirection, ViewportCommand, pos2, vec2};
+use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, ResizeDirection, ViewportCommand, ViewportId, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_engine::appearance::WindowFrame;
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
+use crate::keymap;
 use crate::mailbox::Mailbox;
 use crate::sample;
 use crate::theme::install_fonts;
+
+/// The three window controls, by what a screen reader hears.
+const CONTROLS: [&str; 3] = ["Minimise", "Maximise", "Close the window"];
 
 fn clock() -> Box<FakeClock> {
     Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()))
 }
 
+/// The sample at 1100 × 700 in a native window that may draw its frame (`own`), the frame `frame` chosen; the app in
+/// the whole window, as eframe gives it to it.
 fn harness(own: bool, frame: WindowFrame) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    harness_sized(own, frame, vec2(1100.0, 700.0), |_| {})
+}
+
+fn harness_sized(own: bool, frame: WindowFrame, size: egui::Vec2, setup: impl FnOnce(&mut InboxApp)) -> Harness<'static, InboxApp> {
+    harness_with(own, frame, size, None, setup)
+}
+
+/// [`harness_sized`], each step `dt` seconds when given.
+fn harness_with(own: bool, frame: WindowFrame, size: egui::Vec2, dt: Option<f32>, setup: impl FnOnce(&mut InboxApp)) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::sending(clock()).unwrap(), clock()));
     app.set_own_frame(own);
     app.set_frame(frame);
-    let mut harness =
-        Harness::builder().with_size(vec2(1100.0, 700.0)).with_context_setup(install_fonts).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
-    harness.run();
-    harness
-}
-
-#[test]
-fn the_strip_shows_the_title_and_the_window_controls() {
-    let harness = harness(true, WindowFrame::Strip);
-    assert!(harness.state().draws_frame());
-    for name in ["Minimise", "Maximise", "Close the window"] {
-        harness.get_by_label(name);
-    }
-}
-
-#[test]
-fn the_top_row_shows_the_window_controls_without_a_strip() {
-    let harness = harness(true, WindowFrame::TopRow);
-    harness.get_by_label("Close the window");
-}
-
-#[test]
-fn no_own_frame_with_the_system_s_title_bar_or_outside_a_native_window() {
-    for (own, frame) in [(true, WindowFrame::System), (false, WindowFrame::Strip), (false, WindowFrame::TopRow)] {
-        let harness = harness(own, frame);
-        assert!(!harness.state().draws_frame(), "{own} {frame:?}");
-        assert!(harness.query_by_label("Close the window").is_none(), "{own} {frame:?}");
-    }
-}
-
-#[test]
-fn the_frame_is_one_of_the_appearance_choices() {
-    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
-    app.set_frame(WindowFrame::TopRow);
-    assert_eq!(app.mailbox().appearance().frame, WindowFrame::TopRow);
-}
-
-fn harness_with(frame: WindowFrame, setup: impl FnOnce(&mut InboxApp)) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
-    app.set_own_frame(true);
-    app.set_frame(frame);
     setup(&mut app);
-    let mut harness =
-        Harness::builder().with_size(vec2(1100.0, 700.0)).with_context_setup(install_fonts).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    let mut builder = Harness::builder().with_size(size).with_context_setup(install_fonts);
+    if let Some(dt) = dt {
+        builder = builder.with_step_dt(dt);
+    }
+    let mut harness = builder.build_ui_state(
+        |ui, app: &mut InboxApp| {
+            let whole = ui.ctx().content_rect();
+            ui.scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| app.ui(ui));
+        },
+        app,
+    );
     harness.run();
     harness
 }
@@ -85,6 +69,15 @@ fn press_at(harness: &mut Harness<'static, InboxApp>, at: Pos2) -> Vec<ViewportC
     commands(harness)
 }
 
+/// Presses and lets go at `at`; every command on the way.
+fn click_at(harness: &mut Harness<'static, InboxApp>, at: Pos2) -> Vec<ViewportCommand> {
+    let mut seen = press_at(harness, at);
+    harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    harness.step();
+    seen.extend(commands(harness));
+    seen
+}
+
 /// Presses at `at`, drags 20 points down and returns every command on the way.
 fn drag_from(harness: &mut Harness<'static, InboxApp>, at: Pos2) -> Vec<ViewportCommand> {
     let mut seen = press_at(harness, at);
@@ -96,6 +89,108 @@ fn drag_from(harness: &mut Harness<'static, InboxApp>, at: Pos2) -> Vec<Viewport
     seen
 }
 
+/// The command line's region.
+fn line(harness: &Harness<'_, InboxApp>) -> Rect {
+    super::shell::laid(&harness.ctx).unwrap().command
+}
+
+/// A point of the command line that only the title bar takes: the mark's column, beside the mark.
+fn free(harness: &Harness<'_, InboxApp>) -> Pos2 {
+    let line = line(harness);
+    pos2(line.left() + 120.0, line.center().y)
+}
+
+/// The command field's box, as the command line keeps it for the tests.
+fn field(harness: &Harness<'_, InboxApp>) -> Rect {
+    harness.ctx.data(|data| data.get_temp::<Rect>(crate::command::field_id().with("box"))).unwrap()
+}
+
+/// The rect of each window control.
+fn controls(harness: &Harness<'_, InboxApp>) -> Vec<Rect> {
+    CONTROLS.iter().map(|name| harness.get_by_label(name).rect()).collect()
+}
+
+/// Whether a picture (a mesh with a texture of its own) is painted inside `within`.
+fn picture_in(harness: &Harness<'_, InboxApp>, within: Rect) -> bool {
+    harness.output().shapes.iter().any(|clipped| match &clipped.shape {
+        egui::Shape::Mesh(mesh) => mesh.texture_id != egui::TextureId::default() && within.contains_rect(mesh.calc_bounds()),
+        _ => false,
+    })
+}
+
+/// Sets what the window says of itself: maximised, in front.
+fn window_state(harness: &mut Harness<'static, InboxApp>, maximised: bool, focused: bool) {
+    let viewport = harness.input_mut().viewports.entry(ViewportId::ROOT).or_default();
+    viewport.maximized = Some(maximised);
+    viewport.focused = Some(focused);
+    harness.run();
+}
+
+/// `window-frame/own` at 1440 × 900: the mark at 16, 11 of the command line (22 a side), the field from the index's
+/// column to 12 before the controls, the three controls 108 × 32 at 4 from the line's right end, centred in its height.
+#[test]
+fn window_frame_own_stands_where_the_frame_draws_it() {
+    let harness = harness_sized(true, WindowFrame::Own, vec2(1440.0, 900.0), |_| {});
+    assert!(harness.state().draws_frame());
+    let line = line(&harness);
+    assert_eq!(line, Rect::from_min_size(pos2(1.0, 1.0), vec2(1438.0, 44.0)), "the frame's command line");
+    let rects = controls(&harness);
+    let whole = rects.iter().fold(Rect::NOTHING, |all, rect| all.union(*rect));
+    assert_eq!(whole, Rect::from_min_size(pos2(1327.0, 7.0), vec2(108.0, 32.0)), "the controls at 1326, 6 of the line");
+    assert_eq!(field(&harness), Rect::from_min_size(pos2(234.0, 9.0), vec2(1081.0, 28.0)), "the field at 233, 8 of the line");
+    assert!(picture_in(&harness, Rect::from_min_size(pos2(17.0, 12.0), vec2(22.0, 22.0)).expand(0.5)), "the mark at 16, 11");
+    assert!(harness.query_by_label("New message").is_none(), "the command line draws no New message");
+    assert!(harness.query_by_label("Restore").is_none(), "a window not maximised offers Maximise");
+}
+
+/// `window-frame/own-maximised`: the middle control restores, and pressed it asks the window to restore.
+#[test]
+fn window_frame_own_maximised_offers_restore() {
+    let mut harness = harness_sized(true, WindowFrame::Own, vec2(1440.0, 900.0), |_| {});
+    window_state(&mut harness, true, true);
+    assert!(harness.query_by_label("Maximise").is_none(), "maximised, the middle control is Restore");
+    let restore = harness.get_by_label("Restore").rect();
+    assert_eq!(restore.size(), vec2(36.0, 32.0));
+    let seen = click_at(&mut harness, restore.center());
+    assert!(seen.contains(&ViewportCommand::Maximized(false)), "{seen:?}");
+    assert_eq!(harness.state().window_corner(&harness.ctx), 0.0, "a maximised window has square corners");
+}
+
+/// `window-frame/own-unfocused`: with another window in front the controls are still drawn, named and pressable.
+#[test]
+fn window_frame_own_unfocused_keeps_the_controls_working() {
+    let mut harness = harness_sized(true, WindowFrame::Own, vec2(1440.0, 900.0), |_| {});
+    let focused = controls(&harness);
+    window_state(&mut harness, false, false);
+    assert_eq!(controls(&harness), focused, "the controls stay where they are");
+    let close = harness.get_by_label("Close the window").rect().center();
+    assert!(click_at(&mut harness, close).contains(&ViewportCommand::Close));
+}
+
+/// `window-frame/system`: the desktop's title bar; the command line holds the mark and the field, which runs to 12
+/// before the line's right end, and no window controls.
+#[test]
+fn window_frame_system_leaves_the_controls_to_the_desktop() {
+    for own in [true, false] {
+        let harness = harness_sized(own, if own { WindowFrame::System } else { WindowFrame::Own }, vec2(1440.0, 900.0), |_| {});
+        assert!(!harness.state().draws_frame(), "{own}");
+        for name in CONTROLS {
+            assert!(harness.query_by_label(name).is_none(), "{own}: {name}");
+        }
+        assert_eq!(field(&harness), Rect::from_min_size(pos2(234.0, 9.0), vec2(1193.0, 28.0)), "{own}: the field at 233, 8, 1193 wide");
+        assert!(picture_in(&harness, Rect::from_min_size(pos2(17.0, 12.0), vec2(22.0, 22.0)).expand(0.5)), "{own}: the mark");
+        assert!(harness.ctx.read_response(super::frame::title_bar_id()).is_none(), "{own}: no title bar of the app's");
+    }
+}
+
+#[test]
+fn the_frame_is_one_of_the_appearance_choices() {
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    assert_eq!(app.mailbox().appearance().frame, WindowFrame::Own, "the own frame at first");
+    app.set_frame(WindowFrame::System);
+    assert_eq!(app.mailbox().appearance().frame, WindowFrame::System);
+}
+
 #[test]
 fn a_press_at_an_edge_resizes_the_window_even_where_the_desktop_keeps_the_window_s_place_to_itself() {
     // Wayland tells no window where it is, so egui knows the window's size but not its rect; the test harness neither.
@@ -105,51 +200,52 @@ fn a_press_at_an_edge_resizes_the_window_even_where_the_desktop_keeps_the_window
         (pos2(600.0, 698.0), ResizeDirection::South),
         (pos2(1098.0, 698.0), ResizeDirection::SouthEast),
     ] {
-        for frame in [WindowFrame::Strip, WindowFrame::TopRow] {
-            let mut harness = harness(true, frame);
-            let seen = press_at(&mut harness, at);
-            assert!(seen.contains(&ViewportCommand::BeginResize(direction)), "{frame:?} {at:?}: {seen:?}");
-        }
+        let mut harness = harness(true, WindowFrame::Own);
+        let seen = press_at(&mut harness, at);
+        assert!(seen.contains(&ViewportCommand::BeginResize(direction)), "{at:?}: {seen:?}");
     }
 }
 
 #[test]
-fn dragging_the_top_row_beside_the_panes_moves_the_window() {
-    let mut harness = harness(true, WindowFrame::TopRow);
-    // Above the panes, below the resizing edge.
-    let seen = drag_from(&mut harness, pos2(600.0, 8.0));
-    assert!(seen.contains(&ViewportCommand::StartDrag), "{seen:?}");
+fn a_drag_on_the_command_line_where_no_control_stands_moves_the_window() {
+    let mut harness = harness(true, WindowFrame::Own);
+    let (field, first) = (field(&harness), controls(&harness)[0]);
+    // The mark's column, and the gap between the field and the controls.
+    for at in [free(&harness), pos2((field.right() + first.left()) / 2.0, line(&harness).center().y)] {
+        let mut harness = self::harness(true, WindowFrame::Own);
+        let seen = drag_from(&mut harness, at);
+        assert!(seen.contains(&ViewportCommand::StartDrag), "{at:?}: {seen:?}");
+    }
+    // A press in the field types there: it moves nothing.
+    let seen = drag_from(&mut harness, field.center());
+    assert!(!seen.contains(&ViewportCommand::StartDrag), "the field moved the window: {seen:?}");
 }
 
 /// The rects of the window controls and of every other control or field.
-fn controls_and_others(harness: &Harness<'_, InboxApp>) -> (Vec<Rect>, Vec<(String, Rect)>) {
-    let ours = ["Minimise", "Maximise", "Close the window"];
-    let window = ours.iter().map(|name| harness.get_by_label(name).rect()).collect();
+fn others(harness: &Harness<'_, InboxApp>) -> Vec<(String, Rect)> {
     let mut others = Vec::new();
     for role in [Role::Button, Role::TextInput, Role::SearchInput, Role::ComboBox] {
         for node in harness.query_all_by_role(role) {
             let name = node.accesskit_node().label().unwrap_or_default();
-            if !ours.contains(&name.as_str()) {
+            if !CONTROLS.contains(&name.as_str()) {
                 others.push((name, node.rect()));
             }
         }
     }
-    (window, others)
+    others
 }
 
 #[test]
-fn the_window_controls_in_the_top_row_lie_over_no_other_control() {
+fn the_window_controls_lie_over_no_other_control() {
     for settings in [false, true] {
-        let scene = if settings { "settings" } else { "mail" };
-        let harness = harness_with(WindowFrame::TopRow, |app| {
+        let harness = harness_sized(true, WindowFrame::Own, vec2(1100.0, 700.0), |app| {
             if settings {
                 app.open_settings();
             }
         });
-        let (window, others) = controls_and_others(&harness);
-        for control in &window {
-            for (name, rect) in &others {
-                assert!(!control.intersects(*rect), "{scene}: a window control {control:?} lies over {name:?} {rect:?}");
+        for control in controls(&harness) {
+            for (name, rect) in others(&harness) {
+                assert!(!control.intersects(rect), "settings {settings}: a window control {control:?} lies over {name:?} {rect:?}");
             }
         }
     }
@@ -157,100 +253,49 @@ fn the_window_controls_in_the_top_row_lie_over_no_other_control() {
 
 #[test]
 fn the_window_s_corners_are_round_only_while_the_app_draws_the_frame() {
-    assert!(harness(true, WindowFrame::Strip).state().window_corner(&egui::Context::default()) > 0.0);
-    assert!(harness(true, WindowFrame::TopRow).state().window_corner(&egui::Context::default()) > 0.0);
+    assert!(harness(true, WindowFrame::Own).state().window_corner(&egui::Context::default()) > 0.0);
     assert_eq!(harness(true, WindowFrame::System).state().window_corner(&egui::Context::default()), 0.0);
-    assert_eq!(harness(false, WindowFrame::Strip).state().window_corner(&egui::Context::default()), 0.0);
-}
-
-#[test]
-fn the_strip_s_window_controls_sit_in_its_middle_as_far_from_its_top_as_close_is_from_the_window_s_edge() {
-    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
-    app.set_own_frame(true);
-    app.set_frame(WindowFrame::Strip);
-    // The whole window, as eframe gives it; the harness's own `ui` has a margin.
-    let mut harness = Harness::builder().with_size(vec2(1100.0, 700.0)).with_context_setup(install_fonts).build_ui_state(
-        |ui, app: &mut InboxApp| {
-            let whole = ui.ctx().content_rect();
-            ui.scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| app.ui(ui));
-        },
-        app,
-    );
-    harness.run();
-    // The strip fills the command line.
-    let command = super::shell::laid(&harness.ctx).unwrap().command;
-    for name in ["Minimise", "Maximise", "Close the window"] {
-        let rect = harness.get_by_label(name).rect();
-        let (above, below) = (rect.top() - command.top(), command.bottom() - rect.bottom());
-        assert!((above - below).abs() <= 1.0, "{name}: {above} above, {below} below in {rect:?}");
-    }
-    let close = harness.get_by_label("Close the window").rect();
-    let right = harness.ctx.content_rect().right() - close.right();
-    assert!((close.top() - right).abs() <= 0.5, "Close: {} above, {right} to the window's edge", close.top());
-    // Close's hover fill, a little inside the control, ends as far from the command line's right edge as from its top.
-    let fill_to_edge = command.right() - close.right() + super::frame::HOVER_INSET;
-    let fill_to_top = close.top() - command.top() + super::frame::HOVER_INSET;
-    assert!((fill_to_edge - fill_to_top).abs() <= 0.5, "Close's fill ends {fill_to_edge} from the edge, {fill_to_top} from the top");
+    assert_eq!(harness(false, WindowFrame::Own).state().window_corner(&egui::Context::default()), 0.0);
 }
 
 #[test]
 fn the_window_moves_again_after_a_move_whose_release_the_desktop_kept() {
     // While the desktop moves the window it holds the pointer: the app never hears the button come up.
-    for (frame, at) in [(WindowFrame::Strip, pos2(500.0, 17.0)), (WindowFrame::TopRow, pos2(600.0, 8.0))] {
-        let mut harness = harness(true, frame);
-        assert!(drag_from(&mut harness, at).contains(&ViewportCommand::StartDrag), "{frame:?}: the first move");
-        let seen = drag_from(&mut harness, at + vec2(40.0, 0.0));
-        assert!(seen.contains(&ViewportCommand::StartDrag), "{frame:?}: the second move {seen:?}");
-    }
+    let mut harness = harness(true, WindowFrame::Own);
+    let at = free(&harness);
+    assert!(drag_from(&mut harness, at).contains(&ViewportCommand::StartDrag), "the first move");
+    let seen = drag_from(&mut harness, at + vec2(40.0, 0.0));
+    assert!(seen.contains(&ViewportCommand::StartDrag), "the second move {seen:?}");
 }
 
 #[test]
 fn after_the_desktop_moved_or_resized_the_window_the_button_counts_as_up_again() {
     // The desktop keeps the release; until the app hears the button come up, egui shows no hover anywhere.
-    for (frame, at, grab) in [
-        (WindowFrame::Strip, pos2(500.0, 17.0), ViewportCommand::StartDrag),
-        (WindowFrame::TopRow, pos2(600.0, 8.0), ViewportCommand::StartDrag),
-        (WindowFrame::Strip, pos2(1098.0, 400.0), ViewportCommand::BeginResize(ResizeDirection::East)),
-    ] {
-        let mut harness = harness(true, frame);
-        assert!(drag_from(&mut harness, at).contains(&grab), "{frame:?} {grab:?}");
-        assert!(harness.ctx.input(|input| input.pointer.any_down()), "{frame:?}: the release never came");
+    let start = harness(true, WindowFrame::Own);
+    for (at, grab) in [(free(&start), ViewportCommand::StartDrag), (pos2(1098.0, 400.0), ViewportCommand::BeginResize(ResizeDirection::East))] {
+        let mut harness = harness(true, WindowFrame::Own);
+        assert!(drag_from(&mut harness, at).contains(&grab), "{grab:?}");
+        assert!(harness.ctx.input(|input| input.pointer.any_down()), "{grab:?}: the release never came");
         let ctx = harness.ctx.clone();
         InboxApp::release_after_window_grab(&ctx, harness.input_mut());
         harness.step();
-        assert!(!harness.ctx.input(|input| input.pointer.any_down()), "{frame:?} {grab:?}: the button still counts as down");
-        assert!(harness.ctx.dragged_id().is_none(), "{frame:?} {grab:?}: a drag still goes on");
+        assert!(!harness.ctx.input(|input| input.pointer.any_down()), "{grab:?}: the button still counts as down");
+        assert!(harness.ctx.dragged_id().is_none(), "{grab:?}: a drag still goes on");
     }
 }
 
 #[test]
 fn without_a_grab_by_the_desktop_no_release_is_added() {
-    let mut harness = harness(true, WindowFrame::Strip);
+    let mut harness = harness(true, WindowFrame::Own);
     let ctx = harness.ctx.clone();
     InboxApp::release_after_window_grab(&ctx, harness.input_mut());
     assert!(harness.input_mut().events.is_empty());
 }
 
-/// The app in the whole window, as eframe gives it to it.
-fn whole_window(frame: WindowFrame) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
-    app.set_own_frame(true);
-    app.set_frame(frame);
-    let mut harness = Harness::builder().with_size(vec2(1100.0, 700.0)).with_context_setup(install_fonts).build_ui_state(
-        |ui, app: &mut InboxApp| {
-            let whole = ui.ctx().content_rect();
-            ui.scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| app.ui(ui));
-        },
-        app,
-    );
-    harness.run();
-    harness
-}
-
 #[test]
 fn the_index_starts_under_the_command_line_in_every_frame() {
-    for frame in [WindowFrame::Strip, WindowFrame::TopRow, WindowFrame::System] {
-        let harness = whole_window(frame);
+    for frame in [WindowFrame::Own, WindowFrame::System] {
+        let harness = harness(true, frame);
         let laid = super::shell::laid(&harness.ctx).unwrap();
         assert!(laid.index.top() > laid.command.bottom(), "{frame:?}: {laid:?}");
         let home = harness.get_by_role_and_label(Role::Button, "Home").rect();
@@ -258,11 +303,11 @@ fn the_index_starts_under_the_command_line_in_every_frame() {
     }
 }
 
-/// The sample in the own frame of `frame` at `ppp`, with an error shown or not.
-fn framed(frame: WindowFrame, ppp: f32, error: bool) -> Harness<'static, InboxApp> {
+/// The sample in the own frame at `ppp`, with an error shown or not.
+fn framed(ppp: f32, error: bool) -> Harness<'static, InboxApp> {
     let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_own_frame(true);
-    app.set_frame(frame);
+    app.set_frame(WindowFrame::Own);
     if error {
         app.mailbox_mut().open(crate::mailbox::Place::Folder(4242));
     }
@@ -285,106 +330,121 @@ fn one_run(rows: &std::collections::BTreeSet<i32>) -> bool {
 }
 
 #[test]
-fn in_the_own_frame_the_error_banner_stands_under_the_strip() {
+fn in_the_own_frame_the_error_banner_stands_under_the_command_line() {
     for ppp in [1.0_f32, 1.5] {
         let theme = crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default());
         let p = theme.palette;
-        let quiet = framed(WindowFrame::Strip, ppp, false);
-        let mut harness = framed(WindowFrame::Strip, ppp, true);
+        let quiet = framed(ppp, false);
+        let mut harness = framed(ppp, true);
         assert!(harness.state().mailbox().error().is_some());
-        for name in ["Minimise", "Maximise", "Close the window"] {
-            assert_eq!(harness.get_by_label(name).rect(), quiet.get_by_label(name).rect(), "{ppp} {name}: the strip stays where it is");
-        }
+        assert_eq!(controls(&harness), controls(&quiet), "{ppp}: the controls stay where they are");
         let error = harness.state().mailbox().error().unwrap().to_owned();
         let words = harness.get_by_label(&error).rect();
-        // The strip fills the command line; the frame's hairline under it is the line over the banner.
-        let strip = super::shell::laid(&harness.ctx).unwrap().command.bottom();
-        assert!(words.top() > strip, "{ppp}: the banner's words {words:?} are under the strip");
+        // The frame's hairline under the command line is the line over the banner.
+        let bottom = line(&harness).bottom();
+        assert!(words.top() > bottom, "{ppp}: the banner's words {words:?} are under the command line");
         let colours = [p.line, p.minus];
-        let upper = super::tests::level_line_rows(&harness, &colours, strip - 3.0, words.top() - 1.0);
-        assert!(one_run(&upper), "{ppp}: one line between the strip and the banner: {upper:?}");
+        let upper = super::tests::level_line_rows(&harness, &colours, bottom - 3.0, words.top() - 1.0);
+        assert!(one_run(&upper), "{ppp}: one line between the command line and the banner: {upper:?}");
         let dismiss = harness.get_by_role_and_label(Role::Button, "dismiss").rect();
         let lower = super::tests::level_line_rows(&harness, &colours, dismiss.bottom(), dismiss.bottom() + 16.0);
         assert!(one_run(&lower), "{ppp}: one line between the banner and the panes: {lower:?}");
-        // The strip still moves the window.
-        let seen = drag_from(&mut harness, pos2(500.0, strip / 2.0));
+        // The command line still moves the window.
+        let at = free(&harness);
+        let seen = drag_from(&mut harness, at);
         assert!(seen.contains(&ViewportCommand::StartDrag), "{ppp}: {seen:?}");
     }
 }
 
 #[test]
 fn on_the_settings_the_window_controls_stand_clear_and_do_what_they_do() {
-    for frame in [WindowFrame::Strip, WindowFrame::TopRow] {
-        let mut harness = harness_with(frame, InboxApp::open_settings);
-        let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
-        for name in ["Minimise", "Maximise", "Close the window"] {
-            let control = harness.get_by_label(name).rect();
-            assert!(!control.intersects(sheet), "{frame:?}: {name} {control:?} lies over the settings {sheet:?}");
-        }
-        // A press on Minimise minimises the window and leaves the settings shown.
-        let at = harness.get_by_label("Minimise").rect().center();
-        let mut seen = press_at(&mut harness, at);
-        harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    let mut harness = harness_sized(true, WindowFrame::Own, vec2(1100.0, 700.0), InboxApp::open_settings);
+    let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+    for (name, control) in CONTROLS.iter().zip(controls(&harness)) {
+        assert!(!control.intersects(sheet), "{name} {control:?} lies over the settings {sheet:?}");
+    }
+    // A press on Minimise minimises the window and leaves the settings shown.
+    let at = harness.get_by_label("Minimise").rect().center();
+    let seen = click_at(&mut harness, at);
+    harness.run();
+    assert!(seen.contains(&ViewportCommand::Minimized(true)), "{seen:?}");
+    assert!(harness.state().settings().is_open(), "the press on a window control left the settings");
+}
+
+/// The label of the control with the keyboard.
+fn focused(harness: &Harness<'_, InboxApp>) -> Option<String> {
+    harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
+}
+
+#[test]
+fn tab_walks_the_command_line_then_the_window_controls_then_the_index() {
+    let mut harness = harness(true, WindowFrame::Own);
+    let mut walked = Vec::new();
+    for _ in 0..5 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        walked.push(focused(&harness).unwrap_or_default());
+    }
+    assert_eq!(walked, ["Command line", "Minimise", "Maximise", "Close the window", "Home"], "the drawn order");
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness).as_deref(), Some("Close the window"), "Shift Tab walks it back");
+    // Enter and Space on a control press it (the frame of the key going down, whose output the harness keeps alone).
+    for key in [Key::Enter, Key::Space] {
+        harness.event(Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
         harness.step();
-        seen.extend(commands(&harness));
+        let seen = commands(&harness);
+        harness.event(Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE });
+        harness.step();
+        assert!(seen.contains(&ViewportCommand::Close), "{key:?} on Close closes: {seen:?}");
+    }
+}
+
+#[test]
+fn on_the_settings_tab_walks_the_window_s_controls_and_the_settings_alike() {
+    let mut harness = harness_sized(true, WindowFrame::Own, vec2(1100.0, 700.0), InboxApp::open_settings);
+    let settings = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+    let (mut controls, mut on_settings) = (false, 0);
+    for _ in 0..200 {
+        harness.key_press(Key::Tab);
         harness.run();
-        assert!(seen.contains(&ViewportCommand::Minimized(true)), "{frame:?}: {seen:?}");
-        assert!(harness.state().settings().is_open(), "{frame:?}: the press on a window control left the settings");
+        let Some(node) = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()) else { continue };
+        let label = node.accesskit_node().label().unwrap_or_default();
+        controls |= label == "Minimise";
+        on_settings += usize::from(settings.contains_rect(node.rect()));
+    }
+    assert!(controls, "the settings are a place: Tab reaches Minimise beside them");
+    assert!(on_settings > 20, "Tab reaches the settings' controls ({on_settings})");
+    assert!(harness.state().settings().is_open(), "Tab leaves no place");
+}
+
+/// The title bar moves the window by the pointer only: a Tab walk round the whole window never lands on it, an unnamed
+/// stop that does nothing.
+#[test]
+fn the_title_bar_is_no_tab_stop() {
+    let mut harness = harness(true, WindowFrame::Own);
+    let handle = super::frame::title_bar_id();
+    assert!(harness.ctx.read_response(handle).is_some(), "the handle is drawn");
+    for step in 0..200 {
+        harness.key_press(Key::Tab);
+        harness.step();
+        harness.step();
+        assert_ne!(harness.ctx.memory(|memory| memory.focused()), Some(handle), "Tab {step} lands on the handle");
     }
 }
 
 #[test]
-fn on_the_settings_tab_walks_the_window_s_controls_and_the_settings_alike_in_the_app_s_own_frame() {
-    for frame in [WindowFrame::Strip, WindowFrame::TopRow] {
-        let mut harness = harness_with(frame, InboxApp::open_settings);
-        let settings = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
-        let (mut controls, mut on_settings) = (false, 0);
-        for _ in 0..200 {
-            harness.key_press(egui::Key::Tab);
-            harness.run();
-            let Some(node) = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()) else { continue };
-            let label = node.accesskit_node().label().unwrap_or_default();
-            controls |= label == "Minimise";
-            on_settings += usize::from(settings.contains_rect(node.rect()));
+fn a_double_press_on_the_command_line_maximises_the_window_and_restores_it() {
+    for maximised in [false, true] {
+        let mut harness = harness_with(true, WindowFrame::Own, vec2(1100.0, 700.0), Some(1.0 / 60.0), |_| {});
+        if maximised {
+            window_state(&mut harness, true, true);
         }
-        assert!(controls, "{frame:?}: the settings are a place: Tab reaches Minimise beside them");
-        assert!(on_settings > 20, "{frame:?}: Tab reaches the settings' controls ({on_settings})");
-        assert!(harness.state().settings().is_open(), "{frame:?}: Tab leaves no place");
-    }
-}
-
-/// The strip and the top row's band move the window by the pointer only: a Tab walk round the whole window never
-/// lands on them, an unnamed stop that does nothing.
-#[test]
-fn the_handles_that_move_the_window_are_no_tab_stops() {
-    for (frame, handle) in [(WindowFrame::Strip, "window-strip"), (WindowFrame::TopRow, "window-top-band")] {
-        let mut harness = harness(true, frame);
-        assert!(harness.ctx.read_response(egui::Id::unique(handle)).is_some(), "{frame:?}: the handle is drawn");
-        for step in 0..200 {
-            harness.key_press(egui::Key::Tab);
-            harness.step();
-            harness.step();
-            assert_ne!(harness.ctx.memory(|memory| memory.focused()), Some(egui::Id::unique(handle)), "{frame:?}: Tab {step} lands on the handle");
-        }
-    }
-}
-
-#[test]
-fn a_double_press_on_the_handles_maximises_the_window() {
-    for (frame, at) in [(WindowFrame::Strip, pos2(500.0, 17.0)), (WindowFrame::TopRow, pos2(600.0, 8.0))] {
-        let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
-        app.set_own_frame(true);
-        app.set_frame(frame);
-        // Two presses a sixtieth of a second apart: well inside the double press's time.
-        let mut harness = Harness::builder()
-            .with_size(vec2(1100.0, 700.0))
-            .with_step_dt(1.0 / 60.0)
-            .with_context_setup(install_fonts)
-            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
-        harness.run();
+        let at = free(&harness);
         harness.hover_at(at);
         harness.step();
         let mut seen = Vec::new();
+        // Two presses a sixtieth of a second apart: well inside the double press's time.
         for _ in 0..2 {
             for pressed in [true, false] {
                 harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
@@ -392,6 +452,52 @@ fn a_double_press_on_the_handles_maximises_the_window() {
             harness.step();
             seen.extend(commands(&harness));
         }
-        assert!(seen.contains(&ViewportCommand::Maximized(true)), "{frame:?}: {seen:?}");
+        assert!(seen.contains(&ViewportCommand::Maximized(!maximised)), "maximised {maximised}: {seen:?}");
+    }
+}
+
+/// Close closes whatever stands in front: the command line's results, a menu, the event editor. Never under a gate
+/// that would keep the owner in the window, by the pointer or by a screen reader's activate.
+#[test]
+fn close_closes_over_the_command_line_s_results_a_menu_and_the_event_editor() {
+    for surface in ["results", "menu", "editor"] {
+        for activate in [false, true] {
+            let mut harness = harness(true, WindowFrame::Own);
+            let ctx = harness.ctx.clone();
+            match surface {
+                "results" => {
+                    harness.state_mut().run_action(&ctx, keymap::PALETTE);
+                    harness.run();
+                    harness.state_mut().command_mut().set_text(">zz");
+                    harness.run();
+                    assert!(harness.state().command().results(), "the results show");
+                }
+                "menu" => {
+                    let picker = harness
+                        .query_all_by_role(Role::Button)
+                        .find(|node| node.accesskit_node().label().is_some_and(|name| name.starts_with("Show mail of")))
+                        .unwrap();
+                    picker.click();
+                    harness.run();
+                    assert!(harness.query_by_label("All accounts").is_some(), "the menu shows");
+                }
+                _ => {
+                    harness.state_mut().run_action(&ctx, keymap::CALENDAR);
+                    harness.run();
+                    harness.get_by_role_and_label(Role::Button, "New event").click();
+                    harness.run();
+                    assert!(harness.state().calendar().editor().is_some(), "the editor shows");
+                }
+            }
+            let seen = if activate {
+                harness.get_by_label("Close the window").click_accesskit();
+                harness.step();
+                commands(&harness)
+            } else {
+                let at = harness.get_by_label("Close the window").rect().center();
+                click_at(&mut harness, at)
+            };
+            assert!(seen.contains(&ViewportCommand::Close), "{surface}, activate {activate}: {seen:?}");
+        }
     }
 }

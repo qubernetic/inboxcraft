@@ -255,7 +255,7 @@ pub(super) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let f = &theme.fonts;
     let open = reader.open_id();
     let opened = open.and_then(|id| reader.opened(id));
-    crate::draw::frame::beside(ui, theme, |ui| tools(ui, theme, keymap, mailbox, reader, drawn));
+    tools(ui, theme, keymap, mailbox, reader, drawn);
     // A message the screener holds asks first whether to let its sender in; the rest is a preview.
     if let Some(id) = open.filter(|id| mailbox.held(*id)) {
         super::held::let_in(ui, theme, keymap, mailbox, id, drawn);

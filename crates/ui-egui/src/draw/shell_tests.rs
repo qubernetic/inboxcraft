@@ -220,7 +220,7 @@ fn under(harness: &Harness<'static, InboxApp>) -> (crate::Screen, Place, Option<
 fn a_screen_reader_s_activate_on_the_index_runs_nothing_under_a_modal_surface() {
     // The settings are not one of them: they are a place (below).
     use crate::keymap;
-    let presses = ["Mail", "Calendar", "Later", "Sent", "Inbox", "Personal", "Show mail of: mira@example.org", "New message"];
+    let presses = ["Mail", "Calendar", "Later", "Sent", "Inbox", "Personal", "Show mail of: mira@example.org"];
     for surface in ["editor", "palette"] {
         let mut harness = window(vec2(1300.0, 820.0));
         let ctx = harness.ctx.clone();
@@ -377,24 +377,23 @@ fn on_the_settings_a_place_or_mailbox_of_the_index_does_what_its_key_does() {
 }
 
 #[test]
-fn tab_walks_new_message_in_the_command_line_before_the_index_under_it() {
+fn tab_walks_the_command_line_before_the_index_under_it() {
     let mut harness = window(vec2(1300.0, 820.0));
     let focused = |harness: &Harness<'static, InboxApp>| {
         harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
     };
     let mut walked = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..2 {
         harness.key_press(egui::Key::Tab);
         harness.run();
         walked.push(focused(&harness).unwrap_or_default());
     }
-    // Home is a place and a stop, first of the index.
-    assert_eq!(walked, ["New message", "Command line", "Home"], "the drawn order, top down");
+    // Home is a place and a stop, first of the index. No window controls outside a native window (the own frame's
+    // walk is in `frame_tests`).
+    assert_eq!(walked, ["Command line", "Home"], "the drawn order, top down");
     harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
     harness.run();
-    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
-    harness.run();
-    assert_eq!(focused(&harness).as_deref(), Some("New message"), "Shift Tab walks it back");
+    assert_eq!(focused(&harness).as_deref(), Some("Command line"), "Shift Tab walks it back");
 }
 
 #[test]

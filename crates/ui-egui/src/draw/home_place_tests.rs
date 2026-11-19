@@ -35,7 +35,7 @@ fn sample_app(clock: &FakeClock) -> InboxApp {
 /// `app` in a window of `size`, in the app's own frame, run once.
 fn window_of(mut app: InboxApp, size: egui::Vec2) -> Harness<'static, InboxApp> {
     app.set_own_frame(true);
-    app.set_frame(inboxcraft_engine::appearance::WindowFrame::Strip);
+    app.set_frame(inboxcraft_engine::appearance::WindowFrame::Own);
     let mut harness = Harness::builder().with_size(size).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness

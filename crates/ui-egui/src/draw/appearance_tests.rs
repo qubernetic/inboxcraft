@@ -44,6 +44,8 @@ fn every_choice_persists_across_a_restart() {
     let mut harness = window(&file);
     assert_eq!(*harness.state().appearance(), Appearance::default());
     run(&mut harness, "ui.theme.set", json!({ "mode": "dark" }));
+    // An old client's frame: the top row of older versions is the own frame now.
+    run(&mut harness, "ui.frame.set", json!({ "frame": "system" }));
     run(&mut harness, "ui.frame.set", json!({ "frame": "top_row" }));
     run(&mut harness, "ui.text_scale.set", json!({ "percent": 120 }));
     run(&mut harness, "ui.motion.set", json!({ "reduce": "on" }));
@@ -54,7 +56,7 @@ fn every_choice_persists_across_a_restart() {
     let app = restarted.state();
     assert_eq!(*app.appearance(), chosen);
     assert_eq!(app.mode(), ModePreference::Dark);
-    assert_eq!(app.appearance().frame, WindowFrame::TopRow);
+    assert_eq!(app.appearance().frame, WindowFrame::Own);
     assert_eq!(app.text_scale(), TextScale::from_percent(120).unwrap());
     assert!(app.reduce_motion());
     // The restarted window draws with them from its first frame.

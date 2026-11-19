@@ -523,7 +523,7 @@ fn shift_tab_round_a_page_with_many_accounts_reaches_the_last_account() {
     let mut harness = Harness::builder().with_size(vec2(1440.0, 900.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.state_mut().settings_mut().open_at(Section::Sending);
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "New message").focus();
+    harness.get_by_label("Command line").focus();
     harness.run();
     // Back from the window's first control comes round to its last, the page's: the last account's signature, scrolled
     // to.

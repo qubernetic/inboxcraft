@@ -24,7 +24,13 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn sized(theme: egui::Theme, size: egui::Vec2) -> Harness<'static, InboxApp> {
-    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    sized_in(theme, size, false)
+}
+
+/// [`sized`], in a native window that draws its own frame when `own`: the command line is the title bar.
+fn sized_in(theme: egui::Theme, size: egui::Vec2, own: bool) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.set_own_frame(own);
     let mut harness =
         Harness::builder().with_size(size).with_theme(theme).with_max_steps(12).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
@@ -444,13 +450,13 @@ fn a_press_beside_the_results_closes_them_and_reaches_nothing() {
     assert_eq!(harness.state().mailbox().selected(), selected);
 }
 
-/// The eight frames of the command line at 1440 × 900, each in dark and light: the field 1081 × 28 at 234,9 (the
-/// command line's 233,8 inside the window's 1 px edge), the results the field's width straight under it.
+/// The eight frames of the command line at 1440 × 900 in the app's own frame, each in dark and light: the field 1081 × 28
+/// at 234,9 (the command line's 233,8 inside the window's 1 px edge), the results the field's width straight under it.
 #[test]
 fn the_eight_frames_stand_where_the_design_draws_them() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         // rest: the hint and the key that opens it.
-        let mut harness = sized(theme, vec2(1440.0, 900.0));
+        let mut harness = sized_in(theme, vec2(1440.0, 900.0), true);
         // The harness lays the window 8 in: the frame's numbers are from the window's corner.
         let laid = super::shell::laid(&harness.ctx).unwrap();
         let corner = laid.command.min - egui::vec2(1.0, 1.0);

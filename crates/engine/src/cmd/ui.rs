@@ -43,7 +43,7 @@ pub(crate) const MOTION: CommandSpec =
 pub(crate) const FRAME: CommandSpec = CommandSpec {
     id: "ui.frame.set",
     class: Some(AgentClass::Safe),
-    summary: "Draw the window frame: the system's, controls in the top row, or a slim strip",
+    summary: "Draw the window frame: the system's, or the app's own with the command line as its title bar",
     run: frame,
 };
 
@@ -124,15 +124,14 @@ fn motion(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FrameParams {
-    /// `system`, `top_row` or `strip`.
+    /// `system` or `own`; `top_row` and `strip`, the own frames of older versions, read as `own`.
     frame: String,
 }
 
 fn frame(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: FrameParams = decode(FRAME.id, params)?;
-    let frame = WindowFrame::named(&params.frame).ok_or_else(|| EngineError::bad_params(FRAME.id, "frame is system, top_row or strip"))?;
-    let now = context.state().appearance;
-    Ok(changed(Appearance { frame, own_frame: Appearance::own_of(frame, Some(now.own_frame)), ..now }))
+    let frame = WindowFrame::read(&params.frame).ok_or_else(|| EngineError::bad_params(FRAME.id, "frame is system or own"))?;
+    Ok(changed(Appearance { frame, ..context.state().appearance }))
 }
 
 /// Reads `page` alone, by hand: a `page` that is no page's id is no page, and a refusal repeats nothing it was sent. The

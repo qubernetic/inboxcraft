@@ -903,11 +903,9 @@ fn body(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     // The head last: Tab comes into the composer at From and leaves it from Close.
     if place == Place::Docked {
         let mut child = ui.new_child(UiBuilder::new().max_rect(head_rect));
-        super::frame::beside(&mut child, theme, |ui| {
-            let rect = ui.max_rect();
-            ui.allocate_rect(rect, Sense::hover());
-            head(ui, theme, keymap, mailbox, composer, rect, place, &mut asked);
-        });
+        let rect = child.max_rect();
+        child.allocate_rect(rect, Sense::hover());
+        head(&mut child, theme, keymap, mailbox, composer, rect, place, &mut asked);
     } else {
         head(ui, theme, keymap, mailbox, composer, head_rect, place, &mut asked);
     }

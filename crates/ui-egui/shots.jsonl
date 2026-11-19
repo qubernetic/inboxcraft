@@ -33,8 +33,8 @@
 {"out": "docs/images/error-banner-light.png", "mode": "light", "open": {"folder": 4242}}
 {"out": "docs/images/error-banner-dark.png", "mode": "dark", "open": {"folder": 4242}}
 # The error banner in the app's own frame: under the title strip, beside the rail (#233).
-{"out": "docs/images/error-banner-strip-light.png", "mode": "light", "frame": "strip", "open": {"folder": 4242}}
-{"out": "docs/images/error-banner-strip-dark.png", "mode": "dark", "frame": "strip", "open": {"folder": 4242}}
+{"out": "docs/images/error-banner-strip-light.png", "mode": "light", "frame": "own", "open": {"folder": 4242}}
+{"out": "docs/images/error-banner-strip-dark.png", "mode": "dark", "frame": "own", "open": {"folder": 4242}}
 # The account picker open in a low window, so its list scrolls and shows its thumb (#233).
 {"out": "docs/images/account-picker-open-light.png", "mode": "light", "size": [1200, 600], "steps": [{"press": "Show mail of: mira@example.org"}]}
 {"out": "docs/images/account-picker-open-dark.png", "mode": "dark", "size": [1200, 600], "steps": [{"press": "Show mail of: mira@example.org"}]}

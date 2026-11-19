@@ -211,7 +211,7 @@ fn on_the_settings_a_key_with_ctrl_runs_nothing_of_the_mail_and_new_message_leav
     esc(&mut harness);
     assert!(!harness.state().command().results() && harness.state().settings().is_open(), "one Esc, the palette's");
     // New message, its button pressed, leaves the settings for the mail and begins a message.
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     harness.run();
     assert!(!harness.state().settings().is_open(), "New message leaves the settings");
@@ -227,21 +227,19 @@ fn on_the_settings_a_key_with_ctrl_runs_nothing_of_the_mail_and_new_message_leav
 }
 
 #[test]
-fn the_new_message_button_on_the_settings_begins_a_message_with_the_default_keys_by_a_press_and_by_activate() {
-    for activate in [false, true] {
-        let mut harness = harness(false);
-        open_settings(&mut harness);
-        let button = harness.get_by_role_and_label(Role::Button, "New message");
-        if activate {
-            button.click_accesskit();
-        } else {
-            button.click();
-        }
-        harness.run();
-        harness.run();
-        assert!(!harness.state().settings().is_open(), "activate {activate}: New message leaves the settings");
-        assert!(harness.state().composer().is_some(), "activate {activate}: and begins a message, its key C being bare");
-    }
+fn new_message_from_the_command_line_on_the_settings_begins_a_message() {
+    // The command line draws no New message control: `>` lists it, and from the settings it begins a message too.
+    let mut harness = harness(false);
+    open_settings(&mut harness);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    harness.state_mut().command_mut().set_text(">new message");
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.run();
+    assert!(!harness.state().settings().is_open(), "New message leaves the settings");
+    assert!(harness.state().composer().is_some(), "and begins a message");
 }
 
 #[test]
@@ -371,7 +369,7 @@ fn new_message_pressed_with_the_composer_in_front_keeps_its_draft_and_starts_no_
     harness.get_by_role_and_label(Role::MultilineTextInput, "Message text").type_text("Seeds on Friday");
     harness.run();
     let text = harness.state().composer().map(|composer| composer.text().to_owned());
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     harness.run();
     let composer = harness.state().composer().unwrap();

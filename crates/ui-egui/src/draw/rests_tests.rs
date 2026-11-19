@@ -132,7 +132,7 @@ fn hidden_list(width: f32) -> Harness<'static, InboxApp> {
     for id in [keymap::NEXT, keymap::DOWN, keymap::VIEW_LIST, keymap::DONE, keymap::UNDO] {
         assert!(harness.state().can_run(id), "{width}: {id} before");
     }
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     harness.run();
     assert!(harness.state().list_hidden, "{width}: the list hidden");
@@ -430,7 +430,7 @@ fn opening_the_held_back_message_rests_while_the_list_is_hidden() {
     harness.run();
     harness.run();
     assert!(harness.state().can_run(keymap::OPEN_HELD), "{width}: the held-back message can be opened");
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     harness.run();
     assert!(harness.state().list_hidden, "{width}: the list hidden");

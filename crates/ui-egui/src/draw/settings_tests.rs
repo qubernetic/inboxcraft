@@ -199,20 +199,13 @@ fn the_window_frame_row_runs_ui_frame_set() {
     harness.run();
     harness.get_by_role_and_label(egui::accesskit::Role::Button, "Settings").click();
     harness.run();
-    // The design's two frames: InboxCraft's own (the strip by default) and the desktop's.
+    // The design's two frames: InboxCraft's own (by default) and the desktop's.
     assert!(selected(&harness, "Own"), "the app's own frame by default");
     assert_eq!(press(&mut harness, "System"), "ui.frame.set");
     assert_eq!(harness.state().appearance().frame, WindowFrame::System);
     assert_eq!(press(&mut harness, "Own"), "ui.frame.set");
-    assert_eq!(harness.state().appearance().frame, WindowFrame::Strip, "Own brings back the strip, the own frame last on");
-    // With the top row on (set by its command), the desktop's frame and back bring back the top row: no own frame a
-    // person had is out of reach.
-    harness.state_mut().set_frame(WindowFrame::TopRow);
-    harness.run();
-    assert!(selected(&harness, "Own"), "the top row is the app's own frame");
-    assert_eq!(press(&mut harness, "System"), "ui.frame.set");
-    assert_eq!(press(&mut harness, "Own"), "ui.frame.set");
-    assert_eq!(harness.state().appearance().frame, WindowFrame::TopRow, "Own brings back the top row, the own frame last on");
+    assert_eq!(harness.state().appearance().frame, WindowFrame::Own);
+    assert!(selected(&harness, "Own"), "Own shows chosen again");
 }
 
 #[test]

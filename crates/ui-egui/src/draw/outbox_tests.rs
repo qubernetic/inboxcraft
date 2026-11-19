@@ -49,7 +49,7 @@ fn clock() -> FakeClock {
 
 /// Writes a message to Odile with `subject` in the composer, from the pane's New message.
 fn write(harness: &mut Harness<'static, InboxApp>, subject: &str) {
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(harness);
     harness.run();
     let app = harness.state_mut();
     let (Some(composer), mailbox) = app.composer_mut() else { panic!("no composer") };

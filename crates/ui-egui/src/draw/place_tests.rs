@@ -27,7 +27,7 @@ fn clock() -> Box<FakeClock> {
 /// The frames' window, 1440 × 900, in the app's own frame.
 fn window(mut app: InboxApp) -> Harness<'static, InboxApp> {
     app.set_own_frame(true);
-    app.set_frame(inboxcraft_engine::appearance::WindowFrame::Strip);
+    app.set_frame(inboxcraft_engine::appearance::WindowFrame::Own);
     let mut harness =
         Harness::builder().with_size(vec2(1440.0, 900.0)).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
