@@ -13,6 +13,7 @@
 //! - [`checkbox`]: a filled check box and a radio button.
 //! - [`tooltip`]: the bubble with the action's name and its key chip.
 //! - [`key`]: the chip of a key, its words read from a shortcut.
+//! - [`key_hint`]: a key chip and the word of its action, in the status line.
 //! - [`tag`]: a short mark in a 1 px box, and the coming-soon mark.
 //! - [`label`]: the bracketed section label and the written form of a count.
 //! - [`avatar`]: a person's initials, `muted` on a `stage` square.
@@ -67,6 +68,7 @@ pub mod hover;
 pub mod icon;
 pub mod invite_card;
 pub mod key;
+pub mod key_hint;
 pub mod label;
 pub mod later_row;
 pub mod mail_row;
