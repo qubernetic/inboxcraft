@@ -1359,22 +1359,56 @@ fn delete_and_more_stay_in_a_narrow_reader_at_130_percent() {
 }
 
 #[test]
-fn the_why_line_is_coming_soon_and_says_no_reason_of_its_own() {
+fn the_why_line_says_the_engines_reasons_asked_once_for_many_frames() {
     let fetch = Recorder::default();
-    let harness = opened(&fetch, None, "Photos from the coast walk");
-    // The engine will say why a message is here; until then the line is its row with the tag, and no reason.
-    let line = harness.get_by_label("Why here: coming soon").rect();
-    let tag = harness.query_all_by_label("coming soon").map(|node| node.rect()).find(|rect| line.contains_rect(*rect));
-    assert!(tag.is_some_and(|tag| tag.left() - line.left() == 83.0), "the tag in the reasons' place: {tag:?} {line:?}");
-    let said: Vec<String> = harness
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    let reasons = harness.state().reader.why().to_vec();
+    assert!(!reasons.is_empty(), "the engine says why");
+    let asked = harness.state().reader.asked_why;
+    let runs = harness.state().mailbox.runs();
+    for _ in 0..20 {
+        harness.step();
+    }
+    assert_eq!(harness.state().reader.asked_why, asked, "asked when the message opened, never per frame");
+    assert_eq!(harness.state().mailbox.runs(), runs, "no command per frame");
+    // The line says them, heard as one sentence, under the facts and over the body.
+    let name = crate::component::why_line::spoken(&reasons);
+    let line = harness.get_by_label(&name).rect();
+    let subject = harness.get_by_label("Photos from the coast walk").rect();
+    assert!(line.top() >= subject.bottom(), "{line:?} {subject:?}");
+    // Nothing of the message's own text is in it.
+    for made_up in ["Photos", "coast walk"] {
+        assert!(!name.contains(made_up), "{made_up}: {name}");
+    }
+}
+
+#[test]
+fn with_no_reason_the_head_keeps_no_line_for_it() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    let name = crate::component::why_line::spoken(harness.state().reader.why());
+    let line = harness.get_by_label(&name).rect();
+    let tools_before: Vec<egui::Rect> =
+        harness.query_all_by_role(Role::Button).map(|node| node.rect()).filter(|rect| rect.bottom() <= line.top()).collect();
+    // The first thing the reader shows under the line.
+    let first = harness
         .root()
         .children_recursive()
-        .filter(|node| node.accesskit_node().bounding_box().is_some() && line.contains_rect(node.rect()))
-        .filter_map(|node| node.accesskit_node().label())
-        .collect();
-    for made_up in ["grouped as", "new sender", "held by the screener", "in INBOX"] {
-        assert!(said.iter().all(|label| !label.contains(made_up)), "{made_up}: {said:?}");
-    }
+        .filter(|node| node.accesskit_node().bounding_box().is_some())
+        .filter_map(|node| node.accesskit_node().label().map(|label| (label, node.rect())))
+        .filter(|(_, rect)| rect.top() >= line.bottom() && rect.left() >= line.left() - 0.5 && rect.right() <= line.right() + 0.5)
+        .min_by(|a, b| a.1.top().total_cmp(&b.1.top()));
+    let (first, at) = first.expect("something under the line");
+    // The engine has nothing to say (the message is gone): no line, the head above it unmoved, what was below moves up.
+    harness.state_mut().reader.set_why(Vec::new());
+    harness.run();
+    assert!(harness.query_by_label(&name).is_none(), "no line");
+    assert!(harness.query_all_by_label_contains("Why here").next().is_none(), "no line at all");
+    let tools_after: Vec<egui::Rect> =
+        harness.query_all_by_role(Role::Button).map(|node| node.rect()).filter(|rect| rect.bottom() <= line.top()).collect();
+    assert_eq!(tools_before, tools_after, "the head above stays where it was");
+    let now = harness.get_by_label(&first).rect();
+    assert!(now.top() <= at.top() - line.height(), "{first:?} moves up by the line at least: {now:?} {at:?}");
 }
 
 /// Tab reaches every control of the scene, and the scene rests (asks for no repaint) once it is still.
