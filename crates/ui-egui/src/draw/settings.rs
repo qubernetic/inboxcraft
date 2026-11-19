@@ -73,6 +73,9 @@ const PAGE_LEAST: f32 = 520.0;
 /// The room under a page, in points.
 const PAGE_BOTTOM: f32 = 16.0;
 
+/// The room under the About page, in points.
+const ABOUT_BOTTOM: f32 = 24.0;
+
 /// How far a page's words stand in from its column, as far as a settings row's, in points.
 const INSET: f32 = 16.0;
 
@@ -942,7 +945,7 @@ fn in_the_background(ui: &mut Ui, theme: &Theme, settings: &Settings, desk: Desk
 
 /// Where the settings stand in `body`: the sections' column (232 wide, as the index) with the `line` hairline after it,
 /// and the page's column, 720 wide at most, 40 in from either side (down to 24 where the body is narrow), 24 under the
-/// top and 16 over the foot (the Shortcuts page's list runs to the foot). On whole points; never inverted, however small the body.
+/// top and 16 over the foot (the Shortcuts page's list runs to the foot, About keeps 24). On whole points; never inverted, however small the body.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Columns {
     /// The sections' column.
@@ -962,7 +965,11 @@ impl Columns {
         let nav_width = NAV.min((body.width() * 0.25).floor().max(body.width() - 1.0 - 2.0 * PAGE_X_LEAST - PAGE_LEAST)).max(0.0);
         let nav = Rect::from_min_size(body.min, vec2(nav_width, body.height()));
         let divider = nav.right();
-        let bottom = if shown == Section::Shortcuts { 0.0 } else { PAGE_BOTTOM };
+        let bottom = match shown {
+            Section::Shortcuts => 0.0,
+            Section::About => ABOUT_BOTTOM,
+            _ => PAGE_BOTTOM,
+        };
         let side = ((body.right() - divider - 1.0 - COLUMN) / 2.0).clamp(PAGE_X_LEAST, PAGE_X).floor();
         let left = divider + 1.0 + side;
         let room = Rect::from_min_max(

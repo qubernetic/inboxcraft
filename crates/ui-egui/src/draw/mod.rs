@@ -2989,6 +2989,9 @@ mod outbox_tests;
 #[path = "palette_tests.rs"]
 mod palette_tests;
 #[cfg(test)]
+#[path = "place_tests.rs"]
+mod place_tests;
+#[cfg(test)]
 #[path = "reader_html_tests.rs"]
 mod reader_html_tests;
 #[cfg(test)]
