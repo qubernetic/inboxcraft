@@ -13,7 +13,7 @@ use inboxcraft_model::Role;
 use inboxcraft_time::Timestamp;
 use serde_json::{Value, json};
 
-use crate::calendar::{Calendar, Day};
+use crate::calendar::{Day, EventRow, Moment};
 use crate::mailbox::{Mailbox, SendState, month_text};
 use crate::tr;
 
@@ -281,7 +281,7 @@ fn length(minutes: i64) -> String {
 
 /// Home as the mailbox has it now, read through `safe` commands only: the counts from the inbox's unread mail, the
 /// screener's senders, `mail.list` of the snoozed mail and the outbox; the drafts through `compose.list`; the rest of
-/// today through `calendar.list` and `event.list`. A refused read leaves its part empty (a count `None`), never made
+/// today through `event.list` of today and tomorrow and `calendar.list`. A refused read leaves its part empty (a count `None`), never made
 /// up. Runs commands: call it when the mailbox changed, not every frame.
 pub fn build(mailbox: &mut Mailbox) -> Home {
     if mailbox.accounts().is_empty() {
@@ -297,9 +297,11 @@ pub fn build(mailbox: &mut Mailbox) -> Home {
     let outbox = u64::try_from(mailbox.outbox().len()).ok();
     let refused = u64::try_from(mailbox.outbox().iter().filter(|row| matches!(row.state, SendState::Refused { .. })).count()).unwrap_or(u64::MAX);
     let (drafts, drafts_total) = drafts(mailbox);
-    let mut calendar = Calendar::default();
-    calendar.refresh(mailbox);
-    let (agenda, agenda_total, tomorrow) = agenda(&calendar);
+    let now_moment = civil.and_then(|civil| {
+        let day = Day::new(civil.year(), civil.month(), civil.day())?;
+        Some(Moment { day, minute: u16::from(civil.hour()).saturating_mul(60).saturating_add(u16::from(civil.minute())) })
+    });
+    let (agenda, agenda_total, tomorrow) = now_moment.map(|now| agenda(mailbox, now)).unwrap_or_default();
     let name = mailbox.accounts().iter().find_map(|account| account.name.split_whitespace().next().map(kept));
     let date = civil.map_or_else(
         || tr!("Today").to_owned(),
@@ -380,35 +382,60 @@ fn draft_line(mailbox: &Mailbox, row: &Value) -> Option<DraftLine> {
     Some(DraftLine { id, subject, to, when })
 }
 
-/// The rest of today in `calendar` (timed events of today that have not ended, by their start): the first [`AGENDA`]
-/// lines, how many in all, and tomorrow's first timed event when nothing is left today.
-fn agenda(calendar: &Calendar) -> (Vec<AgendaLine>, u64, Option<(String, String)>) {
-    let today = calendar.today();
-    let now = calendar.now();
-    let mut left: Vec<_> =
-        calendar.events().filter(|event| !event.is_block() && event.first == today && now.is_none_or(|now| event.end > now)).collect();
+/// The rest of today and tomorrow's first event, read with one `event.list` of the two days Home needs (today and
+/// tomorrow on the owner's clock, a day either side because the engine counts from UTC midnights) and one
+/// `calendar.list` for the accounts' colours; nothing when a read was refused (Home puts no error in the window). The
+/// first [`AGENDA`] lines, how many in all, and tomorrow's first timed event when nothing is left today.
+///
+/// An event belongs to the day it starts on: a timed event of today that has not ended is the rest of today, also when
+/// it runs past midnight; tomorrow's first is the first timed event that starts tomorrow. One that started before
+/// today is neither, since its time would read as a time of today. All-day events are not lines.
+fn agenda(mailbox: &mut Mailbox, now: Moment) -> (Vec<AgendaLine>, u64, Option<(String, String)>) {
+    let (today, next) = (now.day, now.day.plus(1));
+    let params = json!({ "from": today.plus(-1).iso_midnight(), "to": today.plus(3).iso_midnight() });
+    let Ok(answer) = mailbox.run("event.list", &params) else { return (Vec::new(), 0, None) };
+    let rows = answer.get("events").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let timed: Vec<EventRow> =
+        rows.iter().filter_map(EventRow::read).filter(|event| !event.all_day && event.start.day >= today && event.start.day <= next).collect();
+    let mut left: Vec<&EventRow> = timed.iter().filter(|event| event.start.day == today && event.end > now).collect();
     left.sort_by_key(|event| (event.start, event.id));
     let total = u64::try_from(left.len()).unwrap_or(u64::MAX);
+    let places = account_places(mailbox);
     let lines = left
         .iter()
         .take(AGENDA)
         .map(|event| {
-            let minutes = i64::from(event.end.minute) - i64::from(event.start.minute) + event.end.day.since(event.start.day).saturating_mul(1_440);
+            let minutes = (i64::from(event.end.minute) - i64::from(event.start.minute))
+                .saturating_add(event.end.day.since(event.start.day).saturating_mul(1_440));
             let detail = [kept(&event.location), length(minutes.max(0))].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" · ");
-            AgendaLine { time: event.start.clock(), title: kept(&event.summary), detail, account: calendar.account_place(event.calendar) }
+            let account = places.iter().find(|(calendar, _)| *calendar == event.calendar).map_or(0, |(_, place)| *place);
+            AgendaLine { time: event.start.clock(), title: kept(&event.summary), detail, account }
         })
         .collect();
     let tomorrow = (total == 0)
         .then(|| {
-            let next = today.plus(1);
-            calendar
-                .events()
-                .filter(|event| !event.is_block() && event.first == next)
+            timed
+                .iter()
+                .filter(|event| event.start.day == next)
                 .min_by_key(|event| (event.start, event.id))
                 .map(|event| (event.start.clock(), kept(&event.summary)))
         })
         .flatten();
     (lines, total, tomorrow)
+}
+
+/// Each calendar's account's place among the accounts (which picks an agenda bar's colour), from `calendar.list`.
+fn account_places(mailbox: &mut Mailbox) -> Vec<(u64, u64)> {
+    let Ok(answer) = mailbox.run("calendar.list", &json!({})) else { return Vec::new() };
+    let rows = answer.get("calendars").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    rows.iter()
+        .filter_map(|row| {
+            let calendar = row.get("id").and_then(Value::as_u64)?;
+            let account = row.get("account").and_then(Value::as_u64)?;
+            let place = mailbox.accounts().iter().find(|held| held.id == account).map_or(0, |held| u64::try_from(held.index).unwrap_or(0));
+            Some((calendar, place))
+        })
+        .collect()
 }
 
 /// Home as the design file draws it in `state` (`today`, `nothing-to-do`, `overflow-counts`, `first-run`,

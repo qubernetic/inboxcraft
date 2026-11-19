@@ -85,6 +85,89 @@ fn home_asks_compose_list_for_the_drafts_it_shows_and_reads_the_total() {
     assert_eq!(build(&mut mailbox).drafts_total, total, "the total, not the rows answered");
 }
 
+/// The sample mailbox at `at` (an ISO 8601 time), in `offsets` with the list's clock at `offset`, the week rule's first
+/// day `first_day` (`week.set`).
+fn mailbox_at(at: &str, first_day: &str, offsets: Option<inboxcraft_time::OffsetTable>, offset: Option<i16>) -> Mailbox {
+    let clock = FakeClock::new(crate::mailbox::parse_date(at).unwrap());
+    let mut session = mail::session(Box::new(clock.clone())).unwrap();
+    if let Some(offsets) = offsets {
+        session.set_offsets(Box::new(offsets));
+    }
+    let mut mailbox = Mailbox::new(session, Box::new(clock));
+    if let Some(minutes) = offset {
+        mailbox.set_offset(inboxcraft_time::Offset::from_minutes(minutes).unwrap());
+    }
+    mailbox.run("week.set", &json!({ "first_day": first_day, "first_week": "first_four_day_week" })).unwrap();
+    mailbox
+}
+
+/// Makes an event `summary` from `start` to `end` in the first calendar.
+fn event(mailbox: &mut Mailbox, summary: &str, start: &str, end: &str) {
+    let calendars = mailbox.run("calendar.list", &json!({})).unwrap();
+    let calendar = calendars["calendars"][0]["id"].as_u64().unwrap();
+    mailbox.run("event.create", &json!({ "calendar": calendar, "summary": summary, "start": start, "end": end })).unwrap();
+}
+
+#[test]
+fn tomorrow_starts_with_its_first_event_on_every_day_of_every_week_rule() {
+    // 9 to 15 November 2026 is Monday to Sunday: each day is the last of the week under one of the presets (Sunday
+    // under a Monday start, Saturday under a Sunday start, Friday under a Saturday start).
+    for first_day in ["monday", "sunday", "saturday"] {
+        for date in 9..=15 {
+            let mut mailbox = mailbox_at(&format!("2026-11-{date:02}T23:50:00Z"), first_day, None, None);
+            let next = date + 1;
+            event(&mut mailbox, "Early kiln", &format!("2026-11-{next:02}T05:00:00Z"), &format!("2026-11-{next:02}T05:30:00Z"));
+            let home = build(&mut mailbox);
+            let at = format!("{first_day}, {date} November: {:?}", home.agenda);
+            assert_eq!(home.agenda_total, 0, "{at}");
+            assert_eq!(home.tomorrow, Some(("05:00".to_owned(), "Early kiln".to_owned())), "{at}");
+        }
+    }
+}
+
+#[test]
+fn an_event_across_midnight_is_today_s_where_it_starts_and_tomorrow_s_only_when_it_starts_then() {
+    // Tuesday 10 November, 22:00: an event from 23:00 to 01:00 is the rest of today, two hours long.
+    let mut mailbox = mailbox_at("2026-11-10T22:00:00Z", "monday", None, None);
+    event(&mut mailbox, "Night firing", "2026-11-10T23:00:00Z", "2026-11-11T01:00:00Z");
+    let home = build(&mut mailbox);
+    let line = home.agenda.iter().find(|line| line.title == "Night firing").unwrap_or_else(|| panic!("{:?}", home.agenda));
+    assert_eq!((line.time.as_str(), line.detail.as_str()), ("23:00", "2 h"));
+    // From the evening before, it is tomorrow's first: it starts tomorrow.
+    let mut mailbox = mailbox_at("2026-11-09T23:50:00Z", "monday", None, None);
+    event(&mut mailbox, "Night firing", "2026-11-10T03:00:00Z", "2026-11-10T04:00:00Z");
+    assert_eq!(build(&mut mailbox).tomorrow, Some(("03:00".to_owned(), "Night firing".to_owned())));
+    // One that started yesterday and ends tomorrow is neither the rest of today nor tomorrow's first.
+    let mut mailbox = mailbox_at("2026-11-10T23:50:00Z", "monday", None, None);
+    event(&mut mailbox, "Long firing", "2026-11-09T23:00:00Z", "2026-11-11T07:00:00Z");
+    event(&mut mailbox, "Early kiln", "2026-11-11T05:00:00Z", "2026-11-11T05:30:00Z");
+    let home = build(&mut mailbox);
+    assert!(home.agenda.iter().all(|line| line.title != "Long firing"), "{:?}", home.agenda);
+    assert_eq!(home.tomorrow, Some(("05:00".to_owned(), "Early kiln".to_owned())));
+}
+
+#[test]
+fn the_day_summer_time_starts_keeps_its_evening_and_its_tomorrow() {
+    // Sunday 29 March 2026: the clocks go from +01:00 to +02:00 at 01:00 UTC; the list's clock shows +02:00.
+    let change = inboxcraft_time::Timestamp::from_unix(1_774_746_000, 0).unwrap();
+    let zone = || {
+        inboxcraft_time::OffsetTable::new(inboxcraft_time::Offset::from_minutes(60).unwrap())
+            .with_change(change, inboxcraft_time::Offset::from_minutes(120).unwrap())
+    };
+    let mut mailbox = mailbox_at("2026-03-29T18:00:00Z", "monday", Some(zone()), Some(120));
+    event(&mut mailbox, "Late glaze", "2026-03-29T20:00:00Z", "2026-03-29T21:00:00Z");
+    event(&mut mailbox, "Early kiln", "2026-03-30T03:00:00Z", "2026-03-30T03:30:00Z");
+    let home = build(&mut mailbox);
+    assert!(home.date.contains("29 Mar"), "{}", home.date);
+    let line = home.agenda.iter().find(|line| line.title == "Late glaze").unwrap_or_else(|| panic!("{:?}", home.agenda));
+    assert_eq!((line.time.as_str(), line.detail.as_str()), ("22:00", "1 h"), "on the summer clock");
+    let mut mailbox = mailbox_at("2026-03-29T21:30:00Z", "monday", Some(zone()), Some(120));
+    event(&mut mailbox, "Early kiln", "2026-03-30T03:00:00Z", "2026-03-30T03:30:00Z");
+    let home = build(&mut mailbox);
+    assert_eq!(home.agenda_total, 0, "{:?}", home.agenda);
+    assert_eq!(home.tomorrow, Some(("05:00".to_owned(), "Early kiln".to_owned())));
+}
+
 #[test]
 fn before_the_first_account_home_is_the_first_run() {
     let store = inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default());
