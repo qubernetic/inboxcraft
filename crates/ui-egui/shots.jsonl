@@ -325,3 +325,8 @@
 {"out": "docs/images/home-place-1000-dark.png", "mode": "dark", "size": [1000, 760], "home_place": true}
 {"out": "docs/images/home-place-130-light.png", "mode": "light", "size": [1440, 900], "text_scale": 130, "home_place": true}
 {"out": "docs/images/home-place-130-dark.png", "mode": "dark", "size": [1440, 900], "text_scale": 130, "home_place": true}
+# The drafts place (#314): the kept drafts as draft rows, newest first, and its empty state.
+{"out": "docs/images/drafts-filled-light.png", "mode": "light", "size": [1440, 900], "drafts": "filled"}
+{"out": "docs/images/drafts-filled-dark.png", "mode": "dark", "size": [1440, 900], "drafts": "filled"}
+{"out": "docs/images/drafts-empty-light.png", "mode": "light", "size": [1440, 900], "drafts": "empty"}
+{"out": "docs/images/drafts-empty-dark.png", "mode": "dark", "size": [1440, 900], "drafts": "empty"}
