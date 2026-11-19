@@ -476,3 +476,56 @@ fn tab_and_shift_tab_reach_the_server_s_row_after_the_last_draft() {
 fn keyed_draft(harness: &Harness<'static, InboxApp>) -> u64 {
     harness.state().mailbox().drafts().map(|draft| draft.id).next().unwrap()
 }
+
+#[test]
+fn a_press_on_the_server_s_row_in_the_empty_state_opens_its_folder() {
+    let mut harness = drafts_place(sample_app(), egui::Theme::Light);
+    let folder = server_folder(&harness);
+    harness.get_by_label("No drafts.");
+    harness.get_by_label(SERVER_ROW).click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::Folder(folder), "the press opens the folder");
+}
+
+#[test]
+fn an_empty_drafts_folder_on_the_server_has_no_row() {
+    let mut app = sample_app();
+    let account = app.mailbox().accounts().first().map(|account| account.id).unwrap();
+    let folder = app.mailbox().folders_of(account).iter().find(|folder| folder.role == Some(Folder::Drafts)).map(|folder| folder.id).unwrap();
+    let listed = app.mailbox_mut().run("mail.list", &json!({ "folder": folder })).unwrap();
+    let ids: Vec<u64> = listed["messages"].as_array().unwrap().iter().filter_map(|message| message["id"].as_u64()).collect();
+    assert!(!ids.is_empty(), "the sample's Drafts folder holds mail");
+    for id in ids {
+        app.mailbox_mut().run("mail.delete", &json!({ "id": id })).unwrap();
+    }
+    app.mailbox_mut().refresh();
+    draft(&mut app, "", "Kiln rota", "");
+    let harness = drafts_place(app, egui::Theme::Dark);
+    row(&harness, "Kiln rota");
+    assert!(harness.query_by_label_contains("Drafts folder on the server").is_none(), "an empty folder has no row");
+}
+
+#[test]
+fn over_an_account_without_a_drafts_folder_j_past_the_last_draft_keeps_it_keyed() {
+    let mut app = sample_app();
+    let studio = app.mailbox().accounts().get(1).map(|account| account.id).unwrap();
+    assert!(
+        !app.mailbox().folders_of(studio).iter().any(|folder| folder.role == Some(Folder::Drafts)),
+        "the sample's second account has no Drafts folder"
+    );
+    let mut drafted = Vec::new();
+    for subject in ["Kiln rota", "Glaze order"] {
+        let mailbox = app.mailbox_mut();
+        let id = mailbox.run("compose.new", &json!({ "account": studio })).unwrap().get("id").and_then(Value::as_u64).unwrap();
+        mailbox.run("compose.update", &json!({ "id": id, "subject": subject })).unwrap();
+        drafted.push(id);
+    }
+    app.mailbox_mut().narrow(Some(studio));
+    let mut harness = drafts_place(app, egui::Theme::Dark);
+    assert_eq!(harness.state().mailbox().server_drafts().count(), 0, "no server's row");
+    for _ in 0..3 {
+        key(&mut harness, Key::J);
+    }
+    assert_eq!(keyed(&harness), drafted.first().copied(), "the oldest draft, the last row, stays keyed at the end");
+}
