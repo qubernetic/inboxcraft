@@ -523,3 +523,19 @@ fn on_a_pane_the_field_shows_at_20_percent() {
     harness.step();
     assert!(self::texts(&harness).iter().all(|text| text.opacity_factor == 1.0));
 }
+
+#[test]
+fn after_the_fonts_change_every_row_is_drawn_with_the_new_atlas() {
+    // egui drops its glyph atlas when the fonts change (or the atlas fills up): a galley kept from before would draw
+    // the wrong glyphs. Every painted row is what the current fonts lay out for its text.
+    let mut harness = harness(with_emblem(Level::Off));
+    harness.ctx.set_fonts(egui::FontDefinitions::default());
+    harness.run_steps(3);
+    let painted = texts(&harness);
+    assert!(painted.len() > 40);
+    for text in painted {
+        let fresh = harness.ctx.fonts_mut(|fonts| fonts.layout_job((*text.galley.job).clone()));
+        let meshes = |galley: &egui::Galley| galley.rows.iter().map(|row| row.visuals.mesh.clone()).collect::<Vec<_>>();
+        assert_eq!(meshes(&text.galley), meshes(&fresh), "a row drawn with glyphs of the old atlas");
+    }
+}

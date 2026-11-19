@@ -23,9 +23,9 @@
 //! changes its glyph until it has cooled.
 //!
 //! The cells are built once, at the first [`show`], for the rect, the seed, the text scale, the pixels per point and
-//! the emblem's area, and again only when one of these changes; the row texts are laid out once for the theme's
-//! mode. A frame at rest paints the cached row texts (one text a row) and lays out nothing; while cells are warm,
-//! only the rows that hold one are laid out again, and a repaint is asked for only while a cell is cooling. The field
+//! the emblem's area, and again only when one of these changes; the row texts are built once for the theme's mode.
+//! A frame at rest paints them (one text a row, each found again in egui's galley cache) and builds nothing; while
+//! cells are warm, only the rows that hold one are built again, and a repaint is asked for only while a cell cools. The field
 //! takes no click, no key and no focus, and shows nothing to a screen reader: it only paints.
 
 use std::collections::BTreeMap;
@@ -218,14 +218,16 @@ struct Cells {
     emblem_at: Option<Pos2>,
 }
 
-/// The row texts laid out for one mode and one build.
+/// The row texts built for one mode and one build, as jobs: egui's galley cache turns a job it laid out last frame
+/// into its galley again without laying it out. A galley is never kept across frames, since egui may drop its glyph
+/// atlas at the start of any frame and a kept galley would point into the old one.
 #[derive(Debug, Clone)]
 struct Look {
     mode: Mode,
     ppp: f32,
     build: u32,
-    rows: Vec<Option<Arc<Galley>>>,
-    emblem_rows: Vec<Option<Arc<Galley>>>,
+    rows: Vec<Option<LayoutJob>>,
+    emblem_rows: Vec<Option<LayoutJob>>,
 }
 
 /// A character field: its cells, the emblem on it and the cells warm under the pointer. Make it once and keep it;
@@ -245,7 +247,7 @@ pub struct Field {
     flips: u32,
     /// How many times the cells were built.
     builds: u32,
-    /// How many row texts were laid out.
+    /// How many row texts were built.
     layouts: u64,
 }
 
@@ -285,8 +287,8 @@ impl Field {
         self.builds = self.builds.saturating_add(1);
     }
 
-    /// Lays the row texts out again if they were laid out for another build, mode or pixels per point.
-    fn lay_out(&mut self, ui: &Ui, theme: &Theme, ppp: f32) {
+    /// Builds the row texts again if they were built for another build, mode or pixels per point.
+    fn lay_out(&mut self, theme: &Theme, ppp: f32) {
         let Some(cells) = &self.cells else { return };
         let fresh = self.look.as_ref().is_some_and(|look| look.mode == theme.mode && look.ppp == ppp && look.build == self.builds);
         if fresh {
@@ -297,7 +299,7 @@ impl Field {
             .map(|row| {
                 let job = field_row(cells, row, &[], theme)?;
                 layouts = layouts.saturating_add(1);
-                Some(ui.painter().layout_job(job))
+                Some(job)
             })
             .collect();
         let emblem_rows = match (&self.emblem, cells.emblem_at) {
@@ -305,7 +307,7 @@ impl Field {
                 .map(|row| {
                     let job = emblem_row(emblem, row, &[], theme)?;
                     layouts = layouts.saturating_add(1);
-                    Some(ui.painter().layout_job(job))
+                    Some(job)
                 })
                 .collect(),
             _ => Vec::new(),
@@ -382,7 +384,7 @@ impl Field {
         self.warm.values().any(|warm| warm.left.is_some())
     }
 
-    /// Paints the cells: the cached row texts, and the rows that hold a warm cell laid out again.
+    /// Paints the cells: the row texts built before, and the rows that hold a warm cell built again.
     fn paint(&mut self, ui: &Ui, theme: &Theme, opts: Opts) {
         let (Some(cells), Some(look)) = (&self.cells, &self.look) else { return };
         let clip = cells.rect.intersect(ui.clip_rect());
@@ -406,8 +408,8 @@ impl Field {
             warm.extend(self.warm.range(Spot::Field(first)..Spot::Field(end)).map(|(spot, warm)| (spot_index(*spot) - first, *warm)));
             let at = pos2(cells.origin.x, row_top(cells, row));
             if warm.is_empty() {
-                if let Some(Some(galley)) = look.rows.get(row) {
-                    text(at, Arc::clone(galley));
+                if let Some(Some(job)) = look.rows.get(row) {
+                    text(at, painter.layout_job(job.clone()));
                 }
             } else if let Some(job) = field_row(cells, row, &warm, theme) {
                 layouts = layouts.saturating_add(1);
@@ -422,8 +424,8 @@ impl Field {
                 warm.extend(self.warm.range(Spot::Emblem(first)..Spot::Emblem(end)).map(|(spot, warm)| (spot_index(*spot) - first, *warm)));
                 let at = pos2(corner.x, floor_px(corner.y + row as f32 * EMBLEM_CELL.y, cells.ppp));
                 if warm.is_empty() {
-                    if let Some(Some(galley)) = look.emblem_rows.get(row) {
-                        text(at, Arc::clone(galley));
+                    if let Some(Some(job)) = look.emblem_rows.get(row) {
+                        text(at, painter.layout_job(job.clone()));
                     }
                 } else if let Some(job) = emblem_row(emblem, row, &warm, theme) {
                     layouts = layouts.saturating_add(1);
@@ -442,7 +444,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, field: &mut Field, rect: Rect, level: Le
     let ctx = ui.ctx().clone();
     let ppp = ctx.pixels_per_point();
     field.build(rect, theme.text_scale, opts.emblem, ppp);
-    field.lay_out(ui, theme, ppp);
+    field.lay_out(theme, ppp);
     let (now, pointer) = ui.input(|input| (input.time, input.pointer.hover_pos()));
     field.update(now, pointer, level, opts.on_home);
     if field.cooling() {
