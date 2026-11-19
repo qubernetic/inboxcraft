@@ -88,8 +88,9 @@ fn a_kept_frame_of_an_older_version_reads_as_the_own_frame_and_junk_as_the_defau
         assert!(appearance.to_value().get("own_frame").is_none(), "{kept}");
     }
     for junk in [json!(3), json!(null), json!("Strip"), json!("top_row "), json!("x".repeat(10_000)), json!(["own"])] {
-        let appearance = Appearance::from_value(&json!({ "theme": "light", "frame": junk }));
-        assert_eq!((appearance.theme, appearance.frame), (ThemeMode::Light, WindowFrame::Own), "{junk}");
+        // A junk frame costs only the frame: the theme and the text size kept beside it are read as they are.
+        let appearance = Appearance::from_value(&json!({ "theme": "dark", "text_scale": 110, "frame": junk }));
+        assert_eq!((appearance.theme, appearance.text_scale, appearance.frame), (ThemeMode::Dark, 110, WindowFrame::Own), "{junk}");
     }
 }
 
