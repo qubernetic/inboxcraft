@@ -30,7 +30,7 @@ use crate::component::button::{LinkSize, TextButton, link_sized};
 use crate::component::field;
 use crate::component::key::{Chip, ChipState};
 use crate::component::label::section_label;
-use crate::component::segmented::{segmented, segmented_for};
+use crate::component::segmented::{segmented, segmented_again, segmented_for};
 use crate::component::settings_row::{page as on_page, settings_row, settings_row_soon_with};
 use crate::component::slider;
 use crate::component::switch::switch;
@@ -444,7 +444,9 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, level: crate::mo
         // computer's wish for less motion shows Off).
         let levels = LEVELS.map(|level| (level, motion_name(level), f.button));
         settings_row(ui, theme, tr!("Motion"), Some(motion_help(level)), |ui| {
-            if let Some(chosen) = segmented_for(ui, theme, &levels, level, Some(tr!("Motion"))) {
+            // Until the owner chooses, a press on the level shown chooses it; once chosen, that press asks nothing.
+            let pressed = segmented_again(ui, theme, &levels, level, Some(tr!("Motion")));
+            if let Some(chosen) = pressed.filter(|chosen| *chosen != level || !current.motion_chosen()) {
                 asked = Some(Asked::Motion(chosen));
             }
         });

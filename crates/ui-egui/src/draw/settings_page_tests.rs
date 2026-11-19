@@ -588,6 +588,40 @@ fn the_computer_s_wish_for_less_motion_shows_off_until_the_owner_chooses() {
 }
 
 #[test]
+fn a_press_on_the_level_shown_records_it_as_the_owner_s_choice_once() {
+    use crate::motion::{Level, level, set_system_wish};
+    // The computer asks for less motion: the page shows Off, not chosen; a press on Off chooses it, so the window
+    // stays at Off when the wish clears.
+    let mut harness = appearance_page();
+    set_system_wish(&harness.ctx, Some(true));
+    harness.run();
+    assert!(chosen(&harness, "Off for Motion") && !harness.state().appearance().motion_chosen());
+    harness.get_by_label("Off for Motion").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().last_run(), Some("ui.motion.set"));
+    assert!(harness.state().appearance().motion_chosen(), "the level shown is now the owner's");
+    set_system_wish(&harness.ctx, Some(false));
+    harness.run();
+    assert_eq!(level(&harness.ctx), Level::Off, "the owner's Off holds without the wish");
+    // No wish: the default Reduced, pressed, is chosen; a later wish no longer gives Off.
+    let mut fresh = appearance_page();
+    fresh.get_by_label("Reduced for Motion").click();
+    fresh.run();
+    assert!(fresh.state().appearance().motion_chosen());
+    set_system_wish(&fresh.ctx, Some(true));
+    fresh.run();
+    assert_eq!(level(&fresh.ctx), Level::Reduced);
+    // Chosen already, a press on the level shown asks for nothing.
+    fresh.get_by_role_and_label(Role::RadioButton, "Light").click();
+    fresh.run();
+    let before = fresh.state().mailbox().last_run();
+    assert_ne!(before, Some("ui.motion.set"));
+    fresh.get_by_label("Reduced for Motion").click();
+    fresh.run();
+    assert_eq!(fresh.state().mailbox().last_run(), before, "a press on the chosen level runs nothing");
+}
+
+#[test]
 fn text_130_and_the_system_frame_stand_as_their_frames() {
     // `settings-appearance/text-130`: the handle on the last tick, the rows still in order.
     let mut harness = appearance_page();
