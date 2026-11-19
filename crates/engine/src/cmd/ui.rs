@@ -4,11 +4,14 @@
 //! `ui.*.set`: the appearance choices, one command each, all `safe`: they change how the window looks and nothing
 //! that leaves the computer. Each answers the whole [`Appearance`] after the change; the front end draws with it and
 //! keeps it on disk.
+//!
+//! `ui.motion.set` takes `level` (`full`, `reduced` or `off`); the older `reduce` (`on`, `off` or `system`) still
+//! answers for one release, and `level` wins when both are given.
 
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::appearance::{Appearance, Motion, TEXT_SCALES, ThemeMode, WindowFrame};
+use crate::appearance::{Appearance, MotionLevel, TEXT_SCALES, ThemeMode, WindowFrame};
 use crate::params::decode;
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
@@ -17,7 +20,7 @@ pub(crate) const COMMANDS: &[CommandSpec] = &[FRAME, MOTION, TEXT_SCALE, THEME];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["mode", "percent", "reduce", "frame"];
+pub(crate) const FIELDS: &[&str] = &["mode", "percent", "level", "reduce", "frame"];
 
 /// `ui.theme.set`: light, dark or the system's.
 pub(crate) const THEME: CommandSpec =
@@ -27,9 +30,9 @@ pub(crate) const THEME: CommandSpec =
 pub(crate) const TEXT_SCALE: CommandSpec =
     CommandSpec { id: "ui.text_scale.set", class: Some(AgentClass::Safe), summary: "Draw every text at 90 to 130 per cent", run: text_scale };
 
-/// `ui.motion.set`: reduced motion.
+/// `ui.motion.set`: how much the window moves.
 pub(crate) const MOTION: CommandSpec =
-    CommandSpec { id: "ui.motion.set", class: Some(AgentClass::Safe), summary: "Reduce motion, let it run, or follow the system", run: motion };
+    CommandSpec { id: "ui.motion.set", class: Some(AgentClass::Safe), summary: "Let the window move fully, calmly or not at all", run: motion };
 
 /// `ui.frame.set`: who draws the window's frame.
 pub(crate) const FRAME: CommandSpec = CommandSpec {
@@ -75,19 +78,34 @@ fn text_scale(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineEr
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MotionParams {
-    /// `on`, `off` or `system`.
-    reduce: String,
+    /// `full`, `reduced` or `off`.
+    level: Option<String>,
+    /// Deprecated, for one release: `on` (off), `off` (full) or `system` (the default level, not chosen).
+    reduce: Option<String>,
+}
+
+/// The level and whether the owner chose it, from `ui.motion.set`'s parameters: `level` when given, else the old
+/// `reduce`. Either one that is not one of its words is refused, even beside a good `level`.
+fn motion_level(params: &MotionParams) -> Result<(MotionLevel, bool), EngineError> {
+    let refused = |what| EngineError::bad_params(MOTION.id, what);
+    let level = params.level.as_deref().map(|level| MotionLevel::named(level).ok_or_else(|| refused("level is full, reduced or off"))).transpose()?;
+    let old = params
+        .reduce
+        .as_deref()
+        .map(|reduce| match reduce {
+            "on" => Ok((MotionLevel::Off, true)),
+            "off" => Ok((MotionLevel::Full, true)),
+            "system" => Ok((MotionLevel::Reduced, false)),
+            _ => Err(refused("reduce is on, off or system")),
+        })
+        .transpose()?;
+    level.map(|level| (level, true)).or(old).ok_or_else(|| refused("level is full, reduced or off"))
 }
 
 fn motion(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: MotionParams = decode(MOTION.id, params)?;
-    let motion = match params.reduce.as_str() {
-        "on" => Motion::Reduce,
-        "off" => Motion::Full,
-        "system" => Motion::System,
-        _ => return Err(EngineError::bad_params(MOTION.id, "reduce is on, off or system")),
-    };
-    Ok(changed(Appearance { motion, ..context.state().appearance }))
+    let (level, chosen) = motion_level(&params)?;
+    Ok(changed(context.state().appearance.with_motion(level, chosen)))
 }
 
 #[derive(Deserialize)]

@@ -1256,3 +1256,90 @@ fn detect_says_when_it_replaced_an_encryption_the_owner_picked() {
     let found = onboarding.found().unwrap();
     assert_eq!(found.encryption_set, [Some(Security::Tls), None], "the IMAP pick was replaced; the outgoing one was Detect's already");
 }
+
+#[test]
+fn the_form_says_its_servers_come_from_an_earlier_detect_only_while_they_do() {
+    let first = found_at("imap.first.example.org", Some("smtp.first.example.org"), "a@first.example.org");
+    let (mut onboarding, detect) = detecting(vec![first.clone(), first]);
+    assert!(!onboarding.detect_older(), "nothing detected yet");
+    detect_now(&mut onboarding, &detect, "a@first.example.org");
+    assert!(!onboarding.detect_older(), "Detect answered for the address in the form");
+    // The owner changes the address: the servers below are the earlier answer's.
+    onboarding.form_mut().address = "b@second.example.org".to_owned();
+    assert!(onboarding.detect_older());
+    // Spaces around the same address are no change: Detect asks about the trimmed address.
+    onboarding.form_mut().address = " a@first.example.org ".to_owned();
+    assert!(!onboarding.detect_older());
+    onboarding.form_mut().address = "b@second.example.org".to_owned();
+    // A server field edited by hand ends it: the IMAP row's port, then the outgoing row's encryption alone.
+    onboarding.form_mut().port = "1993".to_owned();
+    assert!(!onboarding.detect_older(), "the IMAP port typed by hand");
+    onboarding.form_mut().port = String::new();
+    let was = onboarding.form().port.clone();
+    assert_eq!(was, "", "the row as Detect left it but its port");
+    onboarding.form_mut().port = "993".to_owned();
+    assert!(onboarding.detect_older(), "the row as Detect put it again");
+    onboarding.form_mut().smtp_security = Some(Security::StartTls);
+    assert!(!onboarding.detect_older(), "the outgoing encryption picked by hand");
+    onboarding.form_mut().smtp_security = Some(Security::Tls);
+    assert!(onboarding.detect_older());
+    // Detect runs again: while it runs and after it answered for the address now in the form, nothing is said.
+    onboarding.detect();
+    assert!(!onboarding.detect_older(), "while Detect runs");
+    detect.answer();
+    assert!(onboarding.poll());
+    assert!(!onboarding.detect_older(), "Detect answered for the new address");
+}
+
+#[test]
+fn a_form_filled_by_hand_never_says_its_servers_come_from_detect() {
+    let mut onboarding = onboarding(&Kept::default());
+    filled(onboarding.form_mut());
+    onboarding.form_mut().smtp_host = "smtp.example.org".to_owned();
+    assert!(!onboarding.detect_older());
+    onboarding.form_mut().address = "dave@example.org".to_owned();
+    assert!(!onboarding.detect_older(), "the address changed, but no server came from Detect");
+}
+
+#[test]
+fn the_registered_ports_say_which_encryption_is_usual_and_others_say_nothing() {
+    use crate::onboard::unusual_encryption;
+    // IMAP 143 STARTTLS, 993 TLS; submission 587 STARTTLS, 465 TLS; 25 STARTTLS: the other encryption is unusual.
+    for (port, usual) in [(143, Security::StartTls), (993, Security::Tls), (587, Security::StartTls), (465, Security::Tls), (25, Security::StartTls)]
+    {
+        let other = if usual == Security::Tls { Security::StartTls } else { Security::Tls };
+        assert_eq!(unusual_encryption(&port.to_string(), Some(usual), usual_port), None, "{port} with {usual:?}");
+        assert_eq!(unusual_encryption(&port.to_string(), Some(other), usual_port), Some((port, usual)), "{port} with {other:?}");
+    }
+    // No port typed: the usual one for the encryption, never unusual; no encryption picked is TLS, as the form sends it.
+    assert_eq!(unusual_encryption("", Some(Security::StartTls), usual_port), None);
+    assert_eq!(unusual_encryption(" 143 ", None, usual_port), Some((143, Security::StartTls)));
+    // An unknown port, 0, the highest port and junk warn of nothing (the field's own error speaks for junk).
+    for port in ["0", "65535", "1993", "8443", "abc", "99999", "-1", "\u{202e}993"] {
+        for security in [Some(Security::Tls), Some(Security::StartTls), None] {
+            assert_eq!(unusual_encryption(port, security, usual_port), None, "{port:?} {security:?}");
+        }
+    }
+}
+
+fn usual_port(security: Security) -> u16 {
+    security.imap_port()
+}
+
+#[test]
+fn the_earlier_detect_line_names_the_user_name_while_it_is_still_detects() {
+    let first = found_at("imap.first.example.org", None, "a@first.example.org");
+    let (mut onboarding, detect) = detecting(vec![first]);
+    detect_now(&mut onboarding, &detect, "a@first.example.org");
+    assert_eq!(onboarding.form().username, "a@first.example.org", "Detect filled the user name");
+    assert!(!onboarding.detect_older_user_name(), "Detect answered for the address in the form");
+    onboarding.form_mut().address = "b@second.example.org".to_owned();
+    assert!(onboarding.detect_older() && onboarding.detect_older_user_name());
+    // The user name typed by hand: the servers are still the earlier Detect's, the user name is not.
+    onboarding.form_mut().username = "b".to_owned();
+    assert!(onboarding.detect_older() && !onboarding.detect_older_user_name());
+    // A server edited by hand: nothing is said, whatever the user name.
+    onboarding.form_mut().username = "a@first.example.org".to_owned();
+    onboarding.form_mut().host = "imap.second.example.org".to_owned();
+    assert!(!onboarding.detect_older() && !onboarding.detect_older_user_name());
+}

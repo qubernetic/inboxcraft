@@ -631,3 +631,67 @@ fn the_new_senders_queue_says_the_design_files_words() {
     harness.run();
     harness.get_by_label("Nobody new reaches the inbox before you say so. If you keep a sender out, their mail goes to Blocked from then on.");
 }
+
+/// What has the keyboard: its name and its rect.
+fn focused(harness: &Harness<'static, InboxApp>) -> Option<(String, egui::Rect)> {
+    let id = harness.ctx.memory(egui::Memory::focused)?;
+    let rect = harness.ctx.read_response(id)?.rect;
+    let node = harness.query_all_by_role(Role::Button).chain(harness.query_all_by_role(Role::Link)).find(|node| node.rect() == rect)?;
+    Some((node.accesskit_node().label().unwrap_or_default(), rect))
+}
+
+#[test]
+fn on_a_new_senders_card_tab_reaches_let_in_before_keep_out_as_they_are_drawn() {
+    // The owner's ruling: Let in first, read from the left as the design file draws it, and walked so; Shift Tab the
+    // mirror. Wide (the answers at the card's right) and narrow (under the text).
+    for width in [1440.0, 900.0] {
+        let mut harness = Harness::builder()
+            .with_size(vec2(width, 900.0))
+            .with_context_setup(install_fonts)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app());
+        harness.run();
+        harness.get_by_role_and_label(Role::Button, "Review").click();
+        harness.run();
+        harness.run();
+        let mut subjects: Vec<egui::Rect> = harness.query_all_by_role(Role::Link).map(|node| node.rect()).collect();
+        subjects.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        assert_eq!(subjects.len(), 2, "{width}: two cards");
+        let answers = |name: &str| {
+            let mut found: Vec<egui::Rect> = harness.query_all_by_role_and_label(Role::Button, name).map(|node| node.rect()).collect();
+            found.sort_by(|a, b| a.top().total_cmp(&b.top()));
+            found
+        };
+        let (lets, keeps) = (answers("Let in"), answers("Keep out"));
+        assert_eq!((lets.len(), keeps.len()), (2, 2), "{width}");
+        for (let_in, keep_out) in lets.iter().zip(&keeps) {
+            assert!(let_in.right() < keep_out.left() && let_in.top() == keep_out.top(), "{width}: Let in {let_in:?} left of Keep out {keep_out:?}");
+        }
+        if width > 1000.0 {
+            // Wide, the pair still ends at the card's right padding.
+            let card = edged(&harness).into_iter().filter(|rect| rect.width() == 900.0).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
+            assert_eq!(keeps[0].right(), card.right() - 21.0, "{width}: Keep out ends 20 in from the 1 px edge");
+        }
+        // From the first card's subject: its Let in, its Keep out, the next card's subject, Let in, Keep out.
+        let first = harness.query_all_by_role(Role::Link).find(|node| node.rect() == subjects[0]).unwrap();
+        first.focus();
+        harness.run();
+        let wanted = [("Let in", lets[0]), ("Keep out", keeps[0]), ("", subjects[1]), ("Let in", lets[1]), ("Keep out", keeps[1])];
+        let mut walked = Vec::new();
+        for _ in 0..wanted.len() {
+            harness.key_press(egui::Key::Tab);
+            harness.run();
+            walked.push(focused(&harness).map(|(_, rect)| rect));
+        }
+        assert_eq!(walked, wanted.map(|(_, rect)| Some(rect)), "{width}: Tab walks {:?}", wanted.map(|(name, _)| name));
+        let mut back = Vec::new();
+        for _ in 0..wanted.len() {
+            harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+            harness.run();
+            back.push(focused(&harness).map(|(_, rect)| rect));
+        }
+        let mut mirror: Vec<_> = [subjects[0]].into_iter().chain(wanted.iter().map(|(_, rect)| *rect)).map(Some).collect();
+        mirror.pop();
+        mirror.reverse();
+        assert_eq!(back, mirror, "{width}: Shift Tab walks back the same way");
+    }
+}

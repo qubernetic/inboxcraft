@@ -96,7 +96,9 @@ that is:
 - drafts: `compose.new`, `compose.update`, `compose.reply`, `compose.reply_all`, `compose.forward`,
   `compose.template` and `compose.discard`, which deletes a draft here and on the server;
 - `account.check`, which connects to the account's servers and signs in to them;
-- the appearance (`ui.*.set`) and, in the sample mailbox, `sample.mail.set`;
+- the appearance (`ui.*.set`) and, in the sample mailbox, `sample.mail.set`; `ui.motion.set` takes `level`
+  (`full`, `reduced` or `off`), and for one release still the older `reduce` (`on`, `off` or `system`, which hands
+  the choice back to the computer); its answer has `motion_level` and `motion_chosen` beside the older `motion`;
 - snooze, park and pin, as they land.
 
 Everything a client sends is hostile. `cargo +nightly fuzz run control_lines` runs the fuzz target on both lines.

@@ -7,7 +7,7 @@
 //! `label` and `muted`. A `line` hairline parts it from the rest, 14 above and below and 16 at the sides, 10 between:
 //! the title in `heading` (struck through and `muted` when cancelled), the facts WHEN, WHERE, WHO and CAL (labels in a
 //! 56 wide column, the values 12 right of it, 22 high, 6 apart), then by state: Going (primary, but on an older card of a thread), Maybe and No with to
-//! whom the answer goes; what changed or what clashes in a `warn` box; the answer given and Change answer; that it is
+//! whom the answer goes (named the organiser, not the sender, when someone else sent the message); what changed or what clashes in a `warn` box; the answer given and Change answer; that it is
 //! cancelled in a `minus` box and Remove from calendar; the guests' answers; or why there is nothing to answer. A
 //! version a later one replaced is one line instead: the older-version clock and what it says, on the `panel` fill in a
 //! `panel_line` edge. Every word from the event is data: plain words on one line, cut between grapheme clusters with
@@ -44,6 +44,9 @@ pub struct CardEvent<'a> {
     pub who: &'a str,
     /// The calendar it goes into.
     pub cal: &'a str,
+    /// The organiser did not send the message: the line under the answers says the answer goes to the organiser, not to
+    /// the sender.
+    pub not_from_organiser: bool,
 }
 
 /// A guest's answer, on a card of replies.
@@ -180,7 +183,6 @@ pub fn invite_card_with(
     let fact_line = f.body.line;
     let facts_high = fact_line * 4.0 + FACT_GAP * 3.0;
     let boxed = box_high(theme);
-    let goes_high = f.caption.line;
     let why = if let CardState::CannotAnswer { why } = state {
         Some(super::wrapped(
             ui,
@@ -203,6 +205,13 @@ pub fn invite_card_with(
     let lower_room = if spread { width - PAD_X * 2.0 } else { room };
     let placed = lines_of(theme, &widths, lower_room, BUTTON_GAP);
     let answered = if let CardState::Answered { answer } = state { Some(answered_row(ui, theme, keymap, answer, lower_room)) } else { None };
+    let goes = match state {
+        CardState::Request { goes_to } | CardState::Changed { goes_to, .. } | CardState::Clash { goes_to, .. } => {
+            Some(goes_line(ui, theme, goes_to, event.not_from_organiser, lower_room))
+        }
+        _ => None,
+    };
+    let goes_high = goes.as_ref().map_or(f.caption.line, Goes::high);
     let part = match state {
         CardState::Request { .. } => placed.height + GAP + goes_high,
         CardState::Changed { .. } | CardState::Clash { .. } => boxed + GAP + placed.height + GAP + goes_high,
@@ -266,7 +275,7 @@ pub fn invite_card_with(
     let part_top = rect.top() + PAD_Y + f.heading.line + GAP + facts_high + GAP;
     let part_left = if spread { rect.left() + PAD_X } else { info_left };
     let part_rect = Rect::from_min_max(pos2(part_left, part_top), pos2(rect.right() - PAD_X, rect.bottom() - PAD_Y));
-    let lower_part = Lower { rect: part_rect, buttons, placed, answered, why, keep };
+    let lower_part = Lower { rect: part_rect, buttons, placed, answered, why, keep, goes };
     let asked = lower(ui, theme, keymap, state, lower_part);
     // The edge last, over the fills and the hairline.
     if ui.is_rect_visible(rect) {
@@ -324,21 +333,75 @@ struct Lower {
     answered: Option<AnsweredRow>,
     why: Option<std::sync::Arc<egui::Galley>>,
     keep: bool,
+    /// The line of whom the answer goes to, laid out, on a card that asks.
+    goes: Option<Goes>,
+}
+
+/// The line of whom the answer goes to, laid out in its room: the whole sentence on one line. For an organiser who did
+/// not send the message, where it does not fit, its short form on one line; else its short lead-in (up to two lines) over
+/// the address on a line of its own, so the address gives way only when it alone does not fit.
+struct Goes {
+    /// What a screen reader hears: the whole sentence.
+    whole: String,
+    /// The lines drawn, top down.
+    lines: Vec<std::sync::Arc<egui::Galley>>,
+    /// The caption's line height: each row of the lines takes one.
+    line: f32,
+}
+
+impl Goes {
+    /// Its height: a caption line for each row.
+    fn high(&self) -> f32 {
+        self.lines.iter().map(|line| line.rows.len().max(1) as f32 * self.line).sum()
+    }
+}
+
+/// The line of whom the answer goes `to`, `room` wide; `not_from_organiser` names the organiser, not the sender.
+fn goes_line(ui: &Ui, theme: &Theme, to: &str, not_from_organiser: bool, room: f32) -> Goes {
+    let (f, p) = (&theme.fonts, &theme.palette);
+    if !not_from_organiser {
+        let whole = tr!("Your answer goes to {address} at once.", address = to);
+        return Goes { lines: vec![super::fitted(ui, &whole, f.caption, p.muted, room)], whole, line: f.caption.line };
+    }
+    let lead = tr!("Your answer goes at once to the organiser, not to the sender:");
+    let whole = tr!("{lead} {address}", lead = lead, address = to);
+    // One line where it fits: the whole sentence, else its short form, the lead-in giving way before the address.
+    let short_lead = tr!("Answer goes to the organiser, not the sender:");
+    let short = tr!("{lead} {address}", lead = short_lead, address = to);
+    let fits = [whole.as_str(), short.as_str()]
+        .into_iter()
+        .map(|words| super::fitted(ui, words, f.caption, p.muted, f32::INFINITY))
+        .find(|one| one.size().x <= room);
+    if let Some(one) = fits {
+        return Goes { lines: vec![one], whole, line: f.caption.line };
+    }
+    let lead = super::wrapped(ui, &super::plain(short_lead), f.caption, p.muted, room, 2, Align::LEFT);
+    let address = super::fitted(ui, to, f.caption, p.muted, room);
+    Goes { lines: vec![lead, address], whole, line: f.caption.line }
 }
 
 /// The part of a card under its facts; what was pressed.
 fn lower(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &CardState<'_>, part: Lower) -> Option<CardAsked> {
     let p = &theme.palette;
     let f = &theme.fonts;
-    let Lower { rect, buttons, placed, answered, why, keep } = part;
+    let Lower { rect, buttons, placed, answered, why, keep, goes } = part;
     let button = super::control_side(theme);
     let mut top = rect.top();
     let mut asked = None;
-    let goes = |ui: &Ui, top: f32, to: &str| {
-        let whole = tr!("Your answer goes to {address} at once.", address = to);
-        let words = super::fitted(ui, &whole, f.caption, p.muted, rect.width());
-        said(ui, Rect::from_min_size(pos2(rect.left(), top), vec2(paint::run_box(words.size().x), f.caption.line)), &whole, ("goes", 0));
-        paint::run_at(ui.painter(), pos2(rect.left(), top), words, p.muted);
+    let draw_goes = |ui: &Ui, top: f32, goes: &Goes| {
+        let wide = goes.lines.iter().map(|line| paint::run_box(line.size().x)).fold(0.0, f32::max).min(rect.width());
+        said(ui, Rect::from_min_size(pos2(rect.left(), top), vec2(wide, goes.high())), &goes.whole, ("goes", 0));
+        let mut at = top;
+        for line in &goes.lines {
+            let high = line.rows.len().max(1) as f32 * goes.line;
+            // A line of one row as the card always drew it; the wrapped lead-in row by row.
+            if line.rows.len() > 1 {
+                paint::rows_at(ui.painter(), pos2(rect.left(), at), rect.width(), line.clone(), p.muted);
+            } else {
+                paint::run_at(ui.painter(), pos2(rect.left(), at), line.clone(), p.muted);
+            }
+            at += high;
+        }
     };
     let row = |ui: &mut Ui, top: f32| {
         ui.new_child(
@@ -349,7 +412,7 @@ fn lower(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &CardState<'_>, par
     };
     let lines_at = |top: f32| Rect::from_min_size(pos2(rect.left(), top), vec2(rect.width(), placed.height));
     match state {
-        CardState::Request { goes_to } | CardState::Changed { goes_to, .. } | CardState::Clash { goes_to, .. } => {
+        CardState::Request { .. } | CardState::Changed { .. } | CardState::Clash { .. } => {
             if let CardState::Changed { changed: words, .. } | CardState::Clash { clash: words, .. } = state {
                 let label = if matches!(state, CardState::Changed { .. }) { tr!("Changed") } else { tr!("Clash") };
                 top += warning(ui, theme, rect, top, label, words, p.warn) + GAP;
@@ -359,7 +422,9 @@ fn lower(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &CardState<'_>, par
                 Some(index) => Some(CardAsked::Answer(index)),
                 None => None,
             };
-            goes(ui, top + placed.height + GAP, goes_to);
+            if let Some(goes) = &goes {
+                draw_goes(ui, top + placed.height + GAP, goes);
+            }
         }
         CardState::Answered { answer } => {
             let mut child = row(ui, top);

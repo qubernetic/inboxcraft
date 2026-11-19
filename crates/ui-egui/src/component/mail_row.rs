@@ -118,6 +118,8 @@ pub struct MailRow<'a> {
     pub done: bool,
     /// Checked for bulk select: the check box in the first column, on the `stage` fill.
     pub checked: bool,
+    /// The hover action that gives way first when line one cannot hold them all ([`hover::actions_sparing`]).
+    pub spare: Option<usize>,
 }
 
 /// What a mail row did this frame.
@@ -195,7 +197,7 @@ fn content(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &MailRow<'_>, drawn
         let end = if time.is_some() { time_left - GAP } else { right };
         Rect::from_min_max(pos2(rect.center().x + theme.spacing.s1, one), pos2(end.max(rect.center().x + theme.spacing.s1), one + f.body.line))
     });
-    let group = actions_line.map(|at| hover::place(ui, theme, keymap, at, actions)).filter(|group| group.width() > 0.0);
+    let group = actions_line.map(|at| hover::place(ui, theme, keymap, at, actions, row.spare)).filter(|group| group.width() > 0.0);
     let marks: Vec<(IconId, Color32)> = row.marks.iter().map(|mark| mark.look(theme)).collect();
     let font = if row.unread { f.strong } else { f.body };
     let ink = if row.done { p.muted } else { p.ink };
@@ -205,7 +207,7 @@ fn content(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &MailRow<'_>, drawn
     let text = super::fitted(ui, row.line, f.caption, words, right - left);
     paint::run_at(ui.painter(), pos2(left, two), text, words);
     // Last, so the group stands over whatever of the row lies under it.
-    let shown = hover::actions(ui, theme, keymap, actions_id(row.id), actions_line.unwrap_or(line), reach, actions);
+    let shown = hover::actions_sparing(ui, theme, keymap, actions_id(row.id), actions_line.unwrap_or(line), reach, actions, row.spare);
     shown.clicked
 }
 

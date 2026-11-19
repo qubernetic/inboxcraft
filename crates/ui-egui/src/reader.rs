@@ -298,9 +298,10 @@ fn remote_pictures<'a>(blocks: &'a [Block], out: &mut Vec<&'a str>) {
     }
 }
 
-/// The card of the invitation message `id` carries; none when it carries none, or the engine cannot tell.
-fn invite(mailbox: &mut Mailbox, id: u64) -> Option<Invite> {
-    mailbox.run("invite.show", &json!({ "id": id })).ok().and_then(|answer| Invite::read(id, &answer))
+/// The card of the invitation message `id` (sent `from`) carries; none when it carries none, or the engine cannot tell.
+fn invite(mailbox: &mut Mailbox, id: u64, from: &[Person]) -> Option<Invite> {
+    let sender = from.first().map(|person| person.address.as_str());
+    mailbox.run("invite.show", &json!({ "id": id })).ok().and_then(|answer| Invite::read(id, &answer)).map(|invite| invite.sent_by(sender))
 }
 
 /// The reader's state.
@@ -542,7 +543,7 @@ impl Reader {
             })
             .unwrap_or_default();
         if body.is_some() && message.get("invitation").and_then(Value::as_bool) == Some(true) {
-            opened.invite = invite(mailbox, id);
+            opened.invite = invite(mailbox, id, &opened.header.from);
             // Its calendar part is the card, not a file.
             if opened.invite.is_some() {
                 opened.files.retain(|file| !file.media_type.eq_ignore_ascii_case("text/calendar"));
@@ -590,7 +591,7 @@ impl Reader {
     /// Reads the cards of the thread's messages again: an answer, a new version or an undo changes them.
     pub fn refresh_invites(&mut self, mailbox: &mut Mailbox) {
         for opened in self.thread.iter_mut().filter_map(|row| row.opened.as_mut()).filter(|opened| opened.invite.is_some()) {
-            opened.invite = invite(mailbox, opened.id);
+            opened.invite = invite(mailbox, opened.id, &opened.header.from);
         }
 
         // Why the open message is here changes only with its place: moved, snoozed, its sender let in or blocked.
