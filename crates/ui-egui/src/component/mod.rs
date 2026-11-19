@@ -38,6 +38,7 @@
 //! [`gallery`] draws every one of them on one page for `ui_shot`, [`gallery_fields`] the fields, pickers and menus on a
 //! second, [`gallery_screens`] the screens' own sets on another.
 
+pub mod account_row;
 pub mod attachment;
 pub mod avatar;
 pub mod badge;
@@ -59,6 +60,7 @@ pub mod gallery_blocks;
 pub mod gallery_calendar;
 pub mod gallery_field;
 pub mod gallery_fields;
+pub mod gallery_index;
 pub mod gallery_lists;
 pub mod gallery_reader;
 pub mod gallery_screens;
@@ -71,6 +73,8 @@ pub mod key;
 pub mod label;
 pub mod later_row;
 pub mod mail_row;
+pub mod mailbox_row;
+pub mod nav_row;
 pub mod outbox_row;
 pub mod picture_box;
 pub mod pill;

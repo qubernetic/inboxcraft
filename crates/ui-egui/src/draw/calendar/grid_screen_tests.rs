@@ -458,6 +458,10 @@ fn the_details_show_the_whole_text_and_scroll_to_the_rest() {
     // Each part's text, row by row as painted (each row is painted on its own, and only the rows in sight): the panel
     // is scrolled through the part, and every row is kept by where it stands in the part.
     let side = 1440.0 - 252.0;
+    // The panel's scrolling body, from 15 under the body's top to 41 over its foot (23 and 851 in the window at 8, 8
+    // before the window was laid out in its regions).
+    let body = super::super::shell::laid(&harness.ctx).unwrap().body;
+    let (top, bottom) = (body.top() + 15.0, body.bottom() - 41.0);
     let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
     for whole in [long.summary.as_str(), long.location.as_str(), long.description.as_str()] {
         let spoken = whole.replace('\n', " ");
@@ -477,7 +481,7 @@ fn the_details_show_the_whole_text_and_scroll_to_the_rest() {
             harness.run();
         };
         for _ in 0..60 {
-            if part(&harness).top() >= 23.0 {
+            if part(&harness).top() >= top {
                 break;
             }
             wheel(&mut harness, 300.0);
@@ -489,8 +493,8 @@ fn the_details_show_the_whole_text_and_scroll_to_the_rest() {
                 if let egui::Shape::Text(text) = &clipped.shape
                     && text.pos.x >= side
                     && rect.y_range().contains(text.pos.y)
-                    // In the panel's scrolling body (from 23 to 851), not its foot.
-                    && clipped.clip_rect.top() >= 23.0
+                    // In the panel's scrolling body, not its foot.
+                    && clipped.clip_rect.top() >= top
                     && clipped.clip_rect.y_range().contains(text.pos.y)
                     // An icon (the head's Close) is no text.
                     && !text.galley.text().chars().all(|c| ('\u{e000}'..='\u{f8ff}').contains(&c))
@@ -498,7 +502,7 @@ fn the_details_show_the_whole_text_and_scroll_to_the_rest() {
                     rows.insert((text.pos.y - rect.top()).round() as i64, (text.galley.text().to_owned(), text.galley.elided));
                 }
             }
-            if rect.bottom() <= 851.0 {
+            if rect.bottom() <= bottom {
                 break;
             }
             wheel(&mut harness, -300.0);
@@ -627,11 +631,14 @@ fn month_and_agenda_strokes_stand_on_whole_pixels() {
                 let key = harness.state().calendar().events().find(|event| event.summary == "Call with Petra about the logo").map(EventRow::key);
                 harness.state_mut().calendar_mut().0.pick(key);
                 harness.run();
+                // The calendar's own strokes, in the body (the index's are its own).
+                let body = super::super::shell::laid(&harness.ctx).unwrap().body;
                 let strokes: Vec<Rect> = rects(&harness)
                     .into_iter()
                     .filter(|(rect, fill)| {
                         // Under the toolbar: the days and the side panel (the toolbar's controls are the components').
-                        rect.top() >= 48.0 * f32::from(percent) / 100.0
+                        rect.left() >= body.left()
+                            && rect.top() >= body.top() + 48.0 * f32::from(percent) / 100.0
                             && [p.line, p.panel_line, p.cyan_edge].contains(fill)
                             && (rect.width() * ppp <= 2.5 || rect.height() * ppp <= 2.5)
                     })

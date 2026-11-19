@@ -47,8 +47,10 @@
 //! ([`crate::component::gallery_screens`]), `calendar_sets` set to `true` the page of the calendar's sets
 //! ([`crate::component::gallery_calendar`]), `reader` set to `true` the page of the reader's sets
 //! ([`crate::component::gallery_reader`]), `lists` set to `true` the page of the mail lists' rows
-//! ([`crate::component::gallery_lists`]), `character_field` set to `true` the page of the character field
-//! ([`crate::component::gallery_field`]), where `pointer` may rest. The typeface and the icons are fixed, so a script that names a
+//! ([`crate::component::gallery_lists`]), `index` set to `true` the page of the index's rows
+//! ([`crate::component::gallery_index`]), `character_field` set to `true` the page of the character field
+//! ([`crate::component::gallery_field`]), where `pointer` may rest. The typeface and the icons are fixed, so a
+//! script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
 //! before the picture, so what that opens (a menu, a list) is in it; `put_away` set to `true` snoozes, pins, parks and marks
@@ -246,6 +248,9 @@ pub struct Shot {
     /// The page of the mail lists' rows instead of the window.
     #[serde(default)]
     pub lists: Option<bool>,
+    /// The page of the index's rows instead of the window.
+    #[serde(default)]
+    pub index: Option<bool>,
     /// The page of the character field instead of the window; `pointer` may rest on it.
     #[serde(default)]
     pub character_field: Option<bool>,
@@ -801,13 +806,13 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.menu.is_some()
         || shot.outbox.is_some()
         || shot.steps.is_some()
-        || [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists, shot.character_field]
+        || [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists, shot.index, shot.character_field]
             .iter()
             .filter(|page| **page == Some(true))
             .count()
             > 1
         || (shot.calendar_sets == Some(true)
-            && [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists, shot.character_field]
+            && [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists, shot.index, shot.character_field]
                 .contains(&Some(true)));
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
@@ -919,6 +924,20 @@ fn lists_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
         crate::component::gallery_lists::page(ui, &theme, &keymap);
+    })
+}
+
+/// The page of the index's rows of `shot` in `mode`.
+fn index_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of the index's rows")?;
+    let theme = Theme::new(mode, TextScale::default());
+    let mut fonts = true;
+    paint(crate::component::gallery_index::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_index::page(ui, &theme);
     })
 }
 
@@ -1534,6 +1553,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if shot.lists == Some(true) {
         return lists_gallery(shot, mode);
+    }
+    if shot.index == Some(true) {
+        return index_gallery(shot, mode);
     }
     if shot.character_field == Some(true) {
         return field_gallery(shot, mode);

@@ -29,7 +29,7 @@ fn harness() -> Harness<'static, InboxApp> {
 
 fn opened() -> Harness<'static, InboxApp> {
     let mut harness = harness();
-    harness.get_by_label("Appearance settings").click();
+    harness.get_by_role_and_label(egui::accesskit::Role::Button, "Settings").click();
     harness.run();
     assert!(harness.state().settings().is_open());
     harness
@@ -166,8 +166,8 @@ fn a_coming_soon_row_takes_no_focus_and_no_press() {
 #[test]
 fn the_sheet_keeps_tab_inside_and_esc_returns_the_focus() {
     let mut harness = harness();
-    let rail = "Appearance settings";
-    harness.get_by_label(rail).focus();
+    let rail = "Settings";
+    harness.get_by_role_and_label(Role::Button, rail).focus();
     harness.run();
     assert_eq!(focused(&harness).map(|(label, _)| label).as_deref(), Some(rail));
     harness.key_press(Key::Enter);

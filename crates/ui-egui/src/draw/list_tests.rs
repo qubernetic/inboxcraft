@@ -427,12 +427,12 @@ fn the_hover_actions_stand_clear_of_the_row_text_and_the_time_gives_way() {
 }
 
 #[test]
-fn every_button_of_the_list_and_the_rail_has_a_tooltip_with_its_key_chip() {
+fn every_button_of_the_list_and_the_index_s_places_has_a_tooltip_with_its_key_chip() {
     let mut harness = harness(true);
     quick_tooltips(&harness);
     harness.get_by_label(ODILE).hover();
     harness.run();
-    for (name, chip) in [("Done", "D"), ("Mark as read", "R"), ("Mail", "Ctrl 1"), ("Appearance settings", "Ctrl Comma")] {
+    for (name, chip) in [("Done", "D"), ("Mark as read", "R"), ("Mail", "Ctrl 1"), ("Settings", "Ctrl Comma")] {
         harness.get_by_role_and_label(Role::Button, name).hover();
         harness.run();
         assert!(harness.query_all_by_label(chip).count() >= 1, "{name} shows {chip}");
@@ -461,7 +461,7 @@ fn ctrl_comma_opens_the_settings_and_the_mail_button_or_ctrl_1_leaves_them() {
     harness.get_by_role_and_label(Role::Button, "Mail").click();
     harness.run();
     assert!(!harness.state().settings().is_open());
-    harness.get_by_label("Appearance settings").click();
+    harness.get_by_role_and_label(egui::accesskit::Role::Button, "Settings").click();
     harness.run();
     assert!(harness.state().settings().is_open());
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
@@ -1839,6 +1839,9 @@ fn grouped_other() -> (Harness<'static, InboxApp>, Vec<u64>, String) {
 fn done_all_on_the_grouped_lists_other_head_marks_its_messages_done_and_undo_brings_them_back() {
     for by_key in [false, true] {
         let (mut harness, other, head) = grouped_other();
+        // Other's head in sight: a body as high as a 900 window's was before the command and status lines took 74.
+        harness.set_size(vec2(1300.0, 974.0));
+        harness.run();
         assert!(!other.is_empty(), "the showcase keeps a message out of the groups");
         let before = harness.state().mailbox().messages().len();
         if by_key {
@@ -3119,8 +3122,9 @@ fn in_one_pane_esc_with_the_row_left_out_of_sight_lands_on_the_nearest_row_in_si
     harness.run();
     harness.run();
     assert_eq!(rows(&harness), 0, "Enter: the message in front");
-    // The window gets short while the message is read: the row left is out of sight once the list is back.
-    harness.set_size(vec2(900.0, 300.0));
+    // The window gets short while the message is read: the row left is out of sight once the list is back. (A body as
+    // high as a 300 window's was before the command and status lines took their 74.)
+    harness.set_size(vec2(900.0, 374.0));
     harness.run();
     harness.run();
     harness.key_press(Key::Escape);
@@ -3650,7 +3654,9 @@ fn a_keyboard_menus_give_back_lapses_when_its_opener_is_not_drawn_again_in_time(
     harness.run();
     harness.run();
     assert!(crate::component::popup::any_open(&harness.ctx), "More is open");
-    let at = egui::pos2(890.0, 890.0);
+    // Outside More, in the body's bottom right corner.
+    let body = super::shell::laid(&harness.ctx).unwrap().body;
+    let at = body.right_bottom() - egui::vec2(10.0, 10.0);
     harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
     harness.step();
     harness.state_mut().run_action(&egui::Context::default(), crate::keymap::BACK);
@@ -3690,6 +3696,17 @@ fn the_group_menu_is_the_design_files_box() {
         _ => false,
     });
     assert!(!painted_line, "no hairline under the head");
+}
+
+/// A landing asked again forgets where the last one went: a note left by a landing nobody read (its row scrolled away,
+/// the reader holding the keyboard) never answers for the next landing on the same message.
+#[test]
+fn a_new_landing_forgets_where_the_last_one_went() {
+    let ctx = egui::Context::default();
+    // The first landing for message 5 went to row 9 (5's row was out of sight); nobody read it.
+    ctx.data_mut(|data| data.insert_temp(super::list::landed_on_id(), (5_u64, 9_u64)));
+    super::list::land(&ctx, 5);
+    assert_eq!(super::list::landed_on(&ctx, 5), None, "the second landing has not landed yet: no row is its");
 }
 
 /// The hover acts drawn on the row `rect`, left to right: their names and rects.

@@ -158,7 +158,10 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
             ui.ctx().data_mut(|data| data.insert_temp(card_id(), all));
             let ppp = ui.pixels_per_point();
             let line = line_width(ppp);
-            let with_side = all.width() - SIDE - line >= VIEW_LEAST;
+            // The side panel gives way before the toolbar's title would be cut past its short form: the toolbar keeps
+            // the least view it needs from the frame before (its controls, its pads, the short title whole).
+            let least = ui.ctx().data(|data| data.get_temp::<f32>(least_view_id())).filter(|least| least.is_finite()).unwrap_or(0.0);
+            let with_side = all.width() - SIDE - line >= VIEW_LEAST.max(least);
             let side_left = if with_side { snap(all.right() - SIDE, ppp) } else { all.right() + line };
             let view = Rect::from_min_max(all.min, pos2((side_left - line).max(all.left()), all.bottom()));
             if with_side {
@@ -203,6 +206,11 @@ fn view_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, o
     } else {
         more::refocus(ui.ctx());
     }
+}
+
+/// The least width of the view the toolbar asked for in the last frame: its controls, its pads and the short title.
+fn least_view_id() -> Id {
+    Id::unique("calendar-least-view")
 }
 
 /// Where the editor hangs from: New event's rect, kept from the toolbar for the float drawn after the screen.
@@ -281,8 +289,30 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
         };
         let note = note.map(|note| crate::component::galley(ui, &note, theme.fonts.mono_s, p.muted));
         let note_room = note.as_ref().map_or(0.0, |note| note.size().x + NOTE_GAP);
+        // Where the room is short the note gives way first, then the title takes its short form; only that is cut.
         let words = calendar.title();
-        let title = crate::component::cut(ui, &words, theme.fonts.heading, p.ink, (room - note_room).max(1.0));
+        let short = calendar.short_title();
+        let laid = |text: &str| crate::component::galley(ui, text, theme.fonts.heading, p.ink);
+        let (whole, brief) = (laid(&words), laid(&short));
+        // The view this toolbar needs to hold its controls and the short title whole; a change asks for a frame, in
+        // which the side panel gives way or comes back.
+        let least = TOOLBAR_PAD * 2.0 + (inner.right() - ui.available_rect_before_wrap().right()).max(0.0) + brief.size().x.ceil();
+        let kept = ui.ctx().data(|data| data.get_temp::<f32>(least_view_id()));
+        if kept != Some(least) {
+            ui.ctx().data_mut(|data| data.insert_temp(least_view_id(), least));
+            ui.ctx().request_repaint();
+        }
+        let (title, note) = if whole.size().x + note_room <= room {
+            (whole, note)
+        } else if whole.size().x <= room {
+            (whole, None)
+        } else if brief.size().x + note_room <= room {
+            (brief, note)
+        } else if brief.size().x <= room {
+            (brief, None)
+        } else {
+            (crate::component::cut(ui, &short, theme.fonts.heading, p.ink, room.max(1.0)), None)
+        };
         let middle = inner.center().y;
         let wide = title.size().x;
         let ppp = ui.pixels_per_point();
