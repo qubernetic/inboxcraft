@@ -121,12 +121,52 @@ fn the_greeting_follows_the_hour() {
 #[test]
 fn the_lede_says_the_counts_and_the_next_event() {
     let next = super::AgendaLine { time: "15:00".into(), title: "Design review".into(), detail: String::new(), account: 0 };
-    assert_eq!(super::lede(7, 3, 0, Some(&next), false), "7 to read, 3 waiting at the door, and Design review at 15:00.");
-    assert_eq!(super::lede(1, 0, 0, None, false), "1 to read.");
-    assert!(super::lede(0, 0, 0, None, true).starts_with("Nothing waits for you."));
+    assert_eq!(super::lede(Some(7), Some(3), Some(0), Some(&next), false), "7 to read, 3 waiting at the door, and Design review at 15:00.");
+    assert_eq!(super::lede(Some(1), Some(0), Some(0), None, false), "1 to read.");
+    assert!(super::lede(Some(0), Some(0), Some(0), None, true).starts_with("Nothing waits for you."));
     assert_eq!(super::length(30), "30 min");
     assert_eq!(super::length(60), "1 h");
     assert_eq!(super::length(90), "1 h 30 min");
+}
+
+/// A model whose counts are `read`, `screen`, `back` and `outbox`, with nothing left today and no draft.
+fn counted(read: Option<u64>, screen: Option<u64>, back: Option<u64>, outbox: Option<u64>) -> Home {
+    Home {
+        counts: super::counts(read, screen, back, outbox, 0),
+        agenda: Vec::new(),
+        agenda_total: 0,
+        drafts: Vec::new(),
+        drafts_total: 0,
+        ..sample("today").unwrap()
+    }
+}
+
+#[test]
+fn only_counts_read_as_0_make_home_quiet_and_an_unread_count_is_left_out_of_the_lede() {
+    let quiet = "Nothing waits for you. The inbox is read, nobody is at the door, and the day's events are over.";
+    let known = [Some(0), None];
+    for read in known {
+        for screen in known {
+            for back in known {
+                for outbox in known {
+                    let home = counted(read, screen, back, outbox);
+                    let all = [read, screen, back, outbox].iter().all(|count| *count == Some(0));
+                    assert_eq!(home.is_quiet(), all, "{read:?} {screen:?} {back:?} {outbox:?}");
+                    let lede = super::lede(read, screen, back, None, home.is_quiet());
+                    let at = format!("{read:?} {screen:?} {back:?} {outbox:?}: {lede}");
+                    assert_eq!(lede == quiet, all, "{at}");
+                    assert_eq!(lede.contains("inbox is read") || lede.contains("in the inbox"), read == Some(0), "{at}");
+                    assert_eq!(lede.to_lowercase().contains("nobody is at the door"), screen == Some(0) && (read.is_none() || all), "{at}");
+                }
+            }
+        }
+    }
+    assert_eq!(super::lede(Some(0), None, Some(0), None, false), "The inbox is read, and the day's events are over.");
+    assert_eq!(super::lede(None, Some(0), Some(0), None, false), "Nobody is at the door, and the day's events are over.");
+    assert_eq!(super::lede(None, None, None, None, false), "The day's events are over.");
+    assert_eq!(super::lede(Some(0), Some(0), None, None, false), "Nothing waits for you in the inbox.");
+    assert_eq!(super::lede(None, Some(4), None, None, false), "4 waiting at the door.", "an unread count is left out");
+    assert_eq!(super::lede(Some(2), None, Some(1), None, false), "2 to read, and 1 back today.");
 }
 
 #[test]

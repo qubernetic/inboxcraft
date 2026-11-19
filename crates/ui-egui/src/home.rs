@@ -217,10 +217,11 @@ impl Home {
         }
     }
 
-    /// Whether nothing waits: every count 0 or unread, no event left today and no draft.
+    /// Whether nothing waits: every count read and 0 (a count that could not be read is not 0), no event left today
+    /// and no draft.
     #[must_use]
     pub fn is_quiet(&self) -> bool {
-        self.counts.iter().all(|count| count.count.unwrap_or(0) == 0) && self.agenda_total == 0 && self.drafts_total == 0
+        self.counts.iter().all(|count| count.count == Some(0)) && self.agenda_total == 0 && self.drafts_total == 0
     }
 }
 
@@ -235,27 +236,34 @@ fn counts(read: Option<u64>, screen: Option<u64>, back: Option<u64>, outbox: Opt
     ]
 }
 
-/// The sentence under the headline, from the counts and the next event.
-fn lede(read: u64, screen: u64, back: u64, next: Option<&AgendaLine>, quiet: bool) -> String {
+/// The sentence under the headline, from the counts and the next event. A count that could not be read (`None`) is
+/// not 0: the sentence leaves it out and claims nothing of it (the tile shows its unread form).
+fn lede(read: Option<u64>, screen: Option<u64>, back: Option<u64>, next: Option<&AgendaLine>, quiet: bool) -> String {
     if quiet {
         return tr!("Nothing waits for you. The inbox is read, nobody is at the door, and the day's events are over.").to_owned();
     }
     let n = crate::component::label::count;
+    let some = |count: Option<u64>| count.filter(|count| *count > 0);
     let mut parts = Vec::new();
-    if read > 0 {
+    if let Some(read) = some(read) {
         parts.push(tr!("{n} to read", n = n(read)));
     }
-    if screen > 0 {
+    if let Some(screen) = some(screen) {
         parts.push(tr!("{n} waiting at the door", n = n(screen)));
     }
-    if back > 0 {
+    if let Some(back) = some(back) {
         parts.push(tr!("{n} back today", n = n(back)));
     }
     if let Some(next) = next {
         parts.push(tr!("{title} at {time}", title = next.title, time = next.time));
     }
     match parts.split_last() {
-        None => tr!("Nothing waits for you in the inbox.").to_owned(),
+        None => match (read, screen) {
+            (Some(_), Some(_)) => tr!("Nothing waits for you in the inbox.").to_owned(),
+            (Some(_), None) => tr!("The inbox is read, and the day's events are over.").to_owned(),
+            (None, Some(_)) => tr!("Nobody is at the door, and the day's events are over.").to_owned(),
+            (None, None) => tr!("The day's events are over.").to_owned(),
+        },
         Some((last, [])) => tr!("{last}.", last = last),
         Some((last, rest)) => tr!("{rest}, and {last}.", rest = rest.join(", "), last = last),
     }
@@ -325,7 +333,7 @@ pub fn build(mailbox: &mut Mailbox) -> Home {
         buttons: Buttons::ReadAndWrite,
     };
     let quiet = home.is_quiet();
-    home.lede = kept(&lede(read.unwrap_or(0), screen.unwrap_or(0), back.unwrap_or(0), home.agenda.first(), quiet));
+    home.lede = kept(&lede(read, screen, back, home.agenda.first(), quiet));
     home.buttons = if read.unwrap_or(0) > 0 { Buttons::ReadAndWrite } else { Buttons::WriteAndCalendar };
     home
 }
