@@ -1168,6 +1168,45 @@ impl Mailbox {
             .collect()
     }
 
+    /// The heads of Later's snoozed pile, each over the rows that come back in its time, in the list's order: "Back
+    /// today" (before tonight's midnight, and a row whose time has passed), "Back this week" (before the first day of
+    /// the next week, by the owner's week rule, `week.set`: where "Next week" of the presets begins) and "Later". A
+    /// head with no row is left out; any other place, and a search, has none.
+    #[must_use]
+    pub fn later_heads(&self) -> Vec<Group> {
+        if self.place != Place::Later(Pile::Snoozed) || !self.query.is_empty() {
+            return Vec::new();
+        }
+        let (today_ends, week_ends) = self.later_bounds();
+        let mut heads = [
+            Group { icon: IconId::Snooze, name: tr!("Back today").to_owned(), messages: Vec::new() },
+            Group { icon: IconId::Snooze, name: tr!("Back this week").to_owned(), messages: Vec::new() },
+            Group { icon: IconId::Snooze, name: tr!("Later").to_owned(), messages: Vec::new() },
+        ];
+        for row in &self.messages {
+            let at = match row.snoozed_until {
+                Some(until) if today_ends.is_none_or(|end| until < end) => 0,
+                Some(until) if week_ends.is_none_or(|end| until < end) => 1,
+                // No time to sort by: it comes back at none the owner can see.
+                _ => 2,
+            };
+            if let Some(head) = heads.get_mut(at) {
+                head.messages.push(row.id);
+            }
+        }
+        heads.into_iter().filter(|head| !head.messages.is_empty()).collect()
+    }
+
+    /// When today ends and when this week ends on the list's wall clock, the week by the owner's rule; `None` where the
+    /// calendar cannot say (a clock beyond the years it counts).
+    pub(crate) fn later_bounds(&self) -> (Option<Timestamp>, Option<Timestamp>) {
+        let Some(now) = self.now().to_civil(self.offset) else { return (None, None) };
+        let midnight = CivilDateTime::new(now.year(), now.month(), now.day(), 0, 0, 0);
+        let today_ends = midnight.and_then(|day| day.plus_days(1)).and_then(|day| day.to_timestamp(self.offset));
+        let week_ends = self.week_rule().first_day_of(now).and_then(|first| first.plus_days(7)).and_then(|day| day.to_timestamp(self.offset));
+        (today_ends, week_ends)
+    }
+
     /// Does `act` to the message `id` through the engine's commands, at once, and shows its toast; Undo takes it back
     /// ([`Mailbox::undo`]). An act that takes the message out of the list lets the next-message rule pick what is
     /// selected. The engine changes the store at once and sends the change to the server as a kept job; on the sample

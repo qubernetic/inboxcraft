@@ -42,6 +42,7 @@ use std::collections::HashSet;
 use egui::accesskit::Role as AccessRole;
 use egui::{Align, Frame, Id, Layout, Margin, Rect, RichText, ScrollArea, Sense, Ui, UiBuilder, pos2, vec2};
 use inboxcraft_model::Role;
+use inboxcraft_time::Timestamp;
 
 use inboxcraft_engine::ScreenerMode;
 
@@ -1690,7 +1691,7 @@ struct HeadPressed {
 
 /// A group's head across `ui`, the design's group head: its index, name and unread count; in Smart, while it has more
 /// rows than it shows, how many show and "show all" or "show fewer"; "done all" while it is hovered or keyed.
-fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState) -> HeadPressed {
+fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState, done_all: bool) -> HeadPressed {
     let letter = char::from(b'A'.saturating_add(u8::try_from(state.index % 26).unwrap_or(0)));
     let index = format!("[ {letter} ]");
     let shown = state.folds.then(|| {
@@ -1706,7 +1707,7 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadS
         shown: shown.as_deref(),
         link,
         // A head over no message left (its last row leaving) offers nothing to mark done.
-        hover_link: (state.count > 0).then_some(tr!("done all")),
+        hover_link: (done_all && state.count > 0).then_some(tr!("done all")),
     };
     let pressed = group_head(ui, theme, keymap, &head, None);
     HeadPressed { done_all: pressed.hover_link, fold: pressed.link }
@@ -1755,7 +1756,9 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, slot: Slot) {
     let (theme, keymap, mailbox) = (rows.theme, rows.keymap, rows.mailbox);
     match line {
         Line::Head(group, state) => {
-            let pressed = head(ui, theme, keymap, group, *state);
+            // Later's heads sort the snoozed pile by when it comes back: they mark nothing done.
+            let done_all = !matches!(mailbox.place(), Place::Later(_));
+            let pressed = head(ui, theme, keymap, group, *state, done_all);
             if pressed.done_all {
                 let all = mailbox.messages().iter().filter(|message| group.messages.contains(&message.id)).map(|message| message.id);
                 rows.done_all.set(Some(all.collect()));
@@ -2541,6 +2544,23 @@ fn other_of(ctx: &egui::Context, mailbox: &Mailbox, view: InboxView, groups: &[G
     other
 }
 
+/// The heads of Later's snoozed pile ([`Mailbox::later_heads`]), kept for the list of rows, its place, search and
+/// the day and week they count from, so a frame at rest sorts nothing.
+fn later_heads(ctx: &egui::Context, mailbox: &Mailbox) -> std::sync::Arc<[Group]> {
+    if mailbox.place() != Place::Later(Pile::Snoozed) || !mailbox.query().is_empty() {
+        return std::sync::Arc::from(Vec::new());
+    }
+    type Kept = ((u64, (Option<Timestamp>, Option<Timestamp>)), std::sync::Arc<[Group]>);
+    let key = (mailbox.rows_serial(), mailbox.later_bounds());
+    let id = Id::unique("list-later-heads");
+    if let Some((_, heads)) = ctx.data(|data| data.get_temp::<Kept>(id)).filter(|(kept, _)| *kept == key) {
+        return heads;
+    }
+    let heads: std::sync::Arc<[Group]> = std::sync::Arc::from(mailbox.later_heads());
+    ctx.data_mut(|data| data.insert_temp::<Kept>(id, (key, heads.clone())));
+    heads
+}
+
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
 pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     let mut asked = drawn_rows(ui, theme, keymap, mailbox);
@@ -2596,8 +2616,16 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
     }
     let inbox = mailbox.place() == Place::View(Role::Inbox) && mailbox.query().is_empty();
     let wait = inbox && !mailbox.waiting().is_empty();
-    let groups = mailbox.groups();
-    let view = if groups.is_empty() { InboxView::List } else { mailbox.inbox_view() };
+    // Later's snoozed pile stands under its heads, all of each shown; the inbox under its groups, in its view.
+    let later = later_heads(ui.ctx(), mailbox);
+    let groups = if later.is_empty() { std::sync::Arc::from(mailbox.groups()) } else { later };
+    let view = if groups.is_empty() {
+        InboxView::List
+    } else if matches!(mailbox.place(), Place::Later(_)) {
+        InboxView::Grouped
+    } else {
+        mailbox.inbox_view()
+    };
     let rows = Rows {
         theme,
         keymap,

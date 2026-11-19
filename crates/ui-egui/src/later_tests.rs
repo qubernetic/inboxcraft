@@ -306,3 +306,52 @@ fn bringing_back_a_snoozed_message_the_owner_deleted_says_only_its_snooze_went()
     mailbox.act(rota, Act::Unsnooze);
     assert_eq!(mailbox.undoable().map(|undo| undo.text.as_str()), Some("Snooze taken off"), "it stays in Trash: never 'back in the inbox'");
 }
+
+/// The snoozed pile with four messages coming back at `NOW` plus each of `hours`, in the order the pile lists them.
+fn snoozed_at(hours: [i64; 4]) -> (Mailbox, Vec<u64>) {
+    let mut mailbox = mailbox();
+    let ids: Vec<u64> = mailbox.messages().iter().take(4).map(|row| row.id).collect();
+    for (id, hours) in ids.iter().zip(hours) {
+        mailbox.act(*id, Act::Snooze(Timestamp::from_unix(NOW + hours * 3_600, 0).unwrap()));
+    }
+    mailbox.open(Place::Later(Pile::Snoozed));
+    (mailbox, ids)
+}
+
+/// The heads of the pile, each with the ids under it.
+fn heads(mailbox: &Mailbox) -> Vec<(String, Vec<u64>)> {
+    mailbox.later_heads().into_iter().map(|group| (group.name, group.messages)).collect()
+}
+
+#[test]
+fn the_snoozed_pile_stands_under_back_today_back_this_week_and_later() {
+    // Thursday 5 November 09:00: today at 16:00; Saturday 7 at 09:00; Sunday 8 at 09:00; Monday 9 at 09:00.
+    let (mut mailbox, ids) = snoozed_at([7, 48, 72, 96]);
+    let (today, saturday, sunday, monday) = (ids[0], ids[1], ids[2], ids[3]);
+    // Monday first (the default): the week ends as Sunday ends.
+    assert_eq!(
+        heads(&mailbox),
+        [("Back today".to_owned(), vec![today]), ("Back this week".to_owned(), vec![saturday, sunday]), ("Later".to_owned(), vec![monday]),]
+    );
+    // Sunday first: Sunday 8 starts the next week, and so "Next week" of the presets.
+    mailbox.run("week.set", &serde_json::json!({ "first_day": "sunday" })).unwrap();
+    assert_eq!(
+        heads(&mailbox),
+        [("Back today".to_owned(), vec![today]), ("Back this week".to_owned(), vec![saturday]), ("Later".to_owned(), vec![sunday, monday]),]
+    );
+    mailbox.load_presets();
+    let next_week = mailbox.presets().iter().find(|(name, _)| name == "Next week").map(|(_, at)| at.unix_seconds());
+    assert_eq!(next_week, Some(NOW + 72 * 3_600), "the first row of Later is where Next week begins");
+}
+
+#[test]
+fn a_head_with_no_row_is_left_out_and_other_piles_and_searches_have_none() {
+    let (mut mailbox, ids) = snoozed_at([30, 31, 32, 33]);
+    assert_eq!(heads(&mailbox), [("Back this week".to_owned(), ids.clone())], "only the head with rows");
+    mailbox.search("rota");
+    assert!(heads(&mailbox).is_empty(), "a search lists by time, under no head");
+    mailbox.open(Place::Later(Pile::Pins));
+    assert!(heads(&mailbox).is_empty(), "the pins have none");
+    mailbox.open(Place::View(Role::Inbox));
+    assert!(heads(&mailbox).is_empty(), "nor the inbox");
+}

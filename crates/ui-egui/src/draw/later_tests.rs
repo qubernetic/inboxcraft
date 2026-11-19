@@ -384,3 +384,36 @@ fn a_snoozed_message_listed_as_a_mail_row_shows_the_clock_and_when_it_comes_back
     let clock = crate::iconset::glyph(crate::iconset::IconId::Snooze).to_string();
     assert_eq!(drawn_in(&harness, &clock), Some(theme.palette.warn), "the snoozed mark, in warn");
 }
+
+#[test]
+fn later_s_snoozed_pile_stands_under_its_heads_which_offer_no_done_all() {
+    let mut app = app();
+    let ids: Vec<u64> = app.mailbox().messages().iter().take(3).map(|row| row.id).collect();
+    // Thursday 09:00: today at 16:00, Saturday at 09:00, Monday at 09:00 (the next week, Monday first).
+    for (id, hours) in ids.iter().zip([7, 48, 96]) {
+        app.mailbox_mut().act(*id, Act::Snooze(Timestamp::from_unix(NOW + hours * 3_600, 0).unwrap()));
+    }
+    app.mailbox_mut().open(Place::Later(Pile::Snoozed));
+    app.mailbox_mut().forget_undo();
+    let mut harness = harness_of(app);
+    settle(&mut harness);
+    let heads: Vec<(String, f32)> = harness
+        .query_all_by_role(Role::Heading)
+        .filter_map(|node| node.accesskit_node().label().map(|label| (label, node.rect().top())))
+        .filter(|(label, _)| label.starts_with("Back") || label.starts_with("Later,"))
+        .collect();
+    let names: Vec<&str> = heads.iter().map(|(label, _)| label.split(',').next().unwrap_or_default()).collect();
+    assert_eq!(names, ["Back today", "Back this week", "Later"], "three heads, in time order");
+    for (id, (_, top)) in ids.iter().zip(&heads) {
+        let row = harness
+            .query_all_by_label_contains(&harness.state().mailbox().messages().iter().find(|row| row.id == *id).unwrap().subject)
+            .next()
+            .unwrap()
+            .rect();
+        assert!(row.top() >= *top, "each row under its own head");
+    }
+    let head = harness.get_by_role_and_label(Role::Heading, &heads[0].0).rect();
+    harness.hover_at(head.center());
+    settle(&mut harness);
+    assert!(harness.query_by_label("done all").is_none(), "a head of Later marks nothing done");
+}
