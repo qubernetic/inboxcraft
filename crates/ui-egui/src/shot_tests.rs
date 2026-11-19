@@ -951,3 +951,15 @@ fn the_status_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
         assert!(error.to_string().contains("x.png:"), "{error}");
     }
 }
+
+#[test]
+fn home_is_drawn_in_the_body_of_a_1440_window_in_its_states_and_no_other_page() {
+    for state in ["today", "nothing-to-do", "overflow-counts", "first-run", "everything-failing", "today@130"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "home": "{state}"}}"#))).unwrap();
+        assert_eq!((picture.width(), picture.height()), (1205, 826), "{state}");
+    }
+    for bad in [r#""home": "nowhere""#, r#""home": "today@99""#, r#""home": "today", "home_sets": true"#, r#""home": "today", "text_scale": 130"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", {bad}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{bad}: {error}");
+    }
+}

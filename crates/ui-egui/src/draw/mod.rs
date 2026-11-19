@@ -38,6 +38,7 @@ mod calendar;
 pub(crate) use self::calendar::{event_board, mini_month_board};
 mod compose;
 mod frame;
+pub(crate) mod home;
 mod invite;
 mod list;
 mod onboard;
