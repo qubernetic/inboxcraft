@@ -10,6 +10,11 @@ use inboxcraft_model::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId,
 /// Why the store refused a change or could not answer.
 ///
 /// A refused [`Batch`](crate::Batch) changes nothing. No variant carries message text.
+///
+/// A database failure displays as one fixed sentence for its kind, told apart by the database's result code: no
+/// table, column, statement, file name or path reaches whoever reads the sentence. The database's own words stay in
+/// the value, cut to [`MAX_ERROR_DETAIL`] characters without control characters, for the app's own log and for tests:
+/// [`StoreError::detail`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError {
     /// A change names an account the store does not hold.
@@ -53,8 +58,42 @@ pub enum StoreError {
     Corrupt(&'static str),
     /// A file operation failed.
     Io(std::io::ErrorKind),
-    /// The database engine failed; its own message.
+    /// The database could not be read or written, for a reason without a kind of its own below (a missing table, a
+    /// read-only or vanished file, an I/O failure); the database's own words.
     Database(String),
+    /// Another connection holds the database (busy or locked); trying again later may work. The database's own words.
+    DatabaseBusy(String),
+    /// The disk (or the database's page limit) is full. The database's own words.
+    DatabaseFull(String),
+    /// The database file is damaged or is no database. The database's own words.
+    DatabaseDamaged(String),
+    /// The database refused a change that breaks one of its constraints (a trigger's refusal is one). The database's own
+    /// words.
+    DatabaseRefused(String),
+    /// A migration of the schema to this build's version failed for a reason without a kind of its own; the database
+    /// is left as it was. The database's own words.
+    Migration(String),
+}
+
+/// The most characters of the database's own words a [`StoreError`] keeps.
+pub const MAX_ERROR_DETAIL: usize = 256;
+
+impl StoreError {
+    /// The database's own words behind a database failure, for the app's own log and for tests; `None` for every
+    /// other error. Never shown to a caller outside the app: they can name tables, columns, a statement, and a
+    /// value or a refusal's words from a damaged or crafted file.
+    #[must_use]
+    pub fn detail(&self) -> Option<&str> {
+        match self {
+            Self::Database(detail)
+            | Self::DatabaseBusy(detail)
+            | Self::DatabaseFull(detail)
+            | Self::DatabaseDamaged(detail)
+            | Self::DatabaseRefused(detail)
+            | Self::Migration(detail) => Some(detail),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for StoreError {
@@ -75,7 +114,12 @@ impl fmt::Display for StoreError {
             }
             Self::Corrupt(what) => write!(f, "the store is damaged: {what}"),
             Self::Io(kind) => write!(f, "a store file operation failed: {kind}"),
-            Self::Database(message) => write!(f, "the store database failed: {message}"),
+            Self::Database(_) => f.write_str("the store could not be read or written"),
+            Self::DatabaseBusy(_) => f.write_str("the store is busy, try again"),
+            Self::DatabaseFull(_) => f.write_str("the store is full: there is no room left on the disk"),
+            Self::DatabaseDamaged(_) => f.write_str("the store is damaged"),
+            Self::DatabaseRefused(_) => f.write_str("the store refused the change"),
+            Self::Migration(_) => f.write_str("the store could not be brought up to this version"),
         }
     }
 }

@@ -161,7 +161,7 @@ fn a_file_that_is_no_database_is_refused() {
     let tmp = dir();
     let dir = tmp.path();
     fs::write(dir.join(DATABASE_FILE), vec![b'x'; 4096]).unwrap();
-    assert!(matches!(Sqlite::open(dir, StoreConfig::default()), Err(StoreError::Database(_))));
+    assert!(matches!(Sqlite::open(dir, StoreConfig::default()), Err(StoreError::DatabaseDamaged(_))));
 }
 
 #[test]
