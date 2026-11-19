@@ -58,7 +58,7 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
             }
         });
         let firsts = [
-            (FirstWeek::FirstFourDayWeek, tr!("First four-day week"), theme.fonts.button),
+            (FirstWeek::FirstFourDayWeek, tr!("Four-day week"), theme.fonts.button),
             (FirstWeek::WeekOf1January, tr!("Week of 1 January"), theme.fonts.button),
         ];
         let note = match rule.first_week {
