@@ -173,3 +173,19 @@ fn a_second_click_on_send_reaches_nothing_under_it() {
         assert!(harness.state().composer().is_none(), "{level:?}: the second click opened nothing");
     }
 }
+
+#[test]
+fn a_draft_scheduled_from_the_docked_composer_leaves_in_the_frame_of_its_key() {
+    // Schedule plays no M10; the list it reloads draws the frame of the key again, so the owner never waits.
+    for level in [Level::Off, Level::Full] {
+        let (mut harness, _) = written_over(level, true);
+        let later = Timestamp::from_unix(1_793_869_200 + 2 * 86_400, 0).unwrap();
+        harness.state_mut().composer_mut().0.unwrap().set_later(Some(later));
+        harness.run();
+        send(&mut harness);
+        assert!(harness.state().composer().is_none(), "{level:?}: scheduled");
+        assert_eq!(subject(&harness), None, "{level:?}: the composer is gone in that frame");
+        let status = seen(&harness, regions(&harness).1);
+        assert!(status.iter().any(|(text, _, _)| text.starts_with("Scheduled for")), "{level:?}: the status line says so in that frame");
+    }
+}
