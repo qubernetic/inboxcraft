@@ -581,6 +581,16 @@ fn a_field_not_drawn_for_a_while_shows_no_cell_that_cooled_meanwhile() {
 }
 
 #[test]
+fn a_clock_that_jumps_back_lets_the_field_rest_at_once() {
+    let (mut field, _) = held_at_rest();
+    field.update(1.05, 11, None, Level::Full, false);
+    assert!(field.cooling());
+    // 9 s back: no cell keeps cooling until the clock catches up.
+    field.update(1.05 - 9.0, 12, None, Level::Full, false);
+    assert!(!field.cooling(), "the field asks for frames until the clock catches up");
+}
+
+#[test]
 fn the_level_turning_off_stills_everything_at_once() {
     let mut harness = harness(with_emblem(Level::Full));
     harness.hover_at(pos2(370.0, 300.0));

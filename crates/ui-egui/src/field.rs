@@ -393,7 +393,8 @@ impl Field {
                 warm.left = Some(left);
             }
         }
-        self.warm.retain(|_, warm| warm.left.is_none_or(|left| now - left < warm.cool));
+        // A cell left in the future (the clock went back) has cooled.
+        self.warm.retain(|_, warm| warm.left.is_none_or(|left| (0.0..warm.cool).contains(&(now - left))));
         self.last = Some((now, pass));
     }
 
