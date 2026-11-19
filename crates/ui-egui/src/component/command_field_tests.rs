@@ -360,7 +360,7 @@ fn live(text: &str, scope: Scope<'static>) -> (Harness<'static, String>, Rc<RefC
     let seen = Rc::clone(&kept);
     let mut harness = builder::<String>().allow_missing_glyphs().with_size(vec2(640.0, 120.0)).build_ui_state(
         move |ui, text| {
-            crate::motion::set_reduced(ui.ctx(), true);
+            crate::motion::set_level(ui.ctx(), crate::motion::Level::Reduced);
             stage(ui, theme.palette.panel, |ui| {
                 ui.set_width(560.0);
                 let typed = command_field(ui, &theme, Id::unique("command"), text, scope, "Ctrl K", None);
