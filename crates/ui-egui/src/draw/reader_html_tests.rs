@@ -444,6 +444,40 @@ fn a_table_wider_than_its_room_is_a_tab_stop_whose_arrows_show_its_other_columns
 }
 
 #[test]
+fn the_arrows_of_a_wide_table_of_links_scroll_it_and_never_take_the_focus_to_a_link() {
+    // The table keeps the arrows while it has the focus: egui would move the focus to the link beside it.
+    let cells: String = (0..24).map(|index| format!("<td><a href=\"https://example.org/{index}\">cell{index}</a></td>")).collect();
+    let html = format!("<table><tr>{cells}</tr></table>");
+    let mut harness = fitted_then_button(display(&html));
+    harness.key_press(Key::Tab);
+    harness.run();
+    harness.run();
+    let table = focused(&harness);
+    assert_eq!(table.as_ref().map(|(role, _)| *role), Some(Role::ScrollView), "Tab reaches the table first: {table:?}");
+    let start = cell_at(&harness, "cell0").map(|rect| rect.left());
+    for _ in 0..3 {
+        harness.key_press(Key::ArrowRight);
+        harness.run();
+        assert_eq!(focused(&harness), table, "Right leaves the focus on the table");
+    }
+    let moved = cell_at(&harness, "cell0").map(|rect| rect.left());
+    assert!(moved < start, "Right scrolled the table: {start:?} to {moved:?}");
+    harness.key_press(Key::ArrowLeft);
+    harness.run();
+    assert_eq!(focused(&harness), table, "Left too");
+    // No trap: Tab and Shift Tab leave it.
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert!(focused(&harness).is_some_and(|now| Some(&now) != table.as_ref()), "Tab leaves the table");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness), table, "Shift Tab comes back to it");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert_ne!(focused(&harness), table, "and leaves it backwards");
+}
+
+#[test]
 fn a_focused_link_in_a_table_keeps_the_focus_far_from_sight() {
     let html = format!(
         "<table><tr><td><a href=\"https://example.org/1\">first</a></td><td><a href=\"https://example.org/2\">second</a></td></tr>\
