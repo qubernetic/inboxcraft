@@ -671,6 +671,9 @@ pub struct Mailbox {
     calendar_sync: SyncHandle,
     /// The database's words of the last store failure of the window's commands written to standard error.
     logged: Option<String>,
+    /// How many lines the window's commands wrote to standard error, for the tests.
+    #[cfg(test)]
+    logged_lines: u64,
 }
 
 impl std::fmt::Debug for Mailbox {
@@ -908,6 +911,8 @@ impl Mailbox {
             refused: None,
             calendar_sync: SyncHandle::default(),
             logged: None,
+            #[cfg(test)]
+            logged_lines: 0,
         };
         mailbox.refresh();
         mailbox
@@ -1591,6 +1596,10 @@ impl Mailbox {
             && let Some(line) = crate::store_log(error, &mut self.logged)
         {
             eprintln!("{line}");
+            #[cfg(test)]
+            {
+                self.logged_lines = self.logged_lines.saturating_add(1);
+            }
         }
         Ok(answer?)
     }

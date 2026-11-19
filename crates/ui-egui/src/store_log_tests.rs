@@ -20,7 +20,7 @@ fn a_window_command_s_store_failure_logs_the_database_s_words_once_and_never_in_
     let dir = tempfile::tempdir().unwrap();
     let store = Sqlite::open(dir.path(), StoreConfig::default()).unwrap();
     let mut mailbox = Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock());
-    assert_eq!(mailbox.logged, None);
+    assert_eq!((mailbox.logged.as_deref(), mailbox.logged_lines), (None, 0));
     // The database file damaged under the open store: every read fails with the database's own words.
     for name in [DATABASE_FILE.to_owned(), format!("{DATABASE_FILE}-wal"), format!("{DATABASE_FILE}-shm")] {
         std::fs::write(dir.path().join(name), vec![b'x'; 65_536]).unwrap();
@@ -30,6 +30,8 @@ fn a_window_command_s_store_failure_logs_the_database_s_words_once_and_never_in_
     let logged = mailbox.logged.clone();
     assert!(logged.as_deref().is_some_and(|words| !words.is_empty()), "the words are kept for the log: {error:?}");
     assert!(!banner.contains(logged.as_deref().unwrap_or_default()), "the banner holds no words of the database: {banner}");
+    assert_eq!(mailbox.logged_lines, 1, "one line written");
     assert!(mailbox.run("account.list", &json!({})).is_err());
-    assert_eq!(mailbox.logged, logged, "the same words again are written once");
+    assert_eq!(mailbox.logged, logged);
+    assert_eq!(mailbox.logged_lines, 1, "the same words again are not written again");
 }
