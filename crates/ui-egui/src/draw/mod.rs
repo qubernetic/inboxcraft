@@ -3177,6 +3177,7 @@ impl InboxApp {
             settings::Asked::Level(account, level) => self.mailbox.set_notify_level(account, level),
             settings::Asked::Returns(on) => self.mailbox.set_notify_returns(on),
             settings::Asked::Reminders(on) => self.mailbox.set_notify_reminders(on),
+            settings::Asked::Alerts(on) => self.mailbox.set_notify_alerts(on),
             settings::Asked::Background(on) => self.set_background(on),
             settings::Asked::Login(on) => self.set_login(on),
             asked @ (settings::Asked::Templates

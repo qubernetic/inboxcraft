@@ -153,6 +153,8 @@ pub(super) enum Asked {
     Returns(bool),
     /// Whether follow-up reminders notify.
     Reminders(bool),
+    /// Whether calendar alerts notify.
+    Alerts(bool),
     /// Whether closing the window leaves InboxCraft running.
     Background(bool),
     /// Whether InboxCraft starts with the computer.

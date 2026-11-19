@@ -2442,6 +2442,11 @@ impl Mailbox {
         self.notify_set(&json!({ "reminders": on }));
     }
 
+    /// Whether a calendar event's alert notifies the owner (`notify.set`).
+    pub fn set_notify_alerts(&mut self, on: bool) {
+        self.notify_set(&json!({ "alerts": on }));
+    }
+
     fn notify_set(&mut self, params: &Value) {
         if let Err(error) = self.run("notify.set", params) {
             self.fail(error);

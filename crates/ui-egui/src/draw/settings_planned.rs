@@ -1,17 +1,18 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings pages that are designed and not built yet, drawn as coming soon: Calendar (the alerts switch and each
-//! account's calendars with "read again"; the week's first day is a fact), and the three sections that are planned whole, with the coming-soon mark on their head: About (the
-//! program, its licences, its makers and contributors), AI (where a model runs, and the consent to send mail to one
-//! elsewhere) and Plugins. Nothing on them can be pressed or focused.
+//! The settings pages that are designed and not built whole yet: Calendar (the calendar alerts switch works; each
+//! account's calendars with "read again" are coming soon; the week's first day is a fact), and the three sections that
+//! are planned whole, with the coming-soon mark on their head: About (the program, its licences, its makers and
+//! contributors), AI (where a model runs, and the consent to send mail to one elsewhere) and Plugins. Nothing coming
+//! soon on them can be pressed or focused.
 
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, pos2, vec2};
 
 use super::{Asked, body, group, head};
 use crate::component::button::{LinkSize, link_sized};
 use crate::component::segmented::segmented_for;
-use crate::component::settings_row::{settings_row, settings_row_soon};
+use crate::component::settings_row::settings_row;
 use crate::component::soon::soon;
 use crate::component::switch::{SwitchState, switch_in};
 use crate::keymap::Keymap;
@@ -20,12 +21,24 @@ use crate::settings::Section;
 use crate::theme::Theme;
 use crate::tr;
 
-/// The Calendar page: alerts, each account's calendars, the week.
+/// The Calendar page: alerts, each account's calendars, the week. The alerts switch changes `notify.set`'s `alerts` on
+/// the owner's press only.
 pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Option<Asked> {
+    let mut asked = None;
     head(ui, theme, Section::Calendar, &[], |_| {});
     body(ui, theme, "calendar", |ui| {
         group(ui, theme, "A", tr!("Alerts"), None);
-        settings_row_soon(ui, theme, tr!("Calendar alerts"), tr!("An event's alert shows as a desktop notification at its time."));
+        let on = mailbox.notify_settings().alerts;
+        let help = if on {
+            tr!("An event's alert shows as a desktop notification at its time.")
+        } else {
+            tr!("Off: no event notifies. The alerts stay on their events and come back with the switch.")
+        };
+        settings_row(ui, theme, tr!("Calendar alerts"), Some(help), |ui| {
+            if crate::component::switch::switch(ui, theme, tr!("Calendar alerts"), on).clicked() {
+                asked = Some(Asked::Alerts(!on));
+            }
+        });
         let note = tr!("A calendar comes from its account's CalDAV address. Which of them the calendar shows is chosen in its side panel.");
         group(ui, theme, "B", tr!("Calendars"), Some(note));
         let count = mailbox.accounts().len();
@@ -40,7 +53,7 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
             crate::component::label(ui, theme.fonts.mono, first, theme.palette.muted);
         });
     });
-    None
+    asked
 }
 
 /// The height of an account's row of calendars, in points (at 100 %).
@@ -171,3 +184,7 @@ pub(super) fn plugins(ui: &mut Ui, theme: &Theme) -> Option<Asked> {
     });
     None
 }
+
+#[cfg(test)]
+#[path = "settings_calendar_alerts_tests.rs"]
+mod alerts_tests;

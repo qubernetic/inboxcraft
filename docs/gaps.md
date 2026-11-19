@@ -767,7 +767,6 @@ time from the code as it is, not measured.
   to an event the owner organises is shown, not written into the event's guests; delegating is not offered (#149).
 - An answer carries no comment, and its message text is English; Going and Maybe put the event into the account's
   first calendar, with no choice of calendar (#149).
-- The Notifications page has no switch for calendar alerts yet: `notify.set` with `alerts` turns them off (#150).
 - An alert notification has no snooze or dismiss button; mail (`EMAIL`) alarms and alarms more than a year from their
   event are left out; the default alert of an all-day event goes off at midnight the day before (#150).
 
