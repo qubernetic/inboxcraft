@@ -123,11 +123,13 @@ pub(crate) const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [
     );
     CREATE INDEX alert_event ON alert (event, at, id);",
     // 5: a draft's save time beside its record, so the newest drafts of an account are read in index order and a
-    // limit stops the scan. The rows already there take it from their record; a record without one sorts oldest.
+    // limit stops the scan. The rows already there take it from their record; a record without one, or one that
+    // cannot be read, sorts oldest.
     "ALTER TABLE draft ADD COLUMN saved INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE draft ADD COLUMN saved_nanos INTEGER NOT NULL DEFAULT 0;
     UPDATE draft SET saved = coalesce(CAST(json_extract(record, '$.saved[0]') AS INTEGER), 0),
-        saved_nanos = coalesce(CAST(json_extract(record, '$.saved[1]') AS INTEGER), 0);
+        saved_nanos = coalesce(CAST(json_extract(record, '$.saved[1]') AS INTEGER), 0)
+      WHERE typeof(record) = 'text' AND json_valid(record);
     CREATE INDEX draft_newest ON draft (account, saved DESC, saved_nanos DESC, id DESC);",
 ];
 
