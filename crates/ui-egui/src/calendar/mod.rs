@@ -19,6 +19,7 @@ pub mod day;
 pub mod editor;
 pub mod layout;
 pub mod sample;
+pub mod sync;
 
 use std::collections::BTreeSet;
 
@@ -367,6 +368,8 @@ pub struct Calendar {
     /// Changes whenever the events shown change (a read, a calendar shown or hidden): what the views laid out of the
     /// events is kept while it stays the same.
     serial: u64,
+    /// The calendars' sync at the side panel's foot, shared with the mailbox that runs it ([`sync`]).
+    sync: sync::SyncHandle,
 }
 
 /// The next [`Calendar::serial`]: never the same twice in a run, whichever calendar takes it.
@@ -661,6 +664,7 @@ impl Calendar {
     pub fn refresh(&mut self, mailbox: &mut Mailbox) {
         let (now, offset) = (mailbox.now(), mailbox.offset());
         self.tick(now, offset);
+        self.sync = mailbox.calendar_sync();
         self.accounts = mailbox.accounts().iter().map(|account| (account.id, account.index, account.label.clone())).collect();
         if self.focus.is_none() {
             self.focus = self.today;
@@ -692,6 +696,18 @@ impl Calendar {
         self.unreadable = answer.get("unreadable").and_then(Value::as_u64).unwrap_or(0);
         self.serial = next_serial();
         Ok(())
+    }
+
+    /// What the side panel's foot shows of the calendars' sync.
+    #[must_use]
+    pub fn sync_view(&self) -> sync::SyncView {
+        sync::with(&self.sync, |tracker| tracker.view())
+    }
+
+    /// The owner pressed "sync now" (or "try again"): the mailbox runs `calendar.sync` on its next round, unless a
+    /// sync is under way. Whether the press was taken.
+    pub fn ask_sync(&self) -> bool {
+        sync::with(&self.sync, sync::Tracker::ask)
     }
 
     /// Shows the days in `view`, around the same day.

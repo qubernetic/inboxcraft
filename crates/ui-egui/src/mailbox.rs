@@ -40,6 +40,7 @@ use inboxcraft_model::{Account, AccountId, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
 use serde_json::{Value, json};
 
+use crate::calendar::sync::{self, SyncHandle, Tracker};
 use crate::iconset::IconId;
 use crate::workers::Workers;
 use crate::{UiError, tr};
@@ -666,6 +667,8 @@ pub struct Mailbox {
     caller: Caller,
     /// The first command [`Mailbox::run`] refused for [`Mailbox::caller`].
     refused: Option<&'static str>,
+    /// The calendars' sync: the owner's press, its jobs and its events ([`crate::calendar::sync`]).
+    calendar_sync: SyncHandle,
 }
 
 impl std::fmt::Debug for Mailbox {
@@ -899,6 +902,7 @@ impl Mailbox {
             last: None,
             caller: Caller::Owner,
             refused: None,
+            calendar_sync: SyncHandle::default(),
         };
         mailbox.refresh();
         mailbox
@@ -1434,6 +1438,7 @@ impl Mailbox {
                 false
             }
         };
+        changed |= self.sync_calendars();
         for _ in 0..MAX_PUMP_ROUNDS {
             if !self.pump_once(workers) {
                 break;
@@ -1445,6 +1450,37 @@ impl Mailbox {
             self.refresh();
         }
         changed
+    }
+
+    /// Runs `calendar.sync` when the owner pressed "sync now" at the calendar's foot since the last round, and only
+    /// then: the press is all that asks for it. The accounts it asked are followed from here
+    /// ([`crate::calendar::sync::Tracker`]). Whether a press was taken.
+    fn sync_calendars(&mut self) -> bool {
+        if !sync::with(&self.calendar_sync, Tracker::take_asked) {
+            return false;
+        }
+        match self.run("calendar.sync", &json!({})) {
+            Ok(answer) => {
+                let ids = answer.get("accounts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+                let named: Vec<(u64, &str)> = ids
+                    .iter()
+                    .filter_map(Value::as_u64)
+                    .take(sync::MOST_JOBS)
+                    .map(|id| (id, self.accounts.iter().find(|row| row.id == id).map_or("", |row| row.label.as_str())))
+                    .collect();
+                sync::with(&self.calendar_sync, |tracker| tracker.start(&named));
+            }
+            Err(error) => {
+                sync::with(&self.calendar_sync, Tracker::not_started);
+                self.error = Some(error.to_string());
+            }
+        }
+        true
+    }
+
+    /// The calendars' sync, shared with the calendar's side panel, which draws it and notes the owner's press.
+    pub(crate) fn calendar_sync(&self) -> SyncHandle {
+        std::sync::Arc::clone(&self.calendar_sync)
     }
 
     /// Takes the engine's notices into the mailbox, for the desktop, and the subjects of the sends that went late, for
@@ -1493,6 +1529,11 @@ impl Mailbox {
                 return false;
             }
         };
+        let (now, offset) = (self.clock.now(), self.offset);
+        let alive: Vec<u64> = accounts.iter().map(|account| account.id().get()).collect();
+        // The owner's calendar sync follows its jobs; its end or a step of it is drawn, and the jobs its events queue
+        // are taken on the next round.
+        let mut changed = sync::with(&self.calendar_sync, |tracker| tracker.sent(&jobs, &alive, now, offset));
         for job in jobs {
             // A job for an account that is gone has nobody to run it.
             if let Some(account) = accounts.iter().find(|account| account.id() == job.account) {
@@ -1500,8 +1541,8 @@ impl Mailbox {
             }
         }
         workers.keep(&accounts.iter().map(Account::id).collect::<Vec<_>>());
-        let mut changed = false;
         for event in workers.events() {
+            changed |= sync::with(&self.calendar_sync, |tracker| tracker.heard(&event, now, offset));
             match self.session.apply(&event) {
                 Ok(Applied::Changed) => changed = true,
                 Ok(Applied::Dropped) => {}
