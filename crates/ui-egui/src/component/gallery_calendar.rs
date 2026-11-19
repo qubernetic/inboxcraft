@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The gallery page of the calendar's sets for `ui_shot` (`"calendar_sets": true`): the boards of the event block
-//! (timed, band, chip, row, picked, hover, focus) and of the mini month (default, today, picked, hover), every state
-//! drawn as its sheet says with the sheet's words, on the boards' `bg`.
+//! (timed, band, chip, row, picked, hover, focus), of the mini month (default, today, picked, hover) and of the
+//! calendars' sync line (idle, syncing, synced, failed), every state drawn as its sheet says with the sheet's words,
+//! on the boards' `bg`.
 
 use egui::{Rect, Ui, UiBuilder, Vec2, pos2, vec2};
 
@@ -19,7 +20,7 @@ use super::margin;
 const WIDTH: f32 = 1200.0;
 
 /// The page's height, in points.
-const HEIGHT: f32 = 760.0;
+const HEIGHT: f32 = 880.0;
 
 /// The page's size in points.
 #[must_use]
@@ -58,8 +59,30 @@ fn mini_months(ui: &mut Ui, theme: &Theme) {
     });
 }
 
-/// Draws the page into `ui` in `theme` (its sets show no key: `_keymap` keeps the pages' signature).
-pub fn page(ui: &mut Ui, theme: &Theme, _keymap: &Keymap) {
+/// The sync line's board as its frames draw it: idle at 14:02, syncing Studio half way, synced at 14:02, and Studio's
+/// calendars refused.
+fn sync_lines(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    use crate::calendar::Moment;
+    use crate::calendar::sync::{SyncState, SyncView, Why};
+    title(ui, theme, tr!("Calendar sync"));
+    let read = Day::new(2026, 11, 16).map(|day| Moment { day, minute: 14 * 60 + 2 });
+    let studio = || tr!("Studio").to_owned();
+    let boards = [
+        ("idle", SyncState::Idle),
+        ("syncing", SyncState::Syncing { done: 5, of: 10, account: studio() }),
+        ("synced", SyncState::Synced { at: read }),
+        ("failed", SyncState::Failed { account: Some(studio()), why: Why::Refused }),
+    ];
+    cells(ui, theme, |ui| {
+        for (state, sync) in boards {
+            let view = SyncView { state: sync, read };
+            cell(ui, theme, state, |ui| super::calendar_sync::board(ui, theme, keymap, &view, egui::Id::unique(("gallery-sync", state))));
+        }
+    });
+}
+
+/// Draws the page into `ui` in `theme`.
+pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let s = theme.spacing;
     let whole = Rect::from_min_size(pos2(0.0, 0.0), size());
     ui.painter().rect_filled(whole, 0.0, theme.palette.bg);
@@ -70,6 +93,8 @@ pub fn page(ui: &mut Ui, theme: &Theme, _keymap: &Keymap) {
             event_blocks(ui, theme);
             ui.add_space(24.0);
             mini_months(ui, theme);
+            ui.add_space(24.0);
+            sync_lines(ui, theme, keymap);
         });
     });
 }

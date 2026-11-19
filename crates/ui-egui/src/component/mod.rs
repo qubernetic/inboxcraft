@@ -44,6 +44,7 @@ pub mod badge;
 pub mod banner;
 pub mod button;
 pub mod button_row;
+pub mod calendar_sync;
 pub mod card;
 pub mod check_step;
 pub mod checkbox;
