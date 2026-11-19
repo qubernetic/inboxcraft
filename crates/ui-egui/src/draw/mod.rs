@@ -37,6 +37,7 @@
 
 mod accounts;
 mod calendar;
+mod change;
 pub(crate) use self::calendar::{event_board, mini_month_board};
 mod command;
 mod compose;
@@ -271,6 +272,8 @@ pub struct InboxApp {
     /// Whether the composer has taken the list's place this frame (in front of it in one pane): the list is not drawn,
     /// and nothing acts on it or its rows (no key, no palette command, no Undo).
     list_hidden: bool,
+    /// A change of place under way (M12): the old body going, the new one coming.
+    change: Option<change::Change>,
     /// Where the list was drawn last, to tell whether the keyboard was in it when it goes.
     list_rect: Option<Rect>,
     /// For how many more frames the keyboard is given to the composer's text, the list having gone with it.
@@ -437,6 +440,7 @@ impl InboxApp {
             composer: None,
             composer_keys: false,
             list_hidden: false,
+            change: None,
             list_rect: None,
             keys_to_text: 0,
             frame: 0,
@@ -2369,6 +2373,10 @@ impl InboxApp {
         self.frame = ui.ctx().cumulative_frame_nr();
         // The command line's keys first: with its results shown, or the keyboard in it, they are its own.
         let command_keys = command::early(ui.ctx(), &mut self.command);
+        // A key or a press during a change of place acts at once: the change jumps to its end.
+        if crate::scramble::interrupted(ui.ctx()) {
+            self.change = None;
+        }
         // What stands in front, once, before any key is read.
         let surfaces = self.surfaces(ui.ctx());
         let Keys { mut ran, escape, to_place, typing, quiet } = self.keys(ui.ctx(), &surfaces);
@@ -2430,6 +2438,8 @@ impl InboxApp {
         let mut dismiss = false;
         let mut on_calendar = Vec::new();
         let mut on_home = None;
+        // The place the body draws in this frame: a command below that changes it changes it after the body was drawn.
+        let drawn_place = self.index_place(setting);
         let composer_left = half;
         self.list_hidden = false;
         if setting {
@@ -2605,6 +2615,7 @@ impl InboxApp {
         if let Some(changed) = changed {
             self.apply_settings(changed);
         }
+        self.change_place(ui.ctx(), drawn_place, regions.body, p.bg);
         self.follow_accounts_page();
         self.keep_keys();
         self.keep_triage();
@@ -2715,6 +2726,20 @@ impl InboxApp {
 
     /// The place the index shows selected: Settings while they are shown (`setting`), else Home, the calendar, Later
     /// while a pile is shown, or the mail.
+    /// M12, a change of place: when a command of this frame left `drawn` (the place the body drew in `body`), its
+    /// body is kept for the movement and the frame is drawn again with the new place, so the owner never waits for it;
+    /// while a change runs, its frame is painted over the body on the ground `ground`.
+    fn change_place(&mut self, ctx: &egui::Context, drawn: index::Place, body: Rect, ground: egui::Color32) {
+        if self.index_place(self.settings.is_open()) != drawn && !ctx.will_discard() {
+            self.change = change::keep(ctx, body, motion::level(ctx));
+            ctx.request_discard("a change of place draws its new place in the frame of its key");
+            return;
+        }
+        if self.change.as_mut().is_some_and(|change| !change.paint(ctx, ground)) {
+            self.change = None;
+        }
+    }
+
     fn index_place(&self, setting: bool) -> index::Place {
         if setting {
             index::Place::Settings

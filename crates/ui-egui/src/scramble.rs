@@ -113,10 +113,15 @@ pub fn real(count: usize, share: f32, from: Side) -> Range<usize> {
     }
 }
 
-/// Every text in `shape` scrambled through `painter` at `share` from `from`; a shape with no text stays.
+/// Every text in `shape` scrambled through `painter` at `share` from `from`; a shape with no text, and an icon, stay.
 pub fn shape(painter: &Painter, shape: &mut Shape, share: f32, from: Side) {
     match shape {
         Shape::Text(text) => {
+            // An icon is a glyph of the icon font: it stays as it is.
+            let icons = crate::theme::icon_font(1.0).family;
+            if text.galley.job.sections.iter().any(|section| section.format.font_id.family == icons) {
+                return;
+            }
             let Some(count) = count(&text.galley) else { return };
             let seed = count as u64;
             text.galley = galley(painter, &text.galley, &real(count, share, from), seed);
