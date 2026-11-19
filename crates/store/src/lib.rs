@@ -46,7 +46,7 @@ pub use body::{Body, MAX_SOURCE_BYTES, MAX_TEXT_BYTES};
 pub use change::{Batch, Change};
 pub use config::StoreConfig;
 pub use entry::Entry;
-pub use error::StoreError;
+pub use error::{MAX_ERROR_DETAIL, StoreError};
 use inboxcraft_model::{
     Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId,
     FolderState, Job, MessageId, MessageState, Outgoing, Scheduled, Sender,

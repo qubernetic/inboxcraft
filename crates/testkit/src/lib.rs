@@ -20,7 +20,7 @@
 //!   client until `net` exists; later slices drive `net` against the same servers.
 //!
 //! The [`store`] module writes the fixture store: a small invented mailbox on disk, for tests that open a store the
-//! way the apps do.
+//! way the apps do; the [`store_fault`] module makes its database fail from outside (busy, damaged, refusing).
 //!
 //! The [`live`] module is the harness of the opt-in live tests the owner runs by hand on two throwaway test
 //! accounts (`just it-live`); without their credentials, and always in the agent sandbox and in CI, they skip.
@@ -63,6 +63,7 @@ mod script;
 mod server;
 pub mod smtp;
 pub mod store;
+pub mod store_fault;
 mod wire;
 
 pub use client::{ClientError, ErrorKind, TestClient};

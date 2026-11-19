@@ -58,6 +58,7 @@ pub mod field;
 pub mod gallery;
 pub mod gallery_blocks;
 pub mod gallery_calendar;
+pub mod gallery_field;
 pub mod gallery_fields;
 pub mod gallery_index;
 pub mod gallery_lists;

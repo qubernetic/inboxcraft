@@ -86,6 +86,13 @@ one object on one line:
 
 The codes are stable snake_case; new ones may be added.
 
+A `store` error's message is one fixed sentence for what kind of failure it is, told apart by the database's result
+code: "the store is busy, try again", "the store is full: there is no room left on the disk", "the store is
+damaged", "the store refused the change", "the store could not be brought up to this version" or, for any other
+database failure, "the store could not be read or written". It never holds the database's own words: no table or
+column name, statement or path. The same sentences reach the control channel and the MCP tools. The app writes the
+database's words only to its own standard error, when the owner's store does not open.
+
 ## What it does not do
 
 - It never prompts, and only `mcp` reads stdin.

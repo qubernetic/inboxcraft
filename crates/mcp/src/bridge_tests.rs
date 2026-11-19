@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use inboxcraft_control_key::Failure;
 use serde_json::{Value, json};
 
-use crate::test_support::{call, request, text};
+use crate::test_support::{call, call_withheld, request, text};
 use crate::{Commands, Server};
 
 /// The commands that ran, with their params.
@@ -56,4 +56,18 @@ fn a_bridged_server_says_what_it_serves() {
     let instructions = answer["result"]["instructions"].as_str().unwrap();
     assert!(instructions.contains("read-only"), "{instructions}");
     assert!(!instructions.contains("local store"), "{instructions}");
+}
+
+#[test]
+fn the_new_read_tools_run_their_commands_in_the_app() {
+    for (tool, arguments, command) in
+        [("mail_why", json!({ "id": 3 }), "mail.why"), ("week_settings", json!({}), "week.settings"), ("sync_status", json!({}), "sync.status")]
+    {
+        let (mut server, ran) = bridged(Ok(json!({})));
+        let result =
+            if tool == "mail_why" { call_withheld(&mut server, tool, arguments.clone()) } else { call(&mut server, tool, arguments.clone()) };
+        let (out, error) = text(&result);
+        assert!(!error, "{tool}: {out}");
+        assert_eq!(ran.lock().unwrap().as_slice(), [(command.to_owned(), arguments)]);
+    }
 }

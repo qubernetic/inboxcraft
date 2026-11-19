@@ -287,3 +287,9 @@
 # An open list on the settings sheet: the add-account form's IMAP security select, its list open over the sheet (#238).
 {"out": "docs/images/settings-select-open-light.png", "mode": "light", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
 {"out": "docs/images/settings-select-open-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
+# The character field with the emblem's place holder at rest, at 100 % and 130 % text (#275).
+{"out": "docs/images/character-field-light.png", "mode": "light", "character_field": true}
+{"out": "docs/images/character-field-dark.png", "mode": "dark", "character_field": true}
+# The same with the pointer resting on the left edge of the first board's emblem: its cells and the field's warm (#275).
+{"out": "docs/images/character-field-warm-light.png", "mode": "light", "character_field": true, "pointer": [112, 420]}
+{"out": "docs/images/character-field-warm-dark.png", "mode": "dark", "character_field": true, "pointer": [112, 420]}

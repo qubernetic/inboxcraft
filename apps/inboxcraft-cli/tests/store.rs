@@ -7,7 +7,7 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use inboxcraft_model::AccountId;
-use inboxcraft_store::{Sqlite, Storage, StoreConfig};
+use inboxcraft_store::{Sqlite, Storage, StoreConfig, StoreError};
 use inboxcraft_testkit::store;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -144,6 +144,36 @@ fn a_failed_command_is_one_json_error_object_and_a_non_zero_exit() {
         let error: Value = serde_json::from_str(&err).unwrap();
         assert_eq!(error["error"]["code"], kind, "{args:?}: {err}");
         assert!(error["error"]["message"].as_str().is_some_and(|message| !message.is_empty()), "{err}");
+    }
+}
+
+/// An id past `i64::MAX`, the largest key the store takes, is a message that is not there, in the same words as any
+/// unknown id: never one of the sentences of a database failure ("the store could not be read or written" and the
+/// rest).
+#[test]
+fn an_id_past_the_largest_key_is_not_found_and_no_database_failure() {
+    let dir = fixture();
+    let failures: Vec<String> = [
+        StoreError::Database(String::new()),
+        StoreError::DatabaseBusy(String::new()),
+        StoreError::DatabaseFull(String::new()),
+        StoreError::DatabaseDamaged(String::new()),
+        StoreError::DatabaseRefused(String::new()),
+        StoreError::Migration(String::new()),
+    ]
+    .iter()
+    .map(ToString::to_string)
+    .collect();
+    for id in [u64::MAX, i64::MAX.unsigned_abs() + 1, i64::MAX.unsigned_abs()] {
+        for command in ["mail.read", "mail.thread"] {
+            let (code, out, err) = on(dir.path(), &["--json", command, &format!(r#"{{"id":{id}}}"#)]);
+            assert_eq!((code, out.as_str()), (1, ""), "{command} {id}: {err}");
+            let error: Value = serde_json::from_str(&err).unwrap();
+            assert_eq!(error["error"], json!({ "code": "not_found", "message": format!("there is no message {id}") }), "{command} {id}");
+            let (_, _, text) = on(dir.path(), &[command, &format!(r#"{{"id":{id}}}"#)]);
+            assert!(text.contains(&format!("there is no message {id}")), "{command} {id}: {text}");
+            assert!(!failures.iter().any(|failure| text.contains(failure.as_str())), "{command} {id}: {text}");
+        }
     }
 }
 

@@ -17,11 +17,17 @@ fn every_error_says_what_failed() {
         (StoreError::UnknownAlert(AlertId::new(7)), "no alert l7 in the store"),
         (StoreError::WrongAccount { folder: FolderId::new(2), account: AccountId::new(1) }, "folder f2 does not belong to account a1"),
         (StoreError::DuplicateUid { folder: FolderId::new(2), uid: Uid::new(5).unwrap() }, "folder f2 already holds UID 5"),
+        (StoreError::IdOutOfRange(u64::MAX), "id 18446744073709551615 is past the largest the store can keep"),
         (StoreError::TooLarge, "the message source is too large to keep"),
         (StoreError::NewerSchema { found: 9, known: 2 }, "the store has schema version 9, newer than this build's 2"),
         (StoreError::Corrupt("a record"), "the store is damaged: a record"),
         (StoreError::Io(std::io::ErrorKind::NotFound), "a store file operation failed: entity not found"),
-        (StoreError::Database("disk I/O error".to_owned()), "the store database failed: disk I/O error"),
+        (StoreError::Database("no such table: body".to_owned()), "the store could not be read or written"),
+        (StoreError::DatabaseBusy("database is locked".to_owned()), "the store is busy, try again"),
+        (StoreError::DatabaseFull("database or disk is full".to_owned()), "the store is full: there is no room left on the disk"),
+        (StoreError::DatabaseDamaged("file is not a database".to_owned()), "the store is damaged"),
+        (StoreError::DatabaseRefused("UNIQUE constraint failed: message.folder, message.uid".to_owned()), "the store refused the change"),
+        (StoreError::Migration("table meta already exists".to_owned()), "the store could not be brought up to this version"),
     ];
     for (error, text) in cases {
         assert_eq!(error.to_string(), text);
@@ -33,4 +39,12 @@ fn an_io_error_keeps_its_kind() {
     let error: StoreError = std::io::Error::from(std::io::ErrorKind::PermissionDenied).into();
     assert_eq!(error, StoreError::Io(std::io::ErrorKind::PermissionDenied));
     assert!(std::error::Error::source(&error).is_none());
+}
+
+#[test]
+fn only_a_database_failure_has_a_detail() {
+    assert_eq!(StoreError::DatabaseRefused("words".to_owned()).detail(), Some("words"));
+    assert_eq!(StoreError::Migration("step".to_owned()).detail(), Some("step"));
+    assert_eq!(StoreError::Corrupt("a record").detail(), None);
+    assert_eq!(StoreError::TooLarge.detail(), None);
 }
