@@ -156,11 +156,7 @@ fn keep_it_keeps_the_entry_and_each_kind_says_what_its_cancel_does() {
     let mut harness = four();
     for (row, heading, follows) in [
         (ALERT, "Cancel the alert for “Design review”?", "The event stays in the calendar; this alert does not ring."),
-        (
-            SNOOZE,
-            "Cancel the snooze of “A question about the font licence”?",
-            "The message itself stays as it is; only its return leaves the schedule.",
-        ),
+        (SNOOZE, "Cancel the snooze of “A question about the font licence”?", "The message comes back to its inbox now, as if its time had come."),
         (REMINDER, "Cancel the reminder on “Weekend plans”?", "The message itself stays as it is; no reminder comes if no reply arrives."),
     ] {
         press(&mut harness, row);
@@ -321,5 +317,35 @@ fn a_held_key_cancels_at_most_once_and_never_by_its_repeats() {
         harness.run();
         hold_key(&mut harness, key, 6);
         assert_eq!(kept(&mut harness).len(), 3, "a held {key:?} on the danger button cancels once");
+    }
+}
+
+#[test]
+fn cancelling_a_snooze_brings_the_message_back_to_its_inbox() {
+    let mut harness = four();
+    let answer = harness.state_mut().mailbox_mut().run("schedule.list", &json!({})).unwrap();
+    let snoozed = answer["entries"].as_array().unwrap().iter().find(|entry| entry["what"] == "unsnooze").unwrap()["message"].as_u64().unwrap();
+    let in_inbox = |harness: &mut Harness<'static, InboxApp>| {
+        let inbox = harness.state_mut().mailbox_mut().run("mail.list", &json!({ "role": "inbox" })).unwrap();
+        inbox["messages"].as_array().unwrap().iter().any(|message| message["id"] == snoozed)
+    };
+    assert!(!in_inbox(&mut harness), "a snoozed message waits outside the inbox");
+    press(&mut harness, SNOOZE);
+    harness.get_by_label("The message comes back to its inbox now, as if its time had come.");
+    press(&mut harness, "Cancel the snooze");
+    assert_eq!(kept(&mut harness), ["alert", "send", "follow_up"], "its return leaves the schedule");
+    assert!(in_inbox(&mut harness), "the message is back in its inbox");
+    let folders = harness.state_mut().mailbox_mut().run("folder.list", &json!({})).unwrap();
+    let parked: Vec<u64> = folders["folders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|folder| folder["name"] == "InboxCraft/Snoozed")
+        .map(|folder| folder["id"].as_u64().unwrap())
+        .collect();
+    assert!(!parked.is_empty(), "{folders}");
+    for folder in parked {
+        let list = harness.state_mut().mailbox_mut().run("mail.list", &json!({ "folder": folder })).unwrap();
+        assert!(!list["messages"].as_array().unwrap().iter().any(|message| message["id"] == snoozed), "and not in Snoozed");
     }
 }

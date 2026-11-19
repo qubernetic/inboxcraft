@@ -75,6 +75,8 @@ pub struct ScheduledRow {
     pub who: String,
     /// For an alert, how many minutes before the event it rings.
     pub before: Option<u64>,
+    /// For a snooze or a reminder, the message it names: a snooze's cancel brings that message back.
+    pub message: Option<u64>,
 }
 
 /// `text` plain, on one line, at most [`LINE`] characters.
@@ -99,6 +101,7 @@ impl ScheduledRow {
             subject: text("subject"),
             who: text("who"),
             before: value.get("before_minutes").and_then(Value::as_u64),
+            message: value.get("message").and_then(Value::as_u64),
         })
     }
 

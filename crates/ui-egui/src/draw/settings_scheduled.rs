@@ -74,7 +74,9 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, hand: &mut Option<Hand>) ->
         words(
             ui,
             theme.fonts.body,
-            tr!("Cancelling a send puts the message back in Drafts. Cancelling anything else takes only its time off the schedule."),
+            tr!(
+                "Cancelling a send puts the message back in Drafts. Cancelling a snooze brings the message back now. Cancelling a reminder or an alert takes only its time off the schedule."
+            ),
             p.muted,
         );
     });
@@ -230,7 +232,7 @@ fn confirmation(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &ScheduledRow,
         ),
         Kind::Snooze => (
             tr!("Cancel the snooze of “{subject}”?", subject = title),
-            tr!("The message itself stays as it is; only its return leaves the schedule."),
+            tr!("The message comes back to its inbox now, as if its time had come."),
             tr!("Cancel the snooze"),
         ),
         Kind::Reminder => (
@@ -306,7 +308,14 @@ impl super::super::InboxApp {
             }
             Asked::CancelScheduled(id) => {
                 let at = self.settings.scheduled().rows().iter().position(|row| row.id == id);
-                let cancelled = self.mailbox.run("schedule.cancel", &serde_json::json!({ "id": id }));
+                // A snooze's cancel brings its message back now (`mail.unsnooze`, which also takes the entry off the
+                // schedule), never leaving it in Snoozed with nothing to bring it back.
+                let snoozed =
+                    at.and_then(|at| self.settings.scheduled().rows().get(at)).filter(|row| row.kind == Kind::Snooze).and_then(|row| row.message);
+                let cancelled = match snoozed {
+                    Some(message) => self.mailbox.run("mail.unsnooze", &serde_json::json!({ "id": message })),
+                    None => self.mailbox.run("schedule.cancel", &serde_json::json!({ "id": id })),
+                };
                 self.settings.scheduled_mut().keep();
                 self.load_scheduled();
                 if let Err(error) = cancelled {
