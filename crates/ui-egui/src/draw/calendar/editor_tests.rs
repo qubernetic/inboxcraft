@@ -84,7 +84,7 @@ fn new_event_opens_the_editor_and_saving_adds_the_event_with_an_undo_toast() {
         assert!(shows(&harness, "Pottery class, Thursday 5 November, 09:00 – 10:00"));
         harness.get_by_label("Event added");
         harness.check_accessibility();
-        press(&mut harness, "Undo");
+        press(&mut harness, "undo");
         assert!(!shows(&harness, "Pottery class"), "undo takes the new event away");
     }
 }

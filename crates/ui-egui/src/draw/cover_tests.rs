@@ -317,7 +317,7 @@ fn archived_then_settings() -> (Harness<'static, InboxApp>, u64) {
     let first = harness.state().mailbox().messages().first().map(|row| row.id).unwrap();
     harness.state_mut().mailbox_mut().act(first, crate::mailbox::Act::Archive);
     harness.run();
-    assert!(harness.query_by_role_and_label(Role::Button, "Undo").is_some(), "the toast shows its Undo");
+    assert!(harness.query_by_role_and_label(Role::Button, "undo").is_some(), "the toast shows its Undo");
     open_settings(&mut harness);
     harness.ctx.memory_mut(|memory| {
         if let Some(focused) = memory.focused() {
@@ -395,7 +395,7 @@ fn on_the_settings_the_undo_key_without_a_toast_takes_nothing_back() {
     // The toast's time is over: the act stays in the history, no toast names it.
     harness.state_mut().mailbox_mut().forget_undo();
     harness.run();
-    assert!(harness.state().mailbox().can_undo() && harness.query_by_role_and_label(Role::Button, "Undo").is_none());
+    assert!(harness.state().mailbox().can_undo() && harness.query_by_role_and_label(Role::Button, "undo").is_none());
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
     harness.run();
@@ -416,7 +416,7 @@ fn the_act_s_undo_takes_nothing_back_under_the_command_line_s_results() {
         harness.state_mut().command_mut().set_text(">zz");
         harness.run();
         assert!(harness.state().command().results(), "the results show");
-        let undo = harness.get_by_role_and_label(Role::Button, "Undo");
+        let undo = harness.get_by_role_and_label(Role::Button, "undo");
         if activate {
             undo.click_accesskit();
         } else {
@@ -428,7 +428,7 @@ fn the_act_s_undo_takes_nothing_back_under_the_command_line_s_results() {
         // Closed, the toast's Undo takes it back.
         harness.key_press(Key::Escape);
         harness.run();
-        harness.get_by_role_and_label(Role::Button, "Undo").click();
+        harness.get_by_role_and_label(Role::Button, "undo").click();
         harness.run();
         assert!(harness.state().mailbox().messages().iter().any(|row| row.id == first), "activate {activate}: Undo after the results");
     }

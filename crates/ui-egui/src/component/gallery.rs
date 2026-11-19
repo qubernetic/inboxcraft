@@ -34,7 +34,6 @@ use super::soon::{soon, soon_tag};
 use super::switch::{self, SwitchState, switch};
 use super::tag::{TagKind, tag};
 use super::time_picker::{self, Ask, Preset, TimePicker};
-use super::toast::{self, Toast};
 use super::{avatar, badge, card, cut, galley, icon, label, pill, popup, tooltip};
 
 /// The page's size in points.
@@ -123,8 +122,6 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
             avatar::avatar(ui, theme, name, address, side);
         }
     });
-    caption(ui, theme, tr!("Toast"));
-    toast::panel(ui, theme, keymap, &Toast { text: tr!("Marked as done"), undo: Some("ui.undo"), rests: false }, f32::INFINITY);
     coming(ui, theme, keymap);
 }
 

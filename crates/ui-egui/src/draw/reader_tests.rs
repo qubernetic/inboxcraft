@@ -496,7 +496,7 @@ fn archive_in_more_moves_the_open_message_to_the_archive_and_undo_brings_it_back
     settle(&mut harness);
     assert!(row_of(&harness, id).is_none(), "it left the inbox");
     harness.get_by_label("Moved to Archive");
-    harness.get_by_role_and_label(Role::Button, "Undo").click();
+    harness.get_by_role_and_label(Role::Button, "undo").click();
     settle(&mut harness);
     assert!(row_of(&harness, id).is_some());
     assert_eq!(harness.state().reader().open_id(), Some(id), "open again, as it was");
@@ -589,7 +589,7 @@ fn delete_in_the_trash_deletes_for_good_with_a_toast_without_undo() {
     settle(&mut harness);
     assert!(row_of(&harness, id).is_none());
     harness.get_by_label("Deleted for good");
-    assert!(harness.query_by_role_and_label(Role::Button, "Undo").is_none(), "nothing to undo it with");
+    assert!(harness.query_by_role_and_label(Role::Button, "undo").is_none(), "nothing to undo it with");
 }
 
 #[test]
@@ -1422,7 +1422,7 @@ fn walks_and_rests(harness: &mut Harness<'static, InboxApp>, scene: &str) {
     into_the_reader(harness);
     let mut missed = crate::component::tests::keyboard_walk(harness);
     // The toast's Undo (after Done) is its key's, Ctrl Z, while the toast shows: the toast is no Tab stop anywhere.
-    missed.retain(|label| label != "Undo");
+    missed.retain(|label| label != "undo");
     assert!(missed.is_empty(), "{scene}: Tab never reaches {missed:?}");
     assert!(crate::component::tests::rests(harness, 8), "{scene}: it repaints at rest");
 }

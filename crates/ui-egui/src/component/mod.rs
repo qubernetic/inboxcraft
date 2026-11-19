@@ -106,7 +106,6 @@ pub mod switch;
 pub mod tag;
 pub mod thread_row;
 pub mod time_picker;
-pub mod toast;
 pub mod tooltip;
 pub mod typed_time;
 pub mod why_line;

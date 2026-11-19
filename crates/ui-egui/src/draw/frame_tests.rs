@@ -303,59 +303,6 @@ fn the_index_starts_under_the_command_line_in_every_frame() {
     }
 }
 
-/// The sample in the own frame at `ppp`, with an error shown or not.
-fn framed(ppp: f32, error: bool) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
-    app.set_own_frame(true);
-    app.set_frame(WindowFrame::Own);
-    if error {
-        app.mailbox_mut().open(crate::mailbox::Place::Folder(4242));
-    }
-    let mut harness = Harness::builder()
-        .with_size(vec2(1100.0, 700.0))
-        .with_pixels_per_point(ppp)
-        .with_context_setup(install_fonts)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
-    harness.run();
-    harness.run();
-    harness
-}
-
-/// Whether the rows of `rows` run on from one to the next: one line.
-fn one_run(rows: &std::collections::BTreeSet<i32>) -> bool {
-    match (rows.first(), rows.last()) {
-        (Some(first), Some(last)) => usize::try_from(last - first + 1).is_ok_and(|span| span == rows.len()),
-        _ => false,
-    }
-}
-
-#[test]
-fn in_the_own_frame_the_error_banner_stands_under_the_command_line() {
-    for ppp in [1.0_f32, 1.5] {
-        let theme = crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default());
-        let p = theme.palette;
-        let quiet = framed(ppp, false);
-        let mut harness = framed(ppp, true);
-        assert!(harness.state().mailbox().error().is_some());
-        assert_eq!(controls(&harness), controls(&quiet), "{ppp}: the controls stay where they are");
-        let error = harness.state().mailbox().error().unwrap().to_owned();
-        let words = harness.get_by_label(&error).rect();
-        // The frame's hairline under the command line is the line over the banner.
-        let bottom = line(&harness).bottom();
-        assert!(words.top() > bottom, "{ppp}: the banner's words {words:?} are under the command line");
-        let colours = [p.line, p.minus];
-        let upper = super::tests::level_line_rows(&harness, &colours, bottom - 3.0, words.top() - 1.0);
-        assert!(one_run(&upper), "{ppp}: one line between the command line and the banner: {upper:?}");
-        let dismiss = harness.get_by_role_and_label(Role::Button, "dismiss").rect();
-        let lower = super::tests::level_line_rows(&harness, &colours, dismiss.bottom(), dismiss.bottom() + 16.0);
-        assert!(one_run(&lower), "{ppp}: one line between the banner and the panes: {lower:?}");
-        // The command line still moves the window.
-        let at = free(&harness);
-        let seen = drag_from(&mut harness, at);
-        assert!(seen.contains(&ViewportCommand::StartDrag), "{ppp}: {seen:?}");
-    }
-}
-
 #[test]
 fn on_the_settings_the_window_controls_stand_clear_and_do_what_they_do() {
     let mut harness = harness_sized(true, WindowFrame::Own, vec2(1100.0, 700.0), InboxApp::open_settings);

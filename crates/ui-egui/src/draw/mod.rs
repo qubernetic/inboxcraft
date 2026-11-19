@@ -51,6 +51,7 @@ pub(crate) use reader::fitted_board;
 mod index;
 mod settings;
 mod shell;
+pub(crate) mod status;
 
 pub use list::rows_built;
 
@@ -64,9 +65,7 @@ use serde_json::{Value, json};
 
 use crate::calendar::Calendar;
 use crate::command::Command;
-use crate::component::banner::{self, BannerKind, BannerLink};
 use crate::component::soon;
-use crate::component::toast::{self, Toast};
 use crate::compose::Composer;
 use crate::desk::Desk;
 use crate::fetch::{Fetch, Offline};
@@ -97,14 +96,21 @@ fn last_keyboard_id() -> egui::Id {
     egui::Id::unique("window-last-keyboard")
 }
 
-/// Where the toasts of a frame stand: the body, and the composer drawn over it this pass with its foot.
-type ToastRoom = (Rect, Option<(Rect, Rect)>);
-
 /// The pattern of Home's character field.
 const HOME_FIELD_SEED: u32 = 0;
 
-/// How long the toast after an act shows, in seconds; its Undo works until then.
-pub const TOAST_SECONDS: f64 = 6.0;
+/// What a press of the status line's Undo takes back: the message it was drawn on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Undone {
+    /// The send of the draft, waiting for its hold.
+    Send(u64),
+    /// The discard of a draft from Home.
+    Discard,
+    /// The last act.
+    Act,
+    /// Nothing: the act cannot be taken back.
+    Nothing,
+}
 
 /// What was asked of the mail in the index this frame: an account narrowed, a mailbox opened.
 #[derive(Debug, Default)]
@@ -269,8 +275,14 @@ pub struct InboxApp {
     measured: usize,
     /// The frame being drawn; between frames, the next one.
     frame: u64,
-    /// What the composer's last step says in a toast (the draft kept, the message on its way), and since when.
-    notice: Option<(String, Option<f64>)>,
+    /// The status line's notices and errors waiting ([`crate::status::Status`]).
+    status: crate::status::Status,
+    /// The status line's facts, and the mailbox's revision and writes and the time they were read at.
+    facts: (status::Facts, Option<(u64, u64, f64)>),
+    /// The mailbox's error the status line was last given, so each is queued once.
+    seen_error: Option<String>,
+    /// The draft whose countdown shows and its whole hold in seconds: what its bar is a share of.
+    countdown_whole: Option<(u64, f64)>,
     /// The time picker opens over the open message in the next frame, with this text typed.
     picker: Option<String>,
     /// The draft whose send the countdown toast shows, while it waits for its hold.
@@ -441,7 +453,10 @@ impl InboxApp {
             #[cfg(test)]
             measured: 0,
             frame: 0,
-            notice: None,
+            status: crate::status::Status::default(),
+            facts: (status::Facts::default(), None),
+            seen_error: None,
+            countdown_whole: None,
             picker: None,
             sending: None,
             later_picker: false,
@@ -1951,7 +1966,7 @@ impl InboxApp {
         if self.discarding.is_some_and(|(waiting, _)| waiting != draft) {
             self.discard_waiting();
         }
-        self.notice = None;
+        self.status.forget_notices();
         self.discarding = Some((draft, None));
     }
 
@@ -1982,15 +1997,15 @@ impl InboxApp {
         }
     }
 
-    /// Shows `text` in a toast for [`TOAST_SECONDS`].
+    /// Says `text` in the status line, for the `notice` token's time once it shows.
     fn say(&mut self, text: &str) {
-        self.notice = Some((text.to_owned(), None));
+        self.status.push(crate::status::Message::Notice { text: text.to_owned(), until: crate::status::NOTICE_SECONDS });
     }
 
-    /// What the composer's last step says in its toast, while it shows.
+    /// What the composer's last step says in the status line, while it shows or waits to.
     #[must_use]
     pub fn notice(&self) -> Option<&str> {
-        self.notice.as_ref().map(|(text, _)| text.as_str())
+        self.status.notice()
     }
 
     /// Applies what was asked for in the composer.
@@ -2209,59 +2224,6 @@ impl InboxApp {
         }
     }
 
-    /// Where a toast `wide` points wide stands in the `body`, from the rects of this frame: with no `composer` drawn
-    /// over the body, centred at the body's foot. Beside a composer (drawn this pass: its rect and its foot's, which
-    /// holds Send and Discard) centred in the wider band of the body beside it when the toast fits there whole; else
-    /// over the composer, its foot just above the composer's foot, when it fits there whole; else in the wider of the
-    /// two, cut to it. A toast never meets the composer's foot, nor the composer beside it, not even while it rises.
-    fn toast_place(body: Rect, theme: &Theme, composer: Option<(Rect, Rect)>, wide: f32) -> toast::Place {
-        let s = &theme.spacing;
-        let lift = s.s6 + s.s1;
-        let at_foot = |band: Rect| toast::Place {
-            bottom: band.center_bottom() - egui::vec2(0.0, lift),
-            widest: (band.width() - s.s2 * 2.0).max(1.0),
-            lowest: band.bottom(),
-        };
-        let Some((drawn, foot)) = composer.filter(|(drawn, foot)| drawn.is_finite() && foot.is_finite() && body.intersects(*drawn)) else {
-            return at_foot(body);
-        };
-        let (left, right) = (drawn.left().clamp(body.left(), body.right()), drawn.right().clamp(body.left(), body.right()));
-        let before = Rect::from_min_max(body.min, pos2(left, body.bottom()));
-        let after = Rect::from_min_max(pos2(right, body.top()), body.max);
-        let beside = at_foot(if before.width() >= after.width() { before } else { after });
-        let over_foot = (foot.top() - s.s2).clamp(body.top(), body.bottom());
-        let over = toast::Place { bottom: pos2((left + right) / 2.0, over_foot), widest: (right - left - s.s2 * 2.0).max(1.0), lowest: over_foot };
-        if wide <= beside.widest {
-            beside
-        } else if wide <= over.widest {
-            over
-        } else if beside.widest >= over.widest {
-            beside
-        } else {
-            over
-        }
-    }
-
-    /// The toast of the composer's last step, while no act's toast and no countdown shows.
-    fn notice_toast(&mut self, ui: &Ui, theme: &Theme, room: ToastRoom) {
-        let Some((text, since)) = self.notice.clone() else { return };
-        if self.mailbox.undoable().is_some() || self.counting().is_some() || self.discarding.is_some() {
-            return;
-        }
-        let now = ui.input(|input| input.time);
-        let since = since.unwrap_or(now);
-        let left = TOAST_SECONDS - (now - since);
-        if left <= 0.0 {
-            self.notice = None;
-            return;
-        }
-        self.notice = Some((text.clone(), Some(since)));
-        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
-        let shown = Toast { text: &text, undo: None, rests: false };
-        let place = Self::toast_place(room.0, theme, room.1, toast::width(ui, theme, &self.keymap, &shown));
-        toast::show(ui.ctx(), theme, &self.keymap, egui::Id::unique("compose-toast"), &shown, place);
-    }
-
     /// The owner's appearance choices.
     #[must_use]
     pub fn appearance(&self) -> &Appearance {
@@ -2435,8 +2397,6 @@ impl InboxApp {
         let mut region = |salt: &str, rect: Rect| ui.new_child(egui::UiBuilder::new().id_salt(salt).max_rect(rect).layout(layout));
         let (mut command, mut index, mut body) =
             (region("shell-command", regions.command), region("shell-index", regions.index), region("shell-body", regions.body));
-        // In the app's own frame the banner stands under the command line, after the title bar.
-        let early = self.error_banner(&mut body, &theme, corner, false);
         let mut asked = MailAsked::default();
         let mut add = false;
         let mut header = list::Header::default();
@@ -2458,9 +2418,7 @@ impl InboxApp {
         ran.extend(indexed.place.and_then(Self::index_action));
         asked.open = indexed.mailbox;
         asked.narrow = indexed.account;
-        let late = self.error_banner(&mut body, &theme, corner, true);
-        let (mut dismiss, banner) = (early.0 | late.0, early.1.or(late.1));
-        layers.capped(banner);
+        let mut dismiss = false;
         let mut on_calendar = Vec::new();
         let mut on_home = None;
         let mut composer_left = half;
@@ -2542,15 +2500,15 @@ impl InboxApp {
         if !setting {
             composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
         }
-        // The toasts keep clear of the composer drawn this pass, docked or floating ([`compose::drawn_now`]).
-        let (mut undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests(), regions.body);
+        // The status line, a strip of its own at the window's foot: it covers nothing of the panes.
+        let (mut line, mut undid) = self.status_line(ui, &theme, &surfaces, quiet, regions.status);
         // The one gate for the place under a modal surface ([`Surfaces::modal`]): whatever pressed it (the pointer, a key,
         // a screen reader's activate, which egui's layers do not stop), nothing the list, the reader, the composer, Home,
-        // the calendar, the settings' page, the error banner or the act's toast asked for in this frame is applied. The
-        // index has its own gate ([`InboxApp::index_allowed`]). The send's countdown and a draft's discard keep their
-        // Undo: it stops a loss whose time runs out, and changes nothing else under the results.
+        // the calendar, the settings' page or the status line asked for in this frame is applied. The index has its own
+        // gate ([`InboxApp::index_allowed`]).
         if surfaces.modal() {
-            undone = false;
+            line = status::Pressed::default();
+            undid = None;
             listed = list::Asked { out: listed.out, ..list::Asked::default() };
             header = list::Header::default();
             drawn.asked.clear();
@@ -2561,14 +2519,17 @@ impl InboxApp {
             add = false;
             dismiss = false;
         }
+        let (undone, dismissed) = self.apply_line(&line, undid);
+        dismiss |= dismissed;
+        ran.extend(line.hint);
+        add |= line.open_account;
         let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, screener: screener_mode, presets, gained } = listed;
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
         let busy = dismiss
             || back_to_list
             || acted.is_some()
-            || undone
-            || unsent
+            || line != status::Pressed::default()
             || outboxed.is_some()
             || screener_mode.is_some()
             || (out && leaving)
@@ -2681,47 +2642,6 @@ impl InboxApp {
         }
         frame::title_bar(ui, line);
         frame::edges(ui.ctx());
-    }
-
-    /// The error banner of the design, when there is an error: the `panel` ground, 8 above and below and 12 at the
-    /// sides, its act a small link. Its last row holds the one `minus` hairline between it and what stands under it;
-    /// the panes there draw no line of their own ([`Panes::capped`]). In the system's frame it runs across the window
-    /// with a `minus` hairline on its top and sides. In the app's own frame (`framed`) it stands under the command line and
-    /// beside the index, whose lines are its top and left edges, and the frame's outline its right one; where it
-    /// reaches the window's top its top right corner is the window's `corner`. Whether Dismiss was
-    /// pressed, and the banner's rect. Called twice a frame, before the title bar and after it; it draws in
-    /// the call `framed` names (the own frame's or not).
-    fn error_banner(&self, ui: &mut Ui, theme: &Theme, corner: f32, framed: bool) -> (bool, Option<Rect>) {
-        let Some(error) = self.mailbox.error().filter(|_| self.draws_frame() == framed) else { return (false, None) };
-        let p = theme.palette;
-        let mut dismiss = false;
-        // A corner of a few points; the clamp keeps the cast inside u8.
-        let round = corner.clamp(0.0, 255.0) as u8;
-        let on_top = (ui.available_rect_before_wrap().top() - ui.ctx().content_rect().top()).abs() < 0.5;
-        let corners = match (framed, on_top) {
-            (false, _) => egui::CornerRadius { nw: round, ne: round, sw: 0, se: 0 },
-            (true, true) => egui::CornerRadius { nw: 0, ne: round, sw: 0, se: 0 },
-            (true, false) => egui::CornerRadius::ZERO,
-        };
-        // The banner component in its `Error` kind on the window's ground: it pads itself (8 above and below, 12 at the
-        // sides) and draws its ERROR label, words and link; the ground's corner and the edges are the window's, here.
-        let ground = Frame::new().fill(p.panel).corner_radius(corners);
-        let shown = Panel::top("error").show_separator_line(false).frame(ground).show(ui, |ui| {
-            let links = [BannerLink { name: tr!("dismiss"), id: "dismiss" }];
-            let (pressed, _) = banner::banner_in(ui, theme, &self.keymap, BannerKind::Error, error, &links, banner::Ground::Bare);
-            dismiss = pressed.as_deref() == Some("dismiss");
-        });
-        let r = shown.response.rect;
-        let painter = ui.painter();
-        let (right, bottom) = (r.right() - 1.0, r.bottom() - 1.0);
-        if !framed {
-            paint::hairline(painter, r.left_top(), r.right_top(), p.minus);
-            paint::hairline(painter, r.left_top(), pos2(r.left(), bottom), p.minus);
-            paint::hairline(painter, pos2(right, r.top()), pos2(right, bottom), p.minus);
-        }
-        // Its `minus` edge at the foot is the one line between it and the panes, which draw none there.
-        paint::hairline(painter, pos2(r.left(), bottom), pos2(r.right(), bottom), p.minus);
-        (dismiss, Some(r))
     }
 
     /// The app's own frame over the panes, when it draws one: the window's outline.
@@ -2986,119 +2906,161 @@ impl InboxApp {
         self.row_act(action)
     }
 
-    /// The toasts of the frame: the countdown while a send waits for its hold, else the act's; then the composer's
-    /// notice. Whether the act's Undo was pressed, and whether the countdown's took a send back. The act's Undo `rests`
-    /// (its button and its key) while the event editor is open ([`Surfaces::undo_rests`]).
-    fn toasts(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool, body: Rect) -> (bool, bool) {
-        let room = (body, compose::drawn_now(ui.ctx()));
-        let unsent = self.send_toast(ui, theme, quiet, room);
-        let counting = unsent || self.counting().is_some();
-        self.discard_toast(ui, theme, (quiet, rests), room, !counting);
-        let undone = if counting || self.discarding.is_some() { false } else { self.toast(ui, theme, quiet, rests, room) };
-        self.notice_toast(ui, theme, room);
-        (undone, unsent)
+    /// The status line of the frame in `rect` ([`status::line`]): the facts, the key hints that work now, and the one
+    /// message shown: the countdown while a send waits for its hold, else a discard's or the last act's Undo, else an
+    /// error or a notice of the queue ([`crate::status::Status`]). What was pressed in it, with the message it was
+    /// pressed on; nothing is applied here, so the one gate under a modal surface ([`Surfaces::modal`]) holds for it.
+    fn status_line(&mut self, ui: &mut Ui, theme: &Theme, surfaces: &Surfaces, quiet: bool, rect: Rect) -> (status::Pressed, Option<Undone>) {
+        let now = ui.input(|input| input.time);
+        let countdown = self.countdown_message(now);
+        let discard = if countdown.is_some() {
+            // Its time runs while the countdown has the line.
+            self.discard_time(ui, now);
+            None
+        } else {
+            self.discard_message(ui, now)
+        };
+        let act = if countdown.is_some() || discard.is_some() { None } else { self.act_message(now) };
+        if let Some(error) = self.mailbox.error() {
+            if self.seen_error.as_deref() != Some(error) {
+                self.seen_error = Some(error.to_owned());
+                self.status.push(crate::status::Message::Error { text: error.to_owned() });
+            }
+        } else {
+            self.seen_error = None;
+        }
+        self.read_facts(now);
+        let (over, whole) = match (&countdown, &discard, &act) {
+            (Some((draft, message)), _, _) => (Some((Undone::Send(*draft), message.clone())), self.countdown_whole.map_or(0.0, |(_, whole)| whole)),
+            (None, Some(message), _) => (Some((Undone::Discard, message.clone())), crate::status::UNDO_SECONDS),
+            (None, None, Some((message, undoable))) => {
+                (Some((if *undoable { Undone::Act } else { Undone::Nothing }, message.clone())), crate::status::UNDO_SECONDS)
+            }
+            (None, None, None) => (None, 0.0),
+        };
+        let (which, over) = over.unzip();
+        // The window's message, when it gave one, is the one drawn: a press on the line's Undo is that one's.
+        let shown = self.status.shown(now, None, over);
+        match &shown {
+            Some(crate::status::Message::Notice { until, .. }) => {
+                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((until - now).clamp(0.0, 3600.0)));
+            }
+            Some(crate::status::Message::Undo { until, .. } | crate::status::Message::Countdown { until, .. }) => {
+                // The seconds left and the bar change as each second ends, and then only.
+                let part = (until - now).max(0.0).fract();
+                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(if part > 0.001 { part } else { 1.0 }));
+            }
+            _ => {}
+        }
+        let hints: Vec<(&'static str, String, &'static str)> = status::HINTS
+            .iter()
+            .filter(|(action, _)| surfaces.allows(action, &self.keymap))
+            .filter_map(|(action, word)| Some((*action, self.keymap.chip(ui.ctx(), action)?, *word)))
+            .collect();
+        let countdown_shown = matches!(shown, Some(crate::status::Message::Countdown { .. }));
+        let rests = surfaces.undo_rests() && !countdown_shown;
+        let drawn = status::Shown { facts: &self.facts.0, message: shown.as_ref(), now, whole, hints: &hints, undo_key: !quiet, rests };
+        let pressed = status::line(ui, theme, &self.keymap, rect, &drawn);
+        (pressed, which)
     }
 
-    /// The countdown toast while the message sent last waits for its hold: "Sending “subject” in 4 s", with Undo and its
-    /// key, which take the send back. It asks for a frame as each second ends. Whether Undo was pressed (its key works
-    /// while nothing is `quiet`).
-    fn send_toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool, room: ToastRoom) -> bool {
+    /// Applies what was pressed in the status line on the message `undid` names: a send taken back, a discard dropped.
+    /// Whether the last act is to be taken back, and whether the mailbox's error goes (it was the error dismissed).
+    fn apply_line(&mut self, line: &status::Pressed, undid: Option<Undone>) -> (bool, bool) {
+        match undid.filter(|_| line.undo) {
+            Some(Undone::Send(draft)) => self.unsend(draft),
+            Some(Undone::Discard) => self.discarding = None,
+            _ => {}
+        }
+        let dismissed =
+            line.dismiss && self.status.dismiss().is_some_and(|text| self.mailbox.error().is_some_and(|error| crate::status::clean(error) == text));
+        (line.undo && undid == Some(Undone::Act), dismissed)
+    }
+
+    /// The facts of the line, read again when the mailbox changed or a second has passed ([`status::read`]).
+    fn read_facts(&mut self, now: f64) {
+        let stamp = (self.mailbox.revision(), self.mailbox.writes());
+        let fresh = self.facts.1.is_some_and(|(revision, writes, at)| (revision, writes) == stamp && (0.0..1.0).contains(&(now - at)));
+        if !fresh {
+            let facts = self.mailbox.quietly(status::read);
+            // The reads are the facts' own: they count as seen.
+            self.facts = (facts, Some((self.mailbox.revision(), self.mailbox.writes(), now)));
+        }
+    }
+
+    /// The countdown while the message sent last waits for its hold: "sending · subject", the seconds left and the
+    /// share of the hold, with Undo and its key, which take the send back. The draft and the message.
+    fn countdown_message(&mut self, now: f64) -> Option<(u64, crate::status::Message)> {
         let Some((draft, seconds)) = self.counting() else {
             self.sending = None;
-            return false;
+            self.countdown_whole = None;
+            return None;
         };
-        let subject = self.mailbox.outbox().iter().find(|row| row.draft == draft).map(|row| row.subject.clone()).unwrap_or_default();
-        let text = if subject.is_empty() {
-            tr!("Sending in {seconds} s", seconds = seconds)
-        } else {
-            tr!("Sending “{subject}” in {seconds} s", subject = subject, seconds = seconds)
-        };
-        // The next whole second, when the count changes.
-        let left = self.mailbox.outbox().iter().find(|row| row.draft == draft).and_then(|row| match row.state {
+        let row = self.mailbox.outbox().iter().find(|row| row.draft == draft);
+        let subject = row.map(|row| row.subject.clone()).unwrap_or_default();
+        let left = row.and_then(|row| match row.state {
             crate::mailbox::SendState::Waiting(Some(at)) => at.duration_since(self.mailbox.now()),
             _ => None,
         });
-        let tick = left.map_or(std::time::Duration::from_secs(1), |left| {
-            let part = std::time::Duration::from_nanos(u64::from(left.subsec_nanos()));
-            if part.is_zero() { std::time::Duration::from_secs(1) } else { part }
-        });
-        ui.ctx().request_repaint_after(tick);
-        let mut keys = self.keymap.clone();
-        if quiet {
-            keys.unbind(keymap::UNDO);
-        }
-        let id = egui::Id::unique("send-toast").with(draft);
-        let shown = Toast { text: &text, undo: Some(keymap::UNDO), rests: false };
-        let place = Self::toast_place(room.0, theme, room.1, toast::width(ui, theme, &keys, &shown));
-        let undone = toast::show(ui.ctx(), theme, &keys, id, &shown, place);
-        if undone {
-            self.unsend(draft);
-        }
-        undone
+        #[expect(clippy::cast_precision_loss, reason = "seconds of a hold")]
+        let left = left.map_or(seconds as f64, |left| left.as_secs_f64());
+        let whole = match self.countdown_whole {
+            Some((held, whole)) if held == draft => whole.max(left),
+            _ => left,
+        };
+        self.countdown_whole = Some((draft, whole));
+        let text = if subject.is_empty() { tr!("sending").to_owned() } else { tr!("sending · {subject}", subject = crate::status::clean(&subject)) };
+        Some((draft, crate::status::Message::Countdown { text, until: now + left }))
     }
 
-    /// The toast of a draft discarded from Home while its discard waits ([`InboxApp::discard_draft`]): "Draft
-    /// discarded" with Undo and its key (resting as the act's do, for `quiet` and `rests`), `shown` unless the send's
-    /// countdown has the place. Its time runs whether shown or not; when it ends the discard is carried out, and Undo
-    /// drops it; a closing window carries it out too.
-    fn discard_toast(&mut self, ui: &Ui, theme: &Theme, (quiet, rests): (bool, bool), room: ToastRoom, shown: bool) {
-        let Some((draft, since)) = self.discarding else { return };
-        let now = ui.input(|input| input.time);
+    /// Runs the time of a draft discarded from Home ([`InboxApp::discard_draft`]): when it ends, or the window closes,
+    /// the discard is carried out. Whether it still waits.
+    fn discard_time(&mut self, ui: &Ui, now: f64) -> bool {
+        let Some((draft, since)) = self.discarding else { return false };
         let since = since.unwrap_or(now);
-        let left = TOAST_SECONDS - (now - since);
-        // Not a number, over, or the window closes: carried out, not lost with the toast.
+        let left = crate::status::UNDO_SECONDS - (now - since);
+        // Not a number, over, or the window closes: carried out, not lost with the message.
         let closing = ui.input(|input| input.viewport().close_requested());
         let Some(wait) = std::time::Duration::try_from_secs_f64(left).ok().filter(|_| left > 0.0 && !closing) else {
-            return self.discard_waiting();
+            self.discard_waiting();
+            return false;
         };
         self.discarding = Some((draft, Some(since)));
         ui.ctx().request_repaint_after(wait);
-        if !shown {
-            return;
-        }
-        let mut keys = self.keymap.clone();
-        if quiet || rests {
-            keys.unbind(keymap::UNDO);
-        }
-        let id = egui::Id::unique("discard-toast").with(draft);
-        let card = Toast { text: tr!("Draft discarded"), undo: Some(keymap::UNDO), rests };
-        let place = Self::toast_place(room.0, theme, room.1, toast::width(ui, theme, &keys, &card));
-        if toast::show(ui.ctx(), theme, &keys, id, &card, place) {
-            self.discarding = None;
-            ui.ctx().request_repaint();
-        }
+        true
     }
 
-    /// The toast after the last act, rising from the bottom edge, for [`TOAST_SECONDS`]; after it Ctrl+Z still takes
-    /// acts back, one at a time. Whether Undo was pressed (its key works while nothing is `quiet`: no control has the
-    /// focus, no palette, capture or composer has the keys). While Undo `rests` the toast still shows, its Undo drawn resting, and works
-    /// again for what is left of its time once the reason has gone.
-    fn toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool, room: ToastRoom) -> bool {
+    /// The message of a draft discarded from Home while its discard waits: "Draft discarded" with Undo and its key,
+    /// for the `undo` token's time.
+    fn discard_message(&mut self, ui: &Ui, now: f64) -> Option<crate::status::Message> {
+        if !self.discard_time(ui, now) {
+            return None;
+        }
+        let since = self.discarding.and_then(|(_, since)| since).unwrap_or(now);
+        Some(crate::status::Message::Undo { text: tr!("Draft discarded").to_owned(), until: since + crate::status::UNDO_SECONDS })
+    }
+
+    /// The message of the last act, for the `undo` token's time; after it Ctrl+Z still takes acts back, one at a time.
+    /// The message and whether its act can be taken back (one that cannot says so and offers no Undo).
+    fn act_message(&mut self, now: f64) -> Option<(crate::status::Message, bool)> {
         let Some(undo) = self.mailbox.undoable().cloned() else {
             self.toast = None;
-            return false;
+            return None;
         };
-        let now = ui.input(|input| input.time);
         let since = match self.toast {
             Some((serial, since)) if serial == undo.serial => since,
             _ => now,
         };
-        let left = TOAST_SECONDS - (now - since);
-        if left <= 0.0 {
+        let until = since + crate::status::UNDO_SECONDS;
+        if until <= now {
             self.mailbox.forget_undo();
             self.toast = None;
-            return false;
+            return None;
         }
         self.toast = Some((undo.serial, since));
-        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
-        let mut keys = self.keymap.clone();
-        if quiet || rests {
-            keys.unbind(keymap::UNDO);
-        }
-        let id = egui::Id::unique("act-toast").with(undo.serial);
-        let shown = Toast { text: &undo.text, undo: undo.undoable.then_some(keymap::UNDO), rests };
-        let place = Self::toast_place(room.0, theme, room.1, toast::width(ui, theme, &keys, &shown));
-        toast::show(ui.ctx(), theme, &keys, id, &shown, place)
+        let text = crate::status::clean(&undo.text);
+        let message = if undo.undoable { crate::status::Message::Undo { text, until } } else { crate::status::Message::Notice { text, until } };
+        Some((message, undo.undoable))
     }
 
     /// Whether the mail is the place shown: not the settings, the calendar or Home.
@@ -3347,6 +3309,10 @@ mod settings_tests;
 #[cfg(test)]
 #[path = "shortcuts_tests.rs"]
 mod shortcuts_tests;
+
+#[cfg(test)]
+#[path = "status_tests.rs"]
+mod status_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

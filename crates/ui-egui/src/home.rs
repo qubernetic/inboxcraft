@@ -440,6 +440,18 @@ fn agenda(mailbox: &mut Mailbox, now: Moment) -> Agenda {
     Agenda { lines, total, tomorrow, until }
 }
 
+/// The first of today's events left, as the status line names it: its start (`15:00`), its title, and the minutes
+/// until it starts (none or less once it has). Read with [`agenda`]'s commands: call it when the mailbox changed.
+pub(crate) fn next_event(mailbox: &mut Mailbox) -> Option<(String, String, i64)> {
+    let civil = mailbox.now().to_civil(mailbox.offset())?;
+    let day = Day::new(civil.year(), civil.month(), civil.day())?;
+    let minute = u16::from(civil.hour()).saturating_mul(60).saturating_add(u16::from(civil.minute()));
+    let line = agenda(mailbox, Moment { day, minute }).lines.into_iter().next()?;
+    let (hours, minutes) = line.time.split_once(':')?;
+    let start = hours.parse::<i64>().ok()?.saturating_mul(60).saturating_add(minutes.parse::<i64>().ok()?);
+    Some((line.time, line.title, start.saturating_sub(i64::from(minute))))
+}
+
 /// The rest of today as [`agenda`] reads it.
 #[derive(Default)]
 struct Agenda {

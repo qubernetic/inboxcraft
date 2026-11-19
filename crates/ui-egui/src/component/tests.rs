@@ -14,7 +14,6 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::card::card;
 use super::hover::{self, Action};
-use super::toast::{self, Toast};
 use super::{button::IconButton, pill, popup};
 use crate::draw::paint::{DashedEdges, dashed_edges_id};
 use crate::iconset::IconId;
@@ -435,14 +434,6 @@ fn everything(ui: &mut egui::Ui, theme: &Theme, keymap: &Keymap, on: bool) {
     let row = egui::Rect::from_min_size(pos2(0.0, 300.0), vec2(400.0, 40.0));
     hover::actions(ui, theme, keymap, Id::unique("hover"), row, on, &[Action { icon: IconId::Done, name: "Done", action: None, unavailable: None }]);
     if on {
-        toast::show(
-            &ctx,
-            theme,
-            keymap,
-            Id::unique("toast"),
-            &Toast { text: "Toast", undo: None, rests: false },
-            toast::Place { bottom: pos2(200.0, 400.0), widest: f32::INFINITY, lowest: f32::INFINITY },
-        );
         popup::show(&ctx, theme, Id::unique("popup"), pos2(10.0, 10.0), 200.0, |ui| ui.label("Item"));
     }
 }

@@ -195,7 +195,7 @@ fn the_event_added_toast_keeps_clear_of_the_floating_composer_s_send() {
         harness.run();
         assert!(harness.state().calendar().editor().is_none(), "{width}: saved");
         let said = harness.get_by_label_contains("Event added").rect();
-        let undo = harness.get_by_role_and_label(Role::Button, "Undo").rect();
+        let undo = harness.get_by_role_and_label(Role::Button, "undo").rect();
         let toast = said.union(undo).expand2(vec2(16.0, 4.0));
         let send = harness.get_by_role_and_label(Role::Button, "Send").rect();
         assert!(!toast.intersects(send), "{width}: the toast {toast:?} over Send {send:?}");
@@ -210,8 +210,9 @@ fn the_event_added_toast_keeps_clear_of_the_floating_composer_s_send() {
 }
 
 #[test]
-fn the_toast_never_rises_into_the_floating_composer_s_foot() {
-    // At 800 and 900 the toast stands over the composer, just above its foot: from its first frame, not rising into it.
+fn the_event_s_undo_stands_in_the_status_line_never_in_the_floating_composer_s_foot() {
+    // At 800 and 900 the composer floats over the body; the message stands in the status line under the body, from its
+    // first frame (it stood over the composer's foot as a toast).
     for width in [800.0, 900.0] {
         let mut harness = both_at(vec2(width, 820.0));
         typed(&mut harness, "Kiln");
@@ -221,11 +222,13 @@ fn the_toast_never_rises_into_the_floating_composer_s_foot() {
         for _ in 0..40 {
             harness.step();
             let Some(said) = harness.query_by_label_contains("Event added").map(|node| node.rect()) else { continue };
-            let undo = harness.get_by_role_and_label(Role::Button, "Undo").rect();
+            let undo = harness.get_by_role_and_label(Role::Button, "undo").rect();
             let float = said.union(undo).expand2(vec2(16.0, 4.0));
-            assert!(float.bottom() <= send.top() - 4.0, "{width}: frame {seen}: the toast {float:?} in the foot by Send {send:?}");
+            let line = crate::draw::shell::laid(&harness.ctx).unwrap().status;
+            assert!(!float.intersects(send), "{width}: frame {seen}: the message {float:?} over Send {send:?}");
+            assert!(said.top() >= line.top() && said.bottom() <= line.bottom(), "{width}: frame {seen}: {said:?} in the line {line:?}");
             seen += 1;
         }
-        assert!(seen > 10, "{width}: the toast was seen rising ({seen} frames)");
+        assert!(seen > 10, "{width}: the message was seen ({seen} frames)");
     }
 }

@@ -1621,6 +1621,16 @@ impl Mailbox {
         self.session.set_appearance(appearance);
     }
 
+    /// Runs `read`, the status line's reads of its facts (`safe` commands that change nothing), so that they count in
+    /// none of the window's tallies ([`Mailbox::runs`], [`Mailbox::last_run`], the refused command): those say what the
+    /// window ran for the owner, and the line reads at most once a second or when the mailbox changed.
+    pub(crate) fn quietly<R>(&mut self, read: impl FnOnce(&mut Self) -> R) -> R {
+        let (runs, writes, last, refused) = (self.runs, self.writes, self.last, self.refused);
+        let answer = read(self);
+        (self.runs, self.writes, self.last, self.refused) = (runs, writes, last, refused);
+        answer
+    }
+
     /// Runs `command` for the window's caller; a command that may change something counts in [`Mailbox::writes`].
     pub(crate) fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
         self.runs = self.runs.saturating_add(1);

@@ -125,7 +125,7 @@ try:
 - the hover actions on a row, or on the row selected with the arrow keys: Done (D) marks it read and files it as done
   in its account's Archive ("Show done" over the list shows it there again, with a tick), R marks it read or unread, Delete moves it to Trash; A archives it and S flags it. The reader's
   toolbar adds Archive and Move to a folder, its More menu flag and read or unread. A row that leaves the list
-  does so at once and its gap closes; a toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was, and
+  does so at once and its gap closes; the status line says what was done, with Undo (Ctrl+Z) for five seconds, which puts the row back as it was, and
   Ctrl+Z after it walks back through the earlier acts;
 - the appearance settings (the gear on the rail, Ctrl+Comma): mode, window frame, text scale and reduced
   motion, kept in `inboxcraft/appearance.json` in the owner's config folder as in the normal window.

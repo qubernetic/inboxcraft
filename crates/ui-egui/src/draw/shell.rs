@@ -5,7 +5,7 @@
 //! status line across the foot. Measured from the frame sheet of the shell (1440 × 900): the window's outline, one
 //! hairline round everything; the command line 44 high; a hairline under it; the index 232 wide (56 when narrow), a
 //! hairline, the body; a hairline over the status line, 26 high. At 1440 × 900 the body is 1205 × 826 at (234, 46).
-//! The window lays itself out in them each frame; the status line holds nothing yet.
+//! The window lays itself out in them each frame; the status line is drawn in its region (`draw/status.rs`).
 
 use egui::{Context, Id, Rect, Vec2, pos2};
 
@@ -13,8 +13,10 @@ use crate::theme::Theme;
 
 /// The command line's height at 100 %.
 pub(crate) const COMMAND_LINE: f32 = 44.0;
-/// The status line's height at 100 %.
-pub(crate) const STATUS_LINE: f32 = 26.0;
+/// The status line's height at 100 %: the theme's one value ([`crate::theme::Sizes::status`]), which the line and its
+/// parts read too.
+#[cfg(test)]
+pub(crate) const STATUS_LINE: f32 = crate::theme::SIZES.status;
 /// The index's width.
 pub(crate) const INDEX: f32 = 232.0;
 /// The index's width when narrow.
@@ -56,7 +58,7 @@ pub(crate) fn regions_with(size: Vec2, theme: &Theme, ppp: f32, narrow: bool) ->
     let line = ppp.round().max(1.0);
     let factor = theme.text_scale.factor();
     let command = px(even(COMMAND_LINE * factor));
-    let status = px(even(STATUS_LINE * factor));
+    let status = px(theme.boxes().status);
     let index = px(if narrow { INDEX_NARROW } else { INDEX });
     // The least height: the outline, the two lines and their hairlines, and a body of none.
     let least_height = (command + status + 4.0 * line) / ppp;

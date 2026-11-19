@@ -134,7 +134,7 @@ fn accept_with_a_group_lets_the_sender_in_and_undo_holds_them_again() {
     harness.get_by_label("Accepted Harbour Swim Club into Notifications");
     assert_eq!(harness.state().mailbox().waiting().len(), 1);
     assert!(harness.query_by_label(SWIM).is_none());
-    harness.get_by_role_and_label(Role::Button, "Undo").click();
+    harness.get_by_role_and_label(Role::Button, "undo").click();
     harness.run();
     assert_eq!(harness.state().mailbox().waiting().len(), 2);
     harness.get_by_label(SWIM);
@@ -200,7 +200,7 @@ fn a_row_s_context_menu_moves_its_sender_to_another_group_with_undo() {
     harness.run();
     harness.get_by_label("Odile Brannock now goes to Newsletters");
     harness.get_by_label("Newsletters, 1 unread");
-    harness.get_by_role_and_label(Role::Button, "Undo").click();
+    harness.get_by_role_and_label(Role::Button, "undo").click();
     harness.run();
     assert!(harness.query_by_label("Newsletters, 1 unread").is_none());
 }
@@ -444,7 +444,9 @@ fn an_answered_card_takes_its_answers_colour_fades_and_the_next_steps_up() {
         assert!(!edges(&harness).iter().any(|colour| minus.contains(colour)), "the answered card is no longer drawn");
         harness.run_steps(12);
         assert_eq!(let_in_tops(&harness), vec![first], "by 440 ms the next card stands in the answered one's place");
-        // The card that stepped up under the pointer takes its hover in the next two frames; then it rests.
+        // The card that stepped up under the pointer takes its hover in the next two frames; then it rests. (The answer's
+        // Undo in the status line ticks once a second while it shows: it is let go first.)
+        harness.state_mut().mailbox_mut().forget_undo();
         harness.run_steps(2);
         assert!(crate::component::tests::rests(&mut harness, 4), "and it rests");
     }

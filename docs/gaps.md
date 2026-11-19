@@ -628,14 +628,14 @@ time from the code as it is, not measured.
   (`notify.set`), not one per message. "Show done" is forgotten at a restart and is not offered while searching or
   in New senders. The rail's Later opens on the pins; it shows the snoozed, pinned and parked mail of the accounts
   shown, at most 1000 of each (#135).
-- The countdown toast follows the last send the window made: a second send takes its place, and the first one is
-  counted down in the outbox only. Undo send in the toast and in the outbox works only in the hold; a scheduled
+- The countdown in the status line follows the last send the window made: a second send takes its place, and the first one is
+  counted down in the outbox only. Undo send in the status line and in the outbox works only in the hold; a scheduled
   send's Edit takes it back, and it is scheduled again from the composer. The Outbox opens from the folder pane only,
   with no button on the rail and no key. A hold set to another value than 5, 10, 30 or 60 seconds through `send.set`
   shows with none of them chosen (#136).
 - The bounce banner gives the report's reason only: it has no "Edit and resend" (no command makes a new draft from a
-  sent message yet) and does not open the delivery report. The note that a send went late is a toast of six seconds,
-  shown once (#136).
+  sent message yet) and does not open the delivery report. The note that a send went late is a notice in the status line
+  for four seconds, shown once (#136).
 - No tray outside Linux yet, and outside Unix no socket: on Windows a later start says that InboxCraft is already
   running instead of bringing its window forward, and closing the window ends InboxCraft, since nothing could bring
   it back. Start at login is XDG autostart and the Background portal only; Windows and macOS have none

@@ -67,9 +67,6 @@ pub fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, kind: BannerKind, tex
 pub(crate) enum Ground {
     /// Its `panel` fill in a 1 px edge of its kind's colour: a banner on its own.
     Boxed,
-    /// Nothing: the caller paints the ground and the edges (the window's error banner, whose edges are the window's
-    /// lines and whose corner is the window's).
-    Bare,
 }
 
 /// The label of `kind`, as the sheet writes it (in capitals when drawn), and its edge's and label's colours.
