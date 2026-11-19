@@ -179,14 +179,13 @@ fn focused(harness: &Harness<'static, InboxApp>) -> Option<String> {
     harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
 }
 
-/// The mail with its first message open in the reader, Snooze on Ctrl+H and New message on Ctrl+M.
+/// The mail with its first message open in the reader and Snooze on Ctrl+H.
 fn reading_with_keys_on_ctrl() -> Harness<'static, InboxApp> {
     let mut harness = harness(false);
     let first = harness.state().mailbox().messages().first().map(|row| row.id).unwrap();
     harness.state_mut().mailbox_mut().select(Some(first));
     let keymap = harness.state_mut().keymap_mut();
     keymap.bind(keymap::SNOOZE, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::H));
-    keymap.bind(keymap::COMPOSE, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::M));
     harness.run();
     assert!(harness.state().can_run(keymap::SNOOZE), "Snooze can run on the open message");
     harness
@@ -211,8 +210,9 @@ fn on_the_settings_a_key_with_ctrl_runs_nothing_of_the_mail_and_new_message_leav
     assert!(harness.state().settings().is_open(), "the palette leaves the settings shown");
     esc(&mut harness);
     assert!(!harness.state().palette().is_open() && harness.state().settings().is_open(), "one Esc, the palette's");
-    // New message leaves the settings for the mail and begins a message.
-    harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    // New message, its button pressed, leaves the settings for the mail and begins a message.
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
     harness.run();
     assert!(!harness.state().settings().is_open(), "New message leaves the settings");
     assert!(harness.state().composer().is_some(), "and begins a message");
@@ -224,4 +224,91 @@ fn on_the_settings_a_key_with_ctrl_runs_nothing_of_the_mail_and_new_message_leav
     harness.run();
     harness.run();
     assert!(harness.query_by_label("Snooze until").is_some(), "Ctrl+H opens Snooze over the reader");
+}
+
+#[test]
+fn the_new_message_button_on_the_settings_begins_a_message_with_the_default_keys_by_a_press_and_by_activate() {
+    for activate in [false, true] {
+        let mut harness = harness(false);
+        open_settings(&mut harness);
+        let button = harness.get_by_role_and_label(Role::Button, "New message");
+        if activate {
+            button.click_accesskit();
+        } else {
+            button.click();
+        }
+        harness.run();
+        harness.run();
+        assert!(!harness.state().settings().is_open(), "activate {activate}: New message leaves the settings");
+        assert!(harness.state().composer().is_some(), "activate {activate}: and begins a message, its key C being bare");
+    }
+}
+
+#[test]
+fn on_the_settings_an_index_place_whose_key_is_bare_acts_by_a_press_and_by_activate() {
+    let rows = [
+        ("Mail", keymap::MAIL, Key::F5),
+        ("Calendar", keymap::CALENDAR, Key::F6),
+        ("Later", keymap::LATER, Key::F7),
+        ("Settings", keymap::SETTINGS, Key::F8),
+    ];
+    for activate in [false, true] {
+        for (name, action, key) in rows {
+            let mut harness = harness(false);
+            harness.state_mut().keymap_mut().bind(action, egui::KeyboardShortcut::new(Modifiers::NONE, key));
+            let ctx = harness.ctx.clone();
+            harness.state_mut().run_action(&ctx, keymap::SETTINGS);
+            harness.run();
+            assert!(harness.state().settings().is_open());
+            let index = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+            let row = harness.get_all_by_role_and_label(Role::Button, name).find(|node| !index.contains_rect(node.rect())).unwrap();
+            if activate {
+                row.click_accesskit();
+            } else {
+                row.click();
+            }
+            harness.run();
+            harness.run();
+            assert!(!harness.state().settings().is_open(), "{name} on {key:?}, activate {activate}: the row leaves the settings");
+        }
+    }
+}
+
+#[test]
+fn on_the_settings_a_bare_key_typed_into_a_field_is_typed_and_runs_nothing() {
+    let mut harness = harness(false);
+    open_settings(&mut harness);
+    super::tests::at_settings(harness.state_mut(), crate::settings::Section::Shortcuts);
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "Find a command").focus();
+    harness.run();
+    harness.key_press(Key::C);
+    harness.event(egui::Event::Text("c".to_owned()));
+    harness.run();
+    harness.run();
+    assert!(harness.state().settings().is_open(), "the settings stay");
+    assert!(harness.state().composer().is_none(), "C, New message's key, begins nothing");
+    assert_eq!(harness.state().settings().find(), "c", "it is typed into the field");
+}
+
+#[test]
+fn j_walks_the_list_at_once_after_leaving_the_settings_by_their_key() {
+    let mut harness = harness(false);
+    harness.run();
+    harness.key_press(Key::J);
+    harness.run();
+    harness.run();
+    let first = harness.state().mailbox().selected();
+    harness.key_press(Key::J);
+    harness.run();
+    harness.run();
+    let second = harness.state().mailbox().selected();
+    assert!(first.is_some() && second != first, "J walks before: {first:?} {second:?}");
+    open_settings(&mut harness);
+    open_settings_again(&mut harness);
+    harness.key_press(Key::J);
+    harness.run();
+    harness.run();
+    let third = harness.state().mailbox().selected();
+    assert!(third != second, "J walks at once after leaving by the key: {second:?} -> {third:?}");
 }

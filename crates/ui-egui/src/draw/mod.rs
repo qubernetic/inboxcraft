@@ -541,11 +541,11 @@ impl InboxApp {
     ) -> (index::Asked, bool) {
         // The command line first: its New message stands above the index, and Tab walks the drawn order.
         self.own_frame_parts(command, theme, corner);
-        let new_message = self.new_message(command, theme) && surfaces.allows(keymap::COMPOSE, &self.keymap);
+        let new_message = self.new_message(command, theme) && surfaces.allows_press(keymap::COMPOSE);
         let at = self.index_place(setting);
         let flags = (Self::index_live(surfaces), self.checking_elsewhere());
         let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, false, flags);
-        let indexed = Self::index_allowed(surfaces, &self.keymap, indexed);
+        let indexed = Self::index_allowed(surfaces, indexed);
         if let Some(id) = indexed.toggle {
             index::toggle(index.ctx(), id);
         }
@@ -590,14 +590,14 @@ impl InboxApp {
         !(surfaces.held() || surfaces.has(Surface::Editor))
     }
 
-    /// What of the index's `asked` the `surfaces` in front allow: a place where its action may run
-    /// ([`Surfaces::allows`]); a mailbox, the account picker's choice and an account row only with no palette, capture
+    /// What of the index's `asked` the `surfaces` in front allow: a place where a press may run its action
+    /// ([`Surfaces::allows_press`]); a mailbox, the account picker's choice and an account row only with no palette, capture
     /// or event editor in front.
-    fn index_allowed(surfaces: &Surfaces, keymap: &Keymap, asked: index::Asked) -> index::Asked {
+    fn index_allowed(surfaces: &Surfaces, asked: index::Asked) -> index::Asked {
         // A key waited for on the Shortcuts page holds the keys, not the pointer: a place pressed shows, and leaving the
         // settings ends the wait.
         let waiting = surfaces.has(Surface::Capture) && !surfaces.has(Surface::Palette) && !surfaces.has(Surface::Float);
-        let place = asked.place.filter(|place| Self::index_action(*place).is_some_and(|action| waiting || surfaces.allows(action, keymap)));
+        let place = asked.place.filter(|place| Self::index_action(*place).is_some_and(|action| waiting || surfaces.allows_press(action)));
         if Self::index_live(surfaces) { index::Asked { place, ..asked } } else { index::Asked { place, ..index::Asked::default() } }
     }
 

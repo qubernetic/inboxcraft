@@ -183,6 +183,13 @@ impl Surfaces {
         !(self.quiet() && bare)
     }
 
+    /// Whether a press on the window's own control for `action` (the pointer's, or a screen reader's activate) may run
+    /// it: as [`Surfaces::allows`] says for the action, without the rest of a key with no modifier under a quiet
+    /// surface, which is for keys alone (the letters are the fields'; a press on a button is not a letter).
+    pub(crate) fn allows_press(&self, action: &str) -> bool {
+        self.allows(action, &Keymap::empty())
+    }
+
     /// Whether the list may have the keys: on the mail, shown, with nothing in front that takes them (the palette, a
     /// capture, the composer in the reader's place, a float, whose arrows are its own). Whether a row of it has them is
     /// the list's to say.
