@@ -6,6 +6,7 @@ use crate::{
     AccountId, CheckStep, DraftId, Envelope, Flag, Flags, FolderId, FolderListing, FolderPath, FolderState, JobId, ModSeq, StepReport, StepStatus,
     Summary, Uid, UidSet, UidValidity,
 };
+use inboxcraft_time::Timestamp;
 
 fn uid(n: u32) -> Uid {
     Uid::new(n).unwrap()
@@ -15,36 +16,7 @@ fn validity() -> UidValidity {
     UidValidity::new(7).unwrap()
 }
 
-const EVERY_ERROR: [ErrorKind; 28] = [
-    ErrorKind::HostNotFound,
-    ErrorKind::ConnectionRefused,
-    ErrorKind::TimedOut,
-    ErrorKind::PortTimedOut,
-    ErrorKind::MailPortsBlocked,
-    ErrorKind::ConnectionDropped,
-    ErrorKind::CertificateUnknownIssuer,
-    ErrorKind::CertificateExpired,
-    ErrorKind::CertificateNotYetValid,
-    ErrorKind::CertificateWrongHost,
-    ErrorKind::ClockFarOff,
-    ErrorKind::Tls,
-    ErrorKind::StartTlsMissing,
-    ErrorKind::LoginRefused,
-    ErrorKind::LoginUnanswered,
-    ErrorKind::NoLoginMethod,
-    ErrorKind::CredentialMissing,
-    ErrorKind::CommandRefused,
-    ErrorKind::Protocol,
-    ErrorKind::TooLarge,
-    ErrorKind::FolderGone,
-    ErrorKind::MessageGone,
-    ErrorKind::MessageRefused,
-    ErrorKind::NoSubmissionServer,
-    ErrorKind::SendUnanswered,
-    ErrorKind::NotEncrypted,
-    ErrorKind::OtherServer,
-    ErrorKind::NoCalendarServer,
-];
+const EVERY_ERROR: [ErrorKind; 28] = ErrorKind::ALL;
 
 #[test]
 fn every_event_kind_round_trips_and_names_its_folder() {
@@ -86,6 +58,8 @@ fn every_event_kind_round_trips_and_names_its_folder() {
         (EventKind::Sent { draft: DraftId::new(3) }, None),
         (EventKind::SendFailed { draft: DraftId::new(3), kind: ErrorKind::MessageRefused, reply: Some("550 5.1.1 No such user".to_owned()) }, None),
         (EventKind::SendFailed { draft: DraftId::new(3), kind: ErrorKind::TimedOut, reply: None }, None),
+        (EventKind::SyncProgress { done: 2, of: 5 }, None),
+        (EventKind::SyncFinished { at: Timestamp::from_unix(1_793_869_200, 0).unwrap() }, None),
     ];
     for (kind, expected) in kinds {
         assert_eq!(kind.folder(), expected, "{kind:?}");
@@ -134,4 +108,33 @@ fn copied_uids_map_each_old_uid_to_its_new_one() {
     let copied = Copied { uid_validity: UidValidity::new(9).unwrap(), uids: vec![(uid(1), uid(50)), (uid(2), uid(51))] };
     assert_eq!(copied.new_uid(uid(2)), Some(uid(51)));
     assert_eq!(copied.new_uid(uid(3)), None);
+}
+
+#[test]
+fn a_sync_end_out_of_the_time_range_does_not_read() {
+    let event = Event::new(AccountId::new(1), None, EventKind::SyncFinished { at: Timestamp::MAX });
+    let json = serde_json::to_string(&event).unwrap();
+    assert_eq!(serde_json::from_str::<Event>(&json).unwrap(), event);
+    let junk = json.replace(&Timestamp::MAX.unix_seconds().to_string(), &i64::MAX.to_string());
+    assert_ne!(junk, json);
+    assert!(serde_json::from_str::<Event>(&junk).is_err());
+}
+
+#[test]
+fn what_needs_the_owner_is_what_no_later_attempt_mends() {
+    let owner: Vec<ErrorKind> = EVERY_ERROR.into_iter().filter(|kind| kind.needs_the_owner()).collect();
+    assert_eq!(owner.len(), 13, "{owner:?}");
+    assert!(owner.iter().all(|kind| !kind.is_retryable()), "{owner:?}");
+    for kind in [ErrorKind::PortTimedOut, ErrorKind::MailPortsBlocked, ErrorKind::TimedOut, ErrorKind::FolderGone] {
+        assert!(!kind.needs_the_owner(), "{kind:?}");
+    }
+}
+
+#[test]
+fn every_error_kind_is_in_the_list_of_all_once() {
+    // Serde names every kind it knows when it is given one it does not: the list must hold each of them, once.
+    let refused = serde_json::from_str::<ErrorKind>("\"NoSuchKind\"").unwrap_err().to_string();
+    let named: Vec<&str> = refused.split('`').skip(3).step_by(2).collect();
+    let listed: Vec<String> = ErrorKind::ALL.iter().map(|kind| serde_json::to_string(kind).unwrap().trim_matches('"').to_owned()).collect();
+    assert_eq!(named, listed, "{refused}");
 }

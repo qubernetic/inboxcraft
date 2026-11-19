@@ -101,6 +101,20 @@ that is:
   the choice back to the computer); its answer has `motion_level` and `motion_chosen` beside the older `motion`;
 - snooze, park and pin, as they land.
 
+`sync.status` reads how syncing stands in the app, from what its workers told: the state, the folder syncs done of
+all in the rounds under way, the last sync and the number of failing accounts. The state is the first that holds:
+
+- `failing` when an account is stopped until the owner acts: a refused or unanswered sign-in, no password, no login
+  method, a certificate or encryption refused, whether or not any account is connected;
+- `offline` when no account is signed in (connecting counts as not yet), and the failures are of the network or
+  the server: no route, a timeout, a refused or dropped connection;
+- `failing` when a signed-in account's connection or a job (not a body fetch) failed, until the account signs in
+  again after being offline or its worker tells that it is current: a round that ended with nothing failed in it,
+  or a resync of the watched folder with nothing failed since the resync before it;
+- `syncing` while a round has folders left, or a signed-in account has not ended a round yet; a round's folders
+  stop counting when its connection goes offline, and count again at the next sign-in;
+- `synced` otherwise, and always with no account.
+
 Everything a client sends is hostile. `cargo +nightly fuzz run control_lines` runs the fuzz target on both lines.
 
 ## What it does not do

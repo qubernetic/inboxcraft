@@ -495,7 +495,7 @@ mod typed_lines {
 }
 
 /// A [`Timestamp`] as `[seconds, nanoseconds]`, checked on the way in.
-mod required {
+pub(crate) mod required {
     use inboxcraft_time::Timestamp;
     use serde::de::Error as _;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};

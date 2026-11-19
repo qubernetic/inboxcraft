@@ -37,7 +37,7 @@ use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::notify::{Level, Notice, Settings as NotifySettings};
 use inboxcraft_engine::{Applied, Caller, EngineError, Hold, MAX_HISTORY, MAX_LIST, ScreenerMode, Session};
 use inboxcraft_model::{Account, AccountId, Role};
-use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
+use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, WeekRule, Weekday};
 use serde_json::{Value, json};
 
 use crate::calendar::sync::{self, SyncHandle, Tracker};
@@ -803,6 +803,8 @@ fn preset_text(name: &str) -> Option<&'static str> {
         "later_today" => Some(tr!("Later today")),
         "this_evening" => Some(tr!("This evening")),
         "tomorrow_morning" => Some(tr!("Tomorrow morning")),
+        "this_weekend" => Some(tr!("This weekend")),
+        "next_week" => Some(tr!("Next week")),
         _ => None,
     }
 }
@@ -2371,6 +2373,25 @@ impl Mailbox {
     /// Takes the notification choices kept from an earlier run.
     pub(crate) fn restore_notify(&mut self, settings: NotifySettings) {
         self.session.set_notify_settings(settings);
+    }
+
+    /// How the owner's weeks are counted (`week.set`): the calendar's weeks and months, and "Next week" of the time
+    /// presets, count by it.
+    #[must_use]
+    pub fn week_rule(&self) -> WeekRule {
+        self.session.week_rule()
+    }
+
+    /// The week rule as it is kept between runs ([`inboxcraft_engine::week::to_value`]).
+    #[must_use]
+    pub fn kept_week(&self) -> Value {
+        inboxcraft_engine::week::to_value(self.session.week_rule())
+    }
+
+    /// Takes the week rule kept from an earlier run, read as outside data: what cannot be read is the default, never
+    /// an error ([`inboxcraft_engine::week::from_value`]).
+    pub fn restore_week(&mut self, kept: &Value) {
+        self.session.set_week_rule(inboxcraft_engine::week::from_value(kept));
     }
 }
 

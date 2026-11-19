@@ -93,6 +93,8 @@ The codes are stable snake_case; new ones may be added.
   or checking an account, is not run; `mail.read` answers with what the store holds. In the app, the app runs it.
 - The appearance commands (`ui.*.set`) change the session, not the store, so headless they last for the one command
   only.
+- Headless there are no workers, so `sync.status` on a store with an account answers `offline`, with no progress and
+  no last sync; in the app it answers what the workers told.
 
 ## Revision history
 | Date | Change | Summary |

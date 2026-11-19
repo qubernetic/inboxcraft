@@ -8,7 +8,7 @@
 
 use inboxcraft_model::{AccountId, Calendar, CalendarEvent, CalendarEventId, CalendarId};
 use inboxcraft_store::Change;
-use inboxcraft_time::{Offset, Timestamp};
+use inboxcraft_time::{Offset, Timestamp, WeekRule};
 
 use super::Day;
 use crate::UiError;
@@ -131,7 +131,8 @@ fn ics(day: Day) -> String {
 ///
 /// [`UiError::Sample`] when `now` has no day.
 pub fn changes(now: Timestamp) -> Result<Vec<Change>, UiError> {
-    let monday = Day::of(now, Offset::UTC).ok_or_else(|| UiError::sample("no day for the sample's calendars"))?.monday();
+    // The sample's week stays on Monday whatever the owner's rule: its events are placed from it.
+    let monday = Day::of(now, Offset::UTC).ok_or_else(|| UiError::sample("no day for the sample's calendars"))?.week_start(WeekRule::default());
     let base = |calendar: u64| {
         let name = CALENDARS.iter().find(|(id, ..)| *id == calendar).map_or("personal", |(_, _, name, _)| name);
         format!("https://dav.example.org/calendars/mira/{}/", name.to_ascii_lowercase())

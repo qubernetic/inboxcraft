@@ -23,7 +23,7 @@ pub mod sync;
 
 use std::collections::BTreeSet;
 
-use inboxcraft_time::{Offset, Timestamp};
+use inboxcraft_time::{Offset, Timestamp, WeekRule};
 use serde_json::{Value, json};
 
 pub use self::day::Day;
@@ -43,7 +43,7 @@ pub const DAY_MINUTES: u16 = 24 * 60;
 pub enum View {
     /// One day, hour by hour.
     Day,
-    /// Monday to Sunday, hour by hour.
+    /// The seven days of a week from the week's first day ([`Calendar::week_rule`]), hour by hour.
     #[default]
     Week,
     /// The weeks of a month.
@@ -365,6 +365,8 @@ pub struct Calendar {
     more: Option<Day>,
     /// The seconds of the minute now, at the last tick: how long the now line rests.
     second: u8,
+    /// How the owner's weeks are counted, as the session said at the last read ([`Calendar::follow_week`]).
+    week: WeekRule,
     /// Changes whenever the events shown change (a read, a calendar shown or hidden): what the views laid out of the
     /// events is kept while it stays the same.
     serial: u64,
@@ -447,16 +449,32 @@ impl Calendar {
         self.month.unwrap_or_else(|| self.focus().first_of_month())
     }
 
-    /// The first and the last day the view shows: the day; Monday to Sunday; the six weeks from the Monday on or
-    /// before the month's first day; or [`AGENDA_DAYS`] days.
+    /// How the owner's weeks are counted, as of the last read: the week view's days, the month's and the mini month's
+    /// first column and the week's number follow it.
+    #[must_use]
+    pub fn week_rule(&self) -> WeekRule {
+        self.week
+    }
+
+    /// The number of the week the view is on, as [`Calendar::week_rule`] counts it; `None` out of the years known.
+    #[must_use]
+    pub fn week_number(&self) -> Option<u8> {
+        self.focus().week_number(self.week)
+    }
+
+    /// The first and the last day the view shows: the day; the week from its first day ([`Calendar::week_rule`]); the
+    /// six weeks from the week's first day on or before the month's first day; or [`AGENDA_DAYS`] days.
     #[must_use]
     pub fn span(&self) -> (Day, Day) {
         let focus = self.focus();
         match self.view {
             View::Day => (focus, focus),
-            View::Week => (focus.monday(), focus.monday().plus(6)),
+            View::Week => {
+                let first = focus.week_start(self.week);
+                (first, first.plus(6))
+            }
             View::Month => {
-                let first = focus.first_of_month().monday();
+                let first = focus.first_of_month().week_start(self.week);
                 (first, first.plus(41))
             }
             View::Agenda => (focus, focus.plus(AGENDA_DAYS - 1)),
@@ -659,11 +677,21 @@ impl Calendar {
         self.picked_day = None;
     }
 
-    /// Reads the calendars and the events of the days shown again; today comes from the list's clock. The first read
-    /// puts the view on today. A refused command shows in the window's error banner.
+    /// Takes the week rule from the session, once a frame: when it changed (`week.set`), the days shown are read again
+    /// for the new week, the view staying on its day and the picked day and event staying picked; otherwise nothing
+    /// happens.
+    pub fn follow_week(&mut self, mailbox: &mut Mailbox) {
+        if mailbox.week_rule() != self.week {
+            self.refresh(mailbox);
+        }
+    }
+
+    /// Reads the calendars and the events of the days shown again; today comes from the list's clock and the week rule
+    /// from the session. The first read puts the view on today. A refused command shows in the window's error banner.
     pub fn refresh(&mut self, mailbox: &mut Mailbox) {
         let (now, offset) = (mailbox.now(), mailbox.offset());
         self.tick(now, offset);
+        self.week = mailbox.week_rule();
         self.sync = mailbox.calendar_sync();
         self.accounts = mailbox.accounts().iter().map(|account| (account.id, account.index, account.label.clone())).collect();
         if self.focus.is_none() {
@@ -937,3 +965,6 @@ pub fn colour(text: &str) -> Option<[u8; 3]> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[path = "week_tests.rs"]
+mod week_tests;

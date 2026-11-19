@@ -9,6 +9,7 @@
 
 use std::fmt;
 
+use inboxcraft_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -128,6 +129,79 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
+    /// Every kind, in the order they are declared; a test checks it against the kinds serde knows, so a test over
+    /// every kind sees a new one.
+    pub const ALL: [Self; 28] = [
+        Self::HostNotFound,
+        Self::ConnectionRefused,
+        Self::TimedOut,
+        Self::PortTimedOut,
+        Self::MailPortsBlocked,
+        Self::ConnectionDropped,
+        Self::CertificateUnknownIssuer,
+        Self::CertificateExpired,
+        Self::CertificateNotYetValid,
+        Self::CertificateWrongHost,
+        Self::ClockFarOff,
+        Self::Tls,
+        Self::StartTlsMissing,
+        Self::LoginRefused,
+        Self::LoginUnanswered,
+        Self::NoLoginMethod,
+        Self::CredentialMissing,
+        Self::CommandRefused,
+        Self::Protocol,
+        Self::TooLarge,
+        Self::FolderGone,
+        Self::MessageGone,
+        Self::MessageRefused,
+        Self::NoSubmissionServer,
+        Self::SendUnanswered,
+        Self::NotEncrypted,
+        Self::OtherServer,
+        Self::NoCalendarServer,
+    ];
+
+    /// Whether the account stops on this failure until the owner acts: a password or a setting to mend, a certificate
+    /// or encryption refused. The worker does not sign in again after one, and the engine's `sync.status` reads it as
+    /// `failing` even with no account connected. A server out of reach (no route, a timeout, a refused or dropped
+    /// connection, a port that is likely wrong or a network that blocks mail) is not.
+    ///
+    /// Every kind is named, with no catch-all: a new kind does not build until it is put on one side.
+    #[must_use]
+    pub const fn needs_the_owner(self) -> bool {
+        match self {
+            Self::LoginRefused
+            | Self::LoginUnanswered
+            | Self::NoLoginMethod
+            | Self::CredentialMissing
+            | Self::CertificateUnknownIssuer
+            | Self::CertificateExpired
+            | Self::CertificateNotYetValid
+            | Self::CertificateWrongHost
+            | Self::ClockFarOff
+            | Self::Tls
+            | Self::StartTlsMissing
+            | Self::NotEncrypted
+            | Self::OtherServer => true,
+            Self::HostNotFound
+            | Self::ConnectionRefused
+            | Self::TimedOut
+            | Self::PortTimedOut
+            | Self::MailPortsBlocked
+            | Self::ConnectionDropped
+            | Self::CommandRefused
+            | Self::Protocol
+            | Self::TooLarge
+            | Self::FolderGone
+            | Self::MessageGone
+            | Self::MessageRefused
+            | Self::NoSubmissionServer
+            | Self::SendUnanswered
+            | Self::NoCalendarServer => false,
+        }
+    }
+
     /// Whether trying again later can help on its own: passing network trouble. Everything else needs the owner, the
     /// server's administrator or another job.
     #[must_use]
@@ -304,6 +378,21 @@ pub enum EventKind {
     },
     /// What a [`crate::JobKind::Calendar`] job found or did.
     Calendar(CalendarReport),
+    /// How far the account's sync round has come: `done` of its `of` folder syncs. Told when a round starts and as
+    /// each of its folders ends; the engine takes `done` above `of` as `of`.
+    SyncProgress {
+        /// The folder syncs of the round that ended, synced or failed.
+        done: u32,
+        /// The folder syncs of the round.
+        of: u32,
+    },
+    /// A sync round ended with every folder of it synced, or the watched folder was synced again: the account was
+    /// current at `at`.
+    SyncFinished {
+        /// When it ended, by the worker's clock.
+        #[serde(with = "crate::local::required")]
+        at: Timestamp,
+    },
     /// A job or the connection failed.
     Failed {
         /// Why.
@@ -325,6 +414,8 @@ impl EventKind {
             | Self::FolderCreated { .. }
             | Self::Sent { .. }
             | Self::SendFailed { .. }
+            | Self::SyncProgress { .. }
+            | Self::SyncFinished { .. }
             | Self::Calendar(_) => None,
             Self::MessagesAdded { folder, .. }
             | Self::MessagesChanged { folder, .. }

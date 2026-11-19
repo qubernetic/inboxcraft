@@ -332,8 +332,15 @@ pub(crate) struct AccountState {
     pub(crate) connection: Option<ConnectionState>,
     /// Whether the server, at the last sign-in, removes only the messages named (UID EXPUNGE); `false` until it said.
     pub(crate) uid_expunge: bool,
-    /// The last failure, until the account is online again.
+    /// The last failure, until the account signs in again (`Online` from a state that was not signed in) or its worker
+    /// tells that it is current (`SyncFinished`).
     pub(crate) failure: Option<(ErrorKind, Option<FolderId>)>,
+    /// The sync round under way as the worker last told it: folder syncs done (below `of`) and of; `None` before the
+    /// first, once the round ended (synced or failed), when the connection went offline and when the settings
+    /// changed.
+    pub(crate) progress: Option<(u32, u32)>,
+    /// When the account's last sync round ended with every folder synced, as its worker told.
+    pub(crate) synced: Option<Timestamp>,
     /// The last account check, running or done.
     pub(crate) check: Option<Check>,
     /// The account's settings or password changed: the next check that signs in starts the sync again, as the
@@ -698,7 +705,10 @@ impl Session {
             self.state.writes.forget(account);
         }
         for account in resync {
-            self.state.accounts.entry(account).or_default().resync = true;
+            let held = self.state.accounts.entry(account).or_default();
+            held.resync = true;
+            // A new worker signs in with the new settings; the old one's round is over.
+            held.progress = None;
         }
         for (sender, allowed) in senders {
             if allowed {
