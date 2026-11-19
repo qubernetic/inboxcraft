@@ -206,6 +206,7 @@ fn view_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, o
     if let Some(day) = calendar.more() {
         more::show(ui.ctx(), theme, keymap, calendar, (day, over), asked);
     } else {
+        more::forget(ui.ctx());
         more::refocus(ui.ctx());
     }
 }

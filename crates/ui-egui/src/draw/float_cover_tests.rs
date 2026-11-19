@@ -8,7 +8,7 @@
 use egui::accesskit::Role;
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use crate::keymap;
@@ -55,6 +55,66 @@ struct Kind {
     open: fn(&mut Harness<'static, InboxApp>),
     choose: fn(&mut Harness<'static, InboxApp>),
     shown: fn(&Harness<'static, InboxApp>) -> bool,
+    /// The ways its place stops being drawn and comes back.
+    away: &'static [(&'static str, Step)],
+}
+
+/// Ctrl+2 and Ctrl+1: the calendar shown in the mail's place, and the mail again.
+fn calendar_and_back(harness: &mut Harness<'static, InboxApp>) {
+    for key in [Key::Num2, Key::Num1] {
+        harness.key_press_modifiers(Modifiers::COMMAND, key);
+        settle(harness);
+    }
+}
+
+/// Ctrl+2, Ctrl+, twice and Ctrl+1: another place, the settings coming and going over it, and the mail again.
+fn calendar_settings_and_back(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    settle(harness);
+    settings_come_and_go(harness);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    settle(harness);
+}
+
+/// Ctrl+1 from the settings, and Ctrl+, back to them.
+fn mail_and_settings_again(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    settle(harness);
+    assert!(!harness.state().settings().is_open(), "Ctrl+1 leaves the settings");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    settle(harness);
+}
+
+/// The covers alone: the palette, the settings.
+const COVERS: &[(&str, Step)] = &[("the palette", palette_comes_and_goes), ("the settings", settings_come_and_go)];
+
+/// A float on the mail's place: another place and back, then the covers.
+const OFF_THE_MAIL: &[(&str, Step)] = &[
+    ("the calendar and back", calendar_and_back),
+    ("the calendar, the settings and back", calendar_settings_and_back),
+    ("the palette", palette_comes_and_goes),
+    ("the settings", settings_come_and_go),
+];
+
+/// A float on a settings page: the mail and back, then the covers.
+const OFF_THE_SETTINGS: &[(&str, Step)] =
+    &[("the mail and back", mail_and_settings_again), ("the palette", palette_comes_and_goes), ("the settings", settings_come_and_go)];
+
+/// The calendar's week with New event open.
+fn editing(harness: &mut Harness<'static, InboxApp>) {
+    if harness.state().calendar().editor().is_none() {
+        harness.state_mut().show_calendar();
+        let (calendar, mailbox) = harness.state_mut().calendar_mut();
+        calendar.set_view(mailbox, crate::calendar::View::Week);
+        settle(harness);
+        harness.get_by_role_and_label(Role::Button, "New event").click();
+    }
+    settle(harness);
+}
+
+/// The composer's From select, whatever account it shows.
+fn from_field<'h>(harness: &'h Harness<'static, InboxApp>) -> egui_kittest::Node<'h> {
+    harness.query_all_by_role(Role::ComboBox).find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("From "))).unwrap()
 }
 
 /// The first message open in the reader.
@@ -88,7 +148,7 @@ fn composing(harness: &mut Harness<'static, InboxApp>) {
     settle(harness);
 }
 
-const KINDS: [Kind; 6] = [
+const KINDS: [Kind; 8] = [
     Kind {
         name: "the reader's More menu",
         ready: reading,
@@ -98,6 +158,7 @@ const KINDS: [Kind; 6] = [
             harness.get_by_role_and_label(Role::MenuItem, name).click();
         },
         shown: |harness| harness.query_by_label("Show the full header").or_else(|| harness.query_by_label("Hide the full header")).is_some(),
+        away: OFF_THE_MAIL,
     },
     Kind {
         name: "the Move menu",
@@ -108,6 +169,7 @@ const KINDS: [Kind; 6] = [
             row.click();
         },
         shown: |harness| harness.query_by_label("Move to").is_some(),
+        away: OFF_THE_MAIL,
     },
     Kind {
         name: "the Snooze picker",
@@ -115,6 +177,7 @@ const KINDS: [Kind; 6] = [
         open: |harness| press_button(harness, "Snooze"),
         choose: |harness| harness.get_by_label_contains("Tomorrow morning").click(),
         shown: |harness| harness.query_by_label("Snooze until").is_some(),
+        away: OFF_THE_MAIL,
     },
     Kind {
         name: "the Send later picker",
@@ -122,6 +185,7 @@ const KINDS: [Kind; 6] = [
         open: |harness| press_button(harness, "Send later"),
         choose: |harness| harness.get_by_label_contains("Tomorrow morning").click(),
         shown: |harness| harness.query_by_label_contains("Tomorrow morning").is_some(),
+        away: COVERS,
     },
     Kind {
         name: "the account picker",
@@ -129,6 +193,7 @@ const KINDS: [Kind; 6] = [
         open: |harness| press_button(harness, OWNER),
         choose: |harness| harness.get_by_role_and_label(Role::MenuItemRadio, "Studio").click(),
         shown: |harness| harness.query_by_role_and_label(Role::MenuItemRadio, "All accounts").is_some(),
+        away: COVERS,
     },
     Kind {
         name: "a select on a settings page",
@@ -139,6 +204,29 @@ const KINDS: [Kind; 6] = [
         },
         choose: |harness| harness.get_by_role_and_label(Role::MenuItemRadio, "STARTTLS").click(),
         shown: |harness| harness.query_by_role_and_label(Role::MenuItemRadio, "STARTTLS").is_some(),
+        away: OFF_THE_SETTINGS,
+    },
+    Kind {
+        name: "the composer's From menu",
+        ready: composing,
+        open: |harness| {
+            from_field(harness).click();
+            harness.run();
+        },
+        choose: |harness| harness.get_by_label("Studio, holloway.studio@example.org").click(),
+        shown: |harness| harness.query_by_label("Studio, holloway.studio@example.org").is_some(),
+        away: COVERS,
+    },
+    Kind {
+        name: "the event editor's Repeat select",
+        ready: editing,
+        open: |harness| {
+            harness.get_by_role_and_label(Role::ComboBox, "Repeat").click();
+            harness.run();
+        },
+        choose: |harness| harness.get_by_label("Weekdays").click(),
+        shown: |harness| harness.query_by_label("Weekdays").is_some(),
+        away: COVERS,
     },
 ];
 
@@ -162,10 +250,9 @@ fn settings_come_and_go(harness: &mut Harness<'static, InboxApp>) {
 
 #[test]
 fn every_float_closed_by_a_choice_opens_again_with_one_press_after_a_cover_came_and_went() {
-    let covers: [(&str, Step); 2] = [("the palette", palette_comes_and_goes), ("the settings", settings_come_and_go)];
     let mut faults = Vec::new();
     for kind in &KINDS {
-        for (cover, come_and_go) in covers {
+        for (cover, come_and_go) in COVERS {
             let mut harness = harness();
             (kind.ready)(&mut harness);
             (kind.open)(&mut harness);
@@ -184,4 +271,31 @@ fn every_float_closed_by_a_choice_opens_again_with_one_press_after_a_cover_came_
         }
     }
     assert!(faults.is_empty(), "one press opens it and it stays open: {faults:#?}");
+}
+
+#[test]
+fn every_float_open_when_its_place_stopped_being_drawn_is_closed_on_return_and_opens_with_one_press() {
+    let mut faults = Vec::new();
+    for kind in &KINDS {
+        for (way, away_and_back) in kind.away {
+            let mut harness = harness();
+            (kind.ready)(&mut harness);
+            (kind.open)(&mut harness);
+            settle(&mut harness);
+            assert!((kind.shown)(&harness), "{}: open", kind.name);
+            away_and_back(&mut harness);
+            (kind.ready)(&mut harness);
+            settle(&mut harness);
+            if (kind.shown)(&harness) {
+                faults.push(format!("{} after {way}: open by itself", kind.name));
+                continue;
+            }
+            (kind.open)(&mut harness);
+            settle(&mut harness);
+            if !(kind.shown)(&harness) {
+                faults.push(format!("{} after {way}: one press does not open it", kind.name));
+            }
+        }
+    }
+    assert!(faults.is_empty(), "{faults:#?}");
 }

@@ -302,6 +302,10 @@ fn opener() -> Harness<'static, bool> {
                 });
                 *open = shown.is_some();
             }
+            if !*open {
+                // Its caller closed it: it says so, as every caller does.
+                super::forget(ui.ctx(), Id::unique("menu"));
+            }
         },
         false,
     );
@@ -1265,4 +1269,46 @@ fn a_float_its_caller_stopped_drawing_opens_again_with_one_press_after_a_cover_c
     harness.run();
     harness.run();
     assert!(*harness.state() && harness.query_by_label("First").is_some(), "one press opens it again and it stays open");
+}
+
+#[test]
+fn a_float_open_when_its_place_stopped_being_drawn_is_closed_when_it_shows_again_and_one_press_opens_it() {
+    let theme = theme();
+    let keymap = Keymap::default();
+    // The state: whether its caller holds it open, and whether its place is drawn.
+    let mut harness = builder().with_size(egui::vec2(600.0, 400.0)).build_ui_state(
+        move |ui, (open, drawn): &mut (bool, bool)| {
+            motion::set_reduced(ui.ctx(), true);
+            if !*drawn {
+                return;
+            }
+            let button = crate::component::button::TextButton::new("Open").show(ui, &theme, &keymap);
+            if button.clicked() {
+                *open = true;
+            }
+            if *open {
+                let float = super::Float { id: Id::unique("placed"), anchor: button.rect, width: 240.0, returns_to: button.id };
+                *open = super::float(ui.ctx(), &theme, &float, |ui| super::entry(ui, &theme, &keymap, "First", None)).is_some();
+            }
+            if !*open {
+                super::forget(ui.ctx(), Id::unique("placed"));
+            }
+        },
+        (false, true),
+    );
+    harness.run();
+    harness.get_by_label("Open").click();
+    harness.run();
+    assert!(harness.query_by_label("First").is_some(), "open");
+    // Another place shows: its place is not drawn, its caller still holds it open.
+    harness.state_mut().1 = false;
+    harness.run();
+    harness.run();
+    harness.state_mut().1 = true;
+    harness.run();
+    assert!(harness.query_by_label("First").is_none() && !harness.state().0, "back on its place it is closed, not open by itself");
+    harness.get_by_label("Open").click();
+    harness.run();
+    harness.run();
+    assert!(harness.state().0 && harness.query_by_label("First").is_some(), "one press opens it and it stays open");
 }

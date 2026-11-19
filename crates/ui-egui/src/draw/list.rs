@@ -442,6 +442,9 @@ fn note_snooze_row(ctx: &egui::Context, message: u64, rect: Rect, row: Id) {
 
 /// Closes the row's time picker, whichever message it is open on.
 fn close_snooze(ctx: &egui::Context) {
+    if let Some(open) = ctx.data(|data| data.get_temp::<SnoozeOpen>(snooze_open_id())) {
+        popup::forget(ctx, snooze_popup(open.message));
+    }
     ctx.data_mut(|data| {
         data.remove::<SnoozeOpen>(snooze_open_id());
         data.remove::<SnoozeRow>(snooze_row_id());
