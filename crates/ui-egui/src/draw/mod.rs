@@ -3179,6 +3179,14 @@ impl InboxApp {
             settings::Asked::Reminders(on) => self.mailbox.set_notify_reminders(on),
             settings::Asked::Background(on) => self.set_background(on),
             settings::Asked::Login(on) => self.set_login(on),
+            asked @ (settings::Asked::Templates
+            | settings::Asked::NewTemplate(_)
+            | settings::Asked::EditTemplate(..)
+            | settings::Asked::SaveTemplate
+            | settings::Asked::CloseTemplate
+            | settings::Asked::AskDeleteTemplate(..)
+            | settings::Asked::DeleteTemplate(..)
+            | settings::Asked::KeepTemplate) => self.apply_templates(asked),
         }
     }
 

@@ -126,6 +126,41 @@ pub struct Settings {
     signatures: BTreeMap<u64, String>,
     /// Why the last change of starting with the computer was not done, on the Notifications page.
     login_note: Option<String>,
+    /// The page under the section shown, if one is.
+    under: Option<Under>,
+    /// The Templates page's state.
+    templates: crate::templates::Templates,
+}
+
+/// A page under a section, reached from a row of the section's page, with a link back to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Under {
+    /// The templates of every account, under Sending.
+    Templates,
+}
+
+impl Under {
+    /// The section it is under.
+    #[must_use]
+    pub fn section(self) -> Section {
+        match self {
+            Self::Templates => Section::Sending,
+        }
+    }
+
+    /// Its id, as a page of the settings is named from outside.
+    #[must_use]
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Templates => "templates",
+        }
+    }
+
+    /// The page whose [`Self::id`] is `name`.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        [Self::Templates].into_iter().find(|under| under.id() == name)
+    }
 }
 
 impl Settings {
@@ -155,6 +190,11 @@ impl Settings {
     /// Shows the settings on the section whose id ([`Section::id`]) is `page`; a page that is no section's id (outside
     /// data: the control channel's, a script's) shows the page last shown.
     pub fn open_page(&mut self, page: Option<&str>) {
+        if let Some(under) = page.and_then(Under::named) {
+            self.open = true;
+            self.show_under(under);
+            return;
+        }
         match page.and_then(Section::named) {
             Some(section) => self.open_at(section),
             None => self.open(),
@@ -189,10 +229,35 @@ impl Settings {
         self.signatures.remove(&account);
     }
 
-    /// Shows `section`; an action waiting for a key stops waiting.
+    /// Shows `section`; an action waiting for a key stops waiting and a page under a section closes.
     pub fn show(&mut self, section: Section) {
         self.section = section;
         self.capturing = None;
+        self.under = None;
+        self.templates.leave();
+    }
+
+    /// Shows the page `under` its section.
+    pub fn show_under(&mut self, under: Under) {
+        self.show(under.section());
+        self.under = Some(under);
+    }
+
+    /// The page under the section shown, if one is.
+    #[must_use]
+    pub fn under(&self) -> Option<Under> {
+        self.under
+    }
+
+    /// The Templates page's state.
+    #[must_use]
+    pub fn templates(&self) -> &crate::templates::Templates {
+        &self.templates
+    }
+
+    /// The Templates page's state, to change.
+    pub fn templates_mut(&mut self) -> &mut crate::templates::Templates {
+        &mut self.templates
     }
 
     /// Another place is shown: an action waiting for a key stops waiting and the notes on what the last change did go;
@@ -202,6 +267,7 @@ impl Settings {
         self.capturing = None;
         self.keys_note = None;
         self.login_note = None;
+        self.templates.leave();
     }
 
     /// The action waiting for a key, if one is.

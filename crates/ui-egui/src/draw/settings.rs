@@ -46,6 +46,9 @@ use crate::tr;
 #[path = "settings_planned.rs"]
 mod planned;
 
+#[path = "settings_templates.rs"]
+pub(super) mod templates;
+
 /// The width of the sections' column, in points: as wide as the window's index.
 const NAV: f32 = 232.0;
 
@@ -150,6 +153,22 @@ pub(super) enum Asked {
     Background(bool),
     /// Whether InboxCraft starts with the computer.
     Login(bool),
+    /// The Templates page, under Sending.
+    Templates,
+    /// The form on a new template of the account.
+    NewTemplate(u64),
+    /// The form on the account's template of this name.
+    EditTemplate(u64, String),
+    /// Save the template as the form holds it.
+    SaveTemplate,
+    /// Close the form, keeping nothing typed.
+    CloseTemplate,
+    /// Ask the owner to confirm the delete of the account's template of this name.
+    AskDeleteTemplate(u64, String),
+    /// The owner confirmed it: delete the account's template of this name.
+    DeleteTemplate(u64, String),
+    /// The delete was not confirmed.
+    KeepTemplate,
 }
 
 /// What the settings show and change.
@@ -570,6 +589,9 @@ fn nav(ui: &mut Ui, theme: &Theme, shown: Section) -> Option<Asked> {
 fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
     let keymap = view.keymap;
     let mailbox = view.mailbox;
+    if view.settings.under() == Some(crate::settings::Under::Templates) {
+        return templates::page(ui, theme, keymap, view.settings, mailbox);
+    }
     match view.settings.section() {
         Section::Appearance => appearance(ui, theme, view.current, view.level, mailbox.inbox_view()),
         Section::Accounts => super::accounts::page(ui, theme, keymap, mailbox, view.onboarding, view.can_add),
@@ -830,8 +852,12 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
             });
         }
         group(ui, theme, "C", tr!("Templates and scheduled"), None);
-        settings_row_soon_with(ui, theme, tr!("Templates"), tr!("Texts you write often, kept on their account, with a page to manage them."), |ui| {
-            link_sized(ui, theme, keymap, tr!("manage templates →"), LinkSize::Small);
+        settings_row(ui, theme, tr!("Templates"), Some(tr!("Texts you write often, kept on their account, with a page to manage them.")), |ui| {
+            // Its own id, so the culled signatures above, laid out as the page scrolls, never move it: the focus stays.
+            let own = UiBuilder::new().scope_id(Id::unique("settings-manage-templates"));
+            if ui.scope_builder(own, |ui| link_sized(ui, theme, keymap, tr!("manage templates →"), LinkSize::Small)).inner.clicked() {
+                asked = Some(Asked::Templates);
+            }
         });
         settings_row_soon_with(
             ui,

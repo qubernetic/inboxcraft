@@ -748,13 +748,16 @@ fn shift_tab_round_a_page_with_many_accounts_reaches_the_last_account() {
     harness.run();
     harness.get_by_label("Command line").focus();
     harness.run();
-    // Back from the window's first control comes round to its last, the page's: the last account's signature, scrolled
-    // to.
+    // Back from the window's first control comes round to its last, the page's: the Templates link under the signatures
+    // (#317), then the last account's signature, scrolled to.
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness).map(|(label, _)| label).as_deref(), Some("manage templates →"), "Shift+Tab from the first control");
     harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
     harness.run();
     let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     let (label, rect) = focused(&harness).unwrap_or((String::new(), egui::Rect::NOTHING));
-    assert_eq!(label, last, "Shift+Tab from the first control");
+    assert_eq!(label, last, "Shift+Tab from the Templates link");
     assert!(sheet.contains_rect(rect), "{label} {rect:?} in sight on the sheet {sheet:?}");
     // And on back, the account before it.
     harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);

@@ -176,7 +176,8 @@ pub struct Shot {
     /// Whether the settings show Notifications.
     #[serde(default)]
     pub notifications: Option<bool>,
-    /// The settings shown on the section of this name (`appearance` … `plugins`, [`crate::settings::Section::id`]).
+    /// The settings shown on the section of this name (`appearance` … `plugins`, [`crate::settings::Section::id`]), or on
+    /// the page under one (`templates`, [`crate::settings::Under::id`]).
     #[serde(default)]
     pub section: Option<String>,
     /// How the unified inbox shows its groups: `smart` when left out, `grouped` or `list` (the earlier `cards` and
@@ -637,8 +638,14 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
         app.open_shortcuts();
     }
     if let Some(name) = &shot.section {
-        let section = crate::settings::Section::named(name).ok_or_else(|| bad(format!("{}: no settings section {name:?}", shot.out)))?;
-        app.settings_mut().open_at(section);
+        if crate::settings::Under::named(name) == Some(crate::settings::Under::Templates) {
+            // The page under Sending, with the sample's templates kept (the window's own saves, not an agent's).
+            crate::sample::templates(app.mailbox_mut()).map_err(|error| bad(format!("{}: {error}", shot.out)))?;
+            app.open_templates();
+        } else {
+            let section = crate::settings::Section::named(name).ok_or_else(|| bad(format!("{}: no settings section {name:?}", shot.out)))?;
+            app.settings_mut().open_at(section);
+        }
     }
     if let Some(waiting) = &shot.capture {
         let Some(action) = crate::keymap::action(waiting).filter(|_| shot.shortcuts == Some(true)) else {

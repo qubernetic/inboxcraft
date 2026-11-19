@@ -870,6 +870,27 @@ pub fn sending(clock: Box<dyn Clock>) -> Result<Session, UiError> {
     session_over(store, clock)
 }
 
+/// The invented templates the Templates page's pictures show: four on Studio, one on Personal.
+const TEMPLATES: [(u64, &str, &str, &str); 5] = [
+    (2, "Workshop invitation", "Thursday workshop", "Hello, the next workshop is on Thursday in Room 3. We start at {?time} and end by six."),
+    (2, "Quote for a shop front", "Your quote for {?what}", "Hello {first_name}, thank you for asking. The quote follows by {?day}."),
+    (2, "Order received, thank you", "Your order is with us", "Hello {first_name}, thank you. We start on {?day} and write when it is ready."),
+    (2, "Away from the studio", "Away until {?date}", "Hello {first_name}, the studio is closed until {?date}. I read mail once a day."),
+    (1, "Out of town", "Away until {?date}", "Hello {first_name}, I am away until {?date} and answer when I am back."),
+];
+
+/// Keeps the sample's invented templates on the sample accounts of `mailbox`, through `template.save`.
+///
+/// # Errors
+///
+/// [`UiError`] when the session refuses one.
+pub fn templates(mailbox: &mut crate::mailbox::Mailbox) -> Result<(), UiError> {
+    for (account, name, subject, text) in TEMPLATES {
+        mailbox.run("template.save", &serde_json::json!({ "account": account, "name": name, "subject": subject, "text": text }))?;
+    }
+    Ok(())
+}
+
 /// A sample session as [`session`] makes it, over `store` (the sample [`mailbox`], perhaps with more in it), the
 /// screener on.
 ///

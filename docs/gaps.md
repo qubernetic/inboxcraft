@@ -618,9 +618,8 @@ time from the code as it is, not measured.
   address book; a name that would move the address (`<`, `"`, `,`, `@`) is taken as the address alone. The engine
   takes a domain without a dot (`ansel@example`) as an address, so only a recipient with no `@`, two of them or an
   empty part is marked as none. The composer has no window of its own.
-- Reply, reply all and forward have no keys yet, only the reader's buttons and the engine's commands; templates are
-  written and removed only through the engine's `template.save` and `template.delete` (`owner`), not in the window:
-  the settings sheet has no page for them yet (#133).
+- Reply, reply all and forward have no keys yet, only the reader's buttons and the engine's commands (#133).
+  Templates are written, edited and removed on Settings, Sending, Templates (#317).
 - A blank is asked for at the foot of the composer, one at a time; its mark in the text is tinted but cannot be
   clicked to fill it in (#133).
 - The Let in card's group pills are forgotten when another message opens; a sender's group is chosen on the card or
