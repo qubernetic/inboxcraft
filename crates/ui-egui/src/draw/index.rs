@@ -13,8 +13,6 @@
 //! mailboxes' viewport are built and laid out (a screen above and below it, so Tab walks on into rows out of sight
 //! and the row it lands on is scrolled into sight): 40 000 folders cost their offsets, not their rows.
 
-#![cfg_attr(not(test), expect(dead_code, reason = "the window lays its index out in the next step"))]
-
 use std::collections::BTreeSet;
 
 use egui::{Id, Rect, Response, Role as AxRole, ScrollArea, Ui, UiBuilder, WidgetInfo, pos2, vec2};
@@ -23,9 +21,9 @@ use inboxcraft_model::Role;
 use crate::component::account_row::{self, AccountRow, Sync};
 use crate::component::mailbox_row::{self, MailboxRow};
 use crate::component::nav_row::{self, NavRow, Standing, base};
-use crate::component::{avatar, popup, soon};
+use crate::component::{avatar, popup, soon, tooltip};
 use crate::iconset::{self, IconId};
-use crate::keymap::Keymap;
+use crate::keymap::{self, Keymap};
 use crate::mailbox::{self, Mailbox, Pile, role_text};
 use crate::theme::Theme;
 use crate::tr;
@@ -83,15 +81,15 @@ enum Line<'a> {
     Gap,
     /// An account, open or not.
     Account(&'a mailbox::AccountRow, bool),
-    /// A folder of an account.
-    Folder(&'a mailbox::FolderRow),
+    /// A folder of an account, and the account's label, which a screen reader hears with it.
+    Folder(&'a mailbox::FolderRow, &'a str),
 }
 
 impl Line<'_> {
     /// Its height at `theme`'s text scale.
     fn height(&self, theme: &Theme) -> f32 {
         match self {
-            Self::Shared(..) | Self::Folder(_) => Theme::size(theme, mailbox_row::HEIGHT),
+            Self::Shared(..) | Self::Folder(..) => Theme::size(theme, mailbox_row::HEIGHT),
             Self::Gap => GAP,
             Self::Account(..) => Theme::size(theme, account_row::HEIGHT),
         }
@@ -143,7 +141,9 @@ fn lines<'a>(mailbox: &'a Mailbox, open: &BTreeSet<u64>) -> Vec<Line<'a>> {
         let opened = open.contains(&account.id);
         lines.push(Line::Account(account, opened));
         if opened {
-            lines.extend(mailbox.folders_of(account.id).into_iter().filter(|folder| folder.role.is_none()).map(Line::Folder));
+            lines.extend(
+                mailbox.folders_of(account.id).into_iter().filter(|folder| folder.role.is_none()).map(|folder| Line::Folder(folder, &account.label)),
+            );
         }
     }
     lines
@@ -158,7 +158,12 @@ fn shown(mailbox: &Mailbox, at: Place) -> Option<mailbox::Place> {
 fn line(ui: &mut Ui, theme: &Theme, line: &Line<'_>, active: Option<mailbox::Place>, narrow: bool, asked: &mut Asked, toggled: &mut Option<u64>) {
     let response = match *line {
         Line::Shared(place, name, glyph, count) => {
-            let spoken = spoken(name, None, count);
+            // The Outbox counts sends waiting, not unread mail.
+            let spoken = match (place, count) {
+                (mailbox::Place::Outbox, 1) => tr!("Outbox, 1 send").to_owned(),
+                (mailbox::Place::Outbox, _) => tr!("Outbox, {count} sends", count = count),
+                _ => spoken(name, None, count),
+            };
             let row = MailboxRow {
                 id: Id::unique("index-shared").with(format!("{place:?}")),
                 spoken: &spoken,
@@ -195,9 +200,9 @@ fn line(ui: &mut Ui, theme: &Theme, line: &Line<'_>, active: Option<mailbox::Pla
             }
             response
         }
-        Line::Folder(folder) => {
+        Line::Folder(folder, account) => {
             let name = clean(&folder.name);
-            let spoken = spoken(&name, None, folder.unread);
+            let spoken = spoken(&name, Some(&clean(account)), folder.unread);
             let place = mailbox::Place::Folder(folder.id);
             let row = MailboxRow {
                 id: Id::unique("index-folder").with(folder.id),
@@ -228,8 +233,8 @@ fn spoken(name: &str, account: Option<&str>, count: u64) -> String {
     if count == 0 { named } else { tr!("{name}, {count} unread", name = named, count = count) }
 }
 
-/// A place's row.
-fn place(ui: &mut Ui, theme: &Theme, which: Place, at: Place, count: u64, narrow: bool) -> Response {
+/// A place's row; hovered, it says its name and its key, as the rail's buttons did.
+fn place(ui: &mut Ui, theme: &Theme, keymap: &Keymap, which: Place, at: Place, count: u64, narrow: bool) -> Response {
     let (index, label, icon) = match which {
         Place::Home => ("[ 00 ]", tr!("Home"), IconId::Home),
         Place::Mail => ("[ 01 ]", tr!("Mail"), IconId::Mail),
@@ -246,7 +251,13 @@ fn place(ui: &mut Ui, theme: &Theme, which: Place, at: Place, count: u64, narrow
     if which == Place::Home {
         return soon::soon(ui, theme, |ui| nav_row::nav_row(ui, theme, &row, narrow, None));
     }
-    nav_row::nav_row(ui, theme, &row, narrow, None)
+    let action = match which {
+        Place::Mail => keymap::MAIL,
+        Place::Calendar => keymap::CALENDAR,
+        Place::Later => keymap::LATER,
+        Place::Home | Place::Settings => keymap::SETTINGS,
+    };
+    tooltip::attach(nav_row::nav_row(ui, theme, &row, narrow, None), theme, keymap, label, Some(action))
 }
 
 /// Draws the index into `ui`'s whole rect and returns what was asked for. `at` is the place shown; `narrow` draws the
@@ -270,8 +281,8 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let column = Rect::from_min_max(pos2(rect.left(), rect.top() + TOP), rect.max);
     ui.scope_builder(UiBuilder::new().max_rect(column).id_salt("index-column"), |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        place(ui, theme, Place::Home, at, 0, narrow);
-        if place(ui, theme, Place::Mail, at, mail_count, narrow).clicked() {
+        place(ui, theme, keymap, Place::Home, at, 0, narrow);
+        if place(ui, theme, keymap, Place::Mail, at, mail_count, narrow).clicked() {
             asked.place = Some(Place::Mail);
         }
         if mailbox.accounts().is_empty() {
@@ -311,7 +322,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             }
         }
         for (which, count) in [(Place::Calendar, 0), (Place::Later, later), (Place::Settings, 0)] {
-            if place(ui, theme, which, at, count, narrow).clicked() {
+            if place(ui, theme, keymap, which, at, count, narrow).clicked() {
                 asked.place = Some(which);
             }
         }

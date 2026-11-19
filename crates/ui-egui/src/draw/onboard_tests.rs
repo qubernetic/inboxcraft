@@ -119,7 +119,8 @@ fn the_accounts_page_with_no_account_is_the_frames_box_with_add_account_in_it() 
         let adds: Vec<_> = harness.get_all_by_role_and_label(Role::Button, "Add account").map(|node| node.rect()).collect();
         let head = egui::Rect::from_x_y_ranges(sheet.x_range(), sheet.top()..=intro.bottom());
         assert!(!adds.iter().any(|add| head.intersects(*add)), "{theme:?}: no Add account in the head: {adds:?}");
-        let add = *adds.iter().find(|add| card.contains_rect(**add)).unwrap();
+        // The welcome's Add account in the body lies under the sheet, behind this box: the box's own is its lowest.
+        let add = *adds.iter().filter(|add| card.contains_rect(**add)).max_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
         assert!(harness.query_by_label("More").is_none() && harness.query_by_label("Your accounts show up here").is_none(), "{theme:?}");
         // The empty state with its action: lines 24 in from the edge, 40 under its top, 12 apart; the button 8 under
         // the gap after the help.
@@ -150,8 +151,9 @@ fn the_welcome_is_a_box_520_wide_in_the_middle_with_add_account_and_its_arrow() 
         let card = harness.get_by_role_and_label(Role::Group, "Welcome").rect();
         assert_eq!(card.width(), 520.0, "{card:?}");
         assert_eq!(card.height(), 294.0, "the frame's box: {card:?}");
-        // Right of the rail the window's middle is near x 580 of 1100; the box stands in the middle, on whole points.
-        assert!((card.center().x - 580.0).abs() < 40.0 && card.min.x.fract() == 0.0 && card.min.y.fract() == 0.0, "{card:?}");
+        // The box stands in the middle of the body, on whole points.
+        let body = super::shell::laid(&harness.ctx).unwrap().body;
+        assert!((card.center().x - body.center().x).abs() <= 1.0 && card.min.x.fract() == 0.0 && card.min.y.fract() == 0.0, "{card:?} in {body:?}");
         let label = harness.get_by_label("No account yet").rect();
         let title = harness.get_by_label("Add an account to read its mail here.").rect();
         let help = harness.get_by_label("Nothing leaves this computer before you do.").rect();

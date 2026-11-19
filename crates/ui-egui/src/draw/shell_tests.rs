@@ -4,10 +4,17 @@
 //! The frame's four regions: the command line, the index, the body and the status line, measured from the frame sheet
 //! of the shell, on whole pixels at every scale, never negative or no number whatever size the desktop reports.
 
+use egui::accesskit::{Role, Toggled};
 use egui::{Rect, pos2, vec2};
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use inboxcraft_model::Role as Folder;
+use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::{self as shell, COMMAND_LINE, INDEX, INDEX_NARROW, NARROW_INDEX_UNDER, Regions, STATUS_LINE};
+use crate::mailbox::{Mailbox, Pile, Place};
 use crate::theme::{Mode, TextScale, Theme};
+use crate::{InboxApp, sample};
 
 fn theme(percent: u16) -> Theme {
     Theme::new(Mode::Dark, TextScale::from_percent(percent).unwrap())
@@ -96,4 +103,88 @@ fn any_size_from_the_desktop_lays_out_as_at_least_800_wide() {
         }
     }
     assert!(least.status.top() >= least.body.bottom(), "the least height holds every region");
+}
+
+/// The sample window `size` points large, drawn once.
+fn window(size: egui::Vec2) -> Harness<'static, InboxApp> {
+    let clock = || Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()));
+    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut harness =
+        Harness::builder().with_size(size).with_context_setup(crate::theme::install_fonts).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness
+}
+
+#[test]
+fn the_window_does_not_narrow_its_index_yet() {
+    let harness = window(vec2(1100.0, 760.0));
+    let laid = shell::laid(&harness.ctx).unwrap();
+    assert_eq!(laid.index.width(), INDEX, "the window keeps the wide index until the widths slice turns the breakpoint on");
+    assert_eq!(laid.body.left() - laid.index.left(), INDEX + 1.0, "the body one hairline right of the index");
+    // The index's rows stand in the index, the list in the body.
+    let home = harness.get_by_role_and_label(Role::Button, "Home").rect();
+    assert!(laid.index.contains_rect(home), "{home:?} in {:?}", laid.index);
+    let search = harness.get_by_role(Role::TextInput).rect();
+    assert!(laid.body.contains_rect(search), "{search:?} in {:?}", laid.body);
+}
+
+#[test]
+fn the_status_line_is_reserved_and_holds_nothing_yet() {
+    let mut harness = window(vec2(1300.0, 820.0));
+    let status = shell::laid(&harness.ctx).unwrap().status;
+    let inside: Vec<String> = harness
+        .root()
+        .children_recursive()
+        .filter(|node| {
+            node.accesskit_node().bounding_box().is_some_and(|b| {
+                let ppp = harness.ctx.pixels_per_point();
+                let rect = Rect::from_min_max(pos2(b.x0 as f32 / ppp, b.y0 as f32 / ppp), pos2(b.x1 as f32 / ppp, b.y1 as f32 / ppp));
+                rect.intersects(status.shrink(0.5)) && !rect.contains_rect(status)
+            })
+        })
+        .map(|node| format!("{:?} {:?}", node.accesskit_node().role(), node.accesskit_node().label()))
+        .collect();
+    assert!(inside.is_empty(), "nothing stands in the status line: {inside:?}");
+    // A press there reaches nothing: nothing is selected, opened or shown.
+    let (place, selected) = (harness.state().mailbox().place(), harness.state().mailbox().selected());
+    let at = status.center();
+    harness.hover_at(at);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.run();
+    }
+    assert_eq!((harness.state().mailbox().place(), harness.state().mailbox().selected()), (place, selected));
+    assert!(!harness.state().settings().is_open());
+}
+
+#[test]
+fn the_index_s_places_and_mailboxes_go_where_the_rail_and_the_folder_pane_went() {
+    let mut harness = window(vec2(1300.0, 820.0));
+    let press = |harness: &mut Harness<'static, InboxApp>, name: &str| {
+        harness.get_by_role_and_label(Role::Button, name).click();
+        harness.run();
+    };
+    let shown = |harness: &Harness<'static, InboxApp>, name: &str| harness.get_by_role_and_label(Role::Button, name).accesskit_node().toggled();
+    press(&mut harness, "Later");
+    assert_eq!(harness.state().mailbox().place(), Place::Later(Pile::Pins), "Later opens on the pins");
+    assert_eq!(shown(&harness, "Later"), Some(Toggled::True));
+    press(&mut harness, "Mail");
+    assert_eq!(harness.state().mailbox().place(), Place::View(Folder::Inbox), "Mail leaves Later for the inbox");
+    press(&mut harness, "Calendar");
+    assert_eq!(harness.state().screen(), crate::Screen::Calendar);
+    assert_eq!(shown(&harness, "Calendar"), Some(Toggled::True));
+    // A mailbox pressed on the calendar shows the mail, on that mailbox.
+    press(&mut harness, "Sent");
+    assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (crate::Screen::Mail, Place::View(Folder::Sent)));
+    // Home is coming soon: a press does nothing.
+    press(&mut harness, "Home");
+    assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (crate::Screen::Mail, Place::View(Folder::Sent)));
+    // Settings opens the sheet and is the place shown while it is open; Mail leaves it.
+    press(&mut harness, "Settings");
+    assert!(harness.state().settings().is_open());
+    assert_eq!(shown(&harness, "Settings"), Some(Toggled::True));
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(!harness.state().settings().is_open());
 }

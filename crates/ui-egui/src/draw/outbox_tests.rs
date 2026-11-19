@@ -347,3 +347,20 @@ fn a_refused_send_is_the_outbox_rows_72_high_and_a_held_one_56() {
     let refused = harness.get_by_label("To Odile Brannock, Work party on Saturday, Not sent: 550 5.1.1 No such user here").rect();
     assert_eq!(refused.height(), 72.0, "{refused:?}");
 }
+
+#[test]
+fn a_countdown_toast_never_stands_over_the_docked_composer_s_send() {
+    // Beside the list (1300) the toast is centred on the list; where the composer takes the body (800) it stands over
+    // the composer's foot.
+    for width in [1300.0, 800.0] {
+        let clock = clock();
+        let mut harness = sending(&clock, egui::Theme::Light);
+        harness.set_size(vec2(width, 820.0));
+        harness.run();
+        send(&mut harness, "First of two");
+        write(&mut harness, "Second of two");
+        let toast = harness.get_by_label_contains("Sending “First of two”").rect();
+        let send = harness.get_by_role_and_label(Role::Button, "Send").rect();
+        assert!(!toast.intersects(send), "{width}: the toast {toast:?} over Send {send:?}");
+    }
+}

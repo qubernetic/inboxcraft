@@ -314,7 +314,7 @@ fn a_press_aims_only_at_a_control_that_can_be_pressed() {
 
 #[test]
 fn a_click_runs_safe_commands_only() {
-    // The reader's Done, the first of the head's acts at its right: mail.done is the owner's.
-    let error = refusal(r#"{"out": "a.png", "mode": "light", "select": "Photos from the coast walk", "click": [944, 32]}"#);
+    // The reader's Done, the first of the head's acts at its right (under the command line): mail.done is the owner's.
+    let error = refusal(r#"{"out": "a.png", "mode": "light", "select": "Photos from the coast walk", "click": [943, 78]}"#);
     assert!(error.contains("the click reached mail.done, which only the owner runs"), "{error}");
 }

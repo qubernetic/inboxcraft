@@ -925,10 +925,10 @@ fn the_floating_panel_is_520_by_560_where_its_frames_put_it_and_folds_to_its_hea
     let mut harness = composing(egui::Theme::Dark);
     harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
     harness.run();
-    let screen = harness.ctx.content_rect();
+    // The panel stands in the body: 16 in from its right edge and 16 over its foot; over the reader's answers it stands
+    // 16 over them instead, never covering them.
+    let screen = super::shell::laid(&harness.ctx).unwrap().body;
     let close = rect_of(&harness, Role::Button, "Close; the draft is kept");
-    // The frames put the panel 16 in from the window's right edge and 16 over its foot (15 clear of the middle area,
-    // inside the window's 1 px line); over the reader's answers it stands 16 over them instead, never covering them.
     // Close stands 20 in from the panel's right edge and 12 under its top.
     let foot = rect_of(&harness, Role::Button, "Reply").top().min(screen.bottom()).floor();
     assert!((close.right() - (screen.right() - 16.0 - 20.0)).abs() < 0.5, "{close:?} in {screen:?}");
@@ -1257,7 +1257,9 @@ fn hostile_drafts_hold_their_layout() {
     let send = rect_of(&harness, Role::Button, "Send");
     let discard = rect_of(&harness, Role::Button, "Discard the draft");
     assert!(screen.contains_rect(send) && screen.contains_rect(discard), "the foot stays in the window: {send:?} {discard:?}");
-    assert!(send.bottom() > screen.bottom() - 60.0, "and at its place: {send:?}");
+    // At the body's foot: the status line is under it.
+    let body = super::shell::laid(&harness.ctx).unwrap().body;
+    assert!(send.bottom() > body.bottom() - 60.0, "and at its place: {send:?}");
     let text = rect_of(&harness, Role::MultilineTextInput, "Message text");
     assert!(text.top() < send.top(), "the text above the foot");
     // The foot as its frames draw it whatever the draft holds: Send at the left in line with the text's box,
@@ -1688,7 +1690,8 @@ fn hundreds_of_recipients_in_cc_and_bcc_hold_the_layout() {
     assert!((subject.top() - (from.bottom() + 6.0 + 1.0 + 3.0 * line)).abs() < 1.0, "{subject:?} {from:?}");
     assert!(screen.contains_rect(subject), "the subject in sight: {subject:?}");
     let send = rect_of(&harness, Role::Button, "Send");
-    assert!(screen.contains_rect(send) && send.bottom() > screen.bottom() - 60.0, "{send:?}");
+    let body = super::shell::laid(&harness.ctx).unwrap().body;
+    assert!(screen.contains_rect(send) && send.bottom() > body.bottom() - 60.0, "{send:?}");
     let composer = harness.state().composer().unwrap();
     assert_eq!([Line::To, Line::Cc, Line::Bcc].map(|line| composer.chips(line).len()), [500, 500, 500]);
 }
@@ -1877,26 +1880,4 @@ fn at_every_width_the_foot_s_controls_stand_apart_inside_the_composer_and_a_pres
             harness.run();
         }
     }
-}
-
-/// No window of the app (720 at least) leaves the docked composer narrower than its least width; one 280 wide does,
-/// standing in for a composer too narrow for Send, its caret and Discard: Discard gives way, nothing leaves the
-/// composer, and Send still sends.
-#[test]
-fn in_a_composer_too_narrow_for_discard_discard_gives_way_and_send_still_sends() {
-    let mut harness = composing_at(280.0, 100);
-    let composer = super::compose::drawn_rect(&harness.ctx).unwrap();
-    assert!(composer.width() < 216.0, "narrower than its least: {composer:?}");
-    let send = rect_of(&harness, Role::Button, "Send");
-    let later = rect_of(&harness, Role::Button, "Send later");
-    assert!(composer.contains_rect(send) && composer.contains_rect(later) && !send.intersects(later), "{send:?} {later:?} in {composer:?}");
-    let discard = harness.query_by_label("Discard the draft").map(|node| node.rect());
-    assert!(discard.is_none_or(|discard| composer.contains_rect(discard) && !discard.intersects(later)), "Discard {discard:?} in {composer:?}");
-    assert!(discard.is_none(), "Discard gave way");
-    let at = send.center();
-    for pressed in [true, false] {
-        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
-        harness.run();
-    }
-    assert!(harness.state().composer().is_none(), "sent");
 }

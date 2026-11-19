@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The window's content: the folder pane on the left, the header with the search field and the message list, the
+//! The window's content, laid out in the frame's regions ([`shell::regions`]): the index on the left, the header with the search field and the message list, the
 //! reader of the selected message on the right, and an error banner on top while a command's error stands. The
 //! reader can fill the window (full width); Escape leaves that. A window that can add accounts shows "Add account"
 //! in the empty window, which opens the settings sheet on Accounts; accounts are added and listed there.
-//! The navigation rail runs down the window's left edge on the flat panel: its settings button (or its key)
-//! opens the settings sheet over the window; Escape, its close button or the rail's Mail button leave it, and an
-//! account being added with it.
+//! The index holds the places and the mailboxes: its SETTINGS (or its key) opens the settings sheet over the window;
+//! Escape, its close button or the index's MAIL leave it, and an account being added with it.
 //!
 //! The hover actions, the reader's toolbar and their keys (D Done, A Archive, R read or unread, S flag, Delete) act on
 //! the hovered or selected message, on a real account as on the sample; a row that leaves the list slides out first.
@@ -25,7 +24,7 @@
 //! after a restart; [`InboxApp::with_keep`] reads them back at the start. The keys are kept the same way.
 //!
 //! Every action of the window has an id ([`keymap::actions`]) and runs through [`InboxApp::run_action`]: from its
-//! key, from the rail and from the command palette (Ctrl+K), which lists them all. The rail's Calendar shows the
+//! key, from the index and from the command palette (Ctrl+K), which lists them all. The index's CALENDAR shows the
 //! calendar screen ([`Screen::Calendar`]), drawn in `calendar/`, in the place of the mail. A change to an event made
 //! there shows the same toast, and Undo or Ctrl+Z reads the calendar again.
 //!
@@ -44,7 +43,6 @@ mod list;
 mod onboard;
 pub(crate) mod paint;
 mod palette;
-mod pane;
 mod reader;
 pub(crate) use reader::fitted_board;
 mod index;
@@ -63,11 +61,13 @@ use serde_json::{Value, json};
 
 use crate::calendar::Calendar;
 use crate::component::banner::{self, BannerKind, BannerLink};
+use crate::component::button::IconButton;
 use crate::component::soon;
 use crate::component::toast::{self, Toast};
 use crate::compose::Composer;
 use crate::desk::Desk;
 use crate::fetch::{Fetch, Offline};
+use crate::iconset::IconId;
 use crate::keep::{Keep, NoKeep, Triage};
 use crate::keymap::{self, Captured, Keymap};
 use crate::mailbox::{Act, InboxView, Mailbox, Pile, Place};
@@ -91,13 +91,28 @@ pub(super) const LIST_WIDTH: f32 = 440.0;
 /// (`Enter` or a press opens, `Esc` goes back), as the design's breakpoint has it.
 pub(super) const ONE_PANE: f32 = 980.0;
 
-/// The default width of the folder pane, in points.
+/// The width the search field in the list's header is measured from (three quarters of it), in points: the old
+/// folder pane's default width, which the header kept when the pane went.
 pub(super) const FOLDER_PANE: f32 = 240.0;
+
+/// The least width beside the docked composer a toast is centred in, in points: a toast's usual width and room round it.
+const TOAST_ROOM: f32 = 360.0;
+
+/// The height of the docked composer's foot, which holds Send, in points: a toast beside a composer too wide for
+/// [`TOAST_ROOM`] stands over it.
+const COMPOSER_FOOT: f32 = 56.0;
 
 /// How long the toast after an act shows, in seconds; its Undo works until then.
 pub const TOAST_SECONDS: f64 = 6.0;
 
-/// The screen the window shows beside the rail.
+/// What was asked of the mail in the index this frame: an account narrowed, a mailbox opened.
+#[derive(Debug, Default)]
+struct MailAsked {
+    narrow: Option<Option<u64>>,
+    open: Option<Place>,
+}
+
+/// The screen the window shows beside the index.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Screen {
     /// The folders, the list and the reader.
@@ -207,7 +222,7 @@ pub struct InboxApp {
     kept_notify: Option<NotifySettings>,
     /// The app's side of running without a window, when it has one.
     desk: Option<Box<dyn Desk>>,
-    /// The screen shown beside the rail.
+    /// The screen shown beside the index.
     screen: Screen,
     /// The calendar screen.
     calendar: Calendar,
@@ -292,49 +307,6 @@ fn margin(points: f32) -> Margin {
 /// to it. A width that is not a number counts as 1.
 fn list_widest(ui: &Ui, theme: &Theme, docked: bool) -> f32 {
     if docked { (ui.available_width() - compose::least_width(ui, theme) - theme.spacing.s2).max(1.0) } else { f32::INFINITY }
-}
-
-/// Keeps the width the owner gave the resizable pane `id` apart from what `widest` squeezes it to (egui keeps the
-/// squeezed width as the pane's own, kept while the app runs): while the cap bites, the owner's width is kept; once it
-/// lets go (the composer closed or floating, the window wider), the pane is given back the owner's width, as far as the
-/// cap allows. A width the owner drags to while the cap does not bite is the owner's, and so is a narrower one while
-/// it is squeezed, but only from the pane's own resize handle (dragged, or stepped by a screen reader): a width that
-/// changed under a window resized however slowly is the cap's. Both are kept with the pane's own.
-fn keep_owners_width(ctx: &egui::Context, id: egui::Id, widest: f32) {
-    let Some(mut state) = egui::containers::panel::PanelState::load(ctx, id) else { return };
-    let width = state.outer_rect.width();
-    if !width.is_finite() {
-        return;
-    }
-    let key = id.with("owners-width");
-    let (owner, squeezed) = ctx.data_mut(|data| data.get_persisted::<(f32, bool)>(key)).unwrap_or((width, false));
-    // The handle dragged now, or released last frame: egui stores the width a drag leaves only in the frame the
-    // drag stops, so this frame reads it. A screen reader's step or value on the handle is the owner's as a drag is.
-    let handle = id.with("__resize");
-    let stepped = ctx.input(|input| {
-        use egui::accesskit::Action;
-        [Action::Increment, Action::Decrement, Action::SetValue].into_iter().any(|action| input.num_accesskit_action_requests(handle, action) > 0)
-    });
-    let dragging = ctx.is_being_dragged(handle) || ctx.drag_stopped_id() == Some(handle) || stepped;
-    let flag = key.with("dragged");
-    let dragged = ctx.data_mut(|data| data.get_temp::<bool>(flag)).unwrap_or(false) || dragging;
-    ctx.data_mut(|data| data.insert_temp(flag, dragging));
-    let biting = width >= widest - 0.5;
-    let kept = if biting {
-        (owner, true)
-    } else if squeezed && dragged {
-        (width, false)
-    } else if squeezed {
-        let to = owner.min(widest);
-        if to.is_finite() && to > width + 0.5 {
-            state.outer_rect.set_width(to);
-            ctx.data_mut(|data| data.insert_persisted(id, state));
-        }
-        (owner, owner > widest + 0.5)
-    } else {
-        (width, false)
-    };
-    ctx.data_mut(|data| data.insert_persisted(key, kept));
 }
 
 /// Where the list stands: not drawn in one pane while something stands in its place (`shown` false); beside the
@@ -612,7 +584,7 @@ impl InboxApp {
         }
     }
 
-    /// The screen shown beside the rail.
+    /// The screen shown beside the index.
     #[must_use]
     pub fn screen(&self) -> Screen {
         self.screen
@@ -707,7 +679,7 @@ impl InboxApp {
         }
     }
 
-    /// Runs the action `id` of [`keymap::actions`], as its key, the rail or the palette do; an action that cannot run
+    /// Runs the action `id` of [`keymap::actions`], as its key, the index or the palette do; an action that cannot run
     /// now ([`InboxApp::can_run`]) does nothing.
     pub fn run_action(&mut self, ctx: &egui::Context, id: &str) {
         // An action only a coming-soon control offered runs by no way in.
@@ -1923,12 +1895,12 @@ impl InboxApp {
     }
 
     /// The composer's floating panel while it is not `docked`; what was asked in it.
-    fn floating_composer(&mut self, ui: &Ui, theme: &Theme, docked: bool) -> Vec<compose::Asked> {
+    fn floating_composer(&mut self, ui: &Ui, theme: &Theme, docked: bool, body: Rect) -> Vec<compose::Asked> {
         match self.composer.as_mut() {
             Some(composer) if !docked => {
                 // Over the reader's answers when it drew them in this pass: the panel never covers them.
                 let above = reader::answers_rect(ui.ctx()).map(|answers| answers.top());
-                compose::floating(ui.ctx(), theme, &self.keymap, &self.mailbox, composer, ui.ctx().content_rect(), above)
+                compose::floating(ui.ctx(), theme, &self.keymap, &self.mailbox, composer, body, above)
             }
             _ => Vec::new(),
         }
@@ -1974,15 +1946,23 @@ impl InboxApp {
         }
     }
 
-    /// Where every toast stands: its bottom edge over the window's bottom, centred on what is right of the rail.
-    fn toast_bottom(ui: &Ui, theme: &Theme) -> egui::Pos2 {
-        let window = ui.max_rect();
-        let content = window.with_min_x((window.left() + pane::rail_width(theme)).min(window.right()));
-        content.center_bottom() - egui::vec2(0.0, theme.spacing.s6 + theme.spacing.s1)
+    /// Where every toast stands: its bottom edge over the `body`'s bottom, centred on it; beside the `docked` composer,
+    /// whose foot holds Send, centred on what the body holds left of it (the list) when that is wide enough for a toast,
+    /// else over the composer's foot. A toast never stands over Send.
+    fn toast_bottom(body: Rect, theme: &Theme, docked: Option<Rect>) -> egui::Pos2 {
+        let lift = theme.spacing.s6 + theme.spacing.s1;
+        let Some(composer) = docked.filter(|composer| composer.is_finite() && body.intersects(*composer)) else {
+            return body.center_bottom() - egui::vec2(0.0, lift);
+        };
+        let left = Rect::from_min_max(body.min, pos2(composer.left().clamp(body.left(), body.right()), body.bottom()));
+        if left.width() >= TOAST_ROOM {
+            return left.center_bottom() - egui::vec2(0.0, lift);
+        }
+        pos2(body.center().x, (composer.bottom().min(body.bottom()) - COMPOSER_FOOT - theme.spacing.s2).max(body.top()))
     }
 
     /// The toast of the composer's last step, while no act's toast and no countdown shows.
-    fn notice_toast(&mut self, ui: &Ui, theme: &Theme) {
+    fn notice_toast(&mut self, ui: &Ui, theme: &Theme, bottom: egui::Pos2) {
         let Some((text, since)) = self.notice.clone() else { return };
         if self.mailbox.undoable().is_some() || self.counting().is_some() {
             return;
@@ -1996,7 +1976,6 @@ impl InboxApp {
         }
         self.notice = Some((text.clone(), Some(since)));
         ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
-        let bottom = Self::toast_bottom(ui, theme);
         toast::show(ui.ctx(), theme, &self.keymap, egui::Id::unique("compose-toast"), &Toast { text: &text, undo: None, rests: false }, bottom);
     }
 
@@ -2141,7 +2120,6 @@ impl InboxApp {
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };
         self.act_by_key |= keyed.is_some();
         self.follow_adding();
-        let adding = self.onboarding.stage() != Stage::Closed;
         // One Esc closes one surface ([`Surfaces::escape`]): an open float (a menu, a picker, a select), the palette, a
         // capture and the event editor take theirs before anything under them.
         let left_settings = escape == Some(Surface::Sheet);
@@ -2164,9 +2142,20 @@ impl InboxApp {
         // The panes touch; a hairline divides them.
         let corner = self.window_corner(ui.ctx());
         ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
-        // In the app's own frame the banner stands under the strip and beside the rail, so it comes after them.
-        let early = self.error_banner(ui, &theme, corner, false);
-        let mut asked = pane::Asked::default();
+        // The frame's four regions ([`shell::regions`]): the old strip in the command line, the index at the left,
+        // everything else in the body; the status line is reserved and holds nothing yet. The index stays wide until
+        // the widths slice turns its breakpoint on.
+        let window = ui.max_rect();
+        let regions = shell::regions_with(window.size(), &theme, ui.ctx().pixels_per_point(), false).translate(window.min.to_vec2());
+        shell::lay(ui.ctx(), regions);
+        Self::shell_lines(ui, &theme, regions);
+        let layout = *ui.layout();
+        let mut region = |salt: &str, rect: Rect| ui.new_child(egui::UiBuilder::new().id_salt(salt).max_rect(rect).layout(layout));
+        let (mut command, mut index, mut body) =
+            (region("shell-command", regions.command), region("shell-index", regions.index), region("shell-body", regions.body));
+        // In the app's own frame the banner stands under the strip, so it comes after it.
+        let early = self.error_banner(&mut body, &theme, corner, false);
+        let mut asked = MailAsked::default();
         let mut add = false;
         let mut header = list::Header::default();
         // The row sliding out is out when the list is not drawn.
@@ -2175,37 +2164,40 @@ impl InboxApp {
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
         // In one pane the open message (or the composer in its place) and the list swap.
-        let (single, list_shown, reader_shown) = self.panes(ui.ctx(), docked, full);
-        let mut layers = Panes::begin(ui.painter());
+        let (single, list_shown, reader_shown) = self.panes(body.ctx(), docked, full);
+        // The panes stand in the body: its sides are the frame's hairlines, so no pane draws an edge along them.
+        let panes = ui.painter().with_clip_rect(regions.body);
+        let mut layers = Panes::begin(&panes);
         #[cfg(test)]
-        ui.data_mut(|data| data.remove::<egui::Rect>(egui::Id::unique("reader-rect")));
+        body.data_mut(|data| data.remove::<egui::Rect>(egui::Id::unique("reader-rect")));
         let (gap, half) = (0.0, 0.0);
-        let width = pane::rail_width(&theme);
-        let rail = Panel::left("rail")
-            .resizable(false)
-            .exact_size(width)
-            .show_separator_line(false)
-            .frame(Frame::NONE)
-            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, self.screen, setting, adding, self.rail_place(corner, s.s2)));
-        // The rail draws its own edge, so the pane beside it draws none: one line between them.
-        layers.edged(rail.response.rect);
-        let clicked_rail = rail.inner;
-        self.own_frame_parts(ui, &theme, corner);
-        let late = self.error_banner(ui, &theme, corner, true);
+        let at = self.index_place(setting);
+        let indexed = index::show(&mut index, &theme, &self.keymap, &self.mailbox, at, false);
+        let index_settings = indexed.place == Some(index::Place::Settings);
+        ran.extend(indexed.place.and_then(|place| match place {
+            index::Place::Mail => Some(keymap::MAIL),
+            index::Place::Calendar => Some(keymap::CALENDAR),
+            index::Place::Later => Some(keymap::LATER),
+            // Home is coming soon; Settings opens and closes the sheet below.
+            index::Place::Home | index::Place::Settings => None,
+        }));
+        asked.open = indexed.mailbox;
+        asked.narrow = indexed.account;
+        self.own_frame_parts(&mut command, &theme, corner);
+        ran.extend(self.new_message(&mut command, &theme).then_some(keymap::COMPOSE));
+        let late = self.error_banner(&mut body, &theme, corner, true);
         let (dismiss, banner) = (early.0 | late.0, early.1.or(late.1));
         layers.capped(banner);
-        ran.extend(clicked_rail.actions());
         let mut on_calendar = Vec::new();
         let mut composer_left = half;
         self.list_hidden = false;
         if self.screen == Screen::Calendar {
-            on_calendar = self.calendar_screen(ui, &theme, &mut layers);
+            on_calendar = self.calendar_screen(&mut body, &theme, &mut layers);
         } else if self.mailbox.accounts().is_empty() {
-            add = self.welcome(ui, &theme, &mut layers);
+            add = self.welcome(&mut body, &theme, &mut layers);
         } else if !full {
-            let left;
-            (asked, left) = self.folders(ui, &theme, &mut layers, docked);
-            let (widest, least) = (list_widest(ui, &theme, docked), self.list_least(ui, &theme, docked, left));
+            let left = 0.0;
+            let (widest, least) = (list_widest(&body, &theme, docked), self.list_least(&body, &theme, docked, left));
             // The list stands beside the reader while a message is open, and stays, with nothing open, when the open
             // message left the list (held back); and beside the docked composer.
             let reading = self.reader.open_id().is_some() || self.held_back.is_some();
@@ -2237,18 +2229,18 @@ impl InboxApp {
                 ListPlace::Beside => {
                     // Where the panel keeps the width a drag gave it (egui's `PanelState`): the tests plant one there.
                     #[cfg(test)]
-                    ui.data_mut(|data| data.insert_temp(egui::Id::unique("list-panel-id"), ui.scope_id().with_salt(egui::IdSalt::new("list"))));
-                    let shown = list_panel(docked, widest).frame(around(left, half, gap)).show(ui, |ui| list(ui, &mut layers));
+                    body.data_mut(|data| data.insert_temp(egui::Id::unique("list-panel-id"), body.scope_id().with_salt(egui::IdSalt::new("list"))));
+                    let shown = list_panel(docked, widest).frame(around(left, half, gap)).show(&mut body, |ui| list(ui, &mut layers));
                     self.list_rect = Some(shown.response.rect);
                     (header, listed) = shown.inner;
                 }
                 ListPlace::Whole => {
-                    let shown = CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| list(ui, &mut layers));
+                    let shown = CentralPanel::no_frame().frame(around(left, gap, gap)).show(&mut body, |ui| list(ui, &mut layers));
                     self.list_rect = Some(shown.response.rect);
                     (header, listed) = shown.inner;
                 }
             }
-            self.hide_list(ui.ctx(), hidden);
+            self.hide_list(body.ctx(), hidden);
         }
         let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, screener: screener_mode, presets, gained } = listed;
         let mut drawn = reader::Drawn::default();
@@ -2256,11 +2248,11 @@ impl InboxApp {
         // A texture lives no longer than the picture the reader keeps for it.
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
         if docked && reader_shown {
-            composed = self.composer_card(ui, &theme, &mut layers, composer_left);
+            composed = self.composer_card(&mut body, &theme, &mut layers, composer_left);
         } else if self.screen == Screen::Mail && (self.reader.open_id().is_some() || self.held_back.is_some()) && reader_shown && !docked {
-            drawn = self.reader_card(ui, &theme, &mut layers, if full { gap } else { half });
+            drawn = self.reader_card(&mut body, &theme, &mut layers, if full { gap } else { half });
         }
-        layers.finish(ui.painter(), &theme);
+        layers.finish(&panes, &theme);
         // A row's menu whose row this pass did not draw closes; an ask no row took is dropped.
         list::settle_menus(ui.ctx());
         if self.screen == Screen::Calendar {
@@ -2281,8 +2273,13 @@ impl InboxApp {
         } else {
             None
         };
-        composed.extend(self.floating_composer(ui, &theme, docked));
-        let (undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests());
+        composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
+        // The docked composer drawn this frame, which the toasts keep clear of.
+        let docked_at = (docked && reader_shown).then(|| {
+            let left = self.list_rect.map_or(regions.body.left(), |list| list.right().clamp(regions.body.left(), regions.body.right()));
+            Rect::from_min_max(pos2(left, regions.body.top()), regions.body.max)
+        });
+        let (undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests(), regions.body, docked_at);
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
         let busy = dismiss
@@ -2297,7 +2294,7 @@ impl InboxApp {
             || left_settings
             || !ran.is_empty()
             || palette.is_some()
-            || clicked_rail.settings
+            || index_settings
             || changed.is_some()
             || asked.narrow.is_some()
             || asked.open.is_some()
@@ -2310,7 +2307,6 @@ impl InboxApp {
             || clicked.is_some()
             || gained.is_some()
             || add
-            || asked.compose
             || !on_calendar.is_empty()
             || !composed.is_empty()
             || !drawn.asked.is_empty();
@@ -2340,11 +2336,10 @@ impl InboxApp {
         }
         self.follow_list(ui.ctx(), clicked, gained);
         self.composed(ui.ctx(), clicked.is_some(), composed);
-        ran.extend(asked.compose.then_some(keymap::COMPOSE));
         if add {
             self.open_accounts();
         }
-        if clicked_rail.settings {
+        if index_settings {
             if setting { self.close_settings() } else { self.open_settings() }
         }
         if let Some(asked) = palette {
@@ -2368,9 +2363,13 @@ impl InboxApp {
 
     /// Shows what was asked for this frame: an account narrowed, a place opened in the pane or by a pill of the
     /// header, "show done", a search, or "New senders" from Review on the screener card.
-    fn go(&mut self, asked: &pane::Asked, header: list::Header, review: bool) {
+    fn go(&mut self, asked: &MailAsked, header: list::Header, review: bool) {
         if let Some(account) = asked.narrow {
             self.mailbox.narrow(account);
+        }
+        // A mailbox pressed in the index shows the mail, from the calendar too.
+        if asked.open.is_some() {
+            self.screen_to(Screen::Mail);
         }
         if let Some(view) = header.view {
             self.mailbox.set_inbox_view(view);
@@ -2388,7 +2387,7 @@ impl InboxApp {
         }
     }
 
-    /// The app's own frame before the panes, when it draws one: the strip right of the rail with the title and the
+    /// The app's own frame before the panes, when it draws one: the strip in the command line with the title and the
     /// window controls, or the band of the top row that moves the window; and the resizing edges.
     fn own_frame_parts(&self, ui: &mut Ui, theme: &Theme, corner: f32) {
         let drawn = self.draws_frame();
@@ -2399,8 +2398,9 @@ impl InboxApp {
         if self.mailbox.appearance().frame == WindowFrame::Strip {
             let place = if self.screen == Screen::Calendar { tr!("Calendar").to_owned() } else { self.mailbox.title() };
             let title = tr!("{place} · InboxCraft", place = place);
+            // The strip fills the command line; the frame's hairline under it is its bottom edge.
             Panel::top("window-strip")
-                .exact_size(frame::STRIP)
+                .exact_size(ui.max_rect().height())
                 .show_separator_line(false)
                 .frame(Frame::NONE)
                 .show(ui, |ui| frame::strip(ui, theme, &self.keymap, &title, corner));
@@ -2412,9 +2412,9 @@ impl InboxApp {
     /// sides, its act a small link. Its last row holds the one `minus` hairline between it and what stands under it;
     /// the panes there draw no line of their own ([`Panes::capped`]). In the system's frame it runs across the window
     /// with a `minus` hairline on its top and sides. In the app's own frame (`framed`) it stands under the strip and
-    /// beside the rail, whose lines are its top and left edges, and the frame's outline its right one; where it
+    /// beside the index, whose lines are its top and left edges, and the frame's outline its right one; where it
     /// reaches the window's top (the top row) its top right corner is the window's `corner`. Whether Dismiss was
-    /// pressed, and the banner's rect. Called twice a frame, before the rail and strip and after them; it draws in
+    /// pressed, and the banner's rect. Called twice a frame, before the strip and after it; it draws in
     /// the call `framed` names (the own frame's or not).
     fn error_banner(&self, ui: &mut Ui, theme: &Theme, corner: f32, framed: bool) -> (bool, Option<Rect>) {
         let Some(error) = self.mailbox.error().filter(|_| self.draws_frame() == framed) else { return (false, None) };
@@ -2461,25 +2461,43 @@ impl InboxApp {
         frame::outline(ctx, theme, corner);
     }
 
-    /// The folder pane on a card at the left, when there is an account: without one it would hold only the app's
-    /// name. What was asked on it, and how far right of it the next card starts (a full gap from the rail without it).
-    /// Beside the `docked` composer it is never wider than [`list_widest`].
-    fn folders(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, docked: bool) -> (pane::Asked, f32) {
-        let s = theme.spacing;
+    /// New message at the left of the command line (`ui`), while there is an account: the frames draw none, and until
+    /// the command line is built it is the pointer's way to a new message. Whether it was pressed.
+    fn new_message(&self, ui: &mut Ui, theme: &Theme) -> bool {
         if self.mailbox.accounts().is_empty() {
-            return (pane::Asked::default(), 0.0);
+            return false;
         }
-        let widest = list_widest(ui, theme, docked);
-        keep_owners_width(ui.ctx(), ui.scope_id().with_salt(egui::IdSalt::new("folders")), widest);
-        let shown = Panel::left("folders")
-            .resizable(true)
-            .default_size(FOLDER_PANE)
-            // However far its edge is dragged, the docked composer keeps its least width beside it.
-            .max_size(widest)
-            .show_separator_line(false)
-            .frame(around(0.0, 0.0, 0.0))
-            .show(ui, |ui| layers.card(ui, margin(s.s3), |ui| pane::show(ui, theme, &self.keymap, &self.mailbox)));
-        (shown.inner, 0.0)
+        let rect = ui.max_rect();
+        let side = (rect.height() - 2.0 * theme.spacing.s1).clamp(0.0, 32.0);
+        let at = Rect::from_min_size(pos2(rect.left() + theme.spacing.s3, rect.center().y - side / 2.0), egui::vec2(side, side));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(at).id_salt("command-new-message"), |ui| {
+            IconButton::new(IconId::Compose, tr!("New message")).action(keymap::COMPOSE).side(side).show(ui, theme, &self.keymap).clicked()
+        })
+        .inner
+    }
+
+    /// The place the index shows selected: Settings while the sheet is open (`setting`), else the calendar, Later
+    /// while a pile is shown, or the mail.
+    fn index_place(&self, setting: bool) -> index::Place {
+        if setting {
+            index::Place::Settings
+        } else if self.screen == Screen::Calendar {
+            index::Place::Calendar
+        } else if matches!(self.mailbox.place(), Place::Later(_)) {
+            index::Place::Later
+        } else {
+            index::Place::Mail
+        }
+    }
+
+    /// The frame's hairlines between the regions: under the command line, between the index and the body, over the
+    /// status line. The window's outline is the frame's own ([`frame::outline`]).
+    fn shell_lines(ui: &Ui, theme: &Theme, regions: shell::Regions) {
+        let (painter, colour) = (ui.painter(), theme.palette.line);
+        let (command, index, status) = (regions.command, regions.index, regions.status);
+        paint::hairline(painter, pos2(command.left(), command.bottom()), pos2(command.right(), command.bottom()), colour);
+        paint::hairline(painter, pos2(index.right(), index.top()), pos2(index.right(), index.bottom()), colour);
+        paint::hairline(painter, pos2(status.left(), index.bottom()), pos2(status.right(), index.bottom()), colour);
     }
 
     /// The window with no account: one card in the middle, as tall as what it says; whether Add account was pressed.
@@ -2496,13 +2514,6 @@ impl InboxApp {
         // The palette and the settings sheet lie over the screen's floats: they have the keys.
         let over = self.palette.is_open() || self.settings.is_open();
         calendar::screen(ui, theme, &self.keymap, &self.calendar, layers, over)
-    }
-
-    /// Where the rail sits: the window's `corner`, and its mark one `gap` down, under the strip when there is one,
-    /// where the cards start.
-    fn rail_place(&self, corner: f32, gap: f32) -> pane::RailPlace {
-        let strip = self.draws_frame() && self.mailbox.appearance().frame == WindowFrame::Strip;
-        pane::RailPlace { corner, top: gap + if strip { frame::STRIP } else { 0.0 } }
     }
 
     /// The settings sheet over the window; what was asked on it.
@@ -2593,17 +2604,18 @@ impl InboxApp {
     /// The toasts of the frame: the countdown while a send waits for its hold, else the act's; then the composer's
     /// notice. Whether the act's Undo was pressed, and whether the countdown's took a send back. The act's Undo `rests`
     /// (its button and its key) while the event editor is open ([`Surfaces::undo_rests`]).
-    fn toasts(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool) -> (bool, bool) {
-        let unsent = self.send_toast(ui, theme, quiet);
-        let undone = if unsent || self.counting().is_some() { false } else { self.toast(ui, theme, quiet, rests) };
-        self.notice_toast(ui, theme);
+    fn toasts(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool, body: Rect, docked: Option<Rect>) -> (bool, bool) {
+        let bottom = Self::toast_bottom(body, theme, docked);
+        let unsent = self.send_toast(ui, theme, quiet, bottom);
+        let undone = if unsent || self.counting().is_some() { false } else { self.toast(ui, theme, quiet, rests, bottom) };
+        self.notice_toast(ui, theme, bottom);
         (undone, unsent)
     }
 
     /// The countdown toast while the message sent last waits for its hold: "Sending “subject” in 4 s", with Undo and its
     /// key, which take the send back. It asks for a frame as each second ends. Whether Undo was pressed (its key works
     /// while nothing is `quiet`).
-    fn send_toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool) -> bool {
+    fn send_toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool, bottom: egui::Pos2) -> bool {
         let Some((draft, seconds)) = self.counting() else {
             self.sending = None;
             return false;
@@ -2628,7 +2640,6 @@ impl InboxApp {
         if quiet {
             keys.unbind(keymap::UNDO);
         }
-        let bottom = Self::toast_bottom(ui, theme);
         let id = egui::Id::unique("send-toast").with(draft);
         let undone = toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &text, undo: Some(keymap::UNDO), rests: false }, bottom);
         if undone {
@@ -2641,7 +2652,7 @@ impl InboxApp {
     /// acts back, one at a time. Whether Undo was pressed (its key works while nothing is `quiet`: no text field has the
     /// focus, no sheet or palette is open). While Undo `rests` the toast still shows, its Undo drawn resting, and works
     /// again for what is left of its time once the reason has gone.
-    fn toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool) -> bool {
+    fn toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool, bottom: egui::Pos2) -> bool {
         let Some(undo) = self.mailbox.undoable().cloned() else {
             self.toast = None;
             return false;
@@ -2663,7 +2674,6 @@ impl InboxApp {
         if quiet || rests {
             keys.unbind(keymap::UNDO);
         }
-        let bottom = Self::toast_bottom(ui, theme);
         let id = egui::Id::unique("act-toast").with(undo.serial);
         let shown = Toast { text: &undo.text, undo: undo.undoable.then_some(keymap::UNDO), rests };
         toast::show(ui.ctx(), theme, &keys, id, &shown, bottom)
@@ -2845,9 +2855,6 @@ mod outbox_tests;
 #[cfg(test)]
 #[path = "palette_tests.rs"]
 mod palette_tests;
-#[cfg(test)]
-#[path = "pane_tests.rs"]
-mod pane_tests;
 #[cfg(test)]
 #[path = "reader_html_tests.rs"]
 mod reader_html_tests;

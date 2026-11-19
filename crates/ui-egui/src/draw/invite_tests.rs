@@ -417,7 +417,8 @@ fn an_invitation_card_keeps_its_buttons_whole_in_a_narrow_reader() {
     for (width, percent) in [(1024.0, 100), (1024.0, 130), (1100.0, 100), (1100.0, 130)] {
         let mut harness = sending(message(905, "Invitation: Board game night", "REQUEST", ORGANISED_BY_ODILE));
         harness.state_mut().set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
-        harness.set_size(vec2(width, 900.0));
+        // As high a body as a 900 window had before the command and status lines took their 74.
+        harness.set_size(vec2(width, 974.0));
         open(&mut harness, "Invitation: Board game night");
         harness.run();
         let at = format!("{width} {percent}%");

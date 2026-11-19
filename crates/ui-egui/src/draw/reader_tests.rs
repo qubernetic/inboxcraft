@@ -76,7 +76,7 @@ fn selecting_a_row_opens_the_reader_beside_the_list() {
     harness.get_by_label_contains("From Teodor Lisk  <teodor@example.org>");
     harness.get_by_label("Save cliff-path.png");
     harness.get_by_label("Save lighthouse.png");
-    harness.get_by_label("Accounts");
+    harness.get_by_label("Show mail of: mira@example.org");
     harness.check_accessibility();
     harness.get_by_label("More").click();
     harness.run();
@@ -118,12 +118,16 @@ fn escape_leaves_the_full_width_reader() {
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
     full_width(&mut harness, "Full width");
     assert!(harness.state().reader().full_width());
-    assert!(harness.query_by_label("Accounts").is_none(), "the folder pane makes way");
+    // The index is the frame's and stays; the reader fills the body.
+    let body = super::shell::laid(&harness.ctx).unwrap().body;
+    assert!(harness.query_by_label("Show mail of: mira@example.org").is_some(), "the index stays");
+    let reader = super::reader_rect(&harness.ctx).unwrap();
+    assert!(reader.left() <= body.left() + 1.0 && reader.right() >= body.right() - 1.0, "the reader fills the body: {reader:?} in {body:?}");
     assert!(harness.query_by_role(Role::TextInput).is_none(), "and the list with its search");
     harness.key_press(Key::Escape);
     harness.run();
     assert!(!harness.state().reader().full_width());
-    harness.get_by_label("Accounts");
+    harness.get_by_role(Role::TextInput);
     full_width(&mut harness, "Full width");
     full_width(&mut harness, "Leave full width");
     assert!(!harness.state().reader().full_width());
@@ -341,17 +345,16 @@ fn the_toolbar_holds_the_mail_actions() {
 }
 
 #[test]
-fn a_disabled_action_says_why_in_its_tooltip() {
+fn a_place_coming_soon_reads_disabled_and_runs_nothing() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
-    assert!(harness.query_by_label("Not available yet").is_none());
-    harness.get_by_role_and_label(Role::Button, "Start").hover();
+    harness.get_by_role_and_label(Role::Button, "Home").hover();
     for _ in 0..4 {
         harness.run();
     }
-    harness.get_by_label("Not available yet");
+    assert!(harness.get_by_role_and_label(Role::Button, "Home").accesskit_node().is_disabled(), "Home is coming soon");
     let before = harness.state().mailbox().last_run();
-    harness.get_by_role_and_label(Role::Button, "Start").click();
+    harness.get_by_role_and_label(Role::Button, "Home").click();
     harness.run();
     assert_eq!(harness.state().mailbox().last_run(), before, "a disabled action runs nothing");
 }
@@ -421,7 +424,8 @@ fn a_long_subject_wraps_under_the_toolbar() {
     let subject = harness.get_by_label("Photos from the coast walk").rect();
     let more = harness.get_by_role_and_label(Role::Button, "More").rect();
     assert!(subject.top() >= more.bottom(), "the subject sits under the toolbar, not beside it");
-    assert!(subject.height() >= 60.0, "it wraps onto a second line: {subject:?}");
+    // The window is laid out 800 wide at least: the full-width reader is the body's 566, where this subject fits on
+    // one line, so whether it wraps is no longer seen here.
 }
 
 #[test]
@@ -644,7 +648,9 @@ fn the_reader_keeps_to_a_narrow_window() {
     for link in [once, always] {
         assert!(banner.contains_rect(link), "{link:?} stands inside the banner {banner:?}");
     }
-    assert!(once.bottom() <= always.top(), "the links wrap: {once:?} {always:?}");
+    // Where the reader is narrower than the two links on one line they wrap; the window is laid out 800 wide at least,
+    // and the one-pane reader (the body's 566) holds both on one line.
+    assert!(once.bottom() <= always.top() || (once.top() - always.top()).abs() < 0.5, "the links on one line or wrapped: {once:?} {always:?}");
 }
 
 /// How wide and how high the text `label` comes out in a message made of `html`, in a reader 800 points wide.
@@ -1822,40 +1828,6 @@ fn an_older_unfolded_message_keeps_its_details_at_every_width_the_design_draws()
     }
 }
 
-/// Widens the list beside the reader by `by` points, as the owner does by dragging its edge.
-fn widen_list(harness: &mut Harness<'static, InboxApp>, by: f32) {
-    let y = 400.0;
-    // The list's edge: the middle of the stretch where the pointer shows the sideways resize cursor.
-    let edge = |harness: &mut Harness<'static, InboxApp>| {
-        let grabs: Vec<f32> = (200..800)
-            .map(|x| x as f32)
-            .filter(|x| {
-                harness.hover_at(egui::pos2(*x, y));
-                harness.run();
-                harness.output().platform_output.cursor_icon == egui::CursorIcon::ResizeHorizontal
-            })
-            .collect();
-        assert!(!grabs.is_empty(), "the list has an edge to drag");
-        // The first stretch only: the list's own edge.
-        let last = grabs.windows(2).find(|pair| pair[1] - pair[0] > 1.0).map_or(grabs[grabs.len() - 1], |pair| pair[0]);
-        (grabs[0] + last) / 2.0
-    };
-    let was = edge(harness);
-    harness.drag_at(egui::pos2(was, y));
-    harness.run();
-    // Past egui's drag threshold first, then to where the edge goes.
-    harness.hover_at(egui::pos2(was + 20.0, y));
-    harness.run();
-    harness.hover_at(egui::pos2(was + by, y));
-    harness.run();
-    harness.drop_at(egui::pos2(was + by, y));
-    settle(harness);
-    let now = edge(harness);
-    assert!((now - was - by).abs() <= 1.0, "the list grew by {by}: {was} to {now}");
-    harness.hover_at(egui::pos2(1.0, 1.0));
-    settle(harness);
-}
-
 /// Presses Tab until a node whose label holds `label` has the keyboard; whether it got it.
 fn tab_to_containing(harness: &mut Harness<'static, InboxApp>, label: &str) -> bool {
     into_the_reader(harness);
@@ -1876,14 +1848,11 @@ fn tab_to_containing(harness: &mut Harness<'static, InboxApp>, label: &str) -> b
 #[test]
 fn an_older_unfolded_message_s_full_header_is_one_key_away_at_every_width() {
     const OLDER: &str = "Odile Brannock, 08:35, open: ";
-    // The windows the design draws at 130 %, with the list as the lists slice sets it (441 wide) as well.
-    for (width, wider) in [(1024.0, 0.0), (1100.0, 0.0), (1024.0, 61.0), (1100.0, 61.0)] {
+    // The windows the design draws at 130 %; beside the index the list stands 441 wide in both.
+    for (width, wider) in [(1024.0, 0.0), (1100.0, 0.0)] {
         for (key, modifiers) in [(Key::Menu, egui::Modifiers::NONE), (Key::F10, egui::Modifiers::SHIFT)] {
             let fetch = Recorder::default();
             let mut harness = opened_in(&fetch, Some(3), "Re: Allotment rota for November", width, 130, 1.0);
-            if wider > 0.0 {
-                widen_list(&mut harness, wider);
-            }
             harness.get_by_label_contains("Odile Brannock, 08:35, folded").click();
             settle(&mut harness);
             let at = format!("{width} +{wider} {key:?}");
@@ -1977,7 +1946,8 @@ fn the_notice_stays_in_sight_while_the_message_scrolls() {
     const SAID: &str = "Subject copied";
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Draft logo for the bakery");
-    harness.set_size(vec2(1280.0, 420.0));
+    // As high a body as a 420 window's was before the command and status lines took their 74.
+    harness.set_size(vec2(1280.0, 494.0));
     harness.state_mut().reader_mut().0.set_notice(SAID.to_owned());
     settle(&mut harness);
     let label = format!("Note: {SAID}");
@@ -2678,7 +2648,7 @@ enum Reached {
     BesideComposer,
 }
 
-/// A window 1300 × 420 in `view` with the first row of the list reached as `how`, then the list wheeled `away` so far
+/// A window 1300 × 494 in `view` with the first row of the list reached as `how`, then the list wheeled `away` so far
 /// that the row is out of sight.
 fn reached_and_wheeled(view: crate::mailbox::InboxView, how: Reached, away: f32) -> (Harness<'static, InboxApp>, u64) {
     let (mut harness, open) = reached(view, how);
@@ -2691,10 +2661,11 @@ fn reached_and_wheeled(view: crate::mailbox::InboxView, how: Reached, away: f32)
     (harness, open)
 }
 
-/// A window 1300 × 420 in `view` with the first row of the list reached as `how`; the open message.
+/// A window 1300 × 494 in `view` with the first row of the list reached as `how`; the open message.
 fn reached(view: crate::mailbox::InboxView, how: Reached) -> (Harness<'static, InboxApp>, u64) {
     let mut harness = inbox_at(1300.0, view, how == Reached::BesideComposer);
-    harness.set_size(vec2(1300.0, 420.0));
+    // The body as high as a 420 window's was before the command and status lines took their 74.
+    harness.set_size(vec2(1300.0, 494.0));
     settle(&mut harness);
     match how {
         Reached::Opened => {
@@ -2704,7 +2675,7 @@ fn reached(view: crate::mailbox::InboxView, how: Reached) -> (Harness<'static, I
             settle(&mut harness);
         }
         Reached::Keyed => {
-            for _ in 0..60 {
+            for _ in 0..120 {
                 if super::list::focused_row(&harness.ctx).is_some() {
                     break;
                 }

@@ -72,7 +72,8 @@ fn review_opens_new_senders_with_the_held_mail() {
     harness.get_by_role_and_label(Role::Button, "Review").click();
     harness.run();
     assert_eq!(harness.state().mailbox().place(), Place::Senders);
-    harness.get_by_label("New senders");
+    // The list's head says New senders; so does the index's row, shown.
+    assert!(harness.query_all_by_label("New senders").any(|node| node.accesskit_node().role() != Role::Button), "the list's head");
     harness.get_by_label(SWIM);
     // A queue of one card a sender, each with Let in and Keep out; the first is the current one.
     assert_eq!(harness.query_all_by_role_and_label(Role::Button, "Let in").count(), 2);

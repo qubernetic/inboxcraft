@@ -14,12 +14,8 @@ use inboxcraft_engine::appearance::WindowFrame;
 
 use crate::component::tooltip;
 use crate::keymap::Keymap;
-use crate::theme::{SPACING, Theme};
+use crate::theme::Theme;
 use crate::tr;
-
-/// The strip's height, in points: a control's hover fill with a cards' gap above and below it, so the fill of Close,
-/// one gap from the window's right edge too, ends where the cards end.
-pub(super) const STRIP: f32 = CONTROL[1] - 2.0 * HOVER_INSET + 2.0 * SPACING.s2;
 
 /// A window control's width and height, in points.
 const CONTROL: [f32; 2] = [34.0, 28.0];
@@ -152,8 +148,6 @@ pub(super) fn strip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, title: &str, co
     let p = &theme.palette;
     let rect = ui.max_rect();
     ui.painter().rect_filled(rect, top_right_corner(corner), p.surface);
-    let width = 1.0 / ui.ctx().pixels_per_point();
-    ui.painter().hline(rect.x_range(), rect.bottom() - width / 2.0, Stroke::new(width, p.line));
     // Pressed, dragged and double-pressed by the pointer only: a handle that moves the window is no Tab stop.
     let handle = ui.interact(rect, Id::unique("window-strip"), Sense::CLICK | Sense::DRAG);
     moves_the_window(ui.ctx(), &handle);
@@ -364,13 +358,6 @@ pub(super) fn outline(ctx: &Context, theme: &Theme, corner: f32) {
 fn round(corner: f32) -> CornerRadius {
     // A few points; the clamp keeps the cast inside u8.
     CornerRadius::same(corner.clamp(0.0, 255.0) as u8)
-}
-
-/// `corner` on the left two corners only, for what touches the window's left edge (the rail).
-#[must_use]
-pub(super) fn left_corners(corner: f32) -> CornerRadius {
-    let r = round(corner).nw;
-    CornerRadius { nw: r, sw: r, ne: 0, se: 0 }
 }
 
 /// `corner` on the top right corner only, for what touches the window's top right (the strip).

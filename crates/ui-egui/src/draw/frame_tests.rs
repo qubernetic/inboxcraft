@@ -177,17 +177,20 @@ fn the_strip_s_window_controls_sit_in_its_middle_as_far_from_its_top_as_close_is
         app,
     );
     harness.run();
+    // The strip fills the command line.
+    let command = super::shell::laid(&harness.ctx).unwrap().command;
     for name in ["Minimise", "Maximise", "Close the window"] {
         let rect = harness.get_by_label(name).rect();
-        let (above, below) = (rect.top(), super::frame::STRIP - rect.bottom());
+        let (above, below) = (rect.top() - command.top(), command.bottom() - rect.bottom());
         assert!((above - below).abs() <= 1.0, "{name}: {above} above, {below} below in {rect:?}");
     }
     let close = harness.get_by_label("Close the window").rect();
     let right = harness.ctx.content_rect().right() - close.right();
     assert!((close.top() - right).abs() <= 0.5, "Close: {} above, {right} to the window's edge", close.top());
-    // Close's hover fill, a little inside the control, ends where the cards end: one gap from the window's edge.
-    let fill_to_edge = right + super::frame::HOVER_INSET;
-    assert!((fill_to_edge - crate::theme::SPACING.s2).abs() <= 0.5, "Close's fill ends {fill_to_edge} from the edge");
+    // Close's hover fill, a little inside the control, ends as far from the command line's right edge as from its top.
+    let fill_to_edge = command.right() - close.right() + super::frame::HOVER_INSET;
+    let fill_to_top = close.top() - command.top() + super::frame::HOVER_INSET;
+    assert!((fill_to_edge - fill_to_top).abs() <= 0.5, "Close's fill ends {fill_to_edge} from the edge, {fill_to_top} from the top");
 }
 
 #[test]
@@ -245,12 +248,13 @@ fn whole_window(frame: WindowFrame) -> Harness<'static, InboxApp> {
 }
 
 #[test]
-fn the_rail_s_mark_starts_where_the_cards_start_in_every_frame() {
-    let gap = crate::theme::SPACING.s2;
-    for (frame, cards) in [(WindowFrame::Strip, super::frame::STRIP + gap), (WindowFrame::TopRow, gap), (WindowFrame::System, gap)] {
+fn the_index_starts_under_the_command_line_in_every_frame() {
+    for frame in [WindowFrame::Strip, WindowFrame::TopRow, WindowFrame::System] {
         let harness = whole_window(frame);
-        let mark = harness.get_by_role_and_label(Role::Image, "InboxCraft").rect();
-        assert!((mark.top() - cards).abs() <= 0.5, "{frame:?}: the mark starts at {}, the cards at {cards}", mark.top());
+        let laid = super::shell::laid(&harness.ctx).unwrap();
+        assert!(laid.index.top() > laid.command.bottom(), "{frame:?}: {laid:?}");
+        let home = harness.get_by_role_and_label(Role::Button, "Home").rect();
+        assert!((home.top() - (laid.index.top() + 12.0)).abs() <= 0.5, "{frame:?}: HOME at {}, the index at {}", home.top(), laid.index.top());
     }
 }
 
@@ -293,7 +297,8 @@ fn in_the_own_frame_the_error_banner_stands_under_the_strip() {
         }
         let error = harness.state().mailbox().error().unwrap().to_owned();
         let words = harness.get_by_label(&error).rect();
-        let strip = super::frame::STRIP;
+        // The strip fills the command line; the frame's hairline under it is the line over the banner.
+        let strip = super::shell::laid(&harness.ctx).unwrap().command.bottom();
         assert!(words.top() > strip, "{ppp}: the banner's words {words:?} are under the strip");
         let colours = [p.line, p.minus];
         let upper = super::tests::level_line_rows(&harness, &colours, strip - 3.0, words.top() - 1.0);
