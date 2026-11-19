@@ -30,7 +30,7 @@
 
 use std::time::Duration;
 
-use inboxcraft_model::{AccountId, ConnectionState, ErrorKind};
+use inboxcraft_model::{AccountId, ConnectionState};
 use inboxcraft_time::Timestamp;
 use serde_json::{Value, json};
 
@@ -87,27 +87,6 @@ fn connected(held: Option<&AccountState>) -> bool {
     matches!(held.and_then(|held| held.connection), Some(ConnectionState::Online | ConnectionState::Watching))
 }
 
-/// Whether a failure of `kind` stops the account until the owner acts (a password or a setting to fix, a certificate
-/// or encryption refused), rather than waiting for the network or the server to come back.
-const fn stops(kind: ErrorKind) -> bool {
-    matches!(
-        kind,
-        ErrorKind::LoginRefused
-            | ErrorKind::LoginUnanswered
-            | ErrorKind::NoLoginMethod
-            | ErrorKind::CredentialMissing
-            | ErrorKind::CertificateUnknownIssuer
-            | ErrorKind::CertificateExpired
-            | ErrorKind::CertificateNotYetValid
-            | ErrorKind::CertificateWrongHost
-            | ErrorKind::ClockFarOff
-            | ErrorKind::Tls
-            | ErrorKind::StartTlsMissing
-            | ErrorKind::NotEncrypted
-            | ErrorKind::OtherServer
-    )
-}
-
 fn status(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let NoParams {} = decode(STATUS.id, params)?;
     let accounts = context.store().accounts()?;
@@ -122,7 +101,7 @@ fn status(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         syncing |= signed_in && state.synced.is_none();
         if let Some((kind, _)) = state.failure {
             failing = failing.saturating_add(1);
-            stopped |= stops(kind);
+            stopped |= kind.needs_the_owner();
         }
         if let Some((told, all)) = state.progress {
             done = done.saturating_add(told);

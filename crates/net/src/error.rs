@@ -55,16 +55,20 @@ impl NetError {
     /// need the owner.
     #[must_use]
     pub fn is_transient(&self) -> bool {
-        matches!(
-            self.kind,
-            ErrorKind::HostNotFound
-                | ErrorKind::ConnectionRefused
-                | ErrorKind::TimedOut
-                | ErrorKind::ConnectionDropped
-                | ErrorKind::CommandRefused
-                | ErrorKind::Protocol
-                | ErrorKind::TooLarge
-        )
+        // What needs the owner is one list, in the model, which the engine's sync state reads too; the other kinds
+        // that are not transient are a job's own or a diagnosis that a later attempt does not change.
+        !self.kind.needs_the_owner()
+            && !matches!(
+                self.kind,
+                ErrorKind::PortTimedOut
+                    | ErrorKind::MailPortsBlocked
+                    | ErrorKind::FolderGone
+                    | ErrorKind::MessageGone
+                    | ErrorKind::MessageRefused
+                    | ErrorKind::NoSubmissionServer
+                    | ErrorKind::SendUnanswered
+                    | ErrorKind::NoCalendarServer
+            )
     }
 
     /// `error` came after the password went out and before the server answered it: [`ErrorKind::LoginUnanswered`].

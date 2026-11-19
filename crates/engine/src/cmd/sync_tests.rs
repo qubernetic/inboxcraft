@@ -267,7 +267,14 @@ fn a_refused_sign_in_reads_failing_with_no_account_connected() {
 
 #[test]
 fn a_server_out_of_reach_reads_offline() {
-    for kind in [ErrorKind::HostNotFound, ErrorKind::ConnectionRefused, ErrorKind::TimedOut, ErrorKind::ConnectionDropped] {
+    for kind in [
+        ErrorKind::HostNotFound,
+        ErrorKind::ConnectionRefused,
+        ErrorKind::TimedOut,
+        ErrorKind::ConnectionDropped,
+        ErrorKind::PortTimedOut,
+        ErrorKind::MailPortsBlocked,
+    ] {
         let mut session = single();
         connection(&mut session, 1, ConnectionState::Connecting);
         failed_with(&mut session, 1, kind);

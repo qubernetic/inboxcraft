@@ -129,6 +129,30 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
+    /// Whether the account stops on this failure until the owner acts: a password or a setting to mend, a certificate
+    /// or encryption refused. The worker does not sign in again after one, and the engine's `sync.status` reads it as
+    /// `failing` even with no account connected. A server out of reach (no route, a timeout, a refused or dropped
+    /// connection, a port that is likely wrong or a network that blocks mail) is not.
+    #[must_use]
+    pub const fn needs_the_owner(self) -> bool {
+        matches!(
+            self,
+            Self::LoginRefused
+                | Self::LoginUnanswered
+                | Self::NoLoginMethod
+                | Self::CredentialMissing
+                | Self::CertificateUnknownIssuer
+                | Self::CertificateExpired
+                | Self::CertificateNotYetValid
+                | Self::CertificateWrongHost
+                | Self::ClockFarOff
+                | Self::Tls
+                | Self::StartTlsMissing
+                | Self::NotEncrypted
+                | Self::OtherServer
+        )
+    }
+
     /// Whether trying again later can help on its own: passing network trouble. Everything else needs the owner, the
     /// server's administrator or another job.
     #[must_use]

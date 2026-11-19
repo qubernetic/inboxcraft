@@ -148,3 +148,13 @@ fn a_sync_end_out_of_the_time_range_does_not_read() {
     assert_ne!(junk, json);
     assert!(serde_json::from_str::<Event>(&junk).is_err());
 }
+
+#[test]
+fn what_needs_the_owner_is_what_no_later_attempt_mends() {
+    let owner: Vec<ErrorKind> = EVERY_ERROR.into_iter().filter(|kind| kind.needs_the_owner()).collect();
+    assert_eq!(owner.len(), 13, "{owner:?}");
+    assert!(owner.iter().all(|kind| !kind.is_retryable()), "{owner:?}");
+    for kind in [ErrorKind::PortTimedOut, ErrorKind::MailPortsBlocked, ErrorKind::TimedOut, ErrorKind::FolderGone] {
+        assert!(!kind.needs_the_owner(), "{kind:?}");
+    }
+}
