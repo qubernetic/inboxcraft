@@ -190,12 +190,33 @@ fn the_same_rect_seed_and_scale_give_the_same_cells_and_another_seed_others() {
     assert_eq!(a.state().field.cells.as_ref().unwrap().held, b.state().field.cells.as_ref().unwrap().held);
 }
 
+/// The columns of `row` that hold a dot among `cells`.
+fn dots(cells: &Cells, row: usize) -> Vec<usize> {
+    (0..cells.columns).filter(|column| cells.held[row * cells.columns + column] == DOT).collect()
+}
+
 #[test]
 fn seed_0_is_the_design_files_pattern() {
-    // The first row of the character field of `screen/home/today`: dots at columns 0, 14, 28, 57 and 72.
+    // Rows of the character field of `screen/home/today` (150 × 55 cells), read from the design file: the columns
+    // that hold a `·`, across the whole row. Rows far apart, so the row's part of the hash shows.
+    let design: [(usize, &[usize]); 4] = [
+        (0, &[0, 14, 28, 57, 72, 86, 100, 144]),
+        (1, &[3, 27, 63, 75, 82, 90, 117, 149]),
+        (30, &[27, 38, 130, 141]),
+        (54, &[0, 42, 50, 62, 66, 68, 102, 110, 118, 122]),
+    ];
     let cells = built(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 825.0)), 0, TextScale::default());
-    let row: Vec<usize> = (0..80).filter(|column| cells.held[*column] == DOT).collect();
-    assert_eq!(row, [0, 14, 28, 57, 72]);
+    assert_eq!((cells.columns, cells.rows), (150, 55));
+    for (row, columns) in design {
+        assert_eq!(dots(&cells, row), columns, "row {row}");
+    }
+    // Another seed: the same rows, worked out from the hash apart from this code (the design file draws only seed 0).
+    let other: [(usize, &[usize]); 3] =
+        [(1, &[20, 43, 58, 85, 93, 147]), (30, &[5, 37, 81, 87, 97, 99, 101, 115, 122, 141]), (54, &[40, 57, 62, 69, 76, 88, 110])];
+    let cells = built(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 825.0)), 7, TextScale::default());
+    for (row, columns) in other {
+        assert_eq!(dots(&cells, row), columns, "seed 7, row {row}");
+    }
 }
 
 #[test]
