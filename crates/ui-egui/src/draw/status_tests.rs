@@ -265,3 +265,34 @@ fn no_fact_pushes_a_key_hint_out() {
         assert!(undo.right() <= first, "{percent}: the message {undo:?} ends before the keys at {first}");
     }
 }
+
+/// The sample window on a clock at `at` (an ISO 8601 time), with an event from and to the times of `event` when one is
+/// given; the shortest repaint the window asks for, settled.
+fn repaint_at(at: &str, event: Option<(&str, &str)>) -> std::time::Duration {
+    let clock = FakeClock::new(crate::mailbox::parse_date(at).unwrap());
+    let mut mailbox = Mailbox::new(sample::session(Box::new(clock.clone())).unwrap(), Box::new(clock));
+    if let Some((start, end)) = event {
+        let calendars = mailbox.run("calendar.list", &serde_json::json!({})).unwrap();
+        let calendar = calendars["calendars"][0]["id"].as_u64().unwrap();
+        mailbox.run("event.create", &serde_json::json!({ "calendar": calendar, "summary": "Kiln check", "start": start, "end": end })).unwrap();
+    }
+    let next = crate::home::next_event(&mut mailbox);
+    assert_eq!(next.is_some(), event.is_some(), "{at}: the next event is {next:?}");
+    let mut harness = Harness::builder()
+        .with_size(vec2(1300.0, 872.0))
+        .with_max_steps(12)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
+    harness.run_steps(4);
+    harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap_or(std::time::Duration::MAX)
+}
+
+#[test]
+fn with_a_next_event_the_line_asks_for_one_frame_at_the_next_minute() {
+    // "next: Kiln check 09:10 · in 10 min" says the minutes left: at 09:00:20 the line asks for a frame in 40 s, when
+    // the minute ends and the count changes, and not sooner.
+    let delay = repaint_at("2026-11-05T09:00:20Z", Some(("2026-11-05T09:10:00Z", "2026-11-05T10:00:00Z")));
+    assert!(delay > std::time::Duration::from_secs(39) && delay <= std::time::Duration::from_secs(40), "{delay:?}");
+    // With no event left today it asks for none.
+    let delay = repaint_at("2026-11-05T23:58:20Z", None);
+    assert!(delay > std::time::Duration::from_secs(60), "{delay:?}");
+}

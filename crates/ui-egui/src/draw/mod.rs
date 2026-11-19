@@ -2940,6 +2940,10 @@ impl InboxApp {
             self.seen_error = None;
         }
         self.read_facts(now);
+        if self.facts.0.next.is_some() {
+            // The next event's minutes left change as the minute ends: one frame then, read again.
+            ui.ctx().request_repaint_after(status::to_next_minute(self.mailbox.now()));
+        }
         let (over, whole) = match (&countdown, &discard, &act) {
             (Some((draft, message)), _, _) => (Some((Undone::Send(*draft), message.clone())), self.countdown_whole.map_or(0.0, |(_, whole)| whole)),
             (None, Some(message), _) => (Some((Undone::Discard, message.clone())), crate::status::UNDO_SECONDS),

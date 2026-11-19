@@ -85,6 +85,12 @@ impl Default for Facts {
     }
 }
 
+/// The time from `now` to the end of its minute: when a fact that counts minutes changes.
+pub(crate) fn to_next_minute(now: inboxcraft_time::Timestamp) -> std::time::Duration {
+    let into = now.unix_seconds().rem_euclid(60).unsigned_abs();
+    std::time::Duration::from_secs(60_u64.saturating_sub(into)).saturating_sub(std::time::Duration::from_nanos(u64::from(now.subsec_nanos())))
+}
+
 /// The facts as the mailbox has them now, through `sync.status`, `account.list` and the next event; a refused read
 /// leaves its fact out. Runs commands: call it when the mailbox changed or a second has passed, not every frame.
 pub(crate) fn read(mailbox: &mut Mailbox) -> Facts {
