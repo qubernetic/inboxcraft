@@ -277,7 +277,7 @@ fn a_text_field_takes_typing_and_a_disabled_one_does_not() {
 fn a_focused_caret_blinks_once_a_second_and_asks_for_no_more_frames() {
     let theme = theme();
     let mut harness = builder().with_size(vec2(400.0, 120.0)).build_ui(move |ui| {
-        crate::motion::set_reduced(ui.ctx(), true);
+        crate::motion::set_level(ui.ctx(), crate::motion::Level::Reduced);
         crate::component::tests::stage(ui, theme.palette.bg, |ui| {
             let mut text = "Odile".to_owned();
             text_field(ui, &theme, egui::Id::unique("name"), &mut text, &Field::new("Name", ""));
@@ -1010,7 +1010,7 @@ fn a_caret_blinks_at_full_motion_too_and_comes_back_on() {
     for reduced in [false, true] {
         let theme = theme();
         let mut harness = builder().with_size(vec2(400.0, 120.0)).build_ui(move |ui| {
-            crate::motion::set_reduced(ui.ctx(), reduced);
+            crate::motion::set_level(ui.ctx(), if reduced { crate::motion::Level::Reduced } else { crate::motion::Level::Full });
             crate::component::tests::stage(ui, theme.palette.bg, |ui| {
                 let mut text = "Odile".to_owned();
                 text_field(ui, &theme, egui::Id::unique("name"), &mut text, &Field::new("Name", ""));
@@ -1521,4 +1521,26 @@ fn a_caret_inside_the_text_keeps_egui_s_place_and_only_the_end_follows_the_board
         checked += 1;
     }
     assert!(checked > 0, "a place where rounding up and to the nearest differ");
+}
+
+#[test]
+fn at_motion_off_a_focused_caret_stands_still_and_asks_for_no_frames() {
+    let theme = theme();
+    let mut harness = builder().with_size(vec2(400.0, 120.0)).build_ui(move |ui| {
+        crate::motion::set_level(ui.ctx(), crate::motion::Level::Off);
+        crate::component::tests::stage(ui, theme.palette.bg, |ui| {
+            let mut text = "Odile".to_owned();
+            text_field(ui, &theme, egui::Id::unique("name"), &mut text, &Field::new("Name", ""));
+        });
+    });
+    harness.run_ok();
+    harness.get_by_role_and_label(Role::TextInput, "Name").focus();
+    harness.run_ok();
+    let shown = |harness: &Harness<'static>| caret(&painted(harness, "Name"), theme.palette.cyan_edge).is_some();
+    // Frames of 1/60 s over a second and a half: on in every one.
+    for frame in 0..90 {
+        harness.step();
+        assert!(shown(&harness), "frame {frame}: the caret is on");
+    }
+    assert!(crate::component::tests::rests(&mut harness, 2), "and nothing asks for a frame");
 }

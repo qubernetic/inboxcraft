@@ -270,9 +270,7 @@ pub fn command_field(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, scop
     if focus {
         let block = Rect::from_min_size(pos2(caret_left.round(), (text_top + (mono.line - caret.y) / 2.0).round()), caret);
         let since = caret_since(ui, id, output.cursor_range.map_or(0, |range| range.primary.index.0));
-        // The caret blinks at full and at reduced; at off it is still (M8).
-        let still = !live_focus || crate::motion::level(ui.ctx()) == crate::motion::Level::Off;
-        if crate::motion::blink(ui.ctx(), since, still) {
+        if crate::motion::blink(ui.ctx(), since, !live_focus) {
             super::solid(ui).with_clip_rect(text_clip).rect_filled(block, 0.0, p.cyan_edge);
         }
     }

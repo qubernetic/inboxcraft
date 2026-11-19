@@ -391,11 +391,11 @@ pub const STAGGER: f32 = 0.03;
 const HALF_TURN_MS: f64 = 500.0;
 
 /// Whether a caret that last moved at `since` (an input time, in seconds) shows now: on for the first half of each
-/// turn of [`CARET`], off for the second, at every level the app has (the design's caret blinks at full and at
-/// reduced). A repaint is asked for at its next change, never sooner. `still` keeps it on and asks for nothing (a
-/// caret drawn on a board, or the design's `off` level once the app has it).
+/// turn of [`CARET`], off for the second, at full and at reduced, as the design's caret blinks. A repaint is asked for
+/// at its next change, never sooner. At the off level, or `still` (a caret drawn on a board), it is on and asks for
+/// nothing.
 pub fn blink(ctx: &Context, since: f64, still: bool) -> bool {
-    if still {
+    if still || level(ctx) == Level::Off {
         return true;
     }
     let now = ctx.input(|input| input.time);
