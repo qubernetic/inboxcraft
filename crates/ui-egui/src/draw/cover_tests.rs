@@ -312,3 +312,48 @@ fn j_walks_the_list_at_once_after_leaving_the_settings_by_their_key() {
     let third = harness.state().mailbox().selected();
     assert!(third != second, "J walks at once after leaving by the key: {second:?} -> {third:?}");
 }
+
+/// The mail's first message archived, its toast with Undo showing; then the settings shown.
+fn archived_then_settings() -> (Harness<'static, InboxApp>, u64) {
+    let mut harness = harness(false);
+    let first = harness.state().mailbox().messages().first().map(|row| row.id).unwrap();
+    harness.state_mut().mailbox_mut().act(first, crate::mailbox::Act::Archive);
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::Button, "Undo").is_some(), "the toast shows its Undo");
+    open_settings(&mut harness);
+    harness.ctx.memory_mut(|memory| {
+        if let Some(focused) = memory.focused() {
+            memory.surrender_focus(focused);
+        }
+    });
+    harness.run();
+    (harness, first)
+}
+
+fn archived(harness: &Harness<'static, InboxApp>, id: u64) -> bool {
+    harness.state().mailbox().messages().iter().all(|row| row.id != id)
+}
+
+#[test]
+fn on_the_settings_the_undo_key_takes_back_what_the_toast_shown_names() {
+    let (mut harness, first) = archived_then_settings();
+    assert!(archived(&harness, first));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    harness.run();
+    assert!(!archived(&harness, first), "Ctrl+Z takes the archive back, as the toast's Undo would");
+    assert!(harness.state().settings().is_open(), "the settings stay");
+}
+
+#[test]
+fn on_the_settings_the_undo_key_in_a_field_is_the_field_s() {
+    let (mut harness, first) = archived_then_settings();
+    super::tests::at_settings(harness.state_mut(), crate::settings::Section::Shortcuts);
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "Find a command").focus();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    harness.run();
+    assert!(archived(&harness, first), "a field with the keyboard keeps its Undo: the archive stays");
+}

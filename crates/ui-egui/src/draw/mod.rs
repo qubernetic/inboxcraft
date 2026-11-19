@@ -133,7 +133,8 @@ struct Keys {
     to_place: bool,
     /// Whether the mail's own keys rest.
     typing: bool,
-    /// Whether a text field, the settings sheet, the palette or the composer has the keys: the toast's Undo key rests.
+    /// Whether the toast's Undo key rests: a control, the palette, a capture or the composer has the keys. On the
+    /// settings it works while no control has them: it takes back what the toast shown names, as its button does.
     quiet: bool,
 }
 
@@ -1366,6 +1367,7 @@ impl InboxApp {
         // A field with the focus, or a surface whose fields the letters are for.
         let quiet = focused || surfaces.quiet();
         let typing = quiet || self.screen == Screen::Calendar;
+        let quiet = focused || held || surfaces.has(Surface::Composer);
         if held {
             return Keys { ran: Vec::new(), escape: None, to_place: false, typing, quiet };
         }
