@@ -103,6 +103,11 @@ impl Picture {
         Some(Self { started: None, old, rect, ground, form, seconds, layer })
     }
 
+    /// The rect it was kept from.
+    pub(crate) fn rect(&self) -> Rect {
+        self.rect
+    }
+
     /// Paints this frame of the movement, cut to `clip` (where the new content stands; the picture's own rect where
     /// none is given); false when it is over (nothing painted). A repaint is asked for while it runs.
     pub(crate) fn paint(&mut self, ctx: &Context, clip: Option<Rect>) -> bool {

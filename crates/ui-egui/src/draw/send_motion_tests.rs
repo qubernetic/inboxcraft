@@ -23,6 +23,11 @@ const SUBJECT: &str = "Plot notes";
 /// The sample mail in a real session whose first account can send, at `level`, a draft written in the docked composer
 /// with the keys in its subject; frames 10 ms apart.
 fn written(level: Level) -> Harness<'static, InboxApp> {
+    written_over(level, false)
+}
+
+/// [`written`], over the first message opened first (J) when `opened`.
+fn written_over(level: Level, opened: bool) -> Harness<'static, InboxApp> {
     let clock = || Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()));
     let mut store = sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap();
     let account = store.accounts().unwrap().into_iter().find(|account| account.id() == AccountId::new(1)).unwrap();
@@ -38,6 +43,11 @@ fn written(level: Level) -> Harness<'static, InboxApp> {
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
     harness.state_mut().set_motion_level(level);
     harness.run();
+    if opened {
+        harness.event(egui::Event::Key { key: Key::J, pressed: true, modifiers: Modifiers::NONE, repeat: false, physical_key: None });
+        harness.run();
+        assert!(harness.state().mailbox().selected().is_some(), "a message open");
+    }
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, crate::keymap::COMPOSE);
     harness.run();
@@ -127,5 +137,31 @@ fn a_key_while_the_composer_folds_acts_in_its_frame_and_it_is_gone() {
         harness.step();
         assert_eq!(subject(&harness), None, "{level:?}: the key ends it in its frame");
         assert_ne!(harness.ctx.memory(|memory| memory.focused()), before, "{level:?}: and acts: Tab moves the keyboard");
+    }
+}
+
+/// A click at `at`: pressed in one frame, let go in the next.
+fn click_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
+    let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    harness.event(egui::Event::PointerMoved(at));
+    harness.event(button(true));
+    harness.step();
+    harness.event(button(false));
+    harness.step();
+}
+
+#[test]
+fn a_second_click_on_send_reaches_nothing_under_it() {
+    // A double click on Send: the first sends, the second lands where Send stood, over the message the reader shows
+    // again, which must not take it (it would open a reply).
+    for level in [Level::Full, Level::Reduced, Level::Off] {
+        let mut harness = written_over(level, true);
+        let at = harness.get_by_role_and_label(Role::Button, "Send").rect().center();
+        click_at(&mut harness, at);
+        assert!(harness.state().composer().is_none(), "{level:?}: the first click sends");
+        harness.step();
+        click_at(&mut harness, at);
+        harness.run();
+        assert!(harness.state().composer().is_none(), "{level:?}: the second click opened nothing");
     }
 }

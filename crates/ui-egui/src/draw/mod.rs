@@ -283,6 +283,8 @@ pub struct InboxApp {
     reader_place: Option<Rect>,
     /// Whether a draft was sent in this pass.
     just_sent: bool,
+    /// Where the docked draft was sent from and until when (egui's double-click time) a press there reaches nothing.
+    sent_place: Option<(Rect, f64)>,
     /// Where the list was drawn last, to tell whether the keyboard was in it when it goes.
     list_rect: Option<Rect>,
     /// For how many more frames the keyboard is given to the composer's text, the list having gone with it.
@@ -454,6 +456,7 @@ impl InboxApp {
             mode_picture: None,
             reader_place: None,
             just_sent: false,
+            sent_place: None,
             list_rect: None,
             keys_to_text: 0,
             frame: 0,
@@ -2808,6 +2811,10 @@ impl InboxApp {
                         picture::Picture::keep(ctx, rect, &layers, ground, form, picture::MEDIUM + picture::FAST, false)
                     }
                 });
+                if sent {
+                    let until = ctx.input(|input| input.time) + ctx.options(|options| options.input_options.max_double_click_delay);
+                    self.sent_place = self.reader_place.map(|rect| (rect, until));
+                }
                 ctx.request_discard("a message opened or a draft sent shows in the frame of its key");
                 return;
             }
@@ -2816,6 +2823,25 @@ impl InboxApp {
         if self.picture.as_mut().is_some_and(|picture| !picture.paint(ctx, place)) {
             self.picture = None;
         }
+        self.shield(ctx);
+    }
+
+    /// While the reader's place plays a kept picture, and for egui's double-click time after a send from it, a press on
+    /// the place reaches nothing: not the new message's controls hidden under the picture, nor what now stands where
+    /// Send stood (a double click on Send would open a reply). A press during a picture ends it, and is let go with it.
+    fn shield(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|input| input.time);
+        self.sent_place = self.sent_place.filter(|(_, until)| now < *until);
+        if let Some((_, until)) = self.sent_place {
+            // Gone at its time, even with nothing else to draw: a shield left standing would take the next press.
+            ctx.request_repaint_after(std::time::Duration::try_from_secs_f64(until - now).unwrap_or_default());
+        }
+        let Some(rect) = self.picture.as_ref().map(picture::Picture::rect).or(self.sent_place.map(|(rect, _)| rect)) else { return };
+        let id = egui::Id::unique("reader-shield");
+        egui::Area::new(id).order(egui::Order::Middle).fixed_pos(rect.min).constrain(false).movable(false).fade_in(false).show(ctx, |ui| {
+            // Allocated, so the area is as large as the place and stands over it as a layer too.
+            let _ = ui.allocate_rect(rect, egui::Sense::CLICK);
+        });
     }
 
     /// M14: when a command of this pass changed the appearance (`drawn` was the mode it drew in `window`), it is put in

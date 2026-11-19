@@ -136,3 +136,19 @@ fn a_key_while_a_message_comes_in_acts_in_its_frame_and_the_movement_is_at_its_e
         assert!(second.is_subset(&shown) && first.is_disjoint(&shown), "{level:?}: the key ends it in its frame, {shown:?}");
     }
 }
+
+#[test]
+fn a_press_while_a_message_comes_in_reaches_nothing_under_the_old_one() {
+    // The new message's controls stand under the old one's picture: what lies over the reader takes the press instead.
+    let shield = egui::LayerId::new(egui::Order::Middle, egui::Id::unique("reader-shield"));
+    for level in [Level::Full, Level::Reduced] {
+        let mut harness = first_open(level);
+        press(&mut harness, Key::J);
+        harness.step();
+        let reader = reader_rect(&harness);
+        let low = egui::pos2(reader.center().x, reader.bottom() - 40.0);
+        assert_eq!(harness.ctx.layer_id_at(low), Some(shield), "{level:?}: the picture's place takes a press");
+        harness.run_steps(50);
+        assert_ne!(harness.ctx.layer_id_at(low), Some(shield), "{level:?}: at rest the message takes it");
+    }
+}
