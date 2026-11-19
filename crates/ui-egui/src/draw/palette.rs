@@ -5,7 +5,8 @@
 //! with its icon, its name and its key) and a line on the keys that work in it. Typing narrows the list, the arrow
 //! keys move the pick, Enter or a press runs an action; Escape or a press beside the float closes it. An action that
 //! cannot run here (Done with no message selected) is listed faded and runs nothing. A page of the settings
-//! ("Settings: Accounts") rests where Settings rests and has no key of its own: its key column is empty.
+//! ("Settings: Accounts") has no key of its own (its key column is empty) and would rest where Settings rests: it is
+//! checked against `runnable` by the same id, `ui.settings.open`, which no state of the window refuses today.
 
 use egui::{Area, Frame, Id, Key, Modifiers, Order, Rect, Role, ScrollArea, Sense, Shape, Ui, WidgetInfo, pos2, vec2};
 

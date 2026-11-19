@@ -526,3 +526,22 @@ fn open_accounts_shows_only_while_there_is_no_calendar() {
     assert!(!harness.state().calendar().is_empty());
     assert!(harness.query_by_label("Open accounts").is_none());
 }
+
+#[test]
+fn shift_tab_reaches_open_accounts_too() {
+    let mut harness = empty_calendar(egui::Theme::Light);
+    let focused = |harness: &Harness<'static, InboxApp>| {
+        harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
+    };
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+        harness.run();
+        let now = focused(&harness);
+        if now.as_deref() == Some("Open accounts") {
+            return;
+        }
+        seen.push(now);
+    }
+    panic!("Shift Tab never reached Open accounts: {seen:?}");
+}

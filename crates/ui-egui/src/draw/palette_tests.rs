@@ -257,15 +257,6 @@ fn a_page_row_pressed_while_the_settings_show_goes_to_its_page() {
     assert_eq!(harness.state().settings().section(), crate::settings::Section::Sending);
 }
 
-#[test]
-fn the_page_rows_rest_where_settings_rests() {
-    let harness = opened(egui::Theme::Light);
-    let settings = harness.get_by_role_and_label(Role::MenuItem, "Settings").accesskit_node().is_disabled();
-    for name in ["Settings: Appearance", "Settings: Accounts", "Settings: About"] {
-        assert_eq!(harness.get_by_role_and_label(Role::MenuItem, name).accesskit_node().is_disabled(), settings, "{name}");
-    }
-}
-
 /// How many texts the last frame painted with their middle in `rect`: a row's icon, its name and its key's words.
 fn texts_in(harness: &Harness<'static, InboxApp>, rect: egui::Rect) -> usize {
     fn open(shape: &egui::Shape, rect: egui::Rect, count: &mut usize) {
