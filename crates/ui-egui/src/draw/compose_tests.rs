@@ -1926,12 +1926,34 @@ fn send_from_the_command_line_sends_a_floating_draft_and_an_agent_s_call_is_refu
     assert!(harness.state_mut().mailbox_mut().run_for_agent(keymap::SEND, &json!({})).is_err(), "the window's Send is no agent's");
     harness.run();
     assert!(!queued(&mut harness, id), "an agent sent the draft");
-    // The owner's `>` Send sends it.
+    // Folded, the draft is not in sight: `>` lists Send disabled, saying why, and Enter sends nothing.
+    harness.state_mut().composer_mut().0.unwrap().toggle_fold();
+    harness.run();
+    assert!(harness.state().composer().is_some_and(crate::compose::Composer::folded), "the draft is folded");
+    send_from_the_line(&mut harness);
+    let send = keymap::action(keymap::SEND).unwrap().name;
+    assert!(harness.get_by_role_and_label(Role::MenuItem, send).accesskit_node().is_disabled(), "Send is listed disabled while folded");
+    assert!(super::command_line_tests::painted_text(&harness, "Unfold the draft to send it"), "the row says why");
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(!queued(&mut harness, id), "a folded draft the owner cannot see was sent");
+    assert!(harness.state().command().results(), "the refused Send stays listed, the line open");
+    assert!(harness.state().composer().is_some(), "the folded draft stays");
+    harness.key_press(Key::Escape);
+    harness.run();
+    // Unfolded, the owner's `>` Send sends it.
+    harness.state_mut().composer_mut().0.unwrap().toggle_fold();
+    harness.run();
+    send_from_the_line(&mut harness);
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(queued(&mut harness, id), "the owner's Send from the command line sent the floating draft");
+}
+
+/// Ctrl K, then `>send the message` in the command line, its results showing.
+fn send_from_the_line(harness: &mut Harness<'static, InboxApp>) {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
     harness.state_mut().command_mut().set_text(">send the message");
     harness.run();
-    harness.key_press(Key::Enter);
-    harness.run();
-    assert!(queued(&mut harness, id), "the owner's Send from the command line sent the floating draft");
 }

@@ -843,9 +843,23 @@ impl InboxApp {
     }
 
     /// Whether the command line's `>` may run the action `id`: as [`InboxApp::can_run`], but Send sends whatever draft is
-    /// drawn, floating too: from the line the keyboard is never in the composer.
+    /// drawn, floating too: from the line the keyboard is never in the composer. Never a folded draft, which the owner
+    /// cannot see.
     fn can_run_from_the_line(&self, id: &str) -> bool {
-        if id == keymap::SEND { self.composer_drawn() } else { self.can_run(id) }
+        if id == keymap::SEND { self.composer_drawn() && !self.composer_folded() } else { self.can_run(id) }
+    }
+
+    /// Whether the draft drawn is the floating panel folded to its head.
+    fn composer_folded(&self) -> bool {
+        self.composer.as_ref().is_some_and(Composer::folded)
+    }
+
+    /// Why `>` cannot run `id` now, its row listed disabled with it; none when it can.
+    fn refused_on_the_line(&self, ctx: &egui::Context, id: &str) -> Option<&'static str> {
+        if id == keymap::SEND && self.composer_drawn() && self.composer_folded() {
+            return Some(tr!("Unfold the draft to send it"));
+        }
+        (!self.can_run_from_the_line(id) || soon::blocked(ctx, id)).then(|| command::refusal(id))
     }
 
     /// Runs the action `id` of [`keymap::actions`], as its key, the index or the palette do; an action that cannot run
@@ -2738,7 +2752,7 @@ impl InboxApp {
                         .filter(|row| keymap::scope(row.id).meets(screen))
                         .filter(|row| !editing || crate::surface::EDITOR_KEYS.contains(&row.id))
                         .map(|row| {
-                            let refused = (!self.can_run_from_the_line(row.id) || soon::blocked(&ctx, row.id)).then(|| command::refusal(row.id));
+                            let refused = self.refused_on_the_line(&ctx, row.id);
                             command::Listed { row, refused }
                         })
                         .collect();

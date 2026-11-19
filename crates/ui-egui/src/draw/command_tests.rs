@@ -59,7 +59,7 @@ fn type_in(harness: &mut Harness<'static, InboxApp>, text: &str) {
 }
 
 /// Whether the last frame painted a text that reads `wanted`.
-fn painted_text(harness: &Harness<'static, InboxApp>, wanted: &str) -> bool {
+pub(super) fn painted_text(harness: &Harness<'static, InboxApp>, wanted: &str) -> bool {
     fn find(shape: &egui::Shape, wanted: &str) -> bool {
         match shape {
             egui::Shape::Vec(inner) => inner.iter().any(|shape| find(shape, wanted)),
