@@ -66,6 +66,7 @@
 //! able to send and its sent message bounced ([`sample::sending`]): `waiting` the outbox with a send counting down its
 //! hold, one scheduled and one the server refused, `countdown` the toast of a message just sent, `schedule` the
 //! composer with a time picked and its send-later picker open, `bounce` the bounced message open in the reader;
+//! `drafts` opens the drafts place, `empty` or `filled` with two kept drafts;
 //! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with reduced
 //! motion, so it shows where each motion ends. `steps` then drive the set window as a person would, one after
 //! another: a `key`, `tab` or `shift_tab` presses, `focus` or `press` a control by its accessible name ([`Step`]);
@@ -309,6 +310,9 @@ pub struct Shot {
     /// picked) or `bounce` (the bounced message open).
     #[serde(default)]
     pub outbox: Option<String>,
+    /// The drafts place: `empty`, or `filled` with two kept drafts.
+    #[serde(default)]
+    pub drafts: Option<String>,
     /// How the selected HTML message shows: `fitted` (the default) or `plain` (as a text-only program shows it).
     #[serde(default)]
     pub html_view: Option<String>,
@@ -608,6 +612,9 @@ fn calendar(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
 /// Shows the places of `shot` beyond the mail: the calendar, the Shortcuts page with an action waiting for a key, the
 /// command line with its text.
 fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    if let Some(scene) = &shot.drafts {
+        drafts(app, &shot.out, scene)?;
+    }
     if let Some(scene) = &shot.compose {
         compose(app, &shot.out, scene)?;
     }
@@ -814,6 +821,27 @@ fn outbox(app: &mut InboxApp, clock: &FakeClock, out: &str, scene: &str) -> Resu
     Ok(())
 }
 
+/// Opens the drafts place: `empty`, or `filled` with two kept drafts of the first account, the newer on top.
+fn drafts(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
+    let kept: &[(&str, &str)] = match scene {
+        "empty" => &[],
+        "filled" => &[
+            ("Halvard Engen <halvard@example.org>", "Re: Kiln service: two dates to choose from"),
+            ("Sunniva Aalto <sunniva@example.org>", "Price list for the winter workshops"),
+        ],
+        other => return Err(bad(format!("{out}: drafts {other:?} is not empty or filled"))),
+    };
+    let mailbox = app.mailbox_mut();
+    let account = mailbox.accounts().first().map(|account| account.id).ok_or_else(|| bad(format!("{out}: no account")))?;
+    for (to, subject) in kept {
+        let id = mailbox.run("compose.new", &serde_json::json!({ "account": account }))?.get("id").and_then(serde_json::Value::as_u64);
+        let id = id.ok_or_else(|| bad(format!("{out}: no draft")))?;
+        mailbox.run("compose.update", &serde_json::json!({ "id": id, "to": [to], "subject": subject }))?;
+    }
+    mailbox.open(Place::View(Role::Drafts));
+    Ok(())
+}
+
 /// Refuses the window settings for a page of `shot` that shows no window.
 fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
     let window = shot.narrow.is_some()
@@ -854,6 +882,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.picker.is_some()
         || shot.menu.is_some()
         || shot.outbox.is_some()
+        || shot.drafts.is_some()
         || shot.steps.is_some()
         || [
             shot.icons,
