@@ -278,6 +278,12 @@ fn nothing_of_the_place_acts_under_the_command_line_s_results() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
     assert!(harness.state().command().results());
+    // A screen reader's activate, which egui's layers do not stop; then the pointer, which the results take.
+    harness.query_all_by_role(Role::ListItem).find(|node| node.rect().contains(at)).unwrap().click_accesskit();
+    harness.run();
+    harness.run();
+    assert_eq!(opened(&harness), None, "an activate under the results opens nothing");
+    assert!(harness.state().command().results(), "and leaves the results open");
     harness.query_all_by_role(Role::ListItem).find(|node| node.rect().contains(at)).unwrap().click();
     harness.run();
     harness.run();
