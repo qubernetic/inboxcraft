@@ -550,11 +550,9 @@ fn dragging_across_both_breakpoints_keeps_a_half_filled_account_form() {
     harness.run();
     harness.query_all_by_role(Role::TextInput).find(|node| node.value().is_some_and(|value| value == "odile@example.org")).unwrap().focus();
     harness.run();
-    let focused = harness.ctx.memory(|memory| memory.focused());
     for width in DRAG {
         harness.set_size(vec2(width, 800.0));
         harness.run();
-        eprintln!("{width}: focus {:?} was {focused:?}", harness.ctx.memory(|memory| memory.focused()));
         assert!(harness.state().settings().is_open(), "{width}: the settings stay");
         assert_eq!(harness.state().onboarding().form().address, "odile@example.org", "{width}: the form kept");
         assert!(keyboard_somewhere(&harness), "{width}: the keyboard on something");
