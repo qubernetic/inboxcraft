@@ -91,6 +91,20 @@ fetches a remote picture: the front end asks its fetch for the pictures the owne
 fetch is `net::picture` on threads of its own (HTTPS only, a fixed user agent, no cookies or referrer, public
 addresses only), so the engine stays free of network I/O.
 
+`mail.why` (`safe`, `id`) says why a message stands where it does, from what the triage already decided and keeps:
+at most four reasons, most specific first, each a `kind` (`snooze`, `rule`, `sender`, `screener`, `thread`,
+`default`), a `text_id` from a fixed set (`why.snooze.returned`, `why.snooze.until`, `why.rule.group`,
+`why.sender.group`, `why.sender.accepted`, `why.sender.blocked`, `why.screener.held`, `why.screener.blocked`,
+`why.screener.new`, `why.screener.known`, `why.thread.yours`, `why.thread.other`, `why.default`) that the front end
+words in its own language, and `args` with a fixed set of keys per `text_id`: times, a group or rule name, the
+sender's address, a count, a folder id and role. Every text in `args` is cleaned of control characters and invisible
+marks and cut at a character boundary: an address at 254 characters, a group, rule or role name at 64. No text of the message goes
+into the answer. `rule` names the grouped inbox classifier's rule (`calendar`, `automatic`, `list`, `junk`, `robot`,
+`other`), or `why.sender.group` the owner's choice of group for the sender, only for mail in the inbox of a grouped
+account; a return from a snooze counts while the message is in the inbox, as the store keeps
+when it came back but not where to. One decision gives one reason: a sender blocked leaves out `why.screener.blocked`,
+a group chosen for the sender leaves out `why.sender.accepted`, before the four are counted. `default` (the folder) comes only when nothing else does.
+
 The appearance commands (`ui.theme.set`, `ui.text_scale.set`, `ui.motion.set`, `ui.frame.set`, all `safe`) change
 one choice each of the session's `Appearance` (`engine::appearance`) and answer the whole of it. The colours, the
 typeface and the icons are fixed, so there is no command for them. The engine checks the values; it keeps nothing

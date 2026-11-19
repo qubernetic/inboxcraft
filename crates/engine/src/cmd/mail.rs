@@ -5,20 +5,23 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use inboxcraft_model::{Account, AccountId, FolderId, JobKind, Message, MessageId, MessageRef, MessageState, Role, group_threads};
+use inboxcraft_model::{
+    Account, AccountId, EmailAddress, FolderId, JobKind, Message, MessageId, MessageRef, MessageState, Role, Screening, group_threads,
+    is_invisible_mark,
+};
 use inboxcraft_store::{Change, Entry, Search, Storage};
 use inboxcraft_time::Timestamp;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::arrive::group::{self, Grouping};
-use crate::arrive::screener;
+use crate::arrive::screener::{self, ScreenerMode};
 use crate::params::{decode, parse_date};
 use crate::view::{self, View};
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, json};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[ATTACHMENT, LIST, READ, SEARCH, THREAD];
+pub(crate) const COMMANDS: &[CommandSpec] = &[ATTACHMENT, LIST, READ, SEARCH, THREAD, WHY];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
@@ -278,16 +281,7 @@ fn thread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     let id = MessageId::new(params.id);
     let store = context.store();
     store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
-    let mut entries = BTreeMap::new();
-    for account in store.accounts()? {
-        for folder in store.folders(account.id())? {
-            for entry in store.messages(folder.id())? {
-                entries.insert(entry.message().id(), entry);
-            }
-        }
-    }
-    let messages: Vec<Message> = entries.values().map(|entry| entry.message().clone()).collect();
-    let thread = group_threads(&messages).into_iter().find(|thread| thread.contains(&id)).unwrap_or_else(|| vec![id]);
+    let (thread, entries) = thread_of(store, id)?;
     let skip = thread.len().saturating_sub(limit(Some(MAX_LIST)));
     let shown: Vec<Value> = thread.iter().skip(skip).filter_map(|id| entries.get(id)).map(json::message).collect();
     let mut drafts = Vec::new();
@@ -299,6 +293,21 @@ fn thread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         }
     }
     Ok(Outcome::new(json!({ "total": thread.len(), "messages": shown, "drafts": drafts })))
+}
+
+/// The thread `id` is in, oldest first (a thread of one when it names no other), and every message of the store by id.
+fn thread_of(store: &dyn Storage, id: MessageId) -> Result<(Vec<MessageId>, BTreeMap<MessageId, Entry>), EngineError> {
+    let mut entries = BTreeMap::new();
+    for account in store.accounts()? {
+        for folder in store.folders(account.id())? {
+            for entry in store.messages(folder.id())? {
+                entries.insert(entry.message().id(), entry);
+            }
+        }
+    }
+    let messages: Vec<Message> = entries.values().map(|entry| entry.message().clone()).collect();
+    let thread = group_threads(&messages).into_iter().find(|thread| thread.contains(&id)).unwrap_or_else(|| vec![id]);
+    Ok((thread, entries))
 }
 
 /// `mail.attachment`: one attachment of a kept body (by its `index` in `mail.read`'s list) or one inline part (by
@@ -420,3 +429,194 @@ fn search(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     }
     Ok(Outcome::new(json!({ "total": messages.len(), "messages": messages })))
 }
+
+/// `mail.why`: why a message stands where it does, from what the triage already decided and keeps, never from a
+/// second look at the message: at most [`MAX_REASONS`], most specific first. Each reason has a `kind` (`snooze`,
+/// `rule`, `sender`, `screener`, `thread`, `default`), a `text_id` from a fixed set the front end words in its own
+/// language, and `args` with a fixed set of keys per `text_id`: the values the sentence needs, never text of the
+/// message. `default` (the folder) comes only when nothing else does.
+pub(crate) const WHY: CommandSpec =
+    CommandSpec { id: "mail.why", class: Some(AgentClass::Safe), summary: "Say why a message stands where it does, most specific first", run: why };
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WhyParams {
+    /// The message.
+    id: u64,
+}
+
+/// Every `text_id` `mail.why` gives: the fixed set the front end words. The reasons take them from here, by name
+/// ([`text_id`]).
+pub(crate) const TEXT_IDS: [&str; 13] = [
+    "why.snooze.returned",
+    "why.snooze.until",
+    "why.rule.group",
+    "why.sender.group",
+    "why.sender.accepted",
+    "why.sender.blocked",
+    "why.screener.held",
+    "why.screener.blocked",
+    "why.screener.new",
+    "why.screener.known",
+    "why.thread.yours",
+    "why.thread.other",
+    "why.default",
+];
+
+/// The names of [`TEXT_IDS`], one each: the reasons are built with these.
+pub(crate) mod text_id {
+    use super::TEXT_IDS;
+
+    /// Back from a snooze (`at`).
+    pub(crate) const SNOOZE_RETURNED: &str = TEXT_IDS[0];
+    /// Snoozed until (`until`).
+    pub(crate) const SNOOZE_UNTIL: &str = TEXT_IDS[1];
+    /// The grouped inbox's rule gave the group (`group`, `rule`).
+    pub(crate) const RULE_GROUP: &str = TEXT_IDS[2];
+    /// The owner chose the sender's group (`address`, `group`).
+    pub(crate) const SENDER_GROUP: &str = TEXT_IDS[3];
+    /// The owner let the sender in (`address`).
+    pub(crate) const SENDER_ACCEPTED: &str = TEXT_IDS[4];
+    /// The owner blocked the sender (`address`).
+    pub(crate) const SENDER_BLOCKED: &str = TEXT_IDS[5];
+    /// Held back by the screener (`address`).
+    pub(crate) const SCREENER_HELD: &str = TEXT_IDS[6];
+    /// In the blocked folder (`address`).
+    pub(crate) const SCREENER_BLOCKED: &str = TEXT_IDS[7];
+    /// First mail from a new sender (`address`).
+    pub(crate) const SCREENER_NEW: &str = TEXT_IDS[8];
+    /// Let in by the screener as a sender the owner knows (`address`).
+    pub(crate) const SCREENER_KNOWN: &str = TEXT_IDS[9];
+    /// In a thread the owner wrote in (`messages`).
+    pub(crate) const THREAD_YOURS: &str = TEXT_IDS[10];
+    /// In a thread (`messages`).
+    pub(crate) const THREAD_OTHER: &str = TEXT_IDS[11];
+    /// The folder alone (`folder`, `role`).
+    pub(crate) const DEFAULT: &str = TEXT_IDS[12];
+}
+
+/// The most reasons one answer gives.
+pub(crate) const MAX_REASONS: usize = 4;
+
+/// The most characters of an address in an answer: an address is at most this many bytes.
+pub(crate) const ADDRESS_CAP: usize = EmailAddress::MAX_LEN;
+
+/// The most characters of a name (a group, a rule, a role) in an answer.
+pub(crate) const NAME_CAP: usize = 64;
+
+/// `text` with no control characters and no invisible direction or joiner marks, cut at `cap` characters.
+pub(crate) fn clean(text: &str, cap: usize) -> String {
+    text.chars().filter(|c| !c.is_control() && !is_invisible_mark(*c)).take(cap).collect()
+}
+
+/// One reason.
+fn reason(kind: &str, text_id: &str, args: Value) -> Value {
+    json!({ "kind": kind, "text_id": text_id, "args": args })
+}
+
+/// An address for an answer, cleaned and capped; `null` when there is none.
+fn address_arg(address: Option<&EmailAddress>) -> Value {
+    address.map_or(Value::Null, |address| Value::String(clean(address.as_str(), ADDRESS_CAP)))
+}
+
+/// A name for an answer, cleaned and capped.
+fn name_arg(name: &str) -> Value {
+    Value::String(clean(name, NAME_CAP))
+}
+
+fn why(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: WhyParams = decode(WHY.id, params)?;
+    let id = MessageId::new(params.id);
+    let store = context.store();
+    let entry = store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let message = entry.message();
+    let state = store.message_state(id)?;
+    let role_of = |message: &Message| context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
+    let role = role_of(message);
+    let accounts = store.accounts()?;
+    let from = screener::sender_of(message);
+    let screened = from.filter(|address| screener::teaches(&accounts, address));
+    let record = match screened {
+        Some(address) => store.sender(address)?,
+        None => None,
+    };
+    let mut reasons = Vec::new();
+
+    // Snooze: it waits in the snoozed folder, or it came back and still stands where it came back to. The store keeps
+    // the time it came back but not the folder, and a snooze brings mail back to the inbox, so it counts there only:
+    // once the owner moves it on, the return no longer says why it is where it is.
+    match (role, state.snoozed_until, state.returned) {
+        (Some(Role::Snoozed), Some(until), _) => reasons.push(reason("snooze", text_id::SNOOZE_UNTIL, json!({ "until": json::date(until) }))),
+        (Some(Role::Inbox), _, Some(at)) => reasons.push(reason("snooze", text_id::SNOOZE_RETURNED, json!({ "at": json::date(at) }))),
+        _ => {}
+    }
+
+    // The grouped inbox, where grouping applies (the inbox of a grouped account, `of_by` says which account): the
+    // classifier's rule, or else the owner's choice for the sender.
+    let grouped = if role == Some(Role::Inbox) { group::Grouping::new(store)?.of_by(message)? } else { None };
+    match grouped {
+        Some((in_group, Some(rule))) => {
+            reasons.push(reason("rule", text_id::RULE_GROUP, json!({ "group": name_arg(group::name(in_group)), "rule": name_arg(group::rule_name(rule)) })));
+        }
+        Some((in_group, None)) => {
+            reasons.push(reason("sender", text_id::SENDER_GROUP, json!({ "address": address_arg(from), "group": name_arg(group::name(in_group)) })));
+        }
+        None => {}
+    }
+
+    // The owner's decisions on the sender.
+    match record.as_ref().and_then(|record| record.screening) {
+        Some(Screening::Accepted) => reasons.push(reason("sender", text_id::SENDER_ACCEPTED, json!({ "address": address_arg(screened) }))),
+        Some(Screening::Blocked) => reasons.push(reason("sender", text_id::SENDER_BLOCKED, json!({ "address": address_arg(screened) }))),
+        None => {}
+    }
+
+    // The screener: held, blocked, marked as new, or let in as known.
+    let mode = context.state().screener;
+    let screener_said = match role {
+        Some(Role::Screener) => Some(text_id::SCREENER_HELD),
+        Some(Role::Blocked) => Some(text_id::SCREENER_BLOCKED),
+        Some(Role::Inbox) if screener::is_new(store, mode, role, &accounts, message)? => Some(text_id::SCREENER_NEW),
+        Some(Role::Inbox)
+            if mode != ScreenerMode::Off && record.as_ref().is_some_and(|record| record.known && record.screening.is_none()) =>
+        {
+            Some(text_id::SCREENER_KNOWN)
+        }
+        _ => None,
+    };
+    if let Some(text_id) = screener_said {
+        reasons.push(reason("screener", text_id, json!({ "address": address_arg(from) })));
+    }
+
+    // The thread: one the owner wrote in, or another.
+    let (thread, entries) = thread_of(store, id)?;
+    if thread.len() > 1 {
+        let yours = thread.iter().filter(|other| **other != id).filter_map(|other| entries.get(other)).any(|other| role_of(other.message()) == Some(Role::Sent));
+        let text_id = if yours { text_id::THREAD_YOURS } else { text_id::THREAD_OTHER };
+        reasons.push(reason("thread", text_id, json!({ "messages": thread.len() })));
+    }
+
+    if reasons.is_empty() {
+        reasons.push(reason("default", text_id::DEFAULT, json!({ "folder": message.folder().get(), "role": role.map(|role| name_arg(&view::role_name(role))) })));
+    }
+    Ok(Outcome::new(json!({ "reasons": settle(reasons) })))
+}
+
+/// Pairs of reasons that say one decision of the owner's twice: the first, more specific, stays and the second goes.
+/// A sender blocked is why its mail is in the blocked folder; a group chosen for a sender is chosen by accepting it
+/// (`screener.accept` with a group) or for a sender whose mail comes in, so it says the sender is let in.
+const SAME_DECISION: [(&str, &str); 2] = [(text_id::SENDER_BLOCKED, text_id::SCREENER_BLOCKED), (text_id::SENDER_GROUP, text_id::SENDER_ACCEPTED)];
+
+/// The reasons an answer gives of `reasons`, most specific first: one reason a decision, then at most
+/// [`MAX_REASONS`].
+fn settle(mut reasons: Vec<Value>) -> Vec<Value> {
+    let said = |text_id: &str, reasons: &[Value]| reasons.iter().any(|reason| reason["text_id"] == text_id);
+    let dropped: Vec<&str> = SAME_DECISION.iter().filter(|(stays, _)| said(stays, &reasons)).map(|(_, goes)| *goes).collect();
+    reasons.retain(|reason| !dropped.iter().any(|goes| reason["text_id"] == *goes));
+    reasons.truncate(MAX_REASONS);
+    reasons
+}
+
+#[cfg(test)]
+#[path = "mail_tests.rs"]
+mod tests;
