@@ -307,6 +307,8 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
             View::Agenda => Some(tr!("{count} days", count = crate::calendar::AGENDA_DAYS)),
             View::Month => None,
         };
+        // In a narrow window the toolbar drops its note.
+        let note = note.filter(|_| !super::shell::narrow(ui.ctx()));
         let note = note.map(|note| crate::component::galley(ui, &note, theme.fonts.mono_s, p.muted));
         let note_room = note.as_ref().map_or(0.0, |note| note.size().x + NOTE_GAP);
         // Where the room is short the note gives way first, then the title takes its short form; only that is cut.
