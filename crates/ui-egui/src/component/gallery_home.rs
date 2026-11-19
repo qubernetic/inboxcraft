@@ -13,6 +13,7 @@ use crate::theme::Theme;
 use crate::tr;
 
 use super::Shown;
+use super::block_line::{self, BlockLine};
 use super::count_tile::{self, CountTile, Tone};
 use super::gallery::{cell, cells, title};
 use super::margin;
@@ -30,8 +31,14 @@ const HEIGHT: f32 = 640.0;
 /// What draws a column of the page.
 type Draw = fn(&mut Ui, &Theme, &Keymap);
 
+/// The room between two boards, in points.
+const BOARD_GAP: f32 = 24.0;
+
 /// A count tile's width on the boards, in points: the sheet's.
 pub(crate) const TILE_WIDTH: f32 = 140.0;
+
+/// A block's and a block line's width on the boards, in points: the sheets'.
+pub(crate) const BLOCK_WIDTH: f32 = 320.0;
 
 /// One state of the count tile's sheet.
 #[derive(Debug, Clone, Copy)]
@@ -91,9 +98,54 @@ fn tiles(ui: &mut Ui, theme: &Theme, _keymap: &Keymap) {
     }
 }
 
-/// The left column: the count tile.
+/// One state of the block line's sheet.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LineState {
+    pub name: &'static str,
+    pub line: BlockLine<'static>,
+    pub shown: Shown,
+}
+
+/// The block line's states, in the sheet's order, with the sheet's words.
+pub(crate) fn line_states() -> [LineState; 3] {
+    let more = LineState { name: "more", line: BlockLine::More(tr!("all drafts (5) →")), shown: Shown::Rest };
+    [
+        LineState { name: "empty", line: BlockLine::Empty(tr!("No drafts. What you start and do not send is kept here.")), ..more },
+        more,
+        LineState { name: "more-hover", shown: Shown::Hover, ..more },
+    ]
+}
+
+/// The block line of `state`, `width` wide, on `surface`, at `ui`'s cursor; whether it was pressed.
+pub(crate) fn line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &LineState, width: f32) -> bool {
+    ui.allocate_ui(vec2(width, 200.0), |ui| {
+        ui.set_width(width);
+        let high = block_line::height(ui, theme, &state.line, width);
+        ui.painter().rect_filled(Rect::from_min_size(ui.cursor().min, vec2(width, high)), 0.0, theme.palette.surface);
+        ui.push_id(state.name, |ui| block_line::block_line(ui, theme, keymap, &state.line, (state.shown != Shown::Rest).then_some(state.shown))).inner
+    })
+    .inner
+}
+
+/// The block line's board: every state of its sheet, two to a line; then the drafts block of Home with nothing in it.
+fn lines(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Block line"));
+    for pair in line_states().chunks(2) {
+        cells(ui, theme, |ui| {
+            for state in pair {
+                cell(ui, theme, state.name, |ui| {
+                    line(ui, theme, keymap, state, BLOCK_WIDTH);
+                });
+            }
+        });
+    }
+}
+
+/// The left column: the count tile and the block line.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     tiles(ui, theme, keymap);
+    ui.add_space(BOARD_GAP);
+    lines(ui, theme, keymap);
 }
 
 /// The right column: empty yet.
