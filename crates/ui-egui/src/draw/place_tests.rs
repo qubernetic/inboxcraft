@@ -238,11 +238,33 @@ fn every_action_is_of_the_mail_or_the_window_s_and_none_twice() {
 }
 
 #[test]
+fn on_the_settings_no_key_and_no_press_runs_an_action_of_the_mail() {
+    // The gates themselves, whatever the mail holds: a key asks `allows` with the owner's keys (the default ones and
+    // each action on a key with Ctrl), a press or a screen reader's activate asks `allows_press`.
+    let settings = crate::surface::Surfaces::new(crate::surface::Facts { settings: true, ..crate::surface::Facts::default() });
+    for id in OF_THE_MAIL {
+        let mut with_ctrl = keymap::Keymap::default();
+        with_ctrl.bind(id, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::F9));
+        for keys in [keymap::Keymap::default(), with_ctrl] {
+            assert!(!settings.allows(id, &keys), "{id}: its key runs nothing on the settings");
+        }
+        assert!(!settings.allows_press(id), "{id}: a press runs nothing on the settings");
+    }
+    for id in THE_WINDOW_S {
+        assert!(settings.allows_press(id), "{id}: the window's own runs by a press on the settings");
+    }
+}
+
+#[test]
 fn nothing_of_the_mail_runs_on_the_settings_place() {
     let mut harness = sample_window();
+    // An act to take back, so that Undo could run off the settings.
+    let last = harness.state().mailbox().messages().last().map(|row| row.id).unwrap();
+    harness.state_mut().mailbox_mut().act(last, crate::mailbox::Act::Archive);
     let first = harness.state().mailbox().messages().first().map(|row| row.id);
     harness.state_mut().mailbox_mut().select(first);
     harness.run();
+    assert!(harness.state().can_run(keymap::UNDO), "Undo could run off the settings");
     let before: Vec<(&str, bool)> = keymap::actions().into_iter().map(|action| (action.id, harness.state().can_run(action.id))).collect();
     super::tests::at_settings(harness.state_mut(), Section::Appearance);
     harness.run();
