@@ -293,3 +293,6 @@
 # The same with the pointer resting on the left edge of the first board's emblem: its cells and the field's warm (#275).
 {"out": "docs/images/character-field-warm-light.png", "mode": "light", "character_field": true, "pointer": [112, 420]}
 {"out": "docs/images/character-field-warm-dark.png", "mode": "dark", "character_field": true, "pointer": [112, 420]}
+# The page of the status line's sets: the status item and the status message in every state (#287).
+{"out": "docs/images/components-status-light.png", "mode": "light", "status_sets": true}
+{"out": "docs/images/components-status-dark.png", "mode": "dark", "status_sets": true}

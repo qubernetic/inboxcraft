@@ -49,8 +49,9 @@
 //! ([`crate::component::gallery_reader`]), `lists` set to `true` the page of the mail lists' rows
 //! ([`crate::component::gallery_lists`]), `index` set to `true` the page of the index's rows
 //! ([`crate::component::gallery_index`]), `character_field` set to `true` the page of the character field
-//! ([`crate::component::gallery_field`]), where `pointer` may rest. The typeface and the icons are fixed, so a
-//! script that names a
+//! ([`crate::component::gallery_field`]), where `pointer` may rest, `status_sets` set to `true` the page of the
+//! status line's sets ([`crate::component::gallery_status`]). The typeface and the icons are fixed, so a script
+//! that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
 //! before the picture, so what that opens (a menu, a list) is in it; `put_away` set to `true` snoozes, pins, parks and marks
@@ -254,6 +255,9 @@ pub struct Shot {
     /// The page of the character field instead of the window; `pointer` may rest on it.
     #[serde(default)]
     pub character_field: Option<bool>,
+    /// The page of the status line's sets (status item, status message) instead of the window.
+    #[serde(default)]
+    pub status_sets: Option<bool>,
     /// The app's own window frame, as a native window draws it: `strip` or `top_row`; none when left out.
     #[serde(default)]
     pub frame: Option<String>,
@@ -806,14 +810,23 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.menu.is_some()
         || shot.outbox.is_some()
         || shot.steps.is_some()
-        || [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists, shot.index, shot.character_field]
-            .iter()
-            .filter(|page| **page == Some(true))
-            .count()
-            > 1
-        || (shot.calendar_sets == Some(true)
-            && [shot.icons, shot.components, shot.blocks, shot.fields, shot.screens, shot.reader, shot.lists, shot.index, shot.character_field]
-                .contains(&Some(true)));
+        || [
+            shot.icons,
+            shot.components,
+            shot.blocks,
+            shot.fields,
+            shot.screens,
+            shot.calendar_sets,
+            shot.reader,
+            shot.lists,
+            shot.index,
+            shot.character_field,
+            shot.status_sets,
+        ]
+        .iter()
+        .filter(|page| **page == Some(true))
+        .count()
+            > 1;
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
     }
@@ -959,6 +972,21 @@ fn field_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
         crate::component::gallery_field::page(ui, &theme);
+    })
+}
+
+/// The page of the status line's sets of `shot` in `mode`.
+fn status_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of the status line's sets")?;
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = gallery::keymap();
+    let mut fonts = true;
+    paint(crate::component::gallery_status::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_status::page(ui, &theme, &keymap);
     })
 }
 
@@ -1559,6 +1587,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if shot.character_field == Some(true) {
         return field_gallery(shot, mode);
+    }
+    if shot.status_sets == Some(true) {
+        return status_gallery(shot, mode);
     }
     if shot.icons == Some(true) {
         return icon_sheet(shot, mode);
