@@ -285,10 +285,12 @@ const DONE_ACTION: usize = 0;
 pub(crate) const SNOOZE_ACTION: usize = 1;
 const READ_ACTION: usize = 2;
 const DELETE_ACTION: usize = 3;
+/// How many hover actions a row has.
+const ACTIONS: usize = 4;
 
 /// The hover actions of `message`, in their places, the design file's order: Done (or "Not done" for a done one),
 /// Snooze, mark read or unread, Delete.
-fn actions(message: &MessageRow) -> [Action<'static>; 4] {
+fn actions(message: &MessageRow) -> [Action<'static>; ACTIONS] {
     #[cfg(test)]
     super::list_tests::ACTIONS_BUILT.with(|built| built.set(built.get().saturating_add(1)));
     // An open envelope opens an unread message; a closed one closes a read one again.
@@ -594,8 +596,11 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         spare: Some(READ_ACTION),
         blink: square_off(&arrival, !message.seen),
     };
-    // Built only for the row whose group can show: the other rows hand the group nothing.
-    let reach = keyed || ui.rect_contains_pointer(ui.available_rect_before_wrap());
+    // Built only for the row whose group can show: the other rows hand the group nothing. One of whose actions holds
+    // the press can show it, under the pointer or not.
+    let reach = keyed
+        || ui.rect_contains_pointer(ui.available_rect_before_wrap())
+        || crate::component::mail_row::holds_press(ui.ctx(), row_id(message.id), ACTIONS);
     let built = reach.then(|| actions(message));
     let list: &[Action<'static>] = built.as_ref().map_or(&[], |built| built.as_slice());
     let drawn = arriving_row(ui, &arrival, |ui| mail_row(ui, theme, keymap, &shown, keyed, list, None));

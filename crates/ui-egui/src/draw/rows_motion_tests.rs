@@ -452,3 +452,34 @@ fn at_full_new_rows_that_come_together_decode_one_stagger_apart() {
     harness.run_steps(40);
     assert!(crate::component::tests::rests(&mut harness, 4));
 }
+
+#[test]
+fn a_hover_action_held_while_its_row_slides_up_under_the_closing_row_acts() {
+    // Pressed once the row above has begun to close, so the row slides up and out from under the pointer during the
+    // hold: the press stays the action's until it is let go.
+    let mut lost = Vec::new();
+    for (level, wait) in [(Level::Full, 13), (Level::Reduced, 1)] {
+        let mut harness = window(level);
+        let (_, next, below) = odile_selected(&mut harness);
+        harness.event(egui::Event::PointerMoved(egui::pos2(500.0, below + 20.0)));
+        harness.run();
+        press(&mut harness, Key::D);
+        harness.run_steps(wait);
+        let row = {
+            let mailbox = harness.state().mailbox();
+            let message = mailbox.messages().iter().find(|row| row.id == next).unwrap();
+            harness.get_by_label(&mailbox.spoken(message)).rect()
+        };
+        let done = harness
+            .query_all_by_role_and_label(Role::Button, "Done")
+            .map(|node| node.rect())
+            .find(|rect| row.contains(rect.center()))
+            .expect("the next row's Done, under the pointer");
+        super::card_motion_tests::hold_click(&mut harness, done.center(), 10);
+        harness.run_steps(80);
+        if harness.state().mailbox().messages().iter().any(|row| row.id == next) {
+            lost.push((level, wait));
+        }
+    }
+    assert!(lost.is_empty(), "the press on Done was lost: {lost:?}");
+}

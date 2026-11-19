@@ -182,7 +182,9 @@ fn content(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &MailRow<'_>, drawn
     let left = rect.left() + TEXT_LEFT;
     let right = rect.right() - RIGHT;
     let line = Rect::from_min_max(pos2(left, one), pos2(right, one + f.body.line));
-    let hovered = drawn.hovered;
+    // A row one of whose actions holds the press stays as hovered until the release, though it slides out from under
+    // the pointer (a row above it closing): its action is built, and the press is not lost.
+    let hovered = drawn.hovered || holds_press(ui.ctx(), row.id, actions.len());
     let reach = (hovered || keyed) && !actions.is_empty();
     let snoozed = row.marks.contains(&Mark::Snoozed);
     let time_ink = if snoozed {
@@ -211,6 +213,20 @@ fn content(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &MailRow<'_>, drawn
     // Last, so the group stands over whatever of the row lies under it.
     let shown = hover::actions_sparing(ui, theme, keymap, actions_id(row.id), actions_line.unwrap_or(line), reach, actions, row.spare);
     shown.clicked
+}
+
+/// Whether one of the first `count` hover actions of the row `row` holds the pointer's press: pressed and still down,
+/// or let go in this frame as its click. Nothing is read while no button is down or let go.
+#[must_use]
+pub fn holds_press(ctx: &egui::Context, row: Id, count: usize) -> bool {
+    if !ctx.input(|input| input.pointer.any_down() || input.pointer.any_released()) {
+        return false;
+    }
+    // At the release egui has already let the press go: the click it names is the press's end.
+    let clicked = ctx.interaction_snapshot(|interaction| interaction.clicked);
+    (0..count.min(hover::MOST))
+        .map(|n| actions_id(row).with(n))
+        .any(|id| clicked == Some(id) || ctx.read_response(id).is_some_and(|response| response.is_pointer_button_down_on()))
 }
 
 /// The id of the hover action group of the row `row`: its n-th action is `actions_id(row).with(n)`.

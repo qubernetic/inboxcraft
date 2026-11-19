@@ -50,7 +50,7 @@ pub struct Shown {
 }
 
 /// The most actions one group draws.
-const MOST: usize = 16;
+pub(crate) const MOST: usize = 16;
 
 /// The room left and right inside an action, and between its icon and its chip, in points.
 const PAD: f32 = 4.0;
