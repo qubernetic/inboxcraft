@@ -3133,10 +3133,13 @@ impl InboxApp {
         if self.editing_event() {
             return;
         }
+        let before = self.mailbox.selected();
         self.mailbox.undo();
-        // The row given back is selected again: the ring goes to it too, so the next key acts on what is marked.
+        // The row given back is selected again: the ring goes to it too, so the next key acts on what is marked. An Undo
+        // that selected nothing again leaves the ring where the owner put it.
         if let (Some(ringed), Some(back)) = (self.list_row, self.mailbox.selected())
             && ringed != back
+            && before != Some(back)
         {
             self.ring_back = Some(back);
         }

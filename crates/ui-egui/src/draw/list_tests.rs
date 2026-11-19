@@ -3647,6 +3647,30 @@ fn with_nothing_open_the_snooze_key_after_esc_from_a_rows_pointer_menu_opens_its
 }
 
 #[test]
+fn undo_of_an_act_on_the_ringed_row_leaves_the_ring_on_it() {
+    let mut harness = wide(1300.0);
+    harness.get_by_label(TEODOR).click();
+    harness.run();
+    let teodor = harness.state().reader().open_id().unwrap();
+    let odile = id_with(&harness, "Allotment rota for November");
+    menu_then_esc(&mut harness, ODILE);
+    harness.key_press(Key::R);
+    harness.run();
+    assert!(seen(&harness, odile), "R marked the ringed row read");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    harness.run();
+    harness.run();
+    assert!(!seen(&harness, odile), "Undo took the read back");
+    assert!(harness.ctx.memory(|memory| memory.has_focus(super::list::row_id(odile))), "the ring stays on the row");
+    harness.key_press(Key::D);
+    harness.run();
+    harness.run();
+    let done = |id: u64| harness.state().mailbox().messages().iter().all(|row| row.id != id || row.done);
+    assert!(done(odile), "the next D takes the ringed row");
+    assert!(harness.state().mailbox().messages().iter().any(|row| row.id == teodor && !row.done), "not the open message");
+}
+
+#[test]
 fn in_one_pane_another_account_or_search_while_reading_keys_no_row_of_the_new_list() {
     // The message in front leaves the list because the person picked another account or searched: the list comes back
     // in front, and no row of the new list is keyed for them (as beside the reader).
