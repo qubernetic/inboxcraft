@@ -34,7 +34,7 @@ pub(crate) struct Tool {
 }
 
 /// Every tool, in the order `tools/list` gives them.
-pub(crate) const TOOLS: [Tool; 5] = [
+pub(crate) const TOOLS: [Tool; 7] = [
     Tool {
         name: "mail_list",
         command: "mail.list",
@@ -84,7 +84,44 @@ they stand.",
         paged: false,
         render: render::check,
     },
+    Tool {
+        name: "week_settings",
+        command: "week.settings",
+        description: "Show how weeks are counted: the first day of the week, the first week of the year, the names each can \
+take, and the week of today.",
+        schema: no_schema,
+        read_only: true,
+        paged: false,
+        render: render::week,
+    },
+    Tool {
+        name: "sync_status",
+        command: "sync.status",
+        description: "Show how syncing stands over every account: synced, syncing, offline or failing, the folder syncs done \
+of all, the last sync and how many accounts fail. Run on a store with an account, without the app, it reads offline: no \
+worker runs there.",
+        schema: no_schema,
+        read_only: true,
+        paged: false,
+        render: render::sync,
+    },
 ];
+
+/// The tools written but not offered: what a client may read through them is the owner's decision, not taken yet.
+/// `tools/call` names one as withheld; adding it back is moving it into [`TOOLS`]. `mail_why` would tell a client
+/// the grouped inbox's group and its rule, the owner's choice for the sender, the snooze times and whether the owner
+/// wrote in the thread, which no other tool does.
+pub(crate) const WITHHELD: [Tool; 1] = [Tool {
+    name: "mail_why",
+    command: "mail.why",
+    description: "Say why a message stands where it does, at most four reasons, most specific first: a snooze, the grouped \
+inbox's rule, the owner's choice for the sender, the screener, the thread, else the folder. Each reason is a kind, a text id \
+and its values.",
+    schema: id_schema,
+    read_only: true,
+    paged: false,
+    render: render::why,
+}];
 
 /// The roles `mail_list` takes.
 pub(crate) const ROLES: [&str; 11] = ["inbox", "drafts", "sent", "archive", "junk", "trash", "all", "flagged", "screener", "snoozed", "blocked"];
@@ -113,6 +150,10 @@ fn list_schema() -> Value {
 
 fn id_schema() -> Value {
     json!({ "type": "object", "properties": { "id": id("The message.") }, "required": ["id"], "additionalProperties": false })
+}
+
+fn no_schema() -> Value {
+    json!({ "type": "object", "properties": {}, "additionalProperties": false })
 }
 
 fn search_schema() -> Value {
@@ -156,9 +197,20 @@ pub(crate) fn list() -> Vec<Value> {
 /// Runs `tools/call`. A tool that fails answers a result marked `isError`, which the model reads; only a call that
 /// names no tool is a protocol error.
 pub(crate) fn call(commands: &mut dyn Commands, params: &Value) -> Result<Value, RpcError> {
+    call_from(&TOOLS, commands, params)
+}
+
+/// [`call`] of one of `tools`.
+pub(crate) fn call_from(tools: &[Tool], commands: &mut dyn Commands, params: &Value) -> Result<Value, RpcError> {
     let name = params.get("name").and_then(Value::as_str).ok_or_else(|| RpcError::new(code::INVALID_PARAMS, "tools/call names no tool"))?;
-    let tool =
-        TOOLS.iter().find(|tool| tool.name == name).ok_or_else(|| RpcError::new(code::INVALID_PARAMS, format!("there is no tool {}", echo(name))))?;
+    let Some(tool) = tools.iter().find(|tool| tool.name == name) else {
+        let message = if WITHHELD.iter().any(|tool| tool.name == name) {
+            format!("the tool {} is not offered yet: the owner has not decided whether a client may read what it gives", echo(name))
+        } else {
+            format!("there is no tool {}", echo(name))
+        };
+        return Err(RpcError::new(code::INVALID_PARAMS, message));
+    };
     let mut arguments = match params.get("arguments") {
         None | Some(Value::Null) => json!({}),
         Some(arguments @ Value::Object(_)) => arguments.clone(),
