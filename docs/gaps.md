@@ -598,7 +598,7 @@ time from the code as it is, not measured.
   daylight saving change is off by the change, and the app still passes UTC until the computer's offset is read.
   The presets come from the caller; the scheduler's presets join with the snooze and send later screens. The
   alert switch keeps its value while the app runs, not between runs (#129).
-- The palette and the Shortcuts page list the window's own actions (`keymap::actions`), each running the engine's
+- The command line's `>` list and the Shortcuts page list the window's own actions (`keymap::actions`), each running the engine's
   commands it needs; the engine's commands that need a message, an account or other parameters are not listed one
   by one. Changing a key is not an engine command yet, so the control channel and MCP cannot change one. A key
   given to an action may also be one the window reads directly (the arrows, Escape, Enter); both then run. egui

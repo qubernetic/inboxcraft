@@ -49,7 +49,8 @@ of other open-source Rust mail clients; see [NOTICE](NOTICE).
 - **Reading mail safely:** nothing in a message runs; pictures from the web load only when you ask.
 - **Background (Linux):** keeps running with the window closed, a tray icon with the unread count, start at login,
   new mail through IMAP IDLE on the inbox, desktop notifications with Done and Mark read buttons.
-- **Keys:** a command palette (Ctrl+K) and a key for every action, changed on the Shortcuts page.
+- **Keys:** a command line (Ctrl+K or /) for search, commands, people and mailboxes, and a key for every action,
+  changed on the Shortcuts page.
 - **Agents:** `inboxcraft-cli` runs any `safe` command by id, in the running app over a local control channel or
   on a store; `inboxcraft-cli mcp` is a read-only MCP server.
 
