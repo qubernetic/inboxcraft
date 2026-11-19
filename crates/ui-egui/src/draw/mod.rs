@@ -58,7 +58,7 @@ pub use list::rows_built;
 use std::sync::Arc;
 
 use egui::{CentralPanel, Frame, Key, Margin, Panel, Rect, Ui, pos2};
-use inboxcraft_engine::appearance::{Appearance, Motion, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
@@ -960,10 +960,6 @@ impl InboxApp {
             keymap::LIGHT => self.set_mode(ModePreference::Light),
             keymap::DARK => self.set_mode(ModePreference::Dark),
             keymap::SYSTEM_MODE => self.set_mode(ModePreference::System),
-            keymap::MOTION => {
-                let reduce = !self.reduce_motion();
-                self.set_reduce_motion(reduce);
-            }
             keymap::VIEW_GROUPED => self.mailbox.set_inbox_view(InboxView::Grouped),
             keymap::VIEW_SMART => self.mailbox.set_inbox_view(InboxView::Smart),
             keymap::VIEW_LIST => self.mailbox.set_inbox_view(InboxView::List),
@@ -2357,20 +2353,15 @@ impl InboxApp {
         &mut self.keymap
     }
 
-    /// Whether every animation lands at its end at once: the owner's choice, or the system's wish where it can be
-    /// read (not on the desktop, where motion then runs).
-    #[must_use]
-    pub fn reduce_motion(&self) -> bool {
-        match self.appearance().motion {
-            Motion::Reduce => true,
-            Motion::Full => false,
-            Motion::System => motion::system_default(None),
-        }
+    /// Sets the owner's motion level, chosen, from the next frame (`ui.motion.set level=`).
+    pub fn set_motion_level(&mut self, level: motion::Level) {
+        self.appear("ui.motion.set", &json!({ "level": level.kept().id() }));
     }
 
-    /// Turns reduced motion on or off, from the next frame (`ui.motion.set`).
+    /// [`InboxApp::set_motion_level`] for a picture or a test that wants motion on or off: `reduce` is
+    /// [`motion::Level::Off`], else [`motion::Level::Full`].
     pub fn set_reduce_motion(&mut self, reduce: bool) {
-        self.appear("ui.motion.set", &json!({ "reduce": if reduce { "on" } else { "off" } }));
+        self.set_motion_level(if reduce { motion::Level::Off } else { motion::Level::Full });
     }
 
     /// Installs the fonts once, and the appearance in the context when it changed; keeps a changed appearance.
@@ -2400,7 +2391,8 @@ impl InboxApp {
     /// Draws one frame into `ui` and applies what the person asked for.
     pub fn ui(&mut self, ui: &mut Ui) {
         self.install_theme(ui.ctx());
-        motion::set_reduced(ui.ctx(), self.reduce_motion());
+        let appearance = self.appearance();
+        motion::follow(ui.ctx(), appearance.motion_level(), appearance.motion_chosen());
         self.apply_frame(ui.ctx());
         let theme = Theme::current(ui.ctx(), &Look::of(self.mailbox.appearance()));
         ui.set_style(theme.style());
@@ -2811,7 +2803,7 @@ impl InboxApp {
     /// changes what it shows. What was pressed on it.
     fn home_place(&mut self, ui: &mut Ui, theme: &Theme) -> Option<home::Asked> {
         let rect = ui.available_rect_before_wrap();
-        let level = self.motion_level();
+        let level = motion::level(ui.ctx());
         let hidden = self.discarding();
         let shown = self.home.current(&mut self.mailbox, hidden);
         let stage = home::Stage { field: &mut self.field, emblem: None, level };
@@ -2868,28 +2860,16 @@ impl InboxApp {
         None
     }
 
-    /// The level the window moves at, as the settings keep it ([`inboxcraft_engine::appearance::effective`]): the
-    /// owner's level once chosen, else none while the computer asks for less motion, else the default.
-    fn motion_level(&self) -> crate::field::Level {
-        use inboxcraft_engine::appearance::{MotionLevel, effective};
-        let appearance = self.appearance();
-        match effective(appearance.motion_level(), appearance.motion_chosen(), motion::system_default(None)) {
-            MotionLevel::Full => crate::field::Level::Full,
-            MotionLevel::Reduced => crate::field::Level::Reduced,
-            MotionLevel::Off => crate::field::Level::Off,
-        }
-    }
-
     /// The settings in the body; what was asked on them.
     fn settings_place(&mut self, ui: &mut Ui, theme: &Theme) -> Option<settings::Asked> {
-        let reduce = self.reduce_motion();
+        let level = motion::level(ui.ctx());
         let desk = self.desk_view();
         let view = settings::Sheet {
             desk,
             keymap: &self.keymap,
             settings: &mut self.settings,
             current: self.mailbox.appearance(),
-            reduce,
+            level,
             mailbox: &self.mailbox,
             onboarding: &mut self.onboarding,
             can_add: self.can_add,
@@ -3223,7 +3203,7 @@ impl InboxApp {
         match asked {
             settings::Asked::Mode(mode) => self.set_mode(mode),
             settings::Asked::Scale(scale) => self.set_text_scale(scale),
-            settings::Asked::ReduceMotion(reduce) => self.set_reduce_motion(reduce),
+            settings::Asked::Motion(level) => self.set_motion_level(level),
             settings::Asked::Frame(frame) => self.set_frame(frame),
             settings::Asked::Section(section) => self.settings.show(section),
             settings::Asked::Add => self.onboarding.open(),

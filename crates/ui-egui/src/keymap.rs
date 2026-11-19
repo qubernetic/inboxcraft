@@ -94,9 +94,6 @@ pub const VIEW_SMART: &str = "ui.view.smart";
 /// Show the inbox as one list by time.
 pub const VIEW_LIST: &str = "ui.view.list";
 
-/// Turn reduced motion on or off (`ui.motion.set`).
-pub const MOTION: &str = "ui.motion.toggle";
-
 /// Write a new message (`compose.new`), or bring back the one being written.
 pub const COMPOSE: &str = "ui.compose.new";
 
@@ -268,7 +265,6 @@ pub fn actions() -> Vec<Action> {
         action(LIGHT, tr!("Light mode"), IconId::Palette),
         action(DARK, tr!("Dark mode"), IconId::Palette),
         action(SYSTEM_MODE, tr!("Mode of the system"), IconId::Palette),
-        action(MOTION, tr!("Reduce motion on or off"), IconId::Palette),
         action(VIEW_GROUPED, tr!("Inbox view: Grouped"), IconId::Inbox),
         action(VIEW_SMART, tr!("Inbox view: Smart"), IconId::Inbox),
         action(VIEW_LIST, tr!("Inbox view: List"), IconId::Inbox),

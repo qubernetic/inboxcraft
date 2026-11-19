@@ -7,7 +7,7 @@ use std::path::Path;
 
 use egui::vec2;
 use egui_kittest::Harness;
-use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, Motion, MotionLevel, ThemeMode, WindowFrame};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::json;
 
@@ -58,13 +58,13 @@ fn every_choice_persists_across_a_restart() {
     assert_eq!(app.mode(), ModePreference::Dark);
     assert_eq!(app.appearance().frame, WindowFrame::Own);
     assert_eq!(app.text_scale(), TextScale::from_percent(120).unwrap());
-    assert!(app.reduce_motion());
+    assert_eq!(app.appearance().motion_level(), MotionLevel::Off);
     // The restarted window draws with them from its first frame.
     assert_eq!(Mode::of(&restarted.ctx), Mode::Dark);
     let expected = Theme::of(Mode::Dark, &Look::of(&chosen)).style();
     assert_eq!(restarted.ctx.style_of(egui::Theme::Dark).text_styles, expected.text_styles);
     assert_eq!(restarted.ctx.style_of(egui::Theme::Dark).visuals.panel_fill, expected.visuals.panel_fill);
-    assert!(motion::reduced(&restarted.ctx));
+    assert_eq!(motion::level(&restarted.ctx), motion::Level::Off);
 }
 
 #[test]
@@ -89,11 +89,11 @@ fn the_window_s_own_setters_run_the_commands_and_are_kept_too() {
     app.set_mode(ModePreference::Light);
     app.set_frame(WindowFrame::System);
     app.set_text_scale(TextScale::from_percent(90).unwrap());
-    app.set_reduce_motion(false);
+    app.set_motion_level(motion::Level::Full);
     harness.run();
     let kept = KeepFile::new(file.clone()).load().unwrap();
     assert_eq!(kept, *harness.state().appearance());
-    assert_eq!(kept.motion, Motion::Full);
+    assert_eq!((kept.motion_level(), kept.motion_chosen()), (MotionLevel::Full, true));
     assert_eq!(kept.text_scale, 90);
     assert_eq!(kept.frame, WindowFrame::System);
 }

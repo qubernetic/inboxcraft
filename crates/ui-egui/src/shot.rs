@@ -67,8 +67,9 @@
 //! hold, one scheduled and one the server refused, `countdown` the toast of a message just sent, `schedule` the
 //! composer with a time picked and its send-later picker open, `bounce` the bounced message open in the reader;
 //! `drafts` opens the drafts place, `empty` or `filled` with two kept drafts;
-//! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with reduced
-//! motion, so it shows where each motion ends. `steps` then drive the set window as a person would, one after
+//! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with motion at
+//! `off`, or at `reduced` where `motion` says so (both land every motion at its end today), so it shows where each
+//! motion ends. `steps` then drive the set window as a person would, one after
 //! another: a `key`, `tab` or `shift_tab` presses, `focus` or `press` a control by its accessible name ([`Step`]);
 //! the picture is taken when the window rests after the last.
 
@@ -237,6 +238,10 @@ pub struct Shot {
     /// Whether `act` (`done` or `delete`) is caught with its row sliding out, before the toast.
     #[serde(default)]
     pub slide: Option<bool>,
+    /// The motion level chosen, `reduced` or `off` (`off` when left out); `full` is refused, the picture shows
+    /// where each motion ends.
+    #[serde(default)]
+    pub motion: Option<String>,
     /// Every icon in every style instead of the window.
     #[serde(default)]
     pub icons: Option<bool>,
@@ -873,6 +878,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.act.is_some()
         || shot.sync.is_some()
         || shot.slide.is_some()
+        || shot.motion.is_some()
         || shot.text_scale.is_some()
         || shot.size.is_some()
         || shot.frame.is_some()
@@ -1759,7 +1765,12 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if shot.first == Some(true) {
         app = app.with_accounts(Arc::new(Pictured), Box::new(Proposed::new(pictured_proposal())), Box::new(Scripted::passing()));
     }
-    app.set_reduce_motion(true);
+    let level = match shot.motion.as_deref() {
+        None | Some("off") => motion::Level::Off,
+        Some("reduced") => motion::Level::Reduced,
+        Some(other) => return Err(bad(format!("{}: motion {other} is not reduced or off", shot.out))),
+    };
+    app.set_motion_level(level);
     if let Some(name) = &shot.frame {
         let frame = WindowFrame::read(name)
             .filter(|frame| *frame != WindowFrame::System)
