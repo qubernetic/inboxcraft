@@ -327,6 +327,21 @@ fn a_rect_a_cell_wider_builds_again_and_the_warm_cells_keep_their_glyphs() {
 }
 
 #[test]
+fn pixels_per_point_that_are_not_usable_build_once() {
+    // Stored sanitised and compared with what is stored: not built again on every frame.
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    for ppp in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+        let mut field = Field::new(7);
+        for _ in 0..5 {
+            field.build(RECT, TextScale::default(), None, ppp);
+            field.lay_out(&theme);
+        }
+        assert_eq!(field.builds, 1, "{ppp}: built again on every frame");
+        assert!(field.cells.as_ref().unwrap().held.is_empty(), "{ppp}: cells built");
+    }
+}
+
+#[test]
 fn a_4k_field_builds_without_a_spike() {
     use inboxcraft_time::{Clock as _, SystemClock};
     let clock = SystemClock::new();

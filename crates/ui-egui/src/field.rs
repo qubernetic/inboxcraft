@@ -244,7 +244,6 @@ impl Cells {
 #[derive(Debug, Clone)]
 struct Look {
     mode: Mode,
-    ppp: f32,
     build: u32,
     rows: Vec<Option<LayoutJob>>,
     emblem_rows: Vec<Option<LayoutJob>>,
@@ -308,10 +307,11 @@ impl Field {
         self.builds = self.builds.saturating_add(1);
     }
 
-    /// Builds the row texts again if they were built for another build, mode or pixels per point.
-    fn lay_out(&mut self, theme: &Theme, ppp: f32) {
+    /// Builds the row texts again if they were built for another build or mode (new pixels per point build the cells
+    /// again).
+    fn lay_out(&mut self, theme: &Theme) {
         let Some(cells) = &self.cells else { return };
-        let fresh = self.look.as_ref().is_some_and(|look| look.mode == theme.mode && look.ppp == ppp && look.build == self.builds);
+        let fresh = self.look.as_ref().is_some_and(|look| look.mode == theme.mode && look.build == self.builds);
         if fresh {
             return;
         }
@@ -334,7 +334,7 @@ impl Field {
             _ => Vec::new(),
         };
         self.layouts = self.layouts.saturating_add(layouts);
-        self.look = Some(Look { mode: theme.mode, ppp, build: self.builds, rows, emblem_rows });
+        self.look = Some(Look { mode: theme.mode, build: self.builds, rows, emblem_rows });
     }
 
     /// Flips the cells within the level's reach of `pointer` and cools those it has left, at input time `now`.
@@ -465,7 +465,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, field: &mut Field, rect: Rect, level: Le
     let ctx = ui.ctx().clone();
     let ppp = ctx.pixels_per_point();
     field.build(rect, theme.text_scale, opts.emblem, ppp);
-    field.lay_out(theme, ppp);
+    field.lay_out(theme);
     let (now, pointer) = ui.input(|input| (input.time, input.pointer.hover_pos()));
     field.update(now, pointer, level, opts.on_home);
     if field.cooling() {
