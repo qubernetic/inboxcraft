@@ -1446,7 +1446,8 @@ impl InboxApp {
     /// `focused` a key without Command, Ctrl or Alt runs nothing, so a letter typed is typed, and Undo is the field's;
     /// the list's keys run only while it has the keyboard (`listing`). A key that may not run is not taken.
     fn pressed(&self, ctx: &egui::Context, surfaces: &Surfaces, focused: bool, listing: bool) -> Vec<&'static str> {
-        let toasted = self.mailbox.undoable().is_some_and(|undo| undo.undoable) || self.counting().is_some();
+        // A discard waiting behind its toast takes Undo too, on every place ([`InboxApp::discard_draft`]).
+        let toasted = self.mailbox.undoable().is_some_and(|undo| undo.undoable) || self.counting().is_some() || self.discarding.is_some();
         keymap::actions()
             .into_iter()
             .map(|action| action.id)

@@ -736,3 +736,32 @@ fn a_switch_to_another_draft_is_refused_while_the_one_being_written_cannot_be_ke
     assert!(harness.state().mailbox().error().is_some(), "the owner is told");
     assert_eq!(harness.ctx.memory(|memory| memory.focused()), subject, "the keys stay where they were");
 }
+
+/// Off Home the waiting discard's toast still takes Ctrl+Z: on the mail and on the calendar, with an older act in the
+/// history whose own toast has ended, the key brings the draft back and leaves the older act alone. Before the fix
+/// the window's Undo took the key first: the older act came back and the draft was discarded all the same.
+#[test]
+fn off_home_ctrl_z_brings_the_discarded_draft_back_and_not_an_older_act() {
+    for (name, place) in [("mail", InboxApp::show_mail as fn(&mut InboxApp)), ("calendar", InboxApp::show_calendar)] {
+        let mut app = sample_app(&clock());
+        let older = draft(&mut app, "Workshop dates");
+        let archived = app.mailbox().messages().first().map(|row| row.id).unwrap();
+        app.mailbox_mut().act(archived, crate::mailbox::Act::Archive);
+        let mut harness = window(app);
+        wait_out_the_toast(&mut harness);
+        assert!(harness.state().mailbox().can_undo() && harness.state().mailbox().undoable().is_none(), "{name}");
+        press_discard(&mut harness, "Workshop dates");
+        place(harness.state_mut());
+        harness.run();
+        harness.get_by_label("Draft discarded");
+        command(&mut harness, Key::Z);
+        harness.run();
+        assert_eq!(harness.state().discarding(), None, "{name}: Ctrl+Z took back the discard");
+        assert!(harness.state().mailbox().can_undo(), "{name}: the older act is still in the history");
+        wait_out_the_toast(&mut harness);
+        assert!(exists(harness.state_mut(), older), "{name}: the draft is kept");
+        harness.state_mut().show_mail();
+        harness.run();
+        assert!(harness.state().mailbox().messages().iter().all(|row| row.id != archived), "{name}: still archived");
+    }
+}
