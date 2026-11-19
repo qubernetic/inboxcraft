@@ -345,12 +345,14 @@ struct Goes {
     whole: String,
     /// The lines drawn, top down.
     lines: Vec<std::sync::Arc<egui::Galley>>,
+    /// The caption's line height: each row of the lines takes one.
+    line: f32,
 }
 
 impl Goes {
-    /// Its height: the lines' own.
+    /// Its height: a caption line for each row.
     fn high(&self) -> f32 {
-        self.lines.iter().map(|line| line.size().y).sum()
+        self.lines.iter().map(|line| line.rows.len().max(1) as f32 * self.line).sum()
     }
 }
 
@@ -359,7 +361,7 @@ fn goes_line(ui: &Ui, theme: &Theme, to: &str, not_from_organiser: bool, room: f
     let (f, p) = (&theme.fonts, &theme.palette);
     if !not_from_organiser {
         let whole = tr!("Your answer goes to {address} at once.", address = to);
-        return Goes { lines: vec![super::fitted(ui, &whole, f.caption, p.muted, room)], whole };
+        return Goes { lines: vec![super::fitted(ui, &whole, f.caption, p.muted, room)], whole, line: f.caption.line };
     }
     let lead = tr!("Your answer goes at once to the organiser, not to the sender:");
     let whole = tr!("{lead} {address}", lead = lead, address = to);
@@ -371,11 +373,11 @@ fn goes_line(ui: &Ui, theme: &Theme, to: &str, not_from_organiser: bool, room: f
         .map(|words| super::fitted(ui, words, f.caption, p.muted, f32::INFINITY))
         .find(|one| one.size().x <= room);
     if let Some(one) = fits {
-        return Goes { lines: vec![one], whole };
+        return Goes { lines: vec![one], whole, line: f.caption.line };
     }
     let lead = super::wrapped(ui, &super::plain(short_lead), f.caption, p.muted, room, 2, Align::LEFT);
     let address = super::fitted(ui, to, f.caption, p.muted, room);
-    Goes { lines: vec![lead, address], whole }
+    Goes { lines: vec![lead, address], whole, line: f.caption.line }
 }
 
 /// The part of a card under its facts; what was pressed.
@@ -391,8 +393,13 @@ fn lower(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &CardState<'_>, par
         said(ui, Rect::from_min_size(pos2(rect.left(), top), vec2(wide, goes.high())), &goes.whole, ("goes", 0));
         let mut at = top;
         for line in &goes.lines {
-            let high = line.size().y;
-            paint::rows_at(ui.painter(), pos2(rect.left(), at), rect.width(), line.clone(), p.muted);
+            let high = line.rows.len().max(1) as f32 * goes.line;
+            // A line of one row as the card always drew it; the wrapped lead-in row by row.
+            if line.rows.len() > 1 {
+                paint::rows_at(ui.painter(), pos2(rect.left(), at), rect.width(), line.clone(), p.muted);
+            } else {
+                paint::run_at(ui.painter(), pos2(rect.left(), at), line.clone(), p.muted);
+            }
             at += high;
         }
     };
