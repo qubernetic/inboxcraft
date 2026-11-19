@@ -2121,20 +2121,20 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
             });
             ui.spacing_mut().item_spacing.y = CARD_GAP;
             // The cards just answered, while they leave (M11): each at its place in the queue, as far as it has gone.
-            let leaving: Vec<(Answered, Gone, f32)> = answered(ui.ctx(), &askers)
+            let leaving: Vec<(Answered, Gone)> = answered(ui.ctx(), &askers)
                 .into_iter()
                 .map(|left| {
-                    let (gone, tint) = answer_gone(ui.ctx(), theme, &left);
-                    (left, gone, tint)
+                    let gone = answer_gone(ui.ctx(), theme, &left);
+                    (left, gone)
                 })
                 .collect();
-            let still: Vec<Answered> = leaving.iter().filter(|(_, gone, _)| gone.closed < 1.0).map(|(left, ..)| left.clone()).collect();
+            let still: Vec<Answered> = leaving.iter().filter(|(_, gone)| gone.closed < 1.0).map(|(left, _)| left.clone()).collect();
             ui.data_mut(|data| data.insert_temp(answered_id(), still));
-            let holding = leaving.iter().any(|(left, gone, _)| left.at == 0 && gone.closed <= 0.0);
+            let holding = leaving.iter().any(|(left, gone)| left.at == 0 && gone.closed <= 0.0);
             let mut answers = Vec::new();
             for index in 0..=askers.len() {
-                for (left, gone, tint) in leaving.iter().filter(|(left, ..)| left.at.min(askers.len()) == index) {
-                    leaving_card(ui, theme, keymap, mailbox, left, *gone, *tint);
+                for (left, gone) in leaving.iter().filter(|(left, _)| left.at.min(askers.len()) == index) {
+                    leaving_card(ui, theme, keymap, mailbox, left, *gone);
                 }
                 let Some(asker) = askers.get(index) else { break };
                 // The next card becomes the current one when the answered one has faded.
@@ -2142,7 +2142,7 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
                 let (act, high) = sender_card(ui, theme, keymap, mailbox, asker, current, None);
                 if let Some(act) = act {
                     rows.acted.set(Some((asker.newest.id, act)));
-                    if !motion::reduced(ui.ctx()) {
+                    if motion::level(ui.ctx()) != motion::Level::Off {
                         answers.push(Answered { row: asker.newest.clone(), more: asker.more, at: index, keep_out: act == Act::Block, high, current });
                     }
                 }
@@ -2171,7 +2171,7 @@ struct Answered {
     keep_out: bool,
     /// The card's height, in points.
     high: f32,
-    /// It was the current card (its edge `cyan_edge`, from which the answer's colour eases in).
+    /// It was the current card: drawn as it was while it leaves, its edge in the answer's colour.
     current: bool,
 }
 
@@ -2185,9 +2185,6 @@ fn forget_answered(ctx: &egui::Context) {
     ctx.data_mut(|data| data.remove::<Vec<Answered>>(answered_id()));
 }
 
-/// How long a card answered shows its answer's colour before it fades, in seconds (the presentation's 160 ms).
-const ANSWER_HOLD: f32 = 0.16;
-
 /// The cards answered and still leaving, but those whose sender still waits (the answer failed): none is drawn twice.
 fn answered(ctx: &egui::Context, askers: &[Asker<'_>]) -> Vec<Answered> {
     let left = ctx.data(|data| data.get_temp::<Vec<Answered>>(answered_id())).unwrap_or_default();
@@ -2199,24 +2196,34 @@ fn answered(ctx: &egui::Context, askers: &[Asker<'_>]) -> Vec<Answered> {
         .collect()
 }
 
-/// How far the answered card has gone in this frame, as the presentation plays M11 at the reduced level: its edge
-/// eases to the answer's colour over `fast` (CSS's `ease`) and holds it until [`ANSWER_HOLD`], it fades over `fast` at
-/// an even pace, then its place closes over `fast` on the design's curve. Repaints are asked for until it has gone.
-/// The share of the edge's colour comes with it.
-fn answer_gone(ctx: &egui::Context, theme: &Theme, left: &Answered) -> (Gone, f32) {
-    let (hold, fade, close) = (ANSWER_HOLD, theme.motion.fast, theme.motion.fast);
-    let whole = hold + fade + close;
+/// How far the answered card has gone in this frame (`docs/design.md`, "Motion", M11): its edge takes the answer's
+/// colour in the frame of the answer. At full it leaves its slot 24 up (Let in) or down (Keep out) on the curve, fading
+/// at an even pace, over `medium`; at reduced it fades over `fast` in its place. Then its slot closes over
+/// `row_collapse` on the curve and the next card steps up. At off, and once a key or a click came during it, it has
+/// gone. Repaints are asked for until it has.
+fn answer_gone(ctx: &egui::Context, theme: &Theme, left: &Answered) -> Gone {
+    let (fast, close) = (f64::from(theme.motion.fast), f64::from(theme.motion.row_collapse));
+    let level = motion::level(ctx);
+    let out = match level {
+        motion::Level::Full => motion::MEDIUM,
+        motion::Level::Reduced => fast,
+        motion::Level::Off => return Gone::END,
+    };
     let id = Id::unique("queue-leaving").with(left.row.address.to_lowercase());
-    let at = motion::elapsed(ctx, id, whole) * whole;
-    let share = |from: f32, span: f32| if span > 0.0 { ((at - from) / span).clamp(0.0, 1.0) } else { 1.0 };
-    let tint = motion::css_ease(share(0.0, theme.motion.fast));
-    (Gone::closing(motion::ease(share(hold + fade, close)), share(hold, fade)), tint)
+    let Some(age) = motion::run(ctx, id, out + close) else { return Gone::END };
+    let faded = motion::part(age, 0.0, out);
+    let mut gone = Gone::closing(motion::ease(motion::part(age, out, close)), faded);
+    if level == motion::Level::Full {
+        let way = if left.keep_out { SLIDE } else { -SLIDE };
+        gone.shift = way * motion::ease(faded);
+    }
+    gone
 }
 
-/// Draws the card `left` answered as far as it has `gone`: whole in its answer's colour, fading, then only the room it
-/// leaves, closing. What is pressed on it does nothing: it was answered. `tint`: how far its edge has eased from its
-/// own colour to the answer's.
-fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, left: &Answered, gone: Gone, tint: f32) {
+/// Draws the card `left` answered as far as it has `gone`: in its slot, edged in its answer's colour, moved and faded
+/// as far as it has gone and cut by the slot; then only the room it leaves, closing. What is pressed on it does
+/// nothing: it was answered.
+fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, left: &Answered, gone: Gone) {
     if gone.closed > 0.0 {
         // The card's place and the gap under it close together; the next card steps up into them.
         let room = (left.high + CARD_GAP) * (1.0 - gone.closed);
@@ -2226,14 +2233,15 @@ fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, 
         return;
     }
     let p = &theme.palette;
-    let answer = if left.keep_out { p.minus } else { p.plus };
-    let from = if left.current { p.cyan_edge } else { p.line };
-    let edge = if tint >= 1.0 { answer } else { from.lerp_to_gamma(answer, tint.clamp(0.0, 1.0)) };
+    let edge = if left.keep_out { p.minus } else { p.plus };
     let asker = Asker { newest: &left.row, more: left.more };
-    ui.scope(|ui| {
-        ui.multiply_opacity(1.0 - gone.faded);
-        let _ = sender_card(ui, theme, keymap, mailbox, &asker, left.current, Some(edge));
-    });
+    let high = if left.high.is_finite() { left.high.max(0.0) } else { 0.0 };
+    let (slot, _) = ui.allocate_exact_size(vec2(ui.available_width(), high), Sense::hover());
+    let shift = if gone.shift.is_finite() { gone.shift } else { 0.0 };
+    let mut card = ui.new_child(UiBuilder::new().max_rect(slot.translate(vec2(0.0, shift))).id_salt(("leaving-card", left.at)));
+    card.shrink_clip_rect(slot);
+    card.multiply_opacity(1.0 - gone.faded.clamp(0.0, 1.0));
+    let _ = sender_card(&mut card, theme, keymap, mailbox, &asker, left.current, Some(edge));
 }
 
 /// [`sender_card`] for `newest`, the current one, in whatever room `ui` gives: its height (the tests' hostile rooms).
@@ -2647,3 +2655,7 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
 #[cfg(test)]
 #[path = "rows_motion_tests.rs"]
 mod rows_motion_tests;
+
+#[cfg(test)]
+#[path = "card_motion_tests.rs"]
+mod card_motion_tests;
