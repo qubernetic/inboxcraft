@@ -344,11 +344,16 @@ fn back_today(mailbox: &mut Mailbox, today: Option<Day>, offset: inboxcraft_time
     u64::try_from(back).ok()
 }
 
+/// What Home asks `compose.list` for: the [`DRAFTS`] it shows; the "all drafts (N)" line reads the answer's `total`.
+fn drafts_asked() -> Value {
+    json!({ "limit": DRAFTS })
+}
+
 /// The newest [`DRAFTS`] drafts and how many there are, from `compose.list`; none when the read was refused.
 fn drafts(mailbox: &mut Mailbox) -> (Vec<DraftLine>, u64) {
-    let Ok(answer) = mailbox.run("compose.list", &json!({})) else { return (Vec::new(), 0) };
+    let Ok(answer) = mailbox.run("compose.list", &drafts_asked()) else { return (Vec::new(), 0) };
     let rows = answer.get("drafts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
-    let total = u64::try_from(rows.len()).unwrap_or(u64::MAX);
+    let total = answer.get("total").and_then(Value::as_u64).unwrap_or(0).max(u64::try_from(rows.len()).unwrap_or(u64::MAX));
     let lines = rows.iter().take(DRAFTS).filter_map(|row| draft_line(mailbox, row)).collect();
     (lines, total)
 }

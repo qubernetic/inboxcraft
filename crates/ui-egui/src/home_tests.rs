@@ -72,6 +72,20 @@ fn every_draft_is_counted_and_only_the_newest_kept() {
 }
 
 #[test]
+fn home_asks_compose_list_for_the_drafts_it_shows_and_reads_the_total() {
+    let mut mailbox = mailbox();
+    let account = mailbox.accounts().first().unwrap().id;
+    for _ in 0..5 {
+        mailbox.run("compose.new", &json!({ "account": account })).unwrap();
+    }
+    let asked = mailbox.run("compose.list", &super::drafts_asked()).unwrap();
+    assert_eq!(asked["drafts"].as_array().unwrap().len(), DRAFTS, "only what Home shows is answered");
+    let total = asked["total"].as_u64().unwrap();
+    assert!(total >= 5);
+    assert_eq!(build(&mut mailbox).drafts_total, total, "the total, not the rows answered");
+}
+
+#[test]
 fn before_the_first_account_home_is_the_first_run() {
     let store = inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default());
     let session = inboxcraft_engine::Session::new(Box::new(store), clock()).unwrap();
