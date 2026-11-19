@@ -302,6 +302,10 @@ pub(crate) fn line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, rect: Rect, show
             Part::Item(text, kind) => {
                 status_item::status_item(&mut left, theme, StatusItem::new(text, *kind));
             }
+            // At motion off a sync is one print, no bar and no share, its ring still (M9).
+            Part::Progress(..) if crate::motion::level(left.ctx()) == crate::motion::Level::Off => {
+                status_item::status_item(&mut left, theme, StatusItem::new(tr!("syncing…"), Kind::Waiting));
+            }
             Part::Progress(share, note) => {
                 progress(&mut left, theme, keymap, tr!("syncing"), ProgressState::Running(*share), note);
             }
@@ -356,3 +360,7 @@ fn tr_word(word: &str) -> &'static str {
         _ => tr!("commands"),
     }
 }
+
+#[cfg(test)]
+#[path = "sync_motion_tests.rs"]
+mod sync_motion_tests;

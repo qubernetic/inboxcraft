@@ -702,12 +702,15 @@ fn line_state(state: StepState, running: bool) -> check_step::StepState {
 }
 
 /// The steps to print and how each line stands: while the check runs, those that ended and the one under way (motion
-/// M13: a line is printed as its step starts); the steps after it are not shown yet. A check that is not running shows
-/// every step.
-pub(super) fn printed(steps: &[StepRow], running: bool) -> Vec<(&StepRow, check_step::StepState)> {
+/// M13: a line is printed as its step starts; at motion off, `still`, as it ends); the steps after it are not shown yet.
+/// A check that is not running shows every step.
+pub(super) fn printed(steps: &[StepRow], running: bool, still: bool) -> Vec<(&StepRow, check_step::StepState)> {
     let mut lines = Vec::new();
     for row in steps {
         let under_way = running && row.state == StepState::Pending;
+        if under_way && still {
+            break;
+        }
         lines.push((row, line_state(row.state, under_way)));
         if under_way {
             break;
@@ -869,7 +872,7 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
         page_error(ui, theme, keymap, onboarding);
         // The steps in a terminal box.
         let running = onboarding.outcome() == Outcome::Running;
-        let lines = printed(onboarding.steps(), running);
+        let lines = printed(onboarding.steps(), running, crate::motion::level(ui.ctx()) == crate::motion::Level::Off);
         let inner = (width - 2.0 * LIST_PAD.0 - 2.0).max(1.0);
         let shown = Frame::new().fill(p.term).inner_margin(component::margin(LIST_PAD.0 + 1.0, LIST_PAD.1 + 1.0)).show(ui, |ui| {
             ui.set_width(inner);
