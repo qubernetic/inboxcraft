@@ -63,7 +63,7 @@ pub fn spoken(control: Control, maximised: bool) -> &'static str {
         Control::Minimise => tr!("Minimise"),
         Control::Maximise if maximised => tr!("Restore"),
         Control::Maximise => tr!("Maximise"),
-        Control::Close => tr!("Close"),
+        Control::Close => tr!("Close the window"),
     }
 }
 

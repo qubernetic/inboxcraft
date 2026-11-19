@@ -157,3 +157,11 @@ fn the_window_controls_rest() {
     harness.get_by_label(spoken(Control::Close, false)).hover();
     assert!(rests(&mut harness, 8));
 }
+
+#[test]
+fn the_controls_say_what_the_title_bar_says() {
+    assert_eq!(spoken(Control::Minimise, false), "Minimise");
+    assert_eq!(spoken(Control::Maximise, false), "Maximise");
+    assert_eq!(spoken(Control::Maximise, true), "Restore");
+    assert_eq!(spoken(Control::Close, false), "Close the window", "one name for closing the window, not another Close");
+}

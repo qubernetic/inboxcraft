@@ -29,7 +29,7 @@ fn every_state_of_the_three_sets_is_on_the_page_and_tab_reaches_each() {
     let mut harness = harness(Mode::Light);
     assert_eq!(harness.query_all_by_label(spoken()).count(), FIELDS.len(), "the command field's twelve states");
     assert_eq!(harness.query_all_by_label("D done").count(), 2, "the key hint's two");
-    assert_eq!(harness.query_all_by_label("Close").count(), 6, "the window controls' six");
+    assert_eq!(harness.query_all_by_label("Close the window").count(), 6, "the window controls' six");
     assert_eq!(harness.query_all_by_label("Restore").count(), 1, "one maximised");
     let missed = keyboard_walk(&mut harness);
     assert!(missed.is_empty(), "the controls Tab never reaches: {missed:?}");
