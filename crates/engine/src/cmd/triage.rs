@@ -796,7 +796,7 @@ struct SnoozeParams {
     id: u64,
     /// The time it comes back: `2026-11-05T18:00:00Z`, with an offset, or a date (midnight UTC).
     until: Option<String>,
-    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`.
+    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`, `this_weekend`, `next_week`.
     preset: Option<String>,
 }
 
@@ -814,7 +814,7 @@ fn until(context: &Context<'_>, command: &'static str, until: Option<&str>, pres
         (Some(text), None) => {
             parse_date(text.trim()).ok_or_else(|| EngineError::bad_params(command, "until is a time such as 2026-11-05T18:00:00Z"))?
         }
-        (None, Some(name)) => presets(now, context.offsets())
+        (None, Some(name)) => presets(now, context.offsets(), context.state().week)
             .into_iter()
             .find(|(preset, _)| preset.name() == name)
             .map(|(_, at)| at)
@@ -910,7 +910,7 @@ struct FollowUpParams {
     id: u64,
     /// The time to remind at: `2026-11-05T18:00:00Z`, with an offset, or a date (midnight UTC).
     until: Option<String>,
-    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`.
+    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`, `this_weekend`, `next_week`.
     preset: Option<String>,
 }
 

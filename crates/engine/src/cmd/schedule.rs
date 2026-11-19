@@ -25,7 +25,7 @@ pub(crate) const FIELDS: &[&str] = &["id"];
 pub(crate) const PRESETS: CommandSpec = CommandSpec {
     id: "schedule.presets",
     class: Some(AgentClass::Safe),
-    summary: "List the time presets still ahead: later today, this evening, tomorrow morning",
+    summary: "List the time presets still ahead: later today, this evening, tomorrow morning, this weekend, next week",
     run: presets,
 };
 
@@ -41,7 +41,7 @@ pub(crate) const CANCEL: CommandSpec =
 fn presets(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let NoParams {} = decode(PRESETS.id, params)?;
     let presets: Vec<Value> =
-        presets_at(context.now(), context.offsets()).into_iter().map(|(preset, at)| json!({ "preset": preset.name(), "at": json::date(at) })).collect();
+        presets_at(context.now(), context.offsets(), context.state().week).into_iter().map(|(preset, at)| json!({ "preset": preset.name(), "at": json::date(at) })).collect();
     Ok(Outcome::new(json!({ "presets": presets })))
 }
 
