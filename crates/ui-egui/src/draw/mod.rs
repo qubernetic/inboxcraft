@@ -152,6 +152,8 @@ pub struct InboxApp {
     land_held: Option<u64>,
     /// The row landed on for [`InboxApp::land_held`]: its focus opens no preview.
     landed: Option<u64>,
+    /// Whether [`InboxApp::land_held`] is a row the owner's act walked on to, brought into sight before it lands.
+    bring_held: bool,
     /// The card of the grouped inbox the open message stood in when it opened (`Some(None)`: the rows no group holds;
     /// `None`: no cards), so that the keyboard stays in that card when the server takes the message away.
     card: Option<Option<String>>,
@@ -405,6 +407,7 @@ impl InboxApp {
             held_back: None,
             land_held: None,
             landed: None,
+            bring_held: false,
             card: None,
             drawn: std::sync::Arc::from(Vec::new()),
             list_row: None,
@@ -900,7 +903,16 @@ impl InboxApp {
                 ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(focused)));
             }
         }
-        // The row the keyboard landed on after the server took the open message away has the keyboard, not opened.
+        // The row the keyboard landed on after the server took the open message away has the keyboard, not opened: the
+        // row the landing gave it to, the nearest in sight when the asked one was scrolled away.
+        if let Some(wanted) = self.landed
+            && let Some(actual) = list::landed_on(ctx, wanted)
+        {
+            self.landed = Some(actual);
+            if let Some(held) = self.held_back.as_mut().filter(|held| held.land == Some(wanted)) {
+                held.land = Some(actual);
+            }
+        }
         if gained.is_some() && gained == self.landed {
             self.landed = None;
             self.list_keys = true;
@@ -950,6 +962,11 @@ impl InboxApp {
         }
         // The list's act walked on, or the server took the open message away: the keyboard lands on the row asked.
         if let Some(id) = self.land_held.take() {
+            // The row walked on to comes into sight, as a keyed one does; a removal lands in sight where the owner
+            // scrolled.
+            if std::mem::take(&mut self.bring_held) {
+                list::bring(ctx, id);
+            }
             list::land(ctx, id);
         }
         let free = ctx.memory(|memory| memory.focused().is_none()) || list::focused_row(ctx).is_some();
@@ -1439,6 +1456,7 @@ impl InboxApp {
         if walking && from_list {
             // The keyboard stays on the list: on the row walked on to.
             self.land_held = self.mailbox.selected();
+            self.bring_held = true;
         }
         // Beside the docked composer the reader is not drawn: nothing asks for its tool, and a focus in the composer
         // is left alone.
@@ -1451,6 +1469,7 @@ impl InboxApp {
             // Nor on nothing beside the docked composer: on the row walked on to, unless a widget keeps the focus (the
             // composer's text).
             self.land_held = self.mailbox.selected();
+            self.bring_held = true;
         }
         // Read by the first sync after the act, which sees what it took away: it counts once.
         self.act_by_key = false;
@@ -1459,6 +1478,7 @@ impl InboxApp {
         if let Some(gone) = open.filter(|_| gone && !owner && same_list) {
             self.land_held = self.landing_after_removal(gone);
             self.landed = self.land_held;
+            self.bring_held = false;
         }
         if let (true, false, Some(pick)) = (gone, walking, self.mailbox.selected()) {
             // The rule's row is kept, not selected: no act lands on a message that is not shown.

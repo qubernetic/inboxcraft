@@ -2642,3 +2642,168 @@ fn type_into_text(harness: &mut Harness<'static, InboxApp>, text: &str) {
     harness.event(egui::Event::Text(text.to_owned()));
     harness.run();
 }
+
+/// Turns the wheel over the list by `points` (down when positive) and lets it settle.
+fn wheel_list(harness: &mut Harness<'static, InboxApp>, points: f32) {
+    let view = super::list::view_rect(&harness.ctx).unwrap();
+    harness.hover_at(view.center());
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -points),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+        modifiers: egui::Modifiers::NONE,
+    });
+    settle(harness);
+}
+
+/// Whether the row of `id` is drawn wholly in the list's viewport.
+fn in_sight(harness: &Harness<'static, InboxApp>, id: u64) -> bool {
+    let view = super::list::view_rect(&harness.ctx).unwrap();
+    let mailbox = harness.state().mailbox();
+    let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return false };
+    harness
+        .query_all_by_role(Role::ListBoxOption)
+        .any(|node| node.accesskit_node().label().is_some_and(|label| label == mailbox.spoken(row)) && view.contains_rect(node.rect()))
+}
+
+/// How the open row was reached before it went out of sight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reached {
+    /// The owner pressed it: opened and read.
+    Opened,
+    /// Tab walked to it: a preview.
+    Keyed,
+    /// Shift Tab from the docked composer's From walked to it: a preview beside the composer.
+    BesideComposer,
+}
+
+/// A window 1300 × 420 in `view` with the first row of the list reached as `how`, then the list wheeled `away` so far
+/// that the row is out of sight.
+fn reached_and_wheeled(view: crate::mailbox::InboxView, how: Reached, away: f32) -> (Harness<'static, InboxApp>, u64) {
+    let (mut harness, open) = reached(view, how);
+    wheel_list(&mut harness, away);
+    if in_sight(&harness, open) {
+        // A row at the list's foot (Shift Tab from the composer lands there): away is up.
+        wheel_list(&mut harness, -2.0 * away);
+    }
+    assert!(!in_sight(&harness, open), "{view:?} {how:?} {away}: the open row is out of sight");
+    (harness, open)
+}
+
+/// A window 1300 × 420 in `view` with the first row of the list reached as `how`; the open message.
+fn reached(view: crate::mailbox::InboxView, how: Reached) -> (Harness<'static, InboxApp>, u64) {
+    let mut harness = inbox_at(1300.0, view, how == Reached::BesideComposer);
+    harness.set_size(vec2(1300.0, 420.0));
+    settle(&mut harness);
+    match how {
+        Reached::Opened => {
+            let first = super::list::order(&harness.ctx).first().copied().unwrap();
+            let row = harness.state().mailbox().messages().iter().find(|row| row.id == first).unwrap().clone();
+            row_node(&harness, &row.subject).click();
+            settle(&mut harness);
+        }
+        Reached::Keyed => {
+            for _ in 0..60 {
+                if super::list::focused_row(&harness.ctx).is_some() {
+                    break;
+                }
+                harness.key_press(Key::Tab);
+                harness.run();
+            }
+            settle(&mut harness);
+        }
+        Reached::BesideComposer => {
+            type_into_text(&mut harness, "Hello Odile");
+            harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("compose-from")));
+            harness.run();
+            harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+            settle(&mut harness);
+        }
+    }
+    let open = harness.state().reader().open_id().unwrap();
+    (harness, open)
+}
+
+/// The server takes away the open message whose row the owner scrolled out of sight: nothing opens, nothing is read,
+/// a docked composer stays docked, and the keyboard is on a row the list draws.
+#[test]
+fn a_server_removal_of_a_row_out_of_sight_opens_nothing() {
+    use crate::mailbox::InboxView;
+    for view in [InboxView::Grouped, InboxView::Smart, InboxView::List] {
+        for how in [Reached::Opened, Reached::Keyed, Reached::BesideComposer] {
+            for away in [400.0, 3000.0] {
+                let (mut harness, open) = reached_and_wheeled(view, how, away);
+                let seen: Vec<(u64, bool)> =
+                    harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).filter(|(id, _)| *id != open).collect();
+                server_removes(&mut harness, open);
+                let what = format!("{view:?} {how:?} {away}");
+                assert_eq!(harness.state().reader().open_id(), None, "{what}: nothing is opened or previewed");
+                assert_eq!(harness.state().mailbox().selected(), None, "{what}: nothing is selected");
+                let now: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect();
+                assert_eq!(now, seen, "{what}: nothing is read");
+                let focused = super::list::focused_row(&harness.ctx);
+                assert!(focused.is_some_and(|id| super::list::order(&harness.ctx).contains(&id)), "{what}: the keyboard is on a drawn row");
+                if how == Reached::BesideComposer {
+                    let composer = harness.state().composer().unwrap();
+                    assert!(!composer.floating() && composer.text() == "Hello Odile", "{what}: the composer stays docked, the draft whole");
+                }
+                // A step from there opens nothing by itself either.
+                settle(&mut harness);
+                assert_eq!(harness.state().reader().open_id(), None, "{what}: still nothing opened");
+            }
+        }
+    }
+}
+
+/// The owner's own act on a message it opened, its row then scrolled out of sight.
+#[derive(Debug, Clone, Copy)]
+enum OwnersAct {
+    Done,
+    Delete,
+    Snooze,
+    Move,
+}
+
+/// Does `act` on the open message as the owner does from the list: its key, or the act the picker starts.
+fn owners_act(harness: &mut Harness<'static, InboxApp>, act: OwnersAct) {
+    let open = harness.state().reader().open_id().unwrap();
+    match act {
+        OwnersAct::Done => harness.key_press(Key::D),
+        OwnersAct::Delete => harness.key_press(Key::Delete),
+        OwnersAct::Snooze => {
+            let until = Timestamp::from_unix(1_793_869_200 + 86_400, 0).unwrap();
+            harness.state_mut().mailbox_mut().start(open, crate::mailbox::Act::Snooze(until));
+        }
+        OwnersAct::Move => {
+            let mailbox = harness.state().mailbox();
+            let row = mailbox.messages().iter().find(|row| row.id == open).unwrap();
+            let to = mailbox.folders_of(row.account).into_iter().find(|folder| folder.id != row.folder).unwrap().id;
+            harness.state_mut().mailbox_mut().start(open, crate::mailbox::Act::Move(to));
+        }
+    }
+    settle(harness);
+    settle(harness);
+}
+
+/// The owner's act walks on to the rule's next row and opens it, whether the acted row is in sight or scrolled away.
+#[test]
+fn the_owner_s_act_on_a_row_out_of_sight_walks_on_to_the_same_row_as_in_sight() {
+    use crate::mailbox::InboxView;
+    for view in [InboxView::Grouped, InboxView::Smart, InboxView::List] {
+        for act in [OwnersAct::Done, OwnersAct::Delete, OwnersAct::Snooze, OwnersAct::Move] {
+            // In sight first: where the walk goes today.
+            let (mut harness, open) = reached(view, Reached::Opened);
+            owners_act(&mut harness, act);
+            let walked = harness.state().reader().open_id();
+            assert!(walked.is_some_and(|id| id != open), "{view:?} {act:?}: in sight the act walks on");
+            // Out of sight: the same row opens, and is read.
+            let (mut harness, gone) = reached_and_wheeled(view, Reached::Opened, 3000.0);
+            assert_eq!(gone, open);
+            owners_act(&mut harness, act);
+            assert_eq!(harness.state().reader().open_id(), walked, "{view:?} {act:?}: out of sight it walks on to the same row");
+            assert!(read(&harness, walked.unwrap()), "{view:?} {act:?}: and reads it");
+            assert_eq!(super::list::focused_row(&harness.ctx), walked, "{view:?} {act:?}: the keyboard on it");
+        }
+    }
+}

@@ -1621,7 +1621,21 @@ fn land_now(ui: &Ui, listing: &Listing<'_>, kept: Option<&Kept>, forced: Option<
     };
     if let Some(target) = target {
         ctx.memory_mut(|memory| memory.request_focus(row_id(target)));
+        ctx.data_mut(|data| data.insert_temp(landed_on_id(), (wanted, target)));
     }
+}
+
+/// The row a landing asked for `wanted` ([`land`]) actually gave the keyboard to, taken once: `wanted`, or the
+/// nearest row in sight when its own was not.
+pub(super) fn landed_on(ctx: &egui::Context, wanted: u64) -> Option<u64> {
+    let (_, target) = ctx.data(|data| data.get_temp::<(u64, u64)>(landed_on_id())).filter(|(asked, _)| *asked == wanted)?;
+    ctx.data_mut(|data| data.remove::<(u64, u64)>(landed_on_id()));
+    Some(target)
+}
+
+/// Where [`landed_on`] is kept.
+fn landed_on_id() -> Id {
+    Id::unique("list-landed-on")
 }
 
 /// Hundredths of a point, which [`Kept`] compares exactly.
