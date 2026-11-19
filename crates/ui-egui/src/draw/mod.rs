@@ -47,6 +47,7 @@ mod palette;
 mod pane;
 mod reader;
 pub(crate) use reader::fitted_board;
+mod index;
 mod settings;
 mod shell;
 
