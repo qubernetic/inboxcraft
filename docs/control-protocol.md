@@ -99,6 +99,11 @@ that is:
 - the appearance (`ui.*.set`) and, in the sample mailbox, `sample.mail.set`; `ui.motion.set` takes `level`
   (`full`, `reduced` or `off`), and for one release still the older `reduce` (`on`, `off` or `system`, which hands
   the choice back to the computer); its answer has `motion_level` and `motion_chosen` beside the older `motion`;
+- `ui.settings.open`, which shows the settings in the window: on the page its optional `page` names (`appearance`,
+  `accounts`, `notifications`, `triage`, `sending`, `calendar`, `shortcuts`, `privacy` or `about`), also while they
+  show; without `page`, as their key: shown on the page last shown, or, while they show, the place the owner came
+  from. A `page` that names none (another case, a planned page, junk) shows the page last shown; the answer's `page`
+  is the page asked for or `null`;
 - snooze, park and pin, as they land.
 
 `sync.status` reads how syncing stands in the app, from what its workers told: the state, the folder syncs done of

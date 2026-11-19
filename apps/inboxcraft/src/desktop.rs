@@ -236,6 +236,8 @@ impl Desktop {
             }
             call.answer(answer.map_err(|error| Failure::new(error.code(), error.to_string())));
         }
+        // `ui.settings.open` asks the window to show the settings: shown here, as the window's own key shows them.
+        self.app.follow_settings_asked();
         self.app.pump();
         let notices = self.app.mailbox_mut().take_notices();
         if let Some(deliver) = self.deliver.as_mut() {

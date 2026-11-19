@@ -1523,6 +1523,11 @@ impl Mailbox {
         Some(due.duration_since(self.clock.now()).filter(|left| !left.is_zero()).unwrap_or(OVERDUE_WAKE))
     }
 
+    /// What commands asked the window to show since the last call ([`Session::take_settings_asked`]), oldest first.
+    pub fn take_settings_asked(&mut self) -> Vec<inboxcraft_engine::shown::SettingsAsked> {
+        self.session.take_settings_asked()
+    }
+
     /// What the engine has to tell the owner since the last call ([`Session::take_notices`]), for the desktop to show.
     pub fn take_notices(&mut self) -> Vec<Notice> {
         self.hear();

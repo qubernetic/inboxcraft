@@ -1044,6 +1044,23 @@ pub(super) fn place(ui: &mut Ui, theme: &Theme, mut view: Sheet<'_>) -> Option<A
     asked
 }
 
+/// `ui.settings.open` with a page, as the palette's rows and the empty calendar's button run it, and the asks of the
+/// command whoever ran it (the control channel's too).
+impl super::InboxApp {
+    /// Shows what `ui.settings.open` asked for since the last look, in order: the page named, while the settings show
+    /// too, and the page last shown for a page that names none; without a page, as their key: the settings on the page
+    /// last shown, or, while they show, the place the owner came from.
+    pub fn follow_settings_asked(&mut self) {
+        for asked in self.mailbox.take_settings_asked() {
+            if asked.bare && self.settings.is_open() {
+                self.leave_settings();
+            } else {
+                self.open_settings_page(asked.page);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "settings_page_tests.rs"]
 mod page_tests;

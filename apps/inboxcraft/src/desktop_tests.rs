@@ -426,6 +426,40 @@ fn a_control_call_runs_for_an_agent_with_or_without_a_window() {
     drop(send);
 }
 
+/// Runs `ui.settings.open` with `params` over the control channel and ticks; its answer.
+fn open_settings(desktop: &mut Desktop, calls: &mpsc::Sender<Call>, params: serde_json::Value) -> serde_json::Value {
+    let (open, answer) = call("ui.settings.open", params);
+    calls.send(open).unwrap();
+    tick(desktop, &egui::Context::default(), false);
+    answer.try_recv().unwrap().unwrap()
+}
+
+#[test]
+fn ui_settings_open_over_the_control_channel_shows_the_page_named() {
+    use inboxcraft_ui_egui::settings::Section;
+    let (_send, heard) = mpsc::channel();
+    let (calls, received) = mpsc::channel();
+    let mut desktop = Desktop::new(sample_app(), heard).with_control(received);
+    assert_eq!(open_settings(&mut desktop, &calls, json!({ "page": "accounts" })), json!({ "page": "accounts" }));
+    let settings = desktop.app().settings();
+    assert!(settings.is_open());
+    assert_eq!(settings.section(), Section::Accounts);
+    // A page while the settings show goes to that page: the settings stay.
+    open_settings(&mut desktop, &calls, json!({ "page": "about" }));
+    assert!(desktop.app().settings().is_open(), "a page never toggles back");
+    assert_eq!(desktop.app().settings().section(), Section::About);
+    // Junk is no page: the page last shown, the settings still shown.
+    assert_eq!(open_settings(&mut desktop, &calls, json!({ "page": "\u{202e}accounts\u{0}" })), json!({ "page": null }));
+    assert!(desktop.app().settings().is_open(), "junk is no page, and no toggle");
+    assert_eq!(desktop.app().settings().section(), Section::About, "the page last shown");
+    // The bare command is the key: shown, it shows the place the owner came from; again, the settings on their page.
+    open_settings(&mut desktop, &calls, json!({}));
+    assert!(!desktop.app().settings().is_open(), "the bare command toggles back");
+    open_settings(&mut desktop, &calls, json!(null));
+    assert!(desktop.app().settings().is_open());
+    assert_eq!(desktop.app().settings().section(), Section::About, "the page last shown");
+}
+
 #[test]
 fn a_click_on_an_alert_opens_its_event_on_the_calendar_and_brings_the_window_forward() {
     use crate::notify::Click;

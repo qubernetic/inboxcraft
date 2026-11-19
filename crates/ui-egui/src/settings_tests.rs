@@ -89,3 +89,10 @@ fn a_typed_signature_outlasts_every_way_to_another_place() {
     settings.saved_signature(1);
     assert_eq!(settings.signature(1), None, "saved, the page shows the kept one");
 }
+
+#[test]
+fn the_nine_sections_carry_the_pages_the_engine_names_in_its_order() {
+    let ids: Vec<&str> =
+        Section::ALL.iter().filter(|section| !matches!(section, Section::Ai | Section::Plugins)).map(|section| section.id()).collect();
+    assert_eq!(ids, inboxcraft_engine::shown::SETTINGS_PAGES, "one list: `ui.settings.open`'s pages are the window's sections");
+}

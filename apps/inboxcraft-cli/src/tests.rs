@@ -129,6 +129,15 @@ impl Write for Broken {
 }
 
 #[test]
+fn ui_settings_open_goes_to_the_running_app_with_its_page() {
+    let (code, out, _) = run_with(&["commands"]);
+    assert_eq!(code, 0);
+    assert!(out.lines().any(|line| line.starts_with("ui.settings.open ") && line.contains(" safe ")), "{out}");
+    let asked = Request::Run { store: None, id: "ui.settings.open".to_owned(), params: json!({ "page": "accounts" }) };
+    assert_eq!(parsed(&["ui.settings.open", r#"{"page":"accounts"}"#]), Ok(asked));
+}
+
+#[test]
 fn a_closed_output_is_an_error_code_not_a_panic() {
     let mut err = Vec::new();
     assert_eq!(run([OsString::from("--version")], &mut Broken, &mut err), 1);
