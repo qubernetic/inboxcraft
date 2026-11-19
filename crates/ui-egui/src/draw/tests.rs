@@ -463,13 +463,12 @@ fn nothing_repaints_while_nothing_moves() {
         let mut harness = harness_with(sample_app(), theme);
         // Settled: one more run is a single frame that asks for no other.
         assert_eq!(harness.run(), 1, "{theme:?}: idle frames");
-        // The status line's next event asks for one frame at the next minute's end, a timed one; nothing asks sooner
-        // than a second.
+        // The status line's next event asks for one frame at the next minute's end, a timed one; nothing asks sooner.
         let mut asked = 0;
         for _ in 0..10 {
             harness.step();
             let soonest = harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap_or(std::time::Duration::MAX);
-            asked += usize::from(soonest < std::time::Duration::from_secs(1));
+            asked += usize::from(soonest < crate::draw::status::to_next_minute(harness.state().mailbox().now()));
         }
         assert_eq!(asked, 0, "{theme:?}: repaints asked for while idle");
         // The same with a message open in the reader.
