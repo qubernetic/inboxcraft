@@ -728,7 +728,26 @@ fn fade_of(mode: Mode, index: usize, reduced: bool) -> (Own, Own, Vec<Own>, Vec<
     let mut harness = crate::component::tests::staged_motion(theme, reduced, faded()[index].2, egui::vec2(400.0, 120.0), draw);
     let (on, off) = crate::component::tests::hover_frames(&mut harness, label, 10);
     assert!(crate::component::tests::rests(&mut harness, 2), "{mode:?} {label} asks for no repaint once the fade has ended");
-    (still(Shown::Rest), still(Shown::Hover), on, off)
+    // At full a label scrambles on hover (M3); with reduced motion it never does, and its text is checked as drawn.
+    if reduced {
+        (still(Shown::Rest), still(Shown::Hover), on, off)
+    } else {
+        (still(Shown::Rest), still(Shown::Hover), reads(on, label), reads(off, label))
+    }
+}
+
+/// `looks` with every text as long as `label` read as it: at full a label scrambles on hover (M3, `scramble_tests.rs`); these looks
+/// guard its colours.
+fn reads(looks: Vec<Own>, label: &str) -> Vec<Own> {
+    looks
+        .into_iter()
+        .map(|mut look| {
+            for text in look.texts.iter_mut().filter(|text| text.0.chars().count() == label.chars().count()) {
+                label.clone_into(&mut text.0);
+            }
+            look
+        })
+        .collect()
 }
 
 #[test]
@@ -836,6 +855,7 @@ fn a_text_buttons_label_follows_its_fill_so_danger_and_plain_change_at_once() {
                 },
             );
             let (on, off) = hover_frames(&mut harness, label, 10);
+            let (on, off) = (reads(on, label), reads(off, label));
             assert_eq!(on[0], still(Shown::Hover), "{mode:?} {label}: the first hovered frame");
             assert_eq!(off[0], still(Shown::Rest), "{mode:?} {label}: the first frame after leaving");
             for look in on.iter().chain(&off) {

@@ -285,10 +285,12 @@ const DONE_ACTION: usize = 0;
 pub(crate) const SNOOZE_ACTION: usize = 1;
 const READ_ACTION: usize = 2;
 const DELETE_ACTION: usize = 3;
+/// How many hover actions a row has.
+const ACTIONS: usize = 4;
 
 /// The hover actions of `message`, in their places, the design file's order: Done (or "Not done" for a done one),
 /// Snooze, mark read or unread, Delete.
-fn actions(message: &MessageRow) -> [Action<'static>; 4] {
+fn actions(message: &MessageRow) -> [Action<'static>; ACTIONS] {
     #[cfg(test)]
     super::list_tests::ACTIONS_BUILT.with(|built| built.set(built.get().saturating_add(1)));
     // An open envelope opens an unread message; a closed one closes a read one again.
@@ -555,6 +557,7 @@ impl Slot {
 
 /// One message row across `ui`'s width, the mail row of the design; a click selects it.
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool, slot: Slot) -> Drawn {
+    let arrival = Arrival::of(ui.ctx(), theme, message.id);
     let selected = mailbox.selected() == Some(message.id);
     let keyed = selected && mailbox.keyed();
     let text = row_text(ui.ctx(), mailbox, message);
@@ -591,12 +594,16 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         checked: false,
         // Beside the reader the 440 list holds three of the four: Read gives way, Delete stays.
         spare: Some(READ_ACTION),
+        blink: square_off(&arrival, !message.seen),
     };
-    // Built only for the row whose group can show: the other rows hand the group nothing.
-    let reach = keyed || ui.rect_contains_pointer(ui.available_rect_before_wrap());
+    // Built only for the row whose group can show: the other rows hand the group nothing. One of whose actions holds
+    // the press can show it, under the pointer or not.
+    let reach = keyed
+        || ui.rect_contains_pointer(ui.available_rect_before_wrap())
+        || crate::component::mail_row::holds_press(ui.ctx(), row_id(message.id), ACTIONS);
     let built = reach.then(|| actions(message));
     let list: &[Action<'static>] = built.as_ref().map_or(&[], |built| built.as_slice());
-    let drawn = mail_row(ui, theme, keymap, &shown, keyed, list, None);
+    let drawn = arriving_row(ui, &arrival, |ui| mail_row(ui, theme, keymap, &shown, keyed, list, None));
     let response = &drawn.row.response;
     // egui does not scroll to what gains the focus: a row Tab reaches (the next one is always built, two below the
     // viewport) comes into sight, so Tab walks the whole list.
@@ -631,6 +638,140 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     // The focus its menu gives back as it closes is not a walk to the row: it selects nothing.
     let gained = response.gained_focus() && !closed;
     Drawn { clicked: response.clicked(), acted, focused: response.has_focus(), gained, presets }
+}
+
+/// The rows that came into the list with a sync while it was shown (`docs/design.md`, "Motion", M4), kept in the
+/// context: the list they came into (its place, search and account), the rows it held, and each new row with the time
+/// it came.
+#[derive(Debug, Clone, Default)]
+struct Arrivals {
+    /// The place, the search and the account the rows are of; none before the first frame.
+    list: Option<(Place, String, Option<u64>)>,
+    /// The list of rows they were last read from ([`Mailbox::rows_serial`]).
+    serial: u64,
+    /// Every message the list has held since it was opened: a row that comes back (an undo) is not new.
+    seen: HashSet<u64>,
+    /// The new unread rows and when each came, in seconds of the window's clock.
+    came: Vec<(u64, f64)>,
+}
+
+/// The most messages [`Arrivals::seen`] remembers before it starts again from the rows of the list.
+const SEEN_MOST: usize = 50_000;
+
+/// The most new rows that move at once: a sync that brings more lets the rest be there at once.
+const ARRIVING_MOST: usize = 64;
+
+fn arrivals_id() -> Id {
+    Id::unique("list-arrivals")
+}
+
+/// How long a new row moves at `level`, in seconds: at full it decodes in over `medium` and its square is off for
+/// `fast` after; at reduced it fades in over `fast` and its square is off for `fast` after; at off it does not move.
+fn arriving_for(level: motion::Level, theme: &Theme) -> f64 {
+    let fast = f64::from(theme.motion.fast);
+    match level {
+        motion::Level::Full => motion::MEDIUM + fast,
+        motion::Level::Reduced => fast + fast,
+        motion::Level::Off => 0.0,
+    }
+}
+
+/// Notes the rows that came into the list shown since the last frame: a message the list did not hold, unread, while
+/// the same place, search and account stay; rows that come together each start a `stagger` after the one above them.
+/// Opening a list, and every row at off, comes at once. A key or a click ends every movement in that frame. A repaint
+/// is asked for while one runs.
+fn note_arrivals(ctx: &egui::Context, theme: &Theme, mailbox: &Mailbox) {
+    let now = ctx.input(|input| input.time);
+    let level = motion::level(ctx);
+    let whole = arriving_for(level, theme);
+    let ends = motion::input_now(ctx);
+    let moving = ctx.data_mut(|data| {
+        let kept = data.get_temp_mut_or_default::<Arrivals>(arrivals_id());
+        let same = kept
+            .list
+            .as_ref()
+            .is_some_and(|(place, query, narrowed)| *place == mailbox.place() && query == mailbox.query() && *narrowed == mailbox.narrowed());
+        if !same {
+            kept.list = Some((mailbox.place(), mailbox.query().to_owned(), mailbox.narrowed()));
+            kept.serial = mailbox.rows_serial();
+            kept.seen = mailbox.messages().iter().map(|row| row.id).collect();
+            kept.came.clear();
+        } else if kept.serial != mailbox.rows_serial() {
+            kept.serial = mailbox.rows_serial();
+            if kept.seen.len() > SEEN_MOST {
+                kept.seen.clear();
+            }
+            // Rows that come together each start a `stagger` after the one above.
+            let mut next = 0_u32;
+            for row in mailbox.messages() {
+                if kept.seen.insert(row.id) && !row.seen && whole > 0.0 && kept.came.len() < ARRIVING_MOST {
+                    kept.came.push((row.id, now + f64::from(motion::STAGGER) * f64::from(next)));
+                    next = next.saturating_add(1);
+                }
+            }
+        }
+        kept.came.retain(|(_, came)| !ends && whole > 0.0 && (now - came).is_finite() && now - came < whole);
+        !kept.came.is_empty()
+    });
+    if moving {
+        ctx.request_repaint();
+    }
+}
+
+/// A new row as it comes in this frame: how long ago it came, at the level the window moves at.
+#[derive(Debug, Clone, Copy)]
+struct Arrival {
+    age: Option<f64>,
+    level: motion::Level,
+    fast: f64,
+}
+
+impl Arrival {
+    /// Message `id`'s row as it comes in: none (`age`) when it is not new or has come.
+    fn of(ctx: &egui::Context, theme: &Theme, id: u64) -> Self {
+        let now = ctx.input(|input| input.time);
+        let age = ctx.data(|data| {
+            data.get_temp::<Arrivals>(arrivals_id()).and_then(|kept| kept.came.iter().find(|(row, _)| *row == id).map(|(_, came)| now - came))
+        });
+        Self { age, level: motion::level(ctx), fast: f64::from(theme.motion.fast) }
+    }
+}
+
+/// Whether a new row's unread square is in its blink's off phase: from the end of its decoding (full) or fading
+/// (reduced), for `fast`. Read rows have no square.
+fn square_off(arrival: &Arrival, unread: bool) -> bool {
+    let Some(age) = arrival.age.filter(|_| unread) else { return false };
+    let from = match arrival.level {
+        motion::Level::Full => motion::MEDIUM,
+        motion::Level::Reduced => arrival.fast,
+        motion::Level::Off => return false,
+    };
+    age >= from && age < from + arrival.fast
+}
+
+/// Draws a row with `draw` as it comes in: at full its texts resolve from the left out of the code set's glyphs over
+/// `medium`; at reduced it fades in over `fast`. A row whose turn has not come (`stagger`) stands as at its start.
+fn arriving_row<R>(ui: &mut Ui, arrival: &Arrival, draw: impl FnOnce(&mut Ui) -> R) -> R {
+    let Some(age) = arrival.age else { return draw(ui) };
+    match arrival.level {
+        motion::Level::Full if age < motion::MEDIUM => {
+            let mark = crate::scramble::mark(ui.painter());
+            let drawn = draw(ui);
+            let share = motion::part(age, 0.0, motion::MEDIUM);
+            crate::scramble::painted_since(ui.painter(), mark, |painter, shape| {
+                crate::scramble::shape(painter, shape, share, crate::scramble::Side::Left)
+            });
+            drawn
+        }
+        motion::Level::Reduced if age < arrival.fast => {
+            let was = ui.opacity();
+            ui.multiply_opacity(motion::part(age, 0.0, arrival.fast));
+            let drawn = draw(ui);
+            ui.set_opacity(was);
+            drawn
+        }
+        _ => draw(ui),
+    }
 }
 
 /// What a mail row says, worked out once for a list of rows and kept while it stays ([`row_text`]).
@@ -892,12 +1033,33 @@ fn leaving_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, m
     let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
     let account = account_marker.then(|| mailbox.account(message.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0)));
     let id = Id::unique("list-leaving").with(message.id);
-    let mut face = ui.new_child(UiBuilder::new().max_rect(whole));
+    let shift = if gone.shift.is_finite() { gone.shift } else { 0.0 };
+    let mut face = ui.new_child(UiBuilder::new().max_rect(whole.translate(vec2(shift, 0.0))));
     face.shrink_clip_rect(line);
     // Disabled is drawn at full strength here: the fade is the motion's alone.
     face.visuals_mut().disabled_alpha = 1.0;
     face.disable();
     face.multiply_opacity(1.0 - gone.faded.clamp(0.0, 1.0));
+    let mark = crate::scramble::mark(face.painter());
+    leaving_face(&mut face, theme, keymap, mailbox, message, account, id, &spoken, subject);
+    if gone.dissolved > 0.0 {
+        crate::scramble::painted_since(face.painter(), mark, |painter, shape| crate::scramble::dots(painter, shape, gone.dissolved));
+    }
+}
+
+/// The face of the row `message` that left the list, in `face`: the later row in Later, else the mail row.
+#[expect(clippy::too_many_arguments, reason = "the parts of one row, worked out once by its caller")]
+fn leaving_face(
+    face: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    message: &MessageRow,
+    account: Option<u64>,
+    id: Id,
+    spoken: &str,
+    subject: &str,
+) {
     let rest = Some(crate::component::Shown::Rest);
     if let (Place::Later(pile), true) = (mailbox.place(), mailbox.query().is_empty()) {
         let date = mailbox.row_date(message);
@@ -909,7 +1071,7 @@ fn leaving_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, m
         };
         let shown = LaterRow {
             id,
-            spoken: &spoken,
+            spoken,
             who: &message.sender,
             subject,
             when: &when,
@@ -920,14 +1082,14 @@ fn leaving_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, m
             pile: stands,
             link: None,
         };
-        let _ = later_row(&mut face, theme, keymap, &shown, false, rest);
+        let _ = later_row(face, theme, keymap, &shown, false, rest);
         return;
     }
     let words = format!("{subject}{}", after_subject(&message.preview));
     let time = mailbox.row_date(message);
     let shown = MailRow {
         id,
-        spoken: &spoken,
+        spoken,
         sender: &message.sender,
         line: &words,
         time: &time,
@@ -940,8 +1102,9 @@ fn leaving_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, m
         done: false,
         checked: false,
         spare: None,
+        blink: false,
     };
-    let _ = mail_row(&mut face, theme, keymap, &shown, false, &[], rest);
+    let _ = mail_row(face, theme, keymap, &shown, false, &[], rest);
 }
 
 /// What follows a row's subject: a dash and the preview, as the design's line two, or nothing without one.
@@ -1179,16 +1342,34 @@ pub(super) enum Line<'a> {
     Send(&'a OutboxRow),
 }
 
-/// How far the row that left the list has gone, each from 0 to 1: how much of its height has closed, and how far it
-/// has faded. Done, Delete, Archive, Move and Park close the row over `row_collapse` on the design's curve, fading on
-/// CSS's `ease` as it closes (the design's M5 at the reduced level, the presentation's `.row.gone`); Snooze fades it over `fast` in its
-/// place, and then it is gone (M6 at the reduced level).
+/// How far the row that left the list has gone (`docs/design.md`, "Motion", M5 and M6), each share from 0 to 1: how
+/// much of its height has closed, how far it has faded, how many of its characters have gone to dots from the right,
+/// and how far it has moved aside, in points (a snoozed row to the right, an answered card up or down).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Gone {
     /// The share of its height closed.
     pub closed: f32,
     /// The share of its fade.
     pub faded: f32,
+    /// The share of its characters gone to dots, from the right.
+    pub dissolved: f32,
+    /// How far it has moved, in points.
+    pub shift: f32,
+}
+
+impl Gone {
+    /// Gone wholly: at motion off, and once its movement is over.
+    pub const END: Self = Self { closed: 1.0, faded: 1.0, dissolved: 0.0, shift: 0.0 };
+
+    /// Closed `closed` of the way and faded `faded`, where it stands.
+    pub const fn closing(closed: f32, faded: f32) -> Self {
+        Self { closed, faded, dissolved: 0.0, shift: 0.0 }
+    }
+
+    /// Whether it has gone wholly: nothing of it is drawn, and its place has closed.
+    pub fn over(self) -> bool {
+        self.closed >= 1.0 && self.faded >= 1.0
+    }
 }
 
 /// How a group's head stands.
@@ -1949,28 +2130,28 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
             });
             ui.spacing_mut().item_spacing.y = CARD_GAP;
             // The cards just answered, while they leave (M11): each at its place in the queue, as far as it has gone.
-            let leaving: Vec<(Answered, Gone, f32)> = answered(ui.ctx(), &askers)
+            let leaving: Vec<(Answered, Gone)> = answered(ui.ctx(), &askers)
                 .into_iter()
                 .map(|left| {
-                    let (gone, tint) = answer_gone(ui.ctx(), theme, &left);
-                    (left, gone, tint)
+                    let gone = answer_gone(ui.ctx(), theme, &left);
+                    (left, gone)
                 })
                 .collect();
-            let still: Vec<Answered> = leaving.iter().filter(|(_, gone, _)| gone.closed < 1.0).map(|(left, ..)| left.clone()).collect();
+            let still: Vec<Answered> = leaving.iter().filter(|(_, gone)| gone.closed < 1.0).map(|(left, _)| left.clone()).collect();
             ui.data_mut(|data| data.insert_temp(answered_id(), still));
-            let holding = leaving.iter().any(|(left, gone, _)| left.at == 0 && gone.closed <= 0.0);
+            let holding = leaving.iter().any(|(left, gone)| left.at == 0 && gone.closed <= 0.0);
             let mut answers = Vec::new();
             for index in 0..=askers.len() {
-                for (left, gone, tint) in leaving.iter().filter(|(left, ..)| left.at.min(askers.len()) == index) {
-                    leaving_card(ui, theme, keymap, mailbox, left, *gone, *tint);
+                for (left, gone) in leaving.iter().filter(|(left, _)| left.at.min(askers.len()) == index) {
+                    leaving_card(ui, theme, keymap, mailbox, left, *gone);
                 }
                 let Some(asker) = askers.get(index) else { break };
                 // The next card becomes the current one when the answered one has faded.
                 let current = index == 0 && !holding;
-                let (act, high) = sender_card(ui, theme, keymap, mailbox, asker, current, None);
+                let (act, high) = sender_card(ui, theme, keymap, mailbox, asker, current, None, "queue");
                 if let Some(act) = act {
                     rows.acted.set(Some((asker.newest.id, act)));
-                    if !motion::reduced(ui.ctx()) {
+                    if motion::level(ui.ctx()) != motion::Level::Off {
                         answers.push(Answered { row: asker.newest.clone(), more: asker.more, at: index, keep_out: act == Act::Block, high, current });
                     }
                 }
@@ -1999,7 +2180,7 @@ struct Answered {
     keep_out: bool,
     /// The card's height, in points.
     high: f32,
-    /// It was the current card (its edge `cyan_edge`, from which the answer's colour eases in).
+    /// It was the current card: drawn as it was while it leaves, its edge in the answer's colour.
     current: bool,
 }
 
@@ -2013,9 +2194,6 @@ fn forget_answered(ctx: &egui::Context) {
     ctx.data_mut(|data| data.remove::<Vec<Answered>>(answered_id()));
 }
 
-/// How long a card answered shows its answer's colour before it fades, in seconds (the presentation's 160 ms).
-const ANSWER_HOLD: f32 = 0.16;
-
 /// The cards answered and still leaving, but those whose sender still waits (the answer failed): none is drawn twice.
 fn answered(ctx: &egui::Context, askers: &[Asker<'_>]) -> Vec<Answered> {
     let left = ctx.data(|data| data.get_temp::<Vec<Answered>>(answered_id())).unwrap_or_default();
@@ -2027,24 +2205,34 @@ fn answered(ctx: &egui::Context, askers: &[Asker<'_>]) -> Vec<Answered> {
         .collect()
 }
 
-/// How far the answered card has gone in this frame, as the presentation plays M11 at the reduced level: its edge
-/// eases to the answer's colour over `fast` (CSS's `ease`) and holds it until [`ANSWER_HOLD`], it fades over `fast` at
-/// an even pace, then its place closes over `fast` on the design's curve. Repaints are asked for until it has gone.
-/// The share of the edge's colour comes with it.
-fn answer_gone(ctx: &egui::Context, theme: &Theme, left: &Answered) -> (Gone, f32) {
-    let (hold, fade, close) = (ANSWER_HOLD, theme.motion.fast, theme.motion.fast);
-    let whole = hold + fade + close;
+/// How far the answered card has gone in this frame (`docs/design.md`, "Motion", M11): its edge takes the answer's
+/// colour in the frame of the answer. At full it leaves its slot 24 up (Let in) or down (Keep out) on the curve, fading
+/// at an even pace, over `medium`; at reduced it fades over `fast` in its place. Then its slot closes over
+/// `row_collapse` on the curve and the next card steps up. At off, and once a key or a click came during it, it has
+/// gone. Repaints are asked for until it has.
+fn answer_gone(ctx: &egui::Context, theme: &Theme, left: &Answered) -> Gone {
+    let (fast, close) = (f64::from(theme.motion.fast), f64::from(theme.motion.row_collapse));
+    let level = motion::level(ctx);
+    let out = match level {
+        motion::Level::Full => motion::MEDIUM,
+        motion::Level::Reduced => fast,
+        motion::Level::Off => return Gone::END,
+    };
     let id = Id::unique("queue-leaving").with(left.row.address.to_lowercase());
-    let at = motion::elapsed(ctx, id, whole) * whole;
-    let share = |from: f32, span: f32| if span > 0.0 { ((at - from) / span).clamp(0.0, 1.0) } else { 1.0 };
-    let tint = motion::css_ease(share(0.0, theme.motion.fast));
-    (Gone { faded: share(hold, fade), closed: motion::ease(share(hold + fade, close)) }, tint)
+    let Some(age) = motion::run(ctx, id, out + close) else { return Gone::END };
+    let faded = motion::part(age, 0.0, out);
+    let mut gone = Gone::closing(motion::ease(motion::part(age, out, close)), faded);
+    if level == motion::Level::Full {
+        let way = if left.keep_out { SLIDE } else { -SLIDE };
+        gone.shift = way * motion::ease(faded);
+    }
+    gone
 }
 
-/// Draws the card `left` answered as far as it has `gone`: whole in its answer's colour, fading, then only the room it
-/// leaves, closing. What is pressed on it does nothing: it was answered. `tint`: how far its edge has eased from its
-/// own colour to the answer's.
-fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, left: &Answered, gone: Gone, tint: f32) {
+/// Draws the card `left` answered as far as it has `gone`: in its slot, edged in its answer's colour, moved and faded
+/// as far as it has gone and cut by the slot; then only the room it leaves, closing. What is pressed on it does
+/// nothing: it was answered.
+fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, left: &Answered, gone: Gone) {
     if gone.closed > 0.0 {
         // The card's place and the gap under it close together; the next card steps up into them.
         let room = (left.high + CARD_GAP) * (1.0 - gone.closed);
@@ -2054,24 +2242,27 @@ fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, 
         return;
     }
     let p = &theme.palette;
-    let answer = if left.keep_out { p.minus } else { p.plus };
-    let from = if left.current { p.cyan_edge } else { p.line };
-    let edge = if tint >= 1.0 { answer } else { from.lerp_to_gamma(answer, tint.clamp(0.0, 1.0)) };
+    let edge = if left.keep_out { p.minus } else { p.plus };
     let asker = Asker { newest: &left.row, more: left.more };
-    ui.scope(|ui| {
-        ui.multiply_opacity(1.0 - gone.faded);
-        let _ = sender_card(ui, theme, keymap, mailbox, &asker, left.current, Some(edge));
-    });
+    let high = if left.high.is_finite() { left.high.max(0.0) } else { 0.0 };
+    let (slot, _) = ui.allocate_exact_size(vec2(ui.available_width(), high), Sense::hover());
+    let shift = if gone.shift.is_finite() { gone.shift } else { 0.0 };
+    let mut card = ui.new_child(UiBuilder::new().max_rect(slot.translate(vec2(0.0, shift))).id_salt(("leaving-card", left.at)));
+    card.shrink_clip_rect(slot);
+    card.multiply_opacity(1.0 - gone.faded.clamp(0.0, 1.0));
+    let _ = sender_card(&mut card, theme, keymap, mailbox, &asker, left.current, Some(edge), "queue");
 }
 
 /// [`sender_card`] for `newest`, the current one, in whatever room `ui` gives: its height (the tests' hostile rooms).
 #[cfg(test)]
 pub(super) fn sender_card_of(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, newest: &MessageRow) -> f32 {
-    sender_card(ui, theme, keymap, mailbox, &Asker { newest, more: 0 }, true, None).1
+    sender_card(ui, theme, keymap, mailbox, &Asker { newest, more: 0 }, true, None, "alone").1
 }
 
 /// The card of the sender `asker` across `ui` (at most [`CARD_WIDE`]): `current` for the first of the queue, its edge
-/// `edge` when given (an answered card's). The answer pressed, Let in or Keep out, and the card's height.
+/// `edge` when given (an answered card's), its id salted with `salt` (the queue's, or a card drawn alone). The answer
+/// pressed, Let in or Keep out, and the card's height.
+#[expect(clippy::too_many_arguments, reason = "the parts of one card and where it is drawn")]
 fn sender_card(
     ui: &mut Ui,
     theme: &Theme,
@@ -2080,6 +2271,7 @@ fn sender_card(
     asker: &Asker<'_>,
     current: bool,
     edge: Option<egui::Color32>,
+    salt: &str,
 ) -> (Option<Act>, f32) {
     let live = edge.is_none();
     let (p, f, s) = (&theme.palette, &theme.fonts, &theme.spacing);
@@ -2088,8 +2280,10 @@ fn sender_card(
     let mut answer = None;
     let mut opened = false;
     let open = &mut opened;
-    let id = Id::unique("new-sender-card").with(message.address.to_lowercase());
-    let inner = ui.push_id(id, |ui| {
+    // The card's own id, not one counted from what was drawn before it: an answered card above changes its form as it
+    // leaves (in its slot, then only room, then nothing), and a press held on this card across that keeps its widget.
+    let id = Id::unique("new-sender-card").with(message.address.to_lowercase()).with(salt);
+    let inner = ui.scope_builder(UiBuilder::new().scope_id(if live { id } else { id.with("leaving") }), |ui| {
         ui.set_max_width(wide);
         let slot = ui.painter().add(egui::Shape::Noop);
         // The design's 20 and 16 inside the card's 1 px edge.
@@ -2296,20 +2490,40 @@ pub fn rows_built(ctx: &egui::Context) -> Option<usize> {
     ctx.data_mut(|data| data.remove_temp::<usize>(rows_built_id()))
 }
 
-/// How far `left` has gone in this frame: Snooze fades over `fast` (the design's M6 at the reduced level); the other
-/// acts close the row over `row_collapse` on the design's curve, fading as it closes (M5). Repaints are asked for until
-/// it has gone; with motion off it is gone at once.
+/// How far `left` has gone in this frame, at the level the window moves at (`docs/design.md`, "Motion"). Done (and
+/// Delete, Archive, Move, Park), M5: at full its words go to dots from the right over `fast`, then the row closes over
+/// `row_collapse`; at reduced it closes over `row_collapse`, its words intact. Snooze, M6: at full it slides 24 to the
+/// right on the curve and fades at an even pace over `medium`, then its place closes over `row_collapse`; at reduced it
+/// fades over `fast` in its place, then its place closes. The close is on the design's curve, fading on CSS's `ease`
+/// as it closes. At off, and once a key or a press came during it, it is gone. Repaints are asked for until it has.
 fn leaving(ctx: &egui::Context, theme: &Theme, left: &Leaving) -> Gone {
     let id = Id::unique("row-leaving").with(left.row.id);
-    if matches!(left.act, Act::Snooze(_)) {
-        let faded = motion::elapsed(ctx, id, theme.motion.fast);
-        Gone { closed: if faded >= 1.0 { 1.0 } else { 0.0 }, faded }
-    } else {
-        let share = motion::elapsed(ctx, id, theme.motion.row_collapse);
-        // The presentation's `.row`: height on the design's curve, opacity on CSS's default `ease`.
-        Gone { closed: motion::ease(share), faded: motion::css_ease(share) }
+    let snooze = matches!(left.act, Act::Snooze(_));
+    let (fast, close) = (f64::from(theme.motion.fast), f64::from(theme.motion.row_collapse));
+    // How long it stands before its place closes.
+    let before = match (motion::level(ctx), snooze) {
+        (motion::Level::Off, _) => return Gone::END,
+        (motion::Level::Full, false) | (motion::Level::Reduced, true) => fast,
+        (motion::Level::Full, true) => motion::MEDIUM,
+        (motion::Level::Reduced, false) => 0.0,
+    };
+    let Some(age) = motion::run(ctx, id, before + close) else { return Gone::END };
+    let closed = motion::part(age, before, close);
+    let mut gone = Gone::closing(motion::ease(closed), motion::css_ease(closed));
+    match (motion::level(ctx), snooze) {
+        (motion::Level::Full, false) => gone.dissolved = motion::part(age, 0.0, fast),
+        (motion::Level::Full, true) => {
+            gone.faded = motion::part(age, 0.0, motion::MEDIUM);
+            gone.shift = SLIDE * motion::ease(gone.faded);
+        }
+        (motion::Level::Reduced, true) => gone.faded = motion::part(age, 0.0, fast),
+        _ => {}
     }
+    gone
 }
+
+/// How far a snoozed row slides to the right, and an answered card up or down, in points (M6, M11).
+const SLIDE: f32 = 24.0;
 
 /// "Other": the messages of the list no group of `groups` holds, kept for the list of rows, its place, search and
 /// `view`, so a frame copies nothing.
@@ -2377,6 +2591,9 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
         empty_list(ui, theme, keymap, mailbox);
         return Asked { out: true, server, ..Asked::default() };
     }
+    if !outbox && !drafts {
+        note_arrivals(ui.ctx(), theme, mailbox);
+    }
     let inbox = mailbox.place() == Place::View(Role::Inbox) && mailbox.query().is_empty();
     let wait = inbox && !mailbox.waiting().is_empty();
     let groups = mailbox.groups();
@@ -2403,7 +2620,7 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
     let open = |group: &Group| ui.data(|data| data.get_temp::<bool>(group_open_id(&group.name))).unwrap_or(false);
     // How far the row that left has gone (with motion off, at once); once gone it is let go.
     let gone = mailbox.left_row().map(|left| leaving(ui.ctx(), theme, left));
-    let went = gone.is_none_or(|gone| gone.faded >= 1.0);
+    let went = gone.is_none_or(Gone::over);
     let listing = if outbox {
         sends(theme, mailbox)
     } else if drafts {
@@ -2448,3 +2665,11 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
         presets: rows.presets.get(),
     }
 }
+
+#[cfg(test)]
+#[path = "rows_motion_tests.rs"]
+pub(crate) mod rows_motion_tests;
+
+#[cfg(test)]
+#[path = "card_motion_tests.rs"]
+mod card_motion_tests;

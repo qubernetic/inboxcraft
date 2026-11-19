@@ -184,6 +184,7 @@ pub(crate) fn mail_spoken(state: &MailState) -> String {
 pub(crate) fn mail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &MailState) -> mail_row::Drawn {
     let spoken = mail_spoken(state);
     let row = MailRow {
+        blink: false,
         id: Id::unique("gallery-mail-row").with(state.name),
         spoken: &spoken,
         sender: state.sender,

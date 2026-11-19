@@ -28,6 +28,7 @@ use crate::draw::paint;
 use crate::field::{self, Emblem, Field, Level, Opts};
 use crate::home::{AGENDA, Buttons, Count, Counted, DRAFTS, Home, Kind};
 use crate::keymap::{self, Keymap};
+use crate::scramble::Side;
 use crate::theme::Theme;
 use crate::tr;
 
@@ -253,13 +254,26 @@ fn headline(ui: &mut Ui, theme: &Theme, home: &Home) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(width, (font.line * lines).ceil()), Sense::hover());
     let spoken = second.as_ref().map_or_else(|| first.to_owned(), |second| format!("{first} {second}"));
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &spoken));
+    // M3: the headline resolves from glyphs, from its left, as the page opens; what reads is the same for both lines
+    // read as one text.
+    let share = crate::scramble::headline(ui.ctx(), response.id);
     if ui.is_rect_visible(rect) {
         let painter = ui.painter_at(rect);
         let fitted = component::fit_capped(ui, first, font, width);
-        paint::run_at(&painter, rect.min, component::galley(ui, &fitted, font, ink), ink);
+        let count = fitted.chars().count();
+        let second = second.map(|second| component::fit_capped(ui, &second, font, width));
+        let real = crate::scramble::real(count.saturating_add(second.as_ref().map_or(0, |second| second.chars().count())), share, Side::Left);
+        let shown = |text: &str, from: usize| {
+            if share >= 1.0 {
+                text.to_owned()
+            } else {
+                crate::scramble::mixed(text, real.start.saturating_sub(from)..real.end.saturating_sub(from), from as u64)
+            }
+        };
+        paint::run_at(&painter, rect.min, component::galley(ui, &shown(&fitted, 0), font, ink), ink);
         if let Some(second) = second {
-            let fitted = component::fit_capped(ui, &second, font, width);
-            paint::run_at(&painter, pos2(rect.left(), rect.top() + font.line), component::galley(ui, &fitted, font, ink), ink);
+            let line = component::galley(ui, &shown(&second, count), font, ink);
+            paint::run_at(&painter, pos2(rect.left(), rect.top() + font.line), line, ink);
         }
     }
     response

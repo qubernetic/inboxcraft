@@ -170,6 +170,8 @@ fn the_status_line_holds_its_own_and_nothing_of_the_panes() {
 #[test]
 fn the_index_s_places_and_mailboxes_go_where_the_rail_and_the_folder_pane_went() {
     let mut harness = window(vec2(1300.0, 820.0));
+    // Where each press goes, without the movements: Home's headline and a change of place run at the other levels.
+    harness.state_mut().set_motion_level(crate::motion::Level::Off);
     let press = |harness: &mut Harness<'static, InboxApp>, name: &str| {
         harness.get_by_role_and_label(Role::Button, name).click();
         harness.run();

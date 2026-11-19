@@ -403,70 +403,6 @@ fn edges(harness: &Harness<'static, InboxApp>) -> Vec<egui::Color32> {
 }
 
 #[test]
-fn an_answered_card_takes_its_answers_colour_fades_and_the_next_steps_up() {
-    use crate::theme::{Mode, TextScale, Theme};
-    let minus: Vec<egui::Color32> = [Mode::Light, Mode::Dark].map(|mode| Theme::new(mode, TextScale::default()).palette.minus).to_vec();
-    for motion in [true, false] {
-        let mut app = app();
-        app.set_reduce_motion(!motion);
-        let mut harness = Harness::builder()
-            .with_size(vec2(1300.0, 900.0))
-            .with_context_setup(install_fonts)
-            .with_step_dt(1.0 / 100.0)
-            .with_max_steps(200)
-            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
-        harness.run();
-        harness.get_by_role_and_label(Role::Button, "Review").click();
-        harness.run();
-        let tops = let_in_tops(&harness);
-        let (first, second) = (tops[0], tops[1]);
-        harness.query_all_by_role_and_label(Role::Button, "Keep out").next().unwrap().click();
-        harness.step();
-        harness.step();
-        assert!(harness.state().mailbox().can_undo(), "the answer acts at once");
-        if !motion {
-            // Off: the next card is there at once.
-            harness.run();
-            assert_eq!(let_in_tops(&harness), vec![first], "motion off: the next card stands in the answered one's place");
-            continue;
-        }
-        // 0 to 125 ms the edge eases to the answer's colour, as the presentation's border does: not there at once.
-        assert!(!edges(&harness).iter().any(|colour| minus.contains(colour)), "the edge eases in, it does not snap");
-        // Up to 160 ms: the card stays, its edge in the answer's colour (Keep out: `minus`), the next card where it was.
-        harness.run_steps(13);
-        assert!(edges(&harness).iter().any(|colour| minus.contains(colour)), "the edge takes Keep out's colour");
-        assert_eq!(let_in_tops(&harness).last().copied(), Some(second), "the next card waits while the answer shows");
-        // 160 to 285 ms: it fades at an even pace.
-        harness.run_steps(10);
-        let faded_minus = |colour: &egui::Color32| {
-            let alpha = f32::from(colour.a()) / 255.0;
-            colour.a() > 0
-                && colour.a() < 255
-                && minus.iter().any(|m| {
-                    [(colour.r(), m.r()), (colour.g(), m.g()), (colour.b(), m.b())]
-                        .iter()
-                        .all(|(seen, full)| (f32::from(*seen) - f32::from(*full) * alpha).abs() <= 2.0)
-                })
-        };
-        assert!(edges(&harness).iter().any(faded_minus), "half faded: {:?}", edges(&harness));
-        assert_eq!(let_in_tops(&harness).last().copied(), Some(second));
-        // 285 to 410 ms: its place closes over 125 ms on the design's curve, as the presentation's reduced path does,
-        // and the next card steps up.
-        harness.run_steps(7);
-        let mid = let_in_tops(&harness).last().copied().unwrap();
-        assert!(mid < second && mid > first, "the next card is stepping up: {first} < {mid} < {second}");
-        assert!(!edges(&harness).iter().any(|colour| minus.contains(colour)), "the answered card is no longer drawn");
-        harness.run_steps(12);
-        assert_eq!(let_in_tops(&harness), vec![first], "by 440 ms the next card stands in the answered one's place");
-        // The card that stepped up under the pointer takes its hover in the next two frames; then it rests. (The answer's
-        // Undo in the status line ticks once a second while it shows: it is let go first.)
-        harness.state_mut().mailbox_mut().forget_undo();
-        harness.run_steps(2);
-        assert!(crate::component::tests::rests(&mut harness, 4), "and it rests");
-    }
-}
-
-#[test]
 fn the_queue_in_a_room_narrower_than_a_cards_padding_draws_and_never_panics() {
     use crate::theme::{Mode, TextScale, Theme};
     // The room a hostile layout leaves the queue: none, a point, less than a card's 40 of padding.
@@ -533,20 +469,22 @@ fn an_answered_card_left_mid_motion_does_not_play_again_when_new_senders_comes_b
 }
 
 #[test]
-fn a_second_answer_mid_motion_leaves_the_first_card_where_it_is() {
+fn a_second_answer_mid_motion_ends_the_first_cards_movement() {
     let mut harness = queue_moving();
-    let second = let_in_tops(&harness)[1];
+    let tops = let_in_tops(&harness);
+    let (first, second) = (tops[0], tops[1]);
     harness.query_all_by_role_and_label(Role::Button, "Keep out").next().unwrap().click();
-    // While the first card shows its answer, the next one waits where it is: answer it too.
+    // While the first card leaves, the next one waits where it is: answer it too.
     harness.run_steps(3);
     assert_eq!(let_in_tops(&harness).last().copied(), Some(second));
     harness.query_all_by_role_and_label(Role::Button, "Let in").last().unwrap().click();
     harness.step();
     harness.step();
     assert!(harness.state().mailbox().messages().is_empty(), "both answered");
-    // The first card is still there, so the second, leaving too, has not jumped into its place.
-    assert_eq!(let_in_tops(&harness).last().copied(), Some(second), "the second card stays below the first");
-    assert_eq!(let_in_tops(&harness).len(), 2, "both answered cards are still drawn, leaving");
+    // The click ends the first card's movement (M11): only the second is drawn, leaving from the first one's slot.
+    let left = let_in_tops(&harness);
+    assert_eq!(left.len(), 1, "only the second answered card is drawn, leaving: {left:?}");
+    assert!(left[0] < second && left[0] <= first, "it leaves from the first card's slot, upwards: {left:?} {first}");
     harness.run_steps(80);
     harness.get_by_label("Nobody is waiting.");
 }

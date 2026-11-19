@@ -28,6 +28,48 @@ use crate::tr;
 /// The most rows of people or mailboxes listed.
 const MOST_ROWS: usize = 50;
 
+/// The line past which the results' lines come in together as they unfold at full (M8): the last that fit a window.
+const UNFOLDED: usize = 12;
+
+/// The results' lines as they unfold (M8): at full one more line a `stagger` (30 ms) from the first frame the list of
+/// a prefix shows, each whole in its frame; at reduced and off all together. A key ends it: every line is there.
+struct Lines {
+    /// How many lines show in this frame.
+    shown: usize,
+    /// The lines counted so far.
+    counted: usize,
+}
+
+impl Lines {
+    /// The lines of results of `count` rows in `mode`, as far as they have come in.
+    fn of(ctx: &Context, mode: Mode, count: usize, empty: bool) -> Self {
+        let rows = match mode {
+            Mode::Search => 0,
+            // The head and the plugin's row.
+            Mode::Command => count.saturating_add(2),
+            Mode::Person | Mode::Mailbox => count.saturating_add(1),
+        };
+        // And the line saying nothing matches, and the prefixes.
+        let lines = rows.saturating_add(usize::from(empty)).saturating_add(1).min(UNFOLDED);
+        let stagger = f64::from(crate::motion::STAGGER);
+        // Line k (from 1) comes in at k staggers; the movement ends once the last is in.
+        let length = stagger * (lines as f64 + 0.5);
+        let shown = match crate::motion::level(ctx) {
+            crate::motion::Level::Full => crate::motion::run(ctx, Id::unique("command-line-unfold").with(mode as u8), length)
+                // A whole number of staggers, at most a dozen: the cast keeps it.
+                .map_or(usize::MAX, |age| ((age / stagger).floor().max(0.0) as usize).min(lines)),
+            _ => usize::MAX,
+        };
+        Self { shown: if shown >= lines { usize::MAX } else { shown }, counted: 0 }
+    }
+
+    /// Whether the next line shows.
+    fn next(&mut self) -> bool {
+        self.counted = self.counted.saturating_add(1);
+        self.counted <= self.shown
+    }
+}
+
 /// A mailbox the `#` results list: its id, its path and its account's name.
 #[derive(Debug, Clone)]
 pub(super) struct Mailbox {
@@ -286,16 +328,23 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
     let mut picked_id = None;
     let count = lists.count(command.mode());
     let counted = count.to_string();
+    let nothing = count == 0 && command.mode() != Mode::Search && !text.is_empty();
+    let mut lines = Lines::of(ui.ctx(), command.mode(), count, nothing);
     match command.mode() {
         Mode::Search => {}
         Mode::Command => {
-            popup::head(ui, theme, tr!("Commands"), Some(&counted));
+            if lines.next() {
+                popup::head(ui, theme, tr!("Commands"), Some(&counted));
+            }
             // The head, the line of prefixes and the plugin's row keep their room; the commands scroll in the rest.
             let most = (room - theme.boxes().menu_row * 3.0).max(theme.boxes().menu_row);
             let scrolled = egui::ScrollArea::vertical().id_salt("command-line-rows").max_height(most).auto_shrink([false, true]);
             (asked, picked_id) = crate::component::scroll::show(ui, theme, scrolled, |ui| {
                 let (mut asked, mut picked_id) = (None, None);
                 for (at, listed) in lists.commands.iter().enumerate() {
+                    if !lines.next() {
+                        continue;
+                    }
                     let state = match (listed.refused, at == picked) {
                         (Some(_), _) => ItemState::Unavailable,
                         (None, true) => ItemState::Chosen,
@@ -324,6 +373,9 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
             .inner;
             // A plugin's command: planned, drawn coming soon.
             soon::soon(ui, theme, |ui| {
+                if !lines.next() {
+                    return;
+                }
                 let item = Item {
                     icon: Some(IconId::Keyboard),
                     name: tr!("A plugin's command"),
@@ -335,8 +387,10 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
             });
         }
         Mode::Person => {
-            popup::head(ui, theme, tr!("People"), Some(&counted));
-            for (at, person) in lists.people.iter().enumerate() {
+            if lines.next() {
+                popup::head(ui, theme, tr!("People"), Some(&counted));
+            }
+            for (at, person) in lists.people.iter().enumerate().filter(|_| lines.next()) {
                 let response = popup::suggestion_row(ui, theme, &person.name, &person.address, at == picked);
                 said_picked(ui, &response, at == picked, &mut picked_id);
                 if response.clicked() {
@@ -345,8 +399,10 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
             }
         }
         Mode::Mailbox => {
-            popup::head(ui, theme, tr!("Mailboxes"), Some(&counted));
-            for (at, mailbox) in lists.mailboxes.iter().enumerate() {
+            if lines.next() {
+                popup::head(ui, theme, tr!("Mailboxes"), Some(&counted));
+            }
+            for (at, mailbox) in lists.mailboxes.iter().enumerate().filter(|_| lines.next()) {
                 let state = if at == picked { ItemState::Chosen } else { ItemState::Default };
                 let item = Item { icon: Some(IconId::Move), name: &mailbox.name, caption: Some(&mailbox.account), action: None, state };
                 let response = popup::menu_item(ui, theme, keymap, &item);
@@ -357,8 +413,11 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
             }
         }
     }
-    if count == 0 && command.mode() != Mode::Search && !text.is_empty() {
+    if nothing && lines.next() {
         popup::empty(ui, theme, &tr!("Nothing matches “{text}”.", text = text));
+    }
+    if !lines.next() {
+        return (asked, picked_id);
     }
     popup::hairline(ui, theme);
     // The prefixes, each a press away.
@@ -407,3 +466,7 @@ pub(super) fn refusal(id: &str) -> &'static str {
 pub(super) fn wants_people(command: &Command) -> bool {
     command.mode() == Mode::Person && !command.text().trim().is_empty() && command.people().is_none()
 }
+
+#[cfg(test)]
+#[path = "command_motion_tests.rs"]
+mod command_motion_tests;

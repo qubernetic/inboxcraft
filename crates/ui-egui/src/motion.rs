@@ -8,9 +8,10 @@
 //!
 //! The window sets the level each frame from the owner's choice ([`follow`]); while the owner has not chosen, the
 //! computer's wish for less motion gives [`Level::Off`] where the computer can be read ([`set_system_wish`]; the
-//! desktop cannot read it yet, and then the owner's default level holds). Until each level has its own movements,
-//! Reduced and Off both land every movement at once and Full runs today's motion. With a still level egui's own
-//! animations (areas fading in, scrolling to a place) stop too. egui's smoothing of a mouse wheel's notches is fixed
+//! desktop cannot read it yet, and then the owner's default level holds). The movements of the design's table read
+//! the level ([`level`]) and play the form it gives them; what has no reduced form of its own yet lands at its end at
+//! Reduced and Off ([`Level::still`]). With a still level egui's own animations (areas fading in, scrolling to a place)
+//! stop too. egui's smoothing of a mouse wheel's notches is fixed
 //! inside egui and keeps running.
 
 use egui::{Context, Id, Style, emath::easing, style::ScrollAnimation};
@@ -45,6 +46,9 @@ impl Motion {
 
 /// The motion tokens.
 pub const MOTION: Motion = Motion { hover_fade: 0.12, fast: 0.125, tooltip: 0.1, row_collapse: 0.18, card: 0.16, toast: 0.2 };
+
+/// The `medium` token, in seconds: a row decoding in, a snoozed row sliding out, an answered card leaving.
+pub const MEDIUM: f64 = 0.3;
 
 /// The `undo` token, in seconds: how long an act or a discard can be taken back from the status line.
 pub const UNDO: f64 = 5.0;
@@ -226,6 +230,115 @@ pub fn elapsed(ctx: &Context, id: Id, seconds: f32) -> f32 {
     shown
 }
 
+/// The state of a movement [`run`] plays: when it started, the pass it was last asked in, the pass it started in, and
+/// whether it is over.
+#[derive(Debug, Clone, Copy)]
+struct Run {
+    started: f64,
+    last: u64,
+    first: u64,
+    over: bool,
+}
+
+/// The seconds a movement `id` of `seconds` has run, from the first frame it was asked in, at whatever level (the
+/// caller picks the movement of its level); `None` once it is over: its time is up, or a key or a click came in a frame
+/// after its first (the owner never waits: the movement jumps to its end, and the key acts as it would at rest). A
+/// movement that missed a frame starts again. A repaint is asked for while it runs.
+pub(crate) fn run(ctx: &Context, id: Id, seconds: f64) -> Option<f64> {
+    let now = ctx.input(|input| input.time);
+    let pass = ctx.cumulative_pass_nr();
+    let key = id.with("run");
+    let was: Option<Run> = ctx.data(|data| data.get_temp(key)).filter(|was: &Run| was.last.saturating_add(1) >= pass);
+    let mut state = was.unwrap_or(Run { started: now, last: pass, first: pass, over: false });
+    state.last = pass;
+    // A key ends it in this pass; a click in the next frame, once the frame that reads it is drawn.
+    let mut ending = false;
+    match interrupted(ctx).filter(|_| pass != state.first && !state.over) {
+        Some(Came::Key) => state.over = true,
+        Some(Came::Click) => ending = true,
+        None => {}
+    }
+    let age = now - state.started;
+    if !age.is_finite() || age < 0.0 || !seconds.is_finite() || age >= seconds {
+        state.over = true;
+    }
+    if ending && !state.over {
+        // Drawn as it stands in the frame of the click, so the click lands on what the owner pressed; gone in the next.
+        state.over = true;
+        ctx.data_mut(|data| data.insert_temp(key, state));
+        ctx.request_repaint();
+        return Some(age);
+    }
+    ctx.data_mut(|data| data.insert_temp(key, state));
+    if state.over {
+        return None;
+    }
+    ctx.request_repaint();
+    Some(age)
+}
+
+/// Where the pass is kept in which a key or a click came, and which, as the frame's start saw it ([`note_input`]).
+fn input_id() -> Id {
+    Id::unique("inboxcraft-motion-input")
+}
+
+/// What came in a pass that ends a movement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Came {
+    /// A key pressed or text typed.
+    Key,
+    /// The pointer let go: a click lands on what was under the pointer when it was pressed, so the press itself moves
+    /// nothing under it, and what lies under the pointer stays put for the frame that reads the click.
+    Click,
+}
+
+/// Notes, at the start of a frame before any key is taken, whether a key or a click came in it: a movement [`run`]
+/// asks later in the frame, after the keys were taken, still jumps to its end.
+pub(crate) fn note_input(ctx: &Context) {
+    if let Some(came) = input_came(ctx) {
+        let pass = ctx.cumulative_pass_nr();
+        ctx.data_mut(|data| data.insert_temp(input_id(), (pass, came)));
+    }
+}
+
+/// What came in this pass as its input reads now.
+fn input_came(ctx: &Context) -> Option<Came> {
+    ctx.input(|input| {
+        if input.events.iter().any(|event| matches!(event, egui::Event::Key { pressed: true, .. } | egui::Event::Text(_))) {
+            Some(Came::Key)
+        } else {
+            input.pointer.any_released().then_some(Came::Click)
+        }
+    })
+}
+
+/// Whether a key or a click came in this pass, taken by now or not: a movement that leaves the layout as it is (a new
+/// row coming in) ends in it.
+pub(crate) fn input_now(ctx: &Context) -> bool {
+    interrupted(ctx).is_some()
+}
+
+/// What came in this pass, taken by now or not.
+fn interrupted(ctx: &Context) -> Option<Came> {
+    let pass = ctx.cumulative_pass_nr();
+    let noted = ctx.data(|data| data.get_temp::<(u64, Came)>(input_id())).filter(|(at, _)| *at == pass).map(|(_, came)| came);
+    match (input_came(ctx), noted) {
+        (Some(Came::Key), _) | (_, Some(Came::Key)) => Some(Came::Key),
+        (came, noted) => came.or(noted),
+    }
+}
+
+/// The share of `span` seconds gone at `age` seconds, from `from`: 0 before it, 1 after it (or for an empty span).
+#[must_use]
+pub fn part(age: f64, from: f64, span: f64) -> f32 {
+    if span > 0.0 && span.is_finite() {
+        // A share of a fraction of a second: the cast loses nothing that shows.
+        (((age - from) / span) as f32).clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
 /// The design's one curve, `cubic-bezier(.2, .7, .2, 1)`: how far a movement has come at `share` of its time (0 to
 /// 1; below 0 counts as 0, above 1 or not a number as 1, the end of the movement). The curve's time is found by
 /// halving its interval a fixed number of times (its x rises from 0 to 1), so it always ends.
@@ -278,11 +391,11 @@ pub const STAGGER: f32 = 0.03;
 const HALF_TURN_MS: f64 = 500.0;
 
 /// Whether a caret that last moved at `since` (an input time, in seconds) shows now: on for the first half of each
-/// turn of [`CARET`], off for the second, at every level the app has (the design's caret blinks at full and at
-/// reduced). A repaint is asked for at its next change, never sooner. `still` keeps it on and asks for nothing (a
-/// caret drawn on a board, or the design's `off` level once the app has it).
+/// turn of [`CARET`], off for the second, at full and at reduced, as the design's caret blinks. A repaint is asked for
+/// at its next change, never sooner. At the off level, or `still` (a caret drawn on a board), it is on and asks for
+/// nothing.
 pub fn blink(ctx: &Context, since: f64, still: bool) -> bool {
-    if still {
+    if still || level(ctx) == Level::Off {
         return true;
     }
     let now = ctx.input(|input| input.time);

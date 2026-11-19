@@ -268,7 +268,8 @@ fn a_row_that_leaves_acts_at_once_and_its_gap_closes_as_the_motion_level_says() 
     let mut tops = vec![harness.get_by_label(&next).rect().top()];
     // The toast where it first shows: it rises from there.
     let mut rising = harness.query_by_role_and_label(Role::Button, "undo").map(|node| node.rect());
-    for _ in 0..14 {
+    // At full the words dissolve over 125 ms, then the row closes over 180.
+    for _ in 0..20 {
         harness.step();
         tops.push(harness.get_by_label(&next).rect().top());
         rising = rising.or_else(|| harness.query_by_role_and_label(Role::Button, "undo").map(|node| node.rect()));
@@ -1937,7 +1938,8 @@ fn undo_while_the_gap_closes_puts_the_row_back_whole_and_nothing_moves_after() {
     harness.get_by_label(ODILE).hover();
     harness.run_steps(2);
     harness.get_by_role_and_label(Role::Button, "Done").click();
-    harness.run_steps(4);
+    // Past the words' dissolve (125 ms at full), into the close.
+    harness.run_steps(11);
     assert!(harness.state().mailbox().left_row().is_some(), "still closing");
     assert!(harness.get_by_label(&next).rect().top() < below.top(), "the gap has begun to close");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
@@ -2013,7 +2015,7 @@ fn a_row_leaving_above_the_viewport_keeps_the_first_row_in_sight_where_it_stands
     let above = harness.state().messages().first().map(|row| row.id).unwrap();
     assert_ne!(above, first, "the first message is above the viewport");
     harness.state_mut().start(above, crate::mailbox::Act::Done);
-    for step in 0..16 {
+    for step in 0..20 {
         harness.step();
         assert_eq!(pane_rect(&harness, first).map(|rect| rect.top()), Some(top), "step {step}: the first row in sight stays");
     }
@@ -2039,7 +2041,8 @@ fn a_row_snoozed_above_the_viewport_keeps_the_first_row_in_sight_where_it_stands
     // Snoozed until tomorrow: it fades in its place, then its line goes at once.
     let until = Timestamp::from_unix(1_793_869_200 + 86_400, 0).unwrap();
     harness.state_mut().start(above, crate::mailbox::Act::Snooze(until));
-    for step in 0..16 {
+    // At full it slides and fades over 300 ms, then its place closes over 180.
+    for step in 0..30 {
         harness.step();
         assert_eq!(pane_rect(&harness, first).map(|rect| rect.top()), Some(top), "step {step}: the first row in sight stays");
     }
@@ -2063,7 +2066,7 @@ fn the_lines_add_up_to_whole_pixels_while_a_row_closes() {
             let theme = Theme::new(Mode::Light, scale);
             let mut last = f32::INFINITY;
             for closed in [0.0, 0.1, 0.33, 0.5, 0.77, 0.99] {
-                let gone = super::list::Gone { closed, faded: closed };
+                let gone = super::list::Gone::closing(closed, closed);
                 let listing = super::list::lines(&theme, &mailbox, view, &groups, &other, true, &|_| false, Some(gone));
                 let ghost = (0..listing.lines.len()).find(|index| matches!(listing.lines[*index], super::list::Line::Leaving(..))).unwrap();
                 let (top, bottom) = listing.span(ghost).unwrap();
@@ -2103,7 +2106,7 @@ fn a_groups_head_leaves_with_its_last_row() {
     let theme = Theme::new(Mode::Light, TextScale::default());
     let mut last = f32::INFINITY;
     for closed in [0.0, 0.25, 0.5, 0.75, 0.99] {
-        let gone = super::list::Gone { closed, faded: closed };
+        let gone = super::list::Gone::closing(closed, closed);
         let listing = super::list::lines(&theme, &mailbox, InboxView::Grouped, &groups, &other, false, &|_| true, Some(gone));
         // Newsletters' only row is leaving: no bare head stands over nothing, the head closes with the row.
         let heads: Vec<usize> =
@@ -2141,13 +2144,14 @@ fn a_snoozed_row_fades_in_its_place_and_is_then_gone() {
     let below = pane_row(&harness, &next).unwrap().top();
     let later = Timestamp::from_unix(1_793_869_200 + 86_400, 0).unwrap();
     harness.state_mut().start(rota, crate::mailbox::Act::Snooze(later));
-    // Fading (125 ms), the row keeps its height: the row under it stays.
-    for step in 0..5 {
+    // Sliding and fading (300 ms at full), the row keeps its height: the row under it stays.
+    for step in 0..17 {
         harness.step();
         assert!(harness.state().left_row().is_some(), "step {step}: fading");
         assert_eq!(pane_row(&harness, &next).map(|rect| rect.top()), Some(below), "step {step}: no gap closes");
     }
-    harness.run_steps(6);
+    // Then its place closes over 180 ms.
+    harness.run_steps(14);
     assert!(harness.state().left_row().is_none(), "gone after the fade");
     assert_eq!(pane_row(&harness, &next).map(|rect| rect.top()), Some(below - 56.0), "and its place with it");
 }
@@ -2170,7 +2174,8 @@ fn a_row_closes_on_its_card_and_in_the_grouped_list_too() {
         harness.get_by_label(ODILE).hover();
         harness.run_steps(2);
         harness.get_by_role_and_label(Role::Button, "Done").click();
-        harness.run_steps(4);
+        // At full the words dissolve first (125 ms), then the row closes.
+        harness.run_steps(11);
         let mid = harness.get_by_label(&next).rect().top();
         assert!(mid < below && mid > below - 56.0, "{view:?}: closing in its group, {mid} between {below} and {}", below - 56.0);
         harness.run_steps(20);

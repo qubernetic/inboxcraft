@@ -879,15 +879,28 @@ fn the_check_shows_steps_up_to_the_running_one() {
 fn printed_steps_end_at_the_one_under_way_and_a_check_that_ended_shows_all() {
     let row = |id: &str, state| crate::onboard::StepRow { id: id.to_owned(), state, server: None, issuer: None, message: None, kind: None };
     let steps = [row("dns", StepState::Passed), row("tcp", StepState::Pending), row("tls", StepState::Pending)];
-    let running = super::onboard::printed(&steps, true);
+    let running = super::onboard::printed(&steps, true, false);
     assert_eq!(
         running.iter().map(|(row, state)| (row.id.as_str(), *state)).collect::<Vec<_>>(),
         [("dns", crate::component::check_step::StepState::Passed), ("tcp", crate::component::check_step::StepState::Running)]
     );
-    let ended = super::onboard::printed(&steps, false);
+    let ended = super::onboard::printed(&steps, false, false);
     assert_eq!(ended.len(), 3);
     assert_eq!(ended[2].1, crate::component::check_step::StepState::Waiting);
-    assert!(super::onboard::printed(&[], true).is_empty());
+    assert!(super::onboard::printed(&[], true, false).is_empty());
+}
+
+#[test]
+fn at_motion_off_a_step_is_printed_once_it_has_ended_not_as_it_starts() {
+    let row = |id: &str, state| crate::onboard::StepRow { id: id.to_owned(), state, server: None, issuer: None, message: None, kind: None };
+    let steps = [row("dns", StepState::Passed), row("tcp", StepState::Passed), row("tls", StepState::Pending), row("cert", StepState::Pending)];
+    let still = super::onboard::printed(&steps, true, true);
+    assert_eq!(
+        still.iter().map(|(row, state)| (row.id.as_str(), *state)).collect::<Vec<_>>(),
+        [("dns", crate::component::check_step::StepState::Passed), ("tcp", crate::component::check_step::StepState::Passed)],
+        "the lines that ended, the one under way not yet"
+    );
+    assert_eq!(super::onboard::printed(&steps, false, true).len(), 4, "an ended check shows every step at off too");
 }
 
 #[test]

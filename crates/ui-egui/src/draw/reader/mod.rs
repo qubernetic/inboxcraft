@@ -416,7 +416,7 @@ pub(super) fn show(
 }
 
 /// How long a message takes to wipe in when it opens (M7, the `medium` token), in seconds.
-const WIPE: f64 = 0.3;
+pub(crate) const WIPE: f64 = 0.3;
 
 /// How far into the wipe's time the scan line starts to fade, as the presentation fades it over the last tenth.
 const SCAN_GONE: f32 = 0.9;

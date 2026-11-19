@@ -377,6 +377,9 @@ impl<'a> TextButton<'a> {
         let (rect, response) = ui.allocate_exact_size(vec2(width, control_side(theme)), sense);
         response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, self.name));
         let lit = lit(ui, theme, &response, enabled, self.shown, Hover::Fades);
+        // M3: at full the label resolves from glyphs when the pointer comes on; the characters that read so far.
+        let resolved = crate::scramble::count(&label)
+            .and_then(|count| crate::scramble::hover(ui.ctx(), response.id, enabled && self.shown.is_none() && response.hovered(), count));
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
             // The tone's colours at rest, under the pointer and pressed; hover cross-fades from rest, pressed is at once.
@@ -415,7 +418,16 @@ impl<'a> TextButton<'a> {
                 crate::iconset::paint(painter, at, icon, ink);
                 x += icon_side + GAP;
             }
-            painter.galley(egui::pos2(x, rect.center().y - label.size().y / 2.0), label, ink);
+            let at = egui::pos2(x, rect.center().y - label.size().y / 2.0);
+            if let Some(done) = resolved {
+                // The glyphs stand in the label's own box: a wider one never pushes past it.
+                let boxed = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + label_width, rect.bottom()));
+                let clipped = painter.with_clip_rect(painter.clip_rect().intersect(boxed));
+                let seed = label.job.text.len() as u64;
+                clipped.galley(at, crate::scramble::galley(painter, &label, &(0..done), seed), ink);
+            } else {
+                painter.galley(at, label, ink);
+            }
             x += label_width + GAP;
             if let Some(arrow) = arrow {
                 let width = arrow.size().x.ceil();
