@@ -170,3 +170,41 @@ fn a_key_while_a_card_leaves_acts_in_its_frame_and_the_next_card_is_in_place() {
         assert!(answered_edge(&harness, true).is_none(), "{level:?}: the answered card is gone");
     }
 }
+
+/// A pointer press at `at`, held `hold` frames, then let go (a click spread over frames, as a hand makes it).
+pub(crate) fn hold_click(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2, hold: usize) {
+    let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    harness.event(egui::Event::PointerMoved(at));
+    harness.step();
+    harness.event(button(true));
+    harness.step();
+    harness.run_steps(hold);
+    harness.event(button(false));
+    harness.step();
+}
+
+#[test]
+fn a_click_on_the_next_card_held_across_the_slots_close_answers_it() {
+    // Each level at both moments the answered card changes its form: its slot starts closing, then it is let go. The
+    // press comes before the moment and the release after it.
+    let cases = [(Level::Reduced, 8, 6), (Level::Reduced, 28, 6), (Level::Full, 25, 8), (Level::Full, 45, 8)];
+    let mut lost = Vec::new();
+    for (level, wait, hold) in cases {
+        let mut harness = queue(level);
+        let asking = let_in_tops(&harness).len();
+        answer_first(&mut harness, true);
+        harness.run_steps(wait);
+        let mut lets: Vec<_> = harness.query_all_by_role_and_label(Role::Button, "Let in").map(|node| node.rect()).collect();
+        lets.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        // While the answered card still stands in its slot, its own (dead) answers are the first.
+        let next = usize::from(answered_edge(&harness, true).is_some());
+        let at = lets.get(next).map(|rect| rect.center()).expect("the next card's Let in");
+        hold_click(&mut harness, at, hold);
+        harness.run_steps(80);
+        let left = let_in_tops(&harness).len();
+        if left + 2 != asking {
+            lost.push((level, wait, asking, left));
+        }
+    }
+    assert!(lost.is_empty(), "the second answer was lost: {lost:?}");
+}

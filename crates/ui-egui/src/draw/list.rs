@@ -2143,7 +2143,7 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
                 let Some(asker) = askers.get(index) else { break };
                 // The next card becomes the current one when the answered one has faded.
                 let current = index == 0 && !holding;
-                let (act, high) = sender_card(ui, theme, keymap, mailbox, asker, current, None);
+                let (act, high) = sender_card(ui, theme, keymap, mailbox, asker, current, None, "queue");
                 if let Some(act) = act {
                     rows.acted.set(Some((asker.newest.id, act)));
                     if motion::level(ui.ctx()) != motion::Level::Off {
@@ -2245,17 +2245,19 @@ fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, 
     let mut card = ui.new_child(UiBuilder::new().max_rect(slot.translate(vec2(0.0, shift))).id_salt(("leaving-card", left.at)));
     card.shrink_clip_rect(slot);
     card.multiply_opacity(1.0 - gone.faded.clamp(0.0, 1.0));
-    let _ = sender_card(&mut card, theme, keymap, mailbox, &asker, left.current, Some(edge));
+    let _ = sender_card(&mut card, theme, keymap, mailbox, &asker, left.current, Some(edge), "queue");
 }
 
 /// [`sender_card`] for `newest`, the current one, in whatever room `ui` gives: its height (the tests' hostile rooms).
 #[cfg(test)]
 pub(super) fn sender_card_of(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, newest: &MessageRow) -> f32 {
-    sender_card(ui, theme, keymap, mailbox, &Asker { newest, more: 0 }, true, None).1
+    sender_card(ui, theme, keymap, mailbox, &Asker { newest, more: 0 }, true, None, "alone").1
 }
 
 /// The card of the sender `asker` across `ui` (at most [`CARD_WIDE`]): `current` for the first of the queue, its edge
-/// `edge` when given (an answered card's). The answer pressed, Let in or Keep out, and the card's height.
+/// `edge` when given (an answered card's), its id salted with `salt` (the queue's, or a card drawn alone). The answer
+/// pressed, Let in or Keep out, and the card's height.
+#[expect(clippy::too_many_arguments, reason = "the parts of one card and where it is drawn")]
 fn sender_card(
     ui: &mut Ui,
     theme: &Theme,
@@ -2264,6 +2266,7 @@ fn sender_card(
     asker: &Asker<'_>,
     current: bool,
     edge: Option<egui::Color32>,
+    salt: &str,
 ) -> (Option<Act>, f32) {
     let live = edge.is_none();
     let (p, f, s) = (&theme.palette, &theme.fonts, &theme.spacing);
@@ -2272,8 +2275,10 @@ fn sender_card(
     let mut answer = None;
     let mut opened = false;
     let open = &mut opened;
-    let id = Id::unique("new-sender-card").with(message.address.to_lowercase());
-    let inner = ui.push_id(id, |ui| {
+    // The card's own id, not one counted from what was drawn before it: an answered card above changes its form as it
+    // leaves (in its slot, then only room, then nothing), and a press held on this card across that keeps its widget.
+    let id = Id::unique("new-sender-card").with(message.address.to_lowercase()).with(salt);
+    let inner = ui.scope_builder(UiBuilder::new().scope_id(if live { id } else { id.with("leaving") }), |ui| {
         ui.set_max_width(wide);
         let slot = ui.painter().add(egui::Shape::Noop);
         // The design's 20 and 16 inside the card's 1 px edge.
