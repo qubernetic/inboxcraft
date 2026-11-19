@@ -82,6 +82,13 @@ fn every_safe_read_command_runs_on_the_fixture() {
 }
 
 #[test]
+fn the_sync_status_answers_headless_with_no_worker_as_offline() {
+    let dir = fixture();
+    let status = json(dir.path(), &["sync.status"]);
+    assert_eq!(status, json!({ "state": "offline", "done": 0, "of": 0, "last_synced": null, "failing_accounts": 0 }));
+}
+
+#[test]
 fn a_change_a_safe_command_makes_is_kept_in_the_store() {
     let dir = fixture();
     let read = format!(r#"{{"id":{}}}"#, store::LUNCH);

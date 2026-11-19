@@ -117,3 +117,38 @@ fn a_sign_in_without_an_answer_is_not_transient() {
     }
     assert!(!NetError::new(ErrorKind::ConnectionDropped, "").may_sign_in_again());
 }
+
+/// The kinds a later attempt may get over: the worker backs off and signs in again.
+const RETRIED: [ErrorKind; 7] = [
+    ErrorKind::HostNotFound,
+    ErrorKind::ConnectionRefused,
+    ErrorKind::TimedOut,
+    ErrorKind::ConnectionDropped,
+    ErrorKind::CommandRefused,
+    ErrorKind::Protocol,
+    ErrorKind::TooLarge,
+];
+
+/// The kinds that stop the worker without needing the owner, so `sync.status` reads them as `offline`: a check's
+/// diagnosis, or a job's own failure.
+const STOPS_OFFLINE: [ErrorKind; 8] = [
+    ErrorKind::PortTimedOut,
+    ErrorKind::MailPortsBlocked,
+    ErrorKind::FolderGone,
+    ErrorKind::MessageGone,
+    ErrorKind::MessageRefused,
+    ErrorKind::NoSubmissionServer,
+    ErrorKind::SendUnanswered,
+    ErrorKind::NoCalendarServer,
+];
+
+#[test]
+fn every_error_kind_is_retried_stops_for_the_owner_or_stops_offline_and_only_one() {
+    for kind in ErrorKind::ALL {
+        let retried = NetError::new(kind, "").is_transient();
+        let groups = [retried, kind.needs_the_owner(), STOPS_OFFLINE.contains(&kind)];
+        assert_eq!(groups.iter().filter(|in_it| **in_it).count(), 1, "{kind:?}: retried, the owner, offline = {groups:?}");
+        // A kind off the list of the transient ones is never retried.
+        assert_eq!(retried, RETRIED.contains(&kind), "{kind:?}");
+    }
+}
