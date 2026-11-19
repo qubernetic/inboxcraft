@@ -461,6 +461,7 @@ macro_rules! contract_tests {
             jobs_wait_in_the_order_they_came,
             a_job_needs_its_account,
             drafts_read_back_per_account,
+            the_newest_drafts_come_with_their_count,
             a_draft_needs_its_account,
             the_outbox_follows_its_draft,
             the_schedule_reads_back_by_due_time,

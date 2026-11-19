@@ -171,6 +171,9 @@ fn phrase(words: &[String]) -> Option<String> {
     (!words.is_empty()).then(|| format!("\"{}\"", words.join(" ").replace('"', "\"\"")))
 }
 
+/// The newest drafts of account `?1`, at most `?2`, in the order of the `draft_newest` index.
+const NEWEST_DRAFTS: &str = "SELECT record FROM draft WHERE account = ?1 ORDER BY saved DESC, saved_nanos DESC, id DESC LIMIT ?2";
+
 /// An id as SQLite looks it up: `None` past `i64::MAX`, which no key can be. `None` binds as NULL, and `= NULL` is
 /// true for no row whatever the file holds (a negative key in a damaged file too), so the lookup finds nothing, as for
 /// an unknown id: a read gives nothing, a change that needs the thing gives the kind's `Unknown…` error and a removal
@@ -460,6 +463,15 @@ impl Storage for Sqlite {
 
     fn drafts(&self, account: AccountId) -> Result<Vec<Draft>, StoreError> {
         self.records("SELECT record FROM draft WHERE account = ?1 ORDER BY id", [key(account.get())])
+    }
+
+    fn newest_drafts(&self, account: AccountId, limit: usize) -> Result<(u64, Vec<Draft>), StoreError> {
+        let account = key(account.get());
+        let total: i64 = self.conn.query_row("SELECT count(*) FROM draft WHERE account = ?1", [account], |row| row.get(0))?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        // `draft_newest` holds this order, so the scan stops after `limit` rows.
+        let drafts = self.records(NEWEST_DRAFTS, params![account, limit])?;
+        Ok((u64::try_from(total).unwrap_or(0), drafts))
     }
 
     fn draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError> {

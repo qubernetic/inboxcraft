@@ -224,16 +224,96 @@ impl KeepFile {
     }
 }
 
-/// The JSON in `path`, unless it is missing, larger than [`MAX_FILE`] or not JSON.
+/// The JSON in `path`, unless it is missing, not a regular file, larger than [`MAX_FILE`] or not JSON.
 fn read_json(path: &Path) -> Option<Value> {
-    let file = std::fs::File::open(path).ok()?;
-    let mut bytes = Vec::new();
-    // One byte past the cap tells a file that is too large from one that is just large enough.
-    file.take(u64::try_from(MAX_FILE).unwrap_or(u64::MAX).saturating_add(1)).read_to_end(&mut bytes).ok()?;
-    if bytes.len() > MAX_FILE {
+    serde_json::from_slice(&read_kept(path, MAX_FILE)?).ok()
+}
+
+/// The bytes of the kept file `path`, unless it is missing, not a regular file or larger than `cap` bytes.
+///
+/// A kept file is read at the start, so nothing in it may hold the start up: a named pipe, a link to one, a device or
+/// a folder is never read. The type is looked at before the file is opened (following a link, so a kept file may be a
+/// link to a regular file), the file is opened in a way that does not wait for a pipe's writer where the platform has
+/// one, and the type of what was opened is looked at again, in case the file changed in between.
+#[must_use]
+pub fn read_kept(path: &Path, cap: usize) -> Option<Vec<u8>> {
+    if !regular(&std::fs::metadata(path).ok()?) {
         return None;
     }
-    serde_json::from_slice(&bytes).ok()
+    read_opened(open_kept(path).ok()?, cap)
+}
+
+/// Whether `metadata` is that of a regular file.
+fn regular(metadata: &std::fs::Metadata) -> bool {
+    metadata.is_file()
+}
+
+/// The bytes of the opened kept file, unless it is not a regular file or larger than `cap` bytes.
+fn read_opened(file: std::fs::File, cap: usize) -> Option<Vec<u8>> {
+    if !regular(&file.metadata().ok()?) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    // One byte past the cap tells a file that is too large from one that is just large enough.
+    file.take(u64::try_from(cap).unwrap_or(u64::MAX).saturating_add(1)).read_to_end(&mut bytes).ok()?;
+    (bytes.len() <= cap).then_some(bytes)
+}
+
+/// `O_NONBLOCK`: an open with it never waits for a pipe's writer, and a regular file reads as without it.
+#[cfg(all(
+    any(target_os = "linux", target_os = "android"),
+    any(
+        target_arch = "x86",
+        target_arch = "x86_64",
+        target_arch = "arm",
+        target_arch = "aarch64",
+        target_arch = "riscv32",
+        target_arch = "riscv64",
+        target_arch = "powerpc",
+        target_arch = "powerpc64",
+        target_arch = "s390x",
+        target_arch = "loongarch64"
+    )
+))]
+const NO_WAIT: i32 = 0o4000;
+/// `O_NONBLOCK`: an open with it never waits for a pipe's writer, and a regular file reads as without it.
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))]
+const NO_WAIT: i32 = 0x0004;
+/// No flag of known value keeps the open from waiting here; the type looked at before the open is the guard.
+#[cfg(all(
+    unix,
+    not(any(
+        all(
+            any(target_os = "linux", target_os = "android"),
+            any(
+                target_arch = "x86",
+                target_arch = "x86_64",
+                target_arch = "arm",
+                target_arch = "aarch64",
+                target_arch = "riscv32",
+                target_arch = "riscv64",
+                target_arch = "powerpc",
+                target_arch = "powerpc64",
+                target_arch = "s390x",
+                target_arch = "loongarch64"
+            )
+        ),
+        any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly")
+    ))
+))]
+const NO_WAIT: i32 = 0;
+
+/// Opens the kept file `path` to read, without waiting for a pipe's writer.
+#[cfg(unix)]
+fn open_kept(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new().read(true).custom_flags(NO_WAIT).open(path)
+}
+
+/// Opens the kept file `path` to read; the type looked at before the open is the guard.
+#[cfg(not(unix))]
+fn open_kept(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(path)
 }
 
 /// Writes `value` into `path` through a temporary file moved over the old one.
@@ -302,3 +382,7 @@ impl Keep for KeepFile {
 #[cfg(test)]
 #[path = "keep_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "keep_unix_tests.rs"]
+mod unix_tests;
