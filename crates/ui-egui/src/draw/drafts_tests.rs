@@ -315,3 +315,24 @@ fn the_head_counts_every_draft_past_the_list_s_limit_and_the_newest_comes_first(
     harness.get_by_label(&format!("{} drafts", inboxcraft_engine::MAX_LIST + 1));
     assert!(names(&harness)[0].starts_with("Newest"), "{:?}", names(&harness).first());
 }
+
+#[test]
+fn a_write_of_anything_else_reads_no_drafts_and_a_save_from_the_composer_updates_its_row() {
+    let mut app = sample_app();
+    let kiln = draft(&mut app, "", "Kiln rota", "");
+    let mut harness = drafts_place(app, egui::Theme::Dark);
+    harness.state_mut().mailbox_mut().run("ui.theme.set", &json!({ "mode": "dark" })).unwrap();
+    let runs = harness.state().mailbox().runs();
+    harness.run();
+    assert_eq!(harness.state().mailbox().runs(), runs, "a write that is no draft's reads the drafts not again");
+    harness.query_all_by_role(Role::ListItem).find(|node| node.rect().contains(row(&harness, "Kiln rota").center())).unwrap().click();
+    harness.run();
+    harness.run();
+    assert_eq!(opened(&harness), Some(kiln));
+    let (Some(composer), _) = harness.state_mut().composer_mut() else { panic!("the draft opens in the composer") };
+    "Kiln rota, week 47".clone_into(composer.subject_mut());
+    composer.edited();
+    harness.state_mut().keep_draft_now();
+    harness.run();
+    row(&harness, "Kiln rota, week 47");
+}

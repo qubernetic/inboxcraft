@@ -692,7 +692,7 @@ pub struct Mailbox {
     outbox: Vec<OutboxRow>,
     /// The drafts the drafts place lists, from `compose.list`, read while it shows.
     drafts: Vec<DraftItem>,
-    /// [`Mailbox::writes`] when [`Mailbox::drafts`] was last read: a write since reads them again.
+    /// [`Mailbox::draft_writes`] when [`Mailbox::drafts`] was last read: a draft written since reads them again.
     drafts_read: Option<u64>,
     /// How many drafts the engine keeps over the accounts shown (`compose.list`'s `total`), listed or not.
     drafts_total: u64,
@@ -713,6 +713,9 @@ pub struct Mailbox {
     /// Counts the commands run through [`Mailbox::run`] that may change something (all but the reads,
     /// [`changes_nothing`]): a draft kept, an event saved. Home is built again when it moved.
     writes: u64,
+    /// Counts the writes of [`Mailbox::writes`] that may change a kept draft or a send (`compose.*`, `outbox.*`): the
+    /// drafts place reads its drafts again only after one.
+    draft_writes: u64,
     /// The id of the last command run through [`Mailbox::run`].
     last: Option<&'static str>,
     /// Who the window's commands run for: the owner, or an agent while a picture's script steps drive the window.
@@ -965,6 +968,7 @@ impl Mailbox {
             runs: 0,
             revision: 0,
             writes: 0,
+            draft_writes: 0,
             last: None,
             caller: Caller::Owner,
             refused: None,
@@ -1696,6 +1700,9 @@ impl Mailbox {
         self.runs = self.runs.saturating_add(1);
         if !changes_nothing(command) {
             self.writes = self.writes.wrapping_add(1);
+            if command.starts_with("compose.") || command.starts_with("outbox.") {
+                self.draft_writes = self.draft_writes.wrapping_add(1);
+            }
         }
         self.last = Some(command);
         let answer = self.session.run_as(self.caller, command, params);
@@ -1852,18 +1859,19 @@ impl Mailbox {
             self.drafts_total = total;
             self.revision = self.revision.wrapping_add(1);
         }
-        self.drafts_read = Some(self.writes);
+        self.drafts_read = Some(self.draft_writes);
         Ok(())
     }
 
-    /// While the drafts place shows, reads its drafts again when something was written since they were read (a draft
-    /// saved, sent or discarded); otherwise nothing, so a frame at rest runs no command.
+    /// While the drafts place shows, reads its drafts again when a draft or a send was written since they were read (a
+    /// draft saved, sent or discarded: `compose.*`, `outbox.*`); otherwise nothing, so a frame at rest, or after a write
+    /// of anything else, runs no command.
     pub fn keep_drafts_fresh(&mut self) {
-        if self.drafts_listed() && self.drafts_read != Some(self.writes) {
+        if self.drafts_listed() && self.drafts_read != Some(self.draft_writes) {
             let read = self.load_drafts();
             if let Err(error) = read {
-                // Not read again until the next write: a refused read is not asked for every frame.
-                self.drafts_read = Some(self.writes);
+                // Not read again until the next such write: a refused read is not asked for every frame.
+                self.drafts_read = Some(self.draft_writes);
                 self.error = Some(error.to_string());
             }
         }
