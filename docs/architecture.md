@@ -445,10 +445,12 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   (`net::candidates`: de-duplicated, capped, hosts made up from a domain only on 993 and 143, or 465 and 587, never
   without encryption, never port 25), and a candidate counts only when it greets and, encrypted, offers a sign-in
   (`net::probe`, which sends no user name or password). A server the domain names (its autoconfig, the ISPDB, SRV)
-  that no probe reached is still proposed, marked `Checked::NoAnswer`. While the domain names servers of a kind, a
+  that no probe reached is still proposed, marked unchecked. While the domain names servers of a kind, a
   guess of that kind is tried only once every named one has failed for a definite reason (refused, no such name, a
-  certificate that does not hold, no STARTTLS, no sign-in); one that only timed out keeps the guesses away. A host
-  is skipped on every port when its name is not found or when it is a guess of the domain's own that timed out; any
+  certificate that does not hold, no STARTTLS, no sign-in); one that only timed out, dropped the connection or whose
+  certificate does not fit this computer's clock keeps the guesses away, and is proposed with the cause
+  (`Checked::NoAnswer`, `Refused`, `NoName`, `Clock`). A host is skipped on every port when its name is not found;
+  a guess of the domain's own that timed out skips the guesses on its host, not a server the domain names there; any
   other host that timed out is skipped on that port only. It stops once it has an IMAP and a submission server, after
   24 probes, or at its deadline of 120 seconds, which every lookup and probe is given (`net::Deadline`, with a stop
   the app sets when a newer run starts); a probe has 12 seconds of its own and tries at most four addresses. The
