@@ -349,3 +349,18 @@ fn cancelling_a_snooze_brings_the_message_back_to_its_inbox() {
         assert!(!list["messages"].as_array().unwrap().iter().any(|message| message["id"] == snoozed), "and not in Snoozed");
     }
 }
+
+#[test]
+fn entries_that_could_not_be_read_are_counted_in_the_page_s_note() {
+    let mut harness = four();
+    assert!(harness.query_by_label_contains("could not be read").is_none(), "nothing to say when every entry reads");
+    let answer = harness.state_mut().mailbox_mut().run("schedule.list", &json!({})).unwrap();
+    let mut entries = answer["entries"].as_array().unwrap().clone();
+    // One the engine left out, one the window cannot read.
+    entries.push(json!({ "id": 99, "due": "junk", "what": "send" }));
+    harness.state_mut().settings_mut().scheduled_mut().read(&json!({ "entries": entries, "skipped": 1 }));
+    harness.run();
+    assert_eq!(harness.state().settings().scheduled().skipped(), 2);
+    harness.get_by_label("2 waiting entries could not be read and are not listed.");
+    harness.get_by_label(ALERT);
+}

@@ -99,6 +99,16 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut S
         ui.add_space(12.0);
         inset(ui, |ui| words(ui, theme.fonts.body, note, theme.palette.warn));
     }
+    let skipped = scheduled.skipped();
+    if skipped > 0 {
+        let note = if skipped == 1 {
+            tr!("1 waiting entry could not be read and is not listed.").to_owned()
+        } else {
+            tr!("{n} waiting entries could not be read and are not listed.", n = skipped)
+        };
+        ui.add_space(12.0);
+        inset(ui, |ui| words(ui, theme.fonts.body, &note, theme.palette.warn));
+    }
     list(ui, theme, keymap, scheduled, mailbox, &mut hand, &mut asked);
     // A hand to a row not drawn this frame (it went, or is out of sight) goes to the link back instead of nowhere.
     if hand.is_some() {

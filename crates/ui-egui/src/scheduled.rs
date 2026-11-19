@@ -176,6 +176,8 @@ pub struct Scheduled {
     confirm: Option<u64>,
     /// Why the last cancel or read was not done.
     note: Option<String>,
+    /// How many entries the last read left out because they could not be read, by the engine or here.
+    skipped: u64,
 }
 
 impl Scheduled {
@@ -188,7 +190,18 @@ impl Scheduled {
     /// Takes `schedule.list`'s answer: at most [`MOST`] rows, the confirmation dropped when its entry went.
     pub fn read(&mut self, answer: &Value) {
         let listed = answer.get("entries").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
-        self.rows = listed.iter().filter_map(ScheduledRow::read).take(MOST).collect();
+        let mut rows = Vec::new();
+        let mut unread: u64 = 0;
+        for value in listed {
+            match ScheduledRow::read(value) {
+                Some(row) if rows.len() < MOST => rows.push(row),
+                Some(_) => {}
+                None => unread = unread.saturating_add(1),
+            }
+        }
+        self.rows = rows;
+        // What the engine could not read and what this window cannot, together: the page's note says how many.
+        self.skipped = answer.get("skipped").and_then(Value::as_u64).unwrap_or(0).saturating_add(unread);
         if let Some(id) = self.confirm
             && !self.rows.iter().any(|row| row.id == id)
         {
@@ -217,6 +230,12 @@ impl Scheduled {
     #[must_use]
     pub fn note(&self) -> Option<&str> {
         self.note.as_deref()
+    }
+
+    /// How many entries the last read left out because they could not be read.
+    #[must_use]
+    pub fn skipped(&self) -> u64 {
+        self.skipped
     }
 
     /// Says why the last cancel or read was not done; `None` when it was.
