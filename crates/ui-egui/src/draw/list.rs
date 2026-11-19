@@ -353,13 +353,13 @@ struct SnoozeRow {
     pass: u64,
 }
 
-/// Where a Snooze asked from outside the row (its key, in one pane over the keyed row) waits for the row's next draw.
+/// Where a Snooze asked from outside the row (its key, over the keyed or the ringed row) waits for the row's next draw.
 fn ask_snooze_id() -> Id {
     Id::unique("list-ask-snooze")
 }
 
-/// Opens the time picker of the message `message`'s row as its Snooze does, when the row is next drawn keyed: the
-/// Snooze key in one pane, where the reader is not shown.
+/// Opens the time picker of the message `message`'s row as its Snooze does, when the row is next drawn: the Snooze
+/// key in one pane, where the reader is not shown, or on the row the owner ringed by Esc from its pointer menu.
 pub(super) fn ask_snooze(ctx: &egui::Context, message: u64) {
     ctx.data_mut(|data| data.insert_temp(ask_snooze_id(), message));
     ctx.request_repaint();
@@ -637,8 +637,11 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         }
     }
     let mut acted = drawn.acted.and_then(|index| act(message, index));
-    // Its Snooze pressed, or its key asked for the keyed row ([`ask_snooze`]).
-    let asked = keyed && ui.ctx().data_mut(|data| data.remove_temp::<u64>(ask_snooze_id())) == Some(message.id);
+    // Its Snooze pressed, or its key asked for this row: the keyed row, or the one the owner ringed ([`ask_snooze`]).
+    let asked = ui.ctx().data(|data| data.get_temp::<u64>(ask_snooze_id())) == Some(message.id);
+    if asked {
+        ui.ctx().data_mut(|data| data.remove::<u64>(ask_snooze_id()));
+    }
     let presets = drawn.acted == Some(SNOOZE_ACTION) || asked;
     if presets {
         open_snooze(ui.ctx(), message.id, actions_id(message.id).with(SNOOZE_ACTION), rect);
@@ -1024,7 +1027,23 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow)
         let pass = ctx.cumulative_pass_nr();
         ctx.data_mut(|data| data.insert_temp(menu_shown_id(), (message.id, pass)));
     }
-    (acted, was_open && !open)
+    let closed = was_open && !open;
+    // Esc from a menu the pointer opened gave the row the keyboard: the owner put the ring there ([`take_ringed`]).
+    if closed && acted.is_none() && !popup::opened_by_key(&ctx, popup_id) && ctx.memory(|memory| memory.has_focus(response.id)) {
+        ctx.data_mut(|data| data.insert_temp(ringed_id(), message.id));
+    }
+    (acted, closed)
+}
+
+/// Where the row an Esc from its pointer menu gave the keyboard waits for the window ([`take_ringed`]).
+fn ringed_id() -> Id {
+    Id::unique("list-ringed-by-menu")
+}
+
+/// The row an Esc from its pointer menu gave the keyboard to since the last call, if any: the ring the owner put
+/// there, which the acts on a row follow even with nothing open.
+pub(super) fn take_ringed(ctx: &egui::Context) -> Option<u64> {
+    ctx.data_mut(|data| data.remove_temp::<u64>(ringed_id()))
 }
 
 /// The id of the hover action group of message `id`'s row: its n-th action is `actions_id(id).with(n)` (Snooze's

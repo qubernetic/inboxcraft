@@ -3582,6 +3582,71 @@ fn after_esc_from_a_rows_pointer_menu_the_acts_go_to_the_ringed_row_not_the_open
 }
 
 #[test]
+fn with_nothing_open_after_esc_from_a_rows_pointer_menu_the_acts_go_to_the_ringed_row() {
+    // The ruling holds with nothing open too, whatever After is: here Next, the default.
+    let mut harness = wide(1300.0);
+    assert_eq!(harness.state().mailbox().selected(), None, "nothing open");
+    let odile = id_with(&harness, "Allotment rota for November");
+    menu_then_esc(&mut harness, ODILE);
+    assert!(!seen(&harness, odile));
+    harness.key_press(Key::R);
+    harness.run();
+    assert!(seen(&harness, odile), "R marked the ringed row read");
+    assert_eq!(harness.state().reader().open_id(), None, "and opened nothing");
+    harness.key_press(Key::S);
+    harness.run();
+    assert!(harness.state().mailbox().messages().iter().any(|row| row.id == odile && row.flagged), "S flagged it");
+    harness.key_press(Key::D);
+    harness.run();
+    harness.run();
+    let done = |harness: &Harness<'static, InboxApp>, id: u64| harness.state().mailbox().messages().iter().all(|row| row.id != id || row.done);
+    assert!(done(&harness, odile), "D took the ringed row");
+    // The row it took is gone: the ring the keyboard lands on is not one the owner put there, and acts on nothing.
+    let landed = super::list::focused_row(&harness.ctx);
+    let before: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect();
+    harness.key_press(Key::R);
+    harness.run();
+    let after: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect();
+    assert_eq!(after, before, "R after the removal acts on no row (the keyboard on {landed:?})");
+}
+
+#[test]
+fn the_ring_an_esc_from_a_rows_pointer_menu_put_ends_when_the_ring_moves() {
+    // Every way back to the row in two panes selects it; what ends is the memory itself, by Tab, an arrow or a menu.
+    let mut harness = wide(1300.0);
+    let odile = id_with(&harness, "Allotment rota for November");
+    let ringed = |harness: &mut Harness<'static, InboxApp>| {
+        harness.run();
+        harness.state().owner_ring
+    };
+    for (way, key) in [("Tab", Key::Tab), ("J", Key::J), ("the down arrow", Key::ArrowDown)] {
+        menu_then_esc(&mut harness, ODILE);
+        assert_eq!(ringed(&mut harness), Some(odile), "{way}: Esc from the pointer menu rings the row");
+        harness.key_press(key);
+        harness.run();
+        assert_eq!(ringed(&mut harness), None, "{way}: the ring moved, the memory ends");
+    }
+    menu_then_esc(&mut harness, ODILE);
+    harness.get_by_label(TEODOR).click_secondary();
+    harness.run();
+    assert_eq!(ringed(&mut harness), None, "another row's menu ends it");
+    harness.key_press(Key::Escape);
+    harness.run();
+}
+
+#[test]
+fn with_nothing_open_the_snooze_key_after_esc_from_a_rows_pointer_menu_opens_its_picker() {
+    let mut harness = wide(1300.0);
+    let odile = id_with(&harness, "Allotment rota for November");
+    menu_then_esc(&mut harness, ODILE);
+    harness.key_press(Key::H);
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_some(), "H opened the time picker");
+    assert!(harness.ctx.memory(|memory| memory.area_rect(super::list::snooze_popup(odile))).is_some(), "on the ringed row");
+}
+
+#[test]
 fn in_one_pane_another_account_or_search_while_reading_keys_no_row_of_the_new_list() {
     // The message in front leaves the list because the person picked another account or searched: the list comes back
     // in front, and no row of the new list is keyed for them (as beside the reader).

@@ -880,6 +880,11 @@ fn by_key_id(id: Id) -> Id {
     id.with("opened-by-key")
 }
 
+/// Whether the menu `id` was last opened from the keyboard ([`open_under`]), not by the pointer.
+pub fn opened_by_key(ctx: &Context, id: Id) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(by_key_id(id))).unwrap_or(false)
+}
+
 /// A menu `width` wide that `opener` opens and closes (a press, or Enter or Space on it): the [`float`] `id` hung
 /// under it while it is open, `add` drawing its rows and saying whether one was chosen, which closes it. Esc closes it
 /// and gives `opener` the keyboard. A menu opened from the keyboard (Enter or Space on `opener`, or a screen reader's
