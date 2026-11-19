@@ -23,10 +23,9 @@ use std::time::Duration;
 
 use eframe::egui::{self, ViewportCommand};
 use inboxcraft_control_key::Failure;
-use inboxcraft_engine::EngineError;
 use inboxcraft_model::Role;
-use inboxcraft_ui_egui::InboxApp;
 use inboxcraft_ui_egui::mailbox::{Act, Mailbox};
+use inboxcraft_ui_egui::{InboxApp, store_log};
 
 use crate::control::Call;
 use crate::instance::Request;
@@ -258,21 +257,6 @@ impl Desktop {
             self.shown = Some(count);
         }
     }
-}
-
-/// The line for the app's own standard error when `error` is a store failure with the database's own words, unless
-/// they are the words of the line before (`logged`, then kept). The caller (the CLI, MCP) is answered only the fixed
-/// sentence; the words, which can name the store's tables and columns or carry a crafted file's trigger text, cut to
-/// [`inboxcraft_store::MAX_ERROR_DETAIL`] characters without control characters, stay on the owner's machine.
-#[must_use]
-pub fn store_log(error: &EngineError, logged: &mut Option<String>) -> Option<String> {
-    let EngineError::Store(store) = error else { return None };
-    let detail = store.detail()?;
-    if logged.as_deref() == Some(detail) {
-        return None;
-    }
-    *logged = Some(detail.to_owned());
-    Some(format!("inboxcraft: a command failed: {store} (the database said: {detail})"))
 }
 
 /// The unread messages in the inboxes of every account.

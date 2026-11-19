@@ -669,6 +669,8 @@ pub struct Mailbox {
     refused: Option<&'static str>,
     /// The calendars' sync: the owner's press, its jobs and its events ([`crate::calendar::sync`]).
     calendar_sync: SyncHandle,
+    /// The database's words of the last store failure of the window's commands written to standard error.
+    logged: Option<String>,
 }
 
 impl std::fmt::Debug for Mailbox {
@@ -905,6 +907,7 @@ impl Mailbox {
             caller: Caller::Owner,
             refused: None,
             calendar_sync: SyncHandle::default(),
+            logged: None,
         };
         mailbox.refresh();
         mailbox
@@ -1582,6 +1585,12 @@ impl Mailbox {
         let answer = self.session.run_as(self.caller, command, params);
         if let Err(EngineError::NotAllowed { command, .. }) = &answer {
             self.refused = self.refused.or(Some(*command));
+        }
+        // The banner says the store's fixed sentence; the database's own words go to the app's standard error, once.
+        if let Err(error) = &answer
+            && let Some(line) = crate::store_log(error, &mut self.logged)
+        {
+            eprintln!("{line}");
         }
         Ok(answer?)
     }
@@ -2406,6 +2415,9 @@ mod notify_tests;
 #[cfg(test)]
 #[path = "outbox_tests.rs"]
 mod outbox_tests;
+#[cfg(test)]
+#[path = "store_log_tests.rs"]
+mod store_log_tests;
 #[cfg(test)]
 #[path = "mailbox_tests.rs"]
 mod tests;
