@@ -576,3 +576,16 @@ fn nothing_changed_stands_12_right_of_a_signature_s_save() {
     let words = harness.get_all_by_label("nothing changed").find(|node| (node.rect().center().y - save.center().y).abs() < 8.0).unwrap().rect();
     assert_eq!(words.left() - save.right(), 12.0, "{save:?} {words:?}");
 }
+
+#[test]
+fn the_calendar_s_week_row_says_the_rule_s_first_day_and_that_its_own_rows_are_coming() {
+    let mut harness = harness();
+    harness.state_mut().settings_mut().open_at(Section::Calendar);
+    harness.run();
+    assert!(harness.query_all_by_label_contains("Fixed").next().is_none(), "the week is no longer fixed");
+    assert!(harness.query_all_by_label_contains("The week follows the week rule").next().is_some());
+    harness.get_by_label("Monday");
+    harness.state_mut().mailbox_mut().run("week.set", &serde_json::json!({ "first_day": "sunday" })).unwrap();
+    harness.run();
+    harness.get_by_label("Sunday");
+}
