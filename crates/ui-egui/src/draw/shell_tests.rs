@@ -188,3 +188,84 @@ fn the_index_s_places_and_mailboxes_go_where_the_rail_and_the_folder_pane_went()
     harness.run();
     assert!(!harness.state().settings().is_open());
 }
+
+/// What a press under a modal surface must not change: the screen, the mailbox shown, the account narrowed to, the
+/// index's account rows (open or not) and whether the account picker is open.
+fn under(harness: &Harness<'static, InboxApp>) -> (crate::Screen, Place, Option<u64>, Vec<String>, bool) {
+    let rows = harness
+        .query_all_by_role(Role::Button)
+        .filter_map(|node| node.accesskit_node().label())
+        .filter(|label| label.starts_with("Personal"))
+        .collect();
+    let picker = harness.query_by_label("All accounts").is_some();
+    (harness.state().screen(), harness.state().mailbox().place(), harness.state().mailbox().narrowed(), rows, picker)
+}
+
+#[test]
+fn a_screen_reader_s_activate_on_the_index_runs_nothing_under_a_modal_surface() {
+    use crate::keymap;
+    let presses = ["Mail", "Calendar", "Later", "Sent", "Inbox", "Personal", "Show mail of: mira@example.org", "New message"];
+    for surface in ["editor", "sheet", "palette"] {
+        let mut harness = window(vec2(1300.0, 820.0));
+        let ctx = harness.ctx.clone();
+        match surface {
+            "editor" => {
+                harness.state_mut().run_action(&ctx, keymap::CALENDAR);
+                harness.run();
+                harness.get_by_role_and_label(Role::Button, "New event").click();
+                harness.run();
+                harness.get_by_role_and_label(Role::TextInput, "Title").focus();
+                harness.get_by_role_and_label(Role::TextInput, "Title").type_text("Kiln");
+                harness.run();
+            }
+            "sheet" => {
+                harness.state_mut().run_action(&ctx, keymap::SETTINGS);
+                harness.run();
+            }
+            _ => {
+                harness.state_mut().run_action(&ctx, keymap::PALETTE);
+                harness.run();
+                harness.state_mut().palette_mut().query_mut().push_str("zz");
+                harness.run();
+            }
+        }
+        let before = under(&harness);
+        // Under the sheet a place runs as its key does there: it closes the sheet and shows the place (below).
+        let presses = presses.iter().filter(|name| surface != "sheet" || !["Mail", "Calendar", "Later"].contains(name));
+        for &name in presses {
+            let Some(node) = harness
+                .query_all_by_role(Role::Button)
+                .find(|node| node.accesskit_node().label().is_some_and(|label| label == name || label.starts_with(&format!("{name},"))))
+            else {
+                panic!("{surface}: no button {name}");
+            };
+            node.click_accesskit();
+            harness.run();
+            assert_eq!(under(&harness), before, "{surface}: an activate on {name} changed what lies under it");
+            assert!(harness.state().composer().is_none(), "{surface}: {name} opened no composer");
+            match surface {
+                "editor" => {
+                    let summary = harness.state().calendar().editor().map(|editor| editor.form().summary.clone());
+                    assert_eq!(summary.as_deref(), Some("Kiln"), "{surface}: {name}: the editor stays with its typing");
+                }
+                "sheet" => assert!(harness.state().settings().is_open(), "{surface}: {name}: the sheet stays"),
+                _ => {
+                    assert!(harness.state().palette().is_open(), "{surface}: {name}: the palette stays");
+                    assert_eq!(harness.state().palette().query(), "zz", "{surface}: {name}: its typing whole");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn under_the_sheet_a_place_of_the_index_does_what_its_key_does_there() {
+    let mut harness = window(vec2(1300.0, 820.0));
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::SETTINGS);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Calendar").click_accesskit();
+    harness.run();
+    assert!(!harness.state().settings().is_open(), "the sheet closes first, as with Ctrl 2");
+    assert_eq!(harness.state().screen(), crate::Screen::Calendar);
+}

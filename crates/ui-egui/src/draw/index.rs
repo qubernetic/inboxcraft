@@ -49,6 +49,8 @@ pub(crate) struct Asked {
     pub mailbox: Option<mailbox::Place>,
     /// The account picker's choice: one account, or all of them.
     pub account: Option<Option<u64>>,
+    /// An account row pressed: its folders open or close ([`toggle`]).
+    pub toggle: Option<u64>,
 }
 
 /// The most characters of a name a row keeps.
@@ -260,9 +262,22 @@ fn place(ui: &mut Ui, theme: &Theme, keymap: &Keymap, which: Place, at: Place, c
     tooltip::attach(nav_row::nav_row(ui, theme, &row, narrow, None), theme, keymap, label, Some(action))
 }
 
-/// Draws the index into `ui`'s whole rect and returns what was asked for. `at` is the place shown; `narrow` draws the
+/// Opens the folders of account `id` in the index, or closes them when they are open.
+pub(crate) fn toggle(ctx: &egui::Context, id: u64) {
+    let mut open: BTreeSet<u64> = ctx.data(|data| data.get_temp::<BTreeSet<u64>>(open_id())).unwrap_or_default();
+    if !open.remove(&id) {
+        open.insert(id);
+    }
+    ctx.data_mut(|data| data.insert_temp(open_id(), open));
+}
+
+/// Draws the index into `ui`'s whole rect and returns what was asked for (the caller applies it, [`toggle`] too). `at` is the place shown; `narrow` draws the
 /// 56 column (icons, a square where something waits, the accounts' bars).
-pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, at: Place, narrow: bool) -> Asked {
+///
+/// While not `live` (a modal surface in front) the owner's row does not open the account picker: a screen reader's
+/// activate reaches it under egui's modal layers, and a float opened there would come over the surface. The rest of
+/// what is pressed is returned and gated by the caller.
+pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, at: Place, narrow: bool, live: bool) -> Asked {
     let p = &theme.palette;
     let rect = ui.max_rect();
     ui.painter().rect_filled(rect, 0.0, p.panel);
@@ -327,14 +342,8 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             }
         }
     });
-    if let Some(id) = toggled {
-        let mut open = open;
-        if !open.remove(&id) {
-            open.insert(id);
-        }
-        ui.data_mut(|data| data.insert_temp(open_id(), open));
-    }
-    owner(ui, theme, mailbox, rect, narrow, &mut asked);
+    asked.toggle = toggled;
+    owner(ui, theme, mailbox, rect, (narrow, live), &mut asked);
     asked
 }
 
@@ -356,7 +365,7 @@ fn no_account(ui: &mut Ui, theme: &Theme, keymap: &Keymap, narrow: bool, asked: 
 }
 
 /// The owner's row at the foot of `rect`, over a hairline, and the account picker it opens.
-fn owner(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, rect: Rect, narrow: bool, asked: &mut Asked) {
+fn owner(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, rect: Rect, (narrow, live): (bool, bool), asked: &mut Asked) {
     let p = &theme.palette;
     let f = &theme.fonts;
     let at = Rect::from_min_max(pos2(rect.left(), rect.bottom() - Theme::size(theme, OWNER)), rect.max);
@@ -384,7 +393,7 @@ fn owner(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, rect: Rect, narrow: bool
             paint::run_at(ui.painter(), pos2(at.left() + ADDRESS_LEFT, drawn.middle(f.mono_s.line)), words, ink);
         }
         drawn.finish(ui, theme);
-        if let Some(choice) = picker(ui, theme, mailbox, &drawn.response) {
+        if live && let Some(choice) = picker(ui, theme, mailbox, &drawn.response) {
             asked.account = Some(choice);
         }
     });

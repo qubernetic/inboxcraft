@@ -503,6 +503,55 @@ impl InboxApp {
         self.desk = Some(desk);
     }
 
+    /// The action an index place runs, as its key would; Home is coming soon and runs nothing.
+    fn index_action(place: index::Place) -> Option<&'static str> {
+        match place {
+            index::Place::Mail => Some(keymap::MAIL),
+            index::Place::Calendar => Some(keymap::CALENDAR),
+            index::Place::Later => Some(keymap::LATER),
+            index::Place::Settings => Some(keymap::SETTINGS),
+            index::Place::Home => None,
+        }
+    }
+
+    /// Draws the index and the command line; what of the index was asked for and whether New message was pressed, both
+    /// through the one gate of the two: whatever pressed them (the pointer, a key, a screen reader's activate, which
+    /// egui's modal layers do not stop), nothing of it runs unless the `surfaces` in front allow it. A place runs as its
+    /// key would; a mailbox, an account or an account row changes the mail under the surface, so none of them runs
+    /// under the palette, a capture, the sheet or the event editor. An account row's press is applied here.
+    fn index_and_command(
+        &mut self,
+        index: &mut Ui,
+        command: &mut Ui,
+        theme: &Theme,
+        surfaces: &Surfaces,
+        (setting, corner): (bool, f32),
+    ) -> (index::Asked, bool) {
+        let at = self.index_place(setting);
+        let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, false, Self::index_live(surfaces));
+        self.own_frame_parts(command, theme, corner);
+        let new_message = self.new_message(command, theme) && surfaces.allows(keymap::COMPOSE, &self.keymap);
+        let indexed = Self::index_allowed(surfaces, &self.keymap, indexed);
+        if let Some(id) = indexed.toggle {
+            index::toggle(index.ctx(), id);
+        }
+        (indexed, new_message)
+    }
+
+    /// Whether the index's mailboxes, account rows and account picker act: with no palette, capture, sheet or event
+    /// editor in front.
+    fn index_live(surfaces: &Surfaces) -> bool {
+        !(surfaces.held() || surfaces.has(Surface::Sheet) || surfaces.has(Surface::Editor))
+    }
+
+    /// What of the index's `asked` the `surfaces` in front allow: a place where its action may run
+    /// ([`Surfaces::allows`]); a mailbox, the account picker's choice and an account row only with no palette, capture,
+    /// sheet or event editor in front.
+    fn index_allowed(surfaces: &Surfaces, keymap: &Keymap, asked: index::Asked) -> index::Asked {
+        let place = asked.place.filter(|place| Self::index_action(*place).is_some_and(|action| surfaces.allows(action, keymap)));
+        if Self::index_live(surfaces) { index::Asked { place, ..asked } } else { index::Asked { place, ..index::Asked::default() } }
+    }
+
     /// Keeps the notification choices when they changed; the sample keeps none.
     fn keep_notify(&mut self) {
         let Some(kept) = self.kept_notify.as_ref() else { return };
@@ -2187,20 +2236,12 @@ impl InboxApp {
         #[cfg(test)]
         body.data_mut(|data| data.remove::<egui::Rect>(egui::Id::unique("reader-rect")));
         let (gap, half) = (0.0, 0.0);
-        let at = self.index_place(setting);
-        let indexed = index::show(&mut index, &theme, &self.keymap, &self.mailbox, at, false);
+        let (indexed, new_message) = self.index_and_command(&mut index, &mut command, &theme, &surfaces, (setting, corner));
         let index_settings = indexed.place == Some(index::Place::Settings);
-        ran.extend(indexed.place.and_then(|place| match place {
-            index::Place::Mail => Some(keymap::MAIL),
-            index::Place::Calendar => Some(keymap::CALENDAR),
-            index::Place::Later => Some(keymap::LATER),
-            // Home is coming soon; Settings opens and closes the sheet below.
-            index::Place::Home | index::Place::Settings => None,
-        }));
+        ran.extend(indexed.place.and_then(Self::index_action).filter(|action| *action != keymap::SETTINGS));
         asked.open = indexed.mailbox;
         asked.narrow = indexed.account;
-        self.own_frame_parts(&mut command, &theme, corner);
-        ran.extend(self.new_message(&mut command, &theme).then_some(keymap::COMPOSE));
+        ran.extend(new_message.then_some(keymap::COMPOSE));
         let late = self.error_banner(&mut body, &theme, corner, true);
         let (dismiss, banner) = (early.0 | late.0, early.1.or(late.1));
         layers.capped(banner);
