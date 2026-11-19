@@ -2,14 +2,19 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Motion: short, snappy, nothing decorative. Every duration is a token of [`MOTION`], and every animation in the
-//! crate runs through [`toggle`] or [`appear`], which read the one reduced-motion flag ([`set_reduced`]): with it
-//! on, everything lands at its end in the frame it changes. A test refuses egui's animation calls anywhere else.
+//! crate runs through [`toggle`] or [`appear`], which read the one motion level ([`set_level`], [`level`]): at a
+//! level that is [`Level::still`] everything lands at its end in the frame it changes. A test refuses egui's
+//! animation calls anywhere else.
 //!
-//! The flag's default follows the system where the system can be read ([`system_default`]); otherwise motion is on.
-//! With the flag on, egui's own animations (areas fading in, scrolling to a place) stop too. egui's smoothing of a
-//! mouse wheel's notches is fixed inside egui and keeps running.
+//! The window sets the level each frame from the owner's choice ([`follow`]); while the owner has not chosen, the
+//! computer's wish for less motion gives [`Level::Off`] where the computer can be read ([`set_system_wish`]; the
+//! desktop cannot read it yet, and then the owner's default level holds). Until each level has its own movements,
+//! Reduced and Off both land every movement at once and Full runs today's motion. With a still level egui's own
+//! animations (areas fading in, scrolling to a place) stop too. egui's smoothing of a mouse wheel's notches is fixed
+//! inside egui and keeps running.
 
 use egui::{Context, Id, Style, emath::easing, style::ScrollAnimation};
+use inboxcraft_engine::appearance::{MotionLevel, effective};
 
 /// The durations of the motion tokens, in seconds.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -50,23 +55,89 @@ pub const NOTICE: f64 = 4.0;
 /// No animation token is longer than this.
 pub const LONGEST: f32 = 0.25;
 
-/// Where the flag lives in the context.
-fn flag() -> Id {
-    Id::unique("inboxcraft-reduced-motion")
+/// How much the window moves (`docs/design.md`, "Motion"): the owner's level as the window shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    /// Every movement.
+    Full,
+    /// The calm ones: the character field answers only on Home, and nearer; the emblem as at full.
+    Reduced,
+    /// None: still dots and a still emblem.
+    Off,
 }
 
-/// The reduced-motion flag's default: the system's wish where it can be read (`Some`, the web build's
-/// `prefers-reduced-motion`), otherwise motion on.
+impl Level {
+    /// The window's level for the engine's kept one.
+    #[must_use]
+    pub const fn of(level: MotionLevel) -> Self {
+        match level {
+            MotionLevel::Full => Self::Full,
+            MotionLevel::Reduced => Self::Reduced,
+            MotionLevel::Off => Self::Off,
+        }
+    }
+
+    /// The engine's level for this one, as `ui.motion.set level=` names it.
+    #[must_use]
+    pub const fn kept(self) -> MotionLevel {
+        match self {
+            Self::Full => MotionLevel::Full,
+            Self::Reduced => MotionLevel::Reduced,
+            Self::Off => MotionLevel::Off,
+        }
+    }
+
+    /// Whether every movement lands at its end at once: at Reduced and at Off, until each level has movements of its
+    /// own; Full runs them.
+    #[must_use]
+    pub const fn still(self) -> bool {
+        !matches!(self, Self::Full)
+    }
+}
+
+/// Where the level lives in the context.
+fn flag() -> Id {
+    Id::unique("inboxcraft-motion-level")
+}
+
+/// Where the computer's wish for less motion lives in the context.
+fn wish() -> Id {
+    Id::unique("inboxcraft-system-reduces-motion")
+}
+
+/// The computer's wish for less motion as a default: the wish where it can be read (`Some`, the web build's
+/// `prefers-reduced-motion`), otherwise none.
 #[must_use]
 pub fn system_default(system: Option<bool>) -> bool {
     system.unwrap_or(false)
 }
 
-/// Turns reduced motion on or off in `ctx`, egui's fades and scrolling to a place included, from this frame.
-pub fn set_reduced(ctx: &Context, reduced: bool) {
-    ctx.data_mut(|data| data.insert_temp(flag(), reduced));
-    let time = if reduced { 0.0 } else { MOTION.tooltip };
-    let scroll = if reduced { ScrollAnimation::none() } else { ScrollAnimation::default() };
+/// Tells `ctx` the computer's wish for less motion, where the front end can read it (`None`: it cannot). [`follow`]
+/// reads it while the owner has not chosen a level.
+pub fn set_system_wish(ctx: &Context, reduces: Option<bool>) {
+    ctx.data_mut(|data| data.insert_temp(wish(), reduces));
+}
+
+/// The computer's wish for less motion as `ctx` was told it ([`set_system_wish`]); none when it was not.
+#[must_use]
+pub fn system_wish(ctx: &Context) -> bool {
+    system_default(ctx.data(|data| data.get_temp::<Option<bool>>(wish())).flatten())
+}
+
+/// Sets the level in `ctx` from the owner's kept `level`, `chosen` or not ([`effective`]: not chosen, the computer's
+/// wish for less motion gives Off), and gives back the level set.
+pub fn follow(ctx: &Context, level: MotionLevel, chosen: bool) -> Level {
+    let shown = Level::of(effective(level, chosen, system_wish(ctx)));
+    set_level(ctx, shown);
+    shown
+}
+
+/// Sets the level in `ctx`, egui's fades and scrolling to a place included, from this frame.
+pub fn set_level(ctx: &Context, level: Level) {
+    ctx.data_mut(|data| data.insert_temp(flag(), level));
+    let still = level.still();
+    let time = if still { 0.0 } else { MOTION.tooltip };
+    let scroll = if still { ScrollAnimation::none() } else { ScrollAnimation::default() };
     let style = ctx.global_style();
     if style.animation_time != time || style.scroll_animation != scroll {
         ctx.all_styles_mut(|style| {
@@ -76,10 +147,21 @@ pub fn set_reduced(ctx: &Context, reduced: bool) {
     }
 }
 
-/// Whether reduced motion is on in `ctx`.
+/// [`set_level`] for a board or a test that knows only on or off: `reduced` is [`Level::Off`], else [`Level::Full`].
+pub fn set_reduced(ctx: &Context, reduced: bool) {
+    set_level(ctx, if reduced { Level::Off } else { Level::Full });
+}
+
+/// The level in `ctx`; [`Level::Full`] where none was set (a board drawn without the window).
+#[must_use]
+pub(crate) fn level(ctx: &Context) -> Level {
+    ctx.data(|data| data.get_temp(flag())).unwrap_or(Level::Full)
+}
+
+/// Whether every movement lands at its end at once in `ctx` ([`Level::still`]).
 #[must_use]
 pub fn reduced(ctx: &Context) -> bool {
-    ctx.data(|data| data.get_temp(flag())).unwrap_or(false)
+    level(ctx).still()
 }
 
 /// Sets egui's own animation time in `style` to the tooltip token: egui fades its tooltips in over it.

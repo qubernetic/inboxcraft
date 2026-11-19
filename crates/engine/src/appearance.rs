@@ -4,9 +4,9 @@
 //! The owner's appearance choices: mode, text scale, motion and window frame.
 //!
 //! Motion has three levels ([`MotionLevel`]: full, reduced, off) and a flag saying whether the owner chose one; while
-//! the owner has not, the computer's wish for less motion turns it off ([`effective`]). The front end still reads the
-//! older two-way field [`Appearance::motion`] until its Appearance page moves to the levels (Task 5.2 of stage I-2);
-//! that field and [`Appearance::motion_reduced`] together hold the level. [`Appearance::with_motion`] is their only
+//! the owner has not, the computer's wish for less motion turns it off ([`effective`]). The front end reads the level
+//! alone; the older two-way field [`Appearance::motion`] stays for one release, for the kept file and the commands'
+//! answers, and with [`Appearance::motion_reduced`] it holds the level. [`Appearance::with_motion`] is their only
 //! writer; a pair built otherwise is made one level by [`Appearance::normalised`], which the session applies to every
 //! appearance it takes in.
 //!
@@ -71,10 +71,9 @@ choice! {
 }
 
 choice! {
-    /// The older two-way motion setting, kept while the front end reads it: follow the system where it can be read
-    /// (the web build; elsewhere motion runs), always reduce it, or always let it run. [`MotionLevel`] replaces it;
-    /// Task 5.2 of stage I-2 removes it with the front end's last reader. In the kept file and in the commands'
-    /// answers it is the field `motion`, for one release.
+    /// The older two-way motion setting: follow the system where it can be read, always reduce it, or always let it
+    /// run. [`MotionLevel`] replaces it; no front end reads it. In the kept file and in the commands' answers it is the
+    /// field `motion`, for one release.
     Motion {
         /// The system's wish where it can be read, otherwise motion runs.
         System = "system",
@@ -133,7 +132,7 @@ pub struct Appearance {
     pub theme: ThemeMode,
     /// The text scale in per cent, one of [`TEXT_SCALES`].
     pub text_scale: u16,
-    /// The older two-way motion setting, which the front end still reads: [`Motion::System`] while the owner has not
+    /// The older two-way motion setting, kept for one release: [`Motion::System`] while the owner has not
     /// chosen a level, [`Motion::Full`] for [`MotionLevel::Full`], [`Motion::Reduce`] for the other two. Set the level
     /// with [`Appearance::with_motion`], read it with [`Appearance::motion_level`]. Only `with_motion` writes this
     /// field and [`Appearance::motion_reduced`]: a struct update of one of them alone may disagree with the other, and

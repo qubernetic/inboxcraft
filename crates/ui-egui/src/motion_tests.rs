@@ -231,3 +231,30 @@ fn the_elapsed_share_runs_evenly_and_lands() {
     assert!((shares[3] - (3.0 * FRAME as f32 / 0.18)).abs() < 1e-3, "{shares:?}");
     assert_eq!(shares.last().copied(), Some(1.0));
 }
+
+#[test]
+fn the_level_follows_the_owner_once_chosen_and_the_computer_s_wish_before() {
+    use inboxcraft_engine::appearance::MotionLevel;
+
+    use super::{Level, follow, level, set_level, set_system_wish};
+    let ctx = Context::default();
+    assert_eq!(level(&ctx), Level::Full, "a board drawn without the window moves");
+    for (shown, still) in [(Level::Full, false), (Level::Reduced, true), (Level::Off, true)] {
+        set_level(&ctx, shown);
+        assert_eq!((level(&ctx), reduced(&ctx)), (shown, still), "{shown:?}");
+        assert_eq!(Level::of(shown.kept()), shown);
+    }
+    // Not chosen: the default level, or Off while the computer asks for less motion.
+    assert_eq!(follow(&ctx, MotionLevel::Reduced, false), Level::Reduced, "the desktop cannot read the wish");
+    set_system_wish(&ctx, Some(true));
+    assert_eq!(follow(&ctx, MotionLevel::Reduced, false), Level::Off);
+    assert_eq!(level(&ctx), Level::Off);
+    // Chosen, the owner's level whatever the computer wishes.
+    for chosen in [MotionLevel::Full, MotionLevel::Reduced, MotionLevel::Off] {
+        assert_eq!(follow(&ctx, chosen, true), Level::of(chosen));
+    }
+    set_system_wish(&ctx, Some(false));
+    assert_eq!(follow(&ctx, MotionLevel::Reduced, false), Level::Reduced);
+    set_system_wish(&ctx, None);
+    assert_eq!(follow(&ctx, MotionLevel::Full, false), Level::Full);
+}

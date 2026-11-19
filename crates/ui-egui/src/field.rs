@@ -96,18 +96,8 @@ pub const MAX_EMBLEM_COLUMNS: usize = 160;
 /// The most rows of an emblem; an emblem handed in taller is cut to it.
 pub const MAX_EMBLEM_ROWS: usize = 80;
 
-/// How much the window moves (`docs/design.md`, "Motion"): passed in by the caller, never read here.
-///
-/// The level belongs with the rest of the motion levels (`crate::motion`) once they are there.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Level {
-    /// Every movement.
-    Full,
-    /// The calm ones: the field answers only on Home, and nearer; the emblem as at full.
-    Reduced,
-    /// None: still dots and a still emblem.
-    Off,
-}
+/// How much the window moves: passed in by the caller, never read here.
+pub use crate::motion::Level;
 
 /// Where a field lies and what stands on it, as [`show`] is told each frame.
 #[derive(Debug, Clone, Copy, Default)]
