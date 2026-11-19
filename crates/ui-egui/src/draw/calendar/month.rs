@@ -70,7 +70,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
     }
     for index in 1..7 {
         let x = cols.line(index);
-        ui.painter().rect_filled(Rect::from_min_max(pos2(x, weeks.line(0)), pos2(x + line, rect.bottom())), 0.0, p.panel_line);
+        ui.painter().rect_filled(Rect::from_min_max(pos2(x, weeks.line(0)), pos2(x + line, snap(rect.bottom(), ppp))), 0.0, p.panel_line);
     }
     let grid = Grid { cols, weeks, month: calendar.focus().month() };
     for week in 0..WEEKS {
