@@ -363,7 +363,7 @@ fn unsnooze_brings_it_back_now() {
     session.take_jobs();
     clock.advance(Duration::from_secs(60));
     let answer = session.run("mail.unsnooze", &json!({ "id": 2 })).unwrap();
-    assert_eq!(answer, json!({ "id": 2, "folder": 1, "changed": true }));
+    assert_eq!(answer, json!({ "id": 2, "folder": 1, "changed": true, "back": true }));
     assert_eq!(held(&session, 2).folder(), FolderId::new(1));
     assert_eq!(state(&session, 2), MessageState { returned: Some(at(NOW + 60)), ..MessageState::default() });
     assert_eq!(schedule(&session), []);
@@ -383,7 +383,7 @@ fn unsnoozed_after(act: &str, folder: u64) {
     assert!(seen, "{act}: read before, so a return would show");
     clock.advance(Duration::from_secs(60));
     let answer = session.run("mail.unsnooze", &json!({ "id": 2 })).unwrap();
-    assert_eq!(answer, json!({ "id": 2, "folder": folder, "changed": true }), "{act}");
+    assert_eq!(answer, json!({ "id": 2, "folder": folder, "changed": true, "back": false }), "{act}");
     assert_eq!(held(&session, 2).folder(), FolderId::new(folder), "{act}: the owner put it there");
     assert_eq!(held(&session, 2).summary().flags().is_seen(), seen, "{act}: its read state is the owner's");
     assert!(state(&session, 2).is_empty(), "{act}: {:?}", state(&session, 2));
@@ -512,5 +512,8 @@ fn an_account_that_lists_no_inbox_keeps_a_returned_message_where_it_is() {
     let added = EventKind::MessagesAdded { folder: FolderId::new(SNOOZED), uid_validity: validity(), messages: vec![Summary::new(uid(1), envelope)] };
     session.apply(&Event::new(AccountId::new(1), None, added)).unwrap();
     let id = session.store().messages(FolderId::new(SNOOZED)).unwrap().first().unwrap().message().id();
-    assert_eq!(session.run("mail.unsnooze", &json!({ "id": id.get() })).unwrap(), json!({ "id": id.get(), "folder": SNOOZED, "changed": true }));
+    assert_eq!(
+        session.run("mail.unsnooze", &json!({ "id": id.get() })).unwrap(),
+        json!({ "id": id.get(), "folder": SNOOZED, "changed": true, "back": false })
+    );
 }

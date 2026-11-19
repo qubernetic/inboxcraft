@@ -900,7 +900,7 @@ fn unsnooze(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineErro
     let (store, state) = (context.store(), context.state());
     let was = store.message_state(message.id())?;
     if was.snoozed_until.is_none() && !snoozing::is_snoozed(state, &message) {
-        return Ok(Outcome::new(json!({ "id": params.id, "folder": message.folder().get(), "changed": false })));
+        return Ok(Outcome::new(json!({ "id": params.id, "folder": message.folder().get(), "changed": false, "back": false })));
     }
     let mut effects = Effects::default();
     // Only a message still in Snoozed comes back; one the owner moved, archived or deleted meanwhile stays where it
@@ -913,7 +913,9 @@ fn unsnooze(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineErro
     };
     effects.change(Change::SetMessageState(message.id(), MessageState { snoozed_until: None, returned, ..was }));
     effects.changes.extend(schedule::reschedule(store, Due::Unsnooze(message.id()), None, context.next_schedule_id())?);
-    Ok(Outcome::new(json!({ "id": params.id, "folder": folder.get(), "changed": true })).with_effects(effects))
+    // `back`: the message is in the inbox again, not left where it was.
+    let back = folder != message.folder();
+    Ok(Outcome::new(json!({ "id": params.id, "folder": folder.get(), "changed": true, "back": back })).with_effects(effects))
 }
 
 /// `mail.follow_up`: remind the owner if a sent message gets no reply by a time.
