@@ -82,7 +82,10 @@ fn a_place_row_looks_as_its_sheet_says_in_every_state() {
             assert_eq!((number.0.left() - o.x, number.0.top() - o.y, number.2), (16.0, top, if lit { p.cyan_text } else { p.dim }), "{at}");
             let label = find("MAIL");
             let ink = if lit || state.shown == Shown::Hover { p.ink } else { p.muted };
-            assert_eq!((label.0.left() - o.x, label.0.top() - o.y, label.2), (68.0, top, ink), "{at}");
+            // 68 in, as the sheet has it; at a larger text the number grows past it and the label keeps 8 after it.
+            let left = 68.0_f32.max((number.0.left() - o.x + number.0.width() + 8.0).ceil());
+            assert_eq!((label.0.left() - o.x, label.0.top() - o.y, label.2), (left, top, ink), "{at}");
+            assert!(label.0.left() >= number.0.right() + 8.0 - 0.01, "{at}: the label clear of the number");
             let count = crate::component::label::count(state.count);
             if count.is_empty() {
                 assert_eq!(texts.len(), 2, "no count: {at}");

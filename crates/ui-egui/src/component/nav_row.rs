@@ -158,7 +158,10 @@ pub fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>, narrow: bool, shown
     }
     let top = drawn.middle(f.label.line);
     let number = if lit { p.cyan_text } else { p.dim };
-    paint::run_at(ui.painter(), pos2(rect.left() + INDEX_LEFT, top), super::galley(ui, row.index, f.label, number), number);
+    let numbered = super::galley(ui, row.index, f.label, number);
+    // At a larger text the number grows past the label's place: the label keeps the frame's gap after it.
+    let after = rect.left() + INDEX_LEFT + numbered.size().x + COUNT_GAP;
+    paint::run_at(ui.painter(), pos2(rect.left() + INDEX_LEFT, top), numbered, number);
     let right = rect.right() - RIGHT;
     let count = super::label::count(row.count);
     let end = if count.is_empty() {
@@ -170,7 +173,7 @@ pub fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>, narrow: bool, shown
     };
     let ink = if lit || drawn.hovered { p.ink } else { p.muted };
     let ink = super::soon::ink(ui, theme, ink);
-    let left = rect.left() + LABEL_LEFT;
+    let left = (rect.left() + LABEL_LEFT).max(after.ceil());
     let label = super::fitted(ui, row.label, f.label, ink, (end - left).max(0.0));
     paint::run_at(ui.painter(), pos2(left, top), label, ink);
     drawn.finish(ui, theme);
