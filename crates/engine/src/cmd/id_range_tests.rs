@@ -207,3 +207,90 @@ fn an_id_past_the_largest_key_is_not_found_for_an_agent_too() {
         }
     }
 }
+
+/// The parameters that name a thing of some kind, as the hostile sweep reads them.
+const ID_FIELDS: [&str; 5] = ["id", "account", "folder", "calendar", "answers"];
+
+/// A value that a command can take for `field` when `field` is not the one under test; `None` for the fields of no
+/// use here.
+fn filler(field: &str) -> Option<Value> {
+    Some(match field {
+        "id" | "account" | "calendar" => json!(1),
+        "folder" => json!(3),
+        "answers" => json!(28),
+        "flagged" | "seen" | "done" | "parked" | "pinned" | "keep_on_done" | "all_day" | "grouped" => json!(true),
+        "from" => json!("2026-11-05"),
+        "to" => json!("2026-11-12"),
+        "level" => json!("people"),
+        "index" => json!(0),
+        "summary" | "subject" | "label" => json!("Far"),
+        "text" => json!("Hello"),
+        "name" => json!("Thanks"),
+        "start" => json!("2026-11-12T10:00:00Z"),
+        "until" => json!("2026-11-06T09:00:00Z"),
+        "at" => json!("2026-11-20T09:00:00Z"),
+        "preset" => json!("tomorrow_morning"),
+        "answer" => json!("accepted"),
+        "group" => json!("updates"),
+        "address" => json!("anna@example.org"),
+        "content_id" => json!("logo@example.org"),
+        "url" => json!("https://dav.example.org/"),
+        _ => return None,
+    })
+}
+
+/// The parameters to try `command` with: `field` set to `id`, alone and with one or two of the module's other
+/// fields filled, so that a command which needs more than the id reaches its lookup.
+fn tries(fields: &[&'static str], field: &str, id: u64) -> Vec<Value> {
+    let others: Vec<(&str, Value)> =
+        fields.iter().filter(|other| **other != field).filter_map(|other| filler(other).map(|value| (*other, value))).collect();
+    let mut tries = vec![json!({ field: id })];
+    for (at, (first, one)) in others.iter().enumerate() {
+        tries.push(json!({ field: id, *first: one }));
+        for (second, two) in others.iter().skip(at + 1) {
+            tries.push(json!({ field: id, *first: one, *second: two }));
+        }
+    }
+    tries
+}
+
+/// Every command whose module reads a parameter that names a thing, with that parameter set to each far id (alone and
+/// beside one or two other parameters filled), answers as it answers the unknown id, on the SQLite store, and emits as
+/// many jobs. A new command joins by itself.
+#[test]
+fn every_command_that_reads_an_id_answers_a_far_id_as_an_unknown_one() {
+    let (mut session, _dir) = sqlite_world();
+    let (mut runs, mut reached) = (0_usize, std::collections::BTreeSet::new());
+    let mut stopped = std::collections::BTreeSet::new();
+    for module in super::MODULES {
+        for field in module.fields.iter().filter(|field| ID_FIELDS.contains(field)) {
+            for spec in module.commands {
+                let mut any = false;
+                for (at, params) in tries(module.fields, field, UNKNOWN).into_iter().enumerate() {
+                    let unknown = session.run_as(Caller::Owner, spec.id, &params);
+                    let jobs = session.take_jobs().len();
+                    if matches!(&unknown, Err(error) if error.code() == "bad_params") {
+                        continue;
+                    }
+                    any = true;
+                    for id in PAST {
+                        let far = tries(module.fields, field, id).swap_remove(at);
+                        let answer = session.run_as(Caller::Owner, spec.id, &far);
+                        let written = as_unknown(&answer, id);
+                        assert!(!written.contains("database"), "{} {far}: {written}", spec.id);
+                        assert_eq!(written, as_unknown(&unknown, UNKNOWN), "{} {far}", spec.id);
+                        assert_eq!(session.take_jobs().len(), jobs, "{} {far}", spec.id);
+                        runs += 1;
+                    }
+                }
+                if any {
+                    reached.insert((spec.id, *field))
+                } else {
+                    stopped.insert((spec.id, *field))
+                };
+            }
+        }
+    }
+    println!("{runs} runs; reached {reached:?}; not {stopped:?}");
+    assert!(reached.len() >= 64, "{} reached: {reached:?}", reached.len());
+}
