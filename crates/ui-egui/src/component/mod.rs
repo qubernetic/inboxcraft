@@ -85,6 +85,7 @@ pub mod settings_row;
 pub mod slider;
 pub mod soon;
 pub mod status_item;
+pub mod status_message;
 pub mod switch;
 pub mod tag;
 pub mod thread_row;
