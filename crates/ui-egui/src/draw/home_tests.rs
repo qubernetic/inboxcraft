@@ -244,8 +244,10 @@ fn placeholder(columns: usize, rows: usize) -> Emblem {
     Emblem::from_rows(&vec![row.as_str(); rows])
 }
 
+/// `docs/design.md` speaks of the window: at the frame's sizes the emblem leaves whole at a window of 1381 and under,
+/// and stands whole from 1382.
 #[test]
-fn the_emblem_leaves_whole_under_1381() {
+fn the_emblem_leaves_whole_at_a_1381_window_and_under_and_stays_from_1382() {
     let emblem = placeholder(76, 40);
     let size = emblem.size();
     assert_eq!(size, vec2(547.0, 500.0), "the placeholder is the frame's 547 × 500");
