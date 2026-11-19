@@ -487,6 +487,22 @@ fn shows_pottery(harness: &Harness<'static, InboxApp>) -> bool {
 /// The calendar with an event just added (its toast still showing, unless `toast` is false) and open again in the
 /// editor, " at noon" typed into its title, the keyboard on no field.
 fn editing_an_added_event(toast: bool) -> Harness<'static, InboxApp> {
+    let mut harness = an_added_event_open(toast);
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "Title").focus();
+    harness.run();
+    harness.key_press(Key::End);
+    harness.get_by_role_and_label(Role::TextInput, "Title").type_text(" at noon");
+    harness.run();
+    harness.ctx.memory_mut(|memory| memory.stop_text_input());
+    harness.run();
+    assert_eq!(typed_title(&harness).as_deref(), Some("Pottery class at noon"), "the title is typed");
+    harness
+}
+
+/// The calendar with an event just added (its toast still showing, unless `toast` is false), its details open.
+fn an_added_event_open(toast: bool) -> Harness<'static, InboxApp> {
     let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     app.show_calendar();
@@ -518,16 +534,6 @@ fn editing_an_added_event(toast: bool) -> Harness<'static, InboxApp> {
     assert!(harness.state().can_run(keymap::UNDO), "Undo can run before the editor opens");
     harness.query_all(egui_kittest::kittest::by().role(Role::Button).label_contains("Pottery class, ")).next().unwrap().click();
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "Edit").click();
-    harness.run();
-    harness.get_by_role_and_label(Role::TextInput, "Title").focus();
-    harness.run();
-    harness.key_press(Key::End);
-    harness.get_by_role_and_label(Role::TextInput, "Title").type_text(" at noon");
-    harness.run();
-    harness.ctx.memory_mut(|memory| memory.stop_text_input());
-    harness.run();
-    assert_eq!(typed_title(&harness).as_deref(), Some("Pottery class at noon"), "the title is typed");
     harness
 }
 
@@ -592,4 +598,36 @@ fn in_one_pane_the_opened_message_is_the_surface_over_the_list() {
     harness.run();
     harness.run();
     assert_eq!(harness.state().surfaces(&harness.ctx).top(), crate::surface::Surface::Place, "Esc gave the list its place back");
+}
+
+/// Undo and a change of the editor in one frame: Edit pressed with `Ctrl Z`, and `Esc` with `Ctrl Z`. The event being
+/// edited, or just left, is kept either way: the editor's rest is one rule inside the window's own Undo.
+#[test]
+fn undo_in_the_frame_the_editor_opens_or_closes_keeps_the_event() {
+    // Edit and Ctrl Z in one frame: the event's details are open, the editor opens in that frame.
+    let mut harness = an_added_event_open(true);
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(harness.state().calendar().editor().is_some(), "Edit opened the editor");
+    assert!(shows_pottery(&harness), "Edit and Ctrl Z in one frame: the event is kept");
+    // Edit and the toast's Undo button in one frame: the toast drew its Undo available at the frame's start.
+    let mut harness = an_added_event_open(true);
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.get_by_role_and_label(Role::Button, "Undo").click_accesskit();
+    harness.run();
+    assert!(harness.state().calendar().editor().is_some(), "Edit opened the editor");
+    assert!(shows_pottery(&harness), "Edit and the toast's Undo in one frame: the event is kept");
+    // The window's own Undo, which every owner's way ends in, called while the editor is open: it rests.
+    let mut harness = editing_an_added_event(true);
+    harness.state_mut().undo();
+    harness.run();
+    assert!(shows_pottery(&harness), "the window's Undo under the editor: the event is kept");
+    assert_eq!(typed_title(&harness).as_deref(), Some("Pottery class at noon"), "the typed text is whole");
+    // Esc and Ctrl Z in one frame, from the editor with typed text.
+    let mut harness = editing_an_added_event(true);
+    harness.key_press(Key::Escape);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(shows_pottery(&harness), "Esc and Ctrl Z in one frame: the event is kept");
 }

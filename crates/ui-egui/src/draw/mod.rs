@@ -2571,6 +2571,10 @@ impl InboxApp {
 
     /// Takes the toast's act back, or the newest act of the history; the calendar is read again when it shows.
     fn undo(&mut self) {
+        // Every owner's way to Undo ends here: while the event editor is open it rests, whatever the frame began with.
+        if self.editing_event() {
+            return;
+        }
         self.mailbox.undo();
         self.restored = self.docked();
         if self.screen == Screen::Calendar {
