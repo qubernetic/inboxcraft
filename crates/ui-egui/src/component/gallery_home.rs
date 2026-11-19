@@ -72,7 +72,7 @@ pub(crate) fn tile_states() -> [TileState; 8] {
 
 /// The tile of `state`.
 pub(crate) fn tile_of(state: &TileState) -> CountTile<'static> {
-    CountTile { id: Id::unique("gallery-count-tile").with(state.name), count: state.count, label: state.label, tone: state.tone }
+    CountTile { id: Id::unique("gallery-count-tile").with(state.name), count: state.count, label: state.label, tone: state.tone, row: None }
 }
 
 /// The count tile of `state`, 140 wide, at `ui`'s cursor.

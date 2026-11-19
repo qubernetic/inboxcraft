@@ -50,6 +50,9 @@ pub struct CountTile<'a> {
     pub label: &'a str,
     /// The count's colour while it is not 0.
     pub tone: Tone,
+    /// The height of the row it stands in, in points (the tallest tile's [`height`]): the tile takes it when it is
+    /// taller than its own, so a row of tiles shares one height. `None`: its own.
+    pub row: Option<f32>,
 }
 
 /// The count as the tile writes it: `0` for none, else as [`super::label::count`] writes it.
@@ -92,7 +95,8 @@ pub fn count_tile(ui: &mut Ui, theme: &Theme, tile: &CountTile<'_>, shown: Optio
     let p = &theme.palette;
     let f = &theme.fonts;
     let width = ui.available_width().max(PAD_X * 2.0 + 1.0).round();
-    let high = height(ui, theme, tile.label, width);
+    let own = height(ui, theme, tile.label, width);
+    let high = tile.row.filter(|row| row.is_finite()).map_or(own, |row| row.max(own)).round();
     let (rect, _) = ui.allocate_exact_size(vec2(width, high), Sense::hover());
     let response = ui.interact(rect, tile.id, Sense::click());
     let name = spoken(tile);

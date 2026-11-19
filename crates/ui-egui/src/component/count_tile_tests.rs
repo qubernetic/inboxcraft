@@ -14,7 +14,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use super::{CountTile, Tone, count_tile, spoken, written};
 use crate::component::Shown;
 use crate::component::gallery_home::{TILE_WIDTH, TileState, tile, tile_of, tile_states};
-use crate::component::tests::{Look, builder, own, painted, staged};
+use crate::component::tests::{Look, builder, own, painted, stage, staged};
 use crate::motion;
 use crate::theme::{Mode, TextScale, Theme};
 
@@ -28,6 +28,18 @@ fn harness(theme: Theme, state: TileState) -> Harness<'static> {
             tile(ui, theme, &state);
         },
     )
+}
+
+/// [`harness`] that draws a letter its faces lack as a box instead of failing the test.
+fn glyphless(theme: Theme, state: TileState) -> Harness<'static> {
+    let mut harness = builder().allow_missing_glyphs().with_size(vec2(TILE_WIDTH + 48.0, 160.0)).build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), true);
+        stage(ui, theme.palette.surface, |ui| {
+            tile(ui, &theme, &state);
+        });
+    });
+    harness.run();
+    harness
 }
 
 /// Every text the widget `name` painted: `(rect, text, colour, size)`.
@@ -116,7 +128,7 @@ fn pressed_harness(presses: Arc<AtomicUsize>) -> Harness<'static> {
             for (name, count) in [("first", 3), ("second", 9)] {
                 ui.allocate_ui(vec2(TILE_WIDTH, 120.0), |ui| {
                     ui.set_width(TILE_WIDTH);
-                    let tile = CountTile { id: egui::Id::unique(name), count, label: "To read", tone: Tone::Accent };
+                    let tile = CountTile { id: egui::Id::unique(name), count, label: "To read", tone: Tone::Accent, row: None };
                     if count_tile(ui, &theme, &tile, None).clicked() {
                         presses.fetch_add(usize::try_from(count).unwrap_or(0), Ordering::SeqCst);
                     }
@@ -152,13 +164,18 @@ fn tab_reaches_the_tiles_in_the_drawn_order_and_enter_and_space_press_them() {
     assert_eq!(presses.load(Ordering::SeqCst), 21, "a click presses it");
 }
 
-/// Hostile labels: control characters, bidi overrides, 10 000 characters, 10 000 combining marks (the tile's mono face
-/// holds no right-to-left letters).
+/// Hostile labels: control characters, bidi overrides, 10 000 characters, 10 000 combining marks, right-to-left words
+/// (the mono face holds no Hebrew or Arabic letters: drawn as boxes).
 fn hostile() -> Vec<&'static str> {
-    [format!("To\u{0}\r\nre\u{202E}ad {}", "x".repeat(10_000)), format!("e{}", "\u{301}".repeat(10_000))]
-        .into_iter()
-        .map(|text| &*Box::leak(text.into_boxed_str()))
-        .collect()
+    [
+        format!("To\u{0}\r\nre\u{202E}ad {}", "x".repeat(10_000)),
+        format!("e{}", "\u{301}".repeat(10_000)),
+        "שלום עולם, ".repeat(1_000),
+        "مرحبا ".repeat(2_000),
+    ]
+    .into_iter()
+    .map(|text| &*Box::leak(text.into_boxed_str()))
+    .collect()
 }
 
 #[test]
@@ -166,7 +183,8 @@ fn a_hostile_label_stays_in_the_tile_on_two_lines_at_most_cut_once() {
     let theme = Theme::new(Mode::Dark, TextScale::ALL[4]);
     for label in hostile() {
         let state = TileState { name: "hostile", count: 5, label, tone: Tone::Plain, shown: Shown::Rest };
-        let harness = harness(theme, state);
+        // The harness draws a letter its faces lack as a box, as the app does (egui's own policy).
+        let harness = glyphless(theme, state);
         let name = spoken(&tile_of(&state));
         assert!(name.chars().count() <= crate::component::MOST + 8, "what is spoken is capped too");
         let rect = harness.get_by_label(&name).rect();
@@ -175,8 +193,48 @@ fn a_hostile_label_stays_in_the_tile_on_two_lines_at_most_cut_once() {
         assert!(paint.shapes.iter().all(|shape| !shape.overflows), "nothing leaves the tile");
         for (at, words, _, _) in texts(&harness, &name) {
             assert!(rect.contains_rect(at), "{at:?}");
-            assert!(!words.contains(['\0', '\r', '\u{202E}']), "no control or bidi character is drawn");
+            assert!(!words.contains(['\0', '\r', '\n', '\u{202E}']), "no control or bidi character is drawn");
             assert!(words.chars().count() <= crate::component::MOST + 2, "at most the cap is laid out");
         }
+        let f = theme.fonts;
+        let label: Vec<_> = texts(&harness, &name).into_iter().filter(|t| t.3 == f.label.size).collect();
+        assert_eq!(label.len(), 1);
+        assert!(
+            label.iter().all(|t| t.1.matches('…').count() == 1),
+            "cut once: {:?}",
+            label.iter().map(|t| t.1.chars().rev().take(8).collect::<String>()).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn a_row_of_tiles_shares_the_tallest_tiles_height() {
+    // Home's row of counts: four tiles, one with a two-line label; each takes the row's height, hovered fill and all.
+    for scale in [TextScale::default(), TextScale::ALL[4]] {
+        let theme = Theme::new(Mode::Dark, scale);
+        let labels = ["To read", "To screen", "Nothing to read", "In the outbox"];
+        let mut harness = builder().with_size(vec2(4.0 * TILE_WIDTH + 48.0, 200.0)).build_ui(move |ui| {
+            motion::set_reduced(ui.ctx(), true);
+            stage(ui, theme.palette.surface, |ui| {
+                let row = labels.iter().map(|label| super::height(ui, &theme, label, TILE_WIDTH)).fold(0.0_f32, f32::max);
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    for (n, label) in labels.into_iter().enumerate() {
+                        ui.allocate_ui(vec2(TILE_WIDTH, row), |ui| {
+                            ui.set_width(TILE_WIDTH);
+                            let tile = CountTile { id: egui::Id::unique(n), count: 3, label, tone: Tone::Plain, row: Some(row) };
+                            count_tile(ui, &theme, &tile, None);
+                        });
+                    }
+                });
+            });
+        });
+        harness.run();
+        harness.get_by_label("3 To read").hover();
+        harness.run();
+        let rects: Vec<Rect> = labels.iter().map(|label| harness.get_by_label(&format!("3 {label}")).rect()).collect();
+        assert!(rects.iter().all(|rect| rect.size() == vec2(140.0, theme.size(92.0))), "{scale:?}: {rects:?}");
+        let first = rects.first().copied().unwrap_or(Rect::NOTHING);
+        assert_eq!(own(&painted(&harness, "3 To read"), first).fill, Some(theme.palette.stage), "the hover fills the row's height");
     }
 }
