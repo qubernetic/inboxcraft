@@ -147,8 +147,9 @@ pub(crate) fn kept_under(width: f32) -> Option<(usize, usize)> {
 
 /// `text` from outside as one line of the status line: CR, LF, NUL and every other control character put as one space,
 /// every bidi control (embeddings, overrides, isolates and the direction marks) left out, runs of spaces made one, the
-/// ends trimmed, and at most [`MOST`] characters, the last a `…` when it was cut. It reads no further into `text` than
-/// it keeps, so a text of any length costs no more than its first few hundred characters.
+/// ends trimmed, and at most [`MOST`] characters, the last a `…` when it was cut. It stops reading at the first
+/// character past what it keeps; the bidi controls, spaces and controls it skips are read without counting, so a long
+/// run of them is read whole, once (the cost is linear in what it reads).
 pub(crate) fn clean(text: &str) -> String {
     let mut out = String::new();
     let mut count = 0_usize;
