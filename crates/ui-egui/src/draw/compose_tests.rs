@@ -1957,3 +1957,27 @@ fn send_from_the_line(harness: &mut Harness<'static, InboxApp>) {
     harness.state_mut().command_mut().set_text(">send the message");
     harness.run();
 }
+
+#[test]
+fn send_from_the_command_line_of_a_draft_that_cannot_go_says_why_as_its_send_does() {
+    let mut harness = sending();
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
+    type_into(&mut harness, "Subject", "Plot");
+    let id = harness.state().composer().unwrap().draft();
+    harness.state_mut().composer_mut().0.unwrap().set_floating(true);
+    harness.run();
+    let focused = harness.ctx.memory(|memory| memory.focused());
+    if let Some(focused) = focused {
+        harness.ctx.memory_mut(|memory| memory.surrender_focus(focused));
+    }
+    harness.run();
+    send_from_the_line(&mut harness);
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(!queued(&mut harness, id), "a draft with no recipient was sent");
+    let composer = harness.state().composer().expect("the draft stays");
+    let problem = composer.problem().expect("its Send says why");
+    assert_eq!(problem, "Add a recipient to send");
+    assert_eq!(harness.state().notice(), Some(problem.as_str()), "`>` Send says why, in the composer's own words");
+}

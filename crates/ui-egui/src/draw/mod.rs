@@ -1844,9 +1844,15 @@ impl InboxApp {
     /// picked, a toast saying when (`mail.send_later`). A blocked one stays, saying why, and so does one the engine
     /// refuses.
     pub fn send_composer(&mut self) {
+        self.send_drawn();
+    }
+
+    /// [`InboxApp::send_composer`]; whether the draft was kept for a reason its Send shows (no recipient, a blank to
+    /// fill in), not sent and not refused by the engine.
+    fn send_drawn(&mut self) -> bool {
         // A composer opened or moved in this frame has not been seen yet: Send acts once it has been painted.
         let frame = self.frame;
-        let Some(composer) = self.composer.as_mut().filter(|composer| composer.seen(frame)) else { return };
+        let Some(composer) = self.composer.as_mut().filter(|composer| composer.seen(frame)) else { return false };
         let (draft, later) = (composer.draft(), composer.later());
         match composer.send(&mut self.mailbox) {
             Ok(Some(at)) => {
@@ -1859,9 +1865,13 @@ impl InboxApp {
                 }
                 // The engine holds the message now; it goes to the worker once the hold is over.
                 self.pump();
+                false
             }
-            Ok(None) => {}
-            Err(error) => self.mailbox.fail(error),
+            Ok(None) => true,
+            Err(error) => {
+                self.mailbox.fail(error);
+                false
+            }
         }
     }
 
@@ -3104,8 +3114,12 @@ impl InboxApp {
             // ([`InboxApp::can_run`]) is not the one that decides here.
             command::Asked::Run(keymap::SEND) => {
                 self.command.close(ctx);
-                if self.can_run_from_the_line(keymap::SEND) && !soon::blocked(ctx, keymap::SEND) {
-                    self.send_composer();
+                // A draft kept for a reason says it, in its Send's words: the line closed, they may not be in sight.
+                if self.can_run_from_the_line(keymap::SEND) && !soon::blocked(ctx, keymap::SEND) && self.send_drawn() {
+                    let problem = self.composer.as_ref().and_then(|composer| compose::send_problem(&self.mailbox, composer));
+                    if let Some(problem) = problem {
+                        self.say(&problem);
+                    }
                 }
             }
             command::Asked::Run(id) => {

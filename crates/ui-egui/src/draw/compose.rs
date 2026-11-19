@@ -613,6 +613,11 @@ fn send_label(mailbox: &Mailbox, composer: &Composer) -> (String, Option<String>
     }
 }
 
+/// Why the draft cannot go yet, as its Send says it; none when it can.
+pub(super) fn send_problem(mailbox: &Mailbox, composer: &Composer) -> Option<String> {
+    send_label(mailbox, composer).1
+}
+
 /// The narrowest the composer gets in the reader's place, in points: its 40 beside, and the wider of its foot (Send
 /// with its shortest words, the caret of send later and Discard, 8 apart) and a recipient line with its widest chip
 /// beside "Cc  Bcc". The list beside it gives way to it.
