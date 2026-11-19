@@ -615,13 +615,22 @@ impl Run<'_> {
         let out = &mut self.out;
         let done = sync::run(open, &job, &self.settings.sync, now, &mut |event| out.emit(event));
         let tried = self.tries.remove(&job.id).unwrap_or(0).saturating_add(1);
-        let synced = done.is_ok();
         match done {
-            Ok(()) => self.attempt = 0,
+            Ok(()) => {
+                self.attempt = 0;
+                if folder_sync {
+                    self.ended_sync(true);
+                }
+            }
             Err(error) => {
                 let again = rerun && error.kind().is_retryable() && tried < WRITE_TRIES;
                 if !again {
                     self.out.failed(&job, &error);
+                }
+                // The folder ends before the connection goes offline: the engine drops the round's progress then, and
+                // progress told after it would be stored again for an account that is not signed in.
+                if folder_sync {
+                    self.ended_sync(false);
                 }
                 if error.ends_connection() {
                     self.connection = None;
@@ -632,9 +641,6 @@ impl Run<'_> {
                     self.pending.push_front(job);
                 }
             }
-        }
-        if folder_sync {
-            self.ended_sync(synced);
         }
     }
 

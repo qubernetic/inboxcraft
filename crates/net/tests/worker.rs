@@ -486,6 +486,24 @@ fn a_body_fetch_that_failed_in_a_round_does_not_hold_its_end_back() -> Result {
 }
 
 #[test]
+fn a_drop_under_a_folder_sync_tells_that_folder_ended_before_the_connection_goes_offline() -> Result {
+    // The second folder's EXAMINE drops the connection, and the fake serves no second one: the worker backs off.
+    let fake = FakeImap::sample().on(When::command("EXAMINE"), []).on(When::command("EXAMINE"), [Action::Fault(Fault::Drop)]);
+    let mut run = Run::with(fake, Options { connections: 1, ..Options::default() })?;
+    sync(&mut run, 10, "INBOX")?;
+    sync(&mut run, 11, "Sent")?;
+    sync(&mut run, 12, "Lists/Rust")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::BackingOff { .. })))?;
+    let offline = events.iter().position(|kind| *kind == EventKind::Connection(ConnectionState::Offline)).ok_or("no offline")?;
+    let (before, after) = events.split_at(offline);
+    // The engine drops the round's progress on the offline: nothing may store it again while the worker backs off.
+    assert_eq!(told(before).last(), Some(&Some((2, 3))), "{events:?}");
+    assert!(told(after).is_empty(), "{events:?}");
+    run.worker.stop();
+    Ok(())
+}
+
+#[test]
 fn after_a_drop_in_a_round_the_new_sign_in_tells_its_progress_again_at_once() -> Result {
     // The second folder's EXAMINE drops the connection; the worker signs in again on the fake's second connection.
     let fake = FakeImap::sample().on(When::command("EXAMINE"), []).on(When::command("EXAMINE"), [Action::Fault(Fault::Drop)]);

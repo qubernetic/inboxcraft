@@ -374,3 +374,23 @@ fn an_account_whose_first_round_failed_reads_failing_until_a_clean_end() {
     finished(&mut session, 1, NOW);
     assert_eq!(state(&mut session), "synced");
 }
+
+#[test]
+fn an_account_that_dropped_under_a_folder_and_backs_off_does_not_read_syncing_beside_a_current_one() {
+    let mut session = session();
+    current(&mut session);
+    // Account 1 starts a round; the connection drops under its second folder, told ended before the offline, as the
+    // worker does; then it backs off. Account 2 stays signed in and current.
+    connection(&mut session, 1, ConnectionState::Online);
+    progress(&mut session, 1, 0, 3);
+    progress(&mut session, 1, 1, 3);
+    tell(&mut session, 1, EventKind::Failed { kind: ErrorKind::ConnectionDropped, folder: Some(FolderId::new(1)) });
+    progress(&mut session, 1, 2, 3);
+    connection(&mut session, 1, ConnectionState::Offline);
+    connection(&mut session, 1, ConnectionState::Connecting);
+    failed_with(&mut session, 1, ErrorKind::ConnectionRefused);
+    connection(&mut session, 1, ConnectionState::BackingOff { attempt: 1, retry_in_secs: 2 });
+    let now = status(&mut session);
+    assert_ne!(now["state"], "syncing", "{now}");
+    assert_eq!((now["done"].clone(), now["of"].clone()), (json!(0), json!(0)), "{now}");
+}
