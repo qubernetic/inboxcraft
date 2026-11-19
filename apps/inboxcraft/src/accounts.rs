@@ -298,6 +298,7 @@ pub fn proposal(found: &Found) -> Proposal {
             Checked::NoAnswer => "it did not answer from here",
             Checked::Refused => "it refused the connection from here",
             Checked::NoName => "its name was not found",
+            Checked::Clock => "its certificate does not fit this computer's clock",
         };
         failed.push(format!("{} was not checked: {why}", candidate.server));
     }

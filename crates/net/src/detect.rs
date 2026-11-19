@@ -23,7 +23,8 @@
 //! While the domain names servers of a kind, the guesses of that kind (steps 4 and 5) are tried only once every
 //! server it names for that kind has failed for a definite reason: the connection refused, no such name, a
 //! certificate that does not hold, no STARTTLS, no sign-in the app can do, or a server that spoke something else. A
-//! named server that only timed out or dropped the connection keeps the guesses away, and is proposed unchecked.
+//! named server that only timed out, dropped the connection, or whose certificate did not fit this computer's clock
+//! (far off, or a certificate not valid yet) keeps the guesses away, and is proposed unchecked.
 //!
 //! A host whose name was not found is not probed again in the run, on any port; nor is one of the domain's own
 //! common host names whose probe timed out, for the guesses on it (a guess that drops packets is not worth more
@@ -201,6 +202,8 @@ pub enum Checked {
     Refused,
     /// As [`Checked::NoAnswer`], but its host's name was not found.
     NoName,
+    /// As [`Checked::NoAnswer`], but its certificate did not fit this computer's clock, which may be what is off.
+    Clock,
 }
 
 /// A server Detect proposes.
@@ -424,6 +427,7 @@ impl<'a> Run<'a> {
         match own {
             Some(ErrorKind::ConnectionRefused) => Checked::Refused,
             Some(ErrorKind::HostNotFound) => Checked::NoName,
+            Some(kind) if clock_fault(kind) => Checked::Clock,
             None if no_name() => Checked::NoName,
             _ => Checked::NoAnswer,
         }
@@ -594,7 +598,8 @@ impl<'a> Run<'a> {
     }
 }
 
-/// Whether a probe's failure means that nothing answered, rather than a server that spoke and was wrong.
+/// Whether a probe's failure means that nothing answered, or that this computer's clock may be what is wrong, rather
+/// than a server that spoke and was wrong.
 fn no_answer(kind: ErrorKind) -> bool {
     matches!(
         kind,
@@ -604,13 +609,19 @@ fn no_answer(kind: ErrorKind) -> bool {
             | ErrorKind::ConnectionRefused
             | ErrorKind::ConnectionDropped
             | ErrorKind::HostNotFound
-    )
+    ) || clock_fault(kind)
 }
 
-/// Whether a probe's failure says the server is not usable, rather than that it was not reached in time: anything
-/// but a timeout, blocked ports or a dropped connection.
+/// Whether a certificate failed by this computer's clock: far off, or a certificate not valid yet, which a clock a
+/// little behind also gives. The server may be fine.
+fn clock_fault(kind: ErrorKind) -> bool {
+    matches!(kind, ErrorKind::ClockFarOff | ErrorKind::CertificateNotYetValid)
+}
+
+/// Whether a probe's failure says the server is not usable, rather than that it was not reached in time or that this
+/// computer's clock is off: anything but a timeout, blocked ports, a dropped connection or a clock fault.
 fn definite(kind: ErrorKind) -> bool {
-    !matches!(kind, ErrorKind::TimedOut | ErrorKind::PortTimedOut | ErrorKind::MailPortsBlocked | ErrorKind::ConnectionDropped)
+    !(matches!(kind, ErrorKind::TimedOut | ErrorKind::PortTimedOut | ErrorKind::MailPortsBlocked | ErrorKind::ConnectionDropped) || clock_fault(kind))
 }
 
 /// The domain an MX host belongs to, by the rule of thumb of the module; lowercase.

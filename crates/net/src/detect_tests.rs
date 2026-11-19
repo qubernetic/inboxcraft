@@ -688,3 +688,17 @@ fn an_unchecked_named_server_says_why() {
         assert_eq!(proposal.submission[0].checked, checked, "{kind:?}");
     }
 }
+
+/// A certificate that does not fit this computer's clock may be the clock's fault: the named server stays, unchecked,
+/// and no guess is tried in its place.
+#[test]
+fn a_clock_fault_keeps_the_named_server_and_the_guesses_away() {
+    for kind in [ErrorKind::ClockFarOff, ErrorKind::CertificateNotYetValid] {
+        let web = FakeWeb::default().page(AUTOCONFIG, &config("imap.example.org", 993, "SSL"));
+        let probe = FakeProbe { fails_with: kind, ..FakeProbe::only(&["mail.example.org:993 (TLS)", "mail.example.org:465 (TLS)"]) };
+        let proposal = run_probed(&DetectConfig::default(), &FakeDns::default(), &web, &probe);
+        assert_eq!(imap(&proposal), ["imap.example.org:993 (TLS) Autoconfig"], "{kind:?}");
+        assert_eq!(proposal.imap[0].checked, Checked::Clock, "{kind:?}");
+        assert!(probe.tried().iter().all(|tried| !tried.contains("mail.example.org")), "{kind:?}: {:?}", probe.tried());
+    }
+}
