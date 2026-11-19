@@ -5,7 +5,8 @@
 //! views as a segmented control and New event; under it the day, week, month or agenda) and the side panel standing
 //! 252 points wide at the right, a `line` hairline between them (the mini month, the calendars by account, the picked
 //! event's details, and the sync line). Below a view of [`VIEW_LEAST`] points the side panel gives the view its room.
-//! Without a calendar the screen's empty state says there are none yet and what will show here.
+//! Without a calendar the screen's empty state says there are none yet and what will show here, with "Open accounts"
+//! under it, which shows the settings on Accounts.
 //!
 //! The day and week views lay the hours out on a grid of `panel_line` hairlines under a lane of bands over whole days
 //! (`hours`), the month view the six weeks of the month (`month`), the agenda the days that hold events (`agenda`).
@@ -89,6 +90,8 @@ pub(super) enum Asked {
     More(Option<Day>),
     /// New event: the editor on a new event.
     New,
+    /// The empty calendar's "Open accounts": the settings on Accounts.
+    Accounts,
     /// Edit: the editor on the picked event.
     Edit,
     /// Delete: the picked event goes.
@@ -132,22 +135,36 @@ pub(super) fn fixed(theme: &Theme, points: f32) -> f32 {
     Theme::size(theme, points)
 }
 
-/// Under the empty state the design keeps the room of its "Open accounts" button, in points (a secondary button).
+/// Under the empty state the design's "Open accounts" button, in points (a secondary button).
 const EMPTY_ACTION: f32 = 32.0;
 
 /// The calendar screen while there is no calendar: the calendar's card, as with calendars, and in its middle what will
-/// show here, where the design places it (over the room of a button the app has no command for yet).
-pub(super) fn empty(ui: &mut Ui, theme: &Theme, layers: &mut Panes) {
+/// show here with "Open accounts" right under it, the two centred together as the design places them. The button
+/// asks for [`Asked::Accounts`].
+pub(super) fn empty(ui: &mut Ui, theme: &Theme, keymap: &Keymap, layers: &mut Panes) -> Vec<Asked> {
     let about = tr!("The calendars of your accounts show here, by day, week, month and agenda, once an account has a CalDAV address.");
+    let mut asked = Vec::new();
     CentralPanel::no_frame().frame(Frame::NONE).show(ui, |ui| {
         layers.card(ui, Margin::ZERO, |ui| {
             let all = ui.max_rect();
-            let words = Rect::from_min_max(all.min, pos2(all.right(), (all.bottom() - fixed(theme, EMPTY_ACTION)).max(all.top())));
-            ui.scope_builder(UiBuilder::new().max_rect(words).id_salt("calendar-empty"), |ui| {
-                crate::component::empty::empty_state(ui, theme, tr!("Calendar · no calendars"), tr!("No calendars yet."), about);
-            });
+            let action = fixed(theme, EMPTY_ACTION);
+            let words = Rect::from_min_max(all.min, pos2(all.right(), (all.bottom() - action).max(all.top())));
+            let block = ui
+                .scope_builder(UiBuilder::new().max_rect(words).id_salt("calendar-empty"), |ui| {
+                    crate::component::empty::empty_state_box(ui, theme, tr!("Calendar · no calendars"), tr!("No calendars yet."), about)
+                })
+                .inner;
+            let button = TextButton::new(tr!("Open accounts")).secondary();
+            let width = button.width(ui, theme, keymap).min(all.width()).max(1.0);
+            let at = Rect::from_min_size(pos2((block.center().x - width / 2.0).round(), block.bottom()), vec2(width, action));
+            let mut row =
+                ui.new_child(UiBuilder::new().max_rect(at).id_salt("calendar-empty-action").layout(egui::Layout::left_to_right(egui::Align::Center)));
+            if button.show(&mut row, theme, keymap).clicked() {
+                asked.push(Asked::Accounts);
+            }
         });
     });
+    asked
 }
 
 /// The calendar screen with its calendars: the view and the side panel; what was pressed. While `over` the palette or
