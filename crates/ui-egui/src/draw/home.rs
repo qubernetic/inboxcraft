@@ -434,11 +434,7 @@ fn drafts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home) -> (Rect, Op
                 when: &when,
                 last: false,
             };
-            // In a child of its own: what the row lays down inside itself (its links) moves no cursor of the block's.
-            let (place, _) =
-                ui.allocate_exact_size(vec2(ui.available_width(), Theme::size(theme, crate::component::draft_row::HEIGHT)), Sense::hover());
-            let mut child = ui.new_child(UiBuilder::new().max_rect(place).id_salt(("home-draft", draft.id)));
-            let drawn = draft_row(&mut child, theme, keymap, &row, false, None);
+            let drawn = draft_row(ui, theme, keymap, &row, false, None);
             if drawn.discard {
                 asked = Some(Asked::DiscardDraft(draft.id));
             } else if drawn.open || drawn.row.response.clicked() {

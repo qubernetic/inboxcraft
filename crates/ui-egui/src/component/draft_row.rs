@@ -86,11 +86,9 @@ pub fn draft_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &DraftRow<'_>
         let mut x = right - total;
         for (index, (words, wide)) in words.iter().zip(&wides).enumerate() {
             let place = Rect::from_min_size(pos2(x, at(high)), vec2(*wide, high));
-            let clicked = ui
-                .scope_builder(UiBuilder::new().max_rect(place).id_salt(index), |ui| {
-                    link_with(ui, theme, keymap, words, LinkSize::Small, true, None).clicked()
-                })
-                .inner;
+            // A child that does not advance `ui`'s cursor: the links stand inside the row, never under it.
+            let mut child = ui.new_child(UiBuilder::new().max_rect(place).id_salt(index));
+            let clicked = link_with(&mut child, theme, keymap, words, LinkSize::Small, true, None).clicked();
             if index == 0 {
                 open = clicked;
             } else {
