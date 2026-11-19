@@ -1634,3 +1634,17 @@ fn a_server_detect_left_out_for_the_owners_says_why_it_was_not_checked() {
     assert_eq!(said.matches('…').count(), 1, "{said}");
     assert!(!said.contains('\u{202e}') && !said.contains('\u{0}'), "{said:?}");
 }
+
+#[test]
+fn an_account_s_name_in_the_remove_question_is_one_plain_capped_line() {
+    let kept = Kept::default();
+    let mut onboarding = onboarding(&kept);
+    let long = "A".repeat(10_000);
+    onboarding.form_mut().address = format!("Stu\r\ndio\u{0}\u{202e}\u{2066} {long}");
+    let name = onboarding.removed_name();
+    assert!(!name.chars().any(|c| c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')), "{name:?}");
+    assert!(name.starts_with("Stu"), "{name:?}");
+    assert!(name.ends_with('…') && name.chars().count() <= 61, "cut with one ellipsis: {}", name.chars().count());
+    onboarding.form_mut().address = "studio@example.org".to_owned();
+    assert_eq!(onboarding.removed_name(), "studio@example.org", "a short name stays whole");
+}

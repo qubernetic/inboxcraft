@@ -26,7 +26,7 @@ use inboxcraft_engine::notify::Level;
 use inboxcraft_engine::shown::SettingsAsked;
 
 use super::paint::{Ring, focus_ring};
-use crate::component::button::{LinkSize, TextButton, link_sized};
+use crate::component::button::{LinkSize, TextButton, link_sized, owner_pressed};
 use crate::component::field;
 use crate::component::key::{Chip, ChipState};
 use crate::component::label::section_label;
@@ -37,7 +37,7 @@ use crate::component::switch::switch;
 use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::{Action, Keymap};
-use crate::mailbox::{InboxView, Mailbox};
+use crate::mailbox::{After, InboxView, Mailbox};
 use crate::onboard::Onboarding;
 use crate::settings::{Section, Settings};
 use crate::theme::{Font, TextScale, Theme};
@@ -45,6 +45,13 @@ use crate::tr;
 
 #[path = "settings_planned.rs"]
 mod planned;
+
+#[path = "settings_privacy.rs"]
+pub(super) mod privacy;
+#[path = "settings_scheduled.rs"]
+pub(super) mod scheduled;
+#[path = "settings_templates.rs"]
+pub(super) mod templates;
 
 /// The width of the sections' column, in points: as wide as the window's index.
 const NAV: f32 = 232.0;
@@ -138,6 +145,8 @@ pub(super) enum Asked {
     Grouped(u64, bool),
     /// Whether a pin stays on a message when it is done.
     KeepPins(bool),
+    /// What follows an act on the open message (`after.set`).
+    After(After),
     /// How long every send is held before it goes, in seconds.
     Hold(u8),
     /// Which new mail of the account notifies.
@@ -146,10 +155,44 @@ pub(super) enum Asked {
     Returns(bool),
     /// Whether follow-up reminders notify.
     Reminders(bool),
+    /// Whether calendar alerts notify.
+    Alerts(bool),
+    /// The first day of the week (`week.set`).
+    FirstDay(inboxcraft_time::Weekday),
+    /// The first week of the year (`week.set`).
+    FirstWeek(inboxcraft_time::FirstWeek),
     /// Whether closing the window leaves InboxCraft running.
     Background(bool),
     /// Whether InboxCraft starts with the computer.
     Login(bool),
+    /// The Templates page, under Sending.
+    Templates,
+    /// The form on a new template of the account.
+    NewTemplate(u64),
+    /// The form on the account's template of this name.
+    EditTemplate(u64, String),
+    /// Save the template as the form holds it.
+    SaveTemplate,
+    /// Close the form, keeping nothing typed.
+    CloseTemplate,
+    /// Ask the owner to confirm the delete of the account's template of this name.
+    AskDeleteTemplate(u64, String),
+    /// The owner confirmed it: delete the account's template of this name.
+    DeleteTemplate(u64, String),
+    /// The delete was not confirmed.
+    KeepTemplate,
+    /// The Scheduled page, under Sending.
+    Scheduled,
+    /// Ask the owner to confirm the cancel of this schedule entry.
+    AskCancelScheduled(u64),
+    /// The owner confirmed it: cancel this schedule entry.
+    CancelScheduled(u64),
+    /// The cancel was not confirmed.
+    KeepScheduled,
+    /// Read the senders whose pictures always load, for the Privacy page.
+    ReadPrivacy,
+    /// The sender of this address: its pictures ask again.
+    AskAgain(String),
 }
 
 /// What the settings show and change.
@@ -163,6 +206,8 @@ pub(super) struct Sheet<'a> {
     pub(super) onboarding: &'a mut Onboarding,
     /// Whether the window can add accounts.
     pub(super) can_add: bool,
+    /// The account the message being written is from, when one is being written.
+    pub(super) writing: Option<u64>,
     /// What the app's desk says now.
     pub(super) desk: DeskView,
 }
@@ -536,7 +581,7 @@ fn section_count() -> String {
 
 /// The list of sections: its head ("Settings" and how many sections there are), a `line` hairline, then a row per
 /// section, the one shown selected. The section pressed.
-fn nav(ui: &mut Ui, theme: &Theme, shown: Section) -> Option<Asked> {
+fn nav(ui: &mut Ui, theme: &Theme, shown: Section, to_shown: bool) -> Option<Asked> {
     let p = &theme.palette;
     let f = &theme.fonts;
     let width = ui.available_width();
@@ -559,7 +604,11 @@ fn nav(ui: &mut Ui, theme: &Theme, shown: Section) -> Option<Asked> {
     rule_in(ui, p.line);
     ui.add_space(NAV_GAP);
     for section in Section::ALL {
-        if section_row(ui, theme, section, section == shown).clicked() && section != shown {
+        let row = section_row(ui, theme, section, section == shown);
+        if to_shown && section == shown {
+            row.request_focus();
+        }
+        if row.clicked() && section != shown {
             asked = Some(Asked::Section(section));
         }
     }
@@ -570,15 +619,21 @@ fn nav(ui: &mut Ui, theme: &Theme, shown: Section) -> Option<Asked> {
 fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
     let keymap = view.keymap;
     let mailbox = view.mailbox;
+    if view.settings.under() == Some(crate::settings::Under::Templates) {
+        return templates::page(ui, theme, keymap, view.settings, mailbox);
+    }
+    if view.settings.under() == Some(crate::settings::Under::Scheduled) {
+        return scheduled::page(ui, theme, keymap, view.settings, mailbox);
+    }
     match view.settings.section() {
         Section::Appearance => appearance(ui, theme, view.current, view.level, mailbox.inbox_view()),
-        Section::Accounts => super::accounts::page(ui, theme, keymap, mailbox, view.onboarding, view.can_add),
+        Section::Accounts => super::accounts::page(ui, theme, keymap, mailbox, view.onboarding, (view.can_add, view.writing)),
         Section::Shortcuts => shortcuts(ui, theme, keymap, view.settings),
         Section::Sending => sending(ui, theme, keymap, view.settings, mailbox),
         Section::Triage => triage(ui, theme, mailbox),
         Section::Notifications => notifications(ui, theme, mailbox, view.settings, view.desk),
         Section::Calendar => planned::calendar(ui, theme, keymap, mailbox),
-        Section::Privacy => planned::privacy(ui, theme, keymap),
+        Section::Privacy => privacy::page(ui, theme, keymap, view.settings),
         Section::About => planned::about(ui, theme),
         Section::Ai => planned::ai(ui, theme),
         Section::Plugins => planned::plugins(ui, theme),
@@ -763,7 +818,7 @@ fn signature(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
     asked
 }
 
-/// The Sending page: Undo send, the signatures two by two, then the templates and the scheduled list (coming soon).
+/// The Sending page: Undo send, the signatures two by two, then the templates and the scheduled list.
 fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, mailbox: &Mailbox) -> Option<Asked> {
     let mut asked = None;
     head(ui, theme, Section::Sending, &[], |_| {});
@@ -830,23 +885,45 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
             });
         }
         group(ui, theme, "C", tr!("Templates and scheduled"), None);
-        settings_row_soon_with(ui, theme, tr!("Templates"), tr!("Texts you write often, kept on their account, with a page to manage them."), |ui| {
-            link_sized(ui, theme, keymap, tr!("manage templates →"), LinkSize::Small);
+        settings_row(ui, theme, tr!("Templates"), Some(tr!("Texts you write often, kept on their account, with a page to manage them.")), |ui| {
+            // Its own id, so the culled signatures above, laid out as the page scrolls, never move it: the focus stays.
+            let own = UiBuilder::new().scope_id(Id::unique("settings-manage-templates"));
+            if ui.scope_builder(own, |ui| link_sized(ui, theme, keymap, tr!("manage templates →"), LinkSize::Small)).inner.clicked() {
+                asked = Some(Asked::Templates);
+            }
         });
-        settings_row_soon_with(
-            ui,
-            theme,
-            tr!("Scheduled"),
-            tr!("Everything that waits for its time, sends, snoozes, reminders and calendar alerts, in one list."),
-            |ui| {
-                link_sized(ui, theme, keymap, tr!("open the list →"), LinkSize::Small);
-            },
-        );
+        let line = tr!("Everything that waits for its time, sends, snoozes, reminders and calendar alerts, in one list.");
+        settings_row(ui, theme, tr!("Scheduled"), Some(line), |ui| {
+            let own = UiBuilder::new().scope_id(Id::unique("settings-open-scheduled"));
+            if ui.scope_builder(own, |ui| link_sized(ui, theme, keymap, tr!("open the list →"), LinkSize::Small)).inner.clicked() {
+                asked = Some(Asked::Scheduled);
+            }
+        });
     });
     asked
 }
 
-/// The Triage page: the screener, pins on done mail, each account's grouping.
+/// A choice of what follows an act, as its segment names it.
+fn after_name(after: After) -> &'static str {
+    match after {
+        After::Next => tr!("Next"),
+        After::Previous => tr!("Previous"),
+        After::List => tr!("List"),
+        After::Stay => tr!("Stay"),
+    }
+}
+
+/// What the choice of what follows an act does, under its row.
+fn after_help(after: After) -> &'static str {
+    match after {
+        After::Next => tr!("Done, Archive, Delete, Snooze or Move on the open message opens the one below it."),
+        After::Previous => tr!("Done, Archive, Delete, Snooze or Move on the open message opens the one above it."),
+        After::List => tr!("Done, Archive, Delete, Snooze or Move on the open message goes back to the list."),
+        After::Stay => tr!("Done, Archive, Delete, Snooze or Move on the open message leaves the keyboard on the next row, not opened."),
+    }
+}
+
+/// The Triage page: the screener, pins on done mail, what follows an act, each account's grouping.
 fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
@@ -870,13 +947,22 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
         let keep = mailbox.pins_outlast_done();
         let pins_note = tr!("Off, Done takes the pin off; on, a pinned message stays in Pins after it is done.");
         settings_row(ui, theme, tr!("Keep pins on done mail"), Some(pins_note), |ui| {
-            if switch(ui, theme, tr!("Keep pins on done mail"), keep).clicked() {
+            let pressed = switch(ui, theme, tr!("Keep pins on done mail"), keep);
+            if owner_pressed(ui, &pressed) {
                 asked = Some(Asked::KeepPins(!keep));
+            }
+        });
+        group(ui, theme, "C", tr!("After an act"), None);
+        let afters = After::ALL.map(|after| (after, after_name(after), f.button));
+        let after = mailbox.after();
+        settings_row(ui, theme, tr!("What follows an act"), Some(after_help(after)), |ui| {
+            if let Some(after) = segmented_for(ui, theme, &afters, after, Some(tr!("what follows an act"))) {
+                asked = Some(Asked::After(after));
             }
         });
         if !mailbox.accounts().is_empty() {
             let note = tr!("Each account's inbox in People, Notifications and Newsletters, sorted by InboxCraft or by your choice for a sender.");
-            group(ui, theme, "C", tr!("Grouped inbox"), Some(note));
+            group(ui, theme, "D", tr!("Grouped inbox"), Some(note));
         }
         let count = mailbox.accounts().len();
         for (index, account) in mailbox.accounts().iter().enumerate() {
@@ -884,7 +970,8 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
             culled(ui, theme, Id::unique("settings-grouped").with(account.id), ends, |ui| {
                 let name = tr!("Group the inbox of {account}", account = account.label);
                 settings_row(ui, theme, &name, Some(&account.address), |ui| {
-                    if switch(ui, theme, &name, account.grouped).clicked() {
+                    let pressed = switch(ui, theme, &name, account.grouped);
+                    if owner_pressed(ui, &pressed) {
                         asked = Some(Asked::Grouped(account.id, !account.grouped));
                     }
                 });
@@ -931,7 +1018,8 @@ fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Setti
         let chosen = mailbox.notify_settings();
         let (returns, reminders) = (chosen.returns, chosen.reminders);
         settings_row(ui, theme, tr!("Returned snoozes"), Some(tr!("A snoozed message that comes back notifies you.")), |ui| {
-            if switch(ui, theme, tr!("Returned snoozes"), returns).clicked() {
+            let pressed = switch(ui, theme, tr!("Returned snoozes"), returns);
+            if owner_pressed(ui, &pressed) {
                 asked = Some(Asked::Returns(!returns));
             }
         });
@@ -941,7 +1029,8 @@ fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Setti
             tr!("Follow-up reminders"),
             Some(tr!("A message you asked to be reminded of, when no reply came, notifies you.")),
             |ui| {
-                if switch(ui, theme, tr!("Follow-up reminders"), reminders).clicked() {
+                let pressed = switch(ui, theme, tr!("Follow-up reminders"), reminders);
+                if owner_pressed(ui, &pressed) {
                     asked = Some(Asked::Reminders(!reminders));
                 }
             },
@@ -1039,11 +1128,12 @@ pub(super) fn place(ui: &mut Ui, theme: &Theme, mut view: Sheet<'_>) -> Option<A
     place.widget_info(|| WidgetInfo::labeled(Role::Pane, true, tr!("Settings")));
     ui.painter().rect_filled(body, 0.0, p.surface);
     let shown = view.settings.section();
+    let to_shown = view.settings.take_nav_hand();
     let columns = Columns::of(body, shown);
     paint::hairline(ui.painter(), pos2(columns.divider, body.top()), pos2(columns.divider, body.bottom() - 1.0), p.line);
     let mut asked = ui
         .scope_builder(UiBuilder::new().id_salt("settings-sections").max_rect(columns.nav).layout(Layout::top_down(Align::Min)), |ui| {
-            nav(ui, theme, shown)
+            nav(ui, theme, shown, to_shown)
         })
         .inner;
     ui.scope_builder(UiBuilder::new().id_salt("settings-page").max_rect(columns.page).layout(Layout::top_down(Align::Min)), |ui| {

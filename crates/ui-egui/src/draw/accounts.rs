@@ -173,12 +173,20 @@ fn back(ui: &mut Ui, theme: &Theme) -> bool {
     response.clicked()
 }
 
-/// Draws the page; what was asked for. `can_add` offers Add account.
-pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onboarding: &mut Onboarding, can_add: bool) -> Option<Asked> {
+/// Draws the page; what was asked for. `can_add` offers Add account; `writing` is the account the message being
+/// written is from, which an account's question to remove it names.
+pub(super) fn page(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    onboarding: &mut Onboarding,
+    (can_add, writing): (bool, Option<u64>),
+) -> Option<Asked> {
     if onboarding.stage() != Stage::Closed {
         let went_back = inset(ui, |ui| back(ui, theme));
         ui.add_space(theme.spacing.s2);
-        let asked = inset(ui, |ui| onboard::show(ui, theme, keymap, mailbox, onboarding).map(Asked::Page));
+        let asked = inset(ui, |ui| onboard::show(ui, theme, keymap, mailbox, onboarding, writing).map(Asked::Page));
         return if went_back { Some(Asked::Back) } else { asked };
     }
     let accounts = mailbox.accounts();
@@ -213,15 +221,6 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             tr!("Connection state"),
             tr!("Each account's row says how its connection stands: online, signing in or offline."),
             |_| {},
-        );
-        settings_row_soon_with(
-            ui,
-            theme,
-            tr!("Remove account"),
-            tr!("Takes an account and its mail off this computer, after a question that says it cannot be undone."),
-            |ui| {
-                TextButton::new(tr!("Remove account")).danger().show(ui, theme, keymap);
-            },
         );
         settings_row_soon_with(
             ui,

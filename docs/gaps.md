@@ -320,7 +320,7 @@ time from the code as it is, not measured.
   stays. A one-column table is laid out as its cells' blocks; `colspan` and `rowspan` are not read (#29).
 - `--sample` shows an invented mailbox in memory that is forgotten on exit (#30). `inboxcraft` alone keeps the
   owner's store on disk with its accounts, so their passwords stay in the credential store
-  (`io.github.qubernetic.inboxcraft`, `account-<store id>-<id>`) until the account is removed in "Change settings";
+  (`io.github.qubernetic.inboxcraft`, `account-<store id>-<id>`) until the account is removed in "Change settings" or by "Remove account…" on its form;
   a crash or a store that refuses then leaves the entry behind, and `PRIVACY.md` says how to remove one by hand. An
   entry an older build left (`account-<id>`) is never read again and stays until removed by hand (#34, #113).
 - Dates in the list are shown in UTC: the `time` crate has no local time zone yet (#30).
@@ -617,9 +617,8 @@ time from the code as it is, not measured.
   address book; a name that would move the address (`<`, `"`, `,`, `@`) is taken as the address alone. The engine
   takes a domain without a dot (`ansel@example`) as an address, so only a recipient with no `@`, two of them or an
   empty part is marked as none. The composer has no window of its own.
-- Reply, reply all and forward have no keys yet, only the reader's buttons and the engine's commands; templates are
-  written and removed only through the engine's `template.save` and `template.delete` (`owner`), not in the window:
-  the settings sheet has no page for them yet (#133).
+- Reply, reply all and forward have no keys yet, only the reader's buttons and the engine's commands (#133).
+  Templates are written, edited and removed on Settings, Sending, Templates (#317).
 - A blank is asked for at the foot of the composer, one at a time; its mark in the text is tinted but cannot be
   clicked to fill it in (#133).
 - The Let in card's group pills are forgotten when another message opens; a sender's group is chosen on the card or
@@ -767,7 +766,6 @@ time from the code as it is, not measured.
   to an event the owner organises is shown, not written into the event's guests; delegating is not offered (#149).
 - An answer carries no comment, and its message text is English; Going and Maybe put the event into the account's
   first calendar, with no choice of calendar (#149).
-- The Notifications page has no switch for calendar alerts yet: `notify.set` with `alerts` turns them off (#150).
 - An alert notification has no snooze or dismiss button; mail (`EMAIL`) alarms and alarms more than a year from their
   event are left out; the default alert of an all-day event goes off at midnight the day before (#150).
 

@@ -330,6 +330,7 @@ fn a_message_that_leaves_the_list_gives_way_by_the_next_message_rule() {
     assert_eq!(selected_subject(&removed_under(After::Next)).as_deref(), Some("Invoice 2026-031 is paid"));
     assert_eq!(selected_subject(&removed_under(After::Previous)).as_deref(), Some("Draft logo for the bakery"));
     assert_eq!(removed_under(After::List).selected(), None);
+    assert_eq!(removed_under(After::Stay).selected(), None, "stay selects nothing: the window rings the next row");
 }
 
 #[test]

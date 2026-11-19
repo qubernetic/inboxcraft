@@ -241,6 +241,8 @@ pub struct InboxApp {
     kept_notify: Option<NotifySettings>,
     /// The week rule the keep holds; `None` for the sample, which keeps none.
     kept_week: Option<inboxcraft_time::WeekRule>,
+    /// How weeks are counted where the owner chose nothing: the locale's ([`InboxApp::with_week_default`]).
+    week_default: inboxcraft_time::WeekRule,
     /// The app's side of running without a window, when it has one.
     desk: Option<Box<dyn Desk>>,
     /// The screen shown beside the index.
@@ -422,6 +424,7 @@ impl InboxApp {
             kept_triage: Triage::default(),
             kept_notify: None,
             kept_week: None,
+            week_default: inboxcraft_time::WeekRule::default(),
             desk: None,
             screen,
             calendar: Calendar::default(),
@@ -483,6 +486,14 @@ impl InboxApp {
         self
     }
 
+    /// The same window, counting weeks by `rule` where the owner chose nothing, or chose what cannot be read: the rule
+    /// of the owner's locale ([`inboxcraft_engine::week::for_locale`]). Given before [`InboxApp::with_keep`].
+    #[must_use]
+    pub fn with_week_default(mut self, rule: inboxcraft_time::WeekRule) -> Self {
+        self.week_default = rule;
+        self
+    }
+
     /// The same window, keeping the appearance choices and the keys in `keep`: the ones kept there from an earlier run
     /// are the window's from now on, and every change is kept there from the frame it shows in.
     #[must_use]
@@ -506,6 +517,7 @@ impl InboxApp {
                 }
                 self.mailbox.set_inbox_view(kept.view);
                 self.mailbox.restore_pins(kept.keep_pins);
+                self.mailbox.restore_after(kept.after);
                 if let Some(hold) = kept.hold {
                     self.mailbox.restore_hold(hold);
                 }
@@ -518,6 +530,7 @@ impl InboxApp {
                     view: self.mailbox.inbox_view(),
                     keep_pins: self.mailbox.pins_outlast_done(),
                     hold: Some(self.mailbox.hold_seconds()),
+                    after: self.mailbox.after(),
                 };
             }
         }
@@ -530,8 +543,10 @@ impl InboxApp {
                 }
                 None => self.mailbox.notify_settings().clone(),
             });
-            if let Some(kept) = keep.load_week() {
-                self.mailbox.restore_week(&kept);
+            // What the owner chose, read as outside data; what cannot be read, or nothing kept, is the locale's.
+            match keep.load_week() {
+                Some(kept) => self.mailbox.restore_week_or(&kept, self.week_default),
+                None => self.mailbox.restore_week_rule(self.week_default),
             }
             self.kept_week = Some(self.mailbox.week_rule());
         }
@@ -725,7 +740,13 @@ impl InboxApp {
     /// goes, and the screener's mode but on the sample, which keeps the one kept.
     fn triage(&self) -> Triage {
         let screener = if self.mailbox.is_sample() { self.kept_triage.screener } else { self.mailbox.screener_mode() };
-        Triage { screener, view: self.mailbox.inbox_view(), keep_pins: self.mailbox.pins_outlast_done(), hold: Some(self.mailbox.hold_seconds()) }
+        Triage {
+            screener,
+            view: self.mailbox.inbox_view(),
+            keep_pins: self.mailbox.pins_outlast_done(),
+            hold: Some(self.mailbox.hold_seconds()),
+            after: self.mailbox.after(),
+        }
     }
 
     /// Keeps the triage choices when they changed.
@@ -791,9 +812,11 @@ impl InboxApp {
         }
     }
 
-    /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row.
+    /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row; under Stay, with
+    /// nothing selected, on the row that has the keyboard, as the menu key takes it, so the acts go on down the list.
     fn row_act(&self, action: &str) -> Option<(u64, Act)> {
-        let row = self.mailbox.selected().and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
+        let keyed = self.list_row.filter(|_| self.mailbox.after() == crate::mailbox::After::Stay);
+        let row = self.mailbox.selected().or(keyed).and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
         let (_, act) = ROW_ACTS.into_iter().find(|(id, _)| *id == action)?;
         let act = match act {
             Act::Read if row.seen => Act::Unread,
@@ -804,9 +827,10 @@ impl InboxApp {
         Some((row.id, act))
     }
 
-    /// Whether the action `id` can run now: an act on a row needs a selected message, Undo an act in the history, the
-    /// reader's full width an open message; on the settings and on Home nothing of the mail and nothing of the calendar
-    /// runs; the composer's own (Send, fold) only where a composer is drawn; an id the window does not know never runs.
+    /// Whether the action `id` can run now: an act on a row needs a selected message (under Stay the keyed row), Undo
+    /// an act in the history, the reader's full width an open message; on the settings and on Home nothing of the mail
+    /// and nothing of the calendar runs; the composer's own (Send, fold) only where a composer is drawn; an id the
+    /// window does not know never runs.
     #[must_use]
     pub fn can_run(&self, id: &str) -> bool {
         let apart = self.settings.is_open() || self.screen == Screen::Home;
@@ -1660,7 +1684,10 @@ impl InboxApp {
         let taken = self.mailbox.take_taken();
         let owner = gone && taken.is_some() && taken == open;
         let from_list = self.list_keys || self.list_row == open;
-        let walking = owner && (from_list || self.single != Some(true));
+        // Stay, the owner's choice of what follows an act: the act opens nothing, and the keyboard goes to the row that
+        // took the message's place, as when the server takes it away.
+        let stay = self.mailbox.after() == crate::mailbox::After::Stay;
+        let walking = owner && !stay && (from_list || self.single != Some(true));
         if walking && from_list {
             // The keyboard stays on the list: on the row walked on to.
             self.land_held = self.mailbox.selected();
@@ -1683,10 +1710,17 @@ impl InboxApp {
         self.act_by_key = false;
         // Only where the list is the one the message was opened from: another account, place or search is no removal.
         let same_list = self.left.as_ref().is_some_and(|(left, from)| Some(*left) == open && *from == self.list_of());
-        if let Some(gone) = open.filter(|_| gone && !owner && same_list) {
+        if let Some(gone) = open.filter(|_| gone && (!owner || stay) && same_list) {
             self.land_held = self.landing_after_removal(gone);
             self.landed = self.land_held;
-            self.bring_held = false;
+            // The owner's own act brings the list in front in one pane, with the keyboard on that row.
+            self.bring_held = owner;
+        }
+        // Under Stay the owner's act on the row that had the keyboard and was not open: the keyboard lands on the row
+        // that took its place, so the next act goes on from there.
+        if let Some(keyed) = taken.filter(|id| stay && open != Some(*id) && self.list_row == Some(*id)) {
+            self.land_held = self.landing_after_removal(keyed);
+            self.landed = self.land_held;
         }
         if let (true, false, Some(pick)) = (gone, walking, self.mailbox.selected()) {
             // The rule's row is kept, not selected: no act lands on a message that is not shown.
@@ -2829,6 +2863,7 @@ impl InboxApp {
             mailbox: &self.mailbox,
             onboarding: &mut self.onboarding,
             can_add: self.can_add,
+            writing: self.composer.as_ref().map(Composer::account),
         };
         settings::place(ui, theme, view)
     }
@@ -3177,12 +3212,29 @@ impl InboxApp {
             settings::Asked::InboxView(view) => self.mailbox.set_inbox_view(view),
             settings::Asked::Grouped(account, grouped) => self.mailbox.set_grouped(account, grouped),
             settings::Asked::KeepPins(keep) => self.mailbox.set_pins_outlast_done(keep),
+            settings::Asked::After(after) => self.mailbox.set_after(after),
             settings::Asked::Hold(seconds) => self.mailbox.set_hold(seconds),
             settings::Asked::Level(account, level) => self.mailbox.set_notify_level(account, level),
             settings::Asked::Returns(on) => self.mailbox.set_notify_returns(on),
             settings::Asked::Reminders(on) => self.mailbox.set_notify_reminders(on),
+            settings::Asked::Alerts(on) => self.mailbox.set_notify_alerts(on),
+            settings::Asked::FirstDay(day) => self.mailbox.set_week(Some(day), None),
+            settings::Asked::FirstWeek(first) => self.mailbox.set_week(None, Some(first)),
             settings::Asked::Background(on) => self.set_background(on),
             settings::Asked::Login(on) => self.set_login(on),
+            asked @ (settings::Asked::Templates
+            | settings::Asked::NewTemplate(_)
+            | settings::Asked::EditTemplate(..)
+            | settings::Asked::SaveTemplate
+            | settings::Asked::CloseTemplate
+            | settings::Asked::AskDeleteTemplate(..)
+            | settings::Asked::DeleteTemplate(..)
+            | settings::Asked::KeepTemplate) => self.apply_templates(asked),
+            asked @ (settings::Asked::Scheduled
+            | settings::Asked::AskCancelScheduled(_)
+            | settings::Asked::CancelScheduled(_)
+            | settings::Asked::KeepScheduled) => self.apply_scheduled(asked),
+            asked @ (settings::Asked::ReadPrivacy | settings::Asked::AskAgain(_)) => self.apply_privacy(asked),
         }
     }
 
@@ -3198,6 +3250,15 @@ impl InboxApp {
         }
     }
 
+    /// Removes the account `account` as the owner's press of its form's question does, for a picture's setup: the form
+    /// opens, asks, and the question is answered. Whether it was removed.
+    pub(crate) fn remove_account_as_owner(&mut self, account: u64) -> bool {
+        self.onboarding.edit(&mut self.mailbox, account);
+        self.onboarding.ask_remove();
+        self.apply_page(onboard::Asked::Remove);
+        !self.mailbox.accounts().iter().any(|row| row.id == account)
+    }
+
     /// Applies what was asked for on the add-account form or the check.
     fn apply_page(&mut self, asked: onboard::Asked) {
         let (onboarding, mailbox) = (&mut self.onboarding, &mut self.mailbox);
@@ -3209,6 +3270,21 @@ impl InboxApp {
             onboard::Asked::Change => onboarding.change(mailbox),
             onboard::Asked::Close => onboarding.close(),
             onboard::Asked::Cancel => onboarding.cancel(),
+            onboard::Asked::AskRemove => onboarding.ask_remove(),
+            onboard::Asked::KeepAccount => onboarding.keep_account(),
+            onboard::Asked::Remove => {
+                // The owner's press of the question: the only way the form removes an account.
+                let gone = if let crate::onboard::Stage::Edit(id) = onboarding.stage() { Some(id) } else { None };
+                if let Some(said) = onboarding.remove(mailbox) {
+                    // The message being written from it goes with its drafts, as the question said: nothing keeps it
+                    // into a draft that is gone.
+                    if self.composer.as_ref().is_some_and(|composer| gone == Some(composer.account())) {
+                        self.composer = None;
+                    }
+                    self.say(&said);
+                    self.settings.hand_to_nav();
+                }
+            }
         }
         // The new account's jobs go out in this frame.
         self.pump();
@@ -3270,6 +3346,12 @@ fn start(reader: &mut Reader, mailbox: &mut Mailbox, id: u64, act: Act) {
     }
 }
 
+#[cfg(test)]
+#[path = "account_remove_tests.rs"]
+mod account_remove_tests;
+#[cfg(test)]
+#[path = "after_stay_tests.rs"]
+mod after_stay_tests;
 #[cfg(test)]
 #[path = "appearance_tests.rs"]
 mod appearance_tests;

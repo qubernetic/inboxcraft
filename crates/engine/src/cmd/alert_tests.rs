@@ -275,3 +275,19 @@ fn an_alert_tells_the_organiser_s_title_and_place_as_one_short_clean_line_each()
     assert_eq!(about.summary.chars().count(), crate::notify::MAX_TEXT, "cut at the most it may be");
     assert_eq!(about.location, "Corner café upstairs");
 }
+
+#[test]
+fn the_schedule_list_names_an_alert_by_its_event_account_and_lead() {
+    let (mut session, _clock) = fresh();
+    let params = json!({ "calendar": 1, "summary": "Design review\r\n\u{202E}Room 3", "start": "2026-11-05T12:00:00Z" });
+    let id = session.run("event.create", &params).unwrap()["id"].as_u64().unwrap();
+    let answer = session.run("schedule.list", &json!({})).unwrap();
+    let entry = answer["entries"].as_array().unwrap().iter().find(|entry| entry["what"] == "alert").unwrap().clone();
+    assert_eq!(entry["due"], json!("2026-11-05T11:50:00Z"));
+    assert_eq!(entry["account"], json!(1));
+    assert_eq!(entry["subject"], json!("Design review Room 3"));
+    assert_eq!(entry["who"], json!(""));
+    assert_eq!(entry["event"], json!(id));
+    assert_eq!(entry["starts"], json!("2026-11-05T12:00:00Z"));
+    assert_eq!(entry["before_minutes"], json!(10));
+}

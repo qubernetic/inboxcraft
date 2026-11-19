@@ -304,3 +304,26 @@ fn an_undo_whose_old_folder_is_gone_restores_the_state_only() {
     assert_eq!(held(&session, 9).folder(), FolderId::new(3));
     assert!(state(&session, 9).is_empty());
 }
+
+#[test]
+fn what_follows_an_act_is_the_owner_s_and_the_session_keeps_it() {
+    use crate::after::After;
+    let registry = Registry::builtin().unwrap();
+    assert_eq!(registry.lookup("after.set").map(|(_, class)| class), Some(AgentClass::Owner));
+    let mut session = session();
+    assert_eq!(session.after(), After::Next, "the next message by default");
+    assert_eq!(session.run_as(Caller::Agent, "after.set", &json!({ "after": "stay" })).unwrap_err().code(), "not_allowed");
+    assert_eq!(session.after(), After::Next);
+    for (name, after) in [("stay", After::Stay), ("previous", After::Previous), ("list", After::List), ("next", After::Next)] {
+        assert_eq!(session.run("after.set", &json!({ "after": name })).unwrap(), json!({ "after": name }));
+        assert_eq!(session.after(), after, "{name}");
+        assert_eq!(after.name(), name);
+    }
+    for junk in [json!({ "after": "sideways" }), json!({ "after": "Stay\u{0}" }), json!({ "after": 3 }), json!({})] {
+        assert!(session.run("after.set", &junk).is_err(), "{junk}");
+        assert_eq!(session.after(), After::Next, "a refused value changes nothing");
+    }
+    session.set_after(After::Stay);
+    assert_eq!(session.after(), After::Stay, "the front end hands back what it kept");
+    assert_eq!(After::named("sideways"), None);
+}

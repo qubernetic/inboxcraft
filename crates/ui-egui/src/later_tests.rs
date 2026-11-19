@@ -296,3 +296,13 @@ fn a_returned_message_says_so_while_unread() {
     let row = mailbox.messages().iter().find(|row| row.id == rota).unwrap().clone();
     assert!(!mailbox.returned(&row), "read, it is an ordinary message again");
 }
+
+#[test]
+fn bringing_back_a_snoozed_message_the_owner_deleted_says_only_its_snooze_went() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    mailbox.act(rota, Act::Snooze(Timestamp::from_unix(NOW + 2 * 86_400, 0).unwrap()));
+    mailbox.act(rota, Act::Delete);
+    mailbox.act(rota, Act::Unsnooze);
+    assert_eq!(mailbox.undoable().map(|undo| undo.text.as_str()), Some("Snooze taken off"), "it stays in Trash: never 'back in the inbox'");
+}
