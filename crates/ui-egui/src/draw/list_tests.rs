@@ -3671,6 +3671,28 @@ fn undo_of_an_act_on_the_ringed_row_leaves_the_ring_on_it() {
 }
 
 #[test]
+fn a_snooze_asked_for_a_row_not_drawn_next_never_opens_its_picker_later() {
+    // The key asked for the row, but the list drew another place before the row: the ask goes with that draw.
+    let mut harness = wide(1300.0);
+    let odile = id_with(&harness, "Allotment rota for November");
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::SENT);
+    super::list::ask_snooze(&ctx, odile);
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none(), "the row is not in Sent: no picker");
+    harness.state_mut().run_action(&ctx, crate::keymap::MAIL);
+    harness.run();
+    harness.run();
+    let opened = |harness: &Harness<'static, InboxApp>| {
+        harness.query_by_label("Snooze until").is_some() || harness.ctx.memory(|memory| memory.area_rect(super::list::snooze_popup(odile))).is_some()
+    };
+    assert!(!opened(&harness), "back in the inbox, the row drawn, the old ask opens nothing");
+    menu_then_esc(&mut harness, ODILE);
+    assert!(!opened(&harness), "nor once the row has the keyboard");
+}
+
+#[test]
 fn in_one_pane_another_account_or_search_while_reading_keys_no_row_of_the_new_list() {
     // The message in front leaves the list because the person picked another account or searched: the list comes back
     // in front, and no row of the new list is keyed for them (as beside the reader).

@@ -358,8 +358,9 @@ fn ask_snooze_id() -> Id {
     Id::unique("list-ask-snooze")
 }
 
-/// Opens the time picker of the message `message`'s row as its Snooze does, when the row is next drawn: the Snooze
-/// key in one pane, where the reader is not shown, or on the row the owner ringed by Esc from its pointer menu.
+/// Opens the time picker of the message `message`'s row as its Snooze does, if the list's next draw draws the row
+/// (else the ask is dropped): the Snooze key in one pane, where the reader is not shown, or on the row the owner
+/// ringed by Esc from its pointer menu.
 pub(super) fn ask_snooze(ctx: &egui::Context, message: u64) {
     ctx.data_mut(|data| data.insert_temp(ask_snooze_id(), message));
     ctx.request_repaint();
@@ -568,8 +569,19 @@ impl Slot {
     }
 }
 
-/// One message row across `ui`'s width, the mail row of the design; a click selects it.
-fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool, slot: Slot) -> Drawn {
+/// One message row across `ui`'s width, the mail row of the design; a click selects it. `ask`: the message a Snooze
+/// key asked the time picker for in this draw.
+#[expect(clippy::too_many_arguments, reason = "the parts of one row")]
+fn row(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    message: &MessageRow,
+    account_marker: bool,
+    slot: Slot,
+    ask: Option<u64>,
+) -> Drawn {
     let arrival = Arrival::of(ui.ctx(), theme, message.id);
     let selected = mailbox.selected() == Some(message.id);
     let keyed = selected && mailbox.keyed();
@@ -637,11 +649,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         }
     }
     let mut acted = drawn.acted.and_then(|index| act(message, index));
-    // Its Snooze pressed, or its key asked for this row: the keyed row, or the one the owner ringed ([`ask_snooze`]).
-    let asked = ui.ctx().data(|data| data.get_temp::<u64>(ask_snooze_id())) == Some(message.id);
-    if asked {
-        ui.ctx().data_mut(|data| data.remove::<u64>(ask_snooze_id()));
-    }
+    // Its Snooze pressed, or its key asked for this row in this draw: the keyed row, or the one the owner ringed
+    // ([`ask_snooze`]).
+    let asked = ask == Some(message.id);
     let presets = drawn.acted == Some(SNOOZE_ACTION) || asked;
     if presets {
         open_snooze(ui.ctx(), message.id, actions_id(message.id).with(SNOOZE_ACTION), rect);
@@ -1264,6 +1274,8 @@ struct Rows<'a> {
     server: Cell<Option<u64>>,
     /// The row that gained the focus this frame.
     gained: Cell<Option<u64>>,
+    /// The message whose row a Snooze key asked to open the time picker on ([`ask_snooze`]), taken for this draw only.
+    ask: Option<u64>,
 }
 
 impl Rows<'_> {
@@ -1273,7 +1285,7 @@ impl Rows<'_> {
             Place::Later(pile) if self.mailbox.query().is_empty() => {
                 later(ui, self.theme, self.keymap, self.mailbox, message, pile, self.account_marker, slot)
             }
-            _ => row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker, slot),
+            _ => row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker, slot, self.ask),
         };
         if drawn.focused {
             ui.data_mut(|data| data.insert_temp(focused_row_id(), message.id));
@@ -2610,6 +2622,8 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
     let room = ui.max_rect();
     super::paint::hairline(ui.painter(), room.left_top(), room.right_top(), theme.palette.panel_line);
     ui.add_space(1.0);
+    // A Snooze asked by its key lives for this one draw: served if its row is drawn now, else gone, never later.
+    let ask = ui.data_mut(|data| data.remove_temp::<u64>(ask_snooze_id()));
     #[cfg(test)]
     ui.data_mut(|data| data.remove::<Rect>(Id::unique("list-view-rect")));
     if mailbox.place() != Place::Senders {
@@ -2674,6 +2688,7 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
         draft: Cell::new(None),
         server: Cell::new(None),
         gained: Cell::new(None),
+        ask,
     };
     // "Other" stands over the messages no group holds: its "done all" marks those, built or not. Worked out once for a
     // list of rows and its view.
