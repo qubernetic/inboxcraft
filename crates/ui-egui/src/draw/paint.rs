@@ -8,9 +8,8 @@ use std::sync::Arc;
 
 use egui::layers::ShapeIdx;
 use egui::text::{LayoutJob, TextWrapping};
-use egui::{Color32, Frame, Galley, Margin, Painter, Pos2, Rect, Response, Role, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui::{Color32, Frame, Galley, Margin, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
-use crate::iconset::IconId;
 use crate::theme::{FLOAT_SHADOW, Font, Theme};
 
 /// `galley` with every row's baseline on the whole pixel nearest the design's, one half way between two pixels going to
@@ -489,13 +488,12 @@ pub(crate) fn rule(ui: &mut Ui, colour: Color32) -> Response {
 
 /// The panes of one frame. [`Panes::begin`] keeps a place under everything drawn after it; each [`Panes::card`]
 /// draws its content and notes its rectangle; [`Panes::finish`] puts every pane's flat `surface` into the kept place,
-/// with a `line` hairline on each edge that does not lie on the window's border, once where two panes meet, and none
-/// where a pane meets a strip that draws its own edge ([`Panes::edged`], the rail).
+/// with a `line` hairline on each edge that does not lie on the window's border, once where two panes meet; the
+/// painter's clip is the border, along which no pane draws one (the body's sides are the frame's hairlines).
 #[derive(Debug)]
 pub(crate) struct Panes {
     slot: ShapeIdx,
     rects: Vec<Rect>,
-    edged: Vec<Rect>,
     capped: Vec<Rect>,
 }
 
@@ -503,19 +501,13 @@ impl Panes {
     /// Keeps the place for the panes in `painter`'s list, after what it holds now.
     #[must_use]
     pub(crate) fn begin(painter: &Painter) -> Self {
-        Self { slot: painter.add(Shape::Noop), rects: Vec::new(), edged: Vec::new(), capped: Vec::new() }
+        Self { slot: painter.add(Shape::Noop), rects: Vec::new(), capped: Vec::new() }
     }
 
     /// Notes `rect`, a strip above the panes that draws the line on its bottom edge itself (the error banner): a pane
     /// that starts under it draws no line on its top.
     pub(crate) fn capped(&mut self, rect: Option<Rect>) {
         self.capped.extend(rect);
-    }
-
-    /// Notes `rect`, a strip beside the panes that draws the line on its right edge itself (the rail, whose edge
-    /// stands with or without a pane beside it): a pane that starts there draws no line on its left.
-    pub(crate) fn edged(&mut self, rect: Rect) {
-        self.edged.push(rect);
     }
 
     /// A pane over the whole of `ui`, with `add` drawing its content `inner` from its edges.
@@ -534,9 +526,7 @@ impl Panes {
         let mut shapes: Vec<Shape> = self.rects.iter().map(|rect| Shape::rect_filled(snapped(*rect, ppp), 0.0, theme.palette.surface)).collect();
         for rect in &self.rects {
             let whole = snapped(*rect, ppp);
-            // A strip's own edge is the line between it and this pane.
-            let beside_edge = self.edged.iter().any(|strip| near(strip.right(), rect.left()));
-            if !near(rect.left(), window.left()) && !beside_edge {
+            if !near(rect.left(), window.left()) {
                 shapes.push(edge_shape(whole, Side::Left, colour, ppp));
             }
             // The next pane's left edge is this one's right edge: drawn once, by the next.
@@ -557,11 +547,6 @@ impl Panes {
         }
         painter.set(self.slot, Shape::Vec(shapes));
     }
-}
-
-/// The selection over `rect`: one even tone.
-pub(super) fn selection(painter: &Painter, theme: &Theme, rect: Rect, corner: f32) {
-    painter.rect_filled(rect, corner, theme.palette.stage);
 }
 
 /// Where a [`focus_ring`] stands against its control.
@@ -586,65 +571,6 @@ pub(crate) fn focus_ring(painter: &Painter, theme: &Theme, rect: Rect, place: Ri
         Ring::Outside => painter.rect_stroke(on_pixels(rect.expand(2.0)), 0.0, stroke, StrokeKind::Outside),
         Ring::Inside => painter.rect_stroke(on_pixels(rect.shrink(2.0)), 0.0, stroke, StrokeKind::Inside),
     };
-}
-
-/// A pill with `count` in it, its right edge at `right`, centred on `centre_y`; returns its left edge.
-pub(super) fn badge(ui: &Ui, theme: &Theme, count: u64, right: f32, centre_y: f32) -> f32 {
-    crate::component::badge::count(ui, theme, count, right, centre_y)
-}
-
-/// What a navigation row shows.
-pub(super) struct NavRow<'a> {
-    pub(super) text: &'a str,
-    /// What a screen reader says for it.
-    pub(super) spoken: String,
-    pub(super) badge: u64,
-    pub(super) selected: bool,
-    pub(super) depth: usize,
-    /// The icon before the text: `muted`, `ink` while selected.
-    pub(super) icon: Option<IconId>,
-    /// Whether it can be pressed; one that cannot has `muted` text and a `dim` icon and takes no press.
-    pub(super) enabled: bool,
-}
-
-/// A row of the folder pane: a unified view or a folder, with its unread badge.
-pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response {
-    let s = &theme.spacing;
-    let p = &theme.palette;
-    let height = theme.fonts.body.line + s.s2 * 1.5;
-    let sense = if row.enabled { Sense::click() } else { Sense::hover() };
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), sense);
-    response.widget_info(|| WidgetInfo::selected(Role::Button, row.enabled, row.selected, &row.spoken));
-    if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
-        if row.selected {
-            selection(painter, theme, rect, 0.0);
-        } else if response.hovered() && row.enabled {
-            painter.rect_filled(rect, 0.0, p.stage);
-        }
-        let depth = u16::try_from(row.depth.min(8)).unwrap_or(8);
-        let mut left = rect.left() + s.s2 + f32::from(depth) * s.s3;
-        if let Some(icon) = row.icon {
-            let side = theme.icon_side();
-            let at = Rect::from_center_size(pos2(left + side / 2.0, rect.center().y), vec2(side, side));
-            // An icon is `muted`, `ink` on the current row, `dim` when the row cannot be pressed: never faded.
-            let ink = match (row.enabled, row.selected) {
-                (false, _) => p.dim,
-                (true, true) => p.ink,
-                (true, false) => p.muted,
-            };
-            crate::iconset::paint(painter, at, icon, ink);
-            left += side + s.s2;
-        }
-        let right = if row.badge > 0 { badge(ui, theme, row.badge, rect.right() - s.s2, rect.center().y) - s.s2 } else { rect.right() - s.s2 };
-        let ink = if row.enabled { p.ink } else { p.muted };
-        let galley = line(ui, &[(row.text, theme.fonts.body, ink)], right - left);
-        ui.painter().galley(pos2(left, rect.center().y - galley.size().y / 2.0), galley, ink);
-        if response.has_focus() {
-            focus_ring(ui.painter(), theme, rect, Ring::Inside);
-        }
-    }
-    response
 }
 
 /// The edges [`dashed`] painted in one pass, `(pass, [(layer, rect, colour)])`; a later pass starts the list afresh,

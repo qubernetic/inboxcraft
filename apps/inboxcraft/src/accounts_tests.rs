@@ -23,7 +23,7 @@ use inboxcraft_ui_egui::mailbox::Mailbox;
 use inboxcraft_ui_egui::onboard::{self, Keychain};
 use inboxcraft_ui_egui::workers::Workers;
 
-use super::{Entries, NetWorkers, OsKeychain, SERVICE, described, detect, entry_name, newer_run_stops, proposal};
+use super::{Entries, NetWorkers, Network, OsKeychain, SERVICE, described, detect, entry_name, newer_run_stops, proposal, run, run_stops};
 
 const SECRET: &str = "maple-Harbour-42-lantern";
 
@@ -239,31 +239,136 @@ fn a_detected_proposal_reads_as_the_form_shows_it() {
     every.imap.push(Candidate { source: Where::Srv, ..every.imap[0].clone() });
     every.imap.push(Candidate { source: Where::ProviderAutoconfig, ..every.imap[0].clone() });
     every.imap.push(Candidate { source: Where::Provider, ..every.imap[0].clone() });
+    every.imap.push(Candidate { source: Where::Guess, ..every.imap[0].clone() });
     let sources: Vec<onboard::Source> = proposal(&every).imap.iter().map(|suggestion| suggestion.source).collect();
-    // What the MX record pointed to is a guess the owner confirms.
+    // What the MX records pointed to is the provider's guess, a common host name of the domain the domain's own.
     assert_eq!(
         sources,
-        [onboard::Source::AutoconfigRedirect, onboard::Source::Ispdb, onboard::Source::Srv, onboard::Source::Guess, onboard::Source::Guess]
+        [
+            onboard::Source::AutoconfigRedirect,
+            onboard::Source::Ispdb,
+            onboard::Source::Srv,
+            onboard::Source::Provider,
+            onboard::Source::Provider,
+            onboard::Source::Guess
+        ]
     );
 }
 
-/// A named server no probe reached is shown, and the list says why it was not checked, by cause.
+/// A named server no probe reached is shown, with why it was not checked as a fixed id for the form to word; the
+/// lookups' list holds only what failed.
 #[test]
 fn a_named_server_no_probe_reached_is_shown_and_said_to_be_unchecked() {
-    for (checked, why) in [
-        (Checked::NoAnswer, "it did not answer from here"),
-        (Checked::Refused, "it refused the connection from here"),
-        (Checked::NoName, "its name was not found"),
-        (Checked::Clock, "its certificate does not fit this computer's clock"),
+    for (checked, said) in [
+        (Checked::Answered, onboard::Checked::Answered),
+        (Checked::NoAnswer, onboard::Checked::NoAnswer),
+        (Checked::Refused, onboard::Checked::Refused),
+        (Checked::NoName, onboard::Checked::NoName),
+        (Checked::Clock, onboard::Checked::Clock),
     ] {
         let mut found = found();
         found.imap[0].checked = checked;
         let shown = proposal(&found);
         assert_eq!(shown.imap[0].host, "imap.example.org");
-        let line = format!("imap.example.org:993 (TLS) was not checked: {why}");
-        assert!(shown.failed.contains(&line), "{checked:?}: {:?}", shown.failed);
-        assert_eq!(shown.failed.len(), 2);
+        assert_eq!((shown.imap[0].checked, shown.imap[1].checked), (said, onboard::Checked::Answered), "{checked:?}");
+        assert_eq!(shown.failed.len(), 1, "{checked:?}: {:?}", shown.failed);
     }
+}
+
+/// A stand-in for the name servers, the web and the probes that counts what it is asked and sets the form's stop at the
+/// first question, as the owner's Cancel while Detect asks.
+#[derive(Debug, Default, Clone)]
+struct Cancelling {
+    asked: Arc<Mutex<Vec<String>>>,
+    form: onboard::RunStop,
+}
+
+impl Cancelling {
+    /// A stand-in that sets `form` at the first question.
+    fn setting(form: &onboard::RunStop) -> Self {
+        Self { asked: Arc::default(), form: form.clone() }
+    }
+
+    /// The network Detect asks: this stand-in in place of the name servers, the web and the probes.
+    fn network(&self) -> Network {
+        Network { dns: Box::new(self.clone()), web: Box::new(self.clone()), probe: Box::new(self.clone()), clock: Arc::new(SystemClock::new()) }
+    }
+
+    fn asked(&self) -> Vec<String> {
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+impl Cancelling {
+    fn ask(&self, what: String) {
+        self.asked.lock().unwrap().push(what);
+        self.form.stop();
+    }
+}
+
+impl inboxcraft_net::detect::Lookup for Cancelling {
+    fn mx(&self, domain: &Host) -> Result<Vec<Host>, inboxcraft_net::NetError> {
+        self.ask(format!("mx {domain}"));
+        Ok(vec![Host::new("mx1.example.net").unwrap()])
+    }
+
+    fn srv(&self, name: &str) -> Result<Vec<inboxcraft_net::dns::Srv>, inboxcraft_net::NetError> {
+        self.ask(format!("srv {name}"));
+        Ok(Vec::new())
+    }
+}
+
+impl inboxcraft_net::web::Web for Cancelling {
+    fn get(&self, url: &str) -> Result<inboxcraft_net::web::WebAnswer, inboxcraft_net::NetError> {
+        self.ask(format!("web {url}"));
+        Ok(inboxcraft_net::web::WebAnswer { status: 404, location: None, body: Vec::new() })
+    }
+}
+
+impl inboxcraft_net::probe::Probe for Cancelling {
+    fn probe(
+        &self,
+        server: &Server,
+        _service: inboxcraft_net::probe::Service,
+        _deadline: &inboxcraft_net::Deadline,
+    ) -> Result<(), inboxcraft_net::NetError> {
+        self.ask(format!("probe {server}"));
+        Ok(())
+    }
+}
+
+#[test]
+fn the_forms_stop_ends_a_run_before_its_next_lookup_and_a_newer_run_still_stops_it() {
+    static RUNS: AtomicU64 = AtomicU64::new(0);
+    // The form's stop alone, and a newer run alone, each end the run.
+    let form = onboard::RunStop::default();
+    let stop = run_stops(&RUNS, &form);
+    assert!(!stop());
+    form.stop();
+    assert!(stop());
+    let older = run_stops(&RUNS, &onboard::RunStop::default());
+    assert!(!older());
+    let _newer = run_stops(&RUNS, &onboard::RunStop::default());
+    assert!(older());
+}
+
+/// The Detect the window runs, as the app makes it (`accounts::run`), with only the network replaced: the form's Cancel
+/// lands while the first question is out, and no other question starts after it.
+#[test]
+fn the_apps_detect_run_stops_at_the_forms_cancel_before_its_next_question() {
+    let form = onboard::RunStop::default();
+    let fake = Cancelling::setting(&form);
+    let made = fake.clone();
+    let run = run(move || made.network());
+    let found = run("carol@example.org", false, &form);
+    assert!(form.is_stopped());
+    assert_eq!(fake.asked().len(), 1, "{:?}", fake.asked());
+    assert!(found.imap.is_empty() && found.submission.is_empty());
+    // Not stopped, the same run asks on: the stop is what ended it above.
+    let free = Cancelling::setting(&onboard::RunStop::default());
+    let made = free.clone();
+    let _ = super::run(move || made.network())("carol@example.org", false, &onboard::RunStop::default());
+    assert!(free.asked().len() > 1, "{:?}", free.asked());
 }
 
 #[test]
@@ -277,9 +382,9 @@ fn a_newer_detect_run_stops_the_older_one() {
 
 #[test]
 fn detect_refuses_what_is_not_an_address_without_asking_anyone() {
-    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
-    let shown = detect(&tls, "not an address", false);
-    assert!(shown.imap.is_empty() && shown.asked.is_empty());
+    let fake = Cancelling::setting(&onboard::RunStop::default());
+    let shown = detect(&fake.network(), "not an address", false, &onboard::RunStop::default());
+    assert!(shown.imap.is_empty() && shown.asked.is_empty() && fake.asked().is_empty());
     assert_eq!(shown.failed, ["the address is not a mail address"]);
 }
 

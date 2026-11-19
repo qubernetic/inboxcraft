@@ -21,23 +21,59 @@ pub struct Toast<'a> {
     pub text: &'a str,
     /// The undo action of a reversible action: an Undo button and its key.
     pub undo: Option<&'a str>,
+    /// Undo rests: drawn unavailable, its button and its key do nothing (the toast still says what happened).
+    pub rests: bool,
 }
 
-/// Draws the toast's float and content into `ui`; whether Undo was pressed (the button or its key).
-pub fn panel(ui: &mut Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>) -> bool {
+/// Where a toast stands: the middle of its foot, the widest its float may be, and the lowest its foot may go while it
+/// rises (what lies under that line, a composer's foot, stays clear of it).
+#[derive(Debug, Clone, Copy)]
+pub struct Place {
+    /// The middle of the toast's foot, risen.
+    pub bottom: Pos2,
+    /// The widest the float may be: its words are cut with one `…` to stay inside.
+    pub widest: f32,
+    /// The lowest the toast's foot may stand while it rises.
+    pub lowest: f32,
+}
+
+/// How wide what follows the words stands: the gap, Undo and its key chip; nothing without Undo.
+fn undo_wide(ui: &Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>) -> f32 {
+    let s = &theme.spacing;
+    let Some(action) = toast.undo else { return 0.0 };
+    let chip = keymap.chip(ui.ctx(), action).map_or(0.0, |chip| s.s2 + key::Chip::new(ui, theme, &chip, key::ChipState::Default).size().x);
+    s.s2 + button::link_width(ui, theme, tr!("Undo")) + chip
+}
+
+/// How wide the toast's float is with its words whole.
+#[must_use]
+pub fn width(ui: &Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>) -> f32 {
+    let words = galley(ui, toast.text, theme.fonts.body, theme.palette.ink).size().x;
+    words + undo_wide(ui, theme, keymap, toast) + theme.spacing.s4 * 2.0
+}
+
+/// Draws the toast's float and content into `ui`, no wider than `widest` (its words cut with one `…` to fit); whether
+/// Undo was pressed (the button or its key).
+pub fn panel(ui: &mut Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>, widest: f32) -> bool {
     let s = &theme.spacing;
     let p = &theme.palette;
     let slot = ui.painter().add(Shape::Noop);
     let mut undone = false;
     // Undo's own room makes the line taller, so the float's margin gives that back.
     let air = if toast.undo.is_some() { s.s1 } else { s.s2 };
+    let room = widest - s.s4 * 2.0 - undo_wide(ui, theme, keymap, toast);
+    let words = if room.is_finite() {
+        super::cut(ui, toast.text, theme.fonts.body, p.ink, room.max(1.0))
+    } else {
+        galley(ui, toast.text, theme.fonts.body, p.ink)
+    };
     let inner = egui::Frame::new().inner_margin(margin(s.s4, air)).show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = s.s2;
-            ui.label(galley(ui, toast.text, theme.fonts.body, p.ink));
+            ui.label(words);
             if let Some(action) = toast.undo {
-                let undo = button::link(ui, theme, keymap, tr!("Undo"));
-                undone = undo.clicked() || (!soon::is_soon(ui) && keymap.pressed(ui.ctx(), action));
+                let undo = button::link_with(ui, theme, keymap, tr!("Undo"), button::LinkSize::Line, !toast.rests, None);
+                undone = !toast.rests && (undo.clicked() || (!soon::is_soon(ui) && keymap.pressed(ui.ctx(), action)));
                 if let Some(chip) = keymap.chip(ui.ctx(), action) {
                     key::key_chip(ui, theme, &chip, key::ChipState::Default);
                 }
@@ -49,10 +85,11 @@ pub fn panel(ui: &mut Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>) -> 
     undone
 }
 
-/// Shows the toast `id` with its bottom edge centred on `bottom`, rising into place; whether Undo was pressed.
-pub fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, id: Id, toast: &Toast<'_>, bottom: Pos2) -> bool {
+/// Shows the toast `id` at its `place`, rising into it; whether Undo was pressed.
+pub fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, id: Id, toast: &Toast<'_>, place: Place) -> bool {
     let risen = motion::appear(ctx, id, theme.motion.toast);
-    let at = bottom + vec2(0.0, theme.spacing.s6 * (1.0 - risen));
+    let below = (theme.spacing.s6 * (1.0 - risen)).min((place.lowest - place.bottom.y).max(0.0));
+    let at = place.bottom + vec2(0.0, below);
     Area::new(id)
         .order(Order::Foreground)
         .pivot(Align2::CENTER_BOTTOM)
@@ -60,7 +97,7 @@ pub fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, id: Id, toast: &Toast
         .fade_in(false)
         .show(ctx, |ui| {
             ui.multiply_opacity(risen);
-            panel(ui, theme, keymap, toast)
+            panel(ui, theme, keymap, toast, place.widest)
         })
         .inner
 }

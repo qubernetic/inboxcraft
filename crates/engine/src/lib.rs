@@ -140,6 +140,8 @@ pub fn name() -> &'static str {
 }
 
 #[cfg(test)]
+mod store_failure_tests;
+#[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests;

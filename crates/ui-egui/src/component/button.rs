@@ -488,6 +488,11 @@ pub fn link_sized(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, size:
     link_with(ui, theme, keymap, name, size, true, None)
 }
 
+/// How wide a [`LinkSize::Line`] link named `name` is drawn, in points: its words and their pad.
+pub(crate) fn link_width(ui: &Ui, theme: &Theme, name: &str) -> f32 {
+    super::galley(ui, name, theme.fonts.button, theme.palette.ink).size().x.ceil() + LINK_PAD * 2.0
+}
+
 /// [`link_sized`], `enabled` or not, drawn in `shown` when it is given (the gallery's boards).
 pub(crate) fn link_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, size: LinkSize, enabled: bool, shown: Option<Shown>) -> Response {
     link_drawn(ui, theme, keymap, name, None, size, enabled, shown)

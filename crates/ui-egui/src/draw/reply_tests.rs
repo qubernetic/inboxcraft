@@ -205,7 +205,8 @@ fn the_floating_panel_folded_or_open_never_covers_the_reader_s_answers_and_a_pre
         // 16 over the answers' row, its right edge where it stood.
         let top = answers(&harness).iter().map(|rect| rect.top()).fold(f32::INFINITY, f32::min);
         assert_eq!(panel.bottom(), (top - 16.0).floor(), "folded {folded}: the panel's foot 16 over the answers");
-        assert_eq!(panel.right(), 1300.0 - 16.0, "folded {folded}: its right edge as before");
+        let body = super::shell::laid(&harness.ctx).unwrap().body;
+        assert_eq!(panel.right(), body.right() - 16.0, "folded {folded}: its right edge as before, 16 in from the body's");
         let first = harness.state().composer().unwrap().draft();
         // A pointer press on Reply, at its middle.
         let at = harness.get_by_role_and_label(Role::Button, "Reply").rect().center();
@@ -247,6 +248,8 @@ fn with_no_message_open_the_floating_panel_stands_where_it_did() {
     harness.state_mut().composer_mut().0.unwrap().set_floating(true);
     harness.run();
     assert!(harness.state().reader().open_id().is_none(), "nothing open");
-    // 520 × 560, 16 in from the window's right and bottom edges (1300 × 820).
-    assert_eq!(panel(&harness), egui::Rect::from_min_max(egui::pos2(764.0, 244.0), egui::pos2(1284.0, 804.0)));
+    // 520 × 560, 16 in from the body's right and bottom edges.
+    let body = super::shell::laid(&harness.ctx).unwrap().body;
+    let corner = egui::pos2(body.right() - 16.0, (body.bottom() - 16.0).floor());
+    assert_eq!(panel(&harness), egui::Rect::from_min_max(corner - egui::vec2(520.0, 560.0), corner));
 }

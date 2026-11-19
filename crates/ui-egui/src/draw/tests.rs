@@ -115,8 +115,9 @@ fn a_mark_in_a_row_is_14_points_and_an_icon_in_a_button_16() {
     assert!(!flags.is_empty(), "the flagged rows draw their flag");
     assert!(flags.iter().all(|size| *size == theme.mark_side()), "{flags:?}");
     assert_eq!(theme.mark_side(), 14.0);
+    // New message's icon, and the index's Drafts row's, the same glyph.
     let compose = sizes(IconId::Compose);
-    assert_eq!(compose, vec![theme.icon_side()], "the compose button's icon");
+    assert!(!compose.is_empty() && compose.iter().all(|size| *size == theme.icon_side()), "the compose button's icon: {compose:?}");
 }
 
 #[test]
@@ -156,9 +157,20 @@ fn every_control_has_an_accessible_name_in_both_modes() {
         harness.state_mut().search("logo");
         harness.run();
         harness.check_accessibility();
-        harness.get_by_label("Accounts").click();
+        harness.get_by_role_and_label(Role::Button, OWNER).click();
         harness.run();
         harness.check_accessibility();
+    }
+}
+
+/// The owner's row at the index's foot, which opens the account picker.
+const OWNER: &str = "Show mail of: mira@example.org";
+
+/// Opens the index's accounts, `names`, to their folders.
+fn open_accounts(harness: &mut Harness<'static, InboxApp>, names: &[&str]) {
+    for name in names {
+        harness.get_by_role_and_label(Role::Button, name).click();
+        harness.run();
     }
 }
 
@@ -248,21 +260,23 @@ fn a_new_text_scale_shows_from_the_next_frame_and_the_rows_grow_with_it() {
 }
 
 #[test]
-fn the_folder_pane_names_views_and_folders_with_their_unread_counts() {
-    let harness = harness();
+fn the_index_names_views_and_folders_with_their_unread_counts() {
+    let mut harness = harness();
     harness.get_by_label("Inbox, 4 unread");
     harness.get_by_label("Junk, 1 unread");
+    open_accounts(&mut harness, &["Personal", "Studio"]);
     // An account lists only its own folders; its inbox is in the unified view above.
     assert!(harness.query_by_label("Inbox in Personal, 2 unread").is_none());
     harness.get_by_label("Receipts in Personal");
-    harness.get_by_label("Harbour Bakery in Studio");
-    harness.get_by_label("mira@example.org");
-    harness.get_by_label("holloway.studio@example.org");
+    // A folder under another is named by its whole path.
+    harness.get_by_label_contains("Harbour Bakery in Studio");
+    harness.get_by_role_and_label(Role::Button, OWNER);
 }
 
 #[test]
 fn clicking_a_folder_or_a_view_opens_it() {
     let mut harness = harness();
+    open_accounts(&mut harness, &["Personal"]);
     harness.get_by_label("Receipts in Personal").click();
     harness.run();
     assert_eq!(harness.state().mailbox().place(), Place::Folder(7));
@@ -276,16 +290,16 @@ fn clicking_a_folder_or_a_view_opens_it() {
 #[test]
 fn the_account_picker_narrows_to_one_account_with_its_address_in_the_header() {
     let mut harness = harness();
-    harness.get_by_label("Accounts").click();
+    harness.get_by_role_and_label(Role::Button, OWNER).click();
     harness.run();
-    harness.get_by_label("Studio (holloway.studio@example.org)").click();
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio").click();
     harness.run();
     assert_eq!(harness.state().mailbox().narrowed(), Some(2));
     harness.get_by_label_contains("holloway.studio@example.org · ");
     assert!(harness.query_by_label("Inbox in Personal, 2 unread").is_none());
-    harness.get_by_label("Accounts").click();
+    harness.get_by_role_and_label(Role::Button, OWNER).click();
     harness.run();
-    harness.get_by_label("All accounts").click();
+    harness.get_by_role_and_label(Role::MenuItemRadio, "All accounts").click();
     harness.run();
     assert_eq!(harness.state().mailbox().narrowed(), None);
 }
@@ -395,6 +409,7 @@ fn hovering_rows_and_folders_draws_without_trouble() {
     let row = harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, unread").rect().center();
     harness.hover_at(row);
     harness.run();
+    open_accounts(&mut harness, &["Personal"]);
     let folder = harness.get_by_label("Receipts in Personal").rect().center();
     harness.hover_at(folder);
     harness.run();
@@ -594,7 +609,7 @@ fn the_window_is_flat() {
         assert!(round.is_empty(), "{theme:?}: square, flat shapes only:\n{}", round.join("\n"));
         let surface = Theme::new(Mode::of(&harness.ctx), TextScale::default()).palette.surface;
         let panes = shapes.iter().filter(|(_, shape)| matches!(shape, egui::Shape::Rect(rect) if rect.fill == surface)).count();
-        assert!(panes >= 3, "{theme:?}: the folder pane, the list and the reader are flat panes: {panes}");
+        assert!(panes >= 2, "{theme:?}: the list and the reader are flat panes: {panes}");
     }
 }
 
@@ -616,11 +631,11 @@ fn a_hovered_row_takes_the_fill_of_its_ground() {
     harness.run();
     assert!(filled_at(&harness, row, p.stage), "a hovered list row is the stage");
     assert!(!filled_at(&harness, row, p.grid));
-    // A rail button stands on the `panel`: its hover is the `grid`.
+    // A place of the index stands on the `panel`: its hover is the `grid`.
     let calendar = harness.get_by_role_and_label(Role::Button, "Calendar").rect().center();
     harness.hover_at(calendar);
     harness.run();
-    assert!(filled_at(&harness, calendar, p.grid), "a hovered rail button is the grid");
+    assert!(filled_at(&harness, calendar, p.grid), "a hovered place of the index is the grid");
     assert!(!filled_at(&harness, calendar, p.stage));
 }
 
@@ -649,13 +664,13 @@ fn upright_line_columns(harness: &Harness<'static, InboxApp>, colour: egui::Colo
     covered
 }
 
-/// Where the rail ends: its buttons stand in its middle.
-fn rail_right(harness: &Harness<'static, InboxApp>, theme: &Theme) -> f32 {
-    harness.get_by_role_and_label(Role::Button, "Calendar").rect().center().x + super::pane::rail_width(theme) / 2.0
+/// Where the index ends: the frame's hairline between it and the body stands there.
+fn index_right(harness: &Harness<'static, InboxApp>, _theme: &Theme) -> f32 {
+    super::shell::laid(&harness.ctx).unwrap().index.right()
 }
 
 #[test]
-fn one_line_stands_between_the_rail_and_the_pane_beside_it() {
+fn one_line_stands_between_the_index_and_the_body() {
     let theme = Theme::new(Mode::Dark, TextScale::default());
     for ppp in [1.0_f32, 1.5] {
         let wide = ppp.round().max(1.0) as usize;
@@ -665,37 +680,37 @@ fn one_line_stands_between_the_rail_and_the_pane_beside_it() {
             .with_theme(egui::Theme::Dark)
             .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), sample_app());
         harness.run();
-        let seam = rail_right(&harness, &theme);
+        let seam = index_right(&harness, &theme);
         let mail = upright_line_columns(&harness, theme.palette.line, seam);
-        assert_eq!(mail.len(), wide, "{ppp}: one line between the rail and the folder pane: {mail:?}");
+        assert_eq!(mail.len(), wide, "{ppp}: one line between the index and the list: {mail:?}");
         harness.get_by_role_and_label(Role::Button, "Calendar").click();
         harness.run();
         let calendar = upright_line_columns(&harness, theme.palette.line, seam);
-        assert_eq!(calendar.len(), wide, "{ppp}: one line between the rail and the calendar's side: {calendar:?}");
+        assert_eq!(calendar.len(), wide, "{ppp}: one line between the index and the calendar: {calendar:?}");
     }
 }
 
 #[test]
-fn the_rail_keeps_its_line_where_no_pane_stands_beside_it() {
+fn the_index_keeps_its_line_where_no_pane_stands_beside_it() {
     let theme = Theme::new(Mode::Dark, TextScale::default());
     let session = Session::new(Box::new(Memory::new(StoreConfig::default())), clock()).unwrap();
     let harness = harness_with(InboxApp::new(Mailbox::new(session, clock())), egui::Theme::Dark);
-    let columns = upright_line_columns(&harness, theme.palette.line, rail_right(&harness, &theme));
-    assert_eq!(columns.len(), 1, "the rail's own edge: {columns:?}");
+    let columns = upright_line_columns(&harness, theme.palette.line, index_right(&harness, &theme));
+    assert_eq!(columns.len(), 1, "the frame's hairline: {columns:?}");
 }
 
 #[test]
 fn the_account_picker_opens_by_enter_and_takes_an_account_by_enter() {
     let mut harness = harness();
-    let field = harness.get_by_role_and_label(Role::ComboBox, "Accounts");
-    assert_eq!(field.accesskit_node().value().as_deref(), Some("All accounts"));
-    field.focus();
+    harness.get_by_role_and_label(Role::Button, OWNER).focus();
     harness.run();
     harness.key_down(Key::Enter);
     harness.run();
     harness.key_up(Key::Enter);
     harness.run();
-    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio (holloway.studio@example.org)").focus();
+    let all = harness.get_by_role_and_label(Role::MenuItemRadio, "All accounts");
+    assert_eq!(all.accesskit_node().toggled(), Some(Toggled::True), "the picker shows All accounts chosen");
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio").focus();
     harness.run();
     harness.key_down(Key::Enter);
     harness.run();
@@ -703,7 +718,10 @@ fn the_account_picker_opens_by_enter_and_takes_an_account_by_enter() {
     harness.run();
     assert_eq!(harness.state().mailbox().narrowed(), Some(2));
     assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "All accounts").is_none(), "the list closed");
-    assert_eq!(harness.get_by_role_and_label(Role::ComboBox, "Accounts").accesskit_node().value().as_deref(), Some("Studio"));
+    harness.get_by_role_and_label(Role::Button, OWNER).click();
+    harness.run();
+    let studio = harness.get_by_role_and_label(Role::MenuItemRadio, "Studio");
+    assert_eq!(studio.accesskit_node().toggled(), Some(Toggled::True), "opened again, it shows Studio chosen");
 }
 
 #[test]
@@ -803,16 +821,18 @@ fn one_line_stands_between_the_error_banner_and_the_panes_under_it() {
         harness.run();
         let error = harness.state().mailbox().error().unwrap().to_owned();
         let text = harness.get_by_label(&error).rect();
-        // The sheet's padding: 12 at the sides (from the window's left, where the rail starts), the ERROR label there,
+        // The sheet's padding: 12 at the sides (from the body's left, where the banner starts), the ERROR label there,
         // the words 12 right of it.
-        let window = rail_right(&harness, &theme) - super::pane::rail_width(&theme);
+        let window = super::shell::laid(&harness.ctx).unwrap().body.left();
         let label = harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
             egui::Shape::Text(shape) if shape.galley.job.text == "ERROR" => Some(shape.galley.rect.translate(shape.pos.to_vec2())),
             _ => None,
         });
         let label = label.unwrap_or_else(|| panic!("{ppp}: no ERROR label"));
-        assert!((label.left() - window - 12.0).abs() < 0.01, "{ppp}: the label {label:?} in a window from {window}");
-        assert!((text.left() - (label.left() + crate::draw::paint::run_box(label.width()) + 12.0)).abs() < 0.01, "{ppp}: {text:?} after {label:?}");
+        // 12 in and 12 apart, within one physical pixel where the body's edge is not on a whole point (242.67 at 1.5).
+        let pixel = 1.0 / ppp + 0.01;
+        assert!((label.left() - window - 12.0).abs() < pixel, "{ppp}: the label {label:?} in a body from {window}");
+        assert!((text.left() - (label.left() + crate::draw::paint::run_box(label.width()) + 12.0)).abs() < pixel, "{ppp}: {text:?} after {label:?}");
         let dismiss = harness.get_by_role_and_label(Role::Button, "dismiss").rect();
         let rows = level_line_rows(&harness, &[p.line, p.minus], dismiss.bottom(), dismiss.bottom() + 16.0);
         assert_eq!(rows.len(), wide, "{ppp}: one line between the banner and the panes: {rows:?}");
@@ -829,10 +849,10 @@ fn the_error_banner_is_drawn_over_the_window_s_ground() {
         let picture = crate::shot::render(&mut app, vec2(1100.0, 720.0), 1.0, mode).unwrap();
         let at = |x: usize, y: usize| picture.pixel(x, y).map(|pixel| (pixel.r(), pixel.g(), pixel.b()));
         let rgb = |colour: egui::Color32| Some((colour.r(), colour.g(), colour.b()));
-        // Its `panel` ground across the window under its `minus` top line, its line at the foot.
-        assert_eq!(at(700, 0), rgb(p.minus), "{mode:?}: the top line");
-        assert_eq!(at(700, 4), rgb(p.panel), "{mode:?}: the banner's ground");
-        let words = (12..400).any(|x| (8..26).any(|y| at(x, y).is_some_and(|c| Some(c) != rgb(p.panel))));
+        // Its `panel` ground across the body (at 234, 46 in a 1100 × 720 window) under its `minus` top line.
+        assert_eq!(at(700, 46), rgb(p.minus), "{mode:?}: the top line");
+        assert_eq!(at(700, 50), rgb(p.panel), "{mode:?}: the banner's ground");
+        let words = (246..634).any(|x| (54..72).any(|y| at(x, y).is_some_and(|c| Some(c) != rgb(p.panel))));
         assert!(words, "{mode:?}: its words are drawn");
     }
 }
@@ -842,11 +862,12 @@ fn the_account_picker_with_a_stale_account_shows_and_focuses_all_accounts() {
     let mut harness = harness();
     harness.state_mut().mailbox_mut().narrow_stale(4242);
     harness.run();
-    let field = harness.get_by_role_and_label(Role::ComboBox, "Accounts");
-    assert_eq!(field.accesskit_node().value().as_deref(), Some("All accounts"));
-    field.focus();
+    harness.get_by_role_and_label(Role::Button, OWNER).focus();
     harness.run();
     harness.key_press(Key::Enter);
+    harness.run();
+    // The picker is a float: the keyboard leaves its opener and the first Tab lands on its first row.
+    harness.key_press(Key::Tab);
     harness.run();
     harness.run();
     let first = harness.get_by_role_and_label(Role::MenuItemRadio, "All accounts");

@@ -186,7 +186,11 @@ fn the_foot_draws_idle_syncing_synced_and_failed_as_the_frames_do() {
         let SyncState::Synced { at: Some(at) } = state(&harness) else { panic!("{:?}", state(&harness)) };
         assert_eq!(control(&harness), format!("calendars synced {}, sync now", at.clock()));
         assert_eq!(harness.state().calendar().sync_view().read, Some(at), "the read's time is the sync's");
-        assert!(harness.query_by_label_contains("Personal").is_some(), "the calendars kept by the discovery still show");
+        // The side panel's account head (a label); the index's account row of the same name is a button.
+        assert!(
+            harness.query_all(by().role(Role::Label).label_contains("Personal")).next().is_some(),
+            "the calendars kept by the discovery still show"
+        );
         // A second sync fails at sign-in.
         harness.get_by_label_contains("sync now").click();
         frames(&mut harness);

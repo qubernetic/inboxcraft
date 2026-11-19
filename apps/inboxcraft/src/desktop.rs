@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use eframe::egui::{self, ViewportCommand};
 use inboxcraft_control_key::Failure;
+use inboxcraft_engine::EngineError;
 use inboxcraft_model::Role;
 use inboxcraft_ui_egui::InboxApp;
 use inboxcraft_ui_egui::mailbox::{Act, Mailbox};
@@ -55,6 +56,9 @@ pub struct Desktop {
     calls: Option<Receiver<Call>>,
     /// A notification failed; the next failures are not reported again.
     failed: bool,
+    /// The last store failure's detail written to standard error, so a caller that repeats a failing command does not
+    /// repeat the line.
+    logged: Option<String>,
 }
 
 impl std::fmt::Debug for Desktop {
@@ -83,6 +87,7 @@ impl Desktop {
             clicks: None,
             calls: None,
             failed: false,
+            logged: None,
         }
     }
 
@@ -225,6 +230,11 @@ impl Desktop {
         let calls: Vec<Call> = self.calls.as_ref().map(|calls| calls.try_iter().collect()).unwrap_or_default();
         for call in calls {
             let answer = self.app.mailbox_mut().run_for_agent(call.command(), call.params());
+            if let Err(error) = &answer
+                && let Some(line) = store_log(error, &mut self.logged)
+            {
+                eprintln!("{line}");
+            }
             call.answer(answer.map_err(|error| Failure::new(error.code(), error.to_string())));
         }
         self.app.pump();
@@ -248,6 +258,21 @@ impl Desktop {
             self.shown = Some(count);
         }
     }
+}
+
+/// The line for the app's own standard error when `error` is a store failure with the database's own words, unless
+/// they are the words of the line before (`logged`, then kept). The caller (the CLI, MCP) is answered only the fixed
+/// sentence; the words, which can name the store's tables and columns or carry a crafted file's trigger text, cut to
+/// [`inboxcraft_store::MAX_ERROR_DETAIL`] characters without control characters, stay on the owner's machine.
+#[must_use]
+pub fn store_log(error: &EngineError, logged: &mut Option<String>) -> Option<String> {
+    let EngineError::Store(store) = error else { return None };
+    let detail = store.detail()?;
+    if logged.as_deref() == Some(detail) {
+        return None;
+    }
+    *logged = Some(detail.to_owned());
+    Some(format!("inboxcraft: a command failed: {store} (the database said: {detail})"))
 }
 
 /// The unread messages in the inboxes of every account.
