@@ -811,7 +811,8 @@ fn in_a_narrow_reader_the_organisers_address_stays_whole_and_only_an_address_too
     let label = "d".repeat(61);
     let longest = format!("{}@{label}.{label}.{label}.org", "o".repeat(64));
     for (address, whole) in [("odile@example.org", true), (longest.as_str(), false)] {
-        let harness = goes_at(("Teodor Lisk", "teodor@example.org"), address, 130, 1024.0);
+        // 1100: the reader beside the index and the list is about 410 wide, the card's lower part about 190 beside its date.
+        let harness = goes_at(("Teodor Lisk", "teodor@example.org"), address, 130, 1100.0);
         let card = harness
             .query_all_by_role(Role::Group)
             .find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("Invitation: Party")))
