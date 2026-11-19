@@ -378,3 +378,30 @@ fn the_handles_that_move_the_window_are_no_tab_stops() {
         }
     }
 }
+
+#[test]
+fn a_double_press_on_the_handles_maximises_the_window() {
+    for (frame, at) in [(WindowFrame::Strip, pos2(500.0, 17.0)), (WindowFrame::TopRow, pos2(600.0, 8.0))] {
+        let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+        app.set_own_frame(true);
+        app.set_frame(frame);
+        // Two presses a sixtieth of a second apart: well inside the double press's time.
+        let mut harness = Harness::builder()
+            .with_size(vec2(1100.0, 700.0))
+            .with_step_dt(1.0 / 60.0)
+            .with_context_setup(install_fonts)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        harness.run();
+        harness.hover_at(at);
+        harness.step();
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            for pressed in [true, false] {
+                harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+            }
+            harness.step();
+            seen.extend(commands(&harness));
+        }
+        assert!(seen.contains(&ViewportCommand::Maximized(true)), "{frame:?}: {seen:?}");
+    }
+}
