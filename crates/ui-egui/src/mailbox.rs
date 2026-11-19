@@ -37,7 +37,7 @@ use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::notify::{Level, Notice, Settings as NotifySettings};
 use inboxcraft_engine::{Applied, Caller, EngineError, Hold, MAX_HISTORY, MAX_LIST, ScreenerMode, Session};
 use inboxcraft_model::{Account, AccountId, Role};
-use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
+use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, WeekRule, Weekday};
 use serde_json::{Value, json};
 
 use crate::iconset::IconId;
@@ -2330,6 +2330,13 @@ impl Mailbox {
     /// Takes the notification choices kept from an earlier run.
     pub(crate) fn restore_notify(&mut self, settings: NotifySettings) {
         self.session.set_notify_settings(settings);
+    }
+
+    /// How the owner's weeks are counted (`week.set`): the calendar's weeks and months, and "Next week" of the time
+    /// presets, count by it.
+    #[must_use]
+    pub fn week_rule(&self) -> WeekRule {
+        self.session.week_rule()
     }
 }
 

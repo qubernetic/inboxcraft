@@ -382,3 +382,34 @@ fn a_long_title_in_the_details_pushes_the_times_down_and_the_day_s_times_stand_u
     assert!(when.top() >= title.bottom(), "the times under the title: {title:?} {when:?}");
     assert!(when.height() >= 2.0 * 22.0 - 0.5, "the times on a line of their own: {when:?}");
 }
+
+#[test]
+fn the_week_drawn_follows_the_rule_set_in_the_session_with_today_in_it() {
+    for (rule, title, note, heads) in [
+        (r#"{"first_day": "monday"}"#, "2 – 8 November 2026", "week 45", ["Monday 2 November 2026", "Sunday 8 November 2026"]),
+        (r#"{"first_day": "sunday"}"#, "1 – 7 November 2026", "week 44", ["Sunday 1 November 2026", "Saturday 7 November 2026"]),
+        (
+            r#"{"first_day": "saturday", "first_week": "week_of_1_january"}"#,
+            "31 October – 6 November 2026",
+            "week 45",
+            ["Saturday 31 October 2026", "Friday 6 November 2026"],
+        ),
+    ] {
+        let mut harness = on_calendar(egui::Theme::Light);
+        {
+            let (calendar, mailbox) = harness.state_mut().calendar_mut();
+            mailbox.run("week.set", &serde_json::from_str(rule).unwrap()).unwrap();
+            // What the window does once a frame.
+            calendar.follow_week(mailbox);
+        }
+        harness.run();
+        harness.get_by_label(title);
+        harness.get_by_label(note);
+        assert_eq!(harness.get_all_by_label("Thursday 5 November 2026, today").count(), 2, "{rule}: today's head and the mini month's");
+        // A day's head is the widest of the buttons named after it (the mini month's are 28 wide).
+        let head = |name: &str| harness.get_all_by_label(name).map(|node| node.rect()).max_by(|a, b| a.width().total_cmp(&b.width())).unwrap();
+        let [first, last] = heads.map(head);
+        assert!(first.width() > 60.0 && last.width() > 60.0, "{rule}: the heads over the hours");
+        assert!(first.left() < last.left(), "{rule}: the week's first day at the left");
+    }
+}
