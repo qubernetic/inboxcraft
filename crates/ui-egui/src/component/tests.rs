@@ -29,7 +29,7 @@ fn setup(ctx: &Context) {
 
 /// A harness whose context has the bundled fonts from its first frame and records its paint, stepping a frame at a
 /// time.
-pub(super) fn builder<State>() -> egui_kittest::HarnessBuilder<State> {
+pub(crate) fn builder<State>() -> egui_kittest::HarnessBuilder<State> {
     egui_kittest::Harness::<State>::builder().with_context_setup(setup).with_step_dt(FRAME as f32).with_max_steps(60)
 }
 
@@ -596,6 +596,23 @@ pub(crate) fn staged_motion(
     });
     harness.run();
     harness
+}
+
+/// Every text painted in the frame, in the order painted.
+pub(crate) fn texts<State>(harness: &Harness<'_, State>) -> Vec<String> {
+    let mut out = Vec::new();
+    for clipped in &harness.output().shapes {
+        collect_texts(&clipped.shape, &mut out);
+    }
+    out
+}
+
+fn collect_texts(shape: &egui::Shape, out: &mut Vec<String>) {
+    match shape {
+        egui::Shape::Text(text) => out.push(text.galley.job.text.clone()),
+        egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect_texts(shape, out)),
+        _ => {}
+    }
 }
 
 /// The looks of the widget `label` frame by frame as the pointer comes onto it, `frames` frames, then leaves it,

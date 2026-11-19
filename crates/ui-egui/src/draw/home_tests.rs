@@ -490,3 +490,85 @@ fn no_pressable_control_on_home_is_a_no_op() {
         }
     }
 }
+
+/// Home "today" at motion `level`, frames 10 ms apart; `shown` false draws nothing (the page is left).
+fn headline_harness(level: crate::motion::Level) -> Harness<'static, (Home, bool)> {
+    let theme = Theme::new(Mode::Dark, scale(100));
+    let keymap = Keymap::default();
+    let mut field = Field::new(0);
+    let mut harness = crate::component::tests::builder().with_size(BODY).with_step_dt(0.01).build_ui_state(
+        move |ui, (home, shown): &mut (Home, bool)| {
+            crate::motion::set_level(ui.ctx(), level);
+            if *shown {
+                let stage = Stage { field: &mut field, emblem: None, level: Level::Off };
+                show(ui, &theme, &keymap, home, Rect::from_min_size(pos2(0.0, 0.0), BODY), stage);
+            }
+        },
+        (sample("today").unwrap(), false),
+    );
+    // The harness's first frames run before the page opens.
+    harness.state_mut().1 = true;
+    harness.step();
+    harness
+}
+
+/// The headline's two lines as painted, the greeting and the name.
+fn headline_lines(harness: &Harness<'static, (Home, bool)>) -> (String, String) {
+    let (first, second) = harness.state().0.headline();
+    let texts = crate::component::tests::texts(harness);
+    let width = |text: &str| text.chars().count();
+    let first = texts.iter().find(|text| width(text) == width(first) && !text.starts_with('[')).cloned().unwrap_or_default();
+    let name = format!("{}.", second.unwrap_or_default());
+    let second = texts.iter().find(|text| width(text) == width(&name) && **text != first).cloned().unwrap_or_default();
+    (first, second)
+}
+
+#[test]
+fn at_full_the_headline_resolves_from_the_left_over_700_ms_each_time_the_page_opens() {
+    let mut harness = headline_harness(crate::motion::Level::Full);
+    let greeting = harness.state().0.headline().0.to_owned();
+    let (first, _) = headline_lines(&harness);
+    assert!(first.chars().zip(greeting.chars()).all(|(a, b)| a != b || b == ' '), "0 ms: only glyphs, {first:?}");
+    harness.run_steps(42);
+    let (first, second) = headline_lines(&harness);
+    let word = greeting.split(' ').next().unwrap();
+    assert!(first.starts_with(word), "420 ms: the first word reads, {first:?}");
+    assert_ne!(second, format!("{}.", harness.state().0.headline().1.unwrap()), "the name not yet");
+    harness.run_steps(28);
+    assert_eq!(headline_lines(&harness).0, greeting, "700 ms: it reads");
+    assert!(rests(&mut harness, 2), "and rests");
+    // Left and opened again: it plays again.
+    harness.state_mut().1 = false;
+    harness.step();
+    harness.state_mut().1 = true;
+    harness.step();
+    assert_ne!(headline_lines(&harness).0, greeting, "opened again, it resolves again");
+}
+
+#[test]
+fn at_reduced_the_headline_plays_once_per_launch_and_at_off_never() {
+    let mut harness = headline_harness(crate::motion::Level::Reduced);
+    let greeting = harness.state().0.headline().0.to_owned();
+    assert_ne!(headline_lines(&harness).0, greeting, "the first time: glyphs");
+    harness.run_steps(70);
+    assert_eq!(headline_lines(&harness).0, greeting);
+    harness.state_mut().1 = false;
+    harness.step();
+    harness.state_mut().1 = true;
+    harness.step();
+    assert_eq!(headline_lines(&harness).0, greeting, "once per launch: not again");
+    assert!(rests(&mut harness, 2));
+    let mut harness = headline_harness(crate::motion::Level::Off);
+    assert_eq!(headline_lines(&harness).0, greeting, "off: it reads at once");
+    assert!(rests(&mut harness, 2));
+}
+
+#[test]
+fn a_key_during_the_headline_ends_it_in_that_frame() {
+    let mut harness = headline_harness(crate::motion::Level::Full);
+    let greeting = harness.state().0.headline().0.to_owned();
+    harness.run_steps(5);
+    harness.key_press(Key::Tab);
+    harness.step();
+    assert_eq!(headline_lines(&harness).0, greeting, "the key acts and the headline reads at once");
+}

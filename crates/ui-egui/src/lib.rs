@@ -60,6 +60,7 @@ pub mod quote;
 pub mod reader;
 pub mod sample;
 pub mod save;
+pub mod scramble;
 pub mod settings;
 pub mod shot;
 mod status;

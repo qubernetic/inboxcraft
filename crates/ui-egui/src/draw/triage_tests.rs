@@ -447,7 +447,8 @@ fn an_answered_card_takes_its_answers_colour_fades_and_the_next_steps_up() {
         // The card that stepped up under the pointer takes its hover in the next two frames; then it rests. (The answer's
         // Undo in the status line ticks once a second while it shows: it is let go first.)
         harness.state_mut().mailbox_mut().forget_undo();
-        harness.run_steps(2);
+        // At full the hovered button's label resolves too (M3, 300 ms at most).
+        harness.run_steps(20);
         assert!(crate::component::tests::rests(&mut harness, 4), "and it rests");
     }
 }
