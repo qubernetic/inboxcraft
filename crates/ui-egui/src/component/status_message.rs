@@ -188,7 +188,7 @@ pub fn status_message(ui: &mut Ui, theme: &Theme, keymap: &Keymap, message: &Sta
             let chip = key.map(|key| Chip::new(ui, theme, key, ChipState::Default));
             let chip_wide = chip.as_ref().map_or(0.0, |chip| KEY_GAP + chip.size().x);
             let at = place(link + chip_wide);
-            undo = Some((at, link, chip));
+            undo = Some((at, link, chip, key));
         }
         Kind::Error => {
             let (log, dismiss) = (link_width(ui, theme, tr!("open log")), link_width(ui, theme, tr!("dismiss")));
@@ -237,8 +237,13 @@ pub fn status_message(ui: &mut Ui, theme: &Theme, keymap: &Keymap, message: &Sta
     let line = |left: f32, wide: f32| {
         Rect::from_min_size(pos2(left, (middle - theme.boxes().row_link / 2.0).round()), vec2(wide.max(1.0), theme.boxes().row_link))
     };
-    if let Some((left, link, chip)) = undo {
-        if link_at(ui, theme, keymap, line(left, link), clip, tr!("undo"), false).clicked() {
+    if let Some((left, link, chip, key)) = undo {
+        let response = link_at(ui, theme, keymap, line(left, link), clip, tr!("undo"), false);
+        // Its key, while it is offered, is the link's for a screen reader too.
+        if let Some(key) = key {
+            ui.ctx().accesskit_node_builder(response.id, |node| node.set_keyboard_shortcut(key));
+        }
+        if response.clicked() {
             press = Some(Press::Undo);
         }
         if let Some(chip) = chip {

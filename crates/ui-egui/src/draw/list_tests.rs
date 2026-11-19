@@ -210,9 +210,13 @@ fn keys_typed_into_the_search_field_do_not_act() {
     harness.run();
     harness.key_press(Key::D);
     harness.run();
+    let undo_key = |harness: &Harness<'static, InboxApp>| {
+        harness.get_by_role_and_label(Role::Button, "undo").accesskit_node().data().keyboard_shortcut().map(str::to_owned)
+    };
+    assert_eq!(undo_key(&harness).as_deref(), Some("Ctrl Z"), "the line offers Undo's key");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::F);
     harness.run();
-    assert!(harness.query_by_label("Ctrl Z").is_none(), "Undo's key belongs to the field while it has the focus");
+    assert_eq!(undo_key(&harness), None, "Undo's key belongs to the field while it has the focus");
     harness.key_press(Key::R);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
