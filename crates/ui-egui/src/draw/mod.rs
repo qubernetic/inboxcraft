@@ -1362,7 +1362,7 @@ impl InboxApp {
     }
 
     /// Shows the mail, leaving the settings, the calendar and Home.
-    pub(crate) fn show_mail(&mut self) {
+    pub fn show_mail(&mut self) {
         self.leave_settings();
         self.screen_to(Screen::Mail);
     }
@@ -2293,9 +2293,6 @@ impl InboxApp {
         }
         if self.themed.is_none() {
             theme::install_fonts(ctx);
-            // Command and 0 shows Home: egui's own zoom keys (Command and +, -, 0) would take it first. The text size is
-            // the Appearance page's.
-            ctx.options_mut(|options| options.zoom_with_keyboard = false);
         }
         Theme::apply(ctx, &Look::of(&chosen));
         // egui follows the system by itself; a first frame that follows it leaves the context's mode alone.
@@ -2341,8 +2338,7 @@ impl InboxApp {
         // capture and the event editor take theirs before anything under them. On the settings, a place, an Esc with
         // nothing in front closes nothing.
         let setting = self.settings.is_open();
-        // On Home, a place, an Esc with nothing in front closes nothing either.
-        let to_place = to_place && !setting && self.screen != Screen::Home;
+        let to_place = to_place && !setting;
         // The settings shown in the place of what was, and the palette coming over the window, close the lists, menus and
         // pickers open.
         crate::component::popup::covered(ui.ctx(), [setting, self.palette.is_open()]);

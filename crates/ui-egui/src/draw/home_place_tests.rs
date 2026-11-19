@@ -169,6 +169,11 @@ fn home_is_built_once_at_rest_and_again_only_while_it_shows_when_what_it_shows_c
     clock.advance(std::time::Duration::from_secs(3_600));
     harness.run();
     assert_eq!(harness.state().home.builds(), 4, "the hour turned");
+    // Away and back with nothing changed: once on return, as on every return.
+    command(&mut harness, Key::Num1);
+    command(&mut harness, Key::Num0);
+    harness.run();
+    assert_eq!(harness.state().home.builds(), 5, "once on a return with nothing changed");
     // Nothing while another place shows, whatever changes there.
     command(&mut harness, Key::Num1);
     draft(harness.state_mut(), "Clay invoice");
@@ -176,10 +181,10 @@ fn home_is_built_once_at_rest_and_again_only_while_it_shows_when_what_it_shows_c
     for _ in 0..4 {
         harness.run();
     }
-    assert_eq!(harness.state().home.builds(), 4, "nothing is built while the mail shows");
+    assert_eq!(harness.state().home.builds(), 5, "nothing is built while the mail shows");
     command(&mut harness, Key::Num0);
     harness.run();
-    assert_eq!(harness.state().home.builds(), 5, "once on return");
+    assert_eq!(harness.state().home.builds(), 6, "once on return");
 }
 
 #[test]
