@@ -35,6 +35,7 @@
 //! - [`account_bar`]: the 3 × 12 px mark in an account's colour.
 //! - [`soon`]: what is designed and not built yet, drawn unavailable, and its "coming soon" tag.
 //! - [`time_picker`]: presets and a typed time for snooze, send later and reminders ([`typed_time`] reads the text).
+//! - [`window_controls`]: minimise, maximise or restore, and close, for the window's own frame.
 //!
 //! [`gallery`] draws every one of them on one page for `ui_shot`, [`gallery_fields`] the fields, pickers and menus on a
 //! second, [`gallery_screens`] the screens' own sets on another.
@@ -94,6 +95,7 @@ pub mod toast;
 pub mod tooltip;
 pub mod typed_time;
 pub mod why_line;
+pub mod window_controls;
 
 use std::sync::Arc;
 
