@@ -106,8 +106,9 @@ all in the rounds under way, the last sync and the number of failing accounts. T
   method, a certificate or encryption refused, whether or not any account is connected;
 - `offline` when no account is signed in (connecting counts as not yet), and the failures are of the network or
   the server: no route, a timeout, a refused or dropped connection;
-- `failing` when a signed-in account's last connection or job failed (not a body fetch) since its last sign-in or
-  its last round that ended with nothing failed;
+- `failing` when a signed-in account's connection or a job (not a body fetch) failed, until the account signs in
+  again after being offline or its worker tells that it is current: a round that ended with nothing failed in it,
+  or a resync of the watched folder with nothing failed since the resync before it;
 - `syncing` while a round has folders left, or a signed-in account has not ended a round yet;
 - `synced` otherwise, and always with no account.
 
