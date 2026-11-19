@@ -37,7 +37,7 @@ use crate::component::switch::switch;
 use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::{Action, Keymap};
-use crate::mailbox::{InboxView, Mailbox};
+use crate::mailbox::{After, InboxView, Mailbox};
 use crate::onboard::Onboarding;
 use crate::settings::{Section, Settings};
 use crate::theme::{Font, TextScale, Theme};
@@ -145,6 +145,8 @@ pub(super) enum Asked {
     Grouped(u64, bool),
     /// Whether a pin stays on a message when it is done.
     KeepPins(bool),
+    /// What follows an act on the open message (`after.set`).
+    After(After),
     /// How long every send is held before it goes, in seconds.
     Hold(u8),
     /// Which new mail of the account notifies.
@@ -895,7 +897,27 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
     asked
 }
 
-/// The Triage page: the screener, pins on done mail, each account's grouping.
+/// A choice of what follows an act, as its segment names it.
+fn after_name(after: After) -> &'static str {
+    match after {
+        After::Next => tr!("Next"),
+        After::Previous => tr!("Previous"),
+        After::List => tr!("List"),
+        After::Stay => tr!("Stay"),
+    }
+}
+
+/// What the choice of what follows an act does, under its row.
+fn after_help(after: After) -> &'static str {
+    match after {
+        After::Next => tr!("Done, Archive, Delete, Snooze or Move on the open message opens the one below it."),
+        After::Previous => tr!("Done, Archive, Delete, Snooze or Move on the open message opens the one above it."),
+        After::List => tr!("Done, Archive, Delete, Snooze or Move on the open message goes back to the list."),
+        After::Stay => tr!("Done, Archive, Delete, Snooze or Move on the open message leaves the keyboard on the next row, not opened."),
+    }
+}
+
+/// The Triage page: the screener, pins on done mail, what follows an act, each account's grouping.
 fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
@@ -923,9 +945,17 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
                 asked = Some(Asked::KeepPins(!keep));
             }
         });
+        group(ui, theme, "C", tr!("After an act"), None);
+        let afters = After::ALL.map(|after| (after, after_name(after), f.button));
+        let after = mailbox.after();
+        settings_row(ui, theme, tr!("What follows an act"), Some(after_help(after)), |ui| {
+            if let Some(after) = segmented_for(ui, theme, &afters, after, Some(tr!("what follows an act"))) {
+                asked = Some(Asked::After(after));
+            }
+        });
         if !mailbox.accounts().is_empty() {
             let note = tr!("Each account's inbox in People, Notifications and Newsletters, sorted by InboxCraft or by your choice for a sender.");
-            group(ui, theme, "C", tr!("Grouped inbox"), Some(note));
+            group(ui, theme, "D", tr!("Grouped inbox"), Some(note));
         }
         let count = mailbox.accounts().len();
         for (index, account) in mailbox.accounts().iter().enumerate() {

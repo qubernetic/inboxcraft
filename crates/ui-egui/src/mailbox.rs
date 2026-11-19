@@ -334,17 +334,9 @@ impl InboxView {
     }
 }
 
-/// What is selected after the open message leaves the list (an act or a sync removed it).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum After {
-    /// The message below it, the next older one (the one above when it was the last).
-    #[default]
-    Next,
-    /// The message above it, the next newer one (the one below when it was the first).
-    Previous,
-    /// Nothing: back to the list.
-    List,
-}
+/// What is selected after the open message leaves the list (an act or a sync removed it): the owner's choice, kept by
+/// the engine (`after.set`).
+pub use inboxcraft_engine::after::After;
 
 /// An account.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -653,7 +645,6 @@ pub struct Mailbox {
     late: Vec<String>,
     /// The engine's notices since [`Mailbox::take_notices`] was last called.
     notices: Vec<Notice>,
-    after: After,
     /// Where the selected message stood when it last left the list: the rows from there on followed it.
     gap: Option<usize>,
     error: Option<String>,
@@ -906,7 +897,6 @@ impl Mailbox {
             outbox: Vec::new(),
             late: Vec::new(),
             notices: Vec::new(),
-            after: After::Next,
             gap: None,
             error: None,
             runs: 0,
@@ -940,10 +930,11 @@ impl Mailbox {
         if let (Some(at), None) = (was, self.selected) {
             self.gap = Some(at);
             let last = self.messages.len().checked_sub(1);
-            let pick = match self.after {
+            let pick = match self.session.after() {
                 After::Next => last.map(|last| at.min(last)),
                 After::Previous => last.map(|last| at.saturating_sub(1).min(last)),
-                After::List => None,
+                // Stay: nothing opens; the window gives the keyboard to the row that took its place.
+                After::List | After::Stay => None,
             };
             self.selected = pick.and_then(|at| self.messages.get(at)).map(|row| row.id);
         }
@@ -957,15 +948,22 @@ impl Mailbox {
         self.gap
     }
 
-    /// The next-message rule.
+    /// The next-message rule, as `after.set` left it.
     #[must_use]
     pub fn after(&self) -> After {
-        self.after
+        self.session.after()
     }
 
-    /// Sets the next-message rule.
+    /// Sets the next-message rule through `after.set`, as the owner.
     pub fn set_after(&mut self, after: After) {
-        self.after = after;
+        if let Err(error) = self.run("after.set", &json!({ "after": after.name() })) {
+            self.fail(error);
+        }
+    }
+
+    /// Takes the next-message rule kept from an earlier run.
+    pub(crate) fn restore_after(&mut self, after: After) {
+        self.session.set_after(after);
     }
 
     /// Selects the row below the selected one (`forward`) or above it; the first row when none is selected. Stays at

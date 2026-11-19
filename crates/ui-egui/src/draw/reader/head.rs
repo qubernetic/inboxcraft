@@ -31,6 +31,7 @@ fn after_text(after: After) -> &'static str {
         After::Next => tr!("Show the next message"),
         After::Previous => tr!("Show the previous message"),
         After::List => tr!("Go back to the list"),
+        After::Stay => tr!("Stay on the list, on the next row"),
     }
 }
 
@@ -102,7 +103,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
     }
     paint::rule(ui, p.line);
     popup::title(ui, theme, tr!("When a message leaves the list"), None);
-    for after in [After::Next, After::Previous, After::List] {
+    for after in After::ALL {
         let response = popup::choice(ui, theme, after_text(after), mailbox.after() == after);
         if response.clicked() {
             drawn.asked.push(Asked::After(after));

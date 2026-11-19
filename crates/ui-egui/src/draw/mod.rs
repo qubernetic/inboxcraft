@@ -528,6 +528,7 @@ impl InboxApp {
                 }
                 self.mailbox.set_inbox_view(kept.view);
                 self.mailbox.restore_pins(kept.keep_pins);
+                self.mailbox.restore_after(kept.after);
                 if let Some(hold) = kept.hold {
                     self.mailbox.restore_hold(hold);
                 }
@@ -540,6 +541,7 @@ impl InboxApp {
                     view: self.mailbox.inbox_view(),
                     keep_pins: self.mailbox.pins_outlast_done(),
                     hold: Some(self.mailbox.hold_seconds()),
+                    after: self.mailbox.after(),
                 };
             }
         }
@@ -746,7 +748,13 @@ impl InboxApp {
     /// goes, and the screener's mode but on the sample, which keeps the one kept.
     fn triage(&self) -> Triage {
         let screener = if self.mailbox.is_sample() { self.kept_triage.screener } else { self.mailbox.screener_mode() };
-        Triage { screener, view: self.mailbox.inbox_view(), keep_pins: self.mailbox.pins_outlast_done(), hold: Some(self.mailbox.hold_seconds()) }
+        Triage {
+            screener,
+            view: self.mailbox.inbox_view(),
+            keep_pins: self.mailbox.pins_outlast_done(),
+            hold: Some(self.mailbox.hold_seconds()),
+            after: self.mailbox.after(),
+        }
     }
 
     /// Keeps the triage choices when they changed.
@@ -1663,7 +1671,10 @@ impl InboxApp {
         let taken = self.mailbox.take_taken();
         let owner = gone && taken.is_some() && taken == open;
         let from_list = self.list_keys || self.list_row == open;
-        let walking = owner && (from_list || self.single != Some(true));
+        // Stay, the owner's choice of what follows an act: the act opens nothing, and the keyboard goes to the row that
+        // took the message's place, as when the server takes it away.
+        let stay = self.mailbox.after() == crate::mailbox::After::Stay;
+        let walking = owner && !stay && (from_list || self.single != Some(true));
         if walking && from_list {
             // The keyboard stays on the list: on the row walked on to.
             self.land_held = self.mailbox.selected();
@@ -1686,10 +1697,11 @@ impl InboxApp {
         self.act_by_key = false;
         // Only where the list is the one the message was opened from: another account, place or search is no removal.
         let same_list = self.left.as_ref().is_some_and(|(left, from)| Some(*left) == open && *from == self.list_of());
-        if let Some(gone) = open.filter(|_| gone && !owner && same_list) {
+        if let Some(gone) = open.filter(|_| gone && (!owner || stay) && same_list) {
             self.land_held = self.landing_after_removal(gone);
             self.landed = self.land_held;
-            self.bring_held = false;
+            // The owner's own act brings the list in front in one pane, with the keyboard on that row.
+            self.bring_held = owner;
         }
         if let (true, false, Some(pick)) = (gone, walking, self.mailbox.selected()) {
             // The rule's row is kept, not selected: no act lands on a message that is not shown.
@@ -3173,6 +3185,7 @@ impl InboxApp {
             settings::Asked::InboxView(view) => self.mailbox.set_inbox_view(view),
             settings::Asked::Grouped(account, grouped) => self.mailbox.set_grouped(account, grouped),
             settings::Asked::KeepPins(keep) => self.mailbox.set_pins_outlast_done(keep),
+            settings::Asked::After(after) => self.mailbox.set_after(after),
             settings::Asked::Hold(seconds) => self.mailbox.set_hold(seconds),
             settings::Asked::Level(account, level) => self.mailbox.set_notify_level(account, level),
             settings::Asked::Returns(on) => self.mailbox.set_notify_returns(on),
@@ -3301,6 +3314,9 @@ fn start(reader: &mut Reader, mailbox: &mut Mailbox, id: u64, act: Act) {
 #[cfg(test)]
 #[path = "account_remove_tests.rs"]
 mod account_remove_tests;
+#[cfg(test)]
+#[path = "after_stay_tests.rs"]
+mod after_stay_tests;
 #[cfg(test)]
 #[path = "appearance_tests.rs"]
 mod appearance_tests;
