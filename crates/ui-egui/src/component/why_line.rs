@@ -2,15 +2,19 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The reader's "why here" line: WHY HERE in `label` and `cyan_text`, 12 right of it the reasons in `mono_s` and
-//! `muted` on one line, and at the right end the small link `open log →`, on the `panel` fill in a 1 px `panel_line`
-//! edge, 8 above and below, 12 left and right and between its parts, 32 high. The reasons are data (a folder's name, a
-//! group's): drawn as plain words, cut between grapheme clusters with one ellipsis; a screen reader hears them whole.
-//! The log the link opens is not built yet: the link stands unavailable, and the `coming soon` tag stands where the
-//! reasons go while there are none (the app cannot say why yet), else in the room the reasons leave. The words keep the
-//! places the sheet gives them; when room runs short the link gives way first, then the tag, and the reasons are cut
-//! last. Nothing paints past the line, and nothing in it moves.
+//! `muted` on one line, two spaces, a middle dot and two spaces between them, and at the right end the small link
+//! `open log →`, on the `panel` fill in a 1 px `panel_line` edge, 8 above and below, 12 left and right and between its
+//! parts, 32 high. The reasons are the engine's, in the window's words (see `crate::why`), most specific first; they
+//! hold names from outside (an address, a folder), drawn as plain words. What does not fit leaves whole from the end, so
+//! no reason is cut in the middle, except the first when it stands alone, which is cut between grapheme clusters with
+//! one ellipsis. The rule reads the width the line has, never the window's. A screen reader hears every reason as one
+//! sentence, the ones that left included. The log the link opens is not built yet: the link stands unavailable while
+//! the first reason fits whole beside it, and the `coming soon` tag stands in the room the reasons leave, or
+//! where they go while there are none. Nothing paints past the line, nothing in it moves, and it takes no Tab stop.
 
-use egui::{Align, Layout, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
+use std::sync::Arc;
+
+use egui::{Align, Galley, Layout, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint;
 use crate::keymap::Keymap;
@@ -23,16 +27,50 @@ use super::soon::{soon, soon_tag};
 /// The room left and right of the line's parts and between them, in points.
 const PAD_X: f32 = 12.0;
 
-/// What a screen reader hears for a why line saying `reasons`.
-pub(crate) fn spoken(reasons: &str) -> String {
+/// What stands between two reasons, as the design writes it.
+pub const SEPARATOR: &str = "  \u{b7}  ";
+
+/// What a screen reader hears for a why line saying `reasons`: one sentence, every reason in it.
+pub(crate) fn spoken<S: AsRef<str>>(reasons: &[S]) -> String {
     if reasons.is_empty() {
         return tr!("Why here: coming soon").to_owned();
     }
-    tr!("Why here: {reasons}", reasons = super::spoken(reasons))
+    tr!("Why here: {reasons}", reasons = said(reasons))
 }
 
-/// The why line across `ui`'s width saying `reasons`; the line's response, a group named by [`spoken`].
-pub fn why_line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reasons: &str) -> Response {
+/// The reasons as one sentence, cleaned for a screen reader.
+fn said<S: AsRef<str>>(reasons: &[S]) -> String {
+    reasons.iter().map(|reason| super::spoken(reason.as_ref())).collect::<Vec<_>>().join(", ")
+}
+
+/// The reasons that fit in `room`: as many whole from the first as fit, joined; the first alone, cut, when even it does
+/// not fit.
+fn fitting<S: AsRef<str>>(ui: &Ui, theme: &Theme, reasons: &[S], room: f32) -> Arc<Galley> {
+    let (f, p) = (&theme.fonts, &theme.palette);
+    let mut joined = String::new();
+    let mut kept = None;
+    for reason in reasons {
+        let before = joined.len();
+        if before > 0 {
+            joined.push_str(SEPARATOR);
+        }
+        joined.push_str(reason.as_ref());
+        let galley = super::fitted(ui, &joined, f.mono_s, p.muted, f32::INFINITY);
+        if paint::run_box(galley.size().x) > room {
+            joined.truncate(before);
+            break;
+        }
+        kept = Some(galley);
+    }
+    match (kept, reasons.first()) {
+        (Some(galley), _) => galley,
+        (None, first) => super::fitted(ui, first.map_or("", AsRef::as_ref), f.mono_s, p.muted, room),
+    }
+}
+
+/// The why line across `ui`'s width saying `reasons`, most specific first; the line's response, a group named by
+/// [`spoken`].
+pub fn why_line<S: AsRef<str>>(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reasons: &[S]) -> Response {
     let p = &theme.palette;
     let f = &theme.fonts;
     let width = ui.available_width().max(1.0).floor();
@@ -48,20 +86,26 @@ pub fn why_line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reasons: &str) -> R
     let tag_width = super::tag::width(ui, theme, tr!("coming soon"));
     let left = rect.left() + PAD_X + label_width + PAD_X;
     let right = rect.right() - PAD_X;
-    // The words keep the places the sheet gives them: the reasons from 12 right of the label, the link at the right
-    // end. The parts that are not built give way first: the link, then the tag; the reasons are cut last.
-    let wanted = if reasons.is_empty() { tag_width } else { paint::run_box(super::fitted(ui, reasons, f.mono_s, p.muted, f32::INFINITY).size().x) };
+    // The link stands where the sheet puts it while the first reason fits whole beside it (with none, while the tag
+    // does): the reasons leave whole from the end first, then the link, which leads nowhere yet, and only then is the
+    // first reason, standing alone, cut.
     let link_left = right - link_width;
+    let wanted = match reasons.first() {
+        Some(first) => paint::run_box(super::fitted(ui, first.as_ref(), f.mono_s, p.muted, f32::INFINITY).size().x),
+        None => tag_width,
+    };
     let link = left + wanted <= link_left - PAD_X;
     let words_right = if link { link_left - PAD_X } else { right };
     let room = (words_right - left).max(0.0);
-    let words = super::fitted(ui, reasons, f.mono_s, p.muted, room);
-    // With no reason yet the tag stands where the reasons go; with reasons, only in the room they leave.
+    let words = fitting(ui, theme, reasons, room);
+    // With no reason the tag stands where the reasons go; with reasons, only in the room they leave.
     let tag_left = if reasons.is_empty() { left } else { left + paint::run_box(words.size().x) + PAD_X };
     let tag = tag_left + tag_width <= words_right;
     let words_rect = Rect::from_min_size(pos2(left, rect.top()), vec2(room.max(1.0), high));
-    let said = ui.interact(words_rect, id.with("words"), Sense::hover());
-    said.widget_info(|| WidgetInfo::labeled(Role::Label, true, super::spoken(reasons)));
+    if !reasons.is_empty() {
+        let said_rect = ui.interact(words_rect, id.with("words"), Sense::hover());
+        said_rect.widget_info(|| WidgetInfo::labeled(Role::Label, true, said(reasons)));
+    }
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         painter.rect(rect, 0.0, p.panel, Stroke::new(1.0, p.panel_line), StrokeKind::Inside);

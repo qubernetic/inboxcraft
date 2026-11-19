@@ -273,10 +273,15 @@ pub(super) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             paint::run_at(ui.painter(), rect.min, galley, p.muted);
         }
     }
-    // Why the message is here is the engine's to say (`mail.why`, not built yet): the line stands with its tag and no
-    // reason the window makes up.
-    if open.is_some() {
-        why_line(ui, theme, keymap, "");
+    // Why the message is here is the engine's to say (`mail.why`, asked when the message opened): with nothing to say
+    // the line takes no room.
+    if open.is_some() && !reader.why().is_empty() {
+        why_line(ui, theme, keymap, reader.why());
+    }
+    // An act that keeps the message open (a group chosen, Done with done mail shown, back from a snooze) moves it: the
+    // reasons are asked again after this frame.
+    if let Some(id) = open.filter(|_| reader.why_moved(mailbox)) {
+        drawn.asked.push(Asked::Expand(id));
     }
     if let Some(opened) = opened
         && let Some((kind, held)) = holds(reader, opened)
