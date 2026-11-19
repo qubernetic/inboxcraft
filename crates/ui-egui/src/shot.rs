@@ -68,9 +68,9 @@
 //! composer with a time picked and its send-later picker open, `bounce` the bounced message open in the reader;
 //! `drafts` opens the drafts place, `empty` or `filled` with two kept drafts;
 //! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with motion at
-//! `off`, or at `reduced` where `motion` says so (both land every motion at its end today), so it shows where each
-//! motion ends. `steps` then drive the set window as a person would, one after
-//! another: a `key`, `tab` or `shift_tab` presses, `focus` or `press` a control by its accessible name ([`Step`]);
+//! `off`, or at `reduced` where `motion` says so, after the movements are over, so it shows where each motion ends
+//! (at off: the undo line without its bar, a sync as one print). `steps` then drive the set window as a person
+//! would, one after another: a `key`, `tab` or `shift_tab` presses, `focus` or `press` a control by its accessible name ([`Step`]);
 //! the picture is taken when the window rests after the last.
 
 use std::collections::HashMap;

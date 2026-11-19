@@ -8,9 +8,10 @@
 //!
 //! The window sets the level each frame from the owner's choice ([`follow`]); while the owner has not chosen, the
 //! computer's wish for less motion gives [`Level::Off`] where the computer can be read ([`set_system_wish`]; the
-//! desktop cannot read it yet, and then the owner's default level holds). Until each level has its own movements,
-//! Reduced and Off both land every movement at once and Full runs today's motion. With a still level egui's own
-//! animations (areas fading in, scrolling to a place) stop too. egui's smoothing of a mouse wheel's notches is fixed
+//! desktop cannot read it yet, and then the owner's default level holds). The movements of the design's table read
+//! the level ([`level`]) and play the form it gives them; what has no reduced form of its own yet lands at its end at
+//! Reduced and Off ([`Level::still`]). With a still level egui's own animations (areas fading in, scrolling to a place)
+//! stop too. egui's smoothing of a mouse wheel's notches is fixed
 //! inside egui and keeps running.
 
 use egui::{Context, Id, Style, emath::easing, style::ScrollAnimation};
