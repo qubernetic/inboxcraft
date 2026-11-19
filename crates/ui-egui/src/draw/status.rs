@@ -242,14 +242,20 @@ pub(crate) fn line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, rect: Rect, show
     let mut pressed = Pressed::default();
     let p = &theme.palette;
     ui.painter().rect_filled(rect, 0.0, p.panel);
+    // In a narrow window the line keeps its first facts and its last keys ([`crate::status::kept_under`]).
+    let kept = crate::status::kept_under(ui.ctx().content_rect().width());
+    let hints = match kept {
+        Some((_, keys)) => shown.hints.get(shown.hints.len().saturating_sub(keys)..).unwrap_or(shown.hints),
+        None => shown.hints,
+    };
     // The keys first, from the right end: what is left is the facts'.
     let mut keys_left = rect.right() - RIGHT;
-    if !shown.hints.is_empty() {
+    if !hints.is_empty() {
         let keys = Rect::from_min_max(pos2(rect.left(), rect.top()), pos2(rect.right() - RIGHT - KEYS_PAD, rect.bottom()));
         let mut child = ui.new_child(UiBuilder::new().id_salt("status-keys").max_rect(keys).layout(Layout::right_to_left(Align::Center)));
         child.set_clip_rect(rect.intersect(ui.clip_rect()));
         child.spacing_mut().item_spacing.x = KEYS_GAP;
-        for (action, key, word) in shown.hints.iter().rev() {
+        for (action, key, word) in hints.iter().rev() {
             if key_hint(&mut child, theme, key, tr_word(word), None).1 {
                 pressed.hint = Some(action);
             }
@@ -284,7 +290,10 @@ pub(crate) fn line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, rect: Rect, show
     } else {
         left.add_space(LEFT);
     }
-    let parts = parts(shown.facts, shown.message.is_some());
+    let mut parts = parts(shown.facts, shown.message.is_some());
+    if let Some((facts, _)) = kept {
+        parts.truncate(facts);
+    }
     for (at, part) in parts.iter().enumerate() {
         if at > 0 {
             left.label(crate::component::galley(&left, "·", theme.fonts.mono_s, p.dim));

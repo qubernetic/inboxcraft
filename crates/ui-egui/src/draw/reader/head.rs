@@ -274,9 +274,11 @@ pub(super) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
     }
     // Why the message is here is the engine's to say (`mail.why`, asked when the message opened): with nothing to say
-    // the line takes no room.
-    if open.is_some() && !reader.why().is_empty() {
-        why_line(ui, theme, keymap, reader.why());
+    // the line takes no room. In a narrow window it leaves out its last part whole, where it has more than one.
+    let why = reader.why();
+    let why = if crate::draw::shell::narrow(ui.ctx()) && why.len() > 1 { why.get(..why.len().saturating_sub(1)).unwrap_or(why) } else { why };
+    if open.is_some() && !why.is_empty() {
+        why_line(ui, theme, keymap, why);
     }
     // An act that keeps the message open (a group chosen, Done with done mail shown, back from a snooze) moves it: the
     // reasons are asked again after this frame.

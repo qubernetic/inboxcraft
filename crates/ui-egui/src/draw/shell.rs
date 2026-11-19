@@ -21,8 +21,8 @@ pub(crate) const STATUS_LINE: f32 = crate::theme::SIZES.status;
 pub(crate) const INDEX: f32 = 232.0;
 /// The index's width when narrow.
 pub(crate) const INDEX_NARROW: f32 = 56.0;
-/// Under this window width the index is the narrow one.
-#[cfg_attr(not(test), expect(dead_code, reason = "the window keeps the wide index until the widths slice"))]
+/// Under this window width the index is the narrow one, and the command field, the status line, the reader's why line
+/// and the calendar's toolbar give up room with it.
 pub(crate) const NARROW_INDEX_UNDER: f32 = 1280.0;
 /// The least width the window is laid out at; a narrower one is clipped.
 pub(crate) const LEAST_WIDTH: f32 = 800.0;
@@ -41,14 +41,26 @@ pub(crate) struct Regions {
 }
 
 /// Whole-pixel rects for a window of `size` points at `theme`'s text scale and `ppp` physical pixels per point; the
-/// index narrow from the width alone (under [`NARROW_INDEX_UNDER`]).
-#[cfg_attr(not(test), expect(dead_code, reason = "the window keeps the wide index until the widths slice"))]
+/// index narrow from the width alone (under [`NARROW_INDEX_UNDER`]). The window lays itself out with
+/// [`regions_with`], narrow by its whole width.
+#[cfg(test)]
 pub(crate) fn regions(size: Vec2, theme: &Theme, ppp: f32) -> Regions {
-    let narrow = number(size.x, LEAST_WIDTH) < NARROW_INDEX_UNDER;
-    regions_with(size, theme, ppp, narrow)
+    regions_with(size, theme, ppp, narrow_at(size.x))
 }
 
-/// [`regions`] with the index `narrow` or not, whatever the width.
+/// Whether a window `width` points wide is narrow: under [`NARROW_INDEX_UNDER`]; one that is no number is laid out as
+/// the least width, so it is.
+pub(crate) fn narrow_at(width: f32) -> bool {
+    number(width, LEAST_WIDTH) < NARROW_INDEX_UNDER
+}
+
+/// Whether the window of `ctx` is narrow ([`narrow_at`]).
+pub(crate) fn narrow(ctx: &Context) -> bool {
+    narrow_at(ctx.content_rect().width())
+}
+
+/// [`regions`] with the index `narrow` or not, whatever the width: the window narrows by its whole width
+/// ([`narrow`]), which is wider than the rect it lays out in where something stands round it.
 pub(crate) fn regions_with(size: Vec2, theme: &Theme, ppp: f32, narrow: bool) -> Regions {
     // A scale from the desktop is kept to one a screen can have: far outside it, a pixel count overflows or rounds to
     // nothing, and the bounds below would cross.

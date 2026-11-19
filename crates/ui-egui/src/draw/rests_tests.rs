@@ -115,7 +115,7 @@ fn on_the_settings_no_key_of_the_list_back_or_the_views_runs() {
 }
 
 /// A row picked and flagged, so its acts and Undo could run, then New message: the window `width` wide hides the list
-/// (one pane at 720, beside the composer at 980).
+/// (one pane, the composer in front of it, at 720 and just under 980).
 fn hidden_list(width: f32) -> Harness<'static, InboxApp> {
     let mut harness = window(width);
     bind_views_and_back(&mut harness);
@@ -141,7 +141,7 @@ fn hidden_list(width: f32) -> Harness<'static, InboxApp> {
 
 #[test]
 fn with_the_list_hidden_its_keys_views_and_row_commands_rest_and_the_palette_shows_them_unavailable() {
-    for width in [720.0, 980.0] {
+    for width in [720.0, 979.0] {
         let mut harness = hidden_list(width);
         let rows = [keymap::DONE, keymap::ARCHIVE, keymap::READ, keymap::FLAG, keymap::DELETE, keymap::UNDO];
         // In one pane Back is the way the list comes back in front of the composer (the lists slice's own rule); in two
@@ -417,8 +417,8 @@ fn the_thumb_of_the_bar_over_the_content_is_no_tab_stop() {
 
 #[test]
 fn opening_the_held_back_message_rests_while_the_list_is_hidden() {
-    // Two panes, the list hidden beside the composer by the window's width.
-    let width = 980.0;
+    // One pane, the list hidden behind the composer.
+    let width = 979.0;
     let mut harness = window(width);
     harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
     harness.run();

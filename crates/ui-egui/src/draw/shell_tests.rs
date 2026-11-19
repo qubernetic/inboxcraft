@@ -122,11 +122,13 @@ fn window_of(size: egui::Vec2, sending: bool) -> Harness<'static, InboxApp> {
 }
 
 #[test]
-fn the_window_does_not_narrow_its_index_yet() {
+fn under_1280_the_window_narrows_its_index() {
+    let wide = window(vec2(1280.0, 760.0));
+    assert_eq!(shell::laid(&wide.ctx).unwrap().index.width(), INDEX, "1280: the wide index");
     let harness = window(vec2(1100.0, 760.0));
     let laid = shell::laid(&harness.ctx).unwrap();
-    assert_eq!(laid.index.width(), INDEX, "the window keeps the wide index until the widths slice turns the breakpoint on");
-    assert_eq!(laid.body.left() - laid.index.left(), INDEX + 1.0, "the body one hairline right of the index");
+    assert_eq!(laid.index.width(), INDEX_NARROW, "1100: the narrow index");
+    assert_eq!(laid.body.left() - laid.index.left(), INDEX_NARROW + 1.0, "the body one hairline right of the index");
     // The index's rows stand in the index, the list in the body.
     let home = harness.get_by_role_and_label(Role::Button, "Home").rect();
     assert!(laid.index.contains_rect(home), "{home:?} in {:?}", laid.index);
