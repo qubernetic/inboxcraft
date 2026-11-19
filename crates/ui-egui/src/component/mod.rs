@@ -70,6 +70,7 @@ pub mod key;
 pub mod label;
 pub mod later_row;
 pub mod mail_row;
+pub mod mailbox_row;
 pub mod nav_row;
 pub mod outbox_row;
 pub mod picture_box;

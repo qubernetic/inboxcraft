@@ -14,6 +14,7 @@ use crate::tr;
 
 use super::Shown;
 use super::gallery::{cell, title};
+use super::mailbox_row::{self, MailboxRow};
 use super::margin;
 use super::nav_row::{self, NavRow, Standing};
 
@@ -85,6 +86,56 @@ pub(crate) fn nav(ui: &mut Ui, theme: &Theme, state: &NavState) {
     });
 }
 
+/// One state of the mailbox row's sheet.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MailboxState {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub count: u64,
+    pub active: bool,
+    pub narrow: bool,
+    pub shown: Shown,
+}
+
+/// The mailbox row's states, in the sheet's order, with the sheet's words.
+pub(crate) fn mailbox_states() -> [MailboxState; 10] {
+    let rest = MailboxState { name: "default", label: "Inbox", count: 0, active: false, narrow: false, shown: Shown::Rest };
+    [
+        rest,
+        MailboxState { name: "hover", shown: Shown::Hover, ..rest },
+        MailboxState { name: "focus", shown: Shown::Focus, ..rest },
+        MailboxState { name: "active", count: 7, active: true, ..rest },
+        MailboxState { name: "with-count", count: 3, ..rest },
+        MailboxState { name: "long-name", label: "Clients / Bakery on the corner / Shop front lettering / 2026", count: 12, ..rest },
+        MailboxState { name: "narrow", narrow: true, ..rest },
+        MailboxState { name: "narrow-active", narrow: true, active: true, ..rest },
+        MailboxState { name: "narrow-unread", narrow: true, count: 7, ..rest },
+        MailboxState { name: "narrow-active-unread", narrow: true, count: 7, active: true, ..rest },
+    ]
+}
+
+/// What a screen reader hears for the mailbox row of `state`.
+pub(crate) fn mailbox_spoken(state: &MailboxState) -> String {
+    format!("Mailbox ({})", state.name)
+}
+
+/// The mailbox row of `state` at `ui`'s cursor.
+pub(crate) fn mailbox(ui: &mut Ui, theme: &Theme, state: &MailboxState) {
+    let spoken = mailbox_spoken(state);
+    let row = MailboxRow {
+        id: Id::unique("gallery-mailbox-row").with(state.name),
+        spoken: &spoken,
+        icon: crate::iconset::glyph(IconId::Inbox),
+        name: state.label,
+        count: state.count,
+        active: state.active,
+    };
+    let forced = (state.shown != Shown::Rest).then_some(state.shown);
+    sized(ui, theme, state.narrow, mailbox_row::HEIGHT, |ui| {
+        mailbox_row::mailbox_row(ui, theme, &row, state.narrow, forced);
+    });
+}
+
 /// `add` in a column as wide as a wide or a narrow row and `height` high at 100 % text, on the index's `panel`.
 fn sized(ui: &mut Ui, theme: &Theme, narrow: bool, height: f32, add: impl FnOnce(&mut Ui)) {
     let wide = if narrow { NARROW } else { WIDE };
@@ -121,6 +172,7 @@ pub fn page(ui: &mut Ui, theme: &Theme) {
         egui::Frame::NONE.inner_margin(margin(s.s4, s.s3)).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             board(ui, theme, tr!("Place row"), &nav_states(), |state| state.name, nav);
+            board(ui, theme, tr!("Mailbox row"), &mailbox_states(), |state| state.name, mailbox);
         });
     });
 }
