@@ -892,12 +892,33 @@ fn leaving_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, m
     let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
     let account = account_marker.then(|| mailbox.account(message.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0)));
     let id = Id::unique("list-leaving").with(message.id);
-    let mut face = ui.new_child(UiBuilder::new().max_rect(whole));
+    let shift = if gone.shift.is_finite() { gone.shift } else { 0.0 };
+    let mut face = ui.new_child(UiBuilder::new().max_rect(whole.translate(vec2(shift, 0.0))));
     face.shrink_clip_rect(line);
     // Disabled is drawn at full strength here: the fade is the motion's alone.
     face.visuals_mut().disabled_alpha = 1.0;
     face.disable();
     face.multiply_opacity(1.0 - gone.faded.clamp(0.0, 1.0));
+    let mark = crate::scramble::mark(face.painter());
+    leaving_face(&mut face, theme, keymap, mailbox, message, account, id, &spoken, subject);
+    if gone.dissolved > 0.0 {
+        crate::scramble::painted_since(face.painter(), mark, |painter, shape| crate::scramble::dots(painter, shape, gone.dissolved));
+    }
+}
+
+/// The face of the row `message` that left the list, in `face`: the later row in Later, else the mail row.
+#[expect(clippy::too_many_arguments, reason = "the parts of one row, worked out once by its caller")]
+fn leaving_face(
+    face: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    message: &MessageRow,
+    account: Option<u64>,
+    id: Id,
+    spoken: &str,
+    subject: &str,
+) {
     let rest = Some(crate::component::Shown::Rest);
     if let (Place::Later(pile), true) = (mailbox.place(), mailbox.query().is_empty()) {
         let date = mailbox.row_date(message);
@@ -909,7 +930,7 @@ fn leaving_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, m
         };
         let shown = LaterRow {
             id,
-            spoken: &spoken,
+            spoken,
             who: &message.sender,
             subject,
             when: &when,
@@ -920,14 +941,14 @@ fn leaving_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, m
             pile: stands,
             link: None,
         };
-        let _ = later_row(&mut face, theme, keymap, &shown, false, rest);
+        let _ = later_row(face, theme, keymap, &shown, false, rest);
         return;
     }
     let words = format!("{subject}{}", after_subject(&message.preview));
     let time = mailbox.row_date(message);
     let shown = MailRow {
         id,
-        spoken: &spoken,
+        spoken,
         sender: &message.sender,
         line: &words,
         time: &time,
@@ -941,7 +962,7 @@ fn leaving_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, m
         checked: false,
         spare: None,
     };
-    let _ = mail_row(&mut face, theme, keymap, &shown, false, &[], rest);
+    let _ = mail_row(face, theme, keymap, &shown, false, &[], rest);
 }
 
 /// What follows a row's subject: a dash and the preview, as the design's line two, or nothing without one.
@@ -1179,16 +1200,34 @@ pub(super) enum Line<'a> {
     Send(&'a OutboxRow),
 }
 
-/// How far the row that left the list has gone, each from 0 to 1: how much of its height has closed, and how far it
-/// has faded. Done, Delete, Archive, Move and Park close the row over `row_collapse` on the design's curve, fading on
-/// CSS's `ease` as it closes (the design's M5 at the reduced level, the presentation's `.row.gone`); Snooze fades it over `fast` in its
-/// place, and then it is gone (M6 at the reduced level).
+/// How far the row that left the list has gone (`docs/design.md`, "Motion", M5 and M6), each share from 0 to 1: how
+/// much of its height has closed, how far it has faded, how many of its characters have gone to dots from the right,
+/// and how far it has moved aside, in points (a snoozed row to the right, an answered card up or down).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Gone {
     /// The share of its height closed.
     pub closed: f32,
     /// The share of its fade.
     pub faded: f32,
+    /// The share of its characters gone to dots, from the right.
+    pub dissolved: f32,
+    /// How far it has moved, in points.
+    pub shift: f32,
+}
+
+impl Gone {
+    /// Gone wholly: at motion off, and once its movement is over.
+    pub const END: Self = Self { closed: 1.0, faded: 1.0, dissolved: 0.0, shift: 0.0 };
+
+    /// Closed `closed` of the way and faded `faded`, where it stands.
+    pub const fn closing(closed: f32, faded: f32) -> Self {
+        Self { closed, faded, dissolved: 0.0, shift: 0.0 }
+    }
+
+    /// Whether it has gone wholly: nothing of it is drawn, and its place has closed.
+    pub fn over(self) -> bool {
+        self.closed >= 1.0 && self.faded >= 1.0
+    }
 }
 
 /// How a group's head stands.
@@ -2038,7 +2077,7 @@ fn answer_gone(ctx: &egui::Context, theme: &Theme, left: &Answered) -> (Gone, f3
     let at = motion::elapsed(ctx, id, whole) * whole;
     let share = |from: f32, span: f32| if span > 0.0 { ((at - from) / span).clamp(0.0, 1.0) } else { 1.0 };
     let tint = motion::css_ease(share(0.0, theme.motion.fast));
-    (Gone { faded: share(hold, fade), closed: motion::ease(share(hold + fade, close)) }, tint)
+    (Gone::closing(motion::ease(share(hold + fade, close)), share(hold, fade)), tint)
 }
 
 /// Draws the card `left` answered as far as it has `gone`: whole in its answer's colour, fading, then only the room it
@@ -2296,20 +2335,40 @@ pub fn rows_built(ctx: &egui::Context) -> Option<usize> {
     ctx.data_mut(|data| data.remove_temp::<usize>(rows_built_id()))
 }
 
-/// How far `left` has gone in this frame: Snooze fades over `fast` (the design's M6 at the reduced level); the other
-/// acts close the row over `row_collapse` on the design's curve, fading as it closes (M5). Repaints are asked for until
-/// it has gone; with motion off it is gone at once.
+/// How far `left` has gone in this frame, at the level the window moves at (`docs/design.md`, "Motion"). Done (and
+/// Delete, Archive, Move, Park), M5: at full its words go to dots from the right over `fast`, then the row closes over
+/// `row_collapse`; at reduced it closes over `row_collapse`, its words intact. Snooze, M6: at full it slides 24 to the
+/// right on the curve and fades at an even pace over `medium`, then its place closes over `row_collapse`; at reduced it
+/// fades over `fast` in its place, then its place closes. The close is on the design's curve, fading on CSS's `ease`
+/// as it closes. At off, and once a key or a press came during it, it is gone. Repaints are asked for until it has.
 fn leaving(ctx: &egui::Context, theme: &Theme, left: &Leaving) -> Gone {
     let id = Id::unique("row-leaving").with(left.row.id);
-    if matches!(left.act, Act::Snooze(_)) {
-        let faded = motion::elapsed(ctx, id, theme.motion.fast);
-        Gone { closed: if faded >= 1.0 { 1.0 } else { 0.0 }, faded }
-    } else {
-        let share = motion::elapsed(ctx, id, theme.motion.row_collapse);
-        // The presentation's `.row`: height on the design's curve, opacity on CSS's default `ease`.
-        Gone { closed: motion::ease(share), faded: motion::css_ease(share) }
+    let snooze = matches!(left.act, Act::Snooze(_));
+    let (fast, close) = (f64::from(theme.motion.fast), f64::from(theme.motion.row_collapse));
+    // How long it stands before its place closes.
+    let before = match (motion::level(ctx), snooze) {
+        (motion::Level::Off, _) => return Gone::END,
+        (motion::Level::Full, false) | (motion::Level::Reduced, true) => fast,
+        (motion::Level::Full, true) => motion::MEDIUM,
+        (motion::Level::Reduced, false) => 0.0,
+    };
+    let Some(age) = motion::run(ctx, id, before + close) else { return Gone::END };
+    let closed = motion::part(age, before, close);
+    let mut gone = Gone::closing(motion::ease(closed), motion::css_ease(closed));
+    match (motion::level(ctx), snooze) {
+        (motion::Level::Full, false) => gone.dissolved = motion::part(age, 0.0, fast),
+        (motion::Level::Full, true) => {
+            gone.faded = motion::part(age, 0.0, motion::MEDIUM);
+            gone.shift = SLIDE * motion::ease(gone.faded);
+        }
+        (motion::Level::Reduced, true) => gone.faded = motion::part(age, 0.0, fast),
+        _ => {}
     }
+    gone
 }
+
+/// How far a snoozed row slides to the right, and an answered card up or down, in points (M6, M11).
+const SLIDE: f32 = 24.0;
 
 /// "Other": the messages of the list no group of `groups` holds, kept for the list of rows, its place, search and
 /// `view`, so a frame copies nothing.
@@ -2403,7 +2462,7 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
     let open = |group: &Group| ui.data(|data| data.get_temp::<bool>(group_open_id(&group.name))).unwrap_or(false);
     // How far the row that left has gone (with motion off, at once); once gone it is let go.
     let gone = mailbox.left_row().map(|left| leaving(ui.ctx(), theme, left));
-    let went = gone.is_none_or(|gone| gone.faded >= 1.0);
+    let went = gone.is_none_or(Gone::over);
     let listing = if outbox {
         sends(theme, mailbox)
     } else if drafts {
@@ -2448,3 +2507,7 @@ fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) ->
         presets: rows.presets.get(),
     }
 }
+
+#[cfg(test)]
+#[path = "rows_motion_tests.rs"]
+mod rows_motion_tests;

@@ -64,7 +64,7 @@ fn items(ui: &mut Ui, theme: &Theme) {
 /// The status message's board, 560 wide, with the sheet's words: 4 of 5 seconds left to undo, and its key.
 fn messages(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     title(ui, theme, tr!("Status message"));
-    let left = Some(Left { seconds: 4, share: 0.8 });
+    let left = Some(Left { seconds: 4, share: 0.8, bar: true });
     // The undo key as the window's keymap writes it.
     let chip = keymap.chip(ui.ctx(), "ui.undo");
     let key = chip.as_deref();

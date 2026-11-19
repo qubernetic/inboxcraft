@@ -45,21 +45,48 @@ pub fn glyph(seed: u64, index: usize) -> char {
     set.get(at).map_or('#', |byte| char::from(*byte))
 }
 
-/// The character at `index` of a scrambling text: `ch` itself inside `real` or when it is white space, else its glyph.
-fn one(ch: char, index: usize, real: &Range<usize>, seed: u64) -> char {
-    if ch.is_whitespace() || real.contains(&index) { ch } else { glyph(seed, index) }
+/// What stands for the characters that do not read: the code set's glyphs under a seed, or the dot a row's words
+/// dissolve to (M5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fill {
+    /// [`glyph`] under the seed.
+    Code(u64),
+    /// [`DOT`].
+    Dots,
+}
+
+/// The dot a row's words dissolve to (M5).
+pub const DOT: char = '\u{b7}';
+
+/// The character at `index` of a scrambling text: `ch` itself inside `real` or when it is white space, else what
+/// `fill` puts there.
+fn one(ch: char, index: usize, real: &Range<usize>, fill: Fill) -> char {
+    if ch.is_whitespace() || real.contains(&index) {
+        ch
+    } else {
+        match fill {
+            Fill::Code(seed) => glyph(seed, index),
+            Fill::Dots => DOT,
+        }
+    }
 }
 
 /// `text` with the characters inside `real` (counted in characters) as they are and every other one a glyph.
 #[must_use]
 pub fn mixed(text: &str, real: Range<usize>, seed: u64) -> String {
-    text.chars().enumerate().map(|(index, ch)| one(ch, index, &real, seed)).collect()
+    text.chars().enumerate().map(|(index, ch)| one(ch, index, &real, Fill::Code(seed))).collect()
 }
 
 /// `job` with the characters inside `real` as they are and every other one a glyph, its sections kept on the same
 /// characters; none when its text is longer than [`MOST`].
 #[must_use]
 pub fn job(job: &LayoutJob, real: &Range<usize>, seed: u64) -> Option<LayoutJob> {
+    filled(job, real, Fill::Code(seed))
+}
+
+/// [`job`] with `fill` for the characters that do not read.
+#[must_use]
+pub fn filled(job: &LayoutJob, real: &Range<usize>, fill: Fill) -> Option<LayoutJob> {
     if job.text.len() > MOST {
         return None;
     }
@@ -70,7 +97,7 @@ pub fn job(job: &LayoutJob, real: &Range<usize>, seed: u64) -> Option<LayoutJob>
         let part = job.text.get(section.byte_range.start.0..section.byte_range.end.0).unwrap_or_default();
         let start = text.len();
         for ch in part.chars() {
-            text.push(one(ch, index, real, seed));
+            text.push(one(ch, index, real, fill));
             index = index.saturating_add(1);
         }
         section.byte_range = ByteIndex(start)..ByteIndex(text.len());
@@ -89,7 +116,12 @@ pub fn count(galley: &Galley) -> Option<usize> {
 /// galley itself when it is too long to scramble.
 #[must_use]
 pub fn galley(painter: &Painter, galley: &Arc<Galley>, real: &Range<usize>, seed: u64) -> Arc<Galley> {
-    job(&galley.job, real, seed).map_or_else(|| Arc::clone(galley), |job| painter.layout_job(job))
+    filled_galley(painter, galley, real, Fill::Code(seed))
+}
+
+/// [`galley`] with `fill` for the characters that do not read.
+fn filled_galley(painter: &Painter, galley: &Arc<Galley>, real: &Range<usize>, fill: Fill) -> Arc<Galley> {
+    filled(&galley.job, real, fill).map_or_else(|| Arc::clone(galley), |job| painter.layout_job(job))
 }
 
 /// Which end of a text a scramble starts at.
@@ -115,6 +147,16 @@ pub fn real(count: usize, share: f32, from: Side) -> Range<usize> {
 
 /// Every text in `shape` scrambled through `painter` at `share` from `from`; a shape with no text, and an icon, stay.
 pub fn shape(painter: &Painter, shape: &mut Shape, share: f32, from: Side) {
+    shape_with(painter, shape, share, from, None);
+}
+
+/// Every text in `shape` gone to [`DOT`]s from the right at `share` (M5's dissolve); icons stay.
+pub fn dots(painter: &Painter, shape: &mut Shape, share: f32) {
+    shape_with(painter, shape, share, Side::Right, Some(Fill::Dots));
+}
+
+/// [`shape`] with `fill` (none: the code set under a seed of the text's length).
+fn shape_with(painter: &Painter, shape: &mut Shape, share: f32, from: Side, fill: Option<Fill>) {
     match shape {
         Shape::Text(text) => {
             // An icon is a glyph of the icon font: it stays as it is.
@@ -123,17 +165,52 @@ pub fn shape(painter: &Painter, shape: &mut Shape, share: f32, from: Side) {
                 return;
             }
             let Some(count) = count(&text.galley) else { return };
-            let seed = count as u64;
-            text.galley = galley(painter, &text.galley, &real(count, share, from), seed);
+            let fill = fill.unwrap_or(Fill::Code(count as u64));
+            text.galley = filled_galley(painter, &text.galley, &real(count, share, from), fill);
         }
         Shape::Vec(shapes) => {
             for inner in shapes {
-                self::shape(painter, inner, share, from);
+                shape_with(painter, inner, share, from, fill);
             }
         }
         _ => {}
     }
 }
+
+/// Where `painter`'s layer stands now: what is painted through it after this mark is [`painted_since`] it.
+pub fn mark(painter: &Painter) -> egui::layers::ShapeIdx {
+    painter.add(Shape::Noop)
+}
+
+/// Changes every shape painted through `painter`'s layer since `mark` with `change`, at most [`MOST_SHAPES`] of them
+/// (a row paints a few dozen).
+pub fn painted_since(painter: &Painter, mark: egui::layers::ShapeIdx, change: impl Fn(&Painter, &mut Shape)) {
+    let layer = painter.layer_id();
+    let from = mark.0.saturating_add(1);
+    let shapes: Vec<(usize, Shape)> = painter.ctx().graphics(|graphics| {
+        graphics.get(layer).map_or_else(Vec::new, |list| {
+            list.all_entries().enumerate().skip(from).take(MOST_SHAPES).map(|(index, clipped)| (index, clipped.shape.clone())).collect()
+        })
+    });
+    let mut changed = Vec::with_capacity(shapes.len());
+    for (index, mut shape) in shapes {
+        if matches!(shape, Shape::Text(_) | Shape::Vec(_)) {
+            change(painter, &mut shape);
+            changed.push((index, shape));
+        }
+    }
+    // Written back in place, each keeping the clip it was painted with.
+    painter.ctx().graphics_mut(|graphics| {
+        if let Some(list) = graphics.get_mut(layer) {
+            for (index, shape) in changed {
+                list.mutate_shape(egui::layers::ShapeIdx(index), |clipped| clipped.shape = shape);
+            }
+        }
+    });
+}
+
+/// The shapes past which [`painted_since`] changes no more.
+pub const MOST_SHAPES: usize = 2_000;
 
 /// Whether a key or a press came in this frame: a movement that runs jumps to its end.
 #[must_use]

@@ -2371,12 +2371,16 @@ impl InboxApp {
         self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
         self.frame = ui.ctx().cumulative_frame_nr();
+        // The list's rows as this frame draws them: a command of the frame that changes them draws the frame again.
+        let rows_drawn = self.mailbox.rows_serial();
         // The command line's keys first: with its results shown, or the keyboard in it, they are its own.
         let command_keys = command::early(ui.ctx(), &mut self.command);
         // A key or a press during a change of place acts at once: the change jumps to its end.
         if crate::scramble::interrupted(ui.ctx()) {
             self.change = None;
         }
+        // And so do the movements of the rows and the cards, which read it after the keys were taken.
+        motion::note_input(ui.ctx());
         // What stands in front, once, before any key is read.
         let surfaces = self.surfaces(ui.ctx());
         let Keys { mut ran, escape, to_place, typing, quiet } = self.keys(ui.ctx(), &surfaces);
@@ -2616,6 +2620,7 @@ impl InboxApp {
             self.apply_settings(changed);
         }
         self.change_place(ui.ctx(), drawn_place, regions.body, p.bg);
+        self.rows_changed(ui.ctx(), rows_drawn);
         self.follow_accounts_page();
         self.keep_keys();
         self.keep_triage();
@@ -2737,6 +2742,14 @@ impl InboxApp {
         }
         if self.change.as_mut().is_some_and(|change| !change.paint(ctx, ground)) {
             self.change = None;
+        }
+    }
+
+    /// The owner never waits: when a command of this frame changed the list's rows from `drawn` (Done, Snooze,
+    /// Delete …), the frame is drawn again with them.
+    fn rows_changed(&self, ctx: &egui::Context, drawn: u64) {
+        if self.mailbox.rows_serial() != drawn && !ctx.will_discard() {
+            ctx.request_discard("an act draws its list in the frame of its key");
         }
     }
 

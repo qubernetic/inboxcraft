@@ -320,18 +320,20 @@ pub(crate) fn line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, rect: Rect, show
 fn message_in(ui: &mut Ui, theme: &Theme, keymap: &Keymap, message: &Message, shown: &Shown<'_>) -> Option<status_message::Press> {
     // Its key is not offered while something else has it (a field, the composer).
     let key = keymap.chip(ui.ctx(), keymap::UNDO).filter(|_| shown.undo_key);
-    let left = |until: f64| {
+    // At motion off the undo line keeps its seconds without the bar (M5); a send's countdown keeps its bar.
+    let still = crate::motion::level(ui.ctx()) == crate::motion::Level::Off;
+    let left = |until: f64, bar: bool| {
         let rest = (until - shown.now).max(0.0);
         let whole = if shown.whole > 0.0 { shown.whole } else { rest.max(1.0) };
         #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "seconds of a hold of a few seconds, at least 0")]
         let seconds = rest.ceil().min(f64::from(u32::MAX)) as u32;
         #[expect(clippy::cast_possible_truncation, reason = "a share of 0 to 1")]
         let share = (rest.ceil() / whole.ceil().max(1.0)).clamp(0.0, 1.0) as f32;
-        Some(Left { seconds, share })
+        Some(Left { seconds, share, bar })
     };
     let (kind, undoes) = match message {
-        Message::Undo { until, .. } => (status_message::Kind::Undo { key: key.as_deref(), left: left(*until) }, true),
-        Message::Countdown { until, .. } => (status_message::Kind::Countdown { key: key.as_deref(), left: left(*until) }, true),
+        Message::Undo { until, .. } => (status_message::Kind::Undo { key: key.as_deref(), left: left(*until, !still) }, true),
+        Message::Countdown { until, .. } => (status_message::Kind::Countdown { key: key.as_deref(), left: left(*until, true) }, true),
         Message::Notice { .. } => (status_message::Kind::Notice, false),
         Message::Error { .. } => (status_message::Kind::Error, false),
     };

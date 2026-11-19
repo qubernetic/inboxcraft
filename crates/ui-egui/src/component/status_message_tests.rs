@@ -16,7 +16,7 @@ use crate::motion;
 use crate::theme::{Mode, Palette, TextScale, Theme};
 
 const KEY: Option<&str> = Some("Ctrl Z");
-const LEFT: Option<Left> = Some(Left { seconds: 4, share: 0.8 });
+const LEFT: Option<Left> = Some(Left { seconds: 4, share: 0.8, bar: true });
 
 /// The sheet's kinds with their words.
 /// What a screen reader hears of `message`: its text, and a send countdown's seconds left after it.
@@ -344,8 +344,10 @@ fn the_countdown_draws_any_share_and_any_seconds_inside_the_message() {
     // written as given, the largest included.
     for seconds in [0, u32::MAX] {
         for (share, lit) in [(f32::NAN, 0.0), (-1.0, 0.0), (f32::NEG_INFINITY, 0.0), (2.0, 80.0), (f32::INFINITY, 80.0)] {
-            let message =
-                StatusMessage { kind: Kind::Countdown { key: KEY, left: Some(Left { seconds, share }) }, text: "sending · Re: Thursday workshop" };
+            let message = StatusMessage {
+                kind: Kind::Countdown { key: KEY, left: Some(Left { seconds, share, bar: true }) },
+                text: "sending · Re: Thursday workshop",
+            };
             let harness = harness(theme, message, 560.0);
             let rect = harness.get_by_label(&said(message)).rect();
             let paint = painted(&harness, &said(message));

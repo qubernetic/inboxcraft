@@ -70,6 +70,8 @@ pub struct Left {
     pub seconds: u32,
     /// The share of the time left, 0 to 1: how much of the bar is the accent. A share that is not a number is none.
     pub share: f32,
+    /// Whether the bar shows: not at motion off, where the line keeps only its seconds (M5).
+    pub bar: bool,
 }
 
 /// The kinds of the sheet.
@@ -182,7 +184,9 @@ pub fn status_message(ui: &mut Ui, theme: &Theme, keymap: &Keymap, message: &Sta
                 let words = seconds(left);
                 let wide = run_box(super::galley(ui, &words, font, p.muted).size().x);
                 parts.push((place(wide), words, p.muted));
-                bar = Some((place(BAR), left.share));
+                if left.bar {
+                    bar = Some((place(BAR), left.share));
+                }
             }
             let link = link_width(ui, theme, tr!("undo"));
             let chip = key.map(|key| Chip::new(ui, theme, key, ChipState::Default));
