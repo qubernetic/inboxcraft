@@ -13,6 +13,8 @@
 //! - [`checkbox`]: a filled check box and a radio button.
 //! - [`tooltip`]: the bubble with the action's name and its key chip.
 //! - [`key`]: the chip of a key, its words read from a shortcut.
+//! - [`key_hint`]: a key chip and the word of its action, in the status line.
+//! - [`command_field`]: the command line's field, its prompt, scope, text, caret and key.
 //! - [`tag`]: a short mark in a 1 px box, and the coming-soon mark.
 //! - [`label`]: the bracketed section label and the written form of a count.
 //! - [`avatar`]: a person's initials, `muted` on a `stage` square.
@@ -34,6 +36,7 @@
 //! - [`account_bar`]: the 3 × 12 px mark in an account's colour.
 //! - [`soon`]: what is designed and not built yet, drawn unavailable, and its "coming soon" tag.
 //! - [`time_picker`]: presets and a typed time for snooze, send later and reminders ([`typed_time`] reads the text).
+//! - [`window_controls`]: minimise, maximise or restore, and close, for the window's own frame.
 //!
 //! [`gallery`] draws every one of them on one page for `ui_shot`, [`gallery_fields`] the fields, pickers and menus on a
 //! second, [`gallery_screens`] the screens' own sets on another.
@@ -51,6 +54,7 @@ pub mod calendar_sync;
 pub mod card;
 pub mod check_step;
 pub mod checkbox;
+pub mod command_field;
 pub mod content_bar;
 pub mod count_tile;
 pub mod draft_file;
@@ -61,6 +65,7 @@ pub mod field;
 pub mod gallery;
 pub mod gallery_blocks;
 pub mod gallery_calendar;
+pub mod gallery_commands;
 pub mod gallery_field;
 pub mod gallery_fields;
 pub mod gallery_home;
@@ -75,6 +80,7 @@ pub mod hover;
 pub mod icon;
 pub mod invite_card;
 pub mod key;
+pub mod key_hint;
 pub mod label;
 pub mod later_row;
 pub mod mail_row;
@@ -104,6 +110,7 @@ pub mod toast;
 pub mod tooltip;
 pub mod typed_time;
 pub mod why_line;
+pub mod window_controls;
 
 use std::sync::Arc;
 
