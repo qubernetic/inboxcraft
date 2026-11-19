@@ -157,6 +157,10 @@ pub(super) enum Asked {
     Reminders(bool),
     /// Whether calendar alerts notify.
     Alerts(bool),
+    /// The first day of the week (`week.set`).
+    FirstDay(inboxcraft_time::Weekday),
+    /// The first week of the year (`week.set`).
+    FirstWeek(inboxcraft_time::FirstWeek),
     /// Whether closing the window leaves InboxCraft running.
     Background(bool),
     /// Whether InboxCraft starts with the computer.

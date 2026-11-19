@@ -142,3 +142,54 @@ fn a_kept_rule_reads_no_calendar_the_owner_has_not_opened() {
     harness.run();
     assert_eq!(harness.state().calendar.week_rule(), SUNDAY, "opened, the calendar counts by the kept rule");
 }
+
+#[test]
+fn with_nothing_kept_the_week_follows_the_locale_and_junk_falls_back_to_it() {
+    let us = inboxcraft_engine::week::for_locale("en_US.UTF-8");
+    assert_eq!(us, SUNDAY, "a Sunday region counts from Sunday and the week of 1 January");
+    assert_eq!(inboxcraft_engine::week::for_locale("de_DE.UTF-8"), WeekRule::default(), "Monday and ISO weeks");
+    for junk_locale in ["", "C", "POSIX", "en", "\u{202e}en_US", "en_ZZ", &"x".repeat(10_000)] {
+        assert_eq!(inboxcraft_engine::week::for_locale(junk_locale), WeekRule::default(), "{junk_locale:?}: Monday");
+    }
+    assert_eq!(inboxcraft_engine::week::for_locale("en-CA"), SUNDAY, "a hyphen too");
+    // Nothing kept: the locale's.
+    let app = real_app().with_week_default(us).with_keep(Box::new(Held::default()));
+    assert_eq!(app.mailbox().week_rule(), us);
+    // A junk file: the locale's, not Monday.
+    let keep = Held::default();
+    *keep.week.lock().unwrap() = Some(json!({ "first_day": "\u{202e}sunday", "first_week": 3 }));
+    assert_eq!(real_app().with_week_default(us).with_keep(Box::new(keep)).mailbox().week_rule(), us);
+    // What the owner chose stands over the locale.
+    let keep = Held::default();
+    *keep.week.lock().unwrap() = Some(json!({ "first_day": "tuesday", "first_week": "first_four_day_week" }));
+    let chosen = real_app().with_week_default(us).with_keep(Box::new(keep)).mailbox().week_rule();
+    assert_eq!(chosen, WeekRule { first_day: Weekday::Tuesday, first_week: FirstWeek::FirstFourDayWeek });
+}
+
+#[test]
+fn the_calendar_page_sets_the_first_day_and_the_first_week_on_the_owner_s_press() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable as _;
+    let mut app = real_app();
+    app.open_settings_page(Some(crate::settings::Section::Calendar.id()));
+    let mut harness = harness_of(app);
+    harness.get_by_role_and_label(Role::RadioButton, "Week of 1 January").hover();
+    harness.run();
+    harness.get_by_role_and_label(Role::RadioButton, "Week of 1 January").focus();
+    harness.run();
+    assert_eq!(harness.state().mailbox().week_rule(), WeekRule::default(), "a hover or a focus changes nothing");
+    harness.get_by_role_and_label(Role::RadioButton, "Week of 1 January").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().week_rule().first_week, FirstWeek::WeekOf1January);
+    harness.get_by_label("Week starts on").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().week_rule().first_day, Weekday::Monday, "opening the choice changes nothing");
+    harness.get_by_label("Sunday").click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().mailbox().week_rule(), SUNDAY);
+    // The calendar counts by it.
+    harness.state_mut().show_calendar();
+    harness.step();
+    assert_eq!(harness.state().calendar.week_rule(), SUNDAY);
+}

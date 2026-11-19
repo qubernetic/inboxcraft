@@ -2470,9 +2470,37 @@ impl Mailbox {
     }
 
     /// Takes the week rule kept from an earlier run, read as outside data: what cannot be read is the default, never
-    /// an error ([`inboxcraft_engine::week::from_value`]).
+    /// an error ([`inboxcraft_engine::week::from_value`]). The window takes it with its locale's rule as the default
+    /// ([`Mailbox::restore_week_or`]); this is the tests' way with Monday.
+    #[cfg(test)]
     pub(crate) fn restore_week(&mut self, kept: &Value) {
         self.session.set_week_rule(inboxcraft_engine::week::from_value(kept));
+    }
+
+    /// Takes the week rule kept from an earlier run as [`Mailbox::restore_week`] does, with `default` for what cannot
+    /// be read.
+    pub(crate) fn restore_week_or(&mut self, kept: &Value, default: WeekRule) {
+        self.session.set_week_rule(inboxcraft_engine::week::from_value_or(kept, default));
+    }
+
+    /// Counts weeks by `rule`, which nobody chose: the locale's at the start.
+    pub(crate) fn restore_week_rule(&mut self, rule: WeekRule) {
+        self.session.set_week_rule(rule);
+    }
+
+    /// Changes how weeks are counted through `week.set`, as the owner: the first day of the week, the first week of
+    /// the year, or both.
+    pub fn set_week(&mut self, first_day: Option<inboxcraft_time::Weekday>, first_week: Option<inboxcraft_time::FirstWeek>) {
+        let mut params = serde_json::Map::new();
+        if let Some(day) = first_day {
+            params.insert("first_day".into(), json!(inboxcraft_engine::week::day_name(day)));
+        }
+        if let Some(first) = first_week {
+            params.insert("first_week".into(), json!(inboxcraft_engine::week::first_week_name(first)));
+        }
+        if let Err(error) = self.run("week.set", &Value::Object(params)) {
+            self.fail(error);
+        }
     }
 }
 

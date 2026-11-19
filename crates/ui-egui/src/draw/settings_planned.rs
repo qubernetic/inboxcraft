@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The settings pages that are designed and not built whole yet: Calendar (the calendar alerts switch works; each
-//! account's calendars with "read again" are coming soon; the week's first day is a fact), and the three sections that
+//! account's calendars with "read again" are coming soon; the week's first day and first week are the owner's), and the three sections that
 //! are planned whole, with the coming-soon mark on their head: About (the program, its licences, its makers and
 //! contributors), AI (where a model runs, and the consent to send mail to one elsewhere) and Plugins. Nothing coming
 //! soon on them can be pressed or focused.
@@ -11,15 +11,18 @@ use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, pos2, vec2};
 
 use super::{Asked, body, group, head};
 use crate::component::button::{LinkSize, link_sized};
-use crate::component::segmented::segmented_for;
+use crate::component::segmented::{segmented, segmented_for};
+use crate::component::select::Select;
 use crate::component::settings_row::settings_row;
 use crate::component::soon::soon;
 use crate::component::switch::{SwitchState, switch_in};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::mailbox::{AccountRow, Mailbox};
 use crate::settings::Section;
 use crate::theme::Theme;
 use crate::tr;
+use inboxcraft_time::{FirstWeek, Weekday};
 
 /// The Calendar page: alerts, each account's calendars, the week. The alerts switch changes `notify.set`'s `alerts` on
 /// the owner's press only.
@@ -47,13 +50,49 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
             super::culled(ui, theme, egui::Id::unique("settings-calendars").with(account.id), ends, |ui| calendars(ui, theme, keymap, account));
         }
         group(ui, theme, "C", tr!("Week"), None);
-        let first = crate::mailbox::weekday_text(mailbox.week_rule().first_day);
-        let note = tr!("The week follows the week rule (week.set); its own rows here are coming.");
+        let rule = mailbox.week_rule();
+        let note = tr!("The calendar's weeks and months start on this day; until you choose one, your system's region suggests it.");
         settings_row(ui, theme, tr!("Week starts on"), Some(note), |ui| {
-            crate::component::label(ui, theme.fonts.mono, first, theme.palette.muted);
+            if let Some(day) = first_day(ui, theme, rule.first_day) {
+                asked = Some(Asked::FirstDay(day));
+            }
+        });
+        let firsts = [
+            (FirstWeek::FirstFourDayWeek, tr!("First four-day week"), theme.fonts.button),
+            (FirstWeek::WeekOf1January, tr!("Week of 1 January"), theme.fonts.button),
+        ];
+        let note = match rule.first_week {
+            FirstWeek::FirstFourDayWeek => tr!("Week 1 is the first with four days in the new year (ISO 8601)."),
+            FirstWeek::WeekOf1January => tr!("Week 1 is the week that holds 1 January."),
+        };
+        settings_row(ui, theme, tr!("First week of the year"), Some(note), |ui| {
+            if let Some(first) = segmented(ui, theme, &firsts, rule.first_week) {
+                asked = Some(Asked::FirstWeek(first));
+            }
         });
     });
     asked
+}
+
+/// The width of the first day's choice, in points.
+const FIRST_DAY: f32 = 160.0;
+
+/// The choice of the week's first day: a select of the seven days; the day picked, on the owner's press of it.
+fn first_day(ui: &mut Ui, theme: &Theme, now: Weekday) -> Option<Weekday> {
+    let options = Weekday::ALL.map(|day| (day, crate::mailbox::weekday_text(day)));
+    let id = ui.make_persistent_id("settings-first-day-open");
+    let mut open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
+    let select = Select {
+        name: tr!("Week starts on"),
+        shown: crate::mailbox::weekday_text(now),
+        options: &options,
+        current: Some(now),
+        icon: IconId::Calendar,
+        width: FIRST_DAY,
+    };
+    let (_, chosen) = select.show(ui, theme, &mut open);
+    ui.data_mut(|data| data.insert_temp(id, open));
+    chosen.filter(|day| *day != now)
 }
 
 /// The height of an account's row of calendars, in points (at 100 %).

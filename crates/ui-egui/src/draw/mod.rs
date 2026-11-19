@@ -241,6 +241,8 @@ pub struct InboxApp {
     kept_notify: Option<NotifySettings>,
     /// The week rule the keep holds; `None` for the sample, which keeps none.
     kept_week: Option<inboxcraft_time::WeekRule>,
+    /// How weeks are counted where the owner chose nothing: the locale's ([`InboxApp::with_week_default`]).
+    week_default: inboxcraft_time::WeekRule,
     /// The app's side of running without a window, when it has one.
     desk: Option<Box<dyn Desk>>,
     /// The screen shown beside the index.
@@ -441,6 +443,7 @@ impl InboxApp {
             kept_triage: Triage::default(),
             kept_notify: None,
             kept_week: None,
+            week_default: inboxcraft_time::WeekRule::default(),
             desk: None,
             screen,
             calendar: Calendar::default(),
@@ -505,6 +508,14 @@ impl InboxApp {
         self
     }
 
+    /// The same window, counting weeks by `rule` where the owner chose nothing, or chose what cannot be read: the rule
+    /// of the owner's locale ([`inboxcraft_engine::week::for_locale`]). Given before [`InboxApp::with_keep`].
+    #[must_use]
+    pub fn with_week_default(mut self, rule: inboxcraft_time::WeekRule) -> Self {
+        self.week_default = rule;
+        self
+    }
+
     /// The same window, keeping the appearance choices and the keys in `keep`: the ones kept there from an earlier run
     /// are the window's from now on, and every change is kept there from the frame it shows in.
     #[must_use]
@@ -554,8 +565,10 @@ impl InboxApp {
                 }
                 None => self.mailbox.notify_settings().clone(),
             });
-            if let Some(kept) = keep.load_week() {
-                self.mailbox.restore_week(&kept);
+            // What the owner chose, read as outside data; what cannot be read, or nothing kept, is the locale's.
+            match keep.load_week() {
+                Some(kept) => self.mailbox.restore_week_or(&kept, self.week_default),
+                None => self.mailbox.restore_week_rule(self.week_default),
             }
             self.kept_week = Some(self.mailbox.week_rule());
         }
@@ -3191,6 +3204,8 @@ impl InboxApp {
             settings::Asked::Returns(on) => self.mailbox.set_notify_returns(on),
             settings::Asked::Reminders(on) => self.mailbox.set_notify_reminders(on),
             settings::Asked::Alerts(on) => self.mailbox.set_notify_alerts(on),
+            settings::Asked::FirstDay(day) => self.mailbox.set_week(Some(day), None),
+            settings::Asked::FirstWeek(first) => self.mailbox.set_week(None, Some(first)),
             settings::Asked::Background(on) => self.set_background(on),
             settings::Asked::Login(on) => self.set_login(on),
             asked @ (settings::Asked::Templates

@@ -839,14 +839,14 @@ fn nothing_changed_stands_12_right_of_a_signature_s_save() {
 }
 
 #[test]
-fn the_calendar_s_week_row_says_the_rule_s_first_day_and_that_its_own_rows_are_coming() {
+fn the_calendar_s_week_row_shows_the_rule_s_first_day() {
     let mut harness = harness();
     harness.state_mut().settings_mut().open_at(Section::Calendar);
     harness.run();
     assert!(harness.query_all_by_label_contains("Fixed").next().is_none(), "the week is no longer fixed");
-    assert!(harness.query_all_by_label_contains("The week follows the week rule").next().is_some());
-    harness.get_by_label("Monday");
+    let shown = |harness: &Harness<'static, InboxApp>| harness.get_by_role_and_label(Role::ComboBox, "Week starts on").accesskit_node().value();
+    assert_eq!(shown(&harness).as_deref(), Some("Monday"));
     harness.state_mut().mailbox_mut().run("week.set", &serde_json::json!({ "first_day": "sunday" })).unwrap();
     harness.run();
-    harness.get_by_label("Sunday");
+    assert_eq!(shown(&harness).as_deref(), Some("Sunday"));
 }
