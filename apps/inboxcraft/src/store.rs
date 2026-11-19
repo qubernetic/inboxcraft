@@ -64,10 +64,15 @@ pub fn store_dir() -> Option<PathBuf> {
 /// # Errors
 ///
 /// What went wrong, naming the folder: a store from a newer build, a damaged one (also one without its id), a folder
-/// that cannot be made.
+/// that cannot be made; for a database failure, the database's own words after its sentence.
 pub fn open_store(dir: &Path) -> Result<Owned, String> {
     let opened = Sqlite::open(dir, StoreConfig::default()).and_then(|store| Ok(Owned { id: store.id()?, store: Box::new(store) }));
-    opened.map_err(|error| format!("the mail store in {} could not be opened: {error}", dir.display()))
+    opened.map_err(|error| {
+        // This line is the app's own log (its standard error), so it keeps the database's own words; a caller of the
+        // CLI, the control channel or MCP never reads them.
+        let said = error.detail().map(|detail| format!(" (the database said: {detail})")).unwrap_or_default();
+        format!("the mail store in {} could not be opened: {error}{said}", dir.display())
+    })
 }
 
 /// The mail the window on `source` shows: the sample, or the owner's store in [`store_dir`].
