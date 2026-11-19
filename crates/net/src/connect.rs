@@ -6,6 +6,7 @@
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
@@ -206,7 +207,9 @@ impl Connector {
                     .take(self.most_addresses)
                     .collect(),
                 None => match &self.deadline {
-                    Some(deadline) => lookup_by(server.host().as_str(), port, deadline)?.into_iter().take(self.most_addresses).collect(),
+                    Some(deadline) => {
+                        lookup_by(Arc::new(SystemLookup), server.host(), port, deadline)?.into_iter().take(self.most_addresses).collect()
+                    }
                     None => (server.host().as_str(), port)
                         .to_socket_addrs()
                         .map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?
@@ -250,16 +253,56 @@ impl Connector {
     }
 }
 
-/// The system's addresses of `host` on `port`, looked up on a thread of its own and waited for at most until
-/// `deadline`: the system's lookup has no timeout of ours. A lookup still running then is left to end by itself.
-fn lookup_by(host: &str, port: u16, deadline: &Deadline) -> Result<Vec<SocketAddr>, NetError> {
+/// The most name lookups on threads of their own that may run at once in the process, across Detect's runs: a lookup
+/// a probe gave up on goes on until the system's resolver gives up, and these are what is left.
+pub(crate) const MAX_LOOKUPS: usize = 8;
+
+/// The lookups on threads of their own running now.
+static LOOKUPS: AtomicUsize = AtomicUsize::new(0);
+
+/// One of the [`MAX_LOOKUPS`] places, given back when it is dropped (when the lookup's thread ends).
+struct LookupSlot;
+
+impl LookupSlot {
+    fn take() -> Option<Self> {
+        LOOKUPS
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |running| if running < MAX_LOOKUPS { running.checked_add(1) } else { None })
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for LookupSlot {
+    fn drop(&mut self) {
+        let _ = LOOKUPS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |running| running.checked_sub(1));
+    }
+}
+
+/// The system's resolver, which has no timeout of ours.
+#[derive(Debug)]
+struct SystemLookup;
+
+impl Resolve for SystemLookup {
+    fn resolve(&self, host: &Host, port: u16) -> io::Result<Vec<SocketAddr>> {
+        (host.as_str(), port).to_socket_addrs().map(|addresses| addresses.take(MAX_ADDRESSES).collect())
+    }
+}
+
+/// `resolver`'s addresses of `host` on `port`, looked up on a thread of its own and waited for at most until
+/// `deadline`. A lookup still running then is left to end by itself; while [`MAX_LOOKUPS`] of them run, a new one
+/// fails at once as timed out instead of starting.
+fn lookup_by(resolver: Arc<dyn Resolve>, host: &Host, port: u16, deadline: &Deadline) -> Result<Vec<SocketAddr>, NetError> {
     let wait = deadline.wait(Duration::MAX)?;
+    let Some(slot) = LookupSlot::take() else {
+        return Err(NetError::new(ErrorKind::TimedOut, format!("the name {host} was not looked up: {MAX_LOOKUPS} lookups are still running")));
+    };
     let (sender, receiver) = mpsc::channel();
-    let name = host.to_owned();
+    let name = host.clone();
     std::thread::Builder::new()
         .name("inboxcraft-lookup".to_owned())
         .spawn(move || {
-            let found = (name.as_str(), port).to_socket_addrs().map(|addresses| addresses.take(MAX_ADDRESSES).collect::<Vec<_>>());
+            let _slot = slot;
+            let found = resolver.resolve(&name, port);
             // Nobody listens once the wait is over.
             let _ = sender.send(found);
         })

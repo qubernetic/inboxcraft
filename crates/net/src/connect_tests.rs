@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use std::io::Write;
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -64,4 +64,56 @@ fn without_a_deadline_the_sockets_timeouts_are_left_alone() {
     timed.write_all(b"x").unwrap();
     assert_eq!(timed.socket.read_timeout().unwrap(), Some(Duration::from_millis(1234)));
     assert_eq!(timed.socket.write_timeout().unwrap(), Some(Duration::from_millis(2345)));
+}
+
+/// A resolver that hangs until it is let go; it counts its calls.
+#[derive(Debug, Default)]
+struct Held {
+    calls: AtomicUsize,
+    gone: std::sync::Mutex<bool>,
+    let_go: std::sync::Condvar,
+}
+
+impl Resolve for Held {
+    fn resolve(&self, _host: &Host, port: u16) -> io::Result<Vec<SocketAddr>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let mut gone = self.gone.lock().unwrap();
+        while !*gone {
+            gone = self.let_go.wait_timeout(gone, Duration::from_secs(30)).unwrap().0;
+        }
+        Ok(vec![SocketAddr::from(([127, 0, 0, 1], port))])
+    }
+}
+
+/// Lookups left hanging are capped across runs: with [`MAX_LOOKUPS`] still running, the next fails at once as timed
+/// out without asking the resolver; once they end, a lookup runs again.
+#[test]
+fn hanging_lookups_are_capped_across_runs() {
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock::new());
+    let held = Arc::new(Held::default());
+    let host = Host::new("mail.example.org").unwrap();
+    for _ in 0..MAX_LOOKUPS {
+        let deadline = Deadline::new(Arc::clone(&clock), Duration::from_millis(20));
+        let error = lookup_by(Arc::clone(&held) as Arc<dyn Resolve>, &host, 993, &deadline).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::TimedOut);
+    }
+    let start = clock.monotonic();
+    let deadline = Deadline::new(Arc::clone(&clock), Duration::from_secs(5));
+    let error = lookup_by(Arc::clone(&held) as Arc<dyn Resolve>, &host, 993, &deadline).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::TimedOut);
+    assert!(clock.monotonic().saturating_sub(start) < Duration::from_secs(2), "it waited");
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(held.calls.load(Ordering::SeqCst), MAX_LOOKUPS);
+
+    *held.gone.lock().unwrap() = true;
+    held.let_go.notify_all();
+    for _ in 0..500 {
+        if LOOKUPS.load(Ordering::SeqCst) == 0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let deadline = Deadline::new(clock, Duration::from_secs(5));
+    let found = lookup_by(Arc::clone(&held) as Arc<dyn Resolve>, &host, 993, &deadline).unwrap();
+    assert_eq!(found, [SocketAddr::from(([127, 0, 0, 1], 993))]);
 }
