@@ -264,6 +264,18 @@ fn list_with_a_limit_answers_that_many_of_ten_thousand_and_the_total() {
 }
 
 #[test]
+fn list_breaks_a_tie_across_accounts_by_the_higher_id() {
+    let mut store = store();
+    let draft = |id: u64, account: u64| Change::PutDraft(inboxcraft_model::Draft::new(DraftId::new(id), AccountId::new(account), at(NOW - 5)));
+    store.apply(&Batch::new().with(draft(1, 1)).with(draft(2, 2))).unwrap();
+    let clock = FakeClock::new(at(NOW));
+    let mut session = session_at(store, &clock);
+    let one = session.run("compose.list", &json!({ "limit": 1 })).unwrap();
+    assert_eq!(one["drafts"].as_array().unwrap().iter().map(draft_id).collect::<Vec<_>>(), [2], "saved at once: the higher id");
+    assert_eq!(one["total"], json!(2));
+}
+
+#[test]
 fn discard_removes_the_draft_and_its_copy_on_the_server() {
     let (mut session, _) = session();
     let id = draft_id(&session.run("compose.new", &json!({})).unwrap());
