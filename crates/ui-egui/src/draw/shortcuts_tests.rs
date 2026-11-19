@@ -421,3 +421,48 @@ fn the_inbox_views_are_actions_the_palette_runs_and_a_key_can_take() {
     harness.run();
     assert_eq!(harness.state().mailbox().inbox_view(), InboxView::List);
 }
+
+/// A press of the pointer on the window's button called `label` off the settings (the index).
+fn press_off_the_settings(harness: &mut Harness<'static, InboxApp>, label: &str) {
+    let settings = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+    let at = harness
+        .query_all_by_role(Role::Button)
+        .find(|node| {
+            !settings.contains_rect(node.rect()) && node.accesskit_node().label().is_some_and(|name| name == label || name.starts_with(label))
+        })
+        .unwrap_or_else(|| panic!("no {label} off the settings"))
+        .rect()
+        .center();
+    harness.hover_at(at);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+}
+
+#[test]
+fn while_a_key_is_waited_for_every_row_of_the_index_ends_the_wait_and_acts() {
+    // A mailbox: the wait ends and the mail shows it.
+    let mut harness = busy_sheet();
+    press_off_the_settings(&mut harness, "Sent");
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), crate::mailbox::Place::View(inboxcraft_model::Role::Sent), "the mailbox shows");
+    assert_left_kept(&mut harness);
+    // The account picker's choice: the wait ends, the settings are left and the mail narrows.
+    let mut harness = busy_sheet();
+    press_off_the_settings(&mut harness, "Show mail of");
+    harness.run();
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio").click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().mailbox().narrowed(), Some(2), "the mail narrows");
+    assert_left_kept(&mut harness);
+    // An account row: the wait ends and its folders open; the settings stay, as the row shows no place.
+    let mut harness = busy_sheet();
+    press_off_the_settings(&mut harness, "Personal");
+    harness.run();
+    assert!(harness.state().settings().is_open(), "an account row shows no place");
+    assert_eq!(harness.state().settings().capturing(), None, "the wait ends");
+    assert_eq!(harness.state().keymap(), &Keymap::default(), "and no key was given");
+}

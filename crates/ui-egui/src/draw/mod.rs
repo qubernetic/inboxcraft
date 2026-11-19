@@ -546,6 +546,11 @@ impl InboxApp {
         let flags = (Self::index_live(surfaces), self.checking_elsewhere());
         let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, false, flags);
         let indexed = Self::index_allowed(surfaces, indexed);
+        // A row of the index pressed while a key is waited for ends the wait first, then acts.
+        let pressed = indexed.place.is_some() || indexed.mailbox.is_some() || indexed.account.is_some() || indexed.toggle.is_some();
+        if pressed && self.settings.capturing().is_some() {
+            self.settings.captured(None);
+        }
         if let Some(id) = indexed.toggle {
             index::toggle(index.ctx(), id);
         }
@@ -584,10 +589,10 @@ impl InboxApp {
         }
     }
 
-    /// Whether the index's mailboxes, account rows and account picker act: with no palette, capture or event editor in
-    /// front.
+    /// Whether the index's mailboxes, account rows and account picker act: with no palette or event editor in front. A
+    /// key waited for on the Shortcuts page holds the keys, not the pointer: a row pressed ends the wait and acts.
     fn index_live(surfaces: &Surfaces) -> bool {
-        !(surfaces.held() || surfaces.has(Surface::Editor))
+        !(surfaces.has(Surface::Palette) || surfaces.has(Surface::Editor))
     }
 
     /// What of the index's `asked` the `surfaces` in front allow: a place where a press may run its action
@@ -2501,8 +2506,9 @@ impl InboxApp {
         if let Some(account) = asked.narrow {
             self.mailbox.narrow(account);
         }
-        // A mailbox pressed in the index shows the mail, from the calendar and the settings too.
-        if asked.open.is_some() {
+        // A mailbox pressed in the index shows the mail, from the calendar and the settings too; an account chosen in its
+        // picker leaves the settings for the mail, as the owner asked to see that mail.
+        if asked.open.is_some() || (asked.narrow.is_some() && self.settings.is_open()) {
             self.show_mail();
         }
         if let Some(view) = header.view {
