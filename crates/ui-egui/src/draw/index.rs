@@ -221,6 +221,10 @@ fn line(ui: &mut Ui, theme: &Theme, line: &Line<'_>, active: Option<mailbox::Pla
             response
         }
     };
+    // A press leaves the keyboard on the row pressed, never on nothing (from a field of the docked composer too).
+    if response.clicked() {
+        response.request_focus();
+    }
     if response.gained_focus() {
         response.scroll_to_me(None);
     }
@@ -259,7 +263,12 @@ fn place(ui: &mut Ui, theme: &Theme, keymap: &Keymap, which: Place, at: Place, c
         Place::Later => keymap::LATER,
         Place::Home | Place::Settings => keymap::SETTINGS,
     };
-    tooltip::attach(nav_row::nav_row(ui, theme, &row, narrow, None), theme, keymap, label, Some(action))
+    let response = tooltip::attach(nav_row::nav_row(ui, theme, &row, narrow, None), theme, keymap, label, Some(action));
+    // A press leaves the keyboard on the place pressed, never on nothing.
+    if response.clicked() {
+        response.request_focus();
+    }
+    response
 }
 
 /// Opens the folders of account `id` in the index, or closes them when they are open.

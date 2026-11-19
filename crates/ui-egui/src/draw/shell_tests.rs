@@ -290,3 +290,29 @@ fn tab_walks_new_message_in_the_command_line_before_the_index_under_it() {
     harness.run();
     assert_eq!(focused(&harness).as_deref(), Some("New message"), "Shift Tab walks it back");
 }
+
+#[test]
+fn a_press_on_the_index_from_the_docked_composer_leaves_the_keyboard_on_the_row_pressed() {
+    let focused = |harness: &Harness<'static, InboxApp>| {
+        harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
+    };
+    for name in ["Sent", "Later", "Mail", "Studio"] {
+        let mut harness = window(vec2(1300.0, 820.0));
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, crate::keymap::COMPOSE);
+        harness.run();
+        harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
+        harness.get_by_role_and_label(Role::TextInput, "Subject").type_text("Plot");
+        harness.run();
+        let row = harness
+            .query_all_by_role(Role::Button)
+            .find(|node| node.accesskit_node().label().is_some_and(|label| label == name || label.starts_with(&format!("{name},"))));
+        let Some(row) = row else { panic!("no row {name}") };
+        row.click();
+        harness.run();
+        // The row keeps its name; an account row adds ", open" once its folders show.
+        let on = focused(&harness);
+        assert!(on.as_deref().is_some_and(|label| label.starts_with(name)), "{name}: the keyboard on the row pressed, not {on:?}");
+        assert_eq!(harness.state().composer().map(|composer| composer.subject().to_owned()).as_deref(), Some("Plot"), "{name}: the draft kept");
+    }
+}
