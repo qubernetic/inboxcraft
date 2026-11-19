@@ -2340,6 +2340,18 @@ impl Mailbox {
     pub fn week_rule(&self) -> WeekRule {
         self.session.week_rule()
     }
+
+    /// The week rule as it is kept between runs ([`inboxcraft_engine::week::to_value`]).
+    #[must_use]
+    pub fn kept_week(&self) -> Value {
+        inboxcraft_engine::week::to_value(self.session.week_rule())
+    }
+
+    /// Takes the week rule kept from an earlier run, read as outside data: what cannot be read is the default, never
+    /// an error ([`inboxcraft_engine::week::from_value`]).
+    pub fn restore_week(&mut self, kept: &Value) {
+        self.session.set_week_rule(inboxcraft_engine::week::from_value(kept));
+    }
 }
 
 #[cfg(test)]
