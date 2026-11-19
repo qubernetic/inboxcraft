@@ -110,6 +110,18 @@ fn inbox_view_is_set_on_appearance_and_not_on_triage() {
         harness.run();
         assert_eq!(harness.state().mailbox().inbox_view(), view, "{label}");
     }
+    // One stored value: the list's switch (out of the settings, where the list is) changes it, and the page shows
+    // the new view.
+    harness.state_mut().settings_mut().leave();
+    harness.run();
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::VIEW_LIST);
+    harness.run();
+    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::List);
+    harness.state_mut().settings_mut().open_at(Section::Appearance);
+    harness.run();
+    assert!(harness.get_by_role_and_label(Role::RadioButton, "List").accesskit_node().toggled() == Some(egui::accesskit::Toggled::True));
+    assert!(harness.get_by_role_and_label(Role::RadioButton, "Smart").accesskit_node().toggled() != Some(egui::accesskit::Toggled::True));
     harness.get_by_label("Triage, settings page").click();
     harness.run();
     assert_eq!(harness.state().settings().section(), Section::Triage);
