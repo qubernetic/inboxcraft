@@ -489,6 +489,8 @@ fn a_stopped_run_asks_nothing_more() {
     // The lookups before it ran; none after: the last thing asked is the one probe.
     assert_eq!(proposal.asked.last().map(String::as_str), Some("imap mail.example.org:993 (TLS)"));
     assert!(!web.asked().iter().any(|url| url.contains("privateemail")));
+    // Stopped, not out of time: no cap is noted.
+    assert!(!proposal.failed.iter().any(|(what, _)| what.starts_with("detect:")), "{:?}", proposal.failed);
     // A stop before anything asks nothing at all.
     let web = FakeWeb::default();
     let probe = FakeProbe::all();
