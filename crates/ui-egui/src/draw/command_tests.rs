@@ -622,3 +622,36 @@ fn a_page_row_has_no_key_where_settings_shows_its_own() {
         assert!(bound.iter().all(|texts| *texts >= 2), "its icon and its name: {bound:?}");
     }
 }
+
+#[test]
+fn over_the_event_editor_the_command_list_offers_only_the_editor_s_and_the_window_s_commands() {
+    let window: Vec<String> = crate::palette::rows("")
+        .into_iter()
+        .filter(|row| crate::surface::EDITOR_KEYS.contains(&row.id) && keymap::scope(row.id).meets(keymap::Scope::Calendar))
+        .map(|row| row.name.into_owned())
+        .chain(["A plugin's command".to_owned()])
+        .collect();
+    for editing in [false, true] {
+        let mut harness = harness(egui::Theme::Light);
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, keymap::CALENDAR);
+        harness.run();
+        if editing {
+            harness.get_by_role_and_label(Role::Button, "New event").click();
+            harness.run();
+            assert!(harness.state().calendar().editor().is_some(), "the editor shows");
+        }
+        harness.state_mut().run_action(&ctx, keymap::PALETTE);
+        harness.run();
+        type_in(&mut harness, ">");
+        let names: Vec<String> = rows(&harness).into_iter().map(|(name, _)| name).collect();
+        if editing {
+            assert_eq!(names, window, "over the editor: the window's commands (settings, shortcuts, the look, this line)");
+        } else {
+            assert!(names.len() > window.len(), "the calendar alone lists more: {names:?}");
+            for name in ["Show mail", "New message", "Show the calendar"] {
+                assert!(names.iter().any(|listed| listed.starts_with(name)), "{name} without the editor: {names:?}");
+            }
+        }
+    }
+}

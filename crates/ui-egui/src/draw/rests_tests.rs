@@ -466,10 +466,8 @@ fn undo_by(harness: &mut Harness<'static, InboxApp>, how: UndoBy) {
             assert!(harness.state().command().results(), "the palette comes over the editor");
             harness.state_mut().command_mut().set_text(">Undo");
             harness.run();
-            let item = harness.get_by_role_and_label(Role::MenuItem, "Undo");
-            assert!(item.accesskit_node().is_disabled(), "the palette offers Undo as unavailable under the editor");
-            item.click();
-            harness.run();
+            // Over the editor the line lists only the window's commands: Undo is not offered at all.
+            assert!(harness.query_by_role_and_label(Role::MenuItem, "Undo").is_none(), "the line offers no Undo under the editor");
             harness.key_press(Key::Enter);
             harness.run();
             let ctx = harness.ctx.clone();

@@ -246,7 +246,7 @@ const ROW_ACTS: [&str; 5] = [keymap::DONE, keymap::ARCHIVE, keymap::READ, keymap
 
 /// The keys that run under the event editor: what comes over it (the command line's results, the settings, Shortcuts) and the look
 /// of the window. Nothing opens, shows or acts on what lies under it, nor leaves the calendar while it is open.
-const EDITOR_KEYS: [&str; 7] =
+pub(crate) const EDITOR_KEYS: [&str; 7] =
     [keymap::PALETTE, keymap::SETTINGS, keymap::SHORTCUTS, keymap::LIGHT, keymap::DARK, keymap::SYSTEM_MODE, keymap::MOTION];
 
 #[cfg(test)]

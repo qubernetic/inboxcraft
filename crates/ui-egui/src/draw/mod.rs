@@ -2728,9 +2728,13 @@ impl InboxApp {
             match self.command.mode() {
                 crate::command::Mode::Command => {
                     let screen = if self.screen == Screen::Calendar { keymap::Scope::Calendar } else { keymap::Scope::Mail };
+                    // Over the event editor only what comes over it and the window's look: nothing of the mail or the
+                    // calendar under it (until a half-typed event can be kept as a draft).
+                    let editing = self.editing_event();
                     lists.commands = crate::palette::rows(self.command.text())
                         .into_iter()
                         .filter(|row| keymap::scope(row.id).meets(screen))
+                        .filter(|row| !editing || crate::surface::EDITOR_KEYS.contains(&row.id))
                         .map(|row| {
                             let refused = (!self.can_run_from_the_line(row.id) || soon::blocked(&ctx, row.id)).then(|| command::refusal(row.id));
                             command::Listed { row, refused }
