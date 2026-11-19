@@ -148,6 +148,8 @@ fn the_command_list_is_the_palettes_on_every_place_with_and_without_a_composer()
             // The plugin's command, coming soon, ends the list.
             wanted.push(("A plugin's command".to_owned(), false));
             assert_eq!(rows(&harness), wanted, "{place}, composer {composer}");
+            let opening = rows(&harness).into_iter().filter(|(name, _)| name.starts_with("Command line")).count();
+            assert_eq!(opening, 1, "{place}: one row opens the command line");
         }
     }
 }

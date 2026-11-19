@@ -146,7 +146,8 @@ impl Palette {
 pub fn rows(query: &str) -> Vec<Row> {
     let query: String = query.chars().take(MAX_CHARS).collect::<String>().trim().to_lowercase();
     let words: Vec<&str> = query.split_whitespace().collect();
-    let all = keymap::actions().into_iter().map(Row::action).chain(pages());
+    // The command line's bare key opens what the palette's key opens: one row for the two.
+    let all = keymap::actions().into_iter().filter(|action| action.id != keymap::COMMAND_LINE).map(Row::action).chain(pages());
     let (mut first, rest): (Vec<Row>, Vec<Row>) = all
         .filter(|row| {
             let name = row.name.to_lowercase();
