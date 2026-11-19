@@ -47,21 +47,21 @@ pub(crate) fn place(mailbox: &Mailbox, id: u64) -> Option<Place> {
 /// message is gone, the command failed).
 pub(crate) fn ask(mailbox: &mut Mailbox, id: u64) -> Vec<String> {
     match mailbox.run("mail.why", &json!({ "id": id })) {
-        Ok(answer) => words(mailbox, &answer),
+        Ok(answer) => words(mailbox, id, &answer),
         Err(_) => Vec::new(),
     }
 }
 
-/// The reasons of a `mail.why` answer in the window's words, in the engine's order: the ids the window does not know
-/// left out, at most [`MAX_REASONS`].
-pub(crate) fn words(mailbox: &Mailbox, answer: &Value) -> Vec<String> {
+/// The reasons of a `mail.why` answer for message `id` in the window's words, in the engine's order: the ids the window
+/// does not know left out, at most [`MAX_REASONS`].
+pub(crate) fn words(mailbox: &Mailbox, id: u64, answer: &Value) -> Vec<String> {
     let Some(reasons) = answer.get("reasons").and_then(Value::as_array) else { return Vec::new() };
     reasons
         .iter()
         .take(MAX_REASONS)
         .filter_map(|reason| {
             let text_id = reason.get("text_id").and_then(Value::as_str)?;
-            sentence(mailbox, text_id, reason.get("args").unwrap_or(&Value::Null))
+            sentence(mailbox, id, text_id, reason.get("args").unwrap_or(&Value::Null))
         })
         .collect()
 }
@@ -77,9 +77,15 @@ fn when(mailbox: &Mailbox, args: &Value, key: &str) -> Option<String> {
     Some(typed_time::short(at, mailbox.now(), mailbox.offset())).filter(|text| !text.is_empty())
 }
 
-/// The group arg, by its name in the window's words.
-fn group(args: &Value) -> Option<&'static str> {
-    args.get("group").and_then(Value::as_str).and_then(GroupKind::named).map(GroupKind::text)
+/// The group arg as the list shows mail from `address` in it, by its name in the window's words: an invitation stands
+/// with its sender's mail ([`GroupKind::shown_for`]), so the line names the group the list and the head's tag name.
+/// Without an address, a group the list never shows is none.
+fn group(args: &Value, address: Option<&str>) -> Option<&'static str> {
+    let kind = args.get("group").and_then(Value::as_str).and_then(GroupKind::named)?;
+    match address {
+        Some(address) => Some(GroupKind::shown_for(kind, address).text()),
+        None => GroupKind::SHOWN.contains(&kind).then(|| kind.text()),
+    }
 }
 
 /// The name the index gives folder `id`: its role's, else its path.
@@ -92,13 +98,17 @@ fn folder(mailbox: &Mailbox, id: u64) -> Option<String> {
 }
 
 /// The one sentence of `text_id` with `args`; none for an id the window does not know or args it cannot read.
-fn sentence(mailbox: &Mailbox, text_id: &str, args: &Value) -> Option<String> {
+fn sentence(mailbox: &Mailbox, id: u64, text_id: &str, args: &Value) -> Option<String> {
     Some(match text_id {
         "why.snooze.returned" => tr!("back from a snooze, {when}", when = when(mailbox, args, "at")?),
         "why.snooze.until" => tr!("snoozed until {when}", when = when(mailbox, args, "until")?),
         "why.rule.group" => {
-            let group = group(args)?;
-            match args.get("rule").and_then(Value::as_str) {
+            let address = mailbox.messages().iter().find(|row| row.id == id).map(|row| row.address.as_str());
+            let rule = args.get("rule").and_then(Value::as_str);
+            let Some(group) = group(args, address) else {
+                return (rule == Some("calendar")).then(|| tr!("it holds an invitation").to_owned());
+            };
+            match rule {
                 Some("calendar") => tr!("grouped as {group}: it holds an invitation", group = group),
                 Some("automatic") => tr!("grouped as {group}: sent automatically", group = group),
                 Some("list") => tr!("grouped as {group}: sent through a list", group = group),
@@ -107,7 +117,10 @@ fn sentence(mailbox: &Mailbox, text_id: &str, args: &Value) -> Option<String> {
                 _ => tr!("grouped as {group}", group = group),
             }
         }
-        "why.sender.group" => tr!("you put {address} in {group}", address = text(args, "address")?, group = group(args)?),
+        "why.sender.group" => {
+            let address = text(args, "address")?;
+            tr!("you put {address} in {group}", group = group(args, Some(&address))?, address = address)
+        }
         "why.sender.accepted" => tr!("let in by you").to_owned(),
         "why.sender.blocked" => tr!("blocked by you").to_owned(),
         "why.screener.held" => tr!("held back by the screener").to_owned(),

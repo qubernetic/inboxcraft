@@ -5,7 +5,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
 use super::{MAX_REASONS, ask, words};
-use crate::mailbox::Mailbox;
+use crate::mailbox::{GroupKind, Mailbox};
 use crate::sample;
 
 fn clock() -> Box<FakeClock> {
@@ -58,7 +58,7 @@ fn every_id_of_the_engine_is_one_sentence_in_the_windows_words() {
         "in this folder",
     ];
     for ((text_id, args), expected) in thirteen().into_iter().zip(expected) {
-        let said = words(&mailbox, &one(text_id, args));
+        let said = words(&mailbox, 0, &one(text_id, args));
         assert_eq!(said.len(), 1, "{text_id}: {said:?}");
         assert!(said[0].starts_with(expected), "{text_id}: {said:?}");
         assert!(!said[0].contains("why.") && !said[0].contains('{'), "{text_id}: {said:?}");
@@ -77,9 +77,9 @@ fn an_id_the_window_does_not_know_is_left_out_and_never_shown() {
         { "text_id": "why.thread.other", "args": { "messages": "lots" } },
         { "text_id": "why.rule.group", "args": { "group": "Subject line of the mail" } },
     ]});
-    assert_eq!(words(&mailbox, &answer), ["let in by you"]);
+    assert_eq!(words(&mailbox, 0, &answer), ["let in by you"]);
     for junk in [json!(null), json!([]), json!({ "reasons": {} }), json!({ "reasons": "why.default" })] {
-        assert!(words(&mailbox, &junk).is_empty(), "{junk}");
+        assert!(words(&mailbox, 0, &junk).is_empty(), "{junk}");
     }
 }
 
@@ -87,7 +87,7 @@ fn an_id_the_window_does_not_know_is_left_out_and_never_shown() {
 fn at_most_four_reasons_in_the_engines_order() {
     let mailbox = mailbox();
     let reasons: Vec<Value> = thirteen().into_iter().map(|(text_id, args)| json!({ "text_id": text_id, "args": args })).collect();
-    let said = words(&mailbox, &json!({ "reasons": reasons }));
+    let said = words(&mailbox, 0, &json!({ "reasons": reasons }));
     assert_eq!(said.len(), MAX_REASONS);
     assert!(said[0].starts_with("back from a snooze") && said[3].starts_with("you put"), "{said:?}");
 }
@@ -97,7 +97,7 @@ fn an_address_of_254_characters_with_controls_comes_out_clean_and_whole() {
     let mailbox = mailbox();
     let local = "a".repeat(240);
     let address = format!("{local}@example.org\u{202E}\r\n\u{0}");
-    let said = words(&mailbox, &one("why.sender.group", json!({ "address": address, "group": "people" })));
+    let said = words(&mailbox, 0, &one("why.sender.group", json!({ "address": address, "group": "people" })));
     assert_eq!(said.len(), 1);
     assert!(said[0].contains(&format!("{local}@example.org")), "{said:?}");
     assert!(!said[0].chars().any(|c| c.is_control() || c == '\u{202E}'), "{said:?}");
@@ -112,10 +112,10 @@ fn a_folder_is_named_as_the_index_names_it() {
         .flat_map(|account| mailbox.folders_of(account.id).into_iter().map(|folder| (folder.id, folder.role, folder.name.clone())))
         .collect();
     let (with_role, role, _) = folders.iter().find(|folder| folder.1.is_some()).unwrap();
-    let said = words(&mailbox, &one("why.default", json!({ "folder": with_role })));
+    let said = words(&mailbox, 0, &one("why.default", json!({ "folder": with_role })));
     assert_eq!(said, [format!("in {}", crate::mailbox::role_text(role.unwrap()))]);
     if let Some((plain, _, name)) = folders.iter().find(|folder| folder.1.is_none()) {
-        assert_eq!(words(&mailbox, &one("why.default", json!({ "folder": plain }))), [format!("in {name}")]);
+        assert_eq!(words(&mailbox, 0, &one("why.default", json!({ "folder": plain }))), [format!("in {name}")]);
     }
     // A message gone is no reason and no error.
     assert!(ask(&mut mailbox, u64::MAX).is_empty());
@@ -185,4 +185,32 @@ fn a_message_the_engine_cannot_find_has_no_reasons_and_no_error() {
     reader.open(&mut mailbox, Some(u64::MAX));
     assert!(reader.why().is_empty());
     assert_eq!(reader.asked_why, 1);
+}
+
+#[test]
+fn an_invitation_is_grouped_as_the_list_and_the_head_show_it() {
+    use inboxcraft_store::{Batch, Storage as _};
+    let now = Timestamp::from_unix(1_793_869_200, 0).unwrap();
+    let mut store = sample::mailbox(now).unwrap();
+    let mut batch = Batch::new();
+    for change in sample::invitations(now).unwrap() {
+        batch.push(change);
+    }
+    store.apply(&batch).unwrap();
+    let mut mailbox = Mailbox::new(sample::session_over(store, clock()).unwrap(), clock());
+    let row = mailbox.messages().iter().find(|row| row.subject == "Updated invitation: Lunch with Odile").cloned().unwrap();
+    assert_eq!(row.group, Some(GroupKind::Invitations));
+    let shown = GroupKind::shown_for(GroupKind::Invitations, &row.address).text();
+    assert_ne!(shown, GroupKind::Invitations.text());
+    let said = ask(&mut mailbox, row.id);
+    assert_eq!(said.first(), Some(&format!("grouped as {shown}: it holds an invitation")), "{said:?}");
+    assert!(said.iter().all(|reason| !reason.contains(GroupKind::Invitations.text())), "{said:?}");
+    // A message the list does not hold: no group the list never shows.
+    let calendar = one("why.rule.group", json!({ "group": "invitations", "rule": "calendar" }));
+    assert_eq!(words(&mailbox, u64::MAX, &calendar), ["it holds an invitation"]);
+    let sender = one("why.sender.group", json!({ "address": "noreply@example.org", "group": "invitations" }));
+    assert_eq!(
+        words(&mailbox, u64::MAX, &sender),
+        [format!("you put noreply@example.org in {}", GroupKind::shown_for(GroupKind::Invitations, "noreply@example.org").text())]
+    );
 }
