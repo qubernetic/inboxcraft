@@ -48,6 +48,7 @@ mod pane;
 mod reader;
 pub(crate) use reader::fitted_board;
 mod settings;
+mod shell;
 
 pub use list::rows_built;
 
