@@ -35,13 +35,13 @@ fn window(mut app: InboxApp) -> Harness<'static, InboxApp> {
 }
 
 fn sample_window() -> Harness<'static, InboxApp> {
-    window(InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())))
+    window(InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())))
 }
 
 /// A window with no account whose checks are answered by `workers`.
 fn adding_window(workers: FakeWorkers) -> Harness<'static, InboxApp> {
     let detect = Proposed::new(proposal(Source::Autoconfig));
-    window(InboxApp::new(mailbox()).with_accounts(std::sync::Arc::new(Kept::default()), Box::new(detect), Box::new(workers)))
+    window(InboxApp::at_mail(mailbox()).with_accounts(std::sync::Arc::new(Kept::default()), Box::new(detect), Box::new(workers)))
 }
 
 fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
@@ -177,7 +177,7 @@ fn the_palette_no_longer_closes_settings() {
 
 /// Every action that touches a message, a thread, the list, the reader, the composer or the calendar: none runs on the
 /// settings, which show none of them. The test's own list, so that an id dropped from the window's rule fails it.
-const OF_THE_MAIL: [&str; 31] = [
+pub(super) const OF_THE_MAIL: [&str; 31] = [
     keymap::DONE,
     keymap::SNOOZE,
     keymap::ARCHIVE,
@@ -212,8 +212,9 @@ const OF_THE_MAIL: [&str; 31] = [
 ];
 
 /// The window's own actions: they run on the settings as off them (a way to a place shows it, leaving the settings).
-const THE_WINDOW_S: [&str; 14] = [
+pub(super) const THE_WINDOW_S: [&str; 15] = [
     keymap::FIND,
+    keymap::HOME,
     keymap::MAIL,
     keymap::SETTINGS,
     keymap::PALETTE,

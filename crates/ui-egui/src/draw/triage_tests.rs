@@ -30,7 +30,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn app() -> InboxApp {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     app
 }
@@ -283,7 +283,7 @@ impl Keep for Held {
 
 fn real_app() -> InboxApp {
     let session = Session::new(Box::new(sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap()), clock()).unwrap();
-    InboxApp::new(Mailbox::new(session, clock()))
+    InboxApp::at_mail(Mailbox::new(session, clock()))
 }
 
 #[test]

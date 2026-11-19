@@ -35,7 +35,7 @@ fn harness_over(mailbox: Mailbox, theme: egui::Theme) -> Harness<'static, InboxA
         .with_size(vec2(1300.0, 1000.0))
         .with_theme(theme)
         .with_max_steps(12)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
     harness.run();
     harness
 }

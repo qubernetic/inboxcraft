@@ -25,6 +25,9 @@ pub const FIND: &str = "ui.search.focus";
 /// Show the mail: leave the settings or the add-account page (the rail's Mail button).
 pub const MAIL: &str = "ui.mail.show";
 
+/// Show Home, the brief of today (the index's `[ 00 ] HOME`). Command and 0, as Command and 1 shows `[ 01 ] MAIL`.
+pub const HOME: &str = "ui.home.open";
+
 /// Open the appearance settings (the rail's settings button).
 pub const SETTINGS: &str = "ui.settings.open";
 
@@ -221,6 +224,7 @@ pub fn actions() -> Vec<Action> {
     vec![
         action(PALETTE, tr!("Command palette"), IconId::Keyboard),
         action(FIND, tr!("Search mail"), IconId::Search),
+        action(HOME, tr!("Show Home"), IconId::Home),
         action(MAIL, tr!("Show mail"), IconId::Inbox),
         action(SENT, tr!("Show sent mail"), IconId::Send),
         action(LATER, tr!("Show later: snoozed, pins and parked"), IconId::Pin),
@@ -350,6 +354,7 @@ impl Default for Keymap {
     fn default() -> Self {
         let mut keymap = Self::empty();
         keymap.bind(FIND, KeyboardShortcut::new(Modifiers::COMMAND, Key::F));
+        keymap.bind(HOME, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num0));
         keymap.bind(MAIL, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num1));
         keymap.bind(SETTINGS, KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma));
         keymap.bind(DONE, KeyboardShortcut::new(Modifiers::NONE, Key::D));

@@ -27,7 +27,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn app() -> InboxApp {
-    InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()))
+    InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()))
 }
 
 /// The sample window at `ppp` and text scale `percent` on the calendar in `view`.

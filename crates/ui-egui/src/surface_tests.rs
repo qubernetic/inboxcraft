@@ -22,6 +22,7 @@ const MAIL: Facts = Facts {
     one_pane_reader: false,
     mail: true,
     settings: false,
+    home: false,
 };
 
 /// The calendar.
@@ -29,6 +30,9 @@ const CALENDAR: Facts = Facts { mail: false, ..MAIL };
 
 /// The settings, shown from the mail: a place, not a surface in front.
 const SETTINGS: Facts = Facts { settings: true, ..MAIL };
+
+/// Home, a place without mail.
+const HOME: Facts = Facts { mail: false, home: true, ..MAIL };
 
 /// Whether `ctx`, in a pass with `events`, gives `escape` its answer; the pass is ended.
 fn in_a_pass<R>(events: Vec<Event>, run: impl FnOnce(&egui::Context) -> R) -> R {
@@ -101,6 +105,7 @@ fn every_surface_at_once_is_held_in_eight_and_the_place_stays_last() {
         one_pane_reader: true,
         mail: true,
         settings: false,
+        home: false,
     };
     let surfaces = of(all);
     assert_eq!(surfaces.all().len(), 8);
@@ -114,9 +119,10 @@ fn every_surface_at_once_is_held_in_eight_and_the_place_stays_last() {
 /// stacking: the actions it let run. Send is left out: its key needs the keyboard in the composer, which no surface
 /// is. Generated once from those functions (the test `draw::surface_old_tests`, removed with them), checked against
 /// `Surfaces::allows` there.
-const WINDOW: [&str; 22] = [
+const WINDOW: [&str; 23] = [
     "ui.palette.open",
     "ui.search.focus",
+    "ui.home.open",
     "ui.mail.show",
     "ui.sent.show",
     "ui.later.show",
@@ -157,9 +163,10 @@ const LIST: [&str; 11] = [
 /// What runs on the settings, with a modifier only: the window's keys but those of the mail (Undo, the views, Back,
 /// the held-back message, Snooze, the composer's fold). Under the sheet New message did not run; on the settings it
 /// shows the place the owner came from and opens the composer there.
-const ON_SETTINGS: [&str; 14] = [
+const ON_SETTINGS: [&str; 15] = [
     "ui.palette.open",
     "ui.search.focus",
+    "ui.home.open",
     "ui.mail.show",
     "ui.sent.show",
     "ui.later.show",
@@ -174,10 +181,15 @@ const ON_SETTINGS: [&str; 14] = [
     "ui.motion.toggle",
 ];
 
+/// What runs on Home, with a modifier or without (Home has no field the letters are for): the window's keys but those
+/// of the mail, the same rule as on the settings.
+const ON_HOME: [&str; 15] = ON_SETTINGS;
+
 /// What runs with a modifier beside the composer in front: the window's keys but Undo, the composer's text's.
-const COMPOSER: [&str; 21] = [
+const COMPOSER: [&str; 22] = [
     "ui.palette.open",
     "ui.search.focus",
+    "ui.home.open",
     "ui.mail.show",
     "ui.sent.show",
     "ui.later.show",
@@ -207,7 +219,7 @@ const EDITOR: [&str; 7] =
 type Row = (&'static str, Facts, &'static [&'static [&'static str]], &'static [&'static [&'static str]]);
 
 fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
-    let rows: [Row; 16] = [
+    let rows: [Row; 19] = [
         ("place", MAIL, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("float", Facts { float: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
         ("palette", Facts { palette: true, ..MAIL }, &[], &[]),
@@ -226,6 +238,9 @@ fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
         ("float_over_full_width", Facts { float: true, full_width: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
         ("float_over_composer", Facts { float: true, composer: true, ..MAIL }, &[], &[&COMPOSER]),
         ("palette_over_composer", Facts { palette: true, composer: true, ..MAIL }, &[], &[]),
+        ("home", HOME, &[&ON_HOME], &[&ON_HOME]),
+        ("float_over_home", Facts { float: true, ..HOME }, &[&ON_HOME], &[&ON_HOME]),
+        ("palette_over_home", Facts { palette: true, ..HOME }, &[], &[]),
     ];
     rows.into_iter()
         .map(|(name, facts, bare, command)| {
@@ -277,7 +292,7 @@ fn clock() -> Box<inboxcraft_time::FakeClock> {
 
 /// The sample window, `setup` done first, New message bound to Ctrl N.
 fn window(setup: impl FnOnce(&mut crate::InboxApp)) -> egui_kittest::Harness<'static, crate::InboxApp> {
-    let mut app = crate::InboxApp::new(crate::mailbox::Mailbox::new(crate::sample::session(clock()).unwrap(), clock()));
+    let mut app = crate::InboxApp::at_mail(crate::mailbox::Mailbox::new(crate::sample::session(clock()).unwrap(), clock()));
     app.keymap_mut().bind(keymap::COMPOSE, KeyboardShortcut::new(Modifiers::COMMAND, Key::N));
     setup(&mut app);
     let mut harness = egui_kittest::Harness::builder()

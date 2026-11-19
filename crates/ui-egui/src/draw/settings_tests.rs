@@ -21,7 +21,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn harness() -> Harness<'static, InboxApp> {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     let mut harness =
         Harness::builder().with_size(vec2(1200.0, 820.0)).with_theme(egui::Theme::Light).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
@@ -170,7 +170,7 @@ fn the_accounts_page_lists_every_account_with_its_address_and_the_nav_goes_back(
 
 #[test]
 fn a_window_that_adds_accounts_offers_add_account_above_the_list() {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())).with_accounts(
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())).with_accounts(
         std::sync::Arc::new(crate::onboard::NoKeychain),
         Box::<crate::onboard::NoDetect>::default(),
         Box::new(crate::workers::NoWorkers),
@@ -193,7 +193,7 @@ fn a_window_that_adds_accounts_offers_add_account_above_the_list() {
 #[test]
 fn the_window_frame_row_runs_ui_frame_set() {
     // Tall enough that the last row of the page is in view.
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     let mut harness =
         Harness::builder().with_size(vec2(1200.0, 1400.0)).with_theme(egui::Theme::Light).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();

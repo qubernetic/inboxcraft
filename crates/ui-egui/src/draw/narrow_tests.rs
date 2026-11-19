@@ -22,7 +22,7 @@ fn clock() -> Box<FakeClock> {
 
 /// The sample window `width` wide at `percent` text, nothing open yet.
 fn window(width: f32, percent: u16) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
     let mut harness = Harness::builder().with_size(vec2(width, 800.0)).with_max_steps(12).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();

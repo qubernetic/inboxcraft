@@ -28,7 +28,7 @@ fn build(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
 }
 
 fn harness(theme: egui::Theme) -> Harness<'static, InboxApp> {
-    build(InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())), theme)
+    build(InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())), theme)
 }
 
 /// The sample window on the calendar screen.
@@ -98,7 +98,7 @@ fn the_rail_s_calendar_opens_this_week_and_mail_comes_back() {
 fn without_calendars_the_screen_says_there_are_none_yet() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let store = Memory::new(StoreConfig::default());
-        let app = InboxApp::new(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()));
+        let app = InboxApp::at_mail(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()));
         let mut harness = build(app, theme);
         press(&mut harness, "Calendar");
         assert!(harness.state().calendar().is_empty());
@@ -113,7 +113,7 @@ fn without_calendars_the_words_stand_on_the_whole_card_where_the_frame_has_them(
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let p = crate::theme::Palette::of(if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light });
         let store = Memory::new(StoreConfig::default());
-        let app = InboxApp::new(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()));
+        let app = InboxApp::at_mail(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()));
         let mut harness = build(app, theme);
         press(&mut harness, "Calendar");
         let block = harness.get_by_role_and_label(Role::Label, "No calendars yet.").rect();

@@ -38,7 +38,7 @@ fn sending(clock: &FakeClock, theme: egui::Theme) -> Harness<'static, InboxApp> 
         .with_size(vec2(1300.0, 820.0))
         .with_theme(theme)
         .with_max_steps(12)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
     harness.run();
     harness
 }
@@ -263,7 +263,7 @@ fn a_bounced_message_is_marked_in_its_row_and_its_reader_says_why() {
             .with_size(vec2(1300.0, 820.0))
             .with_theme(theme)
             .with_max_steps(12)
-            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
         harness.state_mut().mailbox_mut().open(Place::View(FolderRole::Sent));
         harness.run();
         harness.get_by_label_contains("not delivered").click();
@@ -298,7 +298,7 @@ fn a_refused_invitation_answer_offers_no_edit() {
             .with_size(vec2(1300.0, 820.0))
             .with_theme(theme)
             .with_max_steps(12)
-            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
         harness.state_mut().mailbox_mut().open(Place::Outbox);
         harness.run();
         assert!(harness.state().mailbox().outbox().first().is_some_and(|row| row.invite_answer));

@@ -26,7 +26,7 @@ fn clock() -> Box<FakeClock> {
 
 fn app(kept: &Kept, workers: FakeWorkers) -> InboxApp {
     let detect = Proposed::new(proposal(Source::Autoconfig));
-    InboxApp::new(mailbox()).with_accounts(Arc::new(kept.clone()), Box::new(detect), Box::new(workers))
+    InboxApp::at_mail(mailbox()).with_accounts(Arc::new(kept.clone()), Box::new(detect), Box::new(workers))
 }
 
 fn harness(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
@@ -223,7 +223,7 @@ fn opening_the_form_from_outside_opens_it_on_the_sheet() {
 
 #[test]
 fn a_window_without_onboarding_offers_nothing() {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     assert!(!app.can_add());
     let harness = harness(app, egui::Theme::Light);
     assert_eq!(harness.query_all_by_label("Add account").count(), 0);
@@ -232,7 +232,7 @@ fn a_window_without_onboarding_offers_nothing() {
 }
 
 fn harness_empty() -> Harness<'static, InboxApp> {
-    harness(InboxApp::new(mailbox()), egui::Theme::Light)
+    harness(InboxApp::at_mail(mailbox()), egui::Theme::Light)
 }
 
 #[test]
@@ -567,7 +567,7 @@ fn the_typed_form_outlasts_every_way_out_of_the_settings() {
         // whose command line has New message.
         let sample = matches!(way, "index place" | "mailbox" | "account picker" | "New message");
         let app = if sample {
-            InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()))
+            InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()))
         } else {
             app(&Kept::default(), FakeWorkers::passing())
         };
@@ -1770,7 +1770,7 @@ fn a_line_under_a_server_row_says_when_its_encryption_is_unusual_for_its_port_an
 /// The add form open over a Detect that answers `proposal`, at `percent` text, carol@example.org typed and Detect pressed.
 fn detected_by(proposal: crate::onboard::Proposal, theme: egui::Theme, percent: u16) -> Harness<'static, InboxApp> {
     let mut app =
-        InboxApp::new(mailbox()).with_accounts(Arc::new(Kept::default()), Box::new(Proposed::new(proposal)), Box::new(FakeWorkers::passing()));
+        InboxApp::at_mail(mailbox()).with_accounts(Arc::new(Kept::default()), Box::new(Proposed::new(proposal)), Box::new(FakeWorkers::passing()));
     app.set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
     let mut harness = harness(app, theme);
     harness.state_mut().onboarding_mut().0.open();
@@ -1875,7 +1875,7 @@ fn a_hostile_host_name_in_the_unchecked_line_stays_in_the_form() {
 #[test]
 fn leaving_the_form_while_detect_asks_stops_the_run_and_the_buttons_come_back() {
     let held = crate::onboard::tests::Held::new(vec![crate::onboard::tests::found_at("imap.late.example.org", None, "carol@example.org")]);
-    let app = InboxApp::new(mailbox()).with_accounts(Arc::new(Kept::default()), Box::new(held.clone()), Box::new(FakeWorkers::passing()));
+    let app = InboxApp::at_mail(mailbox()).with_accounts(Arc::new(Kept::default()), Box::new(held.clone()), Box::new(FakeWorkers::passing()));
     let mut harness = harness(app, egui::Theme::Dark);
     open_form(&mut harness);
     harness.state_mut().onboarding_mut().0.form_mut().address = "carol@example.org".to_owned();
@@ -1900,7 +1900,8 @@ fn leaving_the_form_while_detect_asks_stops_the_run_and_the_buttons_come_back() 
 fn a_server_detect_left_out_for_the_owners_says_in_its_note_that_it_was_not_checked() {
     let mut found = crate::onboard::tests::found_at("imap.example.org", None, "carol@example.org");
     found.imap[0].checked = crate::onboard::Checked::Refused;
-    let mut app = InboxApp::new(mailbox()).with_accounts(Arc::new(Kept::default()), Box::new(Proposed::new(found)), Box::new(FakeWorkers::passing()));
+    let mut app =
+        InboxApp::at_mail(mailbox()).with_accounts(Arc::new(Kept::default()), Box::new(Proposed::new(found)), Box::new(FakeWorkers::passing()));
     app.set_text_scale(crate::theme::TextScale::from_percent(100).unwrap());
     let mut harness = harness(app, egui::Theme::Light);
     harness.state_mut().onboarding_mut().0.open();

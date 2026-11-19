@@ -20,7 +20,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn harness() -> Harness<'static, InboxApp> {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     let mut harness =
         Harness::builder().with_size(vec2(1440.0, 900.0)).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
@@ -260,7 +260,7 @@ fn pressable_on_sheet(harness: &Harness<'static, InboxApp>, sheet: egui::Rect) -
 fn tab_reaches_every_control_of_every_page_and_each_page_rests() {
     for theme in [egui::Theme::Dark, egui::Theme::Light] {
         for (name, section) in NAMES.iter().zip(Section::ALL) {
-            let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+            let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
             let mut harness =
                 Harness::builder().with_size(vec2(1200.0, 2400.0)).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
             harness.state_mut().settings_mut().open_at(section);
@@ -290,7 +290,7 @@ fn tab_reaches_every_control_of_every_page_and_each_page_rests() {
 
 #[test]
 fn hostile_account_names_never_break_a_page() {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     // The engine cleans a name (controls out, at most its length): what is left is still long, wide and without spaces.
     let ids: Vec<u64> = app.mailbox().accounts().iter().map(|account| account.id).collect();
     assert!(ids.len() >= 2, "more than one account");
@@ -330,7 +330,7 @@ fn words_end(place: egui::Rect) -> f32 {
 
 #[test]
 fn the_accounts_and_shortcuts_pages_take_the_design_s_values() {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     let mut harness = Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_context_setup(crate::component::tests::record_layers)
@@ -396,7 +396,7 @@ fn calendar_rows_stand_56_apart_with_read_again_at_their_end_and_about_names_the
 #[test]
 fn a_window_too_small_for_the_sheet_draws_it_without_a_fault() {
     for size in [vec2(10.0, 10.0), vec2(30.0, 400.0), vec2(400.0, 20.0)] {
-        let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+        let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
         let mut harness = Harness::builder().with_size(size).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
         for section in Section::ALL {
             harness.state_mut().settings_mut().open_at(section);
@@ -409,7 +409,7 @@ fn a_window_too_small_for_the_sheet_draws_it_without_a_fault() {
 
 #[test]
 fn a_page_with_many_accounts_lays_out_the_rows_in_sight_and_tab_still_reaches_every_one() {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     for n in 0..40 {
         let account = serde_json::json!({
             "address": format!("many{n}@example.org"),
@@ -440,7 +440,7 @@ fn a_page_with_many_accounts_lays_out_the_rows_in_sight_and_tab_still_reaches_ev
 
 #[test]
 fn tab_to_a_control_below_the_page_s_view_scrolls_the_page_to_it() {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     // Too low for the whole Appearance page: its last row, the window frame, starts out of sight.
     let mut harness = Harness::builder().with_size(vec2(1100.0, 600.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.state_mut().settings_mut().open_at(Section::Appearance);
@@ -497,7 +497,7 @@ fn painted_texts(harness: &Harness<'static, InboxApp>) -> Vec<(String, egui::Rec
 fn at_every_text_size_the_section_count_stands_whole() {
     for percent in [90, 100, 110, 120, 130] {
         for section in [Section::Appearance, Section::Accounts, Section::Shortcuts] {
-            let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+            let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
             let mut harness = Harness::builder()
                 .with_size(vec2(1200.0, 820.0))
                 .with_context_setup(crate::theme::install_fonts)
@@ -513,7 +513,7 @@ fn at_every_text_size_the_section_count_stands_whole() {
 
 #[test]
 fn shift_tab_round_a_page_with_many_accounts_reaches_the_last_account() {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     for n in 0..40 {
         let account = serde_json::json!({ "address": format!("many{n}@example.org"), "imap": { "host": "imap.example.org", "security": "tls" } });
         app.mailbox_mut().run("account.add", &account).unwrap();
@@ -542,7 +542,7 @@ fn shift_tab_round_a_page_with_many_accounts_reaches_the_last_account() {
 
 /// The sample with 40 more accounts, on the Sending page at `percent` in a window `size`.
 fn many_on_sending(size: egui::Vec2, percent: u16) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     for n in 0..40 {
         let account = serde_json::json!({ "address": format!("many{n}@example.org"), "imap": { "host": "imap.example.org", "security": "tls" } });
         app.mailbox_mut().run("account.add", &account).unwrap();

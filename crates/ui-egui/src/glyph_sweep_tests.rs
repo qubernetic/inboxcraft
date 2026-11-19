@@ -282,7 +282,7 @@ fn landed(app: &InboxApp, step: Step) {
 /// The window over the sample mailbox and the sweep's mail.
 fn hostile_app() -> InboxApp {
     let (store, _) = hostile_store();
-    InboxApp::new(Mailbox::new(sample::session_over(store, clock()).unwrap(), clock()))
+    InboxApp::at_mail(Mailbox::new(sample::session_over(store, clock()).unwrap(), clock()))
 }
 
 const WINDOW: egui::Vec2 = vec2(1300.0, 820.0);

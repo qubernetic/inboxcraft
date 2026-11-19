@@ -33,7 +33,7 @@ fn harness_over(mailbox: Mailbox, theme: egui::Theme) -> Harness<'static, InboxA
         .with_size(vec2(1300.0, 820.0))
         .with_theme(theme)
         .with_max_steps(12)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
     harness.run();
     harness
 }
@@ -635,7 +635,7 @@ fn composing_over(mailbox: Mailbox) -> Harness<'static, InboxApp> {
         // The composer's wipe runs 300 ms: 18 frames.
         .with_max_steps(40)
         .with_step_dt(1.0 / 60.0)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
     harness.run();
     harness.get_by_role_and_label(Role::Button, "New message").click();
     harness.run();
@@ -1185,7 +1185,7 @@ fn opening_the_held_back_message_beside_the_docked_composer_opens_it_as_a_press_
         let mut harness = Harness::builder()
             .with_size(vec2(width, 820.0))
             .with_max_steps(12)
-            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
         harness.run();
         harness.get_by_role_and_label(Role::Button, "New message").click();
         harness.run();
@@ -1314,7 +1314,7 @@ fn the_composer_wipes_in_over_300_ms_then_rests() {
         .with_size(vec2(1300.0, 820.0))
         .with_max_steps(60)
         .with_step_dt(0.05)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
     harness.run();
     harness.get_by_role_and_label(Role::Button, "New message").click();
     harness.step();
@@ -1342,7 +1342,7 @@ fn typing_during_the_wipe_ends_it_at_once() {
         .with_size(vec2(1300.0, 820.0))
         .with_max_steps(60)
         .with_step_dt(0.02)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
     harness.run();
     harness.get_by_role_and_label(Role::Button, "New message").click();
     harness.step();
@@ -1446,7 +1446,7 @@ fn answered_to_all() -> (Harness<'static, InboxApp>, u64) {
         .with_size(vec2(1300.0, 820.0))
         .with_max_steps(60)
         .with_step_dt(1.0 / 60.0)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
     harness.run();
     let rota = harness.state().mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id).unwrap();
     // Opened as an act of the window does it, after a frame was drawn: the next frame is the first to paint it.
@@ -1582,7 +1582,7 @@ fn wiping() -> Harness<'static, InboxApp> {
         .with_size(vec2(1300.0, 820.0))
         .with_max_steps(60)
         .with_step_dt(0.02)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
     harness.run();
     harness.get_by_role_and_label(Role::Button, "New message").click();
     harness.step();
@@ -1622,7 +1622,7 @@ fn with_reduced_motion_the_composer_is_there_at_once() {
         .with_size(vec2(1300.0, 820.0))
         .with_max_steps(60)
         .with_step_dt(0.02)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
     harness.run();
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, keymap::MOTION);
@@ -1644,7 +1644,7 @@ fn control_characters_and_right_to_left_text_in_a_draft_hold_the_layout() {
         .with_size(vec2(1300.0, 820.0))
         .with_max_steps(12)
         .allow_missing_glyphs()
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(sending_mailbox()));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(sending_mailbox()));
     harness.run();
     let mailbox = harness.state_mut().mailbox_mut();
     let id = mailbox.run_for_agent("compose.new", &json!({})).unwrap()["id"].as_u64().unwrap();
@@ -1701,7 +1701,7 @@ fn many_templates_in_a_short_window_stay_in_it() {
     let mut harness = Harness::builder()
         .with_size(vec2(1100.0, 520.0))
         .with_max_steps(12)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
     harness.run();
     for n in 0..40 {
         let params = json!({ "account": 1, "name": format!("Template {n:02}"), "text": "Thank you." });
@@ -1774,7 +1774,7 @@ fn in_a_narrow_pane_the_foot_s_coming_soon_gives_way_and_nothing_paints_through_
         let mut harness = Harness::builder()
             .with_size(vec2(width, 800.0))
             .with_max_steps(12)
-            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
         harness.run();
         harness.get_by_role_and_label(Role::Button, "New message").click();
         harness.run();
@@ -1835,7 +1835,7 @@ fn attaching_a_file_coming_soon_is_drawn_in_muted_as_its_frame() {
 /// The sample mail that can send, the composer open in the reader's place of a window `width` wide, text at `percent`,
 /// a recipient typed so Send can be pressed.
 fn composing_at(width: f32, percent: u16) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(sending_mailbox());
+    let mut app = InboxApp::at_mail(sending_mailbox());
     app.set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
     let mut harness = Harness::builder().with_size(vec2(width, 800.0)).with_max_steps(12).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();

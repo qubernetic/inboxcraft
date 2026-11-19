@@ -33,7 +33,7 @@ fn build(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
 }
 
 fn app() -> InboxApp {
-    InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()))
+    InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()))
 }
 
 /// The sheet open on Shortcuts, through its section in the nav.

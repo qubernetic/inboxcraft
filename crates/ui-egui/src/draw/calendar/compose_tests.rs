@@ -53,7 +53,7 @@ fn both_at(size: egui::Vec2) -> Harness<'static, InboxApp> {
         .with_theme(egui::Theme::Dark)
         .with_max_steps(40)
         .with_step_dt(1.0 / 60.0)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(sending()));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(sending()));
     harness.run();
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);

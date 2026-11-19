@@ -5,7 +5,8 @@
 //! reader of the selected message on the right, and an error banner on top while a command's error stands. The
 //! reader can fill the window (full width); Escape leaves that. A window that can add accounts shows "Add account"
 //! in the empty window, which shows the settings on Accounts; accounts are added and listed there.
-//! The index holds the places and the mailboxes: its SETTINGS (or its key) shows the settings, a place of their own, in
+//! The window starts on Home ([`Screen::Home`], the brief of today, `draw/home.rs`) when there is an account, and on the
+//! mail with none. The index holds the places and the mailboxes: its SETTINGS (or its key) shows the settings, a place of their own, in
 //! the body; another place, a mailbox, New message or SETTINGS again leave them, and a form being typed stays as it was
 //! left, all but its password.
 //!
@@ -105,6 +106,9 @@ fn last_keyboard_id() -> egui::Id {
 /// Where the toasts of a frame stand: the body, and the composer drawn over it this pass with its foot.
 type ToastRoom = (Rect, Option<(Rect, Rect)>);
 
+/// The pattern of Home's character field.
+const HOME_FIELD_SEED: u32 = 0;
+
 /// How long the toast after an act shows, in seconds; its Undo works until then.
 pub const TOAST_SECONDS: f64 = 6.0;
 
@@ -118,6 +122,8 @@ struct MailAsked {
 /// The screen the window shows beside the index.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Screen {
+    /// Home: the brief of today, the start place when there is an account.
+    Home,
     /// The folders, the list and the reader.
     #[default]
     Mail,
@@ -278,6 +284,10 @@ pub struct InboxApp {
     menu: Option<egui::Id>,
     /// The input time the draft was last kept by [`InboxApp::keep_draft`], in seconds.
     kept_at: Option<f64>,
+    /// Home as last built, built again only while it shows and something it shows changed.
+    home: crate::home::Kept,
+    /// Home's character field, kept across frames: its cells are built for its rect, not every frame.
+    field: crate::field::Field,
 }
 
 /// While the person types in the composer, its draft is kept at most once in this many seconds: keeping it runs
@@ -379,6 +389,8 @@ impl InboxApp {
     /// attachments through `save`.
     #[must_use]
     pub fn with_outside(mailbox: Mailbox, fetch: Box<dyn Fetch>, save: Box<dyn Save>) -> Self {
+        // Home is the start place once there is an account; with none the window offers to add one, as before.
+        let screen = if mailbox.accounts().is_empty() { Screen::Mail } else { Screen::Home };
         Self {
             mailbox,
             reader: Reader::new(fetch, save),
@@ -411,7 +423,7 @@ impl InboxApp {
             kept_notify: None,
             kept_week: None,
             desk: None,
-            screen: Screen::default(),
+            screen,
             calendar: Calendar::default(),
             palette: Palette::default(),
             onboarding: Onboarding::default(),
@@ -436,7 +448,28 @@ impl InboxApp {
             later_picker: false,
             kept_at: None,
             menu: None,
+            home: crate::home::Kept::default(),
+            field: crate::field::Field::new(HOME_FIELD_SEED),
         }
+    }
+
+    /// The window over `mailbox` on the mail, not on Home: the tests built on the mail start there, as the window did
+    /// before Home was its start place.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn at_mail(mailbox: Mailbox) -> Self {
+        let mut app = Self::new(mailbox);
+        app.show_mail();
+        app
+    }
+
+    /// [`InboxApp::with_outside`] on the mail, as [`InboxApp::at_mail`].
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_outside_at_mail(mailbox: Mailbox, fetch: Box<dyn Fetch>, save: Box<dyn Save>) -> Self {
+        let mut app = Self::with_outside(mailbox, fetch, save);
+        app.show_mail();
+        app
     }
 
     /// The same window, offering to add accounts: their passwords go into `keychain`, Detect runs through `detect`,
@@ -518,14 +551,14 @@ impl InboxApp {
         self.desk = Some(desk);
     }
 
-    /// The action an index place runs, as its key would; Home is coming soon and runs nothing.
+    /// The action an index place runs, as its key would.
     fn index_action(place: index::Place) -> Option<&'static str> {
         match place {
+            index::Place::Home => Some(keymap::HOME),
             index::Place::Mail => Some(keymap::MAIL),
             index::Place::Calendar => Some(keymap::CALENDAR),
             index::Place::Later => Some(keymap::LATER),
             index::Place::Settings => Some(keymap::SETTINGS),
-            index::Place::Home => None,
         }
     }
 
@@ -765,11 +798,12 @@ impl InboxApp {
     }
 
     /// Whether the action `id` can run now: an act on a row needs a selected message, Undo an act in the history, the
-    /// reader's full width an open message; on the settings nothing of the mail and nothing of the calendar runs; an id
-    /// the window does not know never runs.
+    /// reader's full width an open message; on the settings and on Home nothing of the mail and nothing of the calendar
+    /// runs; an id the window does not know never runs.
     #[must_use]
     pub fn can_run(&self, id: &str) -> bool {
-        if self.settings.is_open() && (crate::surface::mail_only(id) || keymap::CALENDAR_KEYS.contains(&id)) {
+        let apart = self.settings.is_open() || self.screen == Screen::Home;
+        if apart && (crate::surface::mail_only(id) || keymap::CALENDAR_KEYS.contains(&id)) {
             return false;
         }
         match id {
@@ -848,6 +882,7 @@ impl InboxApp {
                 }
             }
             keymap::CALENDAR => self.show_calendar(),
+            keymap::HOME => self.show_home(),
             keymap::COMPOSE => {
                 // The settings draw no composer: New message shows the place the owner came from.
                 self.leave_settings();
@@ -1150,6 +1185,7 @@ impl InboxApp {
     fn surfaces(&self, ctx: &egui::Context) -> Surfaces {
         let settings = self.settings.is_open();
         let mail = self.screen == Screen::Mail && !settings;
+        let home = self.screen == Screen::Home && !settings;
         Surfaces::new(Facts {
             float: crate::component::popup::any_open(ctx),
             palette: self.palette.is_open(),
@@ -1160,6 +1196,7 @@ impl InboxApp {
             one_pane_reader: mail && one_pane(ctx) && !self.docked() && self.message_in_front() && self.reader.open_id().is_some(),
             mail,
             settings,
+            home,
         })
     }
 
@@ -1318,8 +1355,14 @@ impl InboxApp {
         self.settings.open_at(Section::Shortcuts);
     }
 
-    /// Shows the mail, leaving the settings and the calendar.
-    fn show_mail(&mut self) {
+    /// Shows Home, leaving the settings.
+    pub fn show_home(&mut self) {
+        self.leave_settings();
+        self.screen_to(Screen::Home);
+    }
+
+    /// Shows the mail, leaving the settings, the calendar and Home.
+    pub(crate) fn show_mail(&mut self) {
         self.leave_settings();
         self.screen_to(Screen::Mail);
     }
@@ -1369,7 +1412,8 @@ impl InboxApp {
         let focused = ctx.memory(|memory| memory.focused().is_some()) && self.list_row.is_none();
         // A field with the focus, or a surface whose fields the letters are for.
         let quiet = focused || surfaces.quiet();
-        let typing = quiet || self.screen == Screen::Calendar;
+        // The mail's own keys (an act on a row) rest wherever the mail is not shown: the calendar, Home.
+        let typing = quiet || self.screen != Screen::Mail;
         let quiet = focused || held || surfaces.has(Surface::Composer);
         if held {
             return Keys { ran: Vec::new(), escape: None, to_place: false, typing, quiet };
@@ -1846,6 +1890,18 @@ impl InboxApp {
         }
     }
 
+    /// Discards the kept draft `draft` as the composer's Discard does (`compose.discard`, here and on the server, with
+    /// the same toast); the draft being written, when it is that one, closes with it.
+    fn discard_draft(&mut self, draft: u64) {
+        if self.composer.as_ref().is_some_and(|composer| composer.draft() == draft) {
+            return self.discard_composer();
+        }
+        match self.mailbox.run("compose.discard", &json!({ "id": draft })) {
+            Ok(_) => self.say(tr!("Draft discarded")),
+            Err(error) => self.mailbox.fail(error),
+        }
+    }
+
     /// Removes the draft being written here and on the server.
     fn discard_composer(&mut self) {
         let Some(composer) = &self.composer else { return };
@@ -2237,6 +2293,9 @@ impl InboxApp {
         }
         if self.themed.is_none() {
             theme::install_fonts(ctx);
+            // Command and 0 shows Home: egui's own zoom keys (Command and +, -, 0) would take it first. The text size is
+            // the Appearance page's.
+            ctx.options_mut(|options| options.zoom_with_keyboard = false);
         }
         Theme::apply(ctx, &Look::of(&chosen));
         // egui follows the system by itself; a first frame that follows it leaves the context's mode alone.
@@ -2282,7 +2341,8 @@ impl InboxApp {
         // capture and the event editor take theirs before anything under them. On the settings, a place, an Esc with
         // nothing in front closes nothing.
         let setting = self.settings.is_open();
-        let to_place = to_place && !setting;
+        // On Home, a place, an Esc with nothing in front closes nothing either.
+        let to_place = to_place && !setting && self.screen != Screen::Home;
         // The settings shown in the place of what was, and the palette coming over the window, close the lists, menus and
         // pickers open.
         crate::component::popup::covered(ui.ctx(), [setting, self.palette.is_open()]);
@@ -2336,12 +2396,15 @@ impl InboxApp {
         let (dismiss, banner) = (early.0 | late.0, early.1.or(late.1));
         layers.capped(banner);
         let mut on_calendar = Vec::new();
+        let mut on_home = None;
         let mut composer_left = half;
         self.list_hidden = false;
         if setting {
             changed = self.settings_place(&mut body, &theme);
         } else if self.screen == Screen::Calendar {
             on_calendar = self.calendar_screen(&mut body, &theme, &mut layers);
+        } else if self.screen == Screen::Home {
+            on_home = self.home_place(&mut body, &theme);
         } else if self.mailbox.accounts().is_empty() {
             add = self.welcome(&mut body, &theme, &mut layers);
         } else if !full {
@@ -2450,6 +2513,7 @@ impl InboxApp {
             || gained.is_some()
             || add
             || !on_calendar.is_empty()
+            || on_home.is_some()
             || !composed.is_empty()
             || !drawn.asked.is_empty();
         if busy {
@@ -2466,6 +2530,7 @@ impl InboxApp {
             self.mailbox.done_all(&ids);
         }
         self.apply_calendar(on_calendar);
+        ran.extend(self.settle_home(ui.ctx(), &surfaces, on_home));
         for asked in drawn.asked {
             self.apply(ui, asked);
         }
@@ -2541,7 +2606,11 @@ impl InboxApp {
             return;
         }
         if self.mailbox.appearance().frame == WindowFrame::Strip {
-            let place = if self.screen == Screen::Calendar { tr!("Calendar").to_owned() } else { self.mailbox.title() };
+            let place = match self.screen {
+                Screen::Calendar => tr!("Calendar").to_owned(),
+                Screen::Home => tr!("Home").to_owned(),
+                Screen::Mail => self.mailbox.title(),
+            };
             let title = tr!("{place} · InboxCraft", place = place);
             // The strip fills the command line; the frame's hairline under it is its bottom edge.
             Panel::top("window-strip")
@@ -2621,11 +2690,13 @@ impl InboxApp {
         .inner
     }
 
-    /// The place the index shows selected: Settings while they are shown (`setting`), else the calendar, Later
+    /// The place the index shows selected: Settings while they are shown (`setting`), else Home, the calendar, Later
     /// while a pile is shown, or the mail.
     fn index_place(&self, setting: bool) -> index::Place {
         if setting {
             index::Place::Settings
+        } else if self.screen == Screen::Home {
+            index::Place::Home
         } else if self.screen == Screen::Calendar {
             index::Place::Calendar
         } else if matches!(self.mailbox.place(), Place::Later(_)) {
@@ -2659,6 +2730,82 @@ impl InboxApp {
         // The palette lies over the screen's floats: it has the keys.
         let over = self.palette.is_open();
         calendar::screen(ui, theme, &self.keymap, &self.calendar, layers, over)
+    }
+
+    /// Home in the body: the model kept ([`crate::home::Kept`], built again only when what it shows changed), the
+    /// character field kept, at the motion level the settings say, no emblem; a frame is asked for when the clock next
+    /// changes what it shows. What was pressed on it.
+    fn home_place(&mut self, ui: &mut Ui, theme: &Theme) -> Option<home::Asked> {
+        let rect = ui.available_rect_before_wrap();
+        let level = self.motion_level();
+        let shown = self.home.current(&mut self.mailbox);
+        let stage = home::Stage { field: &mut self.field, emblem: None, level };
+        let drawn = home::show(ui, theme, &self.keymap, shown, rect, stage);
+        if let Some(due) = self.home.due_in(&self.mailbox) {
+            ui.ctx().request_repaint_after(due);
+        }
+        drawn.asked
+    }
+
+    /// After a frame: what was pressed on Home applied, under nothing that holds the keys (a screen reader's activate
+    /// reaches it there); Home not shown, its next frame builds it again. The action to run, if one was asked.
+    fn settle_home(&mut self, ctx: &egui::Context, surfaces: &Surfaces, asked: Option<home::Asked>) -> Option<&'static str> {
+        let action = asked.filter(|_| !surfaces.held()).and_then(|asked| self.apply_home(ctx, asked));
+        if self.settings.is_open() || self.screen != Screen::Home {
+            self.home.forget();
+        }
+        action
+    }
+
+    /// Applies what was pressed on Home: a count's tile shows its mailbox or pile, a draft row opens that draft in the
+    /// composer (the draft being written is kept first, as every other way to a draft does), its discard discards it as
+    /// the composer's Discard does, the agenda's link shows the calendar on today, the buttons do what they say. An
+    /// action that runs as its key does is given back, to run through [`InboxApp::run_action`] and its gates.
+    fn apply_home(&mut self, ctx: &egui::Context, asked: home::Asked) -> Option<&'static str> {
+        use crate::home::Counted;
+        use home::Asked;
+        let mail = |app: &mut Self, place: Place| {
+            app.show_mail();
+            app.mailbox.open(place);
+            app.search.clear();
+        };
+        match asked {
+            Asked::Count(Counted::ToRead) => mail(self, Place::View(Role::Inbox)),
+            Asked::Count(Counted::ToScreen) => mail(self, Place::Senders),
+            Asked::Count(Counted::BackToday) => mail(self, Place::Later(Pile::Snoozed)),
+            Asked::Count(Counted::Outbox | Counted::NotSent) | Asked::OpenOutbox => mail(self, Place::Outbox),
+            Asked::AllDrafts => mail(self, Place::View(Role::Drafts)),
+            Asked::Week | Asked::Today => {
+                self.show_calendar();
+                let view = if asked == Asked::Week { crate::calendar::View::Week } else { crate::calendar::View::Day };
+                self.calendar.set_view(&mut self.mailbox, view);
+                self.calendar.go_today(&mut self.mailbox);
+            }
+            Asked::OpenDraft(draft) => {
+                self.reopen(draft);
+                ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
+            }
+            Asked::DiscardDraft(draft) => self.discard_draft(draft),
+            Asked::ReadMail => return Some(keymap::MAIL),
+            Asked::Write => return Some(keymap::COMPOSE),
+            Asked::Calendar => return Some(keymap::CALENDAR),
+            Asked::AddAccount | Asked::OpenAccount => self.open_accounts(),
+            // The window has no way to the sample mail of its own: it is another start (`just run-sample`).
+            Asked::SampleMail => {}
+        }
+        None
+    }
+
+    /// The level the window moves at, as the settings keep it ([`inboxcraft_engine::appearance::effective`]): the
+    /// owner's level once chosen, else none while the computer asks for less motion, else the default.
+    fn motion_level(&self) -> crate::field::Level {
+        use inboxcraft_engine::appearance::{MotionLevel, effective};
+        let appearance = self.appearance();
+        match effective(appearance.motion_level(), appearance.motion_chosen(), motion::system_default(None)) {
+            MotionLevel::Full => crate::field::Level::Full,
+            MotionLevel::Reduced => crate::field::Level::Reduced,
+            MotionLevel::Off => crate::field::Level::Off,
+        }
     }
 
     /// The settings in the body; what was asked on them.
@@ -2978,6 +3125,9 @@ mod float_cover_tests;
 #[cfg(test)]
 #[path = "frame_tests.rs"]
 mod frame_tests;
+#[cfg(test)]
+#[path = "home_place_tests.rs"]
+mod home_place_tests;
 #[cfg(test)]
 #[path = "invite_tests.rs"]
 mod invite_tests;

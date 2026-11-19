@@ -25,7 +25,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn sample_app() -> InboxApp {
-    InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()))
+    InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()))
 }
 
 fn harness_with(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
@@ -439,7 +439,7 @@ fn an_error_shows_in_a_banner_until_dismissed() {
 #[test]
 fn without_accounts_the_window_says_how_to_look_around() {
     let session = Session::new(Box::new(Memory::new(StoreConfig::default())), clock()).unwrap();
-    let harness = harness_with(InboxApp::new(Mailbox::new(session, clock())), egui::Theme::Dark);
+    let harness = harness_with(InboxApp::at_mail(Mailbox::new(session, clock())), egui::Theme::Dark);
     harness.get_by_label("This window cannot add an account.");
     harness.get_by_label_contains("--sample");
     assert!(harness.query_by_label("Accounts").is_none());
@@ -700,7 +700,7 @@ fn one_line_stands_between_the_index_and_the_body() {
 fn the_index_keeps_its_line_where_no_pane_stands_beside_it() {
     let theme = Theme::new(Mode::Dark, TextScale::default());
     let session = Session::new(Box::new(Memory::new(StoreConfig::default())), clock()).unwrap();
-    let harness = harness_with(InboxApp::new(Mailbox::new(session, clock())), egui::Theme::Dark);
+    let harness = harness_with(InboxApp::at_mail(Mailbox::new(session, clock())), egui::Theme::Dark);
     let columns = upright_line_columns(&harness, theme.palette.line, index_right(&harness, &theme));
     assert_eq!(columns.len(), 1, "the frame's hairline: {columns:?}");
 }

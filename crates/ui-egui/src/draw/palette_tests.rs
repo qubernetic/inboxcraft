@@ -21,7 +21,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn harness(theme: egui::Theme) -> Harness<'static, InboxApp> {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     let mut harness = Harness::builder()
         .with_size(vec2(1200.0, 820.0))
         .with_theme(theme)

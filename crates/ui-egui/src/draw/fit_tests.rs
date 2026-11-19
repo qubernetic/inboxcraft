@@ -42,7 +42,7 @@ enum Scene {
 const SCENES: [Scene; 6] = [Scene::List, Scene::Thread, Scene::Details, Scene::Full, Scene::Onboard, Scene::Settings];
 
 fn app(scene: Scene, scale: TextScale) -> InboxApp {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_text_scale(scale);
     let (folder, subject) = match scene {
         Scene::List | Scene::Onboard | Scene::Settings => (None, "Photos from the coast walk"),

@@ -30,7 +30,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn app() -> InboxApp {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     app.mailbox_mut().set_inbox_view(InboxView::List);
     app

@@ -108,7 +108,7 @@ fn any_size_from_the_desktop_lays_out_as_at_least_800_wide() {
 /// The sample window `size` points large, drawn once.
 fn window(size: egui::Vec2) -> Harness<'static, InboxApp> {
     let clock = || Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()));
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     let mut harness =
         Harness::builder().with_size(size).with_context_setup(crate::theme::install_fonts).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
@@ -177,9 +177,10 @@ fn the_index_s_places_and_mailboxes_go_where_the_rail_and_the_folder_pane_went()
     // A mailbox pressed on the calendar shows the mail, on that mailbox.
     press(&mut harness, "Sent");
     assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (crate::Screen::Mail, Place::View(Folder::Sent)));
-    // Home is coming soon: a press does nothing.
+    // Home is a place: a press shows it, the mail kept as it was under it.
     press(&mut harness, "Home");
-    assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (crate::Screen::Mail, Place::View(Folder::Sent)));
+    assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (crate::Screen::Home, Place::View(Folder::Sent)));
+    assert_eq!(shown(&harness, "Home"), Some(Toggled::True));
     // Settings is a place, the one shown while it shows; Esc does not close it, SETTINGS again shows the place left.
     press(&mut harness, "Settings");
     assert!(harness.state().settings().is_open());
@@ -189,7 +190,11 @@ fn the_index_s_places_and_mailboxes_go_where_the_rail_and_the_folder_pane_went()
     assert!(harness.state().settings().is_open());
     press(&mut harness, "Settings");
     assert!(!harness.state().settings().is_open());
-    assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (crate::Screen::Mail, Place::View(Folder::Sent)));
+    assert_eq!(
+        (harness.state().screen(), harness.state().mailbox().place()),
+        (crate::Screen::Home, Place::View(Folder::Sent)),
+        "Home, left for them"
+    );
     assert_eq!(shown(&harness, "Settings"), Some(Toggled::False));
 }
 
@@ -289,8 +294,8 @@ fn tab_walks_new_message_in_the_command_line_before_the_index_under_it() {
         harness.run();
         walked.push(focused(&harness).unwrap_or_default());
     }
-    // Home is coming soon and is no stop.
-    assert_eq!(walked, ["New message", "Mail", "Inbox, 4 unread"], "the drawn order, top down");
+    // Home is a place and a stop, first of the index.
+    assert_eq!(walked, ["New message", "Home", "Mail"], "the drawn order, top down");
     harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
     harness.run();
     harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);

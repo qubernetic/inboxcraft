@@ -279,7 +279,8 @@ fn clock() -> Box<FakeClock> {
 
 /// The sample window with the message of `subject` open, in `folder` or the unified inbox.
 fn opened(folder: Option<u64>, subject: &str) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::with_outside(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(Recorder::default()), Box::new(NoSave));
+    let mut app =
+        InboxApp::with_outside_at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(Recorder::default()), Box::new(NoSave));
     if let Some(folder) = folder {
         app.mailbox_mut().open(crate::mailbox::Place::Folder(folder));
     }
@@ -559,7 +560,7 @@ fn a_message_s_headings_are_set_as_the_frames_set_them() {
 
 /// The sample window with the message of `subject` open in `folder`, its remote pictures fetched through `fetch`.
 fn opened_with(fetch: &Recorder, folder: u64, subject: &str) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::with_outside(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(NoSave));
+    let mut app = InboxApp::with_outside_at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(NoSave));
     app.mailbox_mut().open(crate::mailbox::Place::Folder(folder));
     let id = app.mailbox().messages().iter().find(|row| row.subject == subject).unwrap().id;
     app.mailbox_mut().select(Some(id));

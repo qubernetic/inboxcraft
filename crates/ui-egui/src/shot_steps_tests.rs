@@ -177,7 +177,7 @@ fn a_step_that_reaches_a_command_only_the_owner_runs_fails_the_picture() {
 /// The sample window at the pictures' time, the second row selected.
 fn window() -> InboxApp {
     let clock = || Box::new(FakeClock::new(Timestamp::from_unix(SHOT_TIME, 0).unwrap()));
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     app.mailbox_mut().step(true);
     app.mailbox_mut().step(true);

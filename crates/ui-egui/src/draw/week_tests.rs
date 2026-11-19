@@ -38,7 +38,7 @@ fn sunday() -> Value {
 /// The sample's mail in a session that is not the sample's, as the owner's own mail would be.
 fn real_app() -> InboxApp {
     let session = Session::new(Box::new(sample::mailbox(Timestamp::from_unix(NOW, 0).unwrap()).unwrap()), clock()).unwrap();
-    let mut app = InboxApp::new(Mailbox::new(session, clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(session, clock()));
     app.set_reduce_motion(true);
     app
 }

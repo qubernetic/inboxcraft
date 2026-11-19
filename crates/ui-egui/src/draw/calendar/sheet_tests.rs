@@ -42,7 +42,7 @@ fn sending() -> Mailbox {
 
 /// The calendar's week in the app's own frame (the strip with the window's controls).
 fn window() -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(sending());
+    let mut app = InboxApp::at_mail(sending());
     app.set_own_frame(true);
     app.set_frame(WindowFrame::Strip);
     app.show_calendar();

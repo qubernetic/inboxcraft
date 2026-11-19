@@ -39,7 +39,7 @@ enum Shown {
 /// The sample window `size` big at `percent` text, its first message open in the reader and the toast `shown` risen
 /// (a second of steps: it shows for six).
 fn with_toast(size: (f32, f32), percent: u16, shown: Shown) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_text_scale(TextScale::from_percent(percent).unwrap());
     let id = app.mailbox().messages().first().map(|row| row.id).unwrap();
     app.mailbox_mut().select(Some(id));
