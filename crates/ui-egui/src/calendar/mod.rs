@@ -752,10 +752,10 @@ impl Calendar {
         sync::with(&self.sync, |tracker| tracker.view())
     }
 
-    /// The owner pressed "sync now" (or "try again"): the mailbox runs `calendar.sync` on its next round, unless a
-    /// sync is under way. Whether the press was taken.
-    pub fn ask_sync(&self) -> bool {
-        sync::with(&self.sync, sync::Tracker::ask)
+    /// The owner pressed "sync now" (or "try again"): `calendar.sync` runs now, unless a sync is under way. Whether it
+    /// ran.
+    pub fn sync_now(&mut self, mailbox: &mut Mailbox) -> bool {
+        mailbox.sync_calendars()
     }
 
     /// Shows the days in `view`, around the same day.

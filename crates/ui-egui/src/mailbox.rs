@@ -1440,7 +1440,6 @@ impl Mailbox {
                 false
             }
         };
-        changed |= self.sync_calendars();
         for _ in 0..MAX_PUMP_ROUNDS {
             if !self.pump_once(workers) {
                 break;
@@ -1454,11 +1453,11 @@ impl Mailbox {
         changed
     }
 
-    /// Runs `calendar.sync` when the owner pressed "sync now" at the calendar's foot since the last round, and only
-    /// then: the press is all that asks for it. The accounts it asked are followed from here
-    /// ([`crate::calendar::sync::Tracker`]). Whether a press was taken.
-    fn sync_calendars(&mut self) -> bool {
-        if !sync::with(&self.calendar_sync, Tracker::take_asked) {
+    /// Runs `calendar.sync` for the owner's press on "sync now" (or "try again") at the calendar's foot, the only thing
+    /// that asks for it, unless a sync is under way. The accounts it asked are followed from here
+    /// ([`crate::calendar::sync::Tracker`]). Whether it ran.
+    pub(crate) fn sync_calendars(&mut self) -> bool {
+        if !sync::with(&self.calendar_sync, |tracker| tracker.can_start()) {
             return false;
         }
         match self.run("calendar.sync", &json!({})) {

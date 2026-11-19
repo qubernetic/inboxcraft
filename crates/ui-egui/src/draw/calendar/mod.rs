@@ -97,6 +97,8 @@ pub(super) enum Asked {
     Save,
     /// The editor's Cancel: what was typed is thrown away.
     Cancel,
+    /// "sync now" or "try again" at the side panel's foot: the calendars' sync.
+    Sync,
     /// Esc or a press outside the editor: it closes when nothing was typed, else it says how to keep the typing.
     Leave(crate::component::popup::Leave),
 }

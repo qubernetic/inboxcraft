@@ -1242,6 +1242,9 @@ impl InboxApp {
                 calendar::Asked::Leave(leave) => calendar.leave_editor(leave == crate::component::popup::Leave::Escape),
                 calendar::Asked::More(day) => calendar.set_more(day),
                 calendar::Asked::PickDay(day) => calendar.pick_day(Some(day)),
+                calendar::Asked::Sync => {
+                    calendar.sync_now(mailbox);
+                }
             }
         }
     }
