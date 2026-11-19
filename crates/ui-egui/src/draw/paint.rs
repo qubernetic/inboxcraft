@@ -70,10 +70,42 @@ pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> A
     on_baseline(cut_within(ui.painter(), job, width.max(1.0)))
 }
 
-/// The run's width as its letters' advances add up: egui puts each letter on a rounded place, so the galley's own
-/// width can be a fraction under it.
+/// The run's width as its letters' advances add up, with the style's letter spacing (tracking) in every gap between two
+/// clusters: egui puts each letter on a rounded place, so the galley's own width can be a fraction under it. egui adds
+/// the spacing before every shaped cluster but a section's first, never after the last letter, so a run of `n`
+/// clusters has `n - 1` gaps. Its clusters are not in the galley: they are counted as the more of the grapheme clusters
+/// and the letters with an advance, so a gap is never missed (a flag or Thai sara am is two shaped clusters in one
+/// grapheme; a zero-width space is a cluster of no advance). A galley of several sections is measured with its widest
+/// spacing in every gap; a tightened style (a negative spacing) by its advances alone. Either way the run is never
+/// measured narrower than it is drawn. A run of no added spacing (every style but the tracked ones) is not counted.
 fn advances(galley: &Galley) -> f32 {
-    galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum()
+    let letters: f32 = galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum();
+    let spacing = galley.job.sections.iter().map(|section| section.format.extra_letter_spacing).fold(0.0_f32, f32::max);
+    if spacing <= 0.0 {
+        return letters;
+    }
+    letters + spacing * gaps(galley) as f32
+}
+
+/// The width the one cutting rule measures `galley` at ([`within`]): what a box that must hold the run whole, uncut,
+/// gives it.
+pub(crate) fn measured(galley: &Galley) -> f32 {
+    advances(galley)
+}
+
+/// How many gaps between clusters a galley's rows may show: per row, the more of its grapheme clusters and its letters
+/// with an advance, less one. A row's glyphs are at most one line, so this is bounded by what a line holds.
+fn gaps(galley: &Galley) -> usize {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    galley
+        .rows
+        .iter()
+        .map(|row| {
+            let shown: String = row.glyphs.iter().map(|glyph| glyph.chr).collect();
+            let advancing = row.glyphs.iter().filter(|glyph| glyph.advance_width > 0.0).count();
+            shown.graphemes(true).count().max(advancing).saturating_sub(1)
+        })
+        .sum()
 }
 
 /// How far a run's added-up advances may pass its box and still fit: what adding up the advances in `f32` drifts by.
