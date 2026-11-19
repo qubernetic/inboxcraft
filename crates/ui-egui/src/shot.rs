@@ -17,7 +17,7 @@
 //! out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `empty`, `form` (typed by hand), `invalid` (a port and a CalDAV address typed wrong), `detected` (after
-//! Detect), `checking` (the third step under way), `passed` or `failed` (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
+//! Detect), `checking` (the third step under way), `passed` or `failed` (the certificate refused); the check is scripted and nothing connects; it shows on the settings' Accounts
 //! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page,
 //! `shortcuts` set to `true` the Shortcuts page, where `capture` names the action waiting for a key
 //! (`ui.calendar.show`), `sending` set to `true` the Sending page, `triage` set to `true` the Triage page,
@@ -152,25 +152,25 @@ pub struct Shot {
     /// Whether the appearance settings page is open.
     #[serde(default)]
     pub settings: Option<bool>,
-    /// Whether the settings sheet is open on Accounts.
+    /// Whether the settings show Accounts.
     #[serde(default)]
     pub accounts: Option<bool>,
     /// With `accounts`: the account whose settings form is open.
     #[serde(default)]
     pub edit_account: Option<u64>,
-    /// Whether the settings sheet is open on Shortcuts.
+    /// Whether the settings show Shortcuts.
     #[serde(default)]
     pub shortcuts: Option<bool>,
-    /// Whether the settings sheet is open on Sending, the first account signed.
+    /// Whether the settings show Sending, the first account signed.
     #[serde(default)]
     pub sending: Option<bool>,
-    /// Whether the settings sheet is open on Triage.
+    /// Whether the settings show Triage.
     #[serde(default)]
     pub triage: Option<bool>,
-    /// Whether the settings sheet is open on Notifications.
+    /// Whether the settings show Notifications.
     #[serde(default)]
     pub notifications: Option<bool>,
-    /// The settings sheet open on the section of this name (`appearance` … `plugins`, [`crate::settings::Section::id`]).
+    /// The settings shown on the section of this name (`appearance` … `plugins`, [`crate::settings::Section::id`]).
     #[serde(default)]
     pub section: Option<String>,
     /// How the unified inbox shows its groups: `smart` when left out, `grouped` or `list` (the earlier `cards` and
@@ -449,6 +449,8 @@ fn onboard(app: InboxApp, out: &str, state: &str) -> Result<InboxApp, UiError> {
         other => return Err(bad(format!("{out}: onboard {other:?} is not empty, form, invalid, detected, checking, passed or failed"))),
     };
     let mut app = app.with_accounts(Arc::new(Pictured), Box::new(Proposed::new(pictured_proposal())), Box::new(workers));
+    // The form is the Accounts page's: nothing shows that page for it.
+    app.open_accounts();
     let (onboarding, mailbox) = app.onboarding_mut();
     onboarding.open();
     if state == "empty" {
