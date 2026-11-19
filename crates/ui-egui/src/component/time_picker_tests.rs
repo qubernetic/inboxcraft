@@ -365,8 +365,9 @@ fn a_time_picker_looks_as_its_sheet_says_in_every_state() {
 
 /// The picker with the engine's five presets of Thursday 5 November 2026 09:00 (Snooze's and Send later's list), an
 /// extra row, the alert and a note, in a float hanging from a control at (40, 120), in a window `size` at `percent`
-/// text: the float's rect, the window's, and the rects of the five rows and of the confirm button.
-fn five_in_a_float(size: egui::Vec2, percent: u16) -> (egui::Rect, egui::Rect, Vec<egui::Rect>, egui::Rect) {
+/// text, after the wheel turned `wheel` points over the float (down when negative): the float's rect, the window's, and
+/// the rects of the five rows and of the confirm button.
+fn five_in_a_float(size: egui::Vec2, percent: u16, wheel: f32) -> (egui::Rect, egui::Rect, Vec<egui::Rect>, egui::Rect) {
     let theme = crate::theme::Theme::new(crate::theme::Mode::Light, crate::theme::TextScale::from_percent(percent).unwrap());
     let now = at(2026, 11, 5, 9, 0);
     let five = [
@@ -401,7 +402,6 @@ fn five_in_a_float(size: egui::Vec2, percent: u16) -> (egui::Rect, egui::Rect, V
     for _ in 0..4 {
         harness.run();
     }
-    let mut found = Vec::new();
     fn walk(shape: &egui::Shape, found: &mut Vec<(egui::Rect, egui::Color32)>) {
         match shape {
             egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
@@ -409,8 +409,25 @@ fn five_in_a_float(size: egui::Vec2, percent: u16) -> (egui::Rect, egui::Rect, V
             _ => {}
         }
     }
-    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
-    let float = found.iter().filter(|(_, fill)| *fill == surface).map(|(rect, _)| *rect).max_by(|a, b| a.height().total_cmp(&b.height())).unwrap();
+    let float_of = |harness: &Harness<'_>| {
+        let mut found = Vec::new();
+        harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+        found.iter().filter(|(_, fill)| *fill == surface).map(|(rect, _)| *rect).max_by(|a, b| a.height().total_cmp(&b.height())).unwrap()
+    };
+    if wheel != 0.0 {
+        harness.hover_at(float_of(&harness).center());
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, wheel),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+        });
+        for _ in 0..30 {
+            harness.run();
+        }
+    }
+    let float = float_of(&harness);
     let rows = ["Later today, 12:00", "This evening, 20:00", "Tomorrow morning, Fri 08:00", "This weekend, Sat 09:00", "Next week, Mon 09:00"]
         .map(|name| harness.get_by_label(name).rect())
         .to_vec();
@@ -421,15 +438,21 @@ fn five_in_a_float(size: egui::Vec2, percent: u16) -> (egui::Rect, egui::Rect, V
 #[test]
 fn the_five_presets_fit_their_float_at_100_and_130_percent_and_scroll_in_the_least_window() {
     for percent in [100, 130] {
-        let (float, window, rows, confirm) = five_in_a_float(egui::vec2(1280.0, 800.0), percent);
+        let (float, window, rows, confirm) = five_in_a_float(egui::vec2(1280.0, 800.0), percent, 0.0);
         assert!(window.contains_rect(float), "{percent} %: {float:?}");
         for row in rows.iter().chain([&confirm]) {
             assert!(float.contains_rect(*row), "{percent} %: {row:?} inside {float:?}");
         }
         assert!(rows.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()), "{percent} %: the engine's order, one under the other");
     }
-    // The least window, 800 × 480, at 130 %: the float stays inside it, its rows scroll.
-    let (float, window, _, _) = five_in_a_float(egui::vec2(800.0, 480.0), 130);
+    // The least window, 800 × 480, at 130 %: the float stays inside it and its rows scroll. Opened, the last preset is
+    // whole in it and the confirm button below the fold; the wheel brings the confirm button whole into it.
+    let (float, window, rows, confirm) = five_in_a_float(egui::vec2(800.0, 480.0), 130, 0.0);
     assert!(window.contains_rect(float), "{float:?}");
     assert!(float.height() <= 480.0 - 6.0 + 0.5, "{float:?}");
+    assert!(rows.last().is_some_and(|next_week| float.contains_rect(*next_week)), "Next week whole: {rows:?} in {float:?}");
+    assert!(!float.contains_rect(confirm), "the confirm button is out of sight before the rows scroll: {confirm:?}");
+    let (float, window, _, confirm) = five_in_a_float(egui::vec2(800.0, 480.0), 130, -2000.0);
+    assert!(window.contains_rect(float), "{float:?}");
+    assert!(float.contains_rect(confirm), "scrolled, the confirm button is whole in the float: {confirm:?} in {float:?}");
 }
