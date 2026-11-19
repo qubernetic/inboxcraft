@@ -6,7 +6,7 @@
 | # | Gap | B | Evidence | Impact | Hours | Doc |
 |---|---|---|---|---|---|---|
 | 1 | No front end hands the engine the computer's time zone: presets, send later, snooze, reminders and the calendar run in UTC | ✓ | `Session::set_offsets` has no caller | "Tomorrow 8:00" and every event are off by the UTC offset, an hour or two in Europe | 4 | |
-| 2 | The composer cannot open a draft closed earlier or left from an earlier run, and has no attachments | ✓ | `ui-egui` has no drafts list and no attach field (#132) | A reply started yesterday or a mail with a file must go through another program | 6 | |
+| 2 | The composer has no attachments | ✓ | `ui-egui` has no attach field (#132); a draft closed earlier opens again from the drafts place (#314) | A mail with a file must go through another program | 6 | |
 | 3 | Only the inbox is watched (IMAP IDLE, no NOTIFY); other folders change when the engine syncs them | | `net` watches one folder per account (#26) | Mail filed by a server rule or another device shows late | 6 | |
 | 4 | Sign-in with a password only: no OAuth (XOAUTH2, OAUTHBEARER) for IMAP, SMTP or CalDAV | | `proto` and `dav` have no OAuth (#20, #144) | Providers that require OAuth cannot be added | 12 | |
 | 5 | One message at a time: no selection of several messages | | `ui-egui` acts on the open message or the hovered row (#131) | Clearing a full inbox takes one act per message | 6 | |
@@ -610,9 +610,8 @@ time from the code as it is, not measured.
   window counts the acts it put into the engine's history from the commands' answers; when the engine holds fewer (it
   keeps 100), Ctrl+Z stops quietly. A failed write the server refuses is taken back by the engine, and its toast still
   shows until it goes.
-- Composer (#132): one message at a time; a draft closed or left from an earlier run cannot be opened again in the
-  window yet, unless the outbox hands it back (#136); it stays in the store (`compose.list`) and in the account's
-  Drafts folder. Plain text only: no formatting, no attachments. Suggestions come from the senders and recipients of the mail kept here (`mail.search`), not from an
+- Composer (#132): one message at a time; a draft closed or left from an earlier run opens again from the drafts
+  place or Home (#314); it stays in the store (`compose.list`) and in the account's Drafts folder. Plain text only: no formatting, no attachments. Suggestions come from the senders and recipients of the mail kept here (`mail.search`), not from an
   address book; a name that would move the address (`<`, `"`, `,`, `@`) is taken as the address alone. The engine
   takes a domain without a dot (`ansel@example`) as an address, so only a recipient with no `@`, two of them or an
   empty part is marked as none. The composer has no window of its own.
