@@ -357,3 +357,49 @@ fn on_the_settings_the_undo_key_in_a_field_is_the_field_s() {
     harness.run();
     assert!(archived(&harness, first), "a field with the keyboard keeps its Undo: the archive stays");
 }
+
+#[test]
+fn new_message_pressed_with_the_composer_in_front_keeps_its_draft_and_starts_no_other() {
+    let mut harness = harness(false);
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::COMPOSE);
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
+    harness.get_by_role_and_label(Role::TextInput, "Subject").type_text("Plot");
+    harness.run();
+    harness.get_by_role_and_label(Role::MultilineTextInput, "Message text").focus();
+    harness.get_by_role_and_label(Role::MultilineTextInput, "Message text").type_text("Seeds on Friday");
+    harness.run();
+    let text = harness.state().composer().map(|composer| composer.text().to_owned());
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    harness.run();
+    let composer = harness.state().composer().unwrap();
+    assert_eq!((composer.subject(), Some(composer.text().to_owned())), ("Plot", text), "the same draft, nothing lost");
+    assert!(!composer.floating(), "docked in the reader's place");
+}
+
+#[test]
+fn on_the_settings_new_message_on_a_key_with_ctrl_leaves_them_and_begins_a_message() {
+    let mut harness = harness(false);
+    harness.state_mut().keymap_mut().bind(keymap::COMPOSE, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::M));
+    open_settings(&mut harness);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    harness.run();
+    harness.run();
+    assert!(!harness.state().settings().is_open(), "New message leaves the settings");
+    assert!(harness.state().composer().is_some(), "and begins a message");
+}
+
+#[test]
+fn on_the_settings_the_undo_key_without_a_toast_takes_nothing_back() {
+    let (mut harness, first) = archived_then_settings();
+    // The toast's time is over: the act stays in the history, no toast names it.
+    harness.state_mut().mailbox_mut().forget_undo();
+    harness.run();
+    assert!(harness.state().mailbox().can_undo() && harness.query_by_role_and_label(Role::Button, "Undo").is_none());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    harness.run();
+    assert!(archived(&harness, first), "the older act stays: Undo rests on the settings without a toast");
+}
