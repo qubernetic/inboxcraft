@@ -694,6 +694,8 @@ pub struct Mailbox {
     drafts: Vec<DraftItem>,
     /// [`Mailbox::writes`] when [`Mailbox::drafts`] was last read: a write since reads them again.
     drafts_read: Option<u64>,
+    /// How many drafts the engine keeps over the accounts shown (`compose.list`'s `total`), listed or not.
+    drafts_total: u64,
     /// The draft whose discard waits behind its toast: the drafts place leaves it out until Undo or the discard.
     hidden_draft: Option<u64>,
     /// The subjects of the sends that went late since [`Mailbox::take_late`] was last called.
@@ -953,6 +955,7 @@ impl Mailbox {
             outbox: Vec::new(),
             drafts: Vec::new(),
             drafts_read: None,
+            drafts_total: 0,
             hidden_draft: None,
             late: Vec::new(),
             notices: Vec::new(),
@@ -1843,8 +1846,10 @@ impl Mailbox {
     fn load_drafts(&mut self) -> Result<(), UiError> {
         let answer = self.run("compose.list", &json!({ "account": self.narrowed, "limit": MAX_LIST }))?;
         let drafts: Vec<DraftItem> = array("compose.list", &answer, "drafts")?.iter().filter_map(|row| draft_item(self, row)).collect();
-        if drafts != self.drafts {
+        let total = answer.get("total").and_then(Value::as_u64).unwrap_or(0);
+        if drafts != self.drafts || total != self.drafts_total {
             self.drafts = drafts;
+            self.drafts_total = total;
             self.revision = self.revision.wrapping_add(1);
         }
         self.drafts_read = Some(self.writes);
@@ -1880,10 +1885,12 @@ impl Mailbox {
         self.hidden_draft = hidden;
     }
 
-    /// What the drafts place's head says under its title: how many drafts it lists.
+    /// What the drafts place's head says under its title: how many drafts the engine keeps (its `total`, also past the
+    /// [`MAX_LIST`] it lists), the one whose discard waits left out.
     #[must_use]
     pub fn drafts_count(&self) -> String {
-        match self.drafts().count() {
+        let hidden = self.hidden_draft.is_some_and(|hidden| self.drafts.iter().any(|draft| draft.id == hidden));
+        match self.drafts_total.saturating_sub(u64::from(hidden)) {
             0 => tr!("no drafts").to_owned(),
             1 => tr!("1 draft").to_owned(),
             count => tr!("{count} drafts", count = count),
@@ -1907,6 +1914,7 @@ impl Mailbox {
             self.load_drafts()?;
         } else {
             self.drafts = Vec::new();
+            self.drafts_total = 0;
             self.drafts_read = None;
         }
         self.place = place;

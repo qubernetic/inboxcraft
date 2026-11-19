@@ -302,3 +302,16 @@ fn a_frame_at_rest_runs_no_command() {
     }
     assert_eq!(harness.state().mailbox().runs(), runs, "the drafts are read again only after a write");
 }
+
+#[test]
+fn the_head_counts_every_draft_past_the_list_s_limit_and_the_newest_comes_first() {
+    let mut app = sample_app();
+    let account = app.mailbox().accounts().first().map(|account| account.id).unwrap();
+    for _ in 0..inboxcraft_engine::MAX_LIST {
+        app.mailbox_mut().run("compose.new", &json!({ "account": account })).unwrap();
+    }
+    draft(&mut app, "", "Newest", "");
+    let harness = drafts_place(app, egui::Theme::Light);
+    harness.get_by_label(&format!("{} drafts", inboxcraft_engine::MAX_LIST + 1));
+    assert!(names(&harness)[0].starts_with("Newest"), "{:?}", names(&harness).first());
+}
