@@ -123,6 +123,10 @@ fn a_junk_kept_week_is_the_default_and_the_other_kept_choices_stay() {
     }
 }
 
+/// Guards the screen gate: off the calendar the window never follows the rule (`follow_week` runs only behind
+/// `calendar_before`'s check of the screen shown), so a kept rule reads nothing until the calendar is opened. The
+/// calendar's own `read` guard (no rule followed before its first read) is bitten by the unit test
+/// `calendar::week_tests::a_calendar_never_read_follows_no_rule_until_its_first_read`, not by this one.
 #[test]
 fn a_kept_rule_reads_no_calendar_the_owner_has_not_opened() {
     let keep = Held::default();
