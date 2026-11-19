@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The status line in the window: a strip of its own at the foot, so the reader's answers stay pressable while a
-//! message with Undo shows (#296); Undo by its key for the `undo` token's 5 s and on the message shown only; nothing of
-//! the line runs under the command line's results; the line rests; and a hostile failure text and a narrow window push
-//! no key hint out.
+//! message with Undo shows (#296); Undo shows for the `undo` token's 5 s, and its key takes back the act of the message
+//! shown; under the command line's results nothing of the line runs but a send's or a discard's Undo; the line rests;
+//! and a hostile failure text and a narrow window push no key hint out.
 
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, vec2};
@@ -71,7 +71,7 @@ fn a_press_on_reply_reply_all_and_forward_reaches_them_while_an_undo_shows() {
 }
 
 #[test]
-fn undo_by_key_works_for_its_5_s() {
+fn undo_shows_for_its_5_s_and_its_key_takes_the_act_back_within_them() {
     // A frame every quarter of a second: within its 5 s, Ctrl+Z takes the act back from the line.
     let (mut harness, id) = reading((1300.0, 872.0), 100);
     harness.state_mut().mailbox_mut().act(id, Act::Flag);
@@ -105,6 +105,27 @@ fn undo_by_key_takes_back_the_act_shown_never_an_older_one() {
     harness.run();
     assert!(!flagged(&harness, second), "the act shown is taken back: {} {:?}", flagged(&harness, first), harness.state().mailbox().error());
     assert!(flagged(&harness, first), "the older one stays");
+}
+
+#[test]
+fn the_key_while_an_undo_shows_takes_back_that_message_s_act() {
+    // The first act's message has gone after its 5 s; the second's shows. The key takes back the second, the one shown.
+    let (mut harness, first) = reading((1300.0, 872.0), 100);
+    let second = harness.state().mailbox().messages().get(2).map(|row| row.id).unwrap();
+    harness.state_mut().mailbox_mut().act(first, Act::Flag);
+    harness.run_steps((UNDO_SECONDS * 4.0) as usize + 2);
+    assert!(harness.query_by_role_and_label(Role::Button, "undo").is_none(), "the first act's message has gone");
+    harness.state_mut().mailbox_mut().act(second, Act::Flag);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "undo");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(!flagged(&harness, second), "the act shown is taken back");
+    assert!(flagged(&harness, first), "the older one stays");
+    // No message shows now: the key is the history's, and takes back the last act left.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(!flagged(&harness, first), "the key takes back the last act whether or not its message shows");
 }
 
 #[test]
