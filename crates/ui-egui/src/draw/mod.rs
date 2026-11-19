@@ -2519,12 +2519,14 @@ impl InboxApp {
             composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
         }
         // The toasts keep clear of the composer drawn this pass, docked or floating ([`compose::drawn_now`]).
-        let (undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests(), regions.body);
+        let (mut undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests(), regions.body);
         // The one gate for the place under a modal surface ([`Surfaces::modal`]): whatever pressed it (the pointer, a key,
         // a screen reader's activate, which egui's layers do not stop), nothing the list, the reader, the composer, Home,
-        // the calendar, the settings' page or the error banner asked for in this frame is applied. The index has its own
-        // gate ([`InboxApp::index_allowed`]).
+        // the calendar, the settings' page, the error banner or the act's toast asked for in this frame is applied. The
+        // index has its own gate ([`InboxApp::index_allowed`]). The send's countdown and a draft's discard keep their
+        // Undo: it stops a loss whose time runs out, and changes nothing else under the results.
         if surfaces.modal() {
+            undone = false;
             listed = list::Asked { out: listed.out, ..list::Asked::default() };
             header = list::Header::default();
             drawn.asked.clear();

@@ -401,3 +401,35 @@ fn on_the_settings_the_undo_key_without_a_toast_takes_nothing_back() {
     harness.run();
     assert!(archived(&harness, first), "the older act stays: Undo rests on the settings without a toast");
 }
+
+/// The act's toast stands over the window while the command line's results show; a screen reader's activate (which
+/// egui's layers do not stop) or a press on its Undo takes back nothing under them, as no control under them acts.
+#[test]
+fn the_act_s_undo_takes_nothing_back_under_the_command_line_s_results() {
+    for activate in [true, false] {
+        let mut harness = harness(false);
+        let first = harness.state().mailbox().messages().first().map(|row| row.id).unwrap();
+        harness.state_mut().mailbox_mut().act(first, crate::mailbox::Act::Archive);
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        harness.state_mut().command_mut().set_text(">zz");
+        harness.run();
+        assert!(harness.state().command().results(), "the results show");
+        let undo = harness.get_by_role_and_label(Role::Button, "Undo");
+        if activate {
+            undo.click_accesskit();
+        } else {
+            undo.click();
+        }
+        harness.run();
+        assert!(!harness.state().mailbox().messages().iter().any(|row| row.id == first), "activate {activate}: Undo ran under the results");
+        assert!(harness.state().mailbox().can_undo(), "activate {activate}: the act is still there to undo");
+        // Closed, the toast's Undo takes it back.
+        harness.key_press(Key::Escape);
+        harness.run();
+        harness.get_by_role_and_label(Role::Button, "Undo").click();
+        harness.run();
+        assert!(harness.state().mailbox().messages().iter().any(|row| row.id == first), "activate {activate}: Undo after the results");
+    }
+}
