@@ -265,3 +265,16 @@ fn the_composer_s_actions_are_the_window_s_and_share_no_key_with_a_screen() {
     keymap.bind(CALENDAR_OPEN, send.unwrap_or(enter));
     assert_eq!(keymap.shortcut(SEND), None, "one key runs one action where the window's and the calendar's meet");
 }
+
+#[test]
+fn a_kept_key_for_the_old_motion_toggle_is_dropped() {
+    // Kept by a build that had `ui.motion.toggle`: the action is gone (motion has three levels on Appearance), its
+    // key binds nothing and the rest of the keymap loads.
+    let kept = serde_json::json!({ "keys": { "ui.motion.toggle": "Command+M", FIND: "Command+G" } });
+    let keymap = Keymap::from_value(&kept);
+    assert!(super::action("ui.motion.toggle").is_none());
+    assert_eq!(keymap.shortcut("ui.motion.toggle"), None);
+    assert_eq!(keymap.action_of(KeyboardShortcut::new(Modifiers::COMMAND, Key::M)), None);
+    assert_eq!(keymap.shortcut(FIND), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::G)));
+    assert!(keymap.to_value()["keys"].get("ui.motion.toggle").is_none(), "nor is it written back");
+}

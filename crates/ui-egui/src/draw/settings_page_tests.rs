@@ -110,6 +110,18 @@ fn inbox_view_is_set_on_appearance_and_not_on_triage() {
         harness.run();
         assert_eq!(harness.state().mailbox().inbox_view(), view, "{label}");
     }
+    // One stored value: the list's switch (out of the settings, where the list is) changes it, and the page shows
+    // the new view.
+    harness.state_mut().settings_mut().leave();
+    harness.run();
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::VIEW_LIST);
+    harness.run();
+    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::List);
+    harness.state_mut().settings_mut().open_at(Section::Appearance);
+    harness.run();
+    assert!(harness.get_by_role_and_label(Role::RadioButton, "List").accesskit_node().toggled() == Some(egui::accesskit::Toggled::True));
+    assert!(harness.get_by_role_and_label(Role::RadioButton, "Smart").accesskit_node().toggled() != Some(egui::accesskit::Toggled::True));
     harness.get_by_label("Triage, settings page").click();
     harness.run();
     assert_eq!(harness.state().settings().section(), Section::Triage);
@@ -459,16 +471,227 @@ fn tab_to_a_control_below_the_page_s_view_scrolls_the_page_to_it() {
     assert!(seen.iter().any(|label| label == "Own / System"), "Tab reaches the window frame: {seen:?}");
 }
 
+/// The Appearance page of a fresh window, 1440 by 900 in dark.
+fn appearance_page() -> Harness<'static, InboxApp> {
+    let mut harness = harness();
+    harness.state_mut().settings_mut().open_at(Section::Appearance);
+    harness.run();
+    harness
+}
+
+/// Whether the option `label` (`<option> for <setting>`) is the one chosen.
+fn chosen(harness: &Harness<'static, InboxApp>, label: &str) -> bool {
+    harness.get_by_label(label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+}
+
+/// Where the top of the settings row `title` stands (its group is named `<title>. <help>`), or of the painted text
+/// `title` (a group's label); infinite when neither is drawn.
+fn row_top(harness: &Harness<'static, InboxApp>, title: &str) -> f32 {
+    let row = format!("{title}. ");
+    let rows = harness.query_all_by_label_contains(&row).filter(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with(&row)));
+    let painted = painted_texts(harness).into_iter().filter(|(text, _)| text == title).map(|(_, rect)| rect.top()).collect::<Vec<_>>();
+    rows.map(|node| node.rect().top()).chain(painted).fold(f32::INFINITY, f32::min)
+}
+
+/// The motion level's help, as the design words it for each level.
+const MOTION_HELP: [(&str, &str); 3] = [
+    (
+        "Full for Motion",
+        "Full: the character field reacts wherever it shows, labels scramble and rows decode in. The showpiece; nothing turns it on but you.",
+    ),
+    (
+        "Reduced for Motion",
+        "Reduced keeps what explains a change and drops the text effects. Until you choose, the computer's reduce-motion setting gives Off.",
+    ),
+    (
+        "Off for Motion",
+        "Off: every change happens at once and the sync bar becomes words. It is what the computer's reduce-motion setting gives until you choose.",
+    ),
+];
+
 #[test]
-fn motion_s_full_carries_the_coming_soon_mark() {
-    let harness = opened();
-    let full = harness.get_by_label("Full for Motion");
-    assert!(full.accesskit_node().is_disabled(), "Full cannot be chosen yet");
-    let full = full.rect();
-    let marks: Vec<egui::Rect> = harness.query_all_by_label("coming soon").map(|tag| tag.rect()).collect();
-    let mark = marks.iter().find(|mark| (mark.center().y - full.center().y).abs() <= 1.0);
-    let mark = mark.unwrap_or_else(|| panic!("no coming-soon mark beside Full {full:?}: {marks:?}"));
-    assert!(mark.right() <= full.left() && full.left() - mark.right() <= 12.0, "the mark {mark:?} stands just before Full {full:?}");
+fn appearance_is_look_then_layout_as_the_default_frame_draws_it() {
+    let harness = appearance_page();
+    // `settings-appearance/default`: two groups, Look over Layout, the rows in the design's order.
+    let order = ["LOOK", "Mode", "Motion", "Text size", "LAYOUT", "Inbox view", "Open a message", "Write a message", "Window frame"];
+    let tops: Vec<f32> = order.iter().map(|title| row_top(&harness, title)).collect();
+    assert!(tops.iter().all(|y| y.is_finite()), "every row is drawn: {order:?} {tops:?}");
+    assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "in the design's order: {order:?} {tops:?}");
+    // As the app starts: Auto, Reduced, 100 %, the inbox view kept (the sample's), pane, pane, own frame.
+    let view = super::inbox_views().into_iter().find(|(view, _)| *view == harness.state().mailbox().inbox_view()).map(|(_, name)| name).unwrap();
+    for label in ["Auto", "Reduced for Motion", view, "Pane for Open a message", "Pane for Write a message", "Own"] {
+        assert!(harness.query_all_by_label(label).any(|node| node.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)), "{label}");
+    }
+    assert_eq!(harness.get_by_role_and_label(Role::Slider, "Text size").accesskit_node().numeric_value(), Some(100.0));
+    harness.get_by_label_contains(MOTION_HELP[1].1);
+    harness.get_by_label_contains("InboxCraft's own frame, where the command line is the title bar, or the desktop's title bar above it.");
+    // Full is no longer coming: every level can be chosen; the two window choices still come later.
+    for (level, _) in MOTION_HELP {
+        assert!(!harness.get_by_label(level).accesskit_node().is_disabled(), "{level}");
+    }
+    for later in ["Window for Open a message", "Window for Write a message"] {
+        assert!(harness.get_by_label(later).accesskit_node().is_disabled(), "{later}");
+    }
+    let motion = harness.get_by_label("Full for Motion").rect();
+    assert!(
+        harness.query_all_by_label("coming soon").all(|tag| (tag.rect().center().y - motion.center().y).abs() > 1.0),
+        "no coming-soon mark on the motion row"
+    );
+}
+
+#[test]
+fn each_motion_level_says_what_it_does_and_nothing_under_it_moves() {
+    // `settings-appearance/motion-full` and `motion-off`, and back to the default's Reduced.
+    let mut harness = appearance_page();
+    let text_size = harness.get_by_role_and_label(Role::Slider, "Text size").rect().top();
+    for (level, help) in [MOTION_HELP[0], MOTION_HELP[2], MOTION_HELP[1]] {
+        harness.get_by_label(level).click();
+        harness.run();
+        assert_eq!(harness.state().mailbox().last_run(), Some("ui.motion.set"));
+        assert!(chosen(&harness, level), "{level}");
+        harness.get_by_label_contains(help);
+        for (other, other_help) in MOTION_HELP.iter().filter(|(other, _)| *other != level) {
+            assert!(!chosen(&harness, other), "{level}: {other} is not chosen");
+            assert!(harness.query_by_label_contains(other_help).is_none(), "{level}: one help");
+        }
+        let now = harness.get_by_role_and_label(Role::Slider, "Text size").rect().top();
+        assert!((now - text_size).abs() < 0.5, "{level}: the rows below stay ({text_size} then {now})");
+    }
+    assert_eq!(harness.state().appearance().motion_level(), inboxcraft_engine::appearance::MotionLevel::Reduced);
+    assert!(harness.state().appearance().motion_chosen());
+}
+
+#[test]
+fn full_runs_today_s_motion_and_reduced_and_off_land_it_at_once() {
+    use crate::motion::{Level, level, reduced};
+    let mut harness = appearance_page();
+    for (label, shown, still) in
+        [("Full for Motion", Level::Full, false), ("Off for Motion", Level::Off, true), ("Reduced for Motion", Level::Reduced, true)]
+    {
+        harness.get_by_label(label).click();
+        harness.run();
+        assert_eq!(level(&harness.ctx), shown, "{label}");
+        assert_eq!(reduced(&harness.ctx), still, "{label}");
+        // The page rests at every level: nothing asks for frames once the press is over.
+        assert!(crate::component::tests::rests(&mut harness, 30), "{label}: the page rests");
+    }
+}
+
+#[test]
+fn the_computer_s_wish_for_less_motion_shows_off_until_the_owner_chooses() {
+    let mut harness = harness();
+    crate::motion::set_system_wish(&harness.ctx, Some(true));
+    harness.state_mut().settings_mut().open_at(Section::Appearance);
+    harness.run();
+    assert!(!harness.state().appearance().motion_chosen());
+    assert_eq!(crate::motion::level(&harness.ctx), crate::motion::Level::Off, "the window moves at Off");
+    assert!(chosen(&harness, "Off for Motion"), "and the page shows Off");
+    harness.get_by_label_contains(MOTION_HELP[2].1);
+    // Chosen, the owner's level holds whatever the computer wishes.
+    harness.get_by_label("Reduced for Motion").click();
+    harness.run();
+    assert!(chosen(&harness, "Reduced for Motion"));
+    assert_eq!(crate::motion::level(&harness.ctx), crate::motion::Level::Reduced);
+    // The computer that does not ask, or cannot be read, leaves the owner's default.
+    let mut fresh = self::harness();
+    crate::motion::set_system_wish(&fresh.ctx, Some(false));
+    fresh.run();
+    assert_eq!(crate::motion::level(&fresh.ctx), crate::motion::Level::Reduced);
+}
+
+#[test]
+fn a_press_on_the_level_shown_records_it_as_the_owner_s_choice_once() {
+    use crate::motion::{Level, level, set_system_wish};
+    // The computer asks for less motion: the page shows Off, not chosen; a press on Off chooses it, so the window
+    // stays at Off when the wish clears.
+    let mut harness = appearance_page();
+    set_system_wish(&harness.ctx, Some(true));
+    harness.run();
+    assert!(chosen(&harness, "Off for Motion") && !harness.state().appearance().motion_chosen());
+    harness.get_by_label("Off for Motion").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().last_run(), Some("ui.motion.set"));
+    assert!(harness.state().appearance().motion_chosen(), "the level shown is now the owner's");
+    set_system_wish(&harness.ctx, Some(false));
+    harness.run();
+    assert_eq!(level(&harness.ctx), Level::Off, "the owner's Off holds without the wish");
+    // No wish: the default Reduced, pressed, is chosen; a later wish no longer gives Off.
+    let mut fresh = appearance_page();
+    fresh.get_by_label("Reduced for Motion").click();
+    fresh.run();
+    assert!(fresh.state().appearance().motion_chosen());
+    set_system_wish(&fresh.ctx, Some(true));
+    fresh.run();
+    assert_eq!(level(&fresh.ctx), Level::Reduced);
+    // Chosen already, a press on the level shown asks for nothing.
+    fresh.get_by_role_and_label(Role::RadioButton, "Light").click();
+    fresh.run();
+    let before = fresh.state().mailbox().last_run();
+    assert_ne!(before, Some("ui.motion.set"));
+    fresh.get_by_label("Reduced for Motion").click();
+    fresh.run();
+    assert_eq!(fresh.state().mailbox().last_run(), before, "a press on the chosen level runs nothing");
+}
+
+#[test]
+fn text_130_and_the_system_frame_stand_as_their_frames() {
+    // `settings-appearance/text-130`: the handle on the last tick, the rows still in order.
+    let mut harness = appearance_page();
+    harness.state_mut().set_text_scale(crate::theme::TextScale::from_percent(130).unwrap());
+    harness.run();
+    assert_eq!(harness.get_by_role_and_label(Role::Slider, "Text size").accesskit_node().numeric_value(), Some(130.0));
+    assert!(chosen(&harness, "Reduced for Motion"));
+    let tops = ["Mode", "Motion", "Text size", "Inbox view", "Window frame"].map(|title| row_top(&harness, title));
+    assert!(tops.iter().all(|y| y.is_finite()) && tops.windows(2).all(|pair| pair[0] < pair[1]), "{tops:?}");
+    // `settings-appearance/frame-system`: System chosen runs `ui.frame.set`.
+    // Below the fold at 130 %: pressed the way a screen reader presses it.
+    harness.get_by_label("System").click_accesskit();
+    harness.run();
+    assert_eq!(harness.state().mailbox().last_run(), Some("ui.frame.set"));
+    assert_eq!(harness.state().appearance().frame, inboxcraft_engine::appearance::WindowFrame::System);
+    assert!(harness.query_all_by_label("System").any(|node| node.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)));
+    // `settings-appearance/layout-window`: both window choices come later; pane stays.
+    for later in ["Window for Open a message", "Window for Write a message"] {
+        harness.get_by_label(later).click();
+        harness.run();
+    }
+    assert!(chosen(&harness, "Pane for Open a message") && chosen(&harness, "Pane for Write a message"));
+}
+
+#[test]
+fn the_keyboard_walks_the_appearance_page_in_the_drawn_order() {
+    let mut harness = appearance_page();
+    harness.get_by_label("Auto / Dark / Light").focus();
+    harness.run();
+    let mut walk: Vec<(String, egui::Rect)> = Vec::new();
+    for _ in 0..30 {
+        let Some(stop) = focused(&harness) else { break };
+        if walk.iter().any(|(label, _)| *label == stop.0) {
+            break;
+        }
+        walk.push(stop);
+        harness.key_press(Key::Tab);
+        harness.run();
+    }
+    let labels: Vec<&str> = walk.iter().map(|(label, _)| label.as_str()).collect();
+    let at = |part: &str| labels.iter().position(|label| label.contains(part)).unwrap_or_else(|| panic!("{part} not reached: {labels:?}"));
+    // Look, then Layout, as drawn; the coming-soon rows take no stop.
+    let order = [at("Auto / Dark / Light"), at("Motion"), at("Text size"), at("Grouped / Smart / List"), at("Own / System")];
+    assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "{labels:?}");
+    assert!(labels.iter().all(|label| !label.contains("Open a message") && !label.contains("Write a message")), "{labels:?}");
+    // Shift Tab walks it back.
+    let last = walk[order[4]].0.clone();
+    harness.get_by_label(&last).focus();
+    harness.run();
+    let mut back = Vec::new();
+    for _ in 0..order[4] {
+        harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+        harness.run();
+        back.push(focused(&harness).map(|(label, _)| label).unwrap_or_default());
+    }
+    let mut forth: Vec<String> = labels[..order[4]].iter().map(|label| (*label).to_owned()).collect();
+    forth.reverse();
+    assert_eq!(back, forth);
 }
 
 /// Every text painted on the sheet in the last frame, as it shows, with where it stands.
