@@ -498,9 +498,15 @@ fn the_eight_frames_stand_where_the_design_draws_them() {
 
 #[test]
 fn every_control_is_reached_by_tab_and_the_open_line_rests_but_for_the_caret() {
-    let harness = opened(egui::Theme::Light, ">");
+    let mut harness = opened(egui::Theme::Light, ">");
     // With the results shown the keyboard stays in the field (the arrows pick a row); closed, Tab reaches the field.
     assert!(field_focused(&harness));
+    // Open, once its rows are in, it rests but for the caret: a repaint on the blink's timer (half a second at most),
+    // never one every frame.
+    harness.run_steps(60);
+    let delay = harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap_or(std::time::Duration::MAX);
+    assert!(delay > std::time::Duration::ZERO && delay <= std::time::Duration::from_millis(500), "the open line asks for a frame in {delay:?}");
+    assert!(harness.state().command().results(), "and stays open");
     let mut harness = harness_resting();
     let unreached = keyboard_walk(&mut harness);
     assert!(!unreached.iter().any(|label| label == "Command line"), "{unreached:?}");
