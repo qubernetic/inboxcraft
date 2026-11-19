@@ -3099,6 +3099,11 @@ impl InboxApp {
         toast::show(ui.ctx(), theme, &keys, id, &shown, place)
     }
 
+    /// Whether the mail is the place shown: not the settings, the calendar or Home.
+    fn mail_shown(&self) -> bool {
+        self.screen == Screen::Mail && !self.settings.is_open()
+    }
+
     /// Applies what was asked for in the command line; the action to run, when one was chosen.
     fn apply_command(&mut self, ctx: &egui::Context, asked: command::Asked) -> Option<&'static str> {
         match asked {
@@ -3125,11 +3130,21 @@ impl InboxApp {
                 self.search.clear();
             }
             command::Asked::Searched(text) => {
-                // A search shows the mail it fills.
-                if !text.is_empty() {
+                // Typing never changes the place: the list fills as it is typed only while the mail shows.
+                if self.mail_shown() {
+                    self.search(&text);
+                }
+            }
+            command::Asked::Find(text) => {
+                // Enter, the owner's act: a search typed elsewhere shows the mail it fills, by the place rules (leaving
+                // the settings clears the add-account password).
+                self.command.close_results();
+                if !text.is_empty() && !self.mail_shown() {
                     self.show_mail();
                 }
-                self.search(&text);
+                if self.mail_shown() {
+                    self.search(&text);
+                }
             }
             command::Asked::Close => self.command.close_results(),
         }

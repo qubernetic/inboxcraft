@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The command line: its field across the command line, between the index's column and the window's controls, and
-//! its results hanging under the field over the dimmed window. Plain text searches the mail shown (the list fills as
-//! it is typed); `>` lists the window's commands as the palette did (one that cannot run here says why and runs
+//! its results hanging under the field over the dimmed window. Plain text searches the mail: while the mail shows, the
+//! list fills as it is typed; from another place typing changes nothing under the field, and Enter shows the mail
+//! searched; `>` lists the window's commands as the palette did (one that cannot run here says why and runs
 //! nothing), `@` the people the mail knows, `#` the mailboxes. The arrows move the pick, Enter or a press runs it;
 //! one `Esc` closes the results, the next gives the keyboard back to where it was; a press beside them closes them.
 //!
@@ -76,8 +77,10 @@ pub(super) enum Asked {
     Person(String),
     /// Go to the mailbox.
     Mailbox(u64),
-    /// Search the mail shown for the text.
+    /// The text typed changed: the mail shown, while it is the mail, searched for it as it is typed.
     Searched(String),
+    /// Enter on a search: the mail searched for the text, shown from any place.
+    Find(String),
     /// Close the results; the field keeps the keyboard.
     Close,
 }
@@ -227,7 +230,7 @@ fn chosen(command: &Command, lists: &Lists, at: usize) -> Option<Asked> {
         return None;
     }
     match command.mode() {
-        Mode::Search => Some(Asked::Close),
+        Mode::Search => Some(Asked::Find(command.text().to_owned())),
         Mode::Command => {
             let listed = lists.commands.get(at).filter(|listed| listed.refused.is_none())?;
             Some(listed.row.page.map_or(Asked::Run(listed.row.id), Asked::Page))

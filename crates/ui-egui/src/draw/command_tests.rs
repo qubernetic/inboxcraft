@@ -250,6 +250,33 @@ fn plain_text_searches_the_mail_as_it_is_typed() {
     assert_eq!(harness.state().mailbox().query(), "bakery");
 }
 
+#[test]
+fn typing_on_home_or_the_calendar_changes_no_place_until_enter() {
+    for place in [Screen::Home, Screen::Calendar] {
+        let mut harness = harness(egui::Theme::Light);
+        match place {
+            Screen::Home => harness.state_mut().show_home(),
+            _ => harness.state_mut().show_calendar(),
+        }
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        type_in(&mut harness, "bake");
+        assert_eq!(harness.state().screen(), place, "{place:?}: typing keeps the place");
+        assert_eq!(harness.state().search_text(), "", "{place:?}: and searches nothing under it");
+        harness.key_press(Key::Escape);
+        harness.run();
+        assert_eq!(harness.state().screen(), place, "{place:?}: Esc keeps it");
+        type_in(&mut harness, "ry");
+        assert_eq!(harness.state().screen(), place, "{place:?}: typed again");
+        harness.key_press(Key::Enter);
+        harness.run();
+        assert_eq!((harness.state().screen(), harness.state().search_text()), (Screen::Mail, "bakery"), "{place:?}: Enter shows the mail searched");
+        assert_eq!(harness.state().mailbox().query(), "bakery");
+        assert!(!harness.state().command().results());
+    }
+}
+
 // Review focus 4.
 
 #[test]
