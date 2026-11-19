@@ -10,8 +10,9 @@
 //! the old choices. The keys go into [`KEYS_FILE`] beside it, read the same way ([`Keymap::from_value`]), and the
 //! triage choices (the screener's mode, the inbox view, whether a pin outlasts done, and how long a send is held) into [`TRIAGE_FILE`] ([`Triage::from_value`]), and the
 //! notification choices (each account's level, returned snoozes and reminders) into [`NOTIFY_FILE`]
-//! ([`NotifySettings::from_value`]); that file names accounts by their number only. A window without a config folder
-//! gets [`NoKeep`].
+//! ([`NotifySettings::from_value`]); that file names accounts by their number only. The week rule (`week.set`) goes into
+//! [`WEEK_FILE`], read as outside data by the session ([`inboxcraft_engine::week::from_value`]). A window without a
+//! config folder gets [`NoKeep`].
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -35,6 +36,9 @@ pub const TRIAGE_FILE: &str = "triage.json";
 
 /// The name of the notification choices' file, beside [`FILE`].
 pub const NOTIFY_FILE: &str = "notify.json";
+
+/// The name of the week rule's file, beside [`FILE`].
+pub const WEEK_FILE: &str = "week.json";
 
 /// The triage choices kept between runs: what the screener does with a new sender's first mail, how the unified
 /// inbox shows its groups, whether a pin stays on a message when it is done, and how long a send is held before it
@@ -137,6 +141,20 @@ pub trait Keep: Send {
     ///
     /// Why nothing was kept, as the owner reads it.
     fn store_notify(&mut self, _settings: &NotifySettings) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// The week rule kept, as written ([`inboxcraft_engine::week::to_value`]), if any could be read; none by default.
+    fn load_week(&self) -> Option<Value> {
+        None
+    }
+
+    /// Keeps `week` in place of the week rule kept; keeps nothing by default.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing was kept, as the owner reads it.
+    fn store_week(&mut self, _week: &Value) -> Result<(), String> {
         Ok(())
     }
 }
@@ -269,6 +287,15 @@ impl Keep for KeepFile {
     fn store_notify(&mut self, settings: &NotifySettings) -> Result<(), String> {
         let path = self.beside(NOTIFY_FILE).ok_or_else(|| format!("{}: no file to keep the notification choices beside", self.path.display()))?;
         write_json(&path, &settings.to_value())
+    }
+
+    fn load_week(&self) -> Option<Value> {
+        read_json(&self.beside(WEEK_FILE)?)
+    }
+
+    fn store_week(&mut self, week: &Value) -> Result<(), String> {
+        let path = self.beside(WEEK_FILE).ok_or_else(|| format!("{}: no file to keep the week rule beside", self.path.display()))?;
+        write_json(&path, week)
     }
 }
 

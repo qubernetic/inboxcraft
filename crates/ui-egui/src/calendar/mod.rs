@@ -367,6 +367,8 @@ pub struct Calendar {
     second: u8,
     /// How the owner's weeks are counted, as the session said at the last read ([`Calendar::follow_week`]).
     week: WeekRule,
+    /// Whether the calendars were read once ([`Calendar::refresh`]): a calendar never read follows no week rule.
+    read: bool,
     /// Changes whenever the events shown change (a read, a calendar shown or hidden): what the views laid out of the
     /// events is kept while it stays the same.
     serial: u64,
@@ -696,9 +698,9 @@ impl Calendar {
 
     /// Takes the week rule from the session, once a frame: when it changed (`week.set`), the days shown are read again
     /// for the new week, the view staying on its day and the picked day and event staying picked; otherwise nothing
-    /// happens.
+    /// happens. A calendar not read yet reads nothing: its first read takes the rule.
     pub fn follow_week(&mut self, mailbox: &mut Mailbox) {
-        if mailbox.week_rule() != self.week {
+        if self.read && mailbox.week_rule() != self.week {
             self.refresh(mailbox);
         }
     }
@@ -709,6 +711,7 @@ impl Calendar {
         let (now, offset) = (mailbox.now(), mailbox.offset());
         self.tick(now, offset);
         self.week = mailbox.week_rule();
+        self.read = true;
         self.sync = mailbox.calendar_sync();
         self.accounts = mailbox.accounts().iter().map(|account| (account.id, account.index, account.label.clone())).collect();
         if self.focus.is_none() {

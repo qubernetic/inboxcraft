@@ -221,6 +221,8 @@ pub struct InboxApp {
     /// The notification choices the keep holds; `None` for the sample, which keeps none: its accounts are not the
     /// owner's.
     kept_notify: Option<NotifySettings>,
+    /// The week rule the keep holds; `None` for the sample, which keeps none.
+    kept_week: Option<inboxcraft_time::WeekRule>,
     /// The app's side of running without a window, when it has one.
     desk: Option<Box<dyn Desk>>,
     /// The screen shown beside the index.
@@ -404,6 +406,7 @@ impl InboxApp {
             kept_keys: Keymap::default(),
             kept_triage: Triage::default(),
             kept_notify: None,
+            kept_week: None,
             desk: None,
             screen: Screen::default(),
             calendar: Calendar::default(),
@@ -490,6 +493,10 @@ impl InboxApp {
                 }
                 None => self.mailbox.notify_settings().clone(),
             });
+            if let Some(kept) = keep.load_week() {
+                self.mailbox.restore_week(&kept);
+            }
+            self.kept_week = Some(self.mailbox.week_rule());
         }
         self.keep = keep;
         self
@@ -602,6 +609,20 @@ impl InboxApp {
         let stored = self.keep.store_notify(&now);
         self.kept_notify = Some(now);
         if let Err(error) = stored {
+            self.mailbox.fail(UiError::Keep(error));
+        }
+    }
+
+    /// Keeps the week rule when it changed; the sample keeps none.
+    fn keep_week(&mut self) {
+        let Some(kept) = self.kept_week else { return };
+        let now = self.mailbox.week_rule();
+        if now == kept {
+            return;
+        }
+        // Tried once per change: the next change tries again.
+        self.kept_week = Some(now);
+        if let Err(error) = self.keep.store_week(&self.mailbox.kept_week()) {
             self.mailbox.fail(UiError::Keep(error));
         }
     }
@@ -1231,6 +1252,7 @@ impl InboxApp {
             return;
         }
         self.calendar.tick(self.mailbox.now(), self.mailbox.offset());
+        self.calendar.follow_week(&mut self.mailbox);
         let open = setting || self.palette.is_open() || self.settings.capturing().is_some();
         for id in calendar::keys::pressed(ctx, &self.keymap, &self.calendar, open) {
             self.calendar_key(ctx, id);
@@ -2446,6 +2468,7 @@ impl InboxApp {
         self.keep_keys();
         self.keep_triage();
         self.keep_notify();
+        self.keep_week();
         self.hear_desk();
         self.own_frame_over(ui.ctx(), &theme, corner);
         self.sync();
@@ -2976,3 +2999,6 @@ mod tests;
 #[cfg(test)]
 #[path = "triage_tests.rs"]
 mod triage_tests;
+#[cfg(test)]
+#[path = "week_tests.rs"]
+mod week_tests;
