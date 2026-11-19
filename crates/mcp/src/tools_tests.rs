@@ -3,8 +3,10 @@
 
 //! The tools on the `testkit` fixture store.
 
-use inboxcraft_engine::{AgentClass, Registry};
+use inboxcraft_engine::{AgentClass, Registry, Session};
+use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_testkit::store;
+use inboxcraft_time::FakeClock;
 use serde_json::json;
 
 use super::{DEFAULT_LIMIT, ROLES, TOOLS, WITHHELD};
@@ -241,4 +243,16 @@ fn mail_why_is_not_offered_until_the_owner_decides() {
     assert!(answer["error"]["message"].as_str().unwrap().contains("is not offered yet"), "{answer}");
     let answer = request(&mut server, json!({ "jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": { "name": "mail_whom" } }));
     assert!(answer["error"]["message"].as_str().unwrap().starts_with("there is no tool"), "{answer}");
+}
+
+#[test]
+fn sync_status_on_a_store_reads_synced_with_no_account_and_offline_with_one() {
+    let empty = Memory::new(StoreConfig::default());
+    let session = Session::new(Box::new(empty), Box::new(FakeClock::new(store::NOW))).unwrap();
+    let mut server = crate::Server::new(session);
+    let (out, error) = text(&call(&mut server, "sync_status", json!({})));
+    assert!(!error && out.starts_with("sync_status: synced\n"), "{out}");
+    let (_dir, mut server) = fixture_server();
+    let (out, error) = text(&call(&mut server, "sync_status", json!({})));
+    assert!(!error && out.starts_with("sync_status: offline\n"), "{out}");
 }

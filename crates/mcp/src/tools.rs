@@ -98,7 +98,8 @@ take, and the week of today.",
         name: "sync_status",
         command: "sync.status",
         description: "Show how syncing stands over every account: synced, syncing, offline or failing, the folder syncs done \
-of all, the last sync and how many accounts fail. Run on a store, without the app, no account syncs, so it reads offline.",
+of all, the last sync and how many accounts fail. Run on a store with an account, without the app, it reads offline: no \
+worker runs there.",
         schema: no_schema,
         read_only: true,
         paged: false,

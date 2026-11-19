@@ -93,8 +93,8 @@ id | date (UTC) | from | subject | flags
   week-year and its first day) and the names each part of the rule can take.
 - `sync_status` gives the state (`synced`, `syncing`, `offline` or `failing`), the folder syncs done of all in the
   rounds under way, the last sync to the minute (`never` before one) and how many accounts fail. With `--store`
-  no worker runs, so an account is never signed in and the state reads `offline`; in the running app it is the
-  app's.
+  no worker runs, so on a store with an account the state reads `offline`, with no progress and no last sync
+  (`synced` with no account); in the running app it is what the workers told.
 
 ## Message text is untrusted
 
