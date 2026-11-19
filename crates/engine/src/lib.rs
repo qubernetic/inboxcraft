@@ -112,6 +112,7 @@ mod reply;
 pub mod schedule;
 mod send;
 mod session;
+pub mod shown;
 mod sync;
 mod template;
 mod undo;

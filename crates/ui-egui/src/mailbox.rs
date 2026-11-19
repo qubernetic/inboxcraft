@@ -668,6 +668,8 @@ pub struct Mailbox {
     last: Option<&'static str>,
     /// Who the window's commands run for: the owner, or an agent while a picture's script steps drive the window.
     caller: Caller,
+    /// The newest `ui.settings.open` of an agent, waiting for the frame's end ([`crate::InboxApp::act_on_agent_ask`]).
+    agent_ask: Option<inboxcraft_engine::shown::SettingsAsked>,
     /// The first command [`Mailbox::run`] refused for [`Mailbox::caller`].
     refused: Option<&'static str>,
     /// The calendars' sync: the owner's press, its jobs and its events ([`crate::calendar::sync`]).
@@ -915,9 +917,12 @@ impl Mailbox {
             refused: None,
             calendar_sync: SyncHandle::default(),
             logged: None,
+            agent_ask: None,
             #[cfg(test)]
             logged_lines: 0,
         };
+        // The window takes what `ui.settings.open` asks: its answer says so.
+        mailbox.session.set_window(true);
         mailbox.refresh();
         mailbox
     }
@@ -1532,6 +1537,27 @@ impl Mailbox {
     pub fn due_in(&mut self) -> Option<std::time::Duration> {
         let due = self.session.due_at().ok().flatten()?;
         Some(due.duration_since(self.clock.now()).filter(|left| !left.is_zero()).unwrap_or(OVERDUE_WAKE))
+    }
+
+    /// What commands asked the window to show since the last call ([`Session::take_settings_asked`]), oldest first.
+    pub fn take_settings_asked(&mut self) -> Vec<inboxcraft_engine::shown::SettingsAsked> {
+        self.session.take_settings_asked()
+    }
+
+    /// Holds an agent's ask until the frame's end, in the place of one held before: the newest only.
+    pub(crate) fn hold_agent_ask(&mut self, asked: inboxcraft_engine::shown::SettingsAsked) {
+        self.agent_ask = Some(asked);
+    }
+
+    /// The agent's ask held, taken.
+    pub(crate) fn take_agent_ask(&mut self) -> Option<inboxcraft_engine::shown::SettingsAsked> {
+        self.agent_ask.take()
+    }
+
+    /// Whether an agent's ask waits for the frame's end.
+    #[must_use]
+    pub fn holds_agent_ask(&self) -> bool {
+        self.agent_ask.is_some()
     }
 
     /// What the engine has to tell the owner since the last call ([`Session::take_notices`]), for the desktop to show.

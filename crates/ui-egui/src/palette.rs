@@ -5,11 +5,48 @@
 //! text. It lists every action of the window ([`keymap::actions`]) by name; typing narrows the list, the arrow keys
 //! move the pick and Enter runs it; an action of another screen (the calendar's arrows on the mail) is not listed. The
 //! text comes from the keyboard and is cut at [`MAX_CHARS`] characters.
+//!
+//! After the actions it lists the settings' nine pages, "Settings: Accounts" and the like: each [`Row`] runs
+//! `ui.settings.open` with its page and has no key of its own.
 
+use std::borrow::Cow;
+
+use inboxcraft_engine::shown::SETTINGS_PAGES;
+
+use crate::iconset::IconId;
 use crate::keymap::{self, Action};
+use crate::settings::Section;
 
 /// The most characters the palette's field takes.
 pub const MAX_CHARS: usize = 64;
+
+/// A row of the palette: an action of the window, or a page of the settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    /// The action it runs: for a page, `ui.settings.open`.
+    pub id: &'static str,
+    /// Its name.
+    pub name: Cow<'static, str>,
+    /// Its icon.
+    pub icon: IconId,
+    /// The page `ui.settings.open` shows ([`Section::id`]); `None` for an action, which runs as its key does.
+    pub page: Option<&'static str>,
+}
+
+impl Row {
+    fn action(action: Action) -> Self {
+        Self { id: action.id, name: Cow::Borrowed(action.name), icon: action.icon, page: None }
+    }
+}
+
+/// The settings' pages as rows, in the settings' order: "Settings: Accounts" runs `ui.settings.open` on `accounts`.
+fn pages() -> impl Iterator<Item = Row> {
+    SETTINGS_PAGES.into_iter().filter_map(|page| {
+        let section = Section::named(page)?;
+        let name = crate::tr!("Settings: {page}", page = section.name());
+        Some(Row { id: keymap::SETTINGS, name: Cow::Owned(name), icon: IconId::Settings, page: Some(page) })
+    })
+}
 
 /// The command palette.
 #[derive(Debug)]
@@ -90,17 +127,35 @@ impl Palette {
         self.screen = screen;
     }
 
-    /// The actions that match the text typed, of the window and of the screen it opens over.
+    /// The rows that match the text typed, of the window and of the screen it opens over.
     #[must_use]
-    pub fn matches(&self) -> Vec<Action> {
-        matching(&self.query).into_iter().filter(|action| keymap::scope(action.id).meets(self.screen)).collect()
+    pub fn matches(&self) -> Vec<Row> {
+        rows(&self.query).into_iter().filter(|row| keymap::scope(row.id).meets(self.screen)).collect()
     }
 
-    /// The action picked, if a row is.
+    /// The row picked, if one is.
     #[must_use]
-    pub fn chosen(&self) -> Option<Action> {
-        self.matches().get(self.picked).copied()
+    pub fn chosen(&self) -> Option<Row> {
+        self.matches().into_iter().nth(self.picked)
     }
+}
+
+/// The rows whose name, or the action's id, or the page's, holds every word of `query` (its first [`MAX_CHARS`]
+/// characters), case left aside: the actions, then the settings' pages, those whose name starts with the text first.
+#[must_use]
+pub fn rows(query: &str) -> Vec<Row> {
+    let query: String = query.chars().take(MAX_CHARS).collect::<String>().trim().to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let all = keymap::actions().into_iter().map(Row::action).chain(pages());
+    let (mut first, rest): (Vec<Row>, Vec<Row>) = all
+        .filter(|row| {
+            let name = row.name.to_lowercase();
+            let id = row.page.unwrap_or(row.id);
+            words.iter().all(|word| name.contains(word) || id.contains(word))
+        })
+        .partition(|row| row.name.to_lowercase().starts_with(&query));
+    first.extend(rest);
+    first
 }
 
 /// The actions whose name or id holds every word of `query`, case left aside; those whose name starts with the text

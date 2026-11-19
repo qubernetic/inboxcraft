@@ -488,6 +488,148 @@ fn a_control_call_runs_for_an_agent_with_or_without_a_window() {
     drop(send);
 }
 
+/// One frame of the window, 1200 × 820, with `events` from the keyboard.
+fn frame(desktop: &mut Desktop, ctx: &egui::Context, events: Vec<egui::Event>) {
+    let raw = RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 820.0))), events, ..RawInput::default() };
+    let mut drawn = ctx.run_ui(raw, |ui| desktop.frame(ui));
+    // No painter takes the textures in a test.
+    drawn.textures_delta.clear();
+}
+
+/// The settings' key, Ctrl+, (the owner's own).
+fn settings_key() -> egui::Event {
+    egui::Event::Key { key: egui::Key::Comma, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }
+}
+
+/// A window over the sample and the control channel's sender, one frame drawn.
+fn controlled() -> (Desktop, mpsc::Sender<Call>, egui::Context) {
+    let (_send, heard) = mpsc::channel();
+    let (calls, received) = mpsc::channel();
+    let mut desktop = Desktop::new(sample_app(), heard).with_control(received);
+    let ctx = egui::Context::default();
+    frame(&mut desktop, &ctx, Vec::new());
+    (desktop, calls, ctx)
+}
+
+/// Runs `ui.settings.open` with `params` over the control channel, ticks and draws a frame; its answer.
+fn open_settings(desktop: &mut Desktop, calls: &mpsc::Sender<Call>, ctx: &egui::Context, params: serde_json::Value) -> serde_json::Value {
+    let (open, answer) = call("ui.settings.open", params);
+    calls.send(open).unwrap();
+    tick(desktop, ctx, false);
+    frame(desktop, ctx, Vec::new());
+    answer.try_recv().unwrap().unwrap()
+}
+
+#[test]
+fn ui_settings_open_over_the_control_channel_shows_the_page_named() {
+    use inboxcraft_ui_egui::settings::Section;
+    let (mut desktop, calls, ctx) = controlled();
+    assert_eq!(open_settings(&mut desktop, &calls, &ctx, json!({ "page": "accounts" })), json!({ "page": "accounts", "window": true }));
+    let settings = desktop.app().settings();
+    assert!(settings.is_open());
+    assert_eq!(settings.section(), Section::Accounts);
+    // A page while the settings show goes to that page: the settings stay.
+    open_settings(&mut desktop, &calls, &ctx, json!({ "page": "about" }));
+    assert!(desktop.app().settings().is_open(), "a page never toggles back");
+    assert_eq!(desktop.app().settings().section(), Section::About);
+    // Junk is no page: the page last shown, the settings still shown.
+    let junk = open_settings(&mut desktop, &calls, &ctx, json!({ "page": "\u{202e}accounts\u{0}" }));
+    assert_eq!(junk, json!({ "page": null, "window": true }));
+    assert!(desktop.app().settings().is_open(), "junk is no page, and no toggle");
+    assert_eq!(desktop.app().settings().section(), Section::About, "the page last shown");
+    // An agent's bare call never toggles: shown, the settings stay; not shown, they show on the page last shown.
+    open_settings(&mut desktop, &calls, &ctx, json!({}));
+    assert!(desktop.app().settings().is_open(), "an agent never takes the owner off the settings");
+    frame(&mut desktop, &ctx, vec![settings_key()]);
+    assert!(!desktop.app().settings().is_open(), "the owner's key still toggles");
+    open_settings(&mut desktop, &calls, &ctx, json!(null));
+    assert!(desktop.app().settings().is_open());
+    assert_eq!(desktop.app().settings().section(), Section::About, "the page last shown");
+}
+
+/// The window on the Accounts page with the add form open, `typed` into it.
+fn on_the_form(typed: impl FnOnce(&mut inboxcraft_ui_egui::onboard::Form)) -> (Desktop, mpsc::Sender<Call>, egui::Context) {
+    let (mut desktop, calls, ctx) = controlled();
+    desktop.app_mut().open_settings_page(Some("accounts"));
+    desktop.app_mut().onboarding_mut().0.open();
+    typed(desktop.app_mut().onboarding_mut().0.form_mut());
+    frame(&mut desktop, &ctx, Vec::new());
+    (desktop, calls, ctx)
+}
+
+#[test]
+fn an_agent_s_bare_call_leaves_a_typed_password_where_it_is() {
+    use inboxcraft_ui_egui::settings::Section;
+    let (mut desktop, calls, ctx) = on_the_form(|form| form.password = inboxcraft_ui_egui::onboard::Secret::new("hunter2"));
+    open_settings(&mut desktop, &calls, &ctx, json!({}));
+    assert!(desktop.app().settings().is_open());
+    assert_eq!(desktop.app().settings().section(), Section::Accounts);
+    assert!(!desktop.app().onboarding().form().password.is_empty(), "the password is still there");
+}
+
+#[test]
+fn an_agent_s_page_waits_while_the_form_holds_typing_and_goes_when_it_is_empty() {
+    use inboxcraft_ui_egui::settings::Section;
+    let (mut desktop, calls, ctx) = on_the_form(|form| form.host = "imap.example.org".to_owned());
+    let skipped = open_settings(&mut desktop, &calls, &ctx, json!({ "page": "appearance" }));
+    assert_eq!(desktop.app().settings().section(), Section::Accounts, "the owner's page stays");
+    assert_eq!(desktop.app().onboarding().form().host, "imap.example.org", "the field is kept");
+    let (mut desktop, calls, ctx) = on_the_form(|_| {});
+    let acted = open_settings(&mut desktop, &calls, &ctx, json!({ "page": "appearance" }));
+    assert_eq!(desktop.app().settings().section(), Section::Appearance, "an empty form holds nothing to lose");
+    assert_eq!(skipped.to_string(), acted.to_string(), "the answer tells nothing of what the owner does");
+}
+
+#[test]
+fn an_agent_s_call_lets_a_key_capture_go_on() {
+    use inboxcraft_ui_egui::settings::Section;
+    let (mut desktop, calls, ctx) = controlled();
+    desktop.app_mut().open_settings_page(Some("shortcuts"));
+    desktop.app_mut().settings_mut().capture(inboxcraft_ui_egui::keymap::FIND);
+    frame(&mut desktop, &ctx, Vec::new());
+    open_settings(&mut desktop, &calls, &ctx, json!({ "page": "about" }));
+    assert_eq!(desktop.app().settings().capturing(), Some(inboxcraft_ui_egui::keymap::FIND), "the capture goes on");
+    assert_eq!(desktop.app().settings().section(), Section::Shortcuts);
+}
+
+#[test]
+fn the_owner_s_key_in_the_same_frame_wins_over_an_agent_s_ask() {
+    use inboxcraft_ui_egui::settings::Section;
+    let (mut desktop, calls, ctx) = controlled();
+    assert!(!desktop.app().settings().is_open());
+    let (open, _answer) = call("ui.settings.open", json!({ "page": "about" }));
+    calls.send(open).unwrap();
+    tick(&mut desktop, &ctx, false);
+    frame(&mut desktop, &ctx, vec![settings_key()]);
+    assert!(desktop.app().settings().is_open(), "the owner's key opened the settings");
+    assert_eq!(desktop.app().settings().section(), Section::Appearance, "on the owner's page, not the agent's");
+    frame(&mut desktop, &ctx, Vec::new());
+    assert_eq!(desktop.app().settings().section(), Section::Appearance, "the agent's ask went");
+}
+
+#[test]
+fn a_thousand_calls_in_a_tick_act_once_and_leave_the_window_usable() {
+    use inboxcraft_ui_egui::settings::Section;
+    let (mut desktop, calls, ctx) = controlled();
+    let mut answers = Vec::new();
+    for index in 0..1_000 {
+        let params = if index % 2 == 0 { json!({ "page": "about" }) } else { json!({}) };
+        let (open, answer) = call("ui.settings.open", params);
+        calls.send(open).unwrap();
+        answers.push(answer);
+    }
+    tick(&mut desktop, &ctx, false);
+    assert!(answers.iter().all(|answer| answer.try_recv().is_ok_and(|answer| answer.is_ok())), "every call answered");
+    assert!(desktop.app_mut().mailbox_mut().take_settings_asked().is_empty(), "nothing left in the queue");
+    frame(&mut desktop, &ctx, Vec::new());
+    // The newest, a bare call, acted once: the settings on the page last shown.
+    assert!(desktop.app().settings().is_open());
+    assert_eq!(desktop.app().settings().section(), Section::Appearance);
+    assert!(!desktop.app().holds_agent_ask());
+    frame(&mut desktop, &ctx, vec![settings_key()]);
+    assert!(!desktop.app().settings().is_open(), "the owner's key works the next frame");
+}
+
 #[test]
 fn a_click_on_an_alert_opens_its_event_on_the_calendar_and_brings_the_window_forward() {
     use crate::notify::Click;

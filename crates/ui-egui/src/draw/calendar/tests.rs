@@ -464,3 +464,84 @@ fn with_sunday_first_the_heads_and_the_mini_month_are_drawn_and_walked_from_sund
         }
     }
 }
+
+/// The calendar of a store with no account: its empty state.
+fn empty_calendar(theme: egui::Theme) -> Harness<'static, InboxApp> {
+    let store = Memory::new(StoreConfig::default());
+    let app = InboxApp::new(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()));
+    let mut harness = build(app, theme);
+    press(&mut harness, "Calendar");
+    assert!(harness.state().calendar().is_empty());
+    harness
+}
+
+#[test]
+fn the_empty_calendar_s_open_accounts_stands_under_the_words_and_shows_the_accounts() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = empty_calendar(theme);
+        let block = harness.get_by_role_and_label(Role::Label, "No calendars yet.").rect();
+        let button = harness.get_by_role_and_label(Role::Button, "Open accounts");
+        let at = button.rect();
+        assert!(!button.accesskit_node().is_disabled());
+        // Right under the block, in its middle, a secondary button 32 high.
+        assert_eq!(at.top(), block.bottom(), "{at:?} under {block:?}");
+        assert!((at.center().x - block.center().x).abs() <= 0.5, "{at:?} in the middle of {block:?}");
+        assert_eq!(at.height(), 32.0);
+        harness.check_accessibility();
+        button.click();
+        harness.run();
+        let app = harness.state();
+        assert!(app.settings().is_open(), "the settings show");
+        assert_eq!(app.settings().section(), crate::settings::Section::Accounts);
+        assert_eq!(app.mailbox().last_run(), Some(crate::keymap::SETTINGS), "through ui.settings.open with its page");
+    }
+}
+
+#[test]
+fn tab_reaches_open_accounts() {
+    let mut harness = empty_calendar(egui::Theme::Light);
+    let focused = |harness: &Harness<'static, InboxApp>| {
+        harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
+    };
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        let now = focused(&harness);
+        if now.as_deref() == Some("Open accounts") {
+            harness.key_press(Key::Enter);
+            harness.run();
+            assert_eq!(harness.state().settings().section(), crate::settings::Section::Accounts, "Enter on it shows the accounts");
+            assert!(harness.state().settings().is_open());
+            return;
+        }
+        seen.push(now);
+    }
+    panic!("Tab never reached Open accounts: {seen:?}");
+}
+
+#[test]
+fn open_accounts_shows_only_while_there_is_no_calendar() {
+    let harness = on_calendar(egui::Theme::Light);
+    assert!(!harness.state().calendar().is_empty());
+    assert!(harness.query_by_label("Open accounts").is_none());
+}
+
+#[test]
+fn shift_tab_reaches_open_accounts_too() {
+    let mut harness = empty_calendar(egui::Theme::Light);
+    let focused = |harness: &Harness<'static, InboxApp>| {
+        harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
+    };
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+        harness.run();
+        let now = focused(&harness);
+        if now.as_deref() == Some("Open accounts") {
+            return;
+        }
+        seen.push(now);
+    }
+    panic!("Shift Tab never reached Open accounts: {seen:?}");
+}
