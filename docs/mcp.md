@@ -53,9 +53,9 @@ letters, digits, `_` and `-` only.
 | `account_check` | `account.check` | `account` |
 | `mail_why` | `mail.why` | `id` |
 | `week_settings` | `week.settings` | none |
+| `sync_status` | `sync.status` | none |
 
-The tools are this fixed list, not every `safe` command: `sync.status`, for one, is not a tool and runs through the
-CLI and the control channel.
+The tools are this fixed list, not every `safe` command: the others run through the CLI and the control channel.
 
 Each tool's `inputSchema` lists its arguments; unknown ones are refused. `mail_read` marks the message opened on this
 computer, as reading it in the app does, and changes nothing on the server.
@@ -96,6 +96,10 @@ id | date (UTC) | from | subject | flags
   thread.
 - `week_settings` gives the first day of the week, the first week of the year, the week of today (its number, its
   week-year and its first day) and the names each part of the rule can take.
+- `sync_status` gives the state (`synced`, `syncing`, `offline` or `failing`), the folder syncs done of all in the
+  rounds under way, the last sync to the minute (`never` before one) and how many accounts fail. With `--store`
+  no worker runs, so an account is never signed in and the state reads `offline`; in the running app it is the
+  app's.
 
 ## Message text is untrusted
 

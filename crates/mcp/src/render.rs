@@ -513,6 +513,30 @@ pub(crate) fn week(_arguments: &Value, answer: &Value) -> String {
     ))
 }
 
+/// A count of the answer, `-` when it is not one.
+fn count_of(value: Option<&Value>) -> String {
+    value.and_then(Value::as_u64).map_or_else(|| "-".to_owned(), |count| count.to_string())
+}
+
+/// `sync_status`: the state, the progress of the rounds under way, the last sync, the accounts that fail.
+pub(crate) fn sync(_arguments: &Value, answer: &Value) -> String {
+    let last = answer.get("last_synced").filter(|last| !last.is_null()).map_or_else(
+        || "never".to_owned(),
+        |last| {
+            // The app's answer, through the control channel: kept to the characters a date to the minute has.
+            let kept: String = date(last).chars().filter(|c| c.is_ascii_digit() || matches!(c, '-' | ':' | ' ')).take(MAX_WORD).collect();
+            if kept.trim().is_empty() { "-".to_owned() } else { kept }
+        },
+    );
+    cap(format!(
+        "sync_status: {}\nprogress: {} of {} folder syncs\nlast synced (UTC): {last}\nfailing accounts: {}\n",
+        word(answer.get("state")),
+        count_of(answer.get("done")),
+        count_of(answer.get("of")),
+        count_of(answer.get("failing_accounts"))
+    ))
+}
+
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;

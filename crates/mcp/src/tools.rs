@@ -34,7 +34,7 @@ pub(crate) struct Tool {
 }
 
 /// Every tool, in the order `tools/list` gives them.
-pub(crate) const TOOLS: [Tool; 7] = [
+pub(crate) const TOOLS: [Tool; 8] = [
     Tool {
         name: "mail_list",
         command: "mail.list",
@@ -104,6 +104,16 @@ take, and the week of today.",
         read_only: true,
         paged: false,
         render: render::week,
+    },
+    Tool {
+        name: "sync_status",
+        command: "sync.status",
+        description: "Show how syncing stands over every account: synced, syncing, offline or failing, the folder syncs done \
+of all, the last sync and how many accounts fail. Run on a store, without the app, no account syncs, so it reads offline.",
+        schema: no_schema,
+        read_only: true,
+        paged: false,
+        render: render::sync,
     },
 ];
 

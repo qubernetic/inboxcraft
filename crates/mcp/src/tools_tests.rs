@@ -209,3 +209,18 @@ fn week_settings_refuses_what_it_does_not_take() {
         assert_eq!(out.lines().count(), 1, "{out}");
     }
 }
+
+#[test]
+fn sync_status_reads_offline_on_a_store_and_takes_nothing() {
+    let (_dir, mut server) = fixture_server();
+    for arguments in [json!({}), json!(null)] {
+        let (out, error) = text(&call(&mut server, "sync_status", arguments));
+        assert!(!error, "{out}");
+        // No worker runs on a store, so its account is not signed in.
+        assert_eq!(out, "sync_status: offline\nprogress: 0 of 0 folder syncs\nlast synced (UTC): never\nfailing accounts: 0\n");
+    }
+    for arguments in [json!({ "x": 1 }), json!({ "id": 1 }), json!([1])] {
+        let (out, error) = text(&call(&mut server, "sync_status", arguments.clone()));
+        assert!(error && out.starts_with("error bad_params: ") && out.lines().count() == 1, "{arguments}: {out}");
+    }
+}
