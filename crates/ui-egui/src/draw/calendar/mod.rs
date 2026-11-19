@@ -275,7 +275,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
         let left = inner.left();
         let room = (ui.available_rect_before_wrap().right() - left).max(0.0);
         let note = match calendar.view() {
-            View::Day | View::Week => Some(tr!("week {number}", number = calendar.focus().iso_week())),
+            View::Day | View::Week => calendar.week_number().map(|number| tr!("week {number}", number = number)),
             View::Agenda => Some(tr!("{count} days", count = crate::calendar::AGENDA_DAYS)),
             View::Month => None,
         };

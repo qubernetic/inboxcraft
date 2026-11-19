@@ -10,6 +10,7 @@
 //! panel scrolling to the rest. At the foot the sync line, coming soon.
 
 use egui::{Rect, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
+use inboxcraft_time::WeekRule;
 
 use super::grid::{line as line_width, snap};
 use super::{Asked, bar_colour, stroke};
@@ -97,9 +98,11 @@ fn side_content(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar
     ui.add_space(GAP);
 }
 
-/// What the mini month shows: its month, today, the picked day, and a day drawn hovered (the gallery's board).
+/// What the mini month shows: its month, today, the picked day, and a day drawn hovered (the gallery's board); its
+/// columns start on the week's first day as `week` counts it.
 struct Mini {
     month: Day,
+    week: WeekRule,
     today: Day,
     picked: Option<Day>,
     hover: Option<Day>,
@@ -109,18 +112,26 @@ struct Mini {
 
 impl Mini {
     fn of(calendar: &Calendar) -> Self {
-        Self { month: calendar.month(), today: calendar.today(), picked: calendar.picked_day(), hover: None, board: None }
+        Self { month: calendar.month(), week: calendar.week_rule(), today: calendar.today(), picked: calendar.picked_day(), hover: None, board: None }
     }
 }
 
 /// The mini-month sheet's board number `board` for the gallery: the month of `month`, `today`, the `picked` day and a
-/// `hover`ed one, 220 wide.
+/// `hover`ed one, 220 wide, its weeks from Monday as the sheet draws them.
 pub(crate) fn mini_month_board(ui: &mut Ui, theme: &Theme, board: u8, month: Day, today: Day, (picked, hover): (Option<Day>, Option<Day>)) {
     ui.allocate_ui(vec2(220.0, 260.0), |ui| {
         ui.set_width(220.0);
         let mut asked = Vec::new();
-        mini_month(ui, theme, &Mini { month: month.first_of_month(), today, picked, hover, board: Some(board) }, &mut asked);
+        let mini = Mini { month: month.first_of_month(), week: WeekRule::default(), today, picked, hover, board: Some(board) };
+        mini_month(ui, theme, &mini, &mut asked);
     });
+}
+
+/// The mini month's first cell, the first day of the week `month`'s first day is in as `rule` counts it, and the
+/// letters over its seven columns from there.
+fn mini_columns(month: Day, rule: WeekRule) -> (Day, [&'static str; 7]) {
+    let first = month.week_start(rule);
+    (first, [0, 1, 2, 3, 4, 5, 6].map(|index| day::weekday_letter(first.plus(index).weekday())))
 }
 
 /// The mini month as the mini-month sheet draws it: a box with its name and steps, the weekdays' letters and the weeks
@@ -130,7 +141,7 @@ fn mini_month(ui: &mut Ui, theme: &Theme, mini: &Mini, asked: &mut Vec<Asked>) {
     let ppp = ui.pixels_per_point();
     let line = line_width(ppp);
     let month = mini.month;
-    let first = month.monday();
+    let (first, letters) = mini_columns(month, mini.week);
     let last = month.months_later(1).plus(-1);
     let weeks = usize::try_from(last.since(first) / 7 + 1).unwrap_or(6).clamp(4, 6);
     let width = ui.available_width();
@@ -165,13 +176,13 @@ fn mini_month(ui: &mut Ui, theme: &Theme, mini: &Mini, asked: &mut Vec<Asked>) {
             asked.push(Asked::Month(forward));
         }
     }
-    let letters = rect.top() + 8.0 + 28.0 + 4.0;
-    for index in 0..7_i64 {
-        let cell = Rect::from_min_size(pos2(left + cell_w * index as f32, letters), vec2(cell_w, 20.0));
-        let galley = crate::component::galley(ui, day::weekday_letter(index), theme.fonts.label, p.muted);
+    let letters_top = rect.top() + 8.0 + 28.0 + 4.0;
+    for (index, letter) in letters.into_iter().enumerate() {
+        let cell = Rect::from_min_size(pos2(left + cell_w * index as f32, letters_top), vec2(cell_w, 20.0));
+        let galley = crate::component::galley(ui, letter, theme.fonts.label, p.muted);
         crate::draw::paint::run_centred(ui.painter(), cell, galley, p.muted);
     }
-    let top = letters + 20.0 + 4.0;
+    let top = letters_top + 20.0 + 4.0;
     for week in 0..weeks {
         for index in 0..7_usize {
             let day = first.plus(i64::try_from(week * 7 + index).unwrap_or(0));
@@ -414,3 +425,7 @@ fn answer(theme: &Theme, status: &str) -> (&'static str, egui::Color32) {
         _ => ("", p.muted),
     }
 }
+
+#[cfg(test)]
+#[path = "side_tests.rs"]
+mod tests;

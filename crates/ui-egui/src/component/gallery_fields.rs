@@ -470,7 +470,7 @@ fn time_pickers(ui: &mut Ui, theme: &Theme) {
         Preset { name: tr!("Later today"), at: at(16, 17, 0) },
         Preset { name: tr!("Tomorrow morning"), at: at(17, 8, 0) },
         Preset { name: tr!("This weekend"), at: at(21, 9, 0) },
-        Preset { name: tr!("Next week"), at: at(23, 8, 0) },
+        Preset { name: tr!("Next week"), at: at(23, 9, 0) },
     ];
     let one = |ui: &mut Ui, typed: &str, alert: bool, late: bool, forced: time_picker::Forced| {
         let ask = Ask {
