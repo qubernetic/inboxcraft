@@ -3116,9 +3116,8 @@ impl InboxApp {
                 self.palette_page(page);
             }
             command::Asked::Person(address) => {
-                // Their mail: the search of the mail shown, by their address.
-                self.command.drop_scope();
-                self.command.set_text(&address);
+                // Their mail: the search of the mail shown, by their address, read as it is (never as a prefix).
+                self.command.set_search(&address);
                 self.command.close_results();
                 self.show_mail();
                 self.search(&address);

@@ -270,6 +270,21 @@ fn at_lists_the_people_of_the_mail_and_enter_shows_their_mail() {
 }
 
 #[test]
+fn a_person_whose_address_starts_like_a_prefix_stays_a_search_of_it() {
+    // `#` and `>` are allowed in an address (RFC 5322 atext), and the address comes from the mail.
+    for address in ["#x@example.org", ">x@example.org"] {
+        let mut harness = opened(egui::Theme::Light, "@x");
+        let ctx = harness.ctx.clone();
+        let ran = harness.state_mut().apply_command(&ctx, super::command::Asked::Person(address.to_owned()));
+        harness.run();
+        assert_eq!(ran, None, "{address}");
+        let command = harness.state().command();
+        assert_eq!((command.mode(), command.text()), (Mode::Search, address), "{address}: the field holds the address");
+        assert_eq!(harness.state().search_text(), address, "{address}: and the search is the same");
+    }
+}
+
+#[test]
 fn hash_lists_the_mailboxes_and_enter_goes_there() {
     let mut harness = opened(egui::Theme::Light, "#bakery");
     assert_eq!(rows(&harness), vec![("Clients/Harbour Bakery".to_owned(), true)]);

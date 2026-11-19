@@ -217,9 +217,7 @@ impl Command {
     /// The text changed: cut at [`MOST`] characters; in a search, a first character `>`, `@` or `#` becomes the mark
     /// (the first character only: one typed later is text); the first row is picked and the results show.
     pub fn typed(&mut self) {
-        if let Some((cut, _)) = self.text.char_indices().nth(MOST) {
-            self.text.truncate(cut);
-        }
+        self.cap();
         if self.mode == Mode::Search
             && let Some(mode) = self.text.chars().next().and_then(Mode::of)
         {
@@ -230,6 +228,24 @@ impl Command {
         self.picked = 0;
         self.stepped = false;
         self.results = true;
+    }
+
+    /// Puts a search for `text` in the field as it is, capped: no character of it is read for a mode, as an address
+    /// from the mail may start with `>` or `#`. The results are left as they were.
+    pub fn set_search(&mut self, text: &str) {
+        self.mode = Mode::Search;
+        self.narrowed = false;
+        text.clone_into(&mut self.text);
+        self.cap();
+        self.picked = 0;
+        self.stepped = false;
+    }
+
+    /// Cuts the text at [`MOST`] characters.
+    fn cap(&mut self) {
+        if let Some((cut, _)) = self.text.char_indices().nth(MOST) {
+            self.text.truncate(cut);
+        }
     }
 
     /// Whether the arrows moved the pick since the text changed: Enter on a bare prefix runs only a row picked so.
