@@ -224,6 +224,30 @@ pub fn unchecked_line(checked: Checked, host: &str) -> Option<String> {
     })
 }
 
+/// What the form says of a server Detect found at `host` and left out because the owner typed another (the outgoing one
+/// when `outgoing`): that the owner's stays, and, when Detect did not reach it (`unchecked`), that it was not checked and
+/// why, the host then cut as in [`unchecked_line`].
+#[must_use]
+pub fn kept_line(host: &str, unchecked: Option<Checked>, outgoing: bool) -> String {
+    let cause = match unchecked {
+        None | Some(Checked::Answered) => None,
+        Some(Checked::NoAnswer) => Some(tr!("it did not answer from here")),
+        Some(Checked::Refused) => Some(tr!("it refused the connection from here")),
+        Some(Checked::NoName) => Some(tr!("its name was not found")),
+        Some(Checked::Clock) => Some(tr!("its certificate does not fit this computer's clock, which may be what is off")),
+    };
+    match (cause, outgoing) {
+        (None, false) => tr!("Detect found {host}; the IMAP server you typed stays.", host = host),
+        (None, true) => tr!("Detect found {host}; the outgoing server you typed stays.", host = host),
+        (Some(cause), false) => {
+            tr!("Detect found {host} but did not check it: {cause}. The IMAP server you typed stays.", host = host_in_line(host), cause = cause)
+        }
+        (Some(cause), true) => {
+            tr!("Detect found {host} but did not check it: {cause}. The outgoing server you typed stays.", host = host_in_line(host), cause = cause)
+        }
+    }
+}
+
 /// The stop of one Detect run: once set, the run starts no further lookup or probe and ends as soon as it can.
 #[derive(Debug, Clone, Default)]
 pub struct RunStop(Arc<AtomicBool>);
@@ -793,6 +817,8 @@ pub struct Found {
     pub kept_imap: Option<String>,
     /// The outgoing server Detect found and left out, because the owner typed another.
     pub kept_outgoing: Option<String>,
+    /// Why Detect did not reach the server it left out (IMAP, outgoing), when it did not.
+    pub kept_unchecked: [Option<Checked>; 2],
     /// The encryption Detect set in the IMAP row and in the outgoing row where it replaced one the owner had picked.
     pub encryption_set: [Option<Security>; 2],
     /// What Detect asked: what left the computer; the first [`MOST_LINES`].
@@ -1458,6 +1484,10 @@ impl Onboarding {
         let kept_imap = best.filter(|_| imap == Filled::Owner).map(|best| shown(&best.host));
         let in_form = outgoing_best.filter(|_| outgoing == Filled::Detect).map(|best| (shown(&best.host), best.source));
         let kept_outgoing = outgoing_best.filter(|_| outgoing == Filled::Owner).map(|best| shown(&best.host));
+        let kept_why = |best: Option<&Suggestion>, filled: Filled| {
+            best.filter(|best| filled == Filled::Owner && best.checked != Checked::Answered).map(|best| best.checked)
+        };
+        let kept_unchecked = [kept_why(best, imap), kept_why(outgoing_best, outgoing)];
         // A server Detect put into a row without having reached it: the row says so, and why.
         let unchecked = |best: Option<&Suggestion>, filled: Filled| {
             best.filter(|best| filled == Filled::Detect && best.checked != Checked::Answered).map(|best| (best.checked, host_in_line(&best.host)))
@@ -1465,8 +1495,19 @@ impl Onboarding {
         self.detected.unchecked = [unchecked(best, imap), unchecked(outgoing_best, outgoing)];
         let (asked, failed, column, alone) = Found::lines(&proposal.asked, &proposal.failed);
         let asked_count = proposal.asked.len();
-        self.found =
-            Some(Arc::new(Found { source, outgoing: in_form, kept_imap, kept_outgoing, encryption_set, asked, failed, asked_count, column, alone }));
+        self.found = Some(Arc::new(Found {
+            source,
+            outgoing: in_form,
+            kept_imap,
+            kept_outgoing,
+            kept_unchecked,
+            encryption_set,
+            asked,
+            failed,
+            asked_count,
+            column,
+            alone,
+        }));
         self.detected.picked = [false; 2];
     }
 

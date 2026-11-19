@@ -41,7 +41,9 @@ use crate::component::soon::{soon, soon_tag};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
-use crate::onboard::{Form, Found, Onboarding, Outcome, Secret, Security, Slot, Source, Stage, StepRow, StepState, port_typed, unusual_encryption};
+use crate::onboard::{
+    Form, Found, Onboarding, Outcome, Secret, Security, Slot, Source, Stage, StepRow, StepState, kept_line, port_typed, unusual_encryption,
+};
 use crate::theme::{Font, Theme};
 use crate::tr;
 
@@ -406,7 +408,7 @@ fn servers(
 fn found_note(ui: &mut Ui, theme: &Theme, keymap: &Keymap, found: &Found) {
     let (kind, text) = match (found.source, found.kept_imap.as_deref()) {
         (Some(source), _) => (if source.doubtful() { BannerKind::Careful } else { BannerKind::Notice }, source.text().to_owned()),
-        (None, Some(host)) => (BannerKind::Notice, tr!("Detect found {host}; the IMAP server you typed stays.", host = host)),
+        (None, Some(host)) => (BannerKind::Notice, kept_line(host, found.kept_unchecked[0], false)),
         (None, None) => (BannerKind::Notice, tr!("Detect found no server: type the settings in.").to_owned()),
     };
     banner(ui, theme, keymap, kind, &text, &[]);
@@ -419,7 +421,7 @@ fn found_note(ui: &mut Ui, theme: &Theme, keymap: &Keymap, found: &Found) {
         banner(ui, theme, keymap, BannerKind::Careful, &text, &[]);
     }
     if let Some(host) = found.kept_outgoing.as_deref() {
-        banner(ui, theme, keymap, BannerKind::Notice, &tr!("Detect found {host}; the outgoing server you typed stays.", host = host), &[]);
+        banner(ui, theme, keymap, BannerKind::Notice, &kept_line(host, found.kept_unchecked[1], true), &[]);
     }
 }
 

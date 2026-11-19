@@ -1591,3 +1591,46 @@ fn cancel_stops_a_threaded_run_before_its_next_lookup_and_a_second_detect_works(
     assert_eq!(onboarding.form().host, "imap.example.org");
     assert_eq!(log.lock().unwrap().last().map(String::as_str), Some("closed"));
 }
+
+#[test]
+fn a_server_detect_left_out_for_the_owners_says_why_it_was_not_checked() {
+    for (checked, cause) in [
+        (Checked::NoAnswer, "it did not answer from here"),
+        (Checked::Refused, "it refused the connection from here"),
+        (Checked::NoName, "its name was not found"),
+        (Checked::Clock, "its certificate does not fit this computer's clock, which may be what is off"),
+    ] {
+        let mut answer = found_at("imap.example.org", Some("smtp.example.org"), "carol@example.org");
+        answer.imap[0].checked = checked;
+        answer.submission[0].checked = checked;
+        let (mut onboarding, detect) = detecting(vec![answer]);
+        onboarding.form_mut().host = "mail.mine.example.org".to_owned();
+        onboarding.form_mut().smtp_host = "smtp.mine.example.org".to_owned();
+        detect_now(&mut onboarding, &detect, "carol@example.org");
+        // The owner's servers stay, and nothing is said beside their rows: they are not Detect's.
+        assert_eq!(onboarding.form().host, "mail.mine.example.org");
+        assert_eq!(onboarding.unchecked(), [None, None]);
+        let found = onboarding.found().unwrap();
+        assert_eq!(found.kept_unchecked, [Some(checked), Some(checked)]);
+        assert_eq!(
+            super::kept_line(found.kept_imap.as_deref().unwrap(), found.kept_unchecked[0], false),
+            format!("Detect found imap.example.org but did not check it: {cause}. The IMAP server you typed stays.")
+        );
+        assert_eq!(
+            super::kept_line(found.kept_outgoing.as_deref().unwrap(), found.kept_unchecked[1], true),
+            format!("Detect found smtp.example.org but did not check it: {cause}. The outgoing server you typed stays.")
+        );
+    }
+    // One that answered says only that the owner's stays.
+    let (mut onboarding, detect) = detecting(vec![found_at("imap.example.org", None, "carol@example.org")]);
+    onboarding.form_mut().host = "mail.mine.example.org".to_owned();
+    detect_now(&mut onboarding, &detect, "carol@example.org");
+    let found = onboarding.found().unwrap();
+    assert_eq!(found.kept_unchecked, [None, None]);
+    assert_eq!(super::kept_line("imap.example.org", None, false), "Detect found imap.example.org; the IMAP server you typed stays.");
+    // A hostile host is cleaned and cut as in the line under a row.
+    let host = format!("\u{202e}{}.example.org\u{0}", "h".repeat(300));
+    let said = super::kept_line(&super::shown(&host), Some(Checked::NoName), false);
+    assert_eq!(said.matches('…').count(), 1, "{said}");
+    assert!(!said.contains('\u{202e}') && !said.contains('\u{0}'), "{said:?}");
+}

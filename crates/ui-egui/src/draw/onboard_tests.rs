@@ -1846,3 +1846,23 @@ fn leaving_the_form_while_detect_asks_stops_the_run_and_the_buttons_come_back() 
     assert!(!harness.get_by_role_and_label(Role::Button, "Check and add").accesskit_node().is_disabled());
     assert_eq!(harness.state().onboarding().form().host, "", "the late answer is dropped");
 }
+
+#[test]
+fn a_server_detect_left_out_for_the_owners_says_in_its_note_that_it_was_not_checked() {
+    let mut found = crate::onboard::tests::found_at("imap.example.org", None, "carol@example.org");
+    found.imap[0].checked = crate::onboard::Checked::Refused;
+    let mut app = InboxApp::new(mailbox()).with_accounts(Arc::new(Kept::default()), Box::new(Proposed::new(found)), Box::new(FakeWorkers::passing()));
+    app.set_text_scale(crate::theme::TextScale::from_percent(100).unwrap());
+    let mut harness = harness(app, egui::Theme::Light);
+    harness.state_mut().onboarding_mut().0.open();
+    {
+        let form = harness.state_mut().onboarding_mut().0.form_mut();
+        form.address = "carol@example.org".to_owned();
+        form.host = "mail.mine.example.org".to_owned();
+    }
+    harness.run();
+    press(&mut harness, "Detect");
+    harness.run();
+    harness.get_by_label("Detect found imap.example.org but did not check it: it refused the connection from here. The IMAP server you typed stays.");
+    assert!(harness.query_by_label_contains("Not checked:").is_none(), "nothing under the owner's row");
+}
