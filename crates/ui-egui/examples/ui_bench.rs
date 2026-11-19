@@ -30,8 +30,12 @@
 //! over the sample's accounts, and Sending and Notifications with 300 accounts more (a signature field, or a row, an
 //! account).
 //!
+//! With `--field` it runs the character field's scenes instead: `field-window-sweep`, a window of the field with an
+//! emblem on its right half, Home's field at the full motion level, the pointer sweeping across it every frame; and
+//! `field-4k-sweep`, the same over a 4K screen (3 840 × 2 160 points, some 69 000 cells).
+//!
 //! ```text
-//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose | --calendar | --settings | --large]
+//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose | --calendar | --settings | --large | --field]
 //! ```
 
 use std::process::ExitCode;
@@ -495,6 +499,40 @@ fn measure(scene: Scene) -> Result<Measured, UiError> {
     Ok(Measured { median_ms: percentile(&times, 0.5), p95_ms: percentile(&times, 0.95), shapes, rows_built: rows })
 }
 
+/// Runs a field of `size` for the warm-up and [`FRAMES`] frames, the pointer sweeping across it.
+fn measure_field(size: Vec2) -> Measured {
+    use inboxcraft_ui_egui::component::gallery_field::placeholder;
+    use inboxcraft_ui_egui::field::{self, Field, Level, Opts};
+    use inboxcraft_ui_egui::theme::{Mode, TextScale, Theme, install_fonts};
+    let ctx = egui::Context::default();
+    install_fonts(&ctx);
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let screen = Rect::from_min_size(Pos2::ZERO, size);
+    let opts = Opts { on_home: true, on_pane: false, emblem: Some(Rect::from_min_max(pos2(size.x / 2.0, 0.0), screen.max)) };
+    let mut kept = Field::new(screen, 0, TextScale::default()).with_emblem(placeholder());
+    let clock = SystemClock::new();
+    let mut times = Vec::with_capacity(FRAMES);
+    let mut shapes = 0;
+    for frame in 0..WARM_UP + FRAMES {
+        // Across the field and back, up and down: a new place every frame, over the field and the emblem.
+        let t = frame as f32 / 60.0;
+        let at = pos2(size.x * (0.5 + 0.45 * (t * 1.3).sin()), size.y * (0.5 + 0.4 * (t * 2.1).sin()));
+        let events = vec![Event::PointerMoved(at)];
+        let input = RawInput { screen_rect: Some(screen), time: Some(frame as f64 / 60.0), predicted_dt: 1.0 / 60.0, events, ..RawInput::default() };
+        let started = clock.monotonic();
+        let output = ctx.run_ui(input, |ui| field::show(ui, &theme, &mut kept, screen, Level::Full, opts));
+        let primitives = ctx.tessellate(output.shapes.clone(), output.pixels_per_point);
+        let took = clock.monotonic().saturating_sub(started);
+        if frame >= WARM_UP {
+            times.push(took.as_secs_f64() * 1000.0);
+            shapes = output.shapes.iter().map(|clipped| count(&clipped.shape)).sum();
+        }
+        drop(primitives);
+    }
+    times.sort_by(f64::total_cmp);
+    Measured { median_ms: percentile(&times, 0.5), p95_ms: percentile(&times, 0.95), shapes, rows_built: None }
+}
+
 /// The CPU's model name and the count of cores the system shows, from `/proc/cpuinfo`.
 fn cpu() -> (String, String) {
     let Ok(info) = std::fs::read_to_string("/proc/cpuinfo") else { return ("unknown".to_owned(), "unknown".to_owned()) };
@@ -536,6 +574,18 @@ fn main() -> ExitCode {
     }
     let clock = SystemClock::new();
     let asked = |flag: &str| std::env::args().any(|arg| arg == flag);
+    if asked("--field") {
+        for (name, size) in [("field-window-sweep", WINDOW), ("field-4k-sweep", vec2(3840.0, 2160.0))] {
+            let measured = measure_field(size);
+            let verdict = if measured.p95_ms <= budget { "PASS" } else { "MISS" };
+            println!(
+                "{name:<24} median_ms {:>8.3}  p95_ms {:>8.3}  shapes {:>6}  rows_built {:>6}  p95 <= {budget} ms: {verdict}",
+                measured.median_ms, measured.p95_ms, measured.shapes, "n/a"
+            );
+        }
+        println!("took {:.1} s", clock.monotonic().as_secs_f64());
+        return ExitCode::SUCCESS;
+    }
     let scenes = if asked("--compose") {
         Scene::compose()
     } else if asked("--calendar") {
