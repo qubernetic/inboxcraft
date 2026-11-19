@@ -13,6 +13,7 @@ use crate::theme::Theme;
 use crate::tr;
 
 use super::Shown;
+use super::account_row::{self, AccountRow, Sync};
 use super::gallery::{cell, title};
 use super::mailbox_row::{self, MailboxRow};
 use super::margin;
@@ -136,6 +137,58 @@ pub(crate) fn mailbox(ui: &mut Ui, theme: &Theme, state: &MailboxState) {
     });
 }
 
+/// One state of the account row's sheet.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AccountState {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub open: bool,
+    pub sync: Sync,
+    pub narrow: bool,
+    pub shown: Shown,
+}
+
+/// The account row's states, in the sheet's order, with the sheet's words.
+pub(crate) fn account_states() -> [AccountState; 12] {
+    let rest = AccountState { name: "default", label: "Studio", open: false, sync: Sync::Quiet, narrow: false, shown: Shown::Rest };
+    [
+        rest,
+        AccountState { name: "hover", shown: Shown::Hover, ..rest },
+        AccountState { name: "focus", shown: Shown::Focus, ..rest },
+        AccountState { name: "open", open: true, ..rest },
+        AccountState { name: "syncing", sync: Sync::Syncing, ..rest },
+        AccountState { name: "offline", sync: Sync::Offline, ..rest },
+        AccountState { name: "refused", sync: Sync::Refused, ..rest },
+        AccountState { name: "long-name", label: "Studio Collective, shared orders and deliveries", ..rest },
+        AccountState { name: "narrow", narrow: true, ..rest },
+        AccountState { name: "narrow-refused", narrow: true, sync: Sync::Refused, ..rest },
+        AccountState { name: "narrow-offline", narrow: true, sync: Sync::Offline, ..rest },
+        AccountState { name: "narrow-syncing", narrow: true, sync: Sync::Syncing, ..rest },
+    ]
+}
+
+/// What a screen reader hears for the account row of `state`.
+pub(crate) fn account_spoken(state: &AccountState) -> String {
+    format!("Account ({})", state.name)
+}
+
+/// The account row of `state` at `ui`'s cursor; the account is the second (its colour `acct2`).
+pub(crate) fn account(ui: &mut Ui, theme: &Theme, state: &AccountState) {
+    let spoken = account_spoken(state);
+    let row = AccountRow {
+        id: Id::unique("gallery-account-row").with(state.name),
+        spoken: &spoken,
+        name: state.label,
+        account: 1,
+        open: state.open,
+        sync: state.sync,
+    };
+    let forced = (state.shown != Shown::Rest).then_some(state.shown);
+    sized(ui, theme, state.narrow, account_row::HEIGHT, |ui| {
+        account_row::account_row(ui, theme, &row, state.narrow, forced);
+    });
+}
+
 /// `add` in a column as wide as a wide or a narrow row and `height` high at 100 % text, on the index's `panel`.
 fn sized(ui: &mut Ui, theme: &Theme, narrow: bool, height: f32, add: impl FnOnce(&mut Ui)) {
     let wide = if narrow { NARROW } else { WIDE };
@@ -173,6 +226,7 @@ pub fn page(ui: &mut Ui, theme: &Theme) {
             ui.set_min_size(ui.available_size());
             board(ui, theme, tr!("Place row"), &nav_states(), |state| state.name, nav);
             board(ui, theme, tr!("Mailbox row"), &mailbox_states(), |state| state.name, mailbox);
+            board(ui, theme, tr!("Account row"), &account_states(), |state| state.name, account);
         });
     });
 }

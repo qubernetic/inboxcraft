@@ -6,7 +6,7 @@
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 
-use super::{mailbox_spoken, mailbox_states, nav_spoken, nav_states, page, size};
+use super::{account_spoken, account_states, mailbox_spoken, mailbox_states, nav_spoken, nav_states, page, size};
 use crate::component::tests::{builder, keyboard_walk, painted, rests};
 use crate::motion;
 use crate::theme::{Mode, TextScale, Theme};
@@ -42,12 +42,17 @@ fn the_boards_of_the_index_page_stand_on_bg_with_every_state() {
     for mode in [Mode::Light, Mode::Dark] {
         let theme = Theme::new(mode, TextScale::default());
         let harness = harness(mode, true);
-        for title in ["Place row", "Mailbox row"] {
+        for title in ["Place row", "Mailbox row", "Account row"] {
             assert_eq!(harness.query_all_by_label(title).count(), 1, "{mode:?}: the {title} board");
         }
         assert_eq!(painted(&harness, "Place row").ground, Some(theme.palette.bg), "{mode:?}");
         let page = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), size());
-        let names = nav_states().iter().map(nav_spoken).chain(mailbox_states().iter().map(mailbox_spoken)).collect::<Vec<_>>();
+        let names = nav_states()
+            .iter()
+            .map(nav_spoken)
+            .chain(mailbox_states().iter().map(mailbox_spoken))
+            .chain(account_states().iter().map(account_spoken))
+            .collect::<Vec<_>>();
         for name in names {
             let node = harness.get_by_label(&name);
             assert!(page.contains_rect(node.rect()), "{name} leaves the page");
