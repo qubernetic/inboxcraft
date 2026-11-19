@@ -211,6 +211,87 @@ fn a_slow_drip_greeting_ends_at_the_probes_deadline() -> Result {
     Ok(())
 }
 
+/// A relay in front of `server`: what the client sends goes on at once; what the server sends goes on one byte every
+/// 100 ms, from the start or (with `after_tls`) from the client's first TLS record on, which is after STARTTLS. It
+/// drips for at most 20 seconds, then closes both sides.
+fn drip_relay(server: SocketAddr, after_tls: bool) -> Result<(SocketAddr, thread::JoinHandle<()>)> {
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let address = listener.local_addr()?;
+    let relay = thread::spawn(move || {
+        let Ok((client, _)) = listener.accept() else { return };
+        let Ok(upstream) = TcpStream::connect(server) else { return };
+        let dripping = Arc::new(std::sync::atomic::AtomicBool::new(!after_tls));
+        let (Ok(mut from_client), Ok(mut to_server), Ok(closer_client), Ok(closer_server)) =
+            (client.try_clone(), upstream.try_clone(), client.try_clone(), upstream.try_clone())
+        else {
+            return;
+        };
+        let started = Arc::clone(&dripping);
+        let up = thread::spawn(move || {
+            let mut buffer = [0_u8; 4096];
+            while let Ok(read) = io::Read::read(&mut from_client, &mut buffer) {
+                let Some(bytes) = buffer.get(..read).filter(|bytes| !bytes.is_empty()) else { break };
+                // A TLS handshake record starts with 0x16.
+                if bytes.first() == Some(&0x16) {
+                    started.store(true, Ordering::SeqCst);
+                }
+                if to_server.write_all(bytes).is_err() {
+                    break;
+                }
+            }
+        });
+        let (mut from_server, mut to_client) = (upstream, client);
+        let mut byte = [0_u8; 1];
+        let mut dripped = 0;
+        while dripped < 200 {
+            if dripping.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_millis(100));
+                dripped += 1;
+            }
+            match io::Read::read(&mut from_server, &mut byte) {
+                Ok(1) if to_client.write_all(&byte).is_ok() => {}
+                _ => break,
+            }
+        }
+        let _ = closer_client.shutdown(std::net::Shutdown::Both);
+        let _ = closer_server.shutdown(std::net::Shutdown::Both);
+        let _ = up.join();
+    });
+    Ok((address, relay))
+}
+
+/// Probes `mail.example.org:<port>` through a [`drip_relay`] in front of `fake`: it must end at its 1.5-second
+/// deadline, with the read timeout at 30 seconds.
+fn probe_through_a_drip(pki: &TestPki, fake: &FakeServer, port: u16, security: Security, after_tls: bool) -> Result {
+    let (address, relay) = drip_relay(fake.addr(), after_tls)?;
+    let connector = prober(pki, Names::default().at("mail.example.org", port, address), SLOW);
+    let server = on("mail.example.org", port, security)?;
+    let (result, took) = timed(|deadline| connector.probe(&server, Service::Imap, deadline), Duration::from_millis(1500));
+    assert_eq!(result.map_err(|error| error.kind()), Err(ErrorKind::TimedOut), "{server}");
+    assert!(took < Duration::from_secs(5), "{server}: {took:?}");
+    drop(connector);
+    let _ = relay.join();
+    Ok(())
+}
+
+/// A server whose TLS handshake comes one byte at a time, each well inside the read timeout, cannot hold the probe
+/// past its deadline on 993: rustls reads in a loop of its own, so the deadline is in the socket under it.
+#[test]
+fn a_slow_drip_handshake_ends_at_the_probes_deadline() -> Result {
+    let pki = TestPki::new()?;
+    let fake = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+    probe_through_a_drip(&pki, &fake, 993, Security::Tls, false)
+}
+
+/// The same on 143: after STARTTLS, the handshake and the encrypted greeting drip, and the probe still ends at its
+/// deadline.
+#[test]
+fn a_slow_drip_after_starttls_ends_at_the_probes_deadline() -> Result {
+    let pki = TestPki::new()?;
+    let fake = Listen::plain().start_imap(FakeImap::new().starttls(pki.server_config(None)?))?;
+    probe_through_a_drip(&pki, &fake, 143, Security::StartTls, true)
+}
+
 /// A resolver that gives one name 16 addresses.
 #[derive(Debug)]
 struct Many;

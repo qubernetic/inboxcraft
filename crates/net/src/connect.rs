@@ -110,10 +110,12 @@ impl Connector {
     }
 
     /// Ends everything it does at `deadline`: the name lookup (the system's on a thread of its own, waited for at
-    /// most until then), each connection attempt, the TLS handshake and every read, however slowly a server sends.
-    /// For Detect's probe.
+    /// most until then), each connection attempt, and every read and write on the socket under TLS ([`Timed`]), so
+    /// the handshake and every answer end there however slowly a server sends or reads. For Detect's probe only: it
+    /// is crate-private, and [`crate::probe`] is its one caller, so the sync, IDLE, send and check connections never
+    /// have a deadline.
     #[must_use]
-    pub fn with_deadline(self, deadline: Deadline) -> Self {
+    pub(crate) fn with_deadline(self, deadline: Deadline) -> Self {
         Self { deadline: Some(deadline), ..self }
     }
 
@@ -121,16 +123,6 @@ impl Connector {
     #[must_use]
     pub fn with_most_addresses(self, most: usize) -> Self {
         Self { most_addresses: most.clamp(1, MAX_ADDRESSES), ..self }
-    }
-
-    /// How long the next read may wait: the I/O timeout, or the time left before the deadline when that is shorter;
-    /// `None` without a deadline (the socket's own timeout holds).
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::TimedOut`] once the deadline has passed.
-    pub(crate) fn read_wait(&self) -> Result<Option<Duration>, NetError> {
-        self.deadline.as_ref().map(|deadline| deadline.wait(self.timeouts.io)).transpose()
     }
 
     /// Looks host names up with `resolver` in place of the system's (the given addresses still come first). For the
@@ -232,15 +224,16 @@ impl Connector {
     /// A TCP connection to `address` with the timeouts set, not encrypted yet.
     pub(crate) fn dial(&self, address: SocketAddr) -> Result<Stream, NetError> {
         let now = self.tls.clock().now();
-        let (connect, io) = match &self.deadline {
-            Some(deadline) => (deadline.wait(self.timeouts.connect)?, deadline.wait(self.timeouts.io)?),
-            None => (self.timeouts.connect, self.timeouts.io),
+        let connect = match &self.deadline {
+            Some(deadline) => deadline.wait(self.timeouts.connect)?,
+            None => self.timeouts.connect,
         };
+        let io = self.timeouts.io;
         let socket = self.dialer.dial(address, connect).map_err(|error| NetError::io(&error, now))?;
         socket.set_read_timeout(Some(io)).map_err(|error| NetError::io(&error, now))?;
         socket.set_write_timeout(Some(io)).map_err(|error| NetError::io(&error, now))?;
         socket.set_nodelay(true).map_err(|error| NetError::io(&error, now))?;
-        Ok(Stream::Plain(socket))
+        Ok(Stream::Plain(Timed::new(socket, self.deadline.clone(), io)))
     }
 
     /// `stream` encrypted for `host`: the TLS handshake runs here, so a certificate fault comes out of this call.
@@ -249,10 +242,8 @@ impl Connector {
         let Stream::Plain(mut socket) = stream else { return Err(NetError::new(ErrorKind::Tls, "the connection is encrypted already")) };
         let name = ServerName::try_from(host.as_str().to_owned()).map_err(|error| NetError::new(ErrorKind::Tls, error.to_string()))?;
         let mut connection = ClientConnection::new(Arc::clone(config), name).map_err(|error| NetError::tls(&error, now))?;
+        // The socket ends every read and write at the probe's deadline ([`Timed`]), inside rustls' own loops too.
         while connection.is_handshaking() {
-            if let Some(wait) = self.read_wait()? {
-                socket.set_read_timeout(Some(wait)).map_err(|error| NetError::io(&error, now))?;
-            }
             connection.complete_io(&mut socket).map_err(|error| NetError::io(&error, now))?;
         }
         Ok(Stream::Tls(Box::new(StreamOwned::new(connection, socket))))
@@ -279,12 +270,56 @@ fn lookup_by(host: &str, port: u16, deadline: &Deadline) -> Result<Vec<SocketAdd
     }
 }
 
+/// A TCP socket that ends every read and write at a deadline, for Detect's probe. rustls reads from it and writes to
+/// it in loops of its own (the handshake, and until a whole record has come), so the deadline has to be here, under
+/// TLS: before each read and write the socket's timeout is set to the I/O timeout or the time left, whichever is
+/// shorter, and once nothing is left the call fails with [`io::ErrorKind::TimedOut`]. Without a deadline it is the
+/// socket as it is, its timeouts untouched.
+#[derive(Debug)]
+pub(crate) struct Timed {
+    socket: TcpStream,
+    deadline: Option<Deadline>,
+    io: Duration,
+}
+
+impl Timed {
+    pub(crate) fn new(socket: TcpStream, deadline: Option<Deadline>, io: Duration) -> Self {
+        Self { socket, deadline, io }
+    }
+
+    /// The wait for the next call, set with `set`; nothing without a deadline.
+    fn arm(&self, set: fn(&TcpStream, Option<Duration>) -> io::Result<()>) -> io::Result<()> {
+        let Some(deadline) = &self.deadline else { return Ok(()) };
+        // `wait` is never zero: a deadline with nothing left is an error.
+        let wait = deadline.wait(self.io).map_err(|error| io::Error::new(io::ErrorKind::TimedOut, error.to_string()))?;
+        set(&self.socket, Some(wait))
+    }
+}
+
+impl Read for Timed {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.arm(TcpStream::set_read_timeout)?;
+        self.socket.read(buf)
+    }
+}
+
+impl Write for Timed {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.arm(TcpStream::set_write_timeout)?;
+        self.socket.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.socket.flush()
+    }
+}
+
 impl Stream {
-    /// How long a read waits; `None` waits for ever.
+    /// How long a read waits; `None` waits for ever. A probe's deadline still ends it ([`Timed`]).
     pub(crate) fn set_read_timeout(&self, wait: Option<Duration>) -> io::Result<()> {
         match self {
-            Self::Plain(socket) => socket.set_read_timeout(wait),
-            Self::Tls(stream) => stream.sock.set_read_timeout(wait),
+            Self::Plain(socket) => socket.socket.set_read_timeout(wait),
+            Self::Tls(stream) => stream.sock.socket.set_read_timeout(wait),
             Self::Closed => Err(io::ErrorKind::NotConnected.into()),
         }
     }
@@ -301,8 +336,8 @@ impl Stream {
 /// A connection: plain TCP, or TLS over it.
 #[derive(Debug)]
 pub(crate) enum Stream {
-    Plain(TcpStream),
-    Tls(Box<StreamOwned<ClientConnection, TcpStream>>),
+    Plain(Timed),
+    Tls(Box<StreamOwned<ClientConnection, Timed>>),
     /// In the moment between the two, while the handshake runs.
     Closed,
 }
@@ -334,3 +369,7 @@ impl Write for Stream {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "connect_tests.rs"]
+mod tests;
