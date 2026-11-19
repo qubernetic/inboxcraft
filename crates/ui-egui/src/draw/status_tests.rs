@@ -225,6 +225,29 @@ fn a_discard_s_undo_keeps_the_draft_under_the_command_line_s_results() {
 }
 
 #[test]
+fn ctrl_z_in_the_command_line_keeps_the_discarded_draft_and_leaves_the_field_as_typed() {
+    // One key, one thing: the discard's Undo takes it, and the field's last edit stays.
+    let (mut harness, _) = reading((1300.0, 872.0), 100);
+    let account = harness.state().mailbox().accounts().first().map(|account| account.id).unwrap();
+    let draft = harness.state_mut().mailbox_mut().run("compose.new", &serde_json::json!({ "account": account })).unwrap();
+    let draft = draft.get("id").and_then(serde_json::Value::as_u64).unwrap();
+    harness.state_mut().discard_draft(draft);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    for typed in [">", "z", "z"] {
+        harness.event(egui::Event::Text(typed.to_owned()));
+        harness.run();
+    }
+    assert_eq!(harness.state().command().text(), "zz", "typed");
+    assert!(harness.state().discarding().is_some(), "the discard waits");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(harness.state().discarding(), None, "the discard is dropped");
+    assert_eq!(harness.state().command().text(), "zz", "the field keeps its text");
+}
+
+#[test]
 fn rests() {
     // At rest, with no message: the line asks for no frame sooner than a second.
     let (mut harness, _) = reading((1300.0, 872.0), 100);

@@ -233,6 +233,8 @@ pub(crate) struct Shown<'a> {
     pub rests: bool,
     /// Whether the message lies over a modal surface's dimmed window, so a press reaches its Undo.
     pub lifted: bool,
+    /// Whether Undo's key was pressed and taken before the frame drew anything that reads it (the window takes it then, before the command line's field).
+    pub undo_taken: bool,
 }
 
 /// Draws the line in `rect`; what was pressed in it.
@@ -327,7 +329,7 @@ fn message_in(ui: &mut Ui, theme: &Theme, keymap: &Keymap, message: &Message, sh
     let drawn = StatusMessage { kind, text: message.text() };
     let press = ui.add_enabled_ui(!(undoes && shown.rests), |ui| status_message::status_message(ui, theme, keymap, &drawn)).inner;
     let press = press.filter(|_| !(undoes && shown.rests));
-    if undoes && !shown.rests && shown.undo_key && !soon::is_soon(ui) && keymap.pressed(ui.ctx(), keymap::UNDO) {
+    if undoes && !shown.rests && shown.undo_key && !soon::is_soon(ui) && (shown.undo_taken || keymap.pressed(ui.ctx(), keymap::UNDO)) {
         return Some(status_message::Press::Undo);
     }
     press

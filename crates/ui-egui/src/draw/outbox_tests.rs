@@ -118,6 +118,43 @@ fn the_send_s_undo_stops_it_under_the_command_line_s_results() {
     }
 }
 
+/// Opens the command line with Ctrl+K and types `>zz` in it one character a frame, so the field has edits to undo.
+fn type_in_the_command_line(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    for typed in [">", "z", "z"] {
+        harness.event(egui::Event::Text(typed.to_owned()));
+        harness.run();
+    }
+    assert_eq!(harness.state().command().text(), "zz", "typed");
+    assert!(harness.state().command().results(), "the results show");
+}
+
+#[test]
+fn ctrl_z_in_the_command_line_stops_the_send_and_leaves_the_field_as_typed() {
+    // One key, one thing: the send's time runs out, so its Undo takes the key, and the field's last edit stays.
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Light);
+    send(&mut harness, "Work party on Saturday");
+    type_in_the_command_line(&mut harness);
+    assert_eq!(harness.state().mailbox().outbox().len(), 1, "counting down");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(harness.state().mailbox().outbox().is_empty(), "the send is stopped");
+    assert_eq!(harness.state().command().text(), "zz", "the field keeps its text");
+}
+
+#[test]
+fn ctrl_z_in_the_command_line_without_a_countdown_is_the_field_s_own_undo() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Light);
+    type_in_the_command_line(&mut harness);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(harness.state().command().text(), "z", "the field takes its last edit back");
+    assert!(harness.state().command().results(), "the results stay");
+}
+
 #[test]
 fn ctrl_z_takes_the_send_back_while_it_counts_down() {
     let clock = clock();

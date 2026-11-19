@@ -2374,6 +2374,7 @@ impl InboxApp {
         // What stands in front, once, before any key is read.
         let surfaces = self.surfaces(ui.ctx());
         let Keys { mut ran, escape, to_place, typing, quiet } = self.keys(ui.ctx(), &surfaces);
+        let undo_taken = self.take_lifted_undo(ui, &surfaces);
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };
         self.act_by_key |= keyed.is_some();
         // One Esc closes one surface ([`Surfaces::escape`]): an open float (a menu, a picker, a select), the palette, a
@@ -2510,7 +2511,7 @@ impl InboxApp {
             composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
         }
         // The status line, a strip of its own at the window's foot: it covers nothing of the panes.
-        let (mut line, mut undid) = self.status_line(ui, &theme, &surfaces, quiet, regions.status);
+        let (mut line, mut undid) = self.status_line(ui, &theme, &surfaces, (quiet, undo_taken), regions.status);
         // The one gate for the place under a modal surface ([`Surfaces::modal`]): whatever pressed it (the pointer, a key,
         // a screen reader's activate, which egui's layers do not stop), nothing the list, the reader, the composer, Home,
         // the calendar, the settings' page or the status line asked for in this frame is applied. The index has its own
@@ -2920,7 +2921,8 @@ impl InboxApp {
     /// message shown: the countdown while a send waits for its hold, else a discard's or the last act's Undo, else an
     /// error or a notice of the queue ([`crate::status::Status`]). What was pressed in it, with the message it was
     /// pressed on; nothing is applied here, so the one gate under a modal surface ([`Surfaces::modal`]) holds for it.
-    fn status_line(&mut self, ui: &mut Ui, theme: &Theme, surfaces: &Surfaces, quiet: bool, rect: Rect) -> (status::Pressed, Option<Undone>) {
+    fn status_line(&mut self, ui: &mut Ui, theme: &Theme, surfaces: &Surfaces, keys: (bool, bool), rect: Rect) -> (status::Pressed, Option<Undone>) {
+        let (quiet, undo_taken) = keys;
         let now = ui.input(|input| input.time);
         let countdown = self.countdown_message(now);
         let discard = if countdown.is_some() {
@@ -2976,8 +2978,17 @@ impl InboxApp {
         // Under a modal surface the Undo of a loss whose time runs out stays in reach: the message lies over the surface's
         // dimmed window, and the field in front does not keep its key ([`Undone::outlasts_the_gate`]).
         let lifted = surfaces.modal() && which.is_some_and(Undone::outlasts_the_gate);
-        let drawn =
-            status::Shown { facts: &self.facts.0, message: shown.as_ref(), now, whole, hints: &hints, undo_key: !quiet || lifted, rests, lifted };
+        let drawn = status::Shown {
+            facts: &self.facts.0,
+            message: shown.as_ref(),
+            now,
+            whole,
+            hints: &hints,
+            undo_key: !quiet || lifted,
+            rests,
+            lifted,
+            undo_taken,
+        };
         let pressed = status::line(ui, theme, &self.keymap, rect, &drawn);
         (pressed, which)
     }
@@ -3029,6 +3040,20 @@ impl InboxApp {
         self.countdown_whole = Some((draft, whole));
         let text = if subject.is_empty() { tr!("sending").to_owned() } else { tr!("sending · {subject}", subject = crate::status::clean(&subject)) };
         Some((draft, crate::status::Message::Countdown { text, until: now + left }))
+    }
+
+    /// Takes Undo's key, when it was pressed, before the command line's field is drawn, while that key is the lifted
+    /// Undo's under the command line's results: the send's countdown, or a draft's discard from Home whose Undo does not
+    /// rest ([`Undone::outlasts_the_gate`]). The key then does one thing, it stops the loss, and the field keeps its text;
+    /// the status line is handed the press. Without such a loss the field keeps the key as its own undo.
+    fn take_lifted_undo(&self, ui: &Ui, surfaces: &Surfaces) -> bool {
+        if !surfaces.modal() {
+            return false;
+        }
+        let now = ui.input(|input| input.time);
+        let discard_waits = self.discarding.is_some_and(|(_, since)| since.is_none_or(|since| crate::status::UNDO_SECONDS - (now - since) > 0.0));
+        let lifted = self.counting().is_some() || (discard_waits && !surfaces.undo_rests());
+        lifted && self.keymap.pressed(ui.ctx(), keymap::UNDO)
     }
 
     /// Runs the time of a draft discarded from Home ([`InboxApp::discard_draft`]): when it ends, or the window closes,
