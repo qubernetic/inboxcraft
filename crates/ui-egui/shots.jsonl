@@ -314,3 +314,9 @@
 {"out": "docs/images/home-first-run-dark.png", "mode": "dark", "home": "first-run"}
 {"out": "docs/images/home-everything-failing-light.png", "mode": "light", "home": "everything-failing"}
 {"out": "docs/images/home-everything-failing-dark.png", "mode": "dark", "home": "everything-failing"}
+{"out": "docs/images/home-place-light.png", "mode": "light", "size": [1440, 900], "home_place": true}
+{"out": "docs/images/home-place-dark.png", "mode": "dark", "size": [1440, 900], "home_place": true}
+{"out": "docs/images/home-place-1000-light.png", "mode": "light", "size": [1000, 760], "home_place": true}
+{"out": "docs/images/home-place-1000-dark.png", "mode": "dark", "size": [1000, 760], "home_place": true}
+{"out": "docs/images/home-place-130-light.png", "mode": "light", "size": [1440, 900], "text_scale": 130, "home_place": true}
+{"out": "docs/images/home-place-130-dark.png", "mode": "dark", "size": [1440, 900], "text_scale": 130, "home_place": true}

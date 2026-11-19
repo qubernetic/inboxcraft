@@ -8,7 +8,7 @@
 //! between two hairlines, and the rest stay where they are. At the foot, over a hairline, the owner's row (avatar and
 //! address) opens the account picker, a float that narrows the mail to one account or shows them all.
 //!
-//! HOME is coming soon. A mailbox or account name is outside data: it is cleaned of control and bidi characters and
+//! HOME shows Home, MAIL the mail, and so on, each as its key does. A mailbox or account name is outside data: it is cleaned of control and bidi characters and
 //! capped at [`MOST_NAME`] characters when a row is built, and cut with one `…` inside its row. Only the rows near the
 //! mailboxes' viewport are built and laid out (a screen above and below it, so Tab walks on into rows out of sight
 //! and the row it lands on is scrolled into sight): 40 000 folders cost their offsets, not their rows.
@@ -21,7 +21,7 @@ use inboxcraft_model::Role;
 use crate::component::account_row::{self, AccountRow, Sync};
 use crate::component::mailbox_row::{self, MailboxRow};
 use crate::component::nav_row::{self, NavRow, Standing, base};
-use crate::component::{avatar, popup, soon, tooltip};
+use crate::component::{avatar, popup, tooltip};
 use crate::iconset::{self, IconId};
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{self, Mailbox, Pile, role_text};
@@ -255,19 +255,17 @@ fn place(ui: &mut Ui, theme: &Theme, keymap: &Keymap, which: Place, at: Place, c
         _ => Standing::Rest,
     };
     let row = NavRow { id: Id::unique("index-place").with(index), spoken: label, index, label, icon, count, standing };
-    if which == Place::Home {
-        return soon::soon(ui, theme, |ui| nav_row::nav_row(ui, theme, &row, narrow, None));
-    }
     let action = match which {
+        Place::Home => keymap::HOME,
         Place::Mail => keymap::MAIL,
         Place::Calendar => keymap::CALENDAR,
         Place::Later => keymap::LATER,
-        Place::Home | Place::Settings => keymap::SETTINGS,
+        Place::Settings => keymap::SETTINGS,
     };
     let response = tooltip::attach(nav_row::nav_row(ui, theme, &row, narrow, None), theme, keymap, label, Some(action));
-    // A press on Calendar shows no list: the keyboard stays on the place, never on nothing. Mail and Later show a list,
-    // which takes the keys as before.
-    if which == Place::Calendar && response.clicked() {
+    // A press on Calendar or Home shows no list: the keyboard stays on the place, never on nothing. Mail and Later show
+    // a list, which takes the keys as before.
+    if matches!(which, Place::Calendar | Place::Home) && response.clicked() {
         response.request_focus();
     }
     response
@@ -323,7 +321,9 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let column = Rect::from_min_max(pos2(rect.left(), rect.top() + TOP), rect.max);
     ui.scope_builder(UiBuilder::new().max_rect(column).id_salt("index-column"), |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        place(ui, theme, keymap, Place::Home, at, 0, narrow);
+        if place(ui, theme, keymap, Place::Home, at, 0, narrow).clicked() {
+            asked.place = Some(Place::Home);
+        }
         if place(ui, theme, keymap, Place::Mail, at, mail_count, narrow).clicked() {
             asked.place = Some(Place::Mail);
         }

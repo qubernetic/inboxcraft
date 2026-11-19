@@ -458,7 +458,8 @@ fn drafts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home) -> (Rect, Op
     (drawn.rect, drawn.inner)
 }
 
-/// The two buttons, 8 apart: the primary one with its arrow (and its key's chip), the secondary one.
+/// The two buttons, 8 apart: the primary one with its arrow (and its key's chip), the secondary one (before the first
+/// account, "Look around with sample mail", coming soon).
 fn buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap, buttons: Buttons) -> (Rect, Option<Asked>) {
     let (first, second) = match buttons {
         Buttons::ReadAndWrite => ((tr!("Read mail"), Some(keymap::MAIL), Asked::ReadMail), (tr!("Write"), Some(keymap::COMPOSE), Asked::Write)),
@@ -482,7 +483,13 @@ fn buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap, buttons: Buttons) -> (Re
             Some(action) => secondary.action(action),
             None => secondary,
         };
-        let two = secondary.show(ui, theme, keymap).clicked();
+        // The sample mail is another start of the app (`just run-sample`): the window has no way to it yet, so it is
+        // drawn coming soon, cannot be pressed and takes no focus.
+        let two = if second.2 == Asked::SampleMail {
+            crate::component::soon::soon(ui, theme, |ui| secondary.show(ui, theme, keymap).clicked())
+        } else {
+            secondary.show(ui, theme, keymap).clicked()
+        };
         if one { Some(first.2) } else { two.then_some(second.2) }
     });
     (inner.response.rect, inner.inner)

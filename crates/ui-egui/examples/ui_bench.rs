@@ -34,8 +34,11 @@
 //! emblem on its right half, Home's field at the full motion level, the pointer sweeping across it every frame; and
 //! `field-4k-sweep`, the same over a 4K screen (3 840 × 2 160 points, some 69 000 cells).
 //!
+//! `home-window-sweep`, among the four scenes above and alone with `--home`: the window on Home, the start place, at the
+//! full motion level, the pointer sweeping across its character field every frame.
+//!
 //! ```text
-//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose | --calendar | --settings | --large | --field]
+//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose | --calendar | --settings | --large | --field | --home]
 //! ```
 
 use std::process::ExitCode;
@@ -173,10 +176,12 @@ enum Scene {
     CalendarCrowd(View),
     /// The settings sheet open on `section`, `more` accounts added to the sample's, left alone.
     Settings { section: Section, more: usize },
+    /// Home in the window at the full motion level, the pointer sweeping across its field.
+    HomeSweep,
 }
 
 impl Scene {
-    const ALL: [Self; 4] = [Self::DefaultRest, Self::ListRest, Self::ListScroll, Self::ReaderHtml];
+    const ALL: [Self; 5] = [Self::DefaultRest, Self::ListRest, Self::ListScroll, Self::ReaderHtml, Self::HomeSweep];
 
     /// The composer's scenes, every size at rest and typing, without AccessKit and with it.
     fn compose() -> Vec<Self> {
@@ -208,6 +213,7 @@ impl Scene {
             Self::ListRest => "inbox-list-rest".to_owned(),
             Self::ListScroll => "inbox-list-scroll".to_owned(),
             Self::ReaderHtml => "reader-html".to_owned(),
+            Self::HomeSweep => "home-window-sweep".to_owned(),
             Self::CalendarWeek => "calendar-week-200".to_owned(),
             Self::CalendarCrowd(view) => format!("calendar-{}-{CROWD_EVENTS}", format!("{view:?}").to_lowercase()),
             Self::ReaderLarge { large, scrolling } => format!("reader-{}-{}", large.name(), if scrolling { "scroll" } else { "rest" }),
@@ -231,7 +237,8 @@ impl Scene {
             | Self::Compose { .. }
             | Self::CalendarWeek
             | Self::CalendarCrowd(_)
-            | Self::Settings { .. } => None,
+            | Self::Settings { .. }
+            | Self::HomeSweep => None,
         }
     }
 }
@@ -277,6 +284,12 @@ fn app(scene: Scene) -> Result<InboxApp, UiError> {
     let mailbox = Mailbox::new(session, Box::new(clock));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
     app.set_reduce_motion(true);
+    if scene == Scene::HomeSweep {
+        app.set_reduce_motion(false);
+        app.show_home();
+    } else {
+        app.show_mail();
+    }
     if let Some(view) = scene.view() {
         app.mailbox_mut().set_inbox_view(view);
     }
@@ -430,7 +443,14 @@ fn measure(scene: Scene) -> Result<Measured, UiError> {
     let mut times = Vec::with_capacity(FRAMES);
     let (mut shapes, mut rows) = (0, None);
     for frame in 0..WARM_UP + FRAMES {
-        let mut events = vec![Event::PointerMoved(press.unwrap_or(over_list))];
+        // On Home: across its field (right of the 600 of the brief) and back, up and down, a new place every frame.
+        let t = frame as f32 / 60.0;
+        let over = if scene == Scene::HomeSweep {
+            pos2(WINDOW.x * (0.82 + 0.15 * (t * 1.3).sin()), WINDOW.y * (0.5 + 0.4 * (t * 2.1).sin()))
+        } else {
+            press.unwrap_or(over_list)
+        };
+        let mut events = vec![Event::PointerMoved(over)];
         if let Some(at) = press
             && frame < 2
         {
@@ -592,6 +612,8 @@ fn main() -> ExitCode {
         vec![Scene::CalendarWeek, Scene::CalendarCrowd(View::Week), Scene::CalendarCrowd(View::Month), Scene::CalendarCrowd(View::Agenda)]
     } else if asked("--settings") {
         Scene::settings()
+    } else if asked("--home") {
+        vec![Scene::HomeSweep]
     } else if asked("--large") {
         Large::ALL.into_iter().flat_map(|large| [false, true].map(|scrolling| Scene::ReaderLarge { large, scrolling })).collect()
     } else {

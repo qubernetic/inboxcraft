@@ -51,7 +51,9 @@
 //! ([`crate::component::gallery_index`]), `character_field` set to `true` the page of the character field
 //! ([`crate::component::gallery_field`]), where `pointer` may rest, `status_sets` set to `true` the page of the
 //! status line's sets ([`crate::component::gallery_status`]),
-//! `home_sets` set to `true` the page of Home's sets ([`crate::component::gallery_home`]),
+//! `home_sets` set to `true` the page of Home's sets ([`crate::component::gallery_home`]), `home_place` set to `true`
+//! shows Home, the start place, in the window (every other scene starts on the mail, as it was taken before Home was
+//! the start place),
 //! `command_sets` set to `true` the page of the command line's sets ([`crate::component::gallery_commands`]).
 //! The typeface and the icons are fixed, so a script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
@@ -195,6 +197,9 @@ pub struct Shot {
     /// Whether the calendar screen shows.
     #[serde(default)]
     pub calendar: Option<bool>,
+    /// Whether Home, the start place, shows in the window; the mail when left out.
+    #[serde(default)]
+    pub home_place: Option<bool>,
     /// The calendar's view (`day`, `week`, `month` or `agenda`), which shows the calendar screen.
     #[serde(default)]
     pub calendar_view: Option<String>,
@@ -805,6 +810,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.capture.is_some()
         || shot.palette.is_some()
         || shot.calendar.is_some()
+        || shot.home_place.is_some()
         || shot.calendar_view.is_some()
         || shot.event.is_some()
         || shot.edit_event.is_some()
@@ -1690,6 +1696,12 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     };
     let mailbox = Mailbox::new(session, Box::new(clock.clone()));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
+    // The window starts on Home; a scene shows it only when it asks, every other one is about the place it names.
+    if shot.home_place == Some(true) {
+        app.show_home();
+    } else {
+        app.show_mail();
+    }
     if shot.first == Some(true) {
         app = app.with_accounts(Arc::new(Pictured), Box::new(Proposed::new(pictured_proposal())), Box::new(Scripted::passing()));
     }

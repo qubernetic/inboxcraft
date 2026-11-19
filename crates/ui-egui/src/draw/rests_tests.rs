@@ -24,7 +24,7 @@ fn clock() -> Box<FakeClock> {
 
 /// The sample mail in a window `width` wide.
 fn window(width: f32) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     let mut harness = Harness::builder()
         .with_size(vec2(width, 900.0))
@@ -315,7 +315,7 @@ fn beside_the_thumb(harness: &Harness<'static, InboxApp>, top: f32, content: &[e
 #[test]
 fn the_one_bar_over_the_content_drags_by_its_thumb_and_gives_a_press_beside_it_to_the_content() {
     // A mail list, short enough to scroll.
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     let mut harness = Harness::builder()
         .with_size(vec2(1440.0, 420.0))
@@ -342,7 +342,7 @@ fn the_one_bar_over_the_content_drags_by_its_thumb_and_gives_a_press_beside_it_t
     assert_ne!(harness.state().mailbox().selected(), selected, "the list: a press in the strip beside the thumb picks {label:?}");
 
     // The calendar's agenda.
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     app.show_calendar();
     let (calendar, mailbox) = app.calendar_mut();
@@ -390,7 +390,7 @@ fn tab_never_onto_the_thumb(harness: &mut Harness<'static, InboxApp>, presses: u
 #[test]
 fn the_thumb_of_the_bar_over_the_content_is_no_tab_stop() {
     // A mail list short enough to scroll.
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     let mut harness = Harness::builder()
         .with_size(vec2(1440.0, 420.0))
@@ -401,7 +401,7 @@ fn the_thumb_of_the_bar_over_the_content_is_no_tab_stop() {
     tab_never_onto_the_thumb(&mut harness, 120, "the list");
 
     // The calendar's agenda.
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     app.show_calendar();
     let (calendar, mailbox) = app.calendar_mut();
@@ -511,7 +511,7 @@ fn editing_an_added_event(toast: bool) -> Harness<'static, InboxApp> {
 
 /// The calendar with an event just added (its toast still showing, unless `toast` is false), its details open.
 fn an_added_event_open(toast: bool) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     app.show_calendar();
     let mut harness = Harness::builder()

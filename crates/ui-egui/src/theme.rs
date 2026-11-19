@@ -690,6 +690,14 @@ pub fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(font_definitions());
 }
 
+/// The interface's size comes from the text-size setting alone ([`TextScale`]): egui's own keyboard zoom (Ctrl+Plus,
+/// Ctrl+Minus, Ctrl+0, which is Home's key) is switched off, and a zoom factor `ctx` came with is set back to 1, so no
+/// start comes up zoomed with no key to undo it.
+pub fn size_from_the_setting_alone(ctx: &egui::Context) {
+    ctx.options_mut(|options| options.zoom_with_keyboard = false);
+    ctx.set_zoom_factor(1.0);
+}
+
 /// One face of a font file found on the computer, for the signs the app's own fonts lack.
 #[derive(Clone)]
 pub struct Fallback {

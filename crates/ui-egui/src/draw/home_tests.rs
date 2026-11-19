@@ -359,7 +359,9 @@ fn each_press_asks_what_it_says_and_runs_nothing() {
     assert_eq!(asked_by(&mut more, "8 more today →"), Some(Asked::Today));
     let mut first = harness("first-run", Mode::Dark, 100);
     assert_eq!(asked_by(&mut first, "Add an account"), Some(Asked::AddAccount));
-    assert_eq!(asked_by(&mut first, "Look around with sample mail"), Some(Asked::SampleMail));
+    // Coming soon: the window has no way to the sample mail yet (#303's fix; it asked for what nothing handled).
+    assert_eq!(asked_by(&mut first, "Look around with sample mail"), None);
+    assert!(first.get_by_label("Look around with sample mail").accesskit_node().is_disabled());
     let mut failing = harness("everything-failing", Mode::Dark, 100);
     assert_eq!(asked_by(&mut failing, "open account"), Some(Asked::OpenAccount));
     assert_eq!(asked_by(&mut failing, "open outbox"), Some(Asked::OpenOutbox));
@@ -460,6 +462,31 @@ fn home_rests_at_every_level_with_the_pointer_away() {
             let page = Rect::from_min_size(pos2(0.0, 0.0), BODY);
             let mut harness = harness_with(sample(state).unwrap(), Mode::Dark, 100, BODY, page, Some(placeholder(20, 10)), level, false);
             assert!(rests(&mut harness, 8), "{state} at {level:?} keeps asking for frames");
+        }
+    }
+}
+
+/// Every control Home's page draws, in each state, that can be pressed asks for something the window handles: no press
+/// is a no-op. What cannot be pressed yet reads as disabled ("Look around with sample mail", coming soon).
+#[test]
+fn no_pressable_control_on_home_is_a_no_op() {
+    for state in ["today", "nothing-to-do", "overflow-counts", "first-run", "everything-failing"] {
+        let labels: Vec<String> = {
+            let harness = harness(state, Mode::Dark, 100);
+            harness
+                .root()
+                .children_recursive()
+                .filter(|node| matches!(node.accesskit_node().role(), Role::Button | Role::Link | Role::ListItem))
+                .filter(|node| !node.accesskit_node().is_disabled())
+                .filter_map(|node| node.accesskit_node().label())
+                .collect()
+        };
+        assert!(!labels.is_empty(), "{state}");
+        for label in labels {
+            let mut harness = harness(state, Mode::Dark, 100);
+            let asked = asked_by(&mut harness, &label);
+            // `Asked::SampleMail` is the one ask the window drops (`InboxApp::apply_home`).
+            assert!(asked.is_some_and(|asked| asked != Asked::SampleMail), "{state}: {label:?} asked {asked:?}");
         }
     }
 }

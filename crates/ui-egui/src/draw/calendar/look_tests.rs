@@ -24,7 +24,7 @@ fn window(view: View) -> Harness<'static, InboxApp> {
 }
 
 fn window_at(view: View, size: egui::Vec2, theme: egui::Theme) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.show_calendar();
     let (calendar, mailbox) = app.calendar_mut();
     calendar.set_view(mailbox, view);

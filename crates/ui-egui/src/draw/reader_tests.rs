@@ -23,7 +23,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn app_with(fetch: &Recorder) -> InboxApp {
-    InboxApp::with_outside(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(NoSave))
+    InboxApp::with_outside_at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(NoSave))
 }
 
 fn harness_with(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
@@ -269,7 +269,7 @@ fn saving_an_attachment_says_where_it_went_or_why_not_on_its_box() {
     harness.run();
     harness.get_by_label("Save sketch-2.png again");
     // A save that works says where the file went.
-    let mut app = InboxApp::with_outside(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(Kept));
+    let mut app = InboxApp::with_outside_at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(Kept));
     let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").unwrap().id;
     app.mailbox_mut().select(Some(id));
     let mut harness = harness_with(app, egui::Theme::Light);
@@ -345,18 +345,18 @@ fn the_toolbar_holds_the_mail_actions() {
 }
 
 #[test]
-fn a_place_coming_soon_reads_disabled_and_runs_nothing() {
+fn home_pressed_over_an_open_message_shows_home_and_mail_shows_the_message_again() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
-    harness.get_by_role_and_label(Role::Button, "Home").hover();
-    for _ in 0..4 {
-        harness.run();
-    }
-    assert!(harness.get_by_role_and_label(Role::Button, "Home").accesskit_node().is_disabled(), "Home is coming soon");
-    let before = harness.state().mailbox().last_run();
+    let open = harness.state().reader().open_id();
+    assert!(open.is_some());
     harness.get_by_role_and_label(Role::Button, "Home").click();
     harness.run();
-    assert_eq!(harness.state().mailbox().last_run(), before, "a disabled action runs nothing");
+    assert_eq!(harness.state().screen(), crate::Screen::Home, "HOME is a place");
+    assert!(harness.query_by_label("Photos from the coast walk").is_none(), "Home stands in the mail's place");
+    harness.get_by_role_and_label(Role::Button, "Mail").click();
+    harness.run();
+    assert_eq!((harness.state().screen(), harness.state().reader().open_id()), (crate::Screen::Mail, open), "the message as it was left");
 }
 
 #[test]
@@ -537,7 +537,7 @@ fn move_to_a_folder_never_offers_a_folder_that_holds_no_mail() {
     let listing = FolderListing::new(FolderPath::new("Projects", Some('/')).unwrap(), Vec::new(), false);
     batch.push(Change::PutFolder(Folder::new(FolderId::new(40), AccountId::new(2), listing)));
     store.apply(&batch).unwrap();
-    let mut app = InboxApp::with_outside(
+    let mut app = InboxApp::with_outside_at_mail(
         Mailbox::new(inboxcraft_engine::Session::new(Box::new(store), clock()).unwrap(), clock()),
         Box::new(Recorder::default()),
         Box::new(NoSave),
@@ -833,7 +833,7 @@ fn with_subject(subject: &str) -> (InboxApp, u64) {
         Batch::new().with(Change::PutMessage(message)).with(Change::PutBody(MessageId::new(id), Body::new(raw, "Two directions attached.").unwrap()));
     store.apply(&batch).unwrap();
     let fetch = Recorder::default();
-    let app = InboxApp::with_outside(Mailbox::new(sample::session_over(store, clock()).unwrap(), clock()), Box::new(fetch), Box::new(NoSave));
+    let app = InboxApp::with_outside_at_mail(Mailbox::new(sample::session_over(store, clock()).unwrap(), clock()), Box::new(fetch), Box::new(NoSave));
     (app, id)
 }
 
@@ -1464,7 +1464,11 @@ fn every_reader_scene_is_walked_by_the_keyboard_and_rests() {
     // A sent message that bounced, under its banner.
     let mut store = sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap();
     sample::bounce(&mut store).unwrap();
-    let app = InboxApp::with_outside(Mailbox::new(sample::session_over(store, clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(NoSave));
+    let app = InboxApp::with_outside_at_mail(
+        Mailbox::new(sample::session_over(store, clock()).unwrap(), clock()),
+        Box::new(fetch.clone()),
+        Box::new(NoSave),
+    );
     let mut harness = harness_with(app, egui::Theme::Light);
     harness.state_mut().mailbox_mut().open(crate::mailbox::Place::View(inboxcraft_model::Role::Sent));
     harness.run();
@@ -1501,7 +1505,7 @@ fn every_reader_scene_is_walked_by_the_keyboard_and_rests() {
     harness.get_by_label("Save sketch-2.png").click();
     harness.run();
     walks_and_rests(&mut harness, "an attachment that failed");
-    let mut app = InboxApp::with_outside(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(Kept));
+    let mut app = InboxApp::with_outside_at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(Kept));
     let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").unwrap().id;
     app.mailbox_mut().select(Some(id));
     let mut harness = harness_with(app, egui::Theme::Light);
@@ -1519,8 +1523,11 @@ fn every_reader_scene_is_walked_by_the_keyboard_and_rests() {
             batch.push(change);
         }
         store.apply(&batch).unwrap();
-        let mut app =
-            InboxApp::with_outside(Mailbox::new(sample::session_over(store, clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(NoSave));
+        let mut app = InboxApp::with_outside_at_mail(
+            Mailbox::new(sample::session_over(store, clock()).unwrap(), clock()),
+            Box::new(fetch.clone()),
+            Box::new(NoSave),
+        );
         let found = app.mailbox_mut().run("mail.search", &json!({ "subject": subject })).unwrap();
         let id = found["messages"].as_array().unwrap().iter().find(|row| row["subject"] == json!(subject)).unwrap()["id"].as_u64().unwrap();
         app.mailbox_mut().select(Some(id));

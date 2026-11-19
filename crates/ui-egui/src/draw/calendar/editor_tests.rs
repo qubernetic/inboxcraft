@@ -19,7 +19,7 @@ fn clock() -> Box<FakeClock> {
 
 /// The sample window on the calendar screen.
 fn on_calendar(theme: egui::Theme) -> Harness<'static, InboxApp> {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     let mut harness = Harness::builder().with_size(vec2(1200.0, 820.0)).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     press(&mut harness, "Calendar");
@@ -212,7 +212,7 @@ fn a_new_event_opens_with_the_list_closed_after_an_escape_left_one_open() {
 
 #[test]
 fn a_new_event_in_a_narrow_window_still_offers_every_control() {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     let mut harness = Harness::builder().with_size(vec2(760.0, 620.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     press(&mut harness, "Calendar");

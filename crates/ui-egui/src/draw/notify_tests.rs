@@ -30,7 +30,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn app() -> InboxApp {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     app
 }
@@ -38,7 +38,7 @@ fn app() -> InboxApp {
 /// The sample's mail in a session that is not the sample's, as the owner's own mail would be.
 fn real_app() -> InboxApp {
     let session = Session::new(Box::new(sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap()), clock()).unwrap();
-    let mut app = InboxApp::new(Mailbox::new(session, clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(session, clock()));
     app.set_reduce_motion(true);
     app
 }
@@ -238,7 +238,7 @@ fn a_background_choice_the_desk_refuses_shows_in_the_error_banner() {
 #[test]
 fn without_accounts_the_page_says_to_add_one_first() {
     let session = Session::new(Box::new(Memory::new(StoreConfig::default())), clock()).unwrap();
-    let harness = on_the_page(InboxApp::new(Mailbox::new(session, clock())));
+    let harness = on_the_page(InboxApp::at_mail(Mailbox::new(session, clock())));
     harness.get_by_label("Add an account first: each account chooses which of its new mail notifies you.");
     harness.get_by_role_and_label(Role::Switch, "Returned snoozes");
 }

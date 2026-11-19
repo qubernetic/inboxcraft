@@ -349,7 +349,7 @@ fn textures_are_set_patched_and_freed() {
 
 #[test]
 fn rendering_any_app_needs_a_sane_size() {
-    let mut app = crate::InboxApp::new(crate::mailbox::Mailbox::new(
+    let mut app = crate::InboxApp::at_mail(crate::mailbox::Mailbox::new(
         crate::sample::session(Box::new(inboxcraft_time::FakeClock::new(inboxcraft_time::Timestamp::UNIX_EPOCH))).unwrap(),
         Box::new(inboxcraft_time::FakeClock::new(inboxcraft_time::Timestamp::UNIX_EPOCH)),
     ));

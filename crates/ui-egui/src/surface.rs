@@ -45,7 +45,7 @@ pub(crate) enum Surface {
     FullWidth,
     /// In one pane, the open message in the list's place.
     OnePaneReader,
-    /// The place itself (the mail, the calendar, the settings): always the last.
+    /// The place itself (Home, the mail, the calendar, the settings): always the last.
     Place,
 }
 
@@ -71,6 +71,10 @@ pub(crate) struct Facts {
     pub mail: bool,
     /// The settings are the place shown.
     pub settings: bool,
+    /// Home is the place shown.
+    pub home: bool,
+    /// A composer is drawn: in the reader's place or floating, on whatever place shows (the settings draw none).
+    pub composer_drawn: bool,
 }
 
 /// What stands in front, top first, the place last. Built once a frame ([`Surfaces::new`]); copies, allocates nothing.
@@ -80,6 +84,10 @@ pub(crate) struct Surfaces {
     len: usize,
     mail: bool,
     settings: bool,
+    /// A place without mail is shown: the settings or Home ([`mail_only`] rests there).
+    apart: bool,
+    /// A composer is drawn ([`of_the_composer`] rests without one).
+    composer_drawn: bool,
 }
 
 impl Surfaces {
@@ -107,7 +115,7 @@ impl Surfaces {
                 len += 1;
             }
         }
-        Self { stack, len: len + 1, mail, settings: facts.settings }
+        Self { stack, len: len + 1, mail, settings: facts.settings, apart: facts.settings || facts.home, composer_drawn: facts.composer_drawn }
     }
 
     /// The surfaces, top first, the place last.
@@ -155,8 +163,8 @@ impl Surfaces {
     }
 
     /// Whether the window's `action` may run with these surfaces in front, as its key (`keymap`'s, with a modifier or
-    /// without) is pressed. Not while the palette or a capture holds the keys; on the settings nothing of the mail
-    /// ([`mail_only`]); under the event editor only what comes over it ([`EDITOR_KEYS`]); a key without a modifier not
+    /// without) is pressed. Not while the palette or a capture holds the keys; on the settings and on Home nothing of the mail
+    /// ([`mail_only`]); the composer's own only where a composer is drawn ([`of_the_composer`]); under the event editor only what comes over it ([`EDITOR_KEYS`]); a key without a modifier not
     /// under a quiet surface ([`Surfaces::quiet`]), and Undo neither there nor while it rests
     /// ([`Surfaces::undo_rests`]); the list's keys only while it has them ([`Surfaces::list_has_keyboard`]). The acts
     /// on a row and the calendar's keys are not the window's: the list and the calendar take those.
@@ -164,7 +172,10 @@ impl Surfaces {
         if self.held() || ROW_ACTS.contains(&action) || keymap::CALENDAR_KEYS.contains(&action) {
             return false;
         }
-        if self.settings && mail_only(action) {
+        if self.apart && mail_only(action) {
+            return false;
+        }
+        if of_the_composer(action) && !self.composer_drawn {
             return false;
         }
         if action == keymap::UNDO && (self.quiet() || self.undo_rests()) {
@@ -203,26 +214,25 @@ impl Surfaces {
     }
 }
 
-/// Whether `action` acts on the mail alone, so it rests while another place is shown that has no mail (the settings):
+/// Whether `action` acts on the mail alone, so it rests while another place is shown that has no mail (the settings,
+/// Home):
 /// the list's keys and the acts on a row, Undo (of the mail's acts), the views of the inbox, Back, the held-back
-/// message, Snooze and the composer's Send and fold. The ways to a place (Mail, Sent, Later, Find, the reader's full
-/// width) show the mail first, so they are not among them.
+/// message and Snooze. The ways to a place (Mail, Sent, Later, Find, the reader's full width) show the mail first, so
+/// they are not among them; nor is Home's own way, which shows Home; nor the composer's ([`of_the_composer`]).
 pub(crate) fn mail_only(action: &str) -> bool {
     keymap::LIST_KEYS.contains(&action) || ROW_ACTS.contains(&action) || MAIL_ONLY.contains(&action)
 }
 
+/// Whether `action` is the composer's own, Send or fold: it runs wherever a composer is drawn (in the reader's place on
+/// the mail, floating over the mail, Home or the calendar) and rests where none is (the settings draw none), whatever
+/// the place.
+pub(crate) fn of_the_composer(action: &str) -> bool {
+    action == keymap::SEND || action == keymap::FOLD
+}
+
 /// The window's actions that act on the mail shown, besides the list's keys and the acts on a row.
-const MAIL_ONLY: [&str; 9] = [
-    keymap::UNDO,
-    keymap::VIEW_GROUPED,
-    keymap::VIEW_SMART,
-    keymap::VIEW_LIST,
-    keymap::BACK,
-    keymap::OPEN_HELD,
-    keymap::SNOOZE,
-    keymap::SEND,
-    keymap::FOLD,
-];
+const MAIL_ONLY: [&str; 7] =
+    [keymap::UNDO, keymap::VIEW_GROUPED, keymap::VIEW_SMART, keymap::VIEW_LIST, keymap::BACK, keymap::OPEN_HELD, keymap::SNOOZE];
 
 /// The acts on the selected row: the list takes their keys.
 const ROW_ACTS: [&str; 5] = [keymap::DONE, keymap::ARCHIVE, keymap::READ, keymap::FLAG, keymap::DELETE];

@@ -25,7 +25,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn harness(calendar: bool) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     if calendar {
         app.show_calendar();
         let (calendar, mailbox) = app.calendar_mut();

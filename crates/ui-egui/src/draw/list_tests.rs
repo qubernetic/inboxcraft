@@ -37,7 +37,7 @@ fn app(showcase: bool) -> InboxApp {
     } else {
         mailbox.set_inbox_view(InboxView::List);
     }
-    InboxApp::new(mailbox)
+    InboxApp::at_mail(mailbox)
 }
 
 fn harness_of(app: InboxApp) -> Harness<'static, InboxApp> {
@@ -110,7 +110,7 @@ fn the_list_view_draws_no_group_head_but_the_screener_card() {
 fn on_a_real_account_the_hover_actions_and_their_keys_act_too() {
     // The same mail in a session over a store, as an account's would be: not the sample.
     let session = Session::new(Box::new(sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap()), clock()).unwrap();
-    let mut app = InboxApp::new(Mailbox::new(session, clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(session, clock()));
     app.set_reduce_motion(true);
     app.mailbox_mut().set_inbox_view(InboxView::List);
     let mut harness = harness_of(app);
@@ -1035,7 +1035,7 @@ fn a_frame_of_a_thousand_rows_none_hovered_or_keyed_lays_out_no_hover_action() {
     let session = sample::session_over(store, Box::new(clock.clone())).unwrap();
     let mut mailbox = Mailbox::new(session, Box::new(clock));
     mailbox.set_inbox_view(InboxView::Grouped);
-    let mut harness = harness_of(InboxApp::new(mailbox));
+    let mut harness = harness_of(InboxApp::at_mail(mailbox));
     harness.hover_at(egui::pos2(1.0, 1.0));
     harness.run();
     crate::component::hover::tests::reset_laid();
@@ -1121,7 +1121,7 @@ fn ten_thousand_mailbox(view: InboxView) -> Mailbox {
 
 /// The sample window over [`ten_thousand_mailbox`], reduced motion on.
 fn ten_thousand(view: InboxView) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(ten_thousand_mailbox(view));
+    let mut app = InboxApp::at_mail(ten_thousand_mailbox(view));
     app.set_reduce_motion(true);
     let mut harness = Harness::builder()
         .with_size(vec2(1300.0, 900.0))
@@ -1345,7 +1345,7 @@ fn done_on_the_keyed_row_keeps_the_next_keyed_and_in_sight() {
     let mut mailbox = Mailbox::new(session, Box::new(clock));
     mailbox.set_inbox_view(InboxView::List);
     let deep = mailbox.messages()[600].id;
-    let mut app = InboxApp::new(mailbox);
+    let mut app = InboxApp::at_mail(mailbox);
     app.set_reduce_motion(true);
     let mut harness = harness_of(app);
     harness.state_mut().mailbox_mut().select(Some(deep));
@@ -2247,7 +2247,7 @@ fn an_invitation_is_grouped_by_its_sender() {
     // No Invitations group: a person's invitation stands with People, a system's with the system's mail.
     assert_eq!(groups, [("People".to_owned(), vec![1, 4]), ("Notifications".to_owned(), vec![2, 3, 5])]);
     // The list draws them so: two heads, every row under its sender's.
-    let mut app = InboxApp::new(mailbox);
+    let mut app = InboxApp::at_mail(mailbox);
     app.set_reduce_motion(true);
     let harness = harness_of(app);
     assert!(harness.query_by_label_contains("Invitations").is_none(), "no Invitations head");
@@ -2408,7 +2408,7 @@ fn a_keyed_row_scrolls_into_sight_by_this_frames_viewport_and_when_first_shown()
     // First shown with a row far down keyed: egui scrolls to it once it knows the viewport.
     let mut mailbox = ten_thousand_mailbox(InboxView::List);
     mailbox.select_keyed(1_000_600);
-    let mut app = InboxApp::new(mailbox);
+    let mut app = InboxApp::at_mail(mailbox);
     app.set_reduce_motion(true);
     let mut harness =
         Harness::builder().with_size(vec2(1300.0, 900.0)).with_context_setup(install_fonts).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
@@ -2657,7 +2657,7 @@ fn the_list_keys_rest_under_a_rows_open_menu() {
 fn a_step_in_the_pass_the_list_shrinks_scrolls_by_that_passs_viewport() {
     /// Each pass's viewport, the keyed message and its row's rect as the pass built it.
     type Seen = Vec<(egui::Rect, Option<u64>, Option<egui::Rect>)>;
-    let mut app = InboxApp::new(ten_thousand_mailbox(InboxView::List));
+    let mut app = InboxApp::at_mail(ten_thousand_mailbox(InboxView::List));
     app.set_reduce_motion(true);
     let mut harness = Harness::builder().with_size(vec2(1300.0, 900.0)).with_context_setup(install_fonts).with_max_steps(240).build_ui_state(
         |ui, (app, seen, armed): &mut (InboxApp, Seen, u8)| {

@@ -820,3 +820,13 @@ fn the_old_view_ids_read_as_the_new_views() {
         }
     }
 }
+
+#[test]
+fn only_a_read_leaves_the_writes_count_as_it_was() {
+    for read in ["mail.list", "compose.list", "compose.show", "event.list", "calendar.list", "send.settings", "sync.status", "mail.attachment"] {
+        assert!(super::changes_nothing(read), "{read} reads");
+    }
+    for write in ["compose.update", "compose.discard", "event.create", "event.update", "mail.send", "history.undo", "calendar.server"] {
+        assert!(!super::changes_nothing(write), "{write} may change what the window shows");
+    }
+}

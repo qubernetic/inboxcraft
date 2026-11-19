@@ -126,7 +126,7 @@ fn the_index_stands_as_its_frame_draws_with_mail_open() {
     assert_eq!((later.top() - calendar.top(), settings.top() - later.top()), (34.0, 34.0), "the places after the mailboxes");
     let owner = harness.query_all_by_role(Role::Button).find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("Show mail of"))).unwrap();
     assert_eq!((owner.rect().top(), owner.rect().height()), (786.0, 40.0), "the owner's row at the foot");
-    assert!(harness.get_by_role_and_label(Role::Button, "Home").accesskit_node().is_disabled(), "HOME is coming soon");
+    assert!(!harness.get_by_role_and_label(Role::Button, "Home").accesskit_node().is_disabled(), "HOME is a place");
     assert_eq!(harness.query_all_by_label("coming soon").count(), 0, "a row inside soon carries no tag of its own");
 }
 
@@ -229,7 +229,7 @@ fn tab_walks_places_mailboxes_accounts_and_the_owner_s_row_in_that_order() {
     assert!(first("Inbox") < first("Personal") || first("Inbox") < first("Studio"), "{order:?}");
     assert!(first("Calendar") > first("Inbox"), "the places after the mailboxes come after them: {order:?}");
     assert!(first("Settings") < first("Show mail of"), "the owner's row last: {order:?}");
-    assert!(!order.iter().any(|label| label.starts_with("Home")), "HOME is no Tab stop");
+    assert!(first("Home") < first("Mail"), "HOME is the first stop: {order:?}");
 }
 
 #[test]

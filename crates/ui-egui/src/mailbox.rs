@@ -661,6 +661,9 @@ pub struct Mailbox {
     /// Counts the reads and changes of what the list's head and cards show (the rows, the place, the folders, the
     /// accounts, the outbox, the view): a measure kept from the list stays good while it is the same.
     revision: u64,
+    /// Counts the commands run through [`Mailbox::run`] that may change something (all but the reads,
+    /// [`changes_nothing`]): a draft kept, an event saved. Home is built again when it moved.
+    writes: u64,
     /// The id of the last command run through [`Mailbox::run`].
     last: Option<&'static str>,
     /// Who the window's commands run for: the owner, or an agent while a picture's script steps drive the window.
@@ -908,6 +911,7 @@ impl Mailbox {
             error: None,
             runs: 0,
             revision: 0,
+            writes: 0,
             last: None,
             caller: Caller::Owner,
             refused: None,
@@ -1012,6 +1016,13 @@ impl Mailbox {
     #[must_use]
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// How many commands that may change something ran through the window so far ([`changes_nothing`] tells the
+    /// reads): equal, the window changed nothing in between.
+    #[must_use]
+    pub fn writes(&self) -> u64 {
+        self.writes
     }
 
     /// Shows `showcase` in the list, for `ui_shot`.
@@ -1610,8 +1621,12 @@ impl Mailbox {
         self.session.set_appearance(appearance);
     }
 
+    /// Runs `command` for the window's caller; a command that may change something counts in [`Mailbox::writes`].
     pub(crate) fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
         self.runs = self.runs.saturating_add(1);
+        if !changes_nothing(command) {
+            self.writes = self.writes.wrapping_add(1);
+        }
         self.last = Some(command);
         let answer = self.session.run_as(self.caller, command, params);
         if let Err(EngineError::NotAllowed { command, .. }) = &answer {
@@ -2453,6 +2468,13 @@ mod outbox_tests;
 #[cfg(test)]
 #[path = "store_log_tests.rs"]
 mod store_log_tests;
+/// Whether `command` only reads: a list, a draft or a message shown, the settings or the state of something. Every
+/// other command may change what the window shows and counts in [`Mailbox::writes`].
+pub(crate) fn changes_nothing(command: &str) -> bool {
+    const READS: [&str; 9] = [".list", ".show", ".settings", ".status", ".presets", ".repeats", ".why", ".thread", ".search"];
+    READS.iter().any(|end| command.ends_with(end)) || command == "mail.attachment"
+}
+
 #[cfg(test)]
 #[path = "mailbox_tests.rs"]
 mod tests;

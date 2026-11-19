@@ -25,7 +25,7 @@ fn clock() -> Box<FakeClock> {
 
 /// The sample window keeping its appearance in `file`, after its first frame.
 fn window(file: &Path) -> Harness<'static, InboxApp> {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())).with_keep(Box::new(KeepFile::new(file.to_path_buf())));
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())).with_keep(Box::new(KeepFile::new(file.to_path_buf())));
     let mut harness = Harness::builder().with_size(vec2(1100.0, 720.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness

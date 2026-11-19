@@ -20,7 +20,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn harness(own: bool, frame: WindowFrame) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_own_frame(own);
     app.set_frame(frame);
     let mut harness =
@@ -55,13 +55,13 @@ fn no_own_frame_with_the_system_s_title_bar_or_outside_a_native_window() {
 
 #[test]
 fn the_frame_is_one_of_the_appearance_choices() {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_frame(WindowFrame::TopRow);
     assert_eq!(app.mailbox().appearance().frame, WindowFrame::TopRow);
 }
 
 fn harness_with(frame: WindowFrame, setup: impl FnOnce(&mut InboxApp)) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_own_frame(true);
     app.set_frame(frame);
     setup(&mut app);
@@ -165,7 +165,7 @@ fn the_window_s_corners_are_round_only_while_the_app_draws_the_frame() {
 
 #[test]
 fn the_strip_s_window_controls_sit_in_its_middle_as_far_from_its_top_as_close_is_from_the_window_s_edge() {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_own_frame(true);
     app.set_frame(WindowFrame::Strip);
     // The whole window, as eframe gives it; the harness's own `ui` has a margin.
@@ -233,7 +233,7 @@ fn without_a_grab_by_the_desktop_no_release_is_added() {
 
 /// The app in the whole window, as eframe gives it to it.
 fn whole_window(frame: WindowFrame) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_own_frame(true);
     app.set_frame(frame);
     let mut harness = Harness::builder().with_size(vec2(1100.0, 700.0)).with_context_setup(install_fonts).build_ui_state(
@@ -260,7 +260,7 @@ fn the_index_starts_under_the_command_line_in_every_frame() {
 
 /// The sample in the own frame of `frame` at `ppp`, with an error shown or not.
 fn framed(frame: WindowFrame, ppp: f32, error: bool) -> Harness<'static, InboxApp> {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_own_frame(true);
     app.set_frame(frame);
     if error {
@@ -372,7 +372,7 @@ fn the_handles_that_move_the_window_are_no_tab_stops() {
 #[test]
 fn a_double_press_on_the_handles_maximises_the_window() {
     for (frame, at) in [(WindowFrame::Strip, pos2(500.0, 17.0)), (WindowFrame::TopRow, pos2(600.0, 8.0))] {
-        let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+        let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
         app.set_own_frame(true);
         app.set_frame(frame);
         // Two presses a sixtieth of a second apart: well inside the double press's time.

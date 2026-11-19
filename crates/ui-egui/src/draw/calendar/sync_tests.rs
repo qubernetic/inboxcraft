@@ -121,7 +121,7 @@ fn on_calendar_named(theme: egui::Theme, feed: &Feed, label: Option<&str>) -> Ha
     }
     let keychain = Arc::new(crate::onboard::NoKeychain);
     let app =
-        InboxApp::new(Mailbox::new(session, clock())).with_accounts(keychain, Box::<crate::onboard::NoDetect>::default(), Box::new(feed.clone()));
+        InboxApp::at_mail(Mailbox::new(session, clock())).with_accounts(keychain, Box::<crate::onboard::NoDetect>::default(), Box::new(feed.clone()));
     let mut harness = Harness::builder().with_size(vec2(1200.0, 820.0)).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness.get_by_role_and_label(Role::Button, "Calendar").click();
