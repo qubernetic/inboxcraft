@@ -234,9 +234,7 @@ struct Look {
 /// [`show`] paints it each frame.
 #[derive(Debug, Clone)]
 pub struct Field {
-    rect: Rect,
     seed: u32,
-    scale: TextScale,
     emblem: Option<Emblem>,
     cells: Option<Cells>,
     look: Option<Look>,
@@ -252,11 +250,11 @@ pub struct Field {
 }
 
 impl Field {
-    /// A field over `rect` with the pattern of `seed` at the text scale `scale`. Its cells are built at its first
-    /// [`show`].
+    /// A field with the pattern of `seed`. Its cells are built at its first [`show`], for the rect and the text scale
+    /// that [`show`] is given.
     #[must_use]
-    pub fn new(rect: Rect, seed: u32, scale: TextScale) -> Self {
-        Self { rect, seed, scale, emblem: None, cells: None, look: None, warm: BTreeMap::new(), frame: 0, flips: 0, builds: 0, layouts: 0 }
+    pub fn new(seed: u32) -> Self {
+        Self { seed, emblem: None, cells: None, look: None, warm: BTreeMap::new(), frame: 0, flips: 0, builds: 0, layouts: 0 }
     }
 
     /// The same field with `emblem` on it, where [`Opts::emblem`] puts it.
@@ -279,8 +277,6 @@ impl Field {
         if same {
             return;
         }
-        self.rect = rect;
-        self.scale = scale;
         self.cells = Some(cells(rect, scale, area, ppp, self.seed, self.emblem.as_ref()));
         self.look = None;
         self.warm.clear();

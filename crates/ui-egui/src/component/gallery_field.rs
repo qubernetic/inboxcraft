@@ -69,9 +69,8 @@ fn board(ui: &mut Ui, theme: &Theme, name: &str, scale: TextScale, at: egui::Pos
     let id = Id::unique("gallery-character-field").with(scale.percent());
     let shown = theme.with_text_scale(scale);
     // Kept between frames in the context, shared, so a frame never copies its cells.
-    let kept = ui.data_mut(|data| {
-        Arc::clone(data.get_temp_mut_or_insert_with(id, || Arc::new(Mutex::new(Field::new(rect, 0, scale).with_emblem(placeholder())))))
-    });
+    let kept =
+        ui.data_mut(|data| Arc::clone(data.get_temp_mut_or_insert_with(id, || Arc::new(Mutex::new(Field::new(0).with_emblem(placeholder()))))));
     if let Ok(mut kept) = kept.lock() {
         field::show(ui, &shown, &mut kept, rect, Level::Full, Opts { on_home: true, on_pane: false, emblem: Some(rect) });
     }

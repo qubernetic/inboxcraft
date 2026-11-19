@@ -39,7 +39,7 @@ struct Stage {
 impl Stage {
     fn new(level: Level, opts: Opts) -> Self {
         Self {
-            field: Field::new(RECT, 7, TextScale::default()),
+            field: Field::new(7),
             rect: RECT,
             level,
             opts,
@@ -154,7 +154,7 @@ fn block() -> Emblem {
 fn with_emblem(level: Level) -> Stage {
     let area = Rect::from_min_max(pos2(380.0, 40.0), pos2(960.0, 580.0));
     let mut stage = Stage::new(level, Opts { on_home: true, on_pane: false, emblem: Some(area) });
-    stage.field = Field::new(RECT, 7, TextScale::default()).with_emblem(block());
+    stage.field = Field::new(7).with_emblem(block());
     stage
 }
 

@@ -509,7 +509,7 @@ fn measure_field(size: Vec2) -> Measured {
     let theme = Theme::new(Mode::Dark, TextScale::default());
     let screen = Rect::from_min_size(Pos2::ZERO, size);
     let opts = Opts { on_home: true, on_pane: false, emblem: Some(Rect::from_min_max(pos2(size.x / 2.0, 0.0), screen.max)) };
-    let mut kept = Field::new(screen, 0, TextScale::default()).with_emblem(placeholder());
+    let mut kept = Field::new(0).with_emblem(placeholder());
     let clock = SystemClock::new();
     let mut times = Vec::with_capacity(FRAMES);
     let mut shapes = 0;
