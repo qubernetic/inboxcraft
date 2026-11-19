@@ -23,6 +23,7 @@ const MAIL: Facts = Facts {
     mail: true,
     settings: false,
     home: false,
+    composer_drawn: false,
 };
 
 /// The calendar.
@@ -106,6 +107,7 @@ fn every_surface_at_once_is_held_in_eight_and_the_place_stays_last() {
         mail: true,
         settings: false,
         home: false,
+        composer_drawn: true,
     };
     let surfaces = of(all);
     assert_eq!(surfaces.all().len(), 8);
@@ -119,7 +121,7 @@ fn every_surface_at_once_is_held_in_eight_and_the_place_stays_last() {
 /// stacking: the actions it let run. Send is left out: its key needs the keyboard in the composer, which no surface
 /// is. Generated once from those functions (the test `draw::surface_old_tests`, removed with them), checked against
 /// `Surfaces::allows` there.
-const WINDOW: [&str; 23] = [
+const WINDOW: [&str; 22] = [
     "ui.palette.open",
     "ui.search.focus",
     "ui.home.open",
@@ -127,7 +129,6 @@ const WINDOW: [&str; 23] = [
     "ui.sent.show",
     "ui.later.show",
     "ui.compose.new",
-    "ui.compose.fold",
     "ui.calendar.show",
     "ui.reader.open_held",
     "ui.message.snooze",
@@ -211,6 +212,10 @@ const COMPOSER: [&str; 22] = [
     "ui.view.list",
 ];
 
+/// The composer's fold: it runs wherever a composer is drawn, on any place, and rests where none is. Before #303's
+/// fix it ran on the mail and the calendar with or without one, and rested on Home though Home draws the floating one.
+const FOLD: [&str; 1] = ["ui.compose.fold"];
+
 /// What runs under the event editor: what comes over it and the look.
 const EDITOR: [&str; 7] =
     ["ui.palette.open", "ui.settings.open", "ui.shortcuts.open", "ui.mode.light", "ui.mode.dark", "ui.mode.system", "ui.motion.toggle"];
@@ -219,7 +224,7 @@ const EDITOR: [&str; 7] =
 type Row = (&'static str, Facts, &'static [&'static [&'static str]], &'static [&'static [&'static str]]);
 
 fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
-    let rows: [Row; 19] = [
+    let rows: [Row; 24] = [
         ("place", MAIL, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("float", Facts { float: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
         ("palette", Facts { palette: true, ..MAIL }, &[], &[]),
@@ -229,18 +234,24 @@ fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
         // Before #254's fix every window key ran under the editor (`WINDOW`, also with a modifier): New message
         // opened under it. Now only what comes over it.
         ("editor", Facts { editor: true, ..CALENDAR }, &[&EDITOR], &[&EDITOR]),
-        ("composer", Facts { composer: true, ..MAIL }, &[], &[&COMPOSER]),
+        ("composer", Facts { composer: true, composer_drawn: true, ..MAIL }, &[], &[&COMPOSER]),
         ("full_width", Facts { full_width: true, ..MAIL }, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("one_pane_reader", Facts { one_pane_reader: true, ..MAIL }, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("calendar", CALENDAR, &[&WINDOW], &[&WINDOW]),
         ("float_over_settings", Facts { float: true, ..SETTINGS }, &[], &[&ON_SETTINGS]),
         ("palette_over_editor", Facts { palette: true, editor: true, ..CALENDAR }, &[], &[]),
         ("float_over_full_width", Facts { float: true, full_width: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
-        ("float_over_composer", Facts { float: true, composer: true, ..MAIL }, &[], &[&COMPOSER]),
-        ("palette_over_composer", Facts { palette: true, composer: true, ..MAIL }, &[], &[]),
+        ("float_over_composer", Facts { float: true, composer: true, composer_drawn: true, ..MAIL }, &[], &[&COMPOSER]),
+        ("palette_over_composer", Facts { palette: true, composer: true, composer_drawn: true, ..MAIL }, &[], &[]),
         ("home", HOME, &[&ON_HOME], &[&ON_HOME]),
         ("float_over_home", Facts { float: true, ..HOME }, &[&ON_HOME], &[&ON_HOME]),
         ("palette_over_home", Facts { palette: true, ..HOME }, &[], &[]),
+        // The floating composer, on each place that draws it: its fold runs there.
+        ("floating_composer", Facts { composer_drawn: true, ..MAIL }, &[&WINDOW, &LIST, &FOLD], &[&WINDOW, &LIST, &FOLD]),
+        ("floating_composer_on_the_calendar", Facts { composer_drawn: true, ..CALENDAR }, &[&WINDOW, &FOLD], &[&WINDOW, &FOLD]),
+        ("floating_composer_on_home", Facts { composer_drawn: true, ..HOME }, &[&ON_HOME, &FOLD], &[&ON_HOME, &FOLD]),
+        ("float_over_the_floating_composer_on_home", Facts { float: true, composer_drawn: true, ..HOME }, &[&ON_HOME, &FOLD], &[&ON_HOME, &FOLD]),
+        ("palette_over_the_floating_composer_on_home", Facts { palette: true, composer_drawn: true, ..HOME }, &[], &[]),
     ];
     rows.into_iter()
         .map(|(name, facts, bare, command)| {
@@ -338,4 +349,22 @@ fn under_the_event_editor_a_key_with_a_modifier_runs_only_what_comes_over_it() {
     harness.run();
     assert!(harness.state().settings().is_open(), "the settings are shown");
     assert!(harness.state().calendar().editor().is_some(), "the editor is kept");
+}
+
+#[test]
+fn send_runs_wherever_a_composer_is_drawn_and_rests_where_none_is() {
+    let keys = Keymap::default();
+    let rows = [
+        ("in the reader's place", Facts { composer: true, composer_drawn: true, ..MAIL }, true),
+        ("floating over the mail", Facts { composer_drawn: true, ..MAIL }, true),
+        ("floating over the calendar", Facts { composer_drawn: true, ..CALENDAR }, true),
+        ("floating over Home", Facts { composer_drawn: true, ..HOME }, true),
+        ("Home without one", HOME, false),
+        ("the settings, which draw none", SETTINGS, false),
+        ("the mail without one", MAIL, false),
+    ];
+    for (name, facts, runs) in rows {
+        assert_eq!(of(facts).allows(keymap::SEND, &keys), runs, "{name}: its key");
+        assert_eq!(of(facts).allows_press(keymap::SEND), runs, "{name}: a press");
+    }
 }

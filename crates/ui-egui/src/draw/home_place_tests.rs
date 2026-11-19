@@ -13,7 +13,7 @@ use inboxcraft_model::Role as Folder;
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
-use super::place_tests::{OF_THE_MAIL, THE_WINDOW_S};
+use super::place_tests::{OF_THE_COMPOSER, OF_THE_MAIL, THE_WINDOW_S};
 use super::{InboxApp, Screen};
 use crate::keymap;
 use crate::mailbox::{Mailbox, Pile, Place};
@@ -503,6 +503,13 @@ fn on_home_no_key_and_no_press_runs_an_action_of_the_mail_and_the_window_s_own_r
         assert!(home.allows_press(id), "{id}: the window's own runs by a press on Home");
         assert!(home.allows(id, &keymap::Keymap::default()), "{id}: and by its key, Home has no field the letters are for");
     }
+    // The composer's own: by the facts, not the place. With no composer they rest; with the floating one drawn over
+    // Home they run.
+    let with = crate::surface::Surfaces::new(crate::surface::Facts { home: true, composer_drawn: true, ..crate::surface::Facts::default() });
+    for id in OF_THE_COMPOSER {
+        assert!(!home.allows_press(id) && !home.allows(id, &keymap::Keymap::default()), "{id}: no composer on Home");
+        assert!(with.allows_press(id) && with.allows(id, &keymap::Keymap::default()), "{id}: the floating composer over Home");
+    }
 }
 
 #[test]
@@ -595,4 +602,80 @@ fn home_stands_in_the_body_at_every_width_and_text_size() {
             }
         }
     }
+}
+
+fn type_into(harness: &mut Harness<'static, InboxApp>, field: &str, text: &str) {
+    harness.get_by_role_and_label(Role::TextInput, field).focus();
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, field).type_text(text);
+    harness.run();
+}
+
+fn folded(harness: &Harness<'static, InboxApp>) -> bool {
+    harness.state().composer().is_some_and(crate::compose::Composer::folded)
+}
+
+/// The composer's own (Send, fold) run where a composer is drawn: Home draws the floating one, so there they act, by
+/// their keys and by their buttons. Before #303's fix both rested on Home as on the settings.
+#[test]
+fn on_home_the_floating_composer_s_send_and_fold_act_by_key_and_by_button() {
+    let mut harness = window(sample_app(&clock()));
+    harness.state_mut().keymap_mut().bind(keymap::FOLD, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::F9));
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::COMPOSE);
+    harness.run();
+    if harness.state().screen() != Screen::Home {
+        command(&mut harness, Key::Num0);
+    }
+    assert_eq!(harness.state().screen(), Screen::Home);
+    assert!(harness.state().composer().is_some() && !harness.state().docked(), "the composer floats over Home");
+    type_into(&mut harness, "Subject", "Kiln report");
+    for round in 0..2 {
+        command(&mut harness, Key::F9);
+        harness.run();
+        assert_eq!(folded(&harness), round == 0, "fold by its key, round {round}");
+    }
+    for (round, words) in ["Fold the draft", "Open the draft"].into_iter().enumerate() {
+        harness.query_all_by_label_contains(words).next().unwrap_or_else(|| panic!("no {words:?}")).click();
+        harness.run();
+        harness.run();
+        assert_eq!(folded(&harness), round == 0, "fold by its button: {words}");
+    }
+    assert_eq!(harness.state().screen(), Screen::Home, "folding leaves Home where it is");
+    type_into(&mut harness, "To", "odile@example.org");
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run();
+    // The sample account has no submission server: the engine refuses the send, which shows it was asked for.
+    let refused = harness.state().mailbox().error().is_some_and(|error| error.contains("mail.send"));
+    assert!(refused, "Send by its key sends from Home");
+}
+
+#[test]
+fn on_the_settings_the_composer_kept_open_neither_sends_nor_folds() {
+    let mut harness = window(sample_app(&clock()));
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::COMPOSE);
+    harness.run();
+    if harness.state().screen() != Screen::Home {
+        command(&mut harness, Key::Num0);
+    }
+    type_into(&mut harness, "To", "odile@example.org");
+    harness.key_press(Key::Enter);
+    harness.run();
+    type_into(&mut harness, "Subject", "Kiln report");
+    assert!(harness.state().can_run(keymap::FOLD) && harness.state().can_run(keymap::SEND), "both run over Home");
+    super::tests::at_settings(harness.state_mut(), crate::settings::Section::Appearance);
+    harness.run();
+    for id in super::place_tests::OF_THE_COMPOSER {
+        assert!(!harness.state().can_run(id), "{id}: the settings draw no composer");
+    }
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run();
+    assert!(harness.state().composer().is_some_and(|composer| !composer.folded()), "nothing sent, nothing folded");
+    let asked = harness.state().mailbox().error().is_some_and(|error| error.contains("mail.send"));
+    assert!(!asked, "Send rests on the settings");
 }

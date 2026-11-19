@@ -804,7 +804,7 @@ impl InboxApp {
 
     /// Whether the action `id` can run now: an act on a row needs a selected message, Undo an act in the history, the
     /// reader's full width an open message; on the settings and on Home nothing of the mail and nothing of the calendar
-    /// runs; an id the window does not know never runs.
+    /// runs; the composer's own (Send, fold) only where a composer is drawn; an id the window does not know never runs.
     #[must_use]
     pub fn can_run(&self, id: &str) -> bool {
         let apart = self.settings.is_open() || self.screen == Screen::Home;
@@ -828,9 +828,13 @@ impl InboxApp {
             keymap::BACK => self.screen == Screen::Mail && self.single == Some(true) && self.in_place_of_list(),
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
-            keymap::FOLD => self.composer.is_some() && !self.docked(),
+            // The composer's own: wherever a composer is drawn ([`crate::surface::of_the_composer`]).
+            keymap::FOLD => self.composer_drawn() && !self.docked(),
             // In front in the reader's place; or the floating panel open with the keys inside it.
-            keymap::SEND => self.composer_in_front() || (self.composer_keys && self.composer.as_ref().is_some_and(|composer| !composer.folded())),
+            keymap::SEND => {
+                self.composer_drawn()
+                    && (self.composer_in_front() || (self.composer_keys && self.composer.as_ref().is_some_and(|composer| !composer.folded())))
+            }
             _ if keymap::CALENDAR_KEYS.contains(&id) => self.screen == Screen::Calendar && !self.calendar.is_empty(),
             // The list's keys and its views act on the list: hidden, it is not there to act on.
             _ if keymap::LIST_KEYS.contains(&id) => self.screen == Screen::Mail && !self.list_hidden && (self.list_row.is_some() || self.list_keys),
@@ -1202,7 +1206,13 @@ impl InboxApp {
             mail,
             settings,
             home,
+            composer_drawn: self.composer_drawn(),
         })
+    }
+
+    /// Whether a composer is drawn this frame: one is open, on any place but the settings, which draw none.
+    fn composer_drawn(&self) -> bool {
+        self.composer.is_some() && !self.settings.is_open()
     }
 
     /// Whether the list has the keyboard: it may have the keys ([`Surfaces::list_has_keyboard`]: on the mail, shown,

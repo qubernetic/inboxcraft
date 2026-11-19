@@ -175,9 +175,9 @@ fn the_palette_no_longer_closes_settings() {
     assert_eq!(harness.state().settings().section(), Section::Triage);
 }
 
-/// Every action that touches a message, a thread, the list, the reader, the composer or the calendar: none runs on the
-/// settings, which show none of them. The test's own list, so that an id dropped from the window's rule fails it.
-pub(super) const OF_THE_MAIL: [&str; 31] = [
+/// Every action that touches a message, a thread, the list, the reader or the calendar: none runs on the settings,
+/// which show none of them. The test's own list, so that an id dropped from the window's rule fails it.
+pub(super) const OF_THE_MAIL: [&str; 29] = [
     keymap::DONE,
     keymap::SNOOZE,
     keymap::ARCHIVE,
@@ -190,8 +190,6 @@ pub(super) const OF_THE_MAIL: [&str; 31] = [
     keymap::VIEW_GROUPED,
     keymap::VIEW_SMART,
     keymap::VIEW_LIST,
-    keymap::SEND,
-    keymap::FOLD,
     keymap::NEXT,
     keymap::PREVIOUS,
     keymap::DOWN,
@@ -210,6 +208,10 @@ pub(super) const OF_THE_MAIL: [&str; 31] = [
     keymap::CALENDAR_OPEN,
     keymap::CALENDAR_CLOSE,
 ];
+
+/// The composer's own actions, Send and fold: they run wherever a composer is drawn and rest where none is, as on the
+/// settings, which draw none.
+pub(super) const OF_THE_COMPOSER: [&str; 2] = [keymap::SEND, keymap::FOLD];
 
 /// The window's own actions: they run on the settings as off them (a way to a place shows it, leaving the settings).
 pub(super) const THE_WINDOW_S: [&str; 15] = [
@@ -231,10 +233,10 @@ pub(super) const THE_WINDOW_S: [&str; 15] = [
 ];
 
 #[test]
-fn every_action_is_of_the_mail_or_the_window_s_and_none_twice() {
+fn every_action_is_of_the_mail_the_composer_or_the_window_s_and_none_twice() {
     for action in keymap::actions() {
-        let (mail, window) = (OF_THE_MAIL.contains(&action.id), THE_WINDOW_S.contains(&action.id));
-        assert!(mail != window, "{}: classify it in exactly one of the two lists", action.id);
+        let lists = [OF_THE_MAIL.contains(&action.id), OF_THE_COMPOSER.contains(&action.id), THE_WINDOW_S.contains(&action.id)];
+        assert_eq!(lists.iter().filter(|on| **on).count(), 1, "{}: classify it in exactly one of the three lists", action.id);
     }
 }
 
@@ -243,7 +245,7 @@ fn on_the_settings_no_key_and_no_press_runs_an_action_of_the_mail() {
     // The gates themselves, whatever the mail holds: a key asks `allows` with the owner's keys (the default ones and
     // each action on a key with Ctrl), a press or a screen reader's activate asks `allows_press`.
     let settings = crate::surface::Surfaces::new(crate::surface::Facts { settings: true, ..crate::surface::Facts::default() });
-    for id in OF_THE_MAIL {
+    for id in OF_THE_MAIL.into_iter().chain(OF_THE_COMPOSER) {
         let mut with_ctrl = keymap::Keymap::default();
         with_ctrl.bind(id, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::F9));
         for keys in [keymap::Keymap::default(), with_ctrl] {
@@ -271,8 +273,8 @@ fn nothing_of_the_mail_runs_on_the_settings_place() {
     harness.run();
     for (id, could) in before {
         let can = harness.state().can_run(id);
-        if OF_THE_MAIL.contains(&id) {
-            assert!(!can, "{id}: acts on the mail or the calendar, which the settings do not show");
+        if OF_THE_MAIL.contains(&id) || OF_THE_COMPOSER.contains(&id) {
+            assert!(!can, "{id}: acts on the mail, the calendar or a composer, which the settings do not show");
         } else {
             assert_eq!(can, could, "{id}: the window's own runs on the settings as off them");
         }
