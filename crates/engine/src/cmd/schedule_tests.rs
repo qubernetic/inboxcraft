@@ -68,7 +68,14 @@ fn next_week_follows_the_first_day_of_the_week_the_owner_set() {
 #[test]
 fn list_answers_every_entry_by_its_time_with_what_it_does() {
     let mut session = session();
-    let answer = session.run_as(Caller::Agent, "schedule.list", &json!({})).unwrap();
+    let mut answer = session.run_as(Caller::Agent, "schedule.list", &json!({})).unwrap();
+    // The fields a row shows (account, subject, who) are the next test's; these are the old ones, kept as they were.
+    for entry in answer["entries"].as_array_mut().unwrap() {
+        let entry = entry.as_object_mut().unwrap();
+        for added in ["account", "subject", "who"] {
+            assert!(entry.remove(added).is_some(), "{added}");
+        }
+    }
     assert_eq!(
         answer,
         json!({ "entries": [
@@ -105,4 +112,54 @@ fn cancel_refuses_an_entry_that_is_not_there_and_junk() {
         assert!(bad(session.run("schedule.cancel", &junk)), "{junk}");
     }
     assert_eq!(session.store().schedule().unwrap().len(), 3);
+}
+
+/// A session whose send waits for a draft with recipients and a subject, beside the snooze and follow-up of [`session`].
+fn rich_session(subject: &str, to: Vec<String>) -> Session {
+    let mut store = mailbox();
+    let mut draft = Draft::new(DraftId::new(3), AccountId::new(2), at(NOW));
+    draft.subject = subject.to_owned();
+    draft.to = to;
+    let batch = Batch::new()
+        .with(Change::PutDraft(draft))
+        .with(Change::PutScheduled(Scheduled { id: ScheduleId::new(2), due: at(NOW + 3600), what: Due::Send(DraftId::new(3)) }))
+        .with(Change::PutScheduled(Scheduled { id: ScheduleId::new(1), due: at(NOW - 60), what: Due::Unsnooze(MessageId::new(2)) }))
+        .with(Change::PutScheduled(Scheduled { id: ScheduleId::new(4), due: at(NOW + 60), what: Due::FollowUp(MessageId::new(5)) }));
+    store.apply(&batch).unwrap();
+    Session::new(Box::new(store), Box::new(FakeClock::new(at(NOW)))).unwrap()
+}
+
+#[test]
+fn list_says_what_each_entry_is_about_its_account_subject_and_who() {
+    let to = vec!["Greta Lindqvist <greta@example.org>".to_owned(), "pavel@example.org".to_owned()];
+    let mut session = rich_session("Thank-you cards: the proof", to);
+    let answer = session.run_as(Caller::Agent, "schedule.list", &json!({})).unwrap();
+    assert_eq!(
+        answer,
+        json!({ "entries": [
+            { "id": 1, "due": "2026-11-05T08:59:00Z", "what": "unsnooze", "message": 2,
+              "account": 1, "subject": "Lunch on Friday", "who": "Anna Example" },
+            { "id": 4, "due": "2026-11-05T09:01:00Z", "what": "follow_up", "message": 5,
+              "account": 1, "subject": "Re: Budget for 2026", "who": "Bob" },
+            { "id": 2, "due": "2026-11-05T10:00:00Z", "what": "send", "draft": 3,
+              "account": 2, "subject": "Thank-you cards: the proof", "who": "Greta Lindqvist, pavel@example.org" },
+        ] })
+    );
+}
+
+#[test]
+fn list_gives_hostile_subjects_and_recipients_as_one_short_clean_line() {
+    let long = "x".repeat(10_000);
+    let subject = format!("Line one\r\nBcc: evil@example.org\0\u{202E}gnp.exe{long}");
+    let to = vec![format!("\u{2066}Mallory\r\n{long} <m@example.org>"), "\0\r\n".to_owned()];
+    let mut session = rich_session(&subject, to);
+    let answer = session.run("schedule.list", &json!({})).unwrap();
+    let send = answer["entries"].as_array().unwrap().iter().find(|entry| entry["what"] == "send").unwrap().clone();
+    for field in ["subject", "who"] {
+        let text = send[field].as_str().unwrap();
+        assert!(text.chars().count() <= crate::notify::MAX_TEXT, "{field} is capped");
+        assert!(!text.chars().any(|c| c.is_control() || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')), "{field}: {text:?}");
+    }
+    assert!(send["subject"].as_str().unwrap().starts_with("Line one Bcc: evil@example.org"));
+    assert!(send["who"].as_str().unwrap().starts_with("Mallory x"));
 }

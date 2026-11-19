@@ -254,8 +254,11 @@ morning (08:00), this weekend (the coming Saturday at 09:00; from 09:00 on a Sat
 Saturday) and next week (09:00 on the first day of the next week, by the week rule below). Snooze, follow-up and
 send later take the same preset ids. They are in the computer's wall-clock time, from the `inboxcraft_time::Offsets` the front end
 hands over with `Session::set_offsets` (UTC until then); a wall-clock time the clock skips in spring lands after the
-change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries and `schedule.cancel`
-(`owner`) takes one off.
+change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries with what a row shows of each, read from the store
+(the account, the subject or an alert's event title, and who: a send's recipients, a snooze's sender, a follow-up's
+recipient; for an alert also its event, when the occurrence starts and the minutes before), each one short line
+without control characters or invisible marks, and `schedule.cancel` (`owner`) takes one off; no undo brings a
+cancelled entry back.
 
 Weeks are counted by the owner's week rule (`inboxcraft_time::WeekRule`): the first day of the week (Monday by
 default) and the year's first week, the first one with four days in the year (ISO 8601 with Monday, the default)
