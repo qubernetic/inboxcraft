@@ -105,3 +105,7 @@ pub fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, id: Id, toast: &Toast
 #[cfg(test)]
 #[path = "toast_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "toast_cover_tests.rs"]
+mod cover_tests;
