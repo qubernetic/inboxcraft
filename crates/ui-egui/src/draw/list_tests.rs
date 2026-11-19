@@ -3688,3 +3688,14 @@ fn the_group_menu_is_the_design_files_box() {
     });
     assert!(!painted_line, "no hairline under the head");
 }
+
+/// A landing asked again forgets where the last one went: a note left by a landing nobody read (its row scrolled away,
+/// the reader holding the keyboard) never answers for the next landing on the same message.
+#[test]
+fn a_new_landing_forgets_where_the_last_one_went() {
+    let ctx = egui::Context::default();
+    // The first landing for message 5 went to row 9 (5's row was out of sight); nobody read it.
+    ctx.data_mut(|data| data.insert_temp(super::list::landed_on_id(), (5_u64, 9_u64)));
+    super::list::land(&ctx, 5);
+    assert_eq!(super::list::landed_on(&ctx, 5), None, "the second landing has not landed yet: no row is its");
+}
