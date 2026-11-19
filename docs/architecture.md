@@ -269,7 +269,10 @@ or the one that holds 1 January. `WeekRule::week` gives a date's week: its first
 it is counted in; a week that starts before year 0 has none. `week.settings` (`safe`) shows the rule and the week
 of today on the owner's wall clock, `week.set` (`owner`) changes it; the front end keeps it
 (`engine::week::to_value`) and hands it back at the start (`Session::set_week_rule`), and a kept value it cannot
-read falls back to the default part by part. "Next week" counts by it.
+read falls back to the default part by part. The desktop app's default is its locale's (`engine::week::for_locale`
+on `LC_ALL`, `LC_TIME` or `LANG`): a short list of regions starts on Sunday and counts the week of 1 January, every
+other region and a locale without one Monday and ISO 8601. "Next week" counts by it; Settings, Calendar sets both
+parts.
 
 The calendars in the engine (`engine::calendar`, `cmd/calendar.rs`) keep each event as the iCalendar text the server
 sent and read it with `ical` whenever it is shown, so nothing of it is lost on the way back. The start, and
