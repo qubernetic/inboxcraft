@@ -23,7 +23,7 @@ use inboxcraft_net::probe::{PROBE_ADDRESSES, Probe, Service};
 use inboxcraft_net::web::{Web, WebAnswer};
 use inboxcraft_net::{Connector, Deadline, Dialer, NetError, Resolve, Timeouts, TlsSettings, Trust};
 use inboxcraft_testkit::imap::FakeImap;
-use inboxcraft_testkit::smtp::FakeSmtp;
+use inboxcraft_testkit::smtp::{Extension, FakeSmtp};
 use inboxcraft_testkit::{FakeServer, Listen, TestPki};
 use inboxcraft_time::{Clock, SystemClock};
 use support::{Result, TIMEOUTS, wall};
@@ -257,4 +257,22 @@ fn a_name_with_sixteen_hanging_addresses_is_capped() -> Result {
     assert_eq!(hang.0.load(Ordering::SeqCst), 1);
     assert!(took < Duration::from_secs(3), "{took:?}");
     Ok(())
+}
+
+/// A server that greets over TLS but offers no sign-in the app can do is no candidate; nothing is sent but the
+/// capability question and the goodbye.
+#[test]
+fn a_server_without_a_sign_in_is_no_candidate() -> Result {
+    let pki = TestPki::new()?;
+    let imap =
+        Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new().without(inboxcraft_testkit::imap::Capability::AuthPlain).no_sign_in())?;
+    let smtp = Listen::tls(pki.server_config(None)?).start_smtp(FakeSmtp::new().without(Extension::AuthPlain).without(Extension::AuthLogin))?;
+    let names = Names::default().at("mail.example.org", 993, imap.addr()).at("mail.example.org", 465, smtp.addr());
+    let connector = prober(&pki, names, TIMEOUTS);
+    let deadline = Deadline::new(wall(), Duration::from_secs(10));
+    let kind = |result: std::result::Result<(), NetError>| result.map_err(|error| error.kind());
+    assert_eq!(kind(connector.probe(&on("mail.example.org", 993, Security::Tls)?, Service::Imap, &deadline)), Err(ErrorKind::NoLoginMethod));
+    assert_eq!(kind(connector.probe(&on("mail.example.org", 465, Security::Tls)?, Service::Submission, &deadline)), Err(ErrorKind::NoLoginMethod));
+    no_credentials(imap)?;
+    no_credentials(smtp)
 }
