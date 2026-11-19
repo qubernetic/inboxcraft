@@ -2807,3 +2807,48 @@ fn the_owner_s_act_on_a_row_out_of_sight_walks_on_to_the_same_row_as_in_sight() 
         }
     }
 }
+
+/// Grouped, the owner opened the last message of a card with another card under it and read it (then pressed in
+/// the reader), and the server takes it away: nothing opens, the keyboard goes to the row now last in that card, not to
+/// the next card's first row, and nothing is read.
+#[test]
+fn in_the_grouped_inbox_a_message_the_owner_read_and_the_server_took_away_opens_nothing() {
+    let mut harness = inbox_at(1280.0, crate::mailbox::InboxView::Grouped, false);
+    let groups = harness.state().mailbox().groups();
+    let card = groups
+        .iter()
+        .take(groups.len().saturating_sub(1))
+        .map(|group| Some(group.name.clone()))
+        .find(|card| card_rows(&harness, card).len() >= 2)
+        .unwrap();
+    let last = *card_rows(&harness, &card).last().unwrap();
+    let subject = row_of(&harness, last).unwrap().subject;
+    row_node(&harness, &subject).click();
+    settle(&mut harness);
+    assert_eq!(harness.state().reader().open_id(), Some(last), "the owner opened it");
+    assert!(read(&harness, last), "and read it");
+    // A press in the reader: the reader has the pointer, the list not the keyboard.
+    let reader = super::reader_rect(&harness.ctx).unwrap();
+    harness.event(egui::Event::PointerButton {
+        pos: reader.center(),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.event(egui::Event::PointerButton {
+        pos: reader.center(),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    settle(&mut harness);
+    let seen: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).filter(|(row, _)| *row != last).collect();
+    taken_away(&mut harness);
+    assert_eq!(harness.state().mailbox().selected(), None, "no row is selected");
+    let now: Vec<(u64, bool)> = harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect();
+    assert_eq!(now, seen, "nothing is read");
+    let now_last = card_rows(&harness, &card).last().copied();
+    assert!(now_last.is_some(), "the card still has rows");
+    assert_eq!(super::list::focused_row(&harness.ctx), now_last, "the keyboard is on the row now last in the card {card:?}");
+    assert_eq!(harness.state().reader().open_id(), None, "and that row's message is not opened by it");
+}
