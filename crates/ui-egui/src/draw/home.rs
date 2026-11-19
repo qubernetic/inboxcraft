@@ -422,19 +422,23 @@ fn drafts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home) -> (Rect, Op
     let drawn = block(ui, theme, &head, None, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         let mut asked = None;
+        // Where the keyboard was last frame: a row it is on (the row or one of its links) is keyed and shows "open" and
+        // "discard", so Tab reaches them; with Shift held, so is the row the control it is on stands under (less than a
+        // row below), so Shift Tab reaches them coming back. Read before the rows ask for the focus, as the row's own Tab needs.
+        let ctx = ui.ctx().clone();
+        let keyboard = ctx.memory(|memory| memory.focused()).and_then(|id| ctx.read_response(id)).map(|response| response.rect);
+        let shift = ui.input(|input| input.modifiers.shift);
         for draft in home.drafts.iter().take(DRAFTS) {
             let subject = draft.subject.as_deref().map(crate::home::kept);
             let [to, when] = [&draft.to, &draft.when].map(|text| crate::home::kept(text));
             let spoken = format!("{} {to} {when}", subject.as_deref().unwrap_or(tr!("(no subject)")));
-            let row = DraftRow {
-                id: Id::unique(("home-draft", draft.id)),
-                spoken: &spoken,
-                subject: subject.as_deref(),
-                to: &to,
-                when: &when,
-                last: false,
-            };
-            let drawn = draft_row(ui, theme, keymap, &row, false, None);
+            let id = Id::unique(("home-draft", draft.id));
+            let keyed = keyboard.zip(ctx.read_response(id).map(|response| response.rect)).is_some_and(|(keyboard, row)| {
+                let below = keyboard.top() - row.bottom();
+                row.expand(0.5).contains_rect(keyboard) || (shift && (-0.5..row.height()).contains(&below))
+            });
+            let row = DraftRow { id, spoken: &spoken, subject: subject.as_deref(), to: &to, when: &when, last: false };
+            let drawn = draft_row(ui, theme, keymap, &row, keyed, None);
             if drawn.discard {
                 asked = Some(Asked::DiscardDraft(draft.id));
             } else if drawn.open || drawn.row.response.clicked() {

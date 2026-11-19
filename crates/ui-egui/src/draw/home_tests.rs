@@ -383,21 +383,28 @@ fn focused(harness: &Harness<'_, State>) -> Option<String> {
 
 #[test]
 fn tab_goes_through_the_page_in_the_drawn_order_and_enter_and_space_press() {
+    const FIRST: &str = "Price list for the winter workshops to Sunniva Aalto edited 12:10";
+    const SECOND: &str = "Re: Kiln service: two dates to choose from to Halvard Engen edited yesterday";
     let mut today = harness("today", Mode::Dark, 100);
     let mut walked = Vec::new();
-    for _ in 0..10 {
+    for _ in 0..14 {
         today.key_press(Key::Tab);
         today.run_steps(2);
         walked.push(focused(&today).unwrap_or_default());
     }
+    // A draft row the keyboard is on shows its two links, and Tab goes through them before the next row.
     let order = [
         "7 To read",
         "3 To screen",
         "2 Back today",
         "1 In the outbox",
         "open the week →",
-        "Price list for the winter workshops to Sunniva Aalto edited 12:10",
-        "Re: Kiln service: two dates to choose from to Halvard Engen edited yesterday",
+        FIRST,
+        "open",
+        "discard",
+        SECOND,
+        "open",
+        "discard",
         "all drafts (2) →",
         "Read mail",
         "Write",
@@ -410,15 +417,33 @@ fn tab_goes_through_the_page_in_the_drawn_order_and_enter_and_space_press() {
     today.key_press(Key::Enter);
     today.run_steps(2);
     assert_eq!(today.state().asked, Some(Asked::ReadMail), "Enter presses");
-    for _ in 0..3 {
+    let mut back = Vec::new();
+    for _ in 0..7 {
         today.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
         today.run_steps(2);
+        back.push(focused(&today).unwrap_or_default());
     }
-    assert_eq!(focused(&today).as_deref(), Some("Price list for the winter workshops to Sunniva Aalto edited 12:10"));
+    assert_eq!(back, ["all drafts (2) →", "discard", "open", SECOND, "discard", "open", FIRST], "Shift Tab: the drawn order backwards");
     today.state_mut().asked = None;
     today.key_press(Key::Space);
     today.run_steps(2);
     assert_eq!(today.state().asked, Some(Asked::OpenDraft(1)), "Space presses");
+    for _ in 0..2 {
+        today.key_press(Key::Tab);
+        today.run_steps(2);
+    }
+    assert_eq!(focused(&today).as_deref(), Some("discard"));
+    today.state_mut().asked = None;
+    today.key_press(Key::Enter);
+    today.run_steps(2);
+    assert_eq!(today.state().asked, Some(Asked::DiscardDraft(1)), "discard by the keyboard only asks");
+    // With the keyboard on the first draft its links are in the tree, and Tab reaches them.
+    let mut lit = harness("today", Mode::Light, 100);
+    lit.get_by_label(FIRST).focus();
+    lit.run_steps(2);
+    assert!(lit.query_by_label("discard").is_some(), "the keyed row shows its links");
+    let missed = keyboard_walk(&mut lit);
+    assert!(missed.is_empty(), "Tab never reaches {missed:?}");
     for state in ["today", "nothing-to-do", "overflow-counts", "first-run", "everything-failing"] {
         let mut harness = harness(state, Mode::Light, 100);
         let missed = keyboard_walk(&mut harness);
