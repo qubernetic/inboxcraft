@@ -433,6 +433,21 @@ fn alerted(store: &dyn Storage, id: AlertId, local: &dyn Offsets, now: Timestamp
     Ok(Some(Notice::Alert { about, missed }))
 }
 
+/// The occurrence alert `id` is for, as `schedule.list` names it: nothing when the store no longer holds the alert,
+/// its event or its calendar.
+pub(crate) fn alert_about(store: &dyn Storage, id: AlertId, local: &dyn Offsets, now: Timestamp) -> Result<Option<EventAbout>, EngineError> {
+    Ok(match alerted(store, id, local, now, false)? {
+        Some(Notice::Alert { about, .. }) => Some(about),
+        _ => None,
+    })
+}
+
+/// Who a schedule entry about `message` names: for a snooze who it is from, for a follow-up whom it went to; one short
+/// clean line.
+pub(crate) fn whom(message: &Message, from: bool) -> String {
+    about(message, if from { from_whom(message) } else { to_whom(message) }).who
+}
+
 /// The message `id`, if the store still holds it.
 fn held(store: &dyn Storage, id: MessageId) -> Result<Option<Message>, EngineError> {
     Ok(store.message(id)?.map(|entry| entry.message().clone()))

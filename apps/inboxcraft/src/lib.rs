@@ -173,7 +173,15 @@ pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, k
     let run: Run = accounts::run(move || accounts::system(&detecting));
     let detect = Box::new(onboard::Threaded::new(run, wake.clone()));
     let workers = Box::new(accounts::NetWorkers::new(WorkerSettings::new(Connector::new(tls)), Arc::clone(&keychain) as Arc<dyn Credentials>, wake));
-    Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save).with_accounts(keychain, detect, workers).with_keep(keep))
+    Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save)
+        .with_accounts(keychain, detect, workers)
+        .with_week_default(inboxcraft_engine::week::for_locale(&locale()))
+        .with_keep(keep))
+}
+
+/// The owner's locale for dates, as the system names it (`LC_ALL`, else `LC_TIME`, else `LANG`), or nothing.
+fn locale() -> String {
+    ["LC_ALL", "LC_TIME", "LANG"].iter().filter_map(|name| std::env::var(name).ok()).find(|value| !value.is_empty()).unwrap_or_default()
 }
 
 /// The folder a start on the owner's mailbox claims ([`instance`]): the one that holds the store.

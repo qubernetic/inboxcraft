@@ -870,6 +870,78 @@ pub fn sending(clock: Box<dyn Clock>) -> Result<Session, UiError> {
     session_over(store, clock)
 }
 
+/// The invented templates the Templates page's pictures show: four on Studio, one on Personal.
+const TEMPLATES: [(u64, &str, &str, &str); 5] = [
+    (2, "Workshop invitation", "Thursday workshop", "Hello, the next workshop is on Thursday in Room 3. We start at {?time} and end by six."),
+    (2, "Quote for a shop front", "Your quote for {?what}", "Hello {first_name}, thank you for asking. The quote follows by {?day}."),
+    (2, "Order received, thank you", "Your order is with us", "Hello {first_name}, thank you. We start on {?day} and write when it is ready."),
+    (2, "Away from the studio", "Away until {?date}", "Hello {first_name}, the studio is closed until {?date}. I read mail once a day."),
+    (1, "Out of town", "Away until {?date}", "Hello {first_name}, I am away until {?date} and answer when I am back."),
+];
+
+/// Keeps the sample's invented templates on the sample accounts of `mailbox`, through `template.save`.
+///
+/// # Errors
+///
+/// [`UiError`] when the session refuses one.
+pub fn templates(mailbox: &mut crate::mailbox::Mailbox) -> Result<(), UiError> {
+    for (account, name, subject, text) in TEMPLATES {
+        mailbox.run("template.save", &serde_json::json!({ "account": account, "name": name, "subject": subject, "text": text }))?;
+    }
+    Ok(())
+}
+
+/// The invented senders whose remote pictures the Privacy page's pictures show loading always.
+const ALWAYS_LOAD: [&str; 3] = ["hello@typeweekly.example.org", "orders@kettle.example.org", "finds@quietweb.example.org"];
+
+/// Lets the sample's invented senders' remote pictures load always in `mailbox`, through `remote.allow`.
+///
+/// # Errors
+///
+/// [`UiError`] when the session refuses one.
+pub fn always_load(mailbox: &mut crate::mailbox::Mailbox) -> Result<(), UiError> {
+    for address in ALWAYS_LOAD {
+        mailbox.run("remote.allow", &serde_json::json!({ "address": address }))?;
+    }
+    Ok(())
+}
+
+/// What the sample schedules for the Scheduled page's pictures: a message snoozed, a follow-up reminder on a sent
+/// one, a new message sent later and a Studio event with its alert. Hours from now.
+const SCHEDULED_SNOOZE: (&str, i64) = ("A question about the font licence", 7);
+const SCHEDULED_REMINDER: (&str, i64) = ("Weekend plans", 46);
+const SCHEDULED_SEND: (&str, &str, i64) = ("Greta Lindqvist <greta@example.org>", "Thank-you cards: the proof", 26);
+const SCHEDULED_EVENT: (&str, i64) = ("Design review", 6);
+
+/// Schedules the sample's snooze, reminder, send later and event in `mailbox` (see [`SCHEDULED_SEND`]), through the engine's
+/// commands; the send needs the first account's submission server, as [`sending`] gives it.
+///
+/// # Errors
+///
+/// [`UiError`] when the session refuses one.
+pub fn scheduled(mailbox: &mut crate::mailbox::Mailbox) -> Result<(), UiError> {
+    let now = mailbox.now();
+    let hours = |n: i64| {
+        Timestamp::from_unix(now.unix_seconds().saturating_add(n.saturating_mul(3_600)), 0).ok_or_else(|| UiError::sample("a time out of range"))
+    };
+    let iso = |at: Timestamp| {
+        at.to_civil(inboxcraft_time::Offset::UTC).map(|c| format!("{:04}-{:02}-{:02}T{:02}:00:00Z", c.year(), c.month(), c.day(), c.hour()))
+    };
+    let (subject, after) = SCHEDULED_SNOOZE;
+    mailbox.run("mail.snooze", &serde_json::json!({ "id": sample_id(subject)?, "until": iso(hours(after)?) }))?;
+    let (subject, after) = SCHEDULED_REMINDER;
+    mailbox.run("mail.follow_up", &serde_json::json!({ "id": sample_id(subject)?, "until": iso(hours(after)?) }))?;
+    let (to, subject, after) = SCHEDULED_SEND;
+    let draft = mailbox.run("compose.new", &serde_json::json!({ "account": 1 }))?;
+    let id = draft.get("id").and_then(serde_json::Value::as_u64).ok_or_else(|| UiError::sample("compose.new gave no draft"))?;
+    mailbox.run("compose.update", &serde_json::json!({ "id": id, "to": [to], "subject": subject, "text": "The proof is attached." }))?;
+    mailbox.run("mail.send_later", &serde_json::json!({ "id": id, "at": iso(hours(after)?) }))?;
+    let (summary, after) = SCHEDULED_EVENT;
+    mailbox.run("event.create", &serde_json::json!({ "calendar": 2, "summary": summary, "start": iso(hours(after)?), "location": "Room 3" }))?;
+    mailbox.forget_undo();
+    Ok(())
+}
+
 /// A sample session as [`session`] makes it, over `store` (the sample [`mailbox`], perhaps with more in it), the
 /// screener on.
 ///

@@ -8,7 +8,7 @@
 //! ([`Appearance::from_value`]): a choice that cannot be read is the default, and a file larger than any appearance is
 //! not read at all. It is written to a temporary file first and moved over the old one, so a crash mid-write leaves
 //! the old choices. The keys go into [`KEYS_FILE`] beside it, read the same way ([`Keymap::from_value`]), and the
-//! triage choices (the screener's mode, the inbox view, whether a pin outlasts done, and how long a send is held) into [`TRIAGE_FILE`] ([`Triage::from_value`]), and the
+//! triage choices (the screener's mode, the inbox view, whether a pin outlasts done, how long a send is held, and what follows an act) into [`TRIAGE_FILE`] ([`Triage::from_value`]), and the
 //! notification choices (each account's level, returned snoozes and reminders) into [`NOTIFY_FILE`]
 //! ([`NotifySettings::from_value`]); that file names accounts by their number only. The week rule (`week.set`) goes into
 //! [`WEEK_FILE`], read as outside data by the session ([`inboxcraft_engine::week::from_value`]). A window without a
@@ -23,7 +23,7 @@ use inboxcraft_engine::{Hold, ScreenerMode};
 use serde_json::{Value, json};
 
 use crate::keymap::Keymap;
-use crate::mailbox::InboxView;
+use crate::mailbox::{After, InboxView};
 
 /// The file's name.
 pub const FILE: &str = "appearance.json";
@@ -41,8 +41,8 @@ pub const NOTIFY_FILE: &str = "notify.json";
 pub const WEEK_FILE: &str = "week.json";
 
 /// The triage choices kept between runs: what the screener does with a new sender's first mail, how the unified
-/// inbox shows its groups, whether a pin stays on a message when it is done, and how long a send is held before it
-/// goes.
+/// inbox shows its groups, whether a pin stays on a message when it is done, how long a send is held before it goes,
+/// and what follows an act on the open message.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Triage {
     /// The screener's mode.
@@ -53,6 +53,8 @@ pub struct Triage {
     pub keep_pins: bool,
     /// How long a send is held, in seconds ([`Hold::MIN`] to [`Hold::MAX`]); `None` until it was kept.
     pub hold: Option<u8>,
+    /// What follows an act on the open message.
+    pub after: After,
 }
 
 impl Triage {
@@ -70,6 +72,7 @@ impl Triage {
             .unwrap_or_default(),
             keep_pins: value.get("keep_pins").and_then(Value::as_bool).unwrap_or(false),
             hold: value.get("hold_seconds").and_then(Value::as_u64).and_then(Hold::new).map(Hold::seconds),
+            after: named("after").and_then(After::named).unwrap_or_default(),
         }
     }
 
@@ -83,6 +86,7 @@ impl Triage {
             "view": self.view.id_before(),
             "keep_pins": self.keep_pins,
             "hold_seconds": self.hold,
+            "after": self.after.name(),
         })
     }
 }

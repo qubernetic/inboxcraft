@@ -60,12 +60,38 @@ pub fn to_value(rule: WeekRule) -> Value {
 /// The rule kept in `value` ([`to_value`]); a part that cannot be read is left at its default, never an error.
 #[must_use]
 pub fn from_value(value: &Value) -> WeekRule {
-    let default = WeekRule::default();
+    from_value_or(value, WeekRule::default())
+}
+
+/// The rule `value` holds, read as outside data as [`from_value`] reads it, with `default` (the locale's, see
+/// [`for_locale`]) for what cannot be read.
+#[must_use]
+pub fn from_value_or(value: &Value, default: WeekRule) -> WeekRule {
     let text = |key: &str| value.get(key).and_then(Value::as_str);
     WeekRule {
         first_day: text("first_day").and_then(day_from_name).unwrap_or(default.first_day),
         first_week: text("first_week").and_then(first_week_from_name).unwrap_or(default.first_week),
     }
+}
+
+/// The regions whose weeks start on Sunday and count week 1 as the week that holds 1 January; every other region, and
+/// a locale without one, counts from Monday by ISO 8601. A short list: a region not on it is counted the ISO way.
+const SUNDAY_REGIONS: [&str; 14] = ["BR", "CA", "HK", "IL", "IN", "JP", "KR", "MO", "MX", "PH", "SA", "TW", "US", "ZA"];
+
+/// The rule a locale such as `en_US.UTF-8` or `en-CA` suggests, by its region; read as outside data: anything but an
+/// ASCII region of two capital letters after an ASCII language of two or three small letters is no region, and the
+/// default.
+#[must_use]
+pub fn for_locale(tag: &str) -> WeekRule {
+    let tag = tag.split(['.', '@']).next().unwrap_or_default();
+    let mut parts = tag.split(['_', '-']);
+    let language = parts.next().filter(|language| (2..=3).contains(&language.len()) && language.bytes().all(|byte| byte.is_ascii_lowercase()));
+    let region = parts.next().filter(|region| region.len() == 2 && region.bytes().all(|byte| byte.is_ascii_uppercase()));
+    let region = language.and(region);
+    if region.is_some_and(|region| SUNDAY_REGIONS.contains(&region)) {
+        return WeekRule { first_day: inboxcraft_time::Weekday::Sunday, first_week: FirstWeek::WeekOf1January };
+    }
+    WeekRule::default()
 }
 
 #[cfg(test)]

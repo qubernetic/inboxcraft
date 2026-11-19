@@ -50,6 +50,8 @@ pub struct Outcome {
     notify: Option<Settings>,
     /// Whether a pin outlasts done from now on.
     pins_outlast_done: Option<bool>,
+    /// What follows an act on the open message from now on.
+    after: Option<crate::after::After>,
     /// How long every send is held from now on.
     hold: Option<Hold>,
     /// How weeks are counted from now on.
@@ -90,6 +92,7 @@ impl Outcome {
             screener: None,
             notify: None,
             pins_outlast_done: None,
+            after: None,
             hold: None,
             week: None,
             withdrawn: Vec::new(),
@@ -177,6 +180,12 @@ impl Outcome {
     /// The outcome changing the notification choices to `settings`.
     pub(crate) fn with_notify(mut self, settings: Settings) -> Self {
         self.notify = Some(settings);
+        self
+    }
+
+    /// The outcome changing what follows an act on the open message from now on.
+    pub(crate) fn with_after(mut self, after: crate::after::After) -> Self {
+        self.after = Some(after);
         self
     }
 
@@ -299,6 +308,9 @@ pub(crate) struct State {
     pub(crate) notify: Settings,
     /// Whether done leaves a pin on (`pin.set`); the front end keeps it on disk and hands it back at the start.
     pub(crate) pins_outlast_done: bool,
+    /// What follows an act on the open message (`after.set`); the front end keeps it on disk and hands it back at the
+    /// start.
+    pub(crate) after: crate::after::After,
     /// How long every send is held (`send.set`); the front end keeps it on disk and hands it back at the start.
     pub(crate) hold: Hold,
     /// How weeks are counted (`week.set`); the front end keeps it on disk and hands it back at the start.
@@ -600,6 +612,17 @@ impl Session {
         self.state.pins_outlast_done
     }
 
+    /// What follows an act on the open message, as `after.set` left it.
+    #[must_use]
+    pub fn after(&self) -> crate::after::After {
+        self.state.after
+    }
+
+    /// Takes what follows an act, kept from an earlier run.
+    pub fn set_after(&mut self, after: crate::after::After) {
+        self.state.after = after;
+    }
+
     /// Takes the pin setting kept from an earlier run.
     pub fn set_pins_outlast_done(&mut self, keep: bool) {
         self.state.pins_outlast_done = keep;
@@ -685,6 +708,7 @@ impl Session {
             screener,
             notify,
             pins_outlast_done,
+            after,
             hold,
             week,
             withdrawn,
@@ -730,6 +754,9 @@ impl Session {
         }
         if let Some(keep) = pins_outlast_done {
             self.state.pins_outlast_done = keep;
+        }
+        if let Some(after) = after {
+            self.state.after = after;
         }
         if let Some(hold) = hold {
             self.state.hold = hold;

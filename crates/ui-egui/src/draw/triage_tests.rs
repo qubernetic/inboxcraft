@@ -17,7 +17,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
 use crate::keep::{Keep, Triage};
-use crate::mailbox::{InboxView, Mailbox, Place};
+use crate::mailbox::{After, InboxView, Mailbox, Place};
 use crate::sample;
 use crate::settings::Section;
 use crate::theme::install_fonts;
@@ -239,7 +239,7 @@ fn settings_on_triage() -> Harness<'static, InboxApp> {
 fn the_triage_page_changes_the_screener_and_the_grouping() {
     let mut harness = settings_on_triage();
     harness.get_by_label("Triage, settings page");
-    harness.get_by_label("[ C ] Grouped inbox");
+    harness.get_by_label("[ D ] Grouped inbox");
     assert_eq!(harness.get_by_role_and_label(Role::RadioButton, "Before the inbox").accesskit_node().toggled(), Some(Toggled::True));
     harness.get_by_role_and_label(Role::RadioButton, "Inside, marked").click();
     harness.run();
@@ -289,7 +289,8 @@ fn real_app() -> InboxApp {
 #[test]
 fn the_kept_triage_choices_come_back_and_each_change_is_kept() {
     let keep = Held::default();
-    *keep.triage.lock().unwrap() = Some(Triage { screener: ScreenerMode::Inside, view: InboxView::Grouped, keep_pins: false, hold: None });
+    *keep.triage.lock().unwrap() =
+        Some(Triage { screener: ScreenerMode::Inside, view: InboxView::Grouped, keep_pins: false, hold: None, after: After::Next });
     let app = real_app().with_keep(Box::new(keep.clone()));
     assert_eq!(app.mailbox().screener_mode(), ScreenerMode::Inside);
     assert_eq!(app.mailbox().inbox_view(), InboxView::Grouped);
@@ -297,12 +298,15 @@ fn the_kept_triage_choices_come_back_and_each_change_is_kept() {
     assert!(keep.stored.lock().unwrap().is_empty(), "nothing changed yet");
     harness.state_mut().mailbox_mut().set_inbox_view(InboxView::List);
     harness.run();
-    assert_eq!(*keep.stored.lock().unwrap(), [Triage { screener: ScreenerMode::Inside, view: InboxView::List, keep_pins: false, hold: Some(5) }]);
+    assert_eq!(
+        *keep.stored.lock().unwrap(),
+        [Triage { screener: ScreenerMode::Inside, view: InboxView::List, keep_pins: false, hold: Some(5), after: After::Next }]
+    );
     harness.state_mut().mailbox_mut().set_screener_mode(ScreenerMode::Off);
     harness.run();
     assert_eq!(
         keep.stored.lock().unwrap().last(),
-        Some(&Triage { screener: ScreenerMode::Off, view: InboxView::List, keep_pins: false, hold: Some(5) })
+        Some(&Triage { screener: ScreenerMode::Off, view: InboxView::List, keep_pins: false, hold: Some(5), after: After::Next })
     );
 }
 
@@ -314,13 +318,17 @@ fn without_kept_choices_the_window_keeps_its_own_from_the_first_change() {
     assert!(keep.stored.lock().unwrap().is_empty());
     harness.state_mut().mailbox_mut().set_inbox_view(InboxView::Grouped);
     harness.run();
-    assert_eq!(*keep.stored.lock().unwrap(), [Triage { screener: ScreenerMode::Off, view: InboxView::Grouped, keep_pins: false, hold: Some(5) }]);
+    assert_eq!(
+        *keep.stored.lock().unwrap(),
+        [Triage { screener: ScreenerMode::Off, view: InboxView::Grouped, keep_pins: false, hold: Some(5), after: After::Next }]
+    );
 }
 
 #[test]
 fn the_sample_takes_the_kept_view_but_never_keeps_its_screener_mode() {
     let keep = Held::default();
-    *keep.triage.lock().unwrap() = Some(Triage { screener: ScreenerMode::Off, view: InboxView::List, keep_pins: false, hold: None });
+    *keep.triage.lock().unwrap() =
+        Some(Triage { screener: ScreenerMode::Off, view: InboxView::List, keep_pins: false, hold: None, after: After::Next });
     let app = app().with_keep(Box::new(keep.clone()));
     assert_eq!(app.mailbox().screener_mode(), ScreenerMode::Before, "the sample keeps its own");
     assert_eq!(app.mailbox().inbox_view(), InboxView::List);
@@ -330,12 +338,18 @@ fn the_sample_takes_the_kept_view_but_never_keeps_its_screener_mode() {
     assert!(keep.stored.lock().unwrap().is_empty(), "the owner's mode is not the sample's to change");
     harness.state_mut().mailbox_mut().set_inbox_view(InboxView::Smart);
     harness.run();
-    assert_eq!(*keep.stored.lock().unwrap(), [Triage { screener: ScreenerMode::Off, view: InboxView::Smart, keep_pins: false, hold: Some(5) }]);
+    assert_eq!(
+        *keep.stored.lock().unwrap(),
+        [Triage { screener: ScreenerMode::Off, view: InboxView::Smart, keep_pins: false, hold: Some(5), after: After::Next }]
+    );
     let fresh = Held::default();
     let mut harness = harness_of(self::app().with_keep(Box::new(fresh.clone())));
     harness.state_mut().mailbox_mut().set_inbox_view(InboxView::Grouped);
     harness.run();
-    assert_eq!(*fresh.stored.lock().unwrap(), [Triage { screener: ScreenerMode::Off, view: InboxView::Grouped, keep_pins: false, hold: Some(5) }]);
+    assert_eq!(
+        *fresh.stored.lock().unwrap(),
+        [Triage { screener: ScreenerMode::Off, view: InboxView::Grouped, keep_pins: false, hold: Some(5), after: After::Next }]
+    );
 }
 
 #[test]

@@ -175,7 +175,10 @@ accounts. `mail.pin` (`safe`) pins a message: it stays in its lists, and `pin.li
 the accounts. Done takes the pin off unless the owner keeps pins through done (`pin.set`, `owner`; the session keeps
 it and the front end hands it back at the start, `Session::pins_outlast_done`). Each list row says `done`, `parked`
 and `pinned`. `history.undo` takes each act back: the state as it was and, for done, the message back where it was
-when that folder still holds mail.
+when that folder still holds mail. What the window does after an act takes the open message out of the list is
+the owner's choice, `after.set` (`owner`): open the next or the previous message, go back to the list, or stay, the
+keyboard on the row that took its place and nothing opened (`after::After`; the session keeps it and the front end
+hands it back at the start).
 
 Snooze (`mail.snooze`, `safe`, in `engine::cmd::triage`; the stage and the return in `engine::arrive::snooze`) puts
 a message away until a time, given as `until` or a preset of `schedule.presets`. The message goes to the account's
@@ -194,7 +197,8 @@ snoozed folder, so a message another InboxCraft snoozed,
 or our own copy back without a UID, is snoozed until its time here too; elsewhere the field is ignored. When the
 entry fires, a message still in the snoozed folder comes back to the inbox unread, with `returned` set to the time
 (`mail.list` sorts it as if it arrived then and says `returned` and `snoozed_until` on each row); one the owner moved
-on stays where it was put. `mail.unsnooze` (`safe`) brings a message back at once; `history.undo` takes a snooze
+on stays where it was put. `mail.unsnooze` (`safe`) brings a message back at once, with the same care: one moved on
+loses only its time and schedule entry, where it is and read as it is; `history.undo` takes a snooze
 back, its time and schedule entry included.
 
 Follow-up reminders (`mail.follow_up`, `safe`, in `engine::cmd::triage`; the stage in `engine::arrive::followup`):
@@ -254,8 +258,12 @@ morning (08:00), this weekend (the coming Saturday at 09:00; from 09:00 on a Sat
 Saturday) and next week (09:00 on the first day of the next week, by the week rule below). Snooze, follow-up and
 send later take the same preset ids. They are in the computer's wall-clock time, from the `inboxcraft_time::Offsets` the front end
 hands over with `Session::set_offsets` (UTC until then); a wall-clock time the clock skips in spring lands after the
-change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries and `schedule.cancel`
-(`owner`) takes one off.
+change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries with what a row shows of each, read from the store
+(the account, the subject or an alert's event title, and who: a send's recipients, a snooze's sender, a follow-up's
+recipient; for an alert also its event, when the occurrence starts and the minutes before), each one short line
+without control characters or invisible marks; an entry whose target the store cannot read is left out and counted
+(`skipped`), so one bad row never refuses the list. `schedule.cancel` (`owner`) takes one off; no undo brings a
+cancelled entry back.
 
 Weeks are counted by the owner's week rule (`inboxcraft_time::WeekRule`): the first day of the week (Monday by
 default) and the year's first week, the first one with four days in the year (ISO 8601 with Monday, the default)
@@ -263,7 +271,10 @@ or the one that holds 1 January. `WeekRule::week` gives a date's week: its first
 it is counted in; a week that starts before year 0 has none. `week.settings` (`safe`) shows the rule and the week
 of today on the owner's wall clock, `week.set` (`owner`) changes it; the front end keeps it
 (`engine::week::to_value`) and hands it back at the start (`Session::set_week_rule`), and a kept value it cannot
-read falls back to the default part by part. "Next week" counts by it.
+read falls back to the default part by part. The desktop app's default is its locale's (`engine::week::for_locale`
+on `LC_ALL`, `LC_TIME` or `LANG`): a short list of regions starts on Sunday and counts the week of 1 January, every
+other region and a locale without one Monday and ISO 8601. "Next week" counts by it; Settings, Calendar sets both
+parts.
 
 The calendars in the engine (`engine::calendar`, `cmd/calendar.rs`) keep each event as the iCalendar text the server
 sent and read it with `ical` whenever it is shown, so nothing of it is lost on the way back. The start, and

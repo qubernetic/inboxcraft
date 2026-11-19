@@ -748,13 +748,19 @@ fn shift_tab_round_a_page_with_many_accounts_reaches_the_last_account() {
     harness.run();
     harness.get_by_label("Command line").focus();
     harness.run();
-    // Back from the window's first control comes round to its last, the page's: the last account's signature, scrolled
-    // to.
+    // Back from the window's first control comes round to its last, the page's: the Scheduled link, the Templates link
+    // under the signatures (#317), then the last account's signature, scrolled to.
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness).map(|(label, _)| label).as_deref(), Some("open the list →"), "Shift+Tab from the first control");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness).map(|(label, _)| label).as_deref(), Some("manage templates →"), "Shift+Tab from the Scheduled link");
     harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
     harness.run();
     let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
     let (label, rect) = focused(&harness).unwrap_or((String::new(), egui::Rect::NOTHING));
-    assert_eq!(label, last, "Shift+Tab from the first control");
+    assert_eq!(label, last, "Shift+Tab from the Templates link");
     assert!(sheet.contains_rect(rect), "{label} {rect:?} in sight on the sheet {sheet:?}");
     // And on back, the account before it.
     harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
@@ -833,14 +839,14 @@ fn nothing_changed_stands_12_right_of_a_signature_s_save() {
 }
 
 #[test]
-fn the_calendar_s_week_row_says_the_rule_s_first_day_and_that_its_own_rows_are_coming() {
+fn the_calendar_s_week_row_shows_the_rule_s_first_day() {
     let mut harness = harness();
     harness.state_mut().settings_mut().open_at(Section::Calendar);
     harness.run();
     assert!(harness.query_all_by_label_contains("Fixed").next().is_none(), "the week is no longer fixed");
-    assert!(harness.query_all_by_label_contains("The week follows the week rule").next().is_some());
-    harness.get_by_label("Monday");
+    let shown = |harness: &Harness<'static, InboxApp>| harness.get_by_role_and_label(Role::ComboBox, "Week starts on").accesskit_node().value();
+    assert_eq!(shown(&harness).as_deref(), Some("Monday"));
     harness.state_mut().mailbox_mut().run("week.set", &serde_json::json!({ "first_day": "sunday" })).unwrap();
     harness.run();
-    harness.get_by_label("Sunday");
+    assert_eq!(shown(&harness).as_deref(), Some("Sunday"));
 }

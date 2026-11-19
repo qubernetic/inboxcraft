@@ -417,6 +417,40 @@ pub(crate) fn keyboard_walk<State>(harness: &mut Harness<'_, State>) -> Vec<Stri
     pressable.into_iter().filter(|(id, _)| !reached.contains(id) && !through_group.contains(id)).map(|(_, label)| label).collect()
 }
 
+/// `key` held on whatever has the keyboard: one fresh press, then `repeats` repeats as a held key sends them, each its
+/// own frame, then the release.
+pub(crate) fn hold_key<State>(harness: &mut Harness<'_, State>, key: Key, repeats: usize) {
+    let event = |pressed, repeat| egui::Event::Key { key, physical_key: None, pressed, repeat, modifiers: egui::Modifiers::NONE };
+    harness.event(event(true, false));
+    harness.run();
+    for _ in 0..repeats {
+        harness.event(event(true, true));
+        harness.run();
+    }
+    harness.event(event(false, false));
+    harness.run();
+}
+
+/// `key` already held down when a control takes the keyboard: the press lands while nothing has the keyboard, then
+/// `take` hands it to the control, then `repeats` repeats, each its own frame, then the release. (egui counts an event
+/// as a repeat only while its key is down, so the press must come first.)
+pub(crate) fn held_on<State>(harness: &mut Harness<'_, State>, key: Key, repeats: usize, take: impl FnOnce(&mut Harness<'_, State>)) {
+    let event = |pressed, repeat| egui::Event::Key { key, physical_key: None, pressed, repeat, modifiers: egui::Modifiers::NONE };
+    if let Some(id) = harness.ctx.memory(|memory| memory.focused()) {
+        harness.ctx.memory_mut(|memory| memory.surrender_focus(id));
+    }
+    harness.event(event(true, false));
+    harness.run();
+    take(harness);
+    harness.run();
+    for _ in 0..repeats {
+        harness.event(event(true, true));
+        harness.run();
+    }
+    harness.event(event(false, false));
+    harness.run();
+}
+
 /// Whether the page rests: after `frames` frames without input, the last asks for no repaint sooner than a second
 /// (a clock that ticks each minute rests; an animation or a repaint every frame does not).
 pub(crate) fn rests<State>(harness: &mut Harness<'_, State>, frames: usize) -> bool {

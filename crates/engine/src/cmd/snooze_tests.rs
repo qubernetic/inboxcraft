@@ -363,11 +363,42 @@ fn unsnooze_brings_it_back_now() {
     session.take_jobs();
     clock.advance(Duration::from_secs(60));
     let answer = session.run("mail.unsnooze", &json!({ "id": 2 })).unwrap();
-    assert_eq!(answer, json!({ "id": 2, "folder": 1, "changed": true }));
+    assert_eq!(answer, json!({ "id": 2, "folder": 1, "changed": true, "back": true }));
     assert_eq!(held(&session, 2).folder(), FolderId::new(1));
     assert_eq!(state(&session, 2), MessageState { returned: Some(at(NOW + 60)), ..MessageState::default() });
     assert_eq!(schedule(&session), []);
     assert_eq!(session.run("mail.unsnooze", &json!({ "id": 2 })).unwrap()["changed"], json!(false));
+}
+
+/// Snoozes message 2, runs `act` on it, then `mail.unsnooze`: the message stays in `folder`, read as it was, and only
+/// its snooze time and schedule entry go, as when its time comes.
+fn unsnoozed_after(act: &str, folder: u64) {
+    let (mut session, clock) = session();
+    change(&mut session, Change::SetFlags(MessageId::new(2), flags(&[Flag::Seen])));
+    snooze(&mut session, 2, "2026-11-05T18:00:00Z");
+    session.run(act, &json!({ "id": 2 })).unwrap();
+    session.take_jobs();
+    assert_eq!(held(&session, 2).folder(), FolderId::new(folder), "{act}");
+    let seen = held(&session, 2).summary().flags().is_seen();
+    assert!(seen, "{act}: read before, so a return would show");
+    clock.advance(Duration::from_secs(60));
+    let answer = session.run("mail.unsnooze", &json!({ "id": 2 })).unwrap();
+    assert_eq!(answer, json!({ "id": 2, "folder": folder, "changed": true, "back": false }), "{act}");
+    assert_eq!(held(&session, 2).folder(), FolderId::new(folder), "{act}: the owner put it there");
+    assert_eq!(held(&session, 2).summary().flags().is_seen(), seen, "{act}: its read state is the owner's");
+    assert!(state(&session, 2).is_empty(), "{act}: {:?}", state(&session, 2));
+    assert_eq!(schedule(&session), [], "{act}");
+    assert!(session.take_jobs().is_empty(), "{act}: nothing goes to the server");
+}
+
+#[test]
+fn unsnoozing_a_message_the_owner_deleted_leaves_it_in_the_trash() {
+    unsnoozed_after("mail.delete", 6);
+}
+
+#[test]
+fn unsnoozing_a_message_the_owner_archived_leaves_it_in_the_archive() {
+    unsnoozed_after("mail.archive", 3);
 }
 
 #[test]
@@ -481,5 +512,8 @@ fn an_account_that_lists_no_inbox_keeps_a_returned_message_where_it_is() {
     let added = EventKind::MessagesAdded { folder: FolderId::new(SNOOZED), uid_validity: validity(), messages: vec![Summary::new(uid(1), envelope)] };
     session.apply(&Event::new(AccountId::new(1), None, added)).unwrap();
     let id = session.store().messages(FolderId::new(SNOOZED)).unwrap().first().unwrap().message().id();
-    assert_eq!(session.run("mail.unsnooze", &json!({ "id": id.get() })).unwrap(), json!({ "id": id.get(), "folder": SNOOZED, "changed": true }));
+    assert_eq!(
+        session.run("mail.unsnooze", &json!({ "id": id.get() })).unwrap(),
+        json!({ "id": id.get(), "folder": SNOOZED, "changed": true, "back": false })
+    );
 }
