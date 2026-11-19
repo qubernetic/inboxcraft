@@ -27,6 +27,9 @@
 //! was left, or for an address no longer in the form, is thrown away. Detect fills a server row and the user name
 //! where the owner typed nothing, or kept what Detect put there before; a host the owner typed keeps the row theirs,
 //! and the note says Detect's server was left out. A Detect that finds nothing takes out what an earlier one put there.
+//! While the server rows still hold what Detect put there and the address has changed since it answered, a line says
+//! they come from an earlier Detect (and the user name, while it is Detect's too), until Detect runs again or a server
+//! field is edited by hand.
 //! A field whose text is wrong says so under itself ([`Slot`]): a port or a CalDAV address as it is
 //! typed, a missing address, password or IMAP server when the form is sent.
 //!
@@ -441,6 +444,27 @@ pub(crate) fn port_typed(text: &str) -> Result<Option<u16>, String> {
     }
 }
 
+/// The encryption a registered mail port is for: IMAP 143 STARTTLS and 993 TLS, submission 587 STARTTLS and 465 TLS,
+/// 25 STARTTLS; `None` for any other port.
+const fn registered(port: u16) -> Option<Security> {
+    match port {
+        993 | 465 => Some(Security::Tls),
+        143 | 587 | 25 => Some(Security::StartTls),
+        _ => None,
+    }
+}
+
+/// Whether the encryption of a server row is unusual for its port: the port as it is typed (`usual` for the
+/// encryption when empty) and the encryption the form sends (TLS when none is picked). The port and the encryption that
+/// port is registered for, when it is the other one; `None` for the usual pair, an unregistered port or a port typed
+/// wrong. It only says so: saving is not held back and nothing is changed.
+#[must_use]
+pub fn unusual_encryption(port: &str, security: Option<Security>, usual: fn(Security) -> u16) -> Option<(u16, Security)> {
+    let security = security.unwrap_or(Security::Tls);
+    let port = port_typed(port).ok()?.unwrap_or_else(|| usual(security));
+    registered(port).filter(|registered| *registered != security).map(|registered| (port, registered))
+}
+
 /// `{host, port, security}` of a server the form names, `None` for an empty host; the usual port when none was typed.
 fn server(host: &str, port: &str, security: Option<Security>, usual: fn(Security) -> u16) -> Result<Option<Value>, String> {
     let host = host.trim();
@@ -751,6 +775,9 @@ struct Detected {
     imap: Option<Row>,
     submission: Option<Row>,
     username: Option<String>,
+    /// The address (trimmed) Detect last answered for: a server row still as Detect put it under another address in
+    /// the form came from an earlier Detect ([`Onboarding::detect_older`]).
+    address: Option<String>,
     /// The rows (IMAP, outgoing) whose encryption the owner picked since Detect last answered: the line that Detect set
     /// it is not said there, whichever encryption the owner picked.
     picked: [bool; 2],
@@ -1288,6 +1315,7 @@ impl Onboarding {
             changed = true;
             if self.stage == Stage::Form && self.form.address.trim() == address {
                 self.take(proposal);
+                self.detected.address = Some(address);
             }
         }
         changed
@@ -1336,6 +1364,37 @@ impl Onboarding {
         self.found =
             Some(Arc::new(Found { source, outgoing: in_form, kept_imap, kept_outgoing, encryption_set, asked, failed, asked_count, column, alone }));
         self.detected.picked = [false; 2];
+    }
+
+    /// Whether the add form's server rows come from an earlier Detect, for another address than the one in the form now:
+    /// Detect filled at least one row, every row it filled stands as it put it (no server field edited by hand since),
+    /// the address changed after it answered, and no Detect runs. A form filled by hand never says so.
+    #[must_use]
+    pub fn detect_older(&self) -> bool {
+        if self.stage != Stage::Form || self.detecting() {
+            return false;
+        }
+        let detected = &self.detected;
+        if detected.address.as_deref().is_none_or(|address| address == self.form.address.trim()) {
+            return false;
+        }
+        let form = &self.form;
+        let rows = [
+            (detected.imap.as_ref(), (&form.host, &form.port, form.security)),
+            (detected.submission.as_ref(), (&form.smtp_host, &form.smtp_port, form.smtp_security)),
+        ];
+        let mut filled = rows.iter().filter_map(|(row, now)| row.map(|row| (row, now))).peekable();
+        filled.peek().is_some()
+            && filled.all(|((host, port, security), (now_host, now_port, now_security))| {
+                host == *now_host && port == *now_port && security == now_security
+            })
+    }
+
+    /// Whether the user name, too, is the earlier Detect's that [`Self::detect_older`] says the servers are: Detect
+    /// filled it and it stands as Detect put it.
+    #[must_use]
+    pub fn detect_older_user_name(&self) -> bool {
+        self.detect_older() && self.detected.username.as_deref().is_some_and(|username| !username.is_empty() && username == self.form.username)
     }
 
     /// The encryption Detect set in each server row (IMAP, outgoing) where it replaced one the owner had picked, as long

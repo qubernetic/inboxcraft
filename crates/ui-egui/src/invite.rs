@@ -214,6 +214,9 @@ pub struct Invite {
     pub replies: Vec<Reply>,
     /// How many more guests answered than `replies` keeps.
     pub more_replies: usize,
+    /// The organiser is not the message's sender ([`Invite::sent_by`]): the card names the organiser as whom the answer
+    /// goes to. False as read.
+    pub not_from_organiser: bool,
 }
 
 /// The most guests' answers a card keeps one by one; the rest are counted. A reply may name tens of thousands of
@@ -234,7 +237,11 @@ impl Invite {
         let rsvp = |name: &str| invite.get(name).and_then(Value::as_str).and_then(Rsvp::named);
         let flag = |name: &str| invite.get(name).and_then(Value::as_bool).unwrap_or(false);
         let organizer = invite.get("organizer").filter(|organizer| organizer.is_object());
-        let address = organizer.and_then(|organizer| organizer.get("address")).and_then(Value::as_str).map(shown);
+        // The address the engine's answer goes to (it trims spaces), capped and flat: outside data.
+        let address = organizer
+            .and_then(|organizer| organizer.get("address"))
+            .and_then(Value::as_str)
+            .map(|address| shown(address).trim_matches(' ').to_owned());
         let name = organizer.and_then(|organizer| organizer.get("name")).and_then(Value::as_str).map(shown).filter(|name| !name.is_empty());
         let all = invite.get("replies").and_then(Value::as_array);
         let more_replies = all.map_or(0, |all| all.len().saturating_sub(MOST_REPLIES));
@@ -273,6 +280,7 @@ impl Invite {
             can_remove: flag("can_remove"),
             replies,
             more_replies,
+            not_from_organiser: false,
         })
     }
 
@@ -375,6 +383,18 @@ impl Invite {
             Some(answer) => tr!("{line} You answered {answer}.", line = line, answer = answer.text()),
             None => line,
         })
+    }
+
+    /// The card of a message sent `from` that address (its first sender's; `None` when it names none): whether the
+    /// organiser is someone else, whom the card then names as whom the answer goes to. The case of an address makes no
+    /// other person.
+    #[must_use]
+    pub fn sent_by(mut self, from: Option<&str>) -> Self {
+        self.not_from_organiser = self
+            .organizer_address
+            .as_deref()
+            .is_some_and(|organiser| from.is_none_or(|from| from.trim().to_lowercase() != organiser.trim().to_lowercase()));
+        self
     }
 
     /// Who the answer goes to: `Your answer goes to odile@example.org at once.`

@@ -197,6 +197,7 @@ pub(crate) fn mail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &MailStat
         marks: state.marks,
         done: state.done,
         checked: state.checked,
+        spare: None,
     };
     let high = Theme::size(theme, mail_row::HEIGHT);
     ui.allocate_ui(vec2(ROW_WIDTH, high), |ui| {
