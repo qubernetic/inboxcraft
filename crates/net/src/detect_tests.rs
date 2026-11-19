@@ -9,7 +9,7 @@ use std::time::Duration;
 use inboxcraft_model::{EmailAddress, ErrorKind, Host, Security, Server};
 use inboxcraft_time::{Clock, FakeClock, Timestamp};
 
-use super::{Checked, DetectConfig, ISPDB, Lookup, MAX_TRIES, Outside, Proposal, Source, base_domain, detect, https_host, within};
+use super::{Candidate, Checked, DetectConfig, ISPDB, Lookup, MAX_TRIES, Outside, Proposal, Run, Source, base_domain, detect, https_host, within};
 use crate::candidates::{MAX_MX, MAX_PROVIDERS};
 use crate::dns::Srv;
 use crate::probe::{Probe, Service};
@@ -633,4 +633,43 @@ fn a_timeout_on_one_port_of_a_named_host_leaves_its_other_ports() {
         probe.tried(),
         ["imap imap.example.org:993 (TLS)", "submission smtp.example.org:465 (TLS)", "submission smtp.example.org:587 (STARTTLS)"]
     );
+}
+
+fn candidate(host: &str, port: u16, security: Security, source: Source) -> Candidate {
+    Candidate {
+        server: Server::new(Host::new(host).unwrap(), NonZeroU16::new(port).unwrap(), security),
+        username: String::new(),
+        source,
+        checked: Checked::NoAnswer,
+    }
+}
+
+/// A guessed host that timed out keeps the other guesses on it away, on every port, but not a server the domain
+/// names on the same host.
+#[test]
+fn a_guessed_host_that_timed_out_still_lets_a_named_server_on_it_be_probed() {
+    let probe = FakeProbe::all();
+    let (dns, web, address, config) = (FakeDns::default(), FakeWeb::default(), address(), DetectConfig::default());
+    let outside = Outside { dns: &dns, web: &web, probe: &probe, clock: probe.clock.clone(), stop: None };
+    let mut run = Run::new(&address, &config, &outside);
+    run.note_unreachable(&candidate("mail.example.org", 993, Security::Tls, Source::Guess), ErrorKind::TimedOut);
+    assert!(run.skipped(&candidate("mail.example.org", 465, Security::Tls, Source::Guess)));
+    assert!(!run.skipped(&candidate("mail.example.org", 587, Security::StartTls, Source::Srv)));
+    // A name that was not found keeps every server on the host away.
+    run.note_unreachable(&candidate("imap.example.org", 993, Security::Tls, Source::Guess), ErrorKind::HostNotFound);
+    assert!(run.skipped(&candidate("imap.example.org", 143, Security::StartTls, Source::Autoconfig)));
+}
+
+/// The domain's SRV records name submission on `mail.example.org:587`; the guessed IMAP host `mail.example.org`
+/// times out on 993. The named server is still probed and, answering, proposed as checked.
+#[test]
+fn a_named_server_on_a_guessed_host_that_timed_out_is_still_probed() {
+    let mut dns = FakeDns::default();
+    dns.srv.insert("_submission._tcp.example.org".to_owned(), vec![("mail.example.org", 587)]);
+    let probe = FakeProbe { fails_with: ErrorKind::TimedOut, ..FakeProbe::only(&["mail.example.org:587 (STARTTLS)"]) };
+    let proposal = run_probed(&DetectConfig::default(), &dns, &FakeWeb::default(), &probe);
+    let submission: Vec<String> =
+        proposal.submission.iter().map(|candidate| format!("{} {:?} {:?}", candidate.server, candidate.source, candidate.checked)).collect();
+    assert_eq!(submission, ["mail.example.org:587 (STARTTLS) Srv Answered"]);
+    assert!(probe.tried().contains(&"submission mail.example.org:587 (STARTTLS)".to_owned()));
 }

@@ -26,8 +26,9 @@
 //! named server that only timed out or dropped the connection keeps the guesses away, and is proposed unchecked.
 //!
 //! A host whose name was not found is not probed again in the run, on any port; nor is one of the domain's own
-//! common host names whose probe timed out (a guess that drops packets is not worth more waits). Any other host whose
-//! probe timed out is not probed again on that port only: a network that drops 465 may let 587 through.
+//! common host names whose probe timed out, for the guesses on it (a guess that drops packets is not worth more
+//! waits; a server the domain names on that host is still probed). Any other host whose probe timed out is not probed
+//! again on that port only: a network that drops 465 may let 587 through.
 //!
 //! The whole run is capped: at most [`DetectConfig::tries`] probes, and [`DetectConfig::within`] of time as a deadline
 //! every lookup and probe is given, so the run ends at its cap; each probe has its own deadline inside it
@@ -241,23 +242,7 @@ pub struct Proposal {
 /// Detects settings for `address`, asking `outside`.
 #[must_use]
 pub fn detect(address: &EmailAddress, config: &DetectConfig, outside: &Outside<'_>) -> Proposal {
-    let deadline = Deadline::new(Arc::clone(&outside.clock), config.within);
-    let deadline = match &outside.stop {
-        Some(stop) => deadline.with_stop(Arc::clone(stop)),
-        None => deadline,
-    };
-    let mut run = Run {
-        address,
-        config,
-        outside,
-        deadline,
-        lookups: Lookups::default(),
-        proposal: Proposal::default(),
-        tried: Vec::new(),
-        unreachable: Vec::new(),
-        blocked: Vec::new(),
-        ended: false,
-    };
+    let mut run = Run::new(address, config, outside);
     let Ok(domain) = Host::new(address.domain()) else { return run.proposal };
     if run.time_left() {
         let asked = format!("dns MX {domain}");
@@ -330,15 +315,40 @@ struct Run<'a> {
     proposal: Proposal,
     /// Every server probed, for what, and why it failed.
     tried: Vec<(Service, Server, Option<ErrorKind>)>,
-    /// Hosts not probed again, on any port: no address, or a guess of the domain's own that timed out.
-    unreachable: Vec<Host>,
+    /// Hosts whose name was not found: not probed again, on any port.
+    no_name: Vec<Host>,
+    /// The domain's own guessed hosts that timed out: no guess on them is probed again, on any port; a server the
+    /// domain names on such a host still is.
+    guess_down: Vec<Host>,
     /// Hosts and ports that timed out: not probed again on that port.
     blocked: Vec<(Host, u16)>,
     /// A cap was reached: nothing more is asked.
     ended: bool,
 }
 
-impl Run<'_> {
+impl<'a> Run<'a> {
+    /// A run for `address`, its deadline started now.
+    fn new(address: &'a EmailAddress, config: &'a DetectConfig, outside: &'a Outside<'a>) -> Self {
+        let deadline = Deadline::new(Arc::clone(&outside.clock), config.within);
+        let deadline = match &outside.stop {
+            Some(stop) => deadline.with_stop(Arc::clone(stop)),
+            None => deadline,
+        };
+        Self {
+            address,
+            config,
+            outside,
+            deadline,
+            lookups: Lookups::default(),
+            proposal: Proposal::default(),
+            tried: Vec::new(),
+            no_name: Vec::new(),
+            guess_down: Vec::new(),
+            blocked: Vec::new(),
+            ended: false,
+        }
+    }
+
     /// Whether the run may still ask: within its time. The first time it may not, the cap is noted.
     fn time_left(&mut self) -> bool {
         if self.ended {
@@ -417,8 +427,7 @@ impl Run<'_> {
                     .of(service)
                     .iter()
                     .find(|candidate| {
-                        !self.tried.iter().any(|(held, server, _)| *held == service && *server == candidate.server)
-                            && !self.skipped(&candidate.server)
+                        !self.tried.iter().any(|(held, server, _)| *held == service && *server == candidate.server) && !self.skipped(candidate)
                     })
                     .cloned();
                 let Some(candidate) = next else { break };
@@ -468,19 +477,22 @@ impl Run<'_> {
         self.lookups.open_guesses(service, open);
     }
 
-    /// Whether `server` is not probed again: its host has no address or is a guess that timed out, or its port timed
-    /// out.
-    fn skipped(&self, server: &Server) -> bool {
-        self.unreachable.contains(server.host()) || self.blocked.iter().any(|(host, port)| host == server.host() && *port == server.port().get())
+    /// Whether `candidate` is not probed again: its host has no address, it is a guess on a guessed host that timed
+    /// out, or its host and port timed out.
+    fn skipped(&self, candidate: &Candidate) -> bool {
+        let server = &candidate.server;
+        self.no_name.contains(server.host())
+            || (candidate.source.is_guess() && self.guess_down.contains(server.host()))
+            || self.blocked.iter().any(|(host, port)| host == server.host() && *port == server.port().get())
     }
 
-    /// After `candidate`'s probe failed with `kind`: a name not found skips its host; a timeout skips the host of the
-    /// domain's own guess, and only the port of any other.
+    /// After `candidate`'s probe failed with `kind`: a name not found skips its host; a timeout of the domain's own
+    /// guess skips the guesses on its host, and any other timeout only its host and port.
     fn note_unreachable(&mut self, candidate: &Candidate, kind: ErrorKind) {
         let host = candidate.server.host();
         match kind {
-            ErrorKind::HostNotFound => self.unreachable.push(host.clone()),
-            ErrorKind::TimedOut | ErrorKind::PortTimedOut if candidate.source == Source::Guess => self.unreachable.push(host.clone()),
+            ErrorKind::HostNotFound => self.no_name.push(host.clone()),
+            ErrorKind::TimedOut | ErrorKind::PortTimedOut if candidate.source == Source::Guess => self.guess_down.push(host.clone()),
             ErrorKind::TimedOut | ErrorKind::PortTimedOut => self.blocked.push((host.clone(), candidate.server.port().get())),
             _ => {}
         }
