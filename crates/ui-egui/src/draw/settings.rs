@@ -97,6 +97,12 @@ const TOOLS_UNDER: f32 = 12.0;
 /// The width of the field that narrows the Shortcuts page's list, in points.
 const FIND: f32 = 320.0;
 
+/// The least width of that field beside Reset all keys, in points: narrower, the button goes under it.
+const FIND_LEAST: f32 = 200.0;
+
+/// The least room between that field and Reset all keys beside it, in points.
+const FIND_GAP: f32 = 16.0;
+
 /// What the owner asked for on the settings this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Asked {
@@ -651,7 +657,13 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
     ui.add_space(TOOLS_TOP);
     inset(ui, |ui| {
         // The field, its label over it, 320 wide where there is room; Reset all keys at the right end, 2 over its foot.
-        let width = ui.available_width().clamp(1.0, FIND);
+        // Where the row is too narrow to keep the field [`FIND_LEAST`] wide beside the button, the button goes under the
+        // field, as a narrow settings row puts its control under its words.
+        let reset = TextButton::new(tr!("Reset all keys")).secondary();
+        let room = ui.available_width();
+        let beside = room - reset.width(ui, theme, keymap) - FIND_GAP;
+        let under = beside < FIND_LEAST;
+        let width = if under { room } else { beside }.clamp(1.0, FIND);
         let field = ui
             .allocate_ui_with_layout(vec2(width, 0.0), Layout::top_down(Align::Min), |ui| {
                 ui.set_width(width);
@@ -660,12 +672,17 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
             })
             .response
             .rect;
-        let reset = Rect::from_min_max(pos2(field.right(), field.top()), pos2(ui.max_rect().right(), field.bottom() - 2.0));
-        ui.scope_builder(UiBuilder::new().max_rect(reset).layout(Layout::right_to_left(Align::Max)), |ui| {
-            if TextButton::new(tr!("Reset all keys")).secondary().show(ui, theme, keymap).clicked() {
-                asked = Some(Asked::ResetKeys);
-            }
-        });
+        let pressed = if under {
+            ui.add_space(8.0);
+            reset.show(ui, theme, keymap).clicked()
+        } else {
+            let at = Rect::from_min_max(pos2(field.right(), field.top()), pos2(ui.max_rect().right(), field.bottom() - 2.0));
+            ui.scope_builder(UiBuilder::new().max_rect(at).layout(Layout::right_to_left(Align::Max)), |ui| reset.show(ui, theme, keymap).clicked())
+                .inner
+        };
+        if pressed {
+            asked = Some(Asked::ResetKeys);
+        }
         if let Some(text) = settings.keys_note() {
             ui.add_space(8.0);
             words(ui, theme.fonts.caption, text, p.muted);
@@ -694,6 +711,10 @@ const HOLDS: [u8; 4] = [5, 10, 30, 60];
 
 /// The room between two signatures side by side, in points.
 const SIGNATURE_GAP: f32 = 24.0;
+
+/// The least width of a signature's column beside another, in points: its label, its field and its Save with "nothing
+/// changed" beside it, at 130 %. Narrower, the signatures stand one under the other.
+const SIGNATURE_LEAST: f32 = 240.0;
 
 /// One account's signature: its label, the field, and Save with "nothing changed" beside it while it is as kept.
 fn signature(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, account: &crate::mailbox::AccountRow) -> Option<Asked> {
@@ -765,6 +786,21 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
                 ui.add_space(INSET);
                 inset(ui, |ui| {
                     let column = ((ui.available_width() - SIGNATURE_GAP) / 2.0).floor().max(1.0);
+                    // Two side by side while each keeps [`SIGNATURE_LEAST`]; one under the other below that.
+                    if column < SIGNATURE_LEAST {
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            for (index, account) in pair.iter().enumerate() {
+                                if index > 0 {
+                                    ui.add_space(SIGNATURE_GAP);
+                                }
+                                if let Some(pressed) = signature(ui, theme, keymap, settings, account) {
+                                    asked = Some(pressed);
+                                }
+                            }
+                        });
+                        return;
+                    }
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = SIGNATURE_GAP;
                         for account in pair {
