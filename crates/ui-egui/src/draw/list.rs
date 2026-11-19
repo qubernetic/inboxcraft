@@ -672,8 +672,9 @@ fn arriving_for(level: motion::Level, theme: &Theme) -> f64 {
 }
 
 /// Notes the rows that came into the list shown since the last frame: a message the list did not hold, unread, while
-/// the same place, search and account stay. Opening a list, and every row at off, comes at once. A key or a click
-/// ends every movement in that frame. A repaint is asked for while one runs.
+/// the same place, search and account stay; rows that come together each start a `stagger` after the one above them.
+/// Opening a list, and every row at off, comes at once. A key or a click ends every movement in that frame. A repaint
+/// is asked for while one runs.
 fn note_arrivals(ctx: &egui::Context, theme: &Theme, mailbox: &Mailbox) {
     let now = ctx.input(|input| input.time);
     let level = motion::level(ctx);
@@ -695,13 +696,16 @@ fn note_arrivals(ctx: &egui::Context, theme: &Theme, mailbox: &Mailbox) {
             if kept.seen.len() > SEEN_MOST {
                 kept.seen.clear();
             }
+            // Rows that come together each start a `stagger` after the one above.
+            let mut next = 0_u32;
             for row in mailbox.messages() {
                 if kept.seen.insert(row.id) && !row.seen && whole > 0.0 && kept.came.len() < ARRIVING_MOST {
-                    kept.came.push((row.id, now));
+                    kept.came.push((row.id, now + f64::from(motion::STAGGER) * f64::from(next)));
+                    next = next.saturating_add(1);
                 }
             }
         }
-        kept.came.retain(|(_, came)| !ends && whole > 0.0 && (now - came).is_finite() && now - came < whole && now >= *came);
+        kept.came.retain(|(_, came)| !ends && whole > 0.0 && (now - came).is_finite() && now - came < whole);
         !kept.came.is_empty()
     });
     if moving {
@@ -741,7 +745,7 @@ fn square_off(arrival: &Arrival, unread: bool) -> bool {
 }
 
 /// Draws a row with `draw` as it comes in: at full its texts resolve from the left out of the code set's glyphs over
-/// `medium`; at reduced it fades in over `fast`.
+/// `medium`; at reduced it fades in over `fast`. A row whose turn has not come (`stagger`) stands as at its start.
 fn arriving_row<R>(ui: &mut Ui, arrival: &Arrival, draw: impl FnOnce(&mut Ui) -> R) -> R {
     let Some(age) = arrival.age else { return draw(ui) };
     match arrival.level {

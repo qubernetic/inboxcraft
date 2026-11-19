@@ -425,3 +425,30 @@ fn a_key_while_a_new_row_comes_in_acts_in_its_frame_and_the_row_is_there() {
         assert!(crate::component::tests::rests(&mut harness, 4), "{level:?}: and nothing moves after");
     }
 }
+
+#[test]
+fn at_full_new_rows_that_come_together_decode_one_stagger_apart() {
+    let mut harness = window(Level::Full);
+    let mut rows = harness.state().mailbox().messages().to_vec();
+    for (id, at) in [(9_998_u64, 0), (9_999, 1)] {
+        let mut new = rows[0].clone();
+        new.id = id;
+        new.sender = ARRIVED.to_owned();
+        new.subject = format!("Arrived {id}");
+        new.seen = false;
+        rows.insert(at, new);
+    }
+    harness.state_mut().mailbox_mut().set_rows(rows);
+    harness.step();
+    let (upper, lower) = (row_of(&harness, 9_998), row_of(&harness, 9_999));
+    harness.run_steps(12);
+    let (one, two) = (sender_in(&harness, upper).unwrap().0, sender_in(&harness, lower).unwrap().0);
+    assert!(reads(&two) < reads(&one), "120 ms: the second row 30 ms behind the first: {one} / {two}");
+    harness.run_steps(19);
+    assert_eq!(sender_in(&harness, upper).map(|(text, _)| text), Some(ARRIVED.to_owned()), "310 ms: the first reads");
+    assert_ne!(sender_in(&harness, lower).map(|(text, _)| text), Some(ARRIVED.to_owned()), "the second not yet");
+    harness.run_steps(4);
+    assert_eq!(sender_in(&harness, lower).map(|(text, _)| text), Some(ARRIVED.to_owned()), "340 ms: the second reads");
+    harness.run_steps(40);
+    assert!(crate::component::tests::rests(&mut harness, 4));
+}
