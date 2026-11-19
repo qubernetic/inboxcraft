@@ -173,6 +173,19 @@ fn answers_under(shown: Shown) -> Vec<((f32, f32), u16, String, Pos2)> {
 }
 
 #[test]
+fn a_press_on_an_answer_under_the_draft_saved_toast_reaches_the_answer() {
+    // The toast has no control of its own: it takes no press, so an answer under it still answers.
+    let under = answers_under(Shown::DraftSaved);
+    assert!(under.len() >= 4, "the toast covers answers at two sizes: {under:?}");
+    for (size, percent, name, at) in under {
+        let mut harness = with_toast(size, percent, Shown::DraftSaved);
+        assert_ne!(harness.ctx.layer_id_at(at), Some(toast_layer(&harness, Shown::DraftSaved)), "{size:?} {percent}: {name}");
+        press(&mut harness, at);
+        assert!(harness.state().composer().is_some(), "{size:?} {percent}: {name} under the toast at {at:?} answers");
+    }
+}
+
+#[test]
 fn a_press_on_an_answer_under_an_act_s_toast_with_undo_reaches_the_toast_and_does_nothing() {
     // Today's fault: a toast with Undo takes presses over its whole float, so an answer under it cannot be pressed by
     // the pointer until the toast goes (six seconds). The keyboard still reaches it (the next test).
