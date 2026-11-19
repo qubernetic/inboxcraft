@@ -23,12 +23,13 @@ const SUBJECT: &str = "Plot notes";
 /// The sample mail in a real session whose first account can send, at `level`, a draft written in the docked composer
 /// with the keys in its subject; frames 10 ms apart.
 fn written(level: Level) -> Harness<'static, InboxApp> {
-    written_over(level, false)
+    written_over(level, false).0
 }
 
-/// [`written`], over the first message opened first (J) when `opened`.
-fn written_over(level: Level, opened: bool) -> Harness<'static, InboxApp> {
-    let clock = || Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()));
+/// [`written`], over the first message opened first (J) when `opened`, and the clock the mail keeps.
+fn written_over(level: Level, opened: bool) -> (Harness<'static, InboxApp>, FakeClock) {
+    let shared = FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap());
+    let clock = || Box::new(shared.clone());
     let mut store = sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap();
     let account = store.accounts().unwrap().into_iter().find(|account| account.id() == AccountId::new(1)).unwrap();
     let server = Server::new(Host::new("smtp.example.org").unwrap(), Security::Tls.submission_port(), Security::Tls);
@@ -58,7 +59,7 @@ fn written_over(level: Level, opened: bool) -> Harness<'static, InboxApp> {
         harness.run();
     }
     assert!(harness.state().composer().is_some_and(|composer| composer.sendable()), "ready to go");
-    harness
+    (harness, shared)
 }
 
 /// Ctrl Enter as one event: the frame of the key is the last drawn.
@@ -83,7 +84,7 @@ fn sending(harness: &Harness<'static, InboxApp>) -> bool {
 
 #[test]
 fn at_off_the_status_line_prints_in_the_frame_of_the_send_and_the_composer_is_gone() {
-    let mut harness = written(Level::Off);
+    let (mut harness, clock) = written_over(Level::Off, false);
     assert!(subject(&harness).is_some() && !sending(&harness));
     let before = harness.ctx.cumulative_pass_nr();
     send(&mut harness);
@@ -92,7 +93,11 @@ fn at_off_the_status_line_prints_in_the_frame_of_the_send_and_the_composer_is_go
     assert!(asked.is_some_and(|pass| pass >= before), "the reader asked the frame of the key drawn again: {asked:?} {before}");
     assert!(sending(&harness), "the owner never waits: the status line prints in the frame of the key");
     assert_eq!(subject(&harness), None, "the composer is gone in that frame");
-    assert!(crate::component::tests::rests(&mut harness, 2) || sending(&harness), "and rests but for the hold's seconds");
+    // Past the send's 5 s hold (the mail's clock) and a double click's time (the window's), it rests.
+    clock.advance(std::time::Duration::from_secs(6));
+    harness.run_steps(40);
+    assert!(!sending(&harness), "the hold is over");
+    assert!(crate::component::tests::rests(&mut harness, 2), "and it rests");
 }
 
 #[test]
@@ -158,7 +163,7 @@ fn a_second_click_on_send_reaches_nothing_under_it() {
     // A double click on Send: the first sends, the second lands where Send stood, over the message the reader shows
     // again, which must not take it (it would open a reply).
     for level in [Level::Full, Level::Reduced, Level::Off] {
-        let mut harness = written_over(level, true);
+        let (mut harness, _) = written_over(level, true);
         let at = harness.get_by_role_and_label(Role::Button, "Send").rect().center();
         click_at(&mut harness, at);
         assert!(harness.state().composer().is_none(), "{level:?}: the first click sends");
