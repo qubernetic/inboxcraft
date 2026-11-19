@@ -3,8 +3,8 @@
 
 //! The float and its rows, as their sheets draw them (`popup-panel`, `menu-item`, `menu-choice`, `suggestion-row`).
 //!
-//! A float is the solid `surface` with a 1 px `cyan_edge` inside and the one shadow ([`paint::float`]), square; its
-//! rows stand 1 px in from its edge, edge to edge. [`float`] hangs one 4 px under the control it opens from, keeps
+//! A float is the solid `surface` with a 1 px `cyan_edge` inside and the one shadow ([`paint::float_shapes`]), square;
+//! its rows stand 1 px in from its edge, edge to edge. [`float`] hangs one 4 px under the control it opens from, keeps
 //! 3 px of ground to the window's border on every side (it moves inwards, never shrinks), keeps `Tab` and
 //! `Shift Tab` inside itself, and closes on `Esc` or a press outside it, giving the keyboard back to the control it
 //! came from. At full motion its rows come in one after the other, 30 ms apart, each over the `fast` token from 4 px
