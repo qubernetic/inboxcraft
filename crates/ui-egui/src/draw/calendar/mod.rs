@@ -184,15 +184,21 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
             // While the event editor is open the view stays under it.
             let single = super::one_pane(ui.ctx());
             let details = single && calendar.picked().is_some() && calendar.editor().is_none();
-            swap_keys(ui.ctx(), details);
+            let was_details = swap_keys(ui.ctx(), details);
             if details {
                 ui.scope_builder(UiBuilder::new().max_rect(all).id_salt("calendar-side"), |ui| {
                     ui.set_clip_rect(all.intersect(ui.clip_rect()));
                     side::show(ui, theme, keymap, calendar, &mut asked);
                 });
+                note_details_keys(ui, all);
                 return;
             }
             let with_side = !single && all.width() - SIDE - line >= VIEW_LEAST.max(least);
+            // Widened out of one pane the details stand beside the view under other ids: the keyboard they had follows
+            // them, so it is not left on a control no longer drawn.
+            if was_details && with_side && calendar.picked().is_some() && calendar.editor().is_none() && details_had_keys(ui.ctx()) {
+                keys::want(ui.ctx(), crate::calendar::Target::Details);
+            }
             let side_left = if with_side { snap(all.right() - SIDE, ppp) } else { all.right() + line };
             let view = Rect::from_min_max(all.min, pos2((side_left - line).max(all.left()), all.bottom()));
             if with_side {
@@ -216,14 +222,37 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
 }
 
 /// Notes whether the side panel stands in the view's place this frame (`details`); when it comes, the keyboard goes to
-/// its details' first control, so it is never left on an event that is no longer drawn.
-fn swap_keys(ctx: &egui::Context, details: bool) {
+/// its details' first control, so it is never left on an event that is no longer drawn. Returns whether they stood
+/// there the frame before.
+fn swap_keys(ctx: &egui::Context, details: bool) -> bool {
     let id = Id::unique("calendar-details-in-front");
     let was = ctx.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
     ctx.data_mut(|data| data.insert_temp(id, details));
     if details && !was {
         keys::want(ctx, crate::calendar::Target::Details);
     }
+    was
+}
+
+fn details_keys_id() -> Id {
+    Id::unique("calendar-details-had-keys")
+}
+
+/// Notes whether the keyboard is on a control of the details standing in the pane (`all`), on their own layer, so a
+/// float or a control elsewhere keeps it when the window widens.
+fn note_details_keys(ui: &Ui, all: Rect) {
+    let ctx = ui.ctx();
+    let layer = ui.layer_id();
+    let inside = ctx
+        .memory(|memory| memory.focused())
+        .and_then(|id| ctx.read_response(id))
+        .is_some_and(|response| response.layer_id == layer && all.contains(response.rect.center()));
+    ctx.data_mut(|data| data.insert_temp(details_keys_id(), inside));
+}
+
+/// Whether the keyboard was on the details in the frame they last stood in the pane.
+fn details_had_keys(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(details_keys_id())).unwrap_or(false)
 }
 
 /// The view: its toolbar, a `line` hairline, and the days.

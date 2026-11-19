@@ -452,6 +452,13 @@ fn under_1280_the_calendar_s_toolbar_drops_its_note_and_under_980_its_side_panel
     harness.run();
     let close = harness.get_by_label("Close the details");
     assert!(close.accesskit_node().is_focused(), "the details take the pane and the keyboard");
+    // Widened out of one pane the details stand beside the week again and keep the keyboard.
+    harness.set_size(vec2(1300.0, 800.0));
+    harness.run();
+    assert!(harness.get_by_label("Close the details").accesskit_node().is_focused(), "1300: the details keep the keyboard");
+    harness.set_size(vec2(900.0, 800.0));
+    harness.run();
+    assert!(harness.get_by_label("Close the details").accesskit_node().is_focused(), "900 again: the details have the keyboard");
     harness.key_press(Key::Escape);
     harness.run();
     assert!(harness.query_by_label("Close the details").is_none(), "Esc gives the pane back to the week");
