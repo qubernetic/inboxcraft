@@ -849,10 +849,14 @@ fn land_id() -> Id {
 /// The keyboard lands on message `id`'s row when the list is next drawn with nothing else focused (`Esc` from the
 /// reader, the list back in front, the window crossing 980): on the row if it is in sight, else on the nearest row in
 /// sight. Asked while a widget about to go (the reader's) still has the focus, it waits for egui to drop it, two
-/// passes at most; a widget that keeps the focus keeps it.
+/// passes at most; a widget that keeps the focus keeps it. A new landing forgets where the last one went
+/// ([`landed_on`]), so that note never answers for this one.
 pub(super) fn land(ctx: &egui::Context, id: u64) {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data_mut(|data| data.insert_temp(land_id(), (id, pass)));
+    ctx.data_mut(|data| {
+        data.remove::<(u64, u64)>(landed_on_id());
+        data.insert_temp(land_id(), (id, pass));
+    });
 }
 
 /// The row the keyboard lands on for `wanted` in a viewport from `top` to `bottom`: `wanted` when its row is wholly in
@@ -1625,7 +1629,21 @@ fn land_now(ui: &Ui, listing: &Listing<'_>, kept: Option<&Kept>, forced: Option<
     };
     if let Some(target) = target {
         ctx.memory_mut(|memory| memory.request_focus(row_id(target)));
+        ctx.data_mut(|data| data.insert_temp(landed_on_id(), (wanted, target)));
     }
+}
+
+/// The row a landing asked for `wanted` ([`land`]) actually gave the keyboard to, taken once: `wanted`, or the
+/// nearest row in sight when its own was not.
+pub(super) fn landed_on(ctx: &egui::Context, wanted: u64) -> Option<u64> {
+    let (_, target) = ctx.data(|data| data.get_temp::<(u64, u64)>(landed_on_id())).filter(|(asked, _)| *asked == wanted)?;
+    ctx.data_mut(|data| data.remove::<(u64, u64)>(landed_on_id()));
+    Some(target)
+}
+
+/// Where [`landed_on`] is kept.
+pub(super) fn landed_on_id() -> Id {
+    Id::unique("list-landed-on")
 }
 
 /// Hundredths of a point, which [`Kept`] compares exactly.

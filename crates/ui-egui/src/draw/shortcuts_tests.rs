@@ -39,7 +39,7 @@ fn app() -> InboxApp {
 /// The sheet open on Shortcuts, through its section in the nav.
 fn on_shortcuts(theme: egui::Theme) -> Harness<'static, InboxApp> {
     let mut harness = build(app(), theme);
-    harness.get_by_label("Appearance settings").click();
+    harness.get_by_role_and_label(egui::accesskit::Role::Button, "Settings").click();
     harness.run();
     harness.get_by_label("Shortcuts, settings page").click();
     harness.run();
@@ -276,11 +276,22 @@ fn a_press_beside_the_sheet_forgets_the_open_state() {
 }
 
 #[test]
-fn the_rail_and_the_keys_that_show_another_place_forget_the_open_state() {
-    for leave in ["Mail", "Calendar", "Sent mail", "Search mail", "Appearance settings"] {
+fn the_index_and_the_keys_that_show_another_place_forget_the_open_state() {
+    // The index lies under the dim: a press on one of its places, beside the sheet, closes the sheet only.
+    for leave in ["Mail", "Calendar", "Later", "Settings"] {
         let mut harness = busy_sheet();
-        harness.get_by_role_and_label(Role::Button, leave).click();
+        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        let row = harness.get_by_role_and_label(Role::Button, leave).rect();
+        let at = egui::pos2(sheet.left() / 2.0, row.center().y);
+        assert!(row.contains(at) && !sheet.contains(at), "{leave}: {row:?} beside {sheet:?}");
+        harness.hover_at(at);
         harness.run();
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+            harness.run();
+        }
+        assert_eq!(harness.state().screen(), crate::Screen::Mail, "{leave}: the press closed the sheet and showed nothing");
+        assert!(!matches!(harness.state().mailbox().place(), crate::mailbox::Place::Later(_)), "{leave}");
         assert_closed_clean(&mut harness);
     }
     let mut harness = busy_sheet();

@@ -45,9 +45,19 @@ pub struct Sqlite {
     config: StoreConfig,
 }
 
+/// A database failure by its kind, told apart by the database's result code, never by its words; the words are kept,
+/// cut, as the detail.
 impl From<rusqlite::Error> for StoreError {
     fn from(error: rusqlite::Error) -> Self {
-        Self::Database(error.to_string())
+        use rusqlite::ErrorCode;
+        let detail: String = error.to_string().chars().filter(|c| !c.is_control()).take(crate::MAX_ERROR_DETAIL).collect();
+        match error.sqlite_error_code() {
+            Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => Self::DatabaseBusy(detail),
+            Some(ErrorCode::DiskFull) => Self::DatabaseFull(detail),
+            Some(ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase) => Self::DatabaseDamaged(detail),
+            Some(ErrorCode::ConstraintViolation) => Self::DatabaseRefused(detail),
+            _ => Self::Database(detail),
+        }
     }
 }
 

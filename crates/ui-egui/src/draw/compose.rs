@@ -179,6 +179,19 @@ pub(super) fn drawn_rect(ctx: &egui::Context) -> Option<Rect> {
     ctx.data(|data| data.get_temp::<Drawn>(drawn_id())).map(|drawn| drawn.rect)
 }
 
+fn foot_id() -> Id {
+    Id::unique("compose-foot-drawn")
+}
+
+/// The composer drawn in this pass and its foot (Send, its caret, Discard), if it was drawn: what a toast keeps clear
+/// of. Without a foot drawn (folded, or still wiping in) the whole composer stands for it.
+pub(super) fn drawn_now(ctx: &egui::Context) -> Option<(Rect, Rect)> {
+    let pass = ctx.cumulative_pass_nr();
+    let drawn = ctx.data(|data| data.get_temp::<Drawn>(drawn_id())).filter(|drawn| drawn.pass == pass)?;
+    let foot = ctx.data(|data| data.get_temp::<(Rect, u64)>(foot_id())).filter(|(_, at)| *at == pass).map_or(drawn.rect, |(foot, _)| foot);
+    Some((drawn.rect, foot))
+}
+
 fn mark_drawn(ui: &Ui, rect: Rect) {
     let drawn = Drawn { layer: ui.layer_id(), rect, pass: ui.ctx().cumulative_pass_nr() };
     ui.ctx().data_mut(|data| data.insert_temp(drawn_id(), drawn));
@@ -616,6 +629,8 @@ pub(super) fn least_width(ui: &Ui, theme: &Theme) -> f32 {
 /// in this order: attaching a file and its tag, Send's key chip (the key still sends), Templates, Discard. What gives
 /// way is not drawn and not reached by Tab: nothing stands over Send or outside `rect`.
 fn foot(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &Composer, rect: Rect, asked: &mut Vec<Asked>) {
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.ctx().data_mut(|data| data.insert_temp(foot_id(), (rect, pass)));
     let p = &theme.palette;
     let s = &theme.spacing;
     let side = control_side(theme);

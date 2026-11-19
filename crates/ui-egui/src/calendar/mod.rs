@@ -497,6 +497,23 @@ impl Calendar {
         }
     }
 
+    /// The title short, for a toolbar with little room: the day or the days without the year (`Thu 5 Nov`,
+    /// `2 – 8 Nov`), the month's short name (`Nov 2026`).
+    #[must_use]
+    pub fn short_title(&self) -> String {
+        let focus = self.focus();
+        match self.view {
+            View::Day => day::short_dated(focus),
+            View::Week => {
+                let (first, last) = self.span();
+                day::span_short(first, last)
+            }
+            View::Month => tr!("{month} {year}", month = day::month_short(focus.month()), year = focus.year()),
+            View::Agenda if Some(focus) == self.today => tr!("From today").to_owned(),
+            View::Agenda => tr!("From {day}", day = day::short_dated(focus)),
+        }
+    }
+
     /// Puts `events` in the days shown in place of what was read: a test's hostile events (zero or negative length,
     /// far-off dates, hundreds at once) and the bench's thousands, which no server gives this way.
     #[doc(hidden)]

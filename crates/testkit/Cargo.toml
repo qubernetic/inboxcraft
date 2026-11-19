@@ -15,6 +15,7 @@ inboxcraft-store = { workspace = true }
 inboxcraft-time = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
+rusqlite = { workspace = true }
 time = { workspace = true }
 
 [dev-dependencies]

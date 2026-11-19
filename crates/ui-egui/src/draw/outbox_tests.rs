@@ -347,3 +347,61 @@ fn a_refused_send_is_the_outbox_rows_72_high_and_a_held_one_56() {
     let refused = harness.get_by_label("To Odile Brannock, Work party on Saturday, Not sent: 550 5.1.1 No such user here").rect();
     assert_eq!(refused.height(), 72.0, "{refused:?}");
 }
+
+#[test]
+fn a_countdown_toast_never_stands_over_the_docked_composer_s_send() {
+    // Beside the list (1300) the toast is centred on the list; where the composer takes the body (800) it stands over
+    // the composer's foot.
+    for width in [1300.0, 800.0] {
+        let clock = clock();
+        let mut harness = sending(&clock, egui::Theme::Light);
+        harness.set_size(vec2(width, 820.0));
+        harness.run();
+        send(&mut harness, "First of two");
+        write(&mut harness, "Second of two");
+        let toast = harness.get_by_label_contains("Sending “First of two”").rect();
+        let send = harness.get_by_role_and_label(Role::Button, "Send").rect();
+        assert!(!toast.intersects(send), "{width}: the toast {toast:?} over Send {send:?}");
+    }
+}
+
+/// The float of the toast whose words hold `words`: its words and its Undo with the float's margins round them.
+fn toast_float(harness: &Harness<'static, InboxApp>, words: &str) -> egui::Rect {
+    let said = harness.get_by_label_contains(words).rect();
+    let undo = harness.get_by_role_and_label(Role::Button, "Undo").rect();
+    said.union(undo).expand2(vec2(16.0, 4.0))
+}
+
+/// A press and release of the pointer at `at`.
+fn press_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
+    use egui::{Event, PointerButton};
+    harness.event(Event::PointerMoved(at));
+    harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    harness.step();
+    harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    harness.step();
+    harness.run();
+}
+
+#[test]
+fn a_countdown_toast_with_a_long_subject_keeps_clear_of_send_at_every_width_and_size() {
+    // Beside the list (1300, 1100), in one pane (900, 800) at 130 %: the toast's float never meets Send, and a press on
+    // Send's middle sends the second message rather than taking the first back.
+    let long = "The minutes of the allotment society's autumn meeting and the rota for the winter digging";
+    for (width, percent) in [(1300.0, 100), (1100.0, 100), (1300.0, 130), (900.0, 130), (800.0, 130), (800.0, 100)] {
+        let clock = clock();
+        let mut harness = sending(&clock, egui::Theme::Light);
+        harness.state_mut().set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+        harness.set_size(vec2(width, 820.0));
+        harness.run();
+        send(&mut harness, long);
+        write(&mut harness, "Second of two");
+        let toast = toast_float(&harness, "Sending “The minutes");
+        let send = harness.get_by_role_and_label(Role::Button, "Send").rect();
+        assert!(!toast.intersects(send), "{width} at {percent} %: the toast {toast:?} over Send {send:?}");
+        assert!(toast.left() >= 0.0 && toast.right() <= width, "{width} at {percent} %: the toast {toast:?} inside the window");
+        press_at(&mut harness, send.center());
+        assert!(harness.state().composer().is_none(), "{width} at {percent} %: the press on Send sent the second message");
+        assert_eq!(harness.state().mailbox().outbox().len(), 2, "{width} at {percent} %: the first one was not taken back");
+    }
+}

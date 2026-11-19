@@ -417,7 +417,8 @@ fn an_invitation_card_keeps_its_buttons_whole_in_a_narrow_reader() {
     for (width, percent) in [(1024.0, 100), (1024.0, 130), (1100.0, 100), (1100.0, 130)] {
         let mut harness = sending(message(905, "Invitation: Board game night", "REQUEST", ORGANISED_BY_ODILE));
         harness.state_mut().set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
-        harness.set_size(vec2(width, 900.0));
+        // As high a body as a 900 window had before the command and status lines took their 74.
+        harness.set_size(vec2(width, 974.0));
         open(&mut harness, "Invitation: Board game night");
         harness.run();
         let at = format!("{width} {percent}%");
@@ -810,7 +811,8 @@ fn in_a_narrow_reader_the_organisers_address_stays_whole_and_only_an_address_too
     let label = "d".repeat(61);
     let longest = format!("{}@{label}.{label}.{label}.org", "o".repeat(64));
     for (address, whole) in [("odile@example.org", true), (longest.as_str(), false)] {
-        let harness = goes_at(("Teodor Lisk", "teodor@example.org"), address, 130, 1024.0);
+        // 1100: the reader beside the index and the list is about 410 wide, the card's lower part about 190 beside its date.
+        let harness = goes_at(("Teodor Lisk", "teodor@example.org"), address, 130, 1100.0);
         let card = harness
             .query_all_by_role(Role::Group)
             .find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("Invitation: Party")))
