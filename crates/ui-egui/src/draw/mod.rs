@@ -95,12 +95,8 @@ pub(super) const ONE_PANE: f32 = 980.0;
 /// folder pane's default width, which the header kept when the pane went.
 pub(super) const FOLDER_PANE: f32 = 240.0;
 
-/// The least width beside the docked composer a toast is centred in, in points: a toast's usual width and room round it.
-const TOAST_ROOM: f32 = 360.0;
-
-/// The height of the docked composer's foot, which holds Send, in points: a toast beside a composer too wide for
-/// [`TOAST_ROOM`] stands over it.
-const COMPOSER_FOOT: f32 = 56.0;
+/// Where the toasts of a frame stand: the body, and the composer drawn over it this pass with its foot.
+type ToastRoom = (Rect, Option<(Rect, Rect)>);
 
 /// How long the toast after an act shows, in seconds; its Undo works until then.
 pub const TOAST_SECONDS: f64 = 6.0;
@@ -1946,23 +1942,41 @@ impl InboxApp {
         }
     }
 
-    /// Where every toast stands: its bottom edge over the `body`'s bottom, centred on it; beside the `docked` composer,
-    /// whose foot holds Send, centred on what the body holds left of it (the list) when that is wide enough for a toast,
-    /// else over the composer's foot. A toast never stands over Send.
-    fn toast_bottom(body: Rect, theme: &Theme, docked: Option<Rect>) -> egui::Pos2 {
-        let lift = theme.spacing.s6 + theme.spacing.s1;
-        let Some(composer) = docked.filter(|composer| composer.is_finite() && body.intersects(*composer)) else {
-            return body.center_bottom() - egui::vec2(0.0, lift);
+    /// Where a toast `wide` points wide stands in the `body`, from the rects of this frame: with no `composer` drawn
+    /// over the body, centred at the body's foot. Beside a composer (drawn this pass: its rect and its foot's, which
+    /// holds Send and Discard) centred in the wider band of the body beside it when the toast fits there whole; else
+    /// over the composer, its foot just above the composer's foot, when it fits there whole; else in the wider of the
+    /// two, cut to it. A toast never meets the composer's foot, nor the composer beside it, not even while it rises.
+    fn toast_place(body: Rect, theme: &Theme, composer: Option<(Rect, Rect)>, wide: f32) -> toast::Place {
+        let s = &theme.spacing;
+        let lift = s.s6 + s.s1;
+        let at_foot = |band: Rect| toast::Place {
+            bottom: band.center_bottom() - egui::vec2(0.0, lift),
+            widest: (band.width() - s.s2 * 2.0).max(1.0),
+            lowest: band.bottom(),
         };
-        let left = Rect::from_min_max(body.min, pos2(composer.left().clamp(body.left(), body.right()), body.bottom()));
-        if left.width() >= TOAST_ROOM {
-            return left.center_bottom() - egui::vec2(0.0, lift);
+        let Some((drawn, foot)) = composer.filter(|(drawn, foot)| drawn.is_finite() && foot.is_finite() && body.intersects(*drawn)) else {
+            return at_foot(body);
+        };
+        let (left, right) = (drawn.left().clamp(body.left(), body.right()), drawn.right().clamp(body.left(), body.right()));
+        let before = Rect::from_min_max(body.min, pos2(left, body.bottom()));
+        let after = Rect::from_min_max(pos2(right, body.top()), body.max);
+        let beside = at_foot(if before.width() >= after.width() { before } else { after });
+        let over_foot = (foot.top() - s.s2).clamp(body.top(), body.bottom());
+        let over = toast::Place { bottom: pos2((left + right) / 2.0, over_foot), widest: (right - left - s.s2 * 2.0).max(1.0), lowest: over_foot };
+        if wide <= beside.widest {
+            beside
+        } else if wide <= over.widest {
+            over
+        } else if beside.widest >= over.widest {
+            beside
+        } else {
+            over
         }
-        pos2(body.center().x, (composer.bottom().min(body.bottom()) - COMPOSER_FOOT - theme.spacing.s2).max(body.top()))
     }
 
     /// The toast of the composer's last step, while no act's toast and no countdown shows.
-    fn notice_toast(&mut self, ui: &Ui, theme: &Theme, bottom: egui::Pos2) {
+    fn notice_toast(&mut self, ui: &Ui, theme: &Theme, room: ToastRoom) {
         let Some((text, since)) = self.notice.clone() else { return };
         if self.mailbox.undoable().is_some() || self.counting().is_some() {
             return;
@@ -1976,7 +1990,9 @@ impl InboxApp {
         }
         self.notice = Some((text.clone(), Some(since)));
         ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
-        toast::show(ui.ctx(), theme, &self.keymap, egui::Id::unique("compose-toast"), &Toast { text: &text, undo: None, rests: false }, bottom);
+        let shown = Toast { text: &text, undo: None, rests: false };
+        let place = Self::toast_place(room.0, theme, room.1, toast::width(ui, theme, &self.keymap, &shown));
+        toast::show(ui.ctx(), theme, &self.keymap, egui::Id::unique("compose-toast"), &shown, place);
     }
 
     /// The owner's appearance choices.
@@ -2274,12 +2290,8 @@ impl InboxApp {
             None
         };
         composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
-        // The docked composer drawn this frame, which the toasts keep clear of.
-        let docked_at = (docked && reader_shown).then(|| {
-            let left = self.list_rect.map_or(regions.body.left(), |list| list.right().clamp(regions.body.left(), regions.body.right()));
-            Rect::from_min_max(pos2(left, regions.body.top()), regions.body.max)
-        });
-        let (undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests(), regions.body, docked_at);
+        // The toasts keep clear of the composer drawn this pass, docked or floating ([`compose::drawn_now`]).
+        let (undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests(), regions.body);
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
         let busy = dismiss
@@ -2604,18 +2616,18 @@ impl InboxApp {
     /// The toasts of the frame: the countdown while a send waits for its hold, else the act's; then the composer's
     /// notice. Whether the act's Undo was pressed, and whether the countdown's took a send back. The act's Undo `rests`
     /// (its button and its key) while the event editor is open ([`Surfaces::undo_rests`]).
-    fn toasts(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool, body: Rect, docked: Option<Rect>) -> (bool, bool) {
-        let bottom = Self::toast_bottom(body, theme, docked);
-        let unsent = self.send_toast(ui, theme, quiet, bottom);
-        let undone = if unsent || self.counting().is_some() { false } else { self.toast(ui, theme, quiet, rests, bottom) };
-        self.notice_toast(ui, theme, bottom);
+    fn toasts(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool, body: Rect) -> (bool, bool) {
+        let room = (body, compose::drawn_now(ui.ctx()));
+        let unsent = self.send_toast(ui, theme, quiet, room);
+        let undone = if unsent || self.counting().is_some() { false } else { self.toast(ui, theme, quiet, rests, room) };
+        self.notice_toast(ui, theme, room);
         (undone, unsent)
     }
 
     /// The countdown toast while the message sent last waits for its hold: "Sending “subject” in 4 s", with Undo and its
     /// key, which take the send back. It asks for a frame as each second ends. Whether Undo was pressed (its key works
     /// while nothing is `quiet`).
-    fn send_toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool, bottom: egui::Pos2) -> bool {
+    fn send_toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool, room: ToastRoom) -> bool {
         let Some((draft, seconds)) = self.counting() else {
             self.sending = None;
             return false;
@@ -2641,7 +2653,9 @@ impl InboxApp {
             keys.unbind(keymap::UNDO);
         }
         let id = egui::Id::unique("send-toast").with(draft);
-        let undone = toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &text, undo: Some(keymap::UNDO), rests: false }, bottom);
+        let shown = Toast { text: &text, undo: Some(keymap::UNDO), rests: false };
+        let place = Self::toast_place(room.0, theme, room.1, toast::width(ui, theme, &keys, &shown));
+        let undone = toast::show(ui.ctx(), theme, &keys, id, &shown, place);
         if undone {
             self.unsend(draft);
         }
@@ -2652,7 +2666,7 @@ impl InboxApp {
     /// acts back, one at a time. Whether Undo was pressed (its key works while nothing is `quiet`: no text field has the
     /// focus, no sheet or palette is open). While Undo `rests` the toast still shows, its Undo drawn resting, and works
     /// again for what is left of its time once the reason has gone.
-    fn toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool, bottom: egui::Pos2) -> bool {
+    fn toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool, rests: bool, room: ToastRoom) -> bool {
         let Some(undo) = self.mailbox.undoable().cloned() else {
             self.toast = None;
             return false;
@@ -2676,7 +2690,8 @@ impl InboxApp {
         }
         let id = egui::Id::unique("act-toast").with(undo.serial);
         let shown = Toast { text: &undo.text, undo: undo.undoable.then_some(keymap::UNDO), rests };
-        toast::show(ui.ctx(), theme, &keys, id, &shown, bottom)
+        let place = Self::toast_place(room.0, theme, room.1, toast::width(ui, theme, &keys, &shown));
+        toast::show(ui.ctx(), theme, &keys, id, &shown, place)
     }
 
     /// Applies what was asked for in the palette; the action to run, when one was chosen.

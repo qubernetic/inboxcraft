@@ -124,7 +124,7 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         }
     });
     caption(ui, theme, tr!("Toast"));
-    toast::panel(ui, theme, keymap, &Toast { text: tr!("Marked as done"), undo: Some("ui.undo"), rests: false });
+    toast::panel(ui, theme, keymap, &Toast { text: tr!("Marked as done"), undo: Some("ui.undo"), rests: false }, f32::INFINITY);
     coming(ui, theme, keymap);
 }
 

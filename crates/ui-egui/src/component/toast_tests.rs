@@ -5,7 +5,7 @@ use egui::{Id, Key, KeyboardShortcut, Modifiers, pos2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 
-use super::{Toast, show};
+use super::{Place, Toast, show};
 use crate::component::tests::{builder, theme};
 use crate::keymap::Keymap;
 use crate::motion;
@@ -21,7 +21,14 @@ fn harness(reduce: bool) -> Harness<'static, u32> {
         move |ui, undone: &mut u32| {
             motion::set_reduced(ui.ctx(), reduce);
             let toast = Toast { text: "Marked as done", undo: Some(UNDO), rests: false };
-            if show(ui.ctx(), &theme, &keymap, Id::unique("toast"), &toast, pos2(300.0, 400.0)) {
+            if show(
+                ui.ctx(),
+                &theme,
+                &keymap,
+                Id::unique("toast"),
+                &toast,
+                Place { bottom: pos2(300.0, 400.0), widest: f32::INFINITY, lowest: f32::INFINITY },
+            ) {
                 *undone += 1;
             }
         },
@@ -58,7 +65,14 @@ fn a_toast_rises_into_place_and_with_reduced_motion_is_there_at_once() {
         move |ui, shown: &mut bool| {
             if *shown {
                 let toast = Toast { text: "Archived", undo: None, rests: false };
-                show(ui.ctx(), &theme, &Keymap::default(), Id::unique("toast"), &toast, pos2(300.0, 400.0));
+                show(
+                    ui.ctx(),
+                    &theme,
+                    &Keymap::default(),
+                    Id::unique("toast"),
+                    &toast,
+                    Place { bottom: pos2(300.0, 400.0), widest: f32::INFINITY, lowest: f32::INFINITY },
+                );
             }
         },
         false,

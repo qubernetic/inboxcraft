@@ -43,8 +43,13 @@ fn sending() -> Mailbox {
 
 /// The calendar's week with the composer floating at the bottom right, its subject "Plot" and the keyboard in it.
 fn both() -> Harness<'static, InboxApp> {
+    both_at(vec2(1440.0, 900.0))
+}
+
+/// [`both`] in a window of `size`.
+fn both_at(size: egui::Vec2) -> Harness<'static, InboxApp> {
     let mut harness = Harness::builder()
-        .with_size(vec2(1440.0, 900.0))
+        .with_size(size)
         .with_theme(egui::Theme::Dark)
         .with_max_steps(40)
         .with_step_dt(1.0 / 60.0)
@@ -179,4 +184,27 @@ fn with_the_composer_and_the_editor_open_one_esc_closes_exactly_one() {
     assert!(floats_open(&harness), "the composer stays open");
     assert_eq!(subject(&harness).as_deref(), Some("Plot"));
     assert!(!queued(&mut harness));
+}
+
+#[test]
+fn the_event_added_toast_keeps_clear_of_the_floating_composer_s_send() {
+    for width in [1300.0, 1440.0, 1100.0] {
+        let mut harness = both_at(vec2(width, 820.0));
+        typed(&mut harness, "Kiln");
+        harness.get_by_role_and_label(Role::Button, "Save").click();
+        harness.run();
+        assert!(harness.state().calendar().editor().is_none(), "{width}: saved");
+        let said = harness.get_by_label_contains("Event added").rect();
+        let undo = harness.get_by_role_and_label(Role::Button, "Undo").rect();
+        let toast = said.union(undo).expand2(vec2(16.0, 4.0));
+        let send = harness.get_by_role_and_label(Role::Button, "Send").rect();
+        assert!(!toast.intersects(send), "{width}: the toast {toast:?} over Send {send:?}");
+        let events = harness.state().calendar().events().filter(|event| event.summary == "Kiln").count();
+        assert_eq!(events, 1, "{width}: the event added");
+        press_at(&mut harness, send.center());
+        harness.run();
+        assert!(queued(&mut harness), "{width}: the press on Send sent the message");
+        let events = harness.state().calendar().events().filter(|event| event.summary == "Kiln").count();
+        assert_eq!(events, 1, "{width}: and did not take the event back");
+    }
 }
