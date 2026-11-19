@@ -577,3 +577,19 @@ fn undo_rests_while_the_event_editor_is_open_by_every_way_in() {
         assert!(!shows_pottery(&harness), "{how:?}: Undo takes the added event back once the editor is closed");
     }
 }
+
+/// The window builds its surfaces from what it shows: in one pane the message the owner opened stands over the list.
+#[test]
+fn in_one_pane_the_opened_message_is_the_surface_over_the_list() {
+    let mut harness = window(720.0);
+    harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
+    harness.run();
+    harness.run();
+    assert!(harness.state().reader().open_id().is_some(), "a message is open");
+    let surfaces = harness.state().surfaces(&harness.ctx);
+    assert_eq!(surfaces.top(), crate::surface::Surface::OnePaneReader, "the reader stands in the list's place");
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().surfaces(&harness.ctx).top(), crate::surface::Surface::Place, "Esc gave the list its place back");
+}

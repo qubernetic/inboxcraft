@@ -12,13 +12,20 @@
 //!   only the owner's open does (`InboxApp::float_behind`);
 //! - the floating composer is two areas, a shadow that takes no pointer under the panel, and stands 16 above the
 //!   reader's answers.
+//!
+//! Built before the keys, from the frame before: a float is one shown "in this pass or the last", so after one closes
+//! a single `Esc` may still find [`Surface::Float`] on top and close nothing. Whether the list is hidden beside the
+//! composer is known only once this frame lays the panes out, after the keys; it is no fact here. The composer in
+//! front ([`Surface::Composer`]) already takes the list's keys whenever the list is hidden, and `InboxApp::can_run`
+//! keeps its own `list_hidden` terms, read after the drawing, for the palette and `run_action`, so a list key or act
+//! never runs in the frame the list hides. A rule that needs this frame's layout belongs in `can_run`, not here.
 
 use egui::Key;
 
 use crate::keymap::{self, Keymap};
 
-/// The most surfaces a frame holds; more is never reached (a float, a capture, the sheet, the full width, a composer, a
-/// reader in one pane and the place at most).
+/// The most surfaces a frame holds: seven in front and the place. Nine surfaces exist, but the palette and a capture
+/// never stand together with all the rest; an eighth in front would drop the lowest, never the top.
 const MOST: usize = 8;
 
 /// One thing that stands in front of the window's place.
@@ -66,8 +73,6 @@ pub(crate) struct Facts {
     pub one_pane_reader: bool,
     /// The mail is the place shown.
     pub mail: bool,
-    /// The list is hidden where the composer stands (beside one too narrow for it, or in one pane).
-    pub list_hidden: bool,
 }
 
 /// What stands in front, top first, the place last. Built once a frame ([`Surfaces::new`]); copies, allocates nothing.
@@ -76,7 +81,6 @@ pub(crate) struct Surfaces {
     stack: [Surface; MOST],
     len: usize,
     mail: bool,
-    list_hidden: bool,
 }
 
 impl Surfaces {
@@ -103,7 +107,7 @@ impl Surfaces {
                 len += 1;
             }
         }
-        Self { stack, len: len + 1, mail: facts.mail, list_hidden: facts.list_hidden }
+        Self { stack, len: len + 1, mail: facts.mail }
     }
 
     /// The surfaces, top first, the place last.
@@ -151,10 +155,10 @@ impl Surfaces {
 
     /// Whether the window's `action` may run with these surfaces in front, as its key (`keymap`'s, with a modifier or
     /// without) is pressed. Not while the palette or a capture holds the keys; under the sheet only the sheet's and the
-    /// window's own ([`SHEET_KEYS`]); under the event editor only what comes over it ([`EDITOR_KEYS`]); a key without a modifier not under a quiet surface
-    /// ([`Surfaces::quiet`]), and Undo neither there nor while it rests ([`Surfaces::undo_rests`]);
-    /// the list's keys only while it has them ([`Surfaces::list_has_keyboard`]). The acts on a row and the calendar's
-    /// keys are not the window's: the list and the calendar take those.
+    /// window's own ([`SHEET_KEYS`]); under the event editor only what comes over it ([`EDITOR_KEYS`]); a key without
+    /// a modifier not under a quiet surface ([`Surfaces::quiet`]), and Undo neither there nor while it rests
+    /// ([`Surfaces::undo_rests`]); the list's keys only while it has them ([`Surfaces::list_has_keyboard`]). The acts
+    /// on a row and the calendar's keys are not the window's: the list and the calendar take those.
     pub(crate) fn allows(&self, action: &str, keymap: &Keymap) -> bool {
         if self.held() || ROW_ACTS.contains(&action) || keymap::CALENDAR_KEYS.contains(&action) {
             return false;
@@ -182,7 +186,7 @@ impl Surfaces {
     /// sheet, a capture, the composer in the reader's place, a float, whose arrows are its own). Whether a row of it has
     /// them is the list's to say.
     pub(crate) fn list_has_keyboard(&self) -> bool {
-        self.mail && !self.list_hidden && !self.held() && !self.has(Surface::Sheet) && !self.has(Surface::Composer) && !self.has(Surface::Float)
+        self.mail && !self.held() && !self.has(Surface::Sheet) && !self.has(Surface::Composer) && !self.has(Surface::Float)
     }
 }
 

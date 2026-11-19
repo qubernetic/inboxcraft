@@ -1061,7 +1061,6 @@ impl InboxApp {
             full_width: self.reader.full_width(),
             one_pane_reader: mail && one_pane(ctx) && !self.docked() && self.message_in_front() && self.reader.open_id().is_some(),
             mail,
-            list_hidden: self.list_hidden,
         })
     }
 

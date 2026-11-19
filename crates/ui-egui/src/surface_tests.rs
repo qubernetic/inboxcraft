@@ -22,7 +22,6 @@ const MAIL: Facts = Facts {
     full_width: false,
     one_pane_reader: false,
     mail: true,
-    list_hidden: false,
 };
 
 /// The calendar.
@@ -60,7 +59,7 @@ fn stackings() -> Vec<(&'static str, Facts, Surface)> {
         ("a float over the composer", Facts { float: true, composer: true, ..MAIL }, Surface::Float),
         ("the reader in one pane over the list", Facts { one_pane_reader: true, ..MAIL }, Surface::OnePaneReader),
         ("a float over the reader in one pane", Facts { float: true, one_pane_reader: true, ..MAIL }, Surface::Float),
-        ("the composer in one pane", Facts { composer: true, list_hidden: true, ..MAIL }, Surface::Composer),
+        ("the composer in one pane", Facts { composer: true, ..MAIL }, Surface::Composer),
         ("the event editor", Facts { editor: true, ..CALENDAR }, Surface::Editor),
         ("a float over the event editor", Facts { float: true, editor: true, ..CALENDAR }, Surface::Float),
     ]
@@ -94,7 +93,6 @@ fn every_surface_at_once_is_held_in_eight_and_the_place_stays_last() {
         full_width: true,
         one_pane_reader: true,
         mail: true,
-        list_hidden: true,
     };
     let surfaces = of(all);
     assert_eq!(surfaces.all().len(), 8);
@@ -198,7 +196,7 @@ const EDITOR: [&str; 7] =
 type Row = (&'static str, Facts, &'static [&'static [&'static str]], &'static [&'static [&'static str]]);
 
 fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
-    let rows: [Row; 18] = [
+    let rows: [Row; 16] = [
         ("place", MAIL, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("float", Facts { float: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
         ("palette", Facts { palette: true, ..MAIL }, &[], &[]),
@@ -216,8 +214,6 @@ fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
         ("palette_over_editor", Facts { palette: true, editor: true, ..CALENDAR }, &[], &[]),
         ("float_over_full_width", Facts { float: true, full_width: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
         ("float_over_composer", Facts { float: true, composer: true, ..MAIL }, &[], &[&COMPOSER]),
-        ("composer_one_pane_list_hidden", Facts { composer: true, list_hidden: true, ..MAIL }, &[], &[&COMPOSER]),
-        ("composer_beside_list_hidden", Facts { composer: true, list_hidden: true, ..MAIL }, &[], &[&COMPOSER]),
         ("palette_over_composer", Facts { palette: true, composer: true, ..MAIL }, &[], &[]),
     ];
     rows.into_iter()
@@ -254,7 +250,6 @@ fn the_list_has_the_keys_only_on_the_mail_with_nothing_over_it_and_shown() {
         ("a capture", Facts { capture: true, sheet: true, ..MAIL }),
         ("the sheet", Facts { sheet: true, ..MAIL }),
         ("the composer in front", Facts { composer: true, ..MAIL }),
-        ("hidden beside the composer", Facts { list_hidden: true, ..MAIL }),
     ] {
         assert!(!of(facts).list_has_keyboard(), "{name}");
     }
