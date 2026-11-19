@@ -195,6 +195,8 @@ pub struct InboxApp {
     landed: Option<u64>,
     /// Whether [`InboxApp::land_held`] is a row the owner's act walked on to, brought into sight before it lands.
     bring_held: bool,
+    /// The row an Undo selected again while the ring stood on another row: the ring goes to it.
+    ring_back: Option<u64>,
     /// The card of the grouped inbox the open message stood in when it opened (`Some(None)`: the rows no group holds;
     /// `None`: no cards), so that the keyboard stays in that card when the server takes the message away.
     card: Option<Option<String>>,
@@ -420,6 +422,7 @@ impl InboxApp {
             land_held: None,
             landed: None,
             bring_held: false,
+            ring_back: None,
             card: None,
             drawn: std::sync::Arc::from(Vec::new()),
             list_row: None,
@@ -836,11 +839,17 @@ impl InboxApp {
         }
     }
 
-    /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row; under Stay, with
-    /// nothing selected, on the row that has the keyboard, as the menu key takes it, so the acts go on down the list.
+    /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row, or on the row that
+    /// has the keyboard's ring when it stands on another (after Esc from a row's pointer menu), as J, K, Enter and the
+    /// menu key take it; with nothing selected only under Stay, so the acts go on down the list: a row the keyboard
+    /// landed on after the server took the open message away is not acted on.
     fn row_act(&self, action: &str) -> Option<(u64, Act)> {
-        let keyed = self.list_row.filter(|_| self.mailbox.after() == crate::mailbox::After::Stay);
-        let row = self.mailbox.selected().or(keyed).and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
+        let stay = self.mailbox.after() == crate::mailbox::After::Stay;
+        let target = match self.mailbox.selected() {
+            Some(selected) => Some(self.list_row.unwrap_or(selected)),
+            None => self.list_row.filter(|_| stay),
+        };
+        let row = target.and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
         let (_, act) = ROW_ACTS.into_iter().find(|(id, _)| *id == action)?;
         let act = match act {
             Act::Read if row.seen => Act::Unread,
@@ -1176,6 +1185,9 @@ impl InboxApp {
         }
         if self.screen != Screen::Mail {
             return;
+        }
+        if let Some(id) = self.ring_back.take() {
+            ctx.memory_mut(|memory| memory.request_focus(list::row_id(id)));
         }
         // The list's act walked on, or the server took the open message away: the keyboard lands on the row asked.
         if let Some(id) = self.land_held.take() {
@@ -3094,6 +3106,12 @@ impl InboxApp {
             return;
         }
         self.mailbox.undo();
+        // The row given back is selected again: the ring goes to it too, so the next key acts on what is marked.
+        if let (Some(ringed), Some(back)) = (self.list_row, self.mailbox.selected())
+            && ringed != back
+        {
+            self.ring_back = Some(back);
+        }
         self.restored = self.docked();
         if self.screen == Screen::Calendar {
             self.calendar.refresh(&mut self.mailbox);

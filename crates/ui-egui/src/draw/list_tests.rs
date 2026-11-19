@@ -3540,6 +3540,28 @@ fn in_one_pane_esc_from_a_rows_pointer_menu_gives_it_the_keyboard_and_opens_noth
 }
 
 #[test]
+fn after_esc_from_a_rows_pointer_menu_the_acts_go_to_the_ringed_row_not_the_open_message() {
+    // The owner's ruling: what the ring marks is what the keys act on, as J, K and Enter do.
+    let mut harness = wide(1300.0);
+    harness.get_by_label(TEODOR).click();
+    harness.run();
+    let teodor = harness.state().reader().open_id().unwrap();
+    let odile = id_with(&harness, "Allotment rota for November");
+    menu_then_esc(&mut harness, ODILE);
+    assert!(seen(&harness, teodor) && !seen(&harness, odile), "the open message read, the ringed one not");
+    harness.key_press(Key::R);
+    harness.run();
+    assert!(seen(&harness, odile), "R marked the ringed row read");
+    assert!(seen(&harness, teodor), "and left the open message as it was");
+    harness.key_press(Key::D);
+    harness.run();
+    harness.run();
+    let done = |id: u64| harness.state().mailbox().messages().iter().all(|row| row.id != id || row.done);
+    assert!(done(odile), "D took the ringed row");
+    assert!(harness.state().mailbox().messages().iter().any(|row| row.id == teodor && !row.done), "not the open message");
+}
+
+#[test]
 fn in_one_pane_another_account_or_search_while_reading_keys_no_row_of_the_new_list() {
     // The message in front leaves the list because the person picked another account or searched: the list comes back
     // in front, and no row of the new list is keyed for them (as beside the reader).
