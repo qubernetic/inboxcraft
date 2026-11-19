@@ -6,13 +6,13 @@
 //!
 //! Running in the background is one flag shared with the [`crate::desktop::Desktop`]: off, closing the window ends
 //! InboxCraft. The choice is kept in [`FILE`] beside the appearance's file in the owner's config folder, read at the
-//! next start ([`kept`]); a file that cannot be read keeps InboxCraft running, as it did before the choice existed.
+//! next start ([`kept`]); a file that cannot be read, or is not a regular file, keeps InboxCraft running, as it did
+//! before the choice existed.
 //!
 //! Starting with the computer is the autostart entry of [`crate::autostart`]. Outside the Flatpak it is written at
 //! once; in the Flatpak the Background portal is asked first, on a thread of its own, since the desktop may ask the
 //! person and take its time. One question waits at a time; the window is woken when its answer comes.
 
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,6 +20,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use inboxcraft_ui_egui::desk::Desk;
 use inboxcraft_ui_egui::fetch::Wake;
+use inboxcraft_ui_egui::keep::read_kept;
 use serde_json::{Value, json};
 
 use crate::autostart::{self, Granted};
@@ -37,12 +38,7 @@ pub type Portal = Arc<dyn Fn(bool) -> Result<Granted, String> + Send + Sync>;
 /// `"background": false`.
 #[must_use]
 pub fn kept(file: &Path) -> bool {
-    let Ok(handle) = std::fs::File::open(file) else { return true };
-    let mut bytes = Vec::new();
-    // One byte past the cap tells a file that is too large from one that is just large enough.
-    if handle.take(u64::try_from(MAX_FILE).unwrap_or(u64::MAX).saturating_add(1)).read_to_end(&mut bytes).is_err() || bytes.len() > MAX_FILE {
-        return true;
-    }
+    let Some(bytes) = read_kept(file, MAX_FILE) else { return true };
     serde_json::from_slice::<Value>(&bytes).ok().and_then(|value| value.get("background").and_then(Value::as_bool)).unwrap_or(true)
 }
 
@@ -173,3 +169,7 @@ impl Desk for OwnerDesk {
 #[cfg(test)]
 #[path = "desk_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "desk_unix_tests.rs"]
+mod unix_tests;
