@@ -139,6 +139,22 @@ fn each_frame_stands_where_its_sheet_puts_it_in_dark_and_light() {
     }
 }
 
+/// The failing state as the page draws it now, its banner one line of text (54 high, where `home/everything-failing`
+/// wraps it onto two, 72 high, and the tiles stand at 280): pinned so that a banner that wraps is seen here and its
+/// gaps line goes with it.
+#[test]
+fn the_failing_state_stands_with_its_one_line_banner_at_100_and_130_percent() {
+    for mode in [Mode::Dark, Mode::Light] {
+        for (percent, banner, counts, buttons) in [(100, (188.0, 54.0), 262.0, 706.0), (130, (222.0, 64.0), 306.0, 864.0)] {
+            let p = harness("everything-failing", mode, percent).state().drawn.parts;
+            let at = format!("{mode:?} {percent}: {:?} {:?} {:?}", p.banner, p.counts, p.buttons);
+            assert_eq!(tall(p.banner), banner, "{at}");
+            assert_eq!(tall(p.counts).0, counts, "{at}");
+            assert_eq!(tall(p.buttons).0, buttons, "{at}");
+        }
+    }
+}
+
 #[test]
 fn at_130_percent_heights_follow_the_text_and_widths_and_gaps_stay() {
     for mode in [Mode::Dark, Mode::Light] {
