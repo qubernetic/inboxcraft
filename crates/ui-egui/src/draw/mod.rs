@@ -2331,6 +2331,7 @@ impl InboxApp {
         }
         if self.themed.is_none() {
             theme::install_fonts(ctx);
+            theme::size_from_the_setting_alone(ctx);
         }
         Theme::apply(ctx, &Look::of(&chosen));
         // egui follows the system by itself; a first frame that follows it leaves the context's mode alone.

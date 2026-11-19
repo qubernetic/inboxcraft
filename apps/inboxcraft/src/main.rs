@@ -101,6 +101,8 @@ fn windows(mut desktop: Desktop, shown: &Shown) -> ExitCode {
             }
             // IBM Plex from the first frame on, so no text is drawn in another font first.
             inboxcraft_ui_egui::theme::install_fonts(&creation.egui_ctx);
+            // Each window's context: no keyboard zoom, the size from the text-size setting alone.
+            inboxcraft_ui_egui::theme::size_from_the_setting_alone(&creation.egui_ctx);
             Ok(Box::new(window) as Box<dyn eframe::App + '_>)
         };
         let ran = eframe::run_native("InboxCraft", options, Box::new(made));

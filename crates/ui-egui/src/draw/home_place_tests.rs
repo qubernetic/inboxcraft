@@ -679,3 +679,29 @@ fn on_the_settings_the_composer_kept_open_neither_sends_nor_folds() {
     let asked = harness.state().mailbox().error().is_some_and(|error| error.contains("mail.send"));
     assert!(!asked, "Send rests on the settings");
 }
+
+/// The owner's ruling: Ctrl+0 is Home, and egui's own keyboard zoom is off. The interface's size comes from the
+/// text-size setting alone: Ctrl+Plus and Ctrl+Minus change nothing, Ctrl+0 shows Home, and a zoom factor a context
+/// came with (an earlier zoom) is set back to 1 at the start.
+#[test]
+fn the_zoom_keys_change_nothing_and_ctrl_0_shows_home_at_a_zoom_of_one() {
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(Box::new(clock())).unwrap(), Box::new(clock())));
+    app.set_own_frame(true);
+    let mut harness = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_context_setup(|ctx| ctx.set_zoom_factor(1.5))
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness.run();
+    assert_eq!(harness.ctx.zoom_factor(), 1.0, "a kept zoom is set back to 1 at the start");
+    assert!(!harness.ctx.options(|options| options.zoom_with_keyboard), "egui's keyboard zoom is off");
+    for key in [Key::Plus, Key::Equals, Key::Minus, Key::Plus] {
+        command(&mut harness, key);
+        harness.run();
+        assert_eq!(harness.ctx.zoom_factor(), 1.0, "{key:?} zooms nothing");
+        assert_eq!(harness.state().screen(), Screen::Mail, "{key:?} moves nothing");
+    }
+    command(&mut harness, Key::Num0);
+    assert_eq!(harness.state().screen(), Screen::Home, "Ctrl+0 is Home");
+    assert_eq!(harness.ctx.zoom_factor(), 1.0);
+}
