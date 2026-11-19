@@ -336,3 +336,51 @@ fn a_write_of_anything_else_reads_no_drafts_and_a_save_from_the_composer_updates
     harness.run();
     row(&harness, "Kiln rota, week 47");
 }
+
+/// Presses the row of the draft whose name starts with `subject`.
+fn press(harness: &mut Harness<'static, InboxApp>, subject: &str) {
+    let at = row(harness, subject).center();
+    harness.query_all_by_role(Role::ListItem).find(|node| node.rect().contains(at)).unwrap().click();
+    harness.run();
+    harness.run();
+}
+
+#[test]
+fn a_draft_opened_here_brings_its_text_recipients_and_account_into_the_composer() {
+    let mut app = sample_app();
+    let studio = app.mailbox().accounts().get(1).map(|account| account.id).unwrap();
+    let mailbox = app.mailbox_mut();
+    let id = mailbox.run("compose.new", &json!({ "account": studio })).unwrap().get("id").and_then(Value::as_u64).unwrap();
+    let update = json!({ "id": id, "to": ["Odile Brannock <odile@example.org>"], "subject": "Glaze order", "text": "Two kilos of celadon." });
+    mailbox.run("compose.update", &update).unwrap();
+    let mut harness = drafts_place(app, egui::Theme::Light);
+    press(&mut harness, "Glaze order");
+    let composer = harness.state().composer().unwrap();
+    assert_eq!(composer.draft(), id);
+    assert_eq!(composer.account(), studio, "written from its own account");
+    assert_eq!(composer.subject(), "Glaze order");
+    assert_eq!(composer.text(), "Two kilos of celadon.");
+    let to: Vec<&str> = composer.chips(crate::compose::Line::To).iter().map(|chip| chip.text.as_str()).collect();
+    assert_eq!(to, ["Odile Brannock <odile@example.org>"]);
+}
+
+#[test]
+fn opening_a_draft_while_another_holds_unsaved_text_keeps_that_one() {
+    let mut app = sample_app();
+    let kiln = draft(&mut app, "", "Kiln rota", "");
+    let glaze = draft(&mut app, "", "Glaze order", "");
+    let mut harness = drafts_place(app, egui::Theme::Light);
+    press(&mut harness, "Kiln rota");
+    assert_eq!(opened(&harness), Some(kiln));
+    let (Some(composer), _) = harness.state_mut().composer_mut() else { panic!("the draft opens in the composer") };
+    "Firing on Thursday.".clone_into(composer.text_mut());
+    composer.edited();
+    // The way a press and Enter in this place open a draft, before the composer's own save has run: only the switch
+    // keeps the text.
+    let ctx = harness.ctx.clone();
+    harness.state_mut().open_draft(&ctx, glaze);
+    harness.run();
+    assert_eq!(opened(&harness), Some(glaze));
+    let shown = harness.state_mut().mailbox_mut().run("compose.show", &json!({ "id": kiln })).unwrap();
+    assert_eq!(shown.get("text").and_then(Value::as_str), Some("Firing on Thursday."), "{shown}");
+}
