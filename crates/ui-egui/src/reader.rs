@@ -430,6 +430,14 @@ impl Reader {
         &self.why.0
     }
 
+    /// Whether the open message no longer stands where it stood when the engine said why it is here: its folder, its
+    /// group, its sender's screening, done or its snooze changed in the list (one row of the list read, no command).
+    /// The head asks for the reasons again then, by unfolding the open message ([`Reader::expand`]).
+    #[must_use]
+    pub fn why_moved(&self, mailbox: &Mailbox) -> bool {
+        self.open.is_some_and(|id| crate::why::place(mailbox, id) != self.why.1)
+    }
+
     /// Says the open message is here for `why`, as if the engine had said so.
     #[cfg(test)]
     pub(crate) fn set_why(&mut self, why: Vec<String>) {
@@ -442,6 +450,9 @@ impl Reader {
         if self.expanded.contains(&id) {
             if Some(id) != self.open {
                 self.expanded.remove(&id);
+            } else if self.why_moved(mailbox) {
+                // The open message stays unfolded; asked for, the reader looks again at why it is here.
+                self.ask_why(mailbox, id);
             }
             return;
         }
@@ -583,7 +594,7 @@ impl Reader {
         }
 
         // Why the open message is here changes only with its place: moved, snoozed, its sender let in or blocked.
-        if let Some(id) = self.open.filter(|id| crate::why::place(mailbox, *id) != self.why.1) {
+        if let Some(id) = self.open.filter(|_| self.why_moved(mailbox)) {
             self.ask_why(mailbox, id);
         }
     }

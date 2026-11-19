@@ -2501,3 +2501,123 @@ fn a_flag_from_the_list_does_not_turn_a_later_removal_into_a_walk_on() {
     taken_away(&mut harness);
     assert_eq!(harness.state().mailbox().selected(), None, "nothing is selected");
 }
+
+/// The why line's reasons as the open reader holds them, and how many times it asked.
+fn why_now(harness: &Harness<'static, InboxApp>) -> (Vec<String>, u64) {
+    (harness.state().reader.why().to_vec(), harness.state().reader.asked_why)
+}
+
+/// A few frames, as the window draws them after an act.
+fn frames(harness: &mut Harness<'static, InboxApp>) {
+    for _ in 0..3 {
+        harness.run();
+    }
+}
+
+/// The open message's reasons are what the engine says now, and the line says them.
+fn fresh(harness: &mut Harness<'static, InboxApp>) -> Vec<String> {
+    let open = harness.state().reader.open_id().unwrap();
+    let held = harness.state().reader.why().to_vec();
+    let app = harness.state_mut();
+    let now = crate::why::ask(&mut app.mailbox, open);
+    assert_eq!(held, now, "the reasons are the engine's of now");
+    harness.get_by_label(&crate::component::why_line::spoken(&held));
+    held
+}
+
+#[test]
+fn a_group_chosen_from_the_lists_menu_changes_the_open_messages_reasons() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Allotment rota for November");
+    let id = harness.state().reader.open_id().unwrap();
+    let (before, asked) = why_now(&harness);
+    assert!(before.iter().all(|reason| !reason.contains("Notifications")), "{before:?}");
+    harness.state_mut().mailbox_mut().select_keyed(id);
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(id)));
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::F10);
+    harness.run();
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Notifications").click();
+    frames(&mut harness);
+    assert_eq!(harness.state().reader.open_id(), Some(id), "still open");
+    let (after, now) = why_now(&harness);
+    assert!(after.iter().any(|reason| reason.ends_with("in Notifications")), "{before:?} -> {after:?}");
+    assert_eq!(now, asked + 1, "asked once more");
+    fresh(&mut harness);
+    // Idle frames after: no more asking.
+    for _ in 0..10 {
+        harness.step();
+    }
+    assert_eq!(why_now(&harness).1, now);
+}
+
+#[test]
+fn not_done_with_show_done_on_keeps_the_message_open_and_says_where_it_is() {
+    let fetch = Recorder::default();
+    let mut app = app_with(&fetch);
+    app.mailbox_mut().set_show_done(true);
+    let id = app.mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").unwrap().id;
+    app.mailbox_mut().select(Some(id));
+    app.mailbox_mut().act(id, crate::mailbox::Act::Done);
+    let mut harness = harness_with(app, egui::Theme::Light);
+    frames(&mut harness);
+    let (before, asked) = why_now(&harness);
+    // Done, it is out of the grouped inbox: no group is a reason.
+    assert!(before.iter().all(|reason| !reason.starts_with("grouped as")), "{before:?}");
+    harness.get_by_role_and_label(Role::Button, "Not done").click();
+    frames(&mut harness);
+    assert_eq!(harness.state().reader.open_id(), Some(id), "still open");
+    let (after, now) = why_now(&harness);
+    assert_eq!(after.first().map(String::as_str), Some("grouped as People"), "back in the inbox: {before:?} -> {after:?}");
+    assert_eq!(now, asked + 1);
+    fresh(&mut harness);
+}
+
+#[test]
+fn brought_back_from_a_snooze_the_reader_says_the_engines_reasons_of_now() {
+    let fetch = Recorder::default();
+    let mut app = app_with(&fetch);
+    let id = app.mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").unwrap().id;
+    let later = app.mailbox().now().unix_seconds().saturating_add(2 * 86_400);
+    app.mailbox_mut().act(id, crate::mailbox::Act::Snooze(Timestamp::from_unix(later, 0).unwrap()));
+    app.mailbox_mut().open(crate::mailbox::Place::Later(crate::mailbox::Pile::Snoozed));
+    app.mailbox_mut().select(Some(id));
+    app.mailbox_mut().forget_undo();
+    let mut harness = harness_with(app, egui::Theme::Light);
+    let (before, _) = why_now(&harness);
+    assert!(before.iter().any(|reason| reason.starts_with("snoozed until")), "{before:?}");
+    harness.get_by_role_and_label(Role::Button, "More").click();
+    harness.run();
+    harness.get_by_label("Bring back now").click();
+    frames(&mut harness);
+    // The pile is empty: whatever is open says the engine's reasons of now, none of the snooze that ended.
+    if harness.state().reader.open_id().is_some() {
+        let after = fresh(&mut harness);
+        assert!(after.iter().all(|reason| !reason.starts_with("snoozed until")), "{after:?}");
+    } else {
+        assert!(harness.query_all_by_label_contains("snoozed until").next().is_none());
+    }
+}
+
+#[test]
+fn a_sender_let_in_from_the_lists_card_leaves_no_reason_stale() {
+    let fetch = Recorder::default();
+    for (open, card) in [("Winter swim at the harbour steps", 0), ("Bare-root fruit trees are in", 0)] {
+        let mut app = app_with(&fetch);
+        app.mailbox_mut().open(crate::mailbox::Place::Senders);
+        let id = app.mailbox().messages().iter().find(|row| row.subject == open).unwrap().id;
+        app.mailbox_mut().select(Some(id));
+        let mut harness = harness_with(app, egui::Theme::Light);
+        let (before, asked) = why_now(&harness);
+        assert_eq!(before, ["held back by the screener"], "{open}");
+        harness.query_all_by_role_and_label(Role::Button, "Let in").nth(card).unwrap().click();
+        frames(&mut harness);
+        let still = harness.state().reader.open_id() == Some(id);
+        let (_, now) = why_now(&harness);
+        if still {
+            // Another sender let in: this message did not move, nothing asked.
+            assert_eq!(now, asked, "{open}");
+        }
+        fresh(&mut harness);
+    }
+}

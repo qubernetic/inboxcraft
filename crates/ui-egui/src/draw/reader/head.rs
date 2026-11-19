@@ -278,6 +278,11 @@ pub(super) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     if open.is_some() && !reader.why().is_empty() {
         why_line(ui, theme, keymap, reader.why());
     }
+    // An act that keeps the message open (a group chosen, Done with done mail shown, back from a snooze) moves it: the
+    // reasons are asked again after this frame.
+    if let Some(id) = open.filter(|_| reader.why_moved(mailbox)) {
+        drawn.asked.push(Asked::Expand(id));
+    }
     if let Some(opened) = opened
         && let Some((kind, held)) = holds(reader, opened)
     {
