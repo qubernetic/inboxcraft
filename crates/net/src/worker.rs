@@ -223,7 +223,7 @@ struct Out<'a> {
     reported: Option<ConnectionState>,
     /// The state of each folder as the last sync left it, for the resync of a watched folder.
     states: HashMap<FolderId, FolderState>,
-    /// The failures told so far ([`EventKind::Failed`]), to tell whether one came since a point.
+    /// The failures told so far ([`EventKind::Failed`], a body fetch's aside), to tell whether one came since a point.
     failures: u64,
 }
 
@@ -255,8 +255,14 @@ impl Out<'_> {
         }
     }
 
+    /// Tells that `job` failed. A body fetch that failed is the message's (deleted on the server, say): it says
+    /// nothing of the account being current, so it is not counted among the failures.
     fn failed(&mut self, job: &Job, error: &NetError) {
+        let counted = self.failures;
         self.say(Some(job.id), EventKind::Failed { kind: error.kind(), folder: job.kind.folder() });
+        if matches!(job.kind, JobKind::FetchBody { .. }) {
+            self.failures = counted;
+        }
     }
 }
 

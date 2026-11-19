@@ -7,7 +7,7 @@
 mod support;
 
 use inboxcraft_model::{
-    AccountId, CheckStep, ConnectionState, ErrorKind, EventKind, FolderId, FolderState, Job, JobId, JobKind, SpecialUse, StepStatus,
+    AccountId, CheckStep, ConnectionState, ErrorKind, EventKind, FolderId, FolderState, Job, JobId, JobKind, SpecialUse, StepStatus, UidSet,
 };
 use inboxcraft_net::SyncConfig;
 use inboxcraft_testkit::Fault;
@@ -448,16 +448,39 @@ fn a_round_with_any_job_that_failed_in_it_tells_no_end() -> Result {
     let mut run = Run::sample()?;
     run.job(JobKind::Idle { folder: INBOX, path: path("INBOX")? })?;
     run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
-    // Sent while the worker waits in IDLE: one round of two folder syncs, with a body fetch from a folder that is
-    // gone between them.
+    // Sent while the worker waits in IDLE: one round of two folder syncs, with a move out of a folder that is gone
+    // between them.
     sync(&mut run, 11, "Sent")?;
-    run.job(JobKind::FetchBody { folder: FolderId::new(99), path: path("Nowhere")?, uid_validity: validity(7)?, uid: uid(1)? })?;
+    run.job(JobKind::Move {
+        folder: FolderId::new(99),
+        path: path("Nowhere")?,
+        uid_validity: validity(7)?,
+        uids: [uid(1)?].into_iter().collect::<UidSet>(),
+        to: FolderId::new(11),
+        to_path: path("Sent")?,
+    })?;
     sync(&mut run, 12, "Lists/Rust")?;
     let events = run.rounds(|kind| matches!(kind, EventKind::SyncProgress { done: 2, of: 2 }))?;
     assert!(events.iter().any(|kind| matches!(kind, EventKind::Failed { .. })), "{events:?}");
     // The watched folder's resync after it tells no end either.
     let events = run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
     assert_eq!(told(&events), [], "{events:?}");
+    run.finish()?;
+    Ok(())
+}
+
+#[test]
+fn a_body_fetch_that_failed_in_a_round_does_not_hold_its_end_back() -> Result {
+    let mut run = Run::sample()?;
+    run.job(JobKind::Idle { folder: INBOX, path: path("INBOX")? })?;
+    run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
+    sync(&mut run, 11, "Sent")?;
+    run.job(JobKind::FetchBody { folder: FolderId::new(99), path: path("Nowhere")?, uid_validity: validity(7)?, uid: uid(1)? })?;
+    sync(&mut run, 12, "Lists/Rust")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::SyncProgress { done: 2, of: 2 }))?;
+    assert!(events.iter().any(|kind| matches!(kind, EventKind::Failed { .. })), "{events:?}");
+    let next = run.rounds(|_| true)?;
+    assert!(matches!(next[..], [EventKind::SyncFinished { .. }]), "the round ends: {next:?}");
     run.finish()?;
     Ok(())
 }
