@@ -483,3 +483,22 @@ fn a_hover_action_held_while_its_row_slides_up_under_the_closing_row_acts() {
     }
     assert!(lost.is_empty(), "the press on Done was lost: {lost:?}");
 }
+
+#[test]
+fn a_key_the_command_line_takes_ends_a_leaving_row_in_its_frame() {
+    // Esc, Up, Down and Enter are the command line's own while its results show; they end a movement all the same.
+    for key in [Key::Escape, Key::ArrowUp, Key::ArrowDown, Key::Enter] {
+        let mut harness = window(Level::Full);
+        let _ = odile_selected(&mut harness);
+        harness.event(egui::Event::Key { key: Key::K, pressed: true, modifiers: Modifiers::COMMAND, repeat: false, physical_key: None });
+        harness.run_steps(20);
+        harness.event(egui::Event::Text(">".to_owned()));
+        harness.step();
+        let id = harness.state().mailbox().selected().unwrap();
+        harness.state_mut().mailbox_mut().start(id, Act::Done);
+        harness.run_steps(3);
+        assert!(harness.state().mailbox().left_row().is_some(), "{key:?}: the row is leaving");
+        press(&mut harness, key);
+        assert!(harness.state().mailbox().left_row().is_none(), "{key:?}: the key ended the movement in its frame");
+    }
+}
