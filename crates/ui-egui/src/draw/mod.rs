@@ -860,14 +860,8 @@ impl InboxApp {
                     composer.toggle_fold();
                 }
             }
-            // A place: pressed again it shows the place the owner came from.
-            keymap::SETTINGS => {
-                if self.settings.is_open() {
-                    self.leave_settings();
-                } else {
-                    self.open_settings();
-                }
-            }
+            // A place: pressed again it shows the place the owner came from (the owner's bare `ui.settings.open`).
+            keymap::SETTINGS => self.apply_settings_ask(inboxcraft_engine::shown::SettingsAsked { page: None, bare: true, by_agent: false }),
             keymap::SHORTCUTS => self.open_shortcuts(),
             keymap::UNDO => self.undo(),
             keymap::FULL_WIDTH => {

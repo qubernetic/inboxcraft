@@ -305,6 +305,8 @@ pub(crate) struct State {
     pub(crate) week: WeekRule,
     /// What to tell the owner, for the front end to take ([`Session::take_notices`]).
     pub(crate) notices: VecDeque<Notice>,
+    /// Whether a window takes what commands ask it to show ([`Session::set_window`]); `false` headless.
+    pub(crate) window: bool,
     /// What the window is asked to show, for the front end to take ([`Session::take_settings_asked`]); the newest
     /// [`crate::shown::MAX_ASKED`].
     pub(crate) settings_asked: VecDeque<SettingsAsked>,
@@ -629,6 +631,11 @@ impl Session {
     /// account as one count.
     pub fn take_notices(&mut self) -> Vec<Notice> {
         notify::collapse(std::mem::take(&mut self.state.notices))
+    }
+
+    /// Says that a window takes what commands ask it to show (`ui.settings.open`): its answer's `window` is then `true`.
+    pub fn set_window(&mut self, window: bool) {
+        self.state.window = window;
     }
 
     /// What commands asked the window to show since the last call, oldest first: at most

@@ -204,13 +204,15 @@ fn settings_open_is_safe_and_asks_the_window_for_the_page_named() {
     assert_eq!(session.registry().get("ui.settings.open").unwrap().class, Some(AgentClass::Safe));
     for page in SETTINGS_PAGES {
         let answer = session.run_as(Caller::Agent, "ui.settings.open", &json!({ "page": page })).unwrap();
-        assert_eq!(answer, json!({ "page": page }));
-        assert_eq!(session.take_settings_asked(), vec![SettingsAsked { page: Some(page), bare: false }], "{page}");
+        assert_eq!(answer, json!({ "page": page, "window": false }));
+        assert_eq!(session.take_settings_asked(), vec![SettingsAsked { page: Some(page), bare: false, by_agent: true }], "{page}");
     }
     for bare in [json!({}), json!(null), json!({ "page": null })] {
-        assert_eq!(session.run_as(Caller::Agent, "ui.settings.open", &bare).unwrap(), json!({ "page": null }), "{bare}");
-        assert_eq!(session.take_settings_asked(), vec![SettingsAsked { page: None, bare: true }], "{bare}: as the key");
+        assert_eq!(session.run_as(Caller::Agent, "ui.settings.open", &bare).unwrap(), json!({ "page": null, "window": false }), "{bare}");
+        assert_eq!(session.take_settings_asked(), vec![SettingsAsked { page: None, bare: true, by_agent: true }], "{bare}: as the key");
     }
+    session.run_as(Caller::Owner, "ui.settings.open", &json!({ "page": "about" })).unwrap();
+    assert_eq!(session.take_settings_asked(), vec![SettingsAsked { page: Some("about"), bare: false, by_agent: false }], "the owner's own");
     assert!(session.take_settings_asked().is_empty(), "taken once");
 }
 
@@ -237,4 +239,14 @@ fn the_window_s_asks_are_kept_up_to_a_few_while_nobody_takes_them() {
     let asked = session.take_settings_asked();
     assert_eq!(asked.len(), MAX_ASKED);
     assert_eq!(asked.last().and_then(|asked| asked.page), Some("accounts"), "the newest kept");
+}
+
+#[test]
+fn settings_open_says_whether_a_window_takes_the_ask() {
+    let mut session = session();
+    let headless = session.run_as(Caller::Agent, "ui.settings.open", &json!({ "page": "accounts" })).unwrap();
+    assert_eq!(headless["window"], json!(false), "on a store nothing is shown, and the answer says so");
+    session.set_window(true);
+    let shown = session.run_as(Caller::Agent, "ui.settings.open", &json!({ "page": "accounts" })).unwrap();
+    assert_eq!(shown, json!({ "page": "accounts", "window": true }));
 }

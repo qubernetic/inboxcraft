@@ -169,7 +169,7 @@ fn open_with_a_junk_page_never_panics() {
         for page in &pages {
             for caller in [Caller::Owner, Caller::Agent] {
                 let answer = session.run_as(caller, "ui.settings.open", &json!({ "page": page }));
-                assert_eq!(answer, Ok(json!({ "page": null })), "{page}");
+                assert_eq!(answer, Ok(json!({ "page": null, "window": false })), "{page}");
             }
             let asked = session.take_settings_asked();
             assert!(asked.len() == 2 && asked.iter().all(|asked| asked.page.is_none() && (!asked.bare || page.is_null())), "{page}: {asked:?}");

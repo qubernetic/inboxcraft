@@ -26,6 +26,9 @@ pub struct SettingsAsked {
     /// No `page` was given (or `null`): the settings as their key does, shown on the page last shown or, when they
     /// show, the place the owner came from. A `page` that names none is not bare: the settings stay shown.
     pub bare: bool,
+    /// An agent asked (the control channel, the CLI in the app): the window never toggles for it and passes over it
+    /// while the owner types in the account form or gives a key. Only the command's caller sets it, never a parameter.
+    pub by_agent: bool,
 }
 
 /// The page `value` names: one of [`SETTINGS_PAGES`] exactly; anything else (no text, a text over [`MAX_PAGE`] bytes,

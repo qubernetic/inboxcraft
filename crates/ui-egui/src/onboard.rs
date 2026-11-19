@@ -1054,6 +1054,33 @@ impl Onboarding {
         }
     }
 
+    /// Whether the form holds what the owner typed: the add form with any text or a password in it, or an account's
+    /// form open to change. An agent's `ui.settings.open` passes over the window while it does.
+    #[must_use]
+    pub fn holds_typing(&self) -> bool {
+        match self.stage {
+            Stage::Edit(_) => true,
+            Stage::Form => {
+                let form = &self.form;
+                !form.password.is_empty()
+                    || [
+                        &form.address,
+                        &form.label,
+                        &form.display_name,
+                        &form.username,
+                        &form.host,
+                        &form.port,
+                        &form.smtp_host,
+                        &form.smtp_port,
+                        &form.caldav,
+                    ]
+                    .iter()
+                    .any(|text| !text.is_empty())
+            }
+            Stage::Closed | Stage::Checking(_) => false,
+        }
+    }
+
     /// Whether the check of an added or changed account is under way.
     #[must_use]
     pub fn checking(&self) -> bool {
