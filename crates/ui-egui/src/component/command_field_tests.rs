@@ -329,6 +329,25 @@ fn at_130_percent_the_heights_scale_and_the_widths_stay() {
             for mark in filled(&paint, p.cyan).into_iter().filter(|mark| mark.width() >= 16.0) {
                 assert_eq!((mark.height(), mark.min), (20.0, mark.min.round()), "{at}");
             }
+            // Widths, insets and gaps stay: the prompt 13 in, the chip 13 from the right end, 8 between the parts.
+            let shown = texts(&paint);
+            let prompt = shown.iter().find(|shown| shown.1 == ">").map_or(Rect::NOTHING, |shown| shown.0);
+            assert_eq!(prompt.left() - rect.left(), 13.0, "the prompt: {at}");
+            let chip = paint
+                .rects()
+                .find(|shape| matches!(shape.look, Look::Rect { radius, .. } if radius == 2.0))
+                .map_or(Rect::NOTHING, |shape| shape.rect);
+            assert_eq!(rect.right() - chip.right(), 13.0, "the chip: {at}");
+            if let Some(name) = state.scope_name.and_then(|name| shown.iter().find(|shown| shown.1 == name)) {
+                assert!((chip.left() - 8.0 - name.0.right().ceil()).abs() <= 1.0, "the scope's name: {at}");
+            }
+            let next = prompt.left() + crate::draw::paint::run_box(prompt.width()) + 8.0;
+            let first = filled(&paint, p.cyan).into_iter().find(|mark| mark.width() >= 16.0).map(|mark| mark.left());
+            let first =
+                first.or_else(|| state.texts.first().and_then(|want| shown.iter().find(|shown| shown.1 == want.1)).map(|shown| shown.0.left()));
+            if let Some(first) = first.filter(|_| state.name != "focus") {
+                assert_eq!(first, next, "8 after the prompt: {at}");
+            }
             assert!(!paint.shapes.iter().any(|shape| shape.overflows && visible(shape)), "{at}");
         }
     }
@@ -365,8 +384,9 @@ fn a_long_paste_is_capped() {
     // In the very frame of the paste: what went in was cut where it went in.
     harness.step();
     assert_eq!(harness.state().chars().count(), MOST, "a paste of 10 000 is cut at the cap");
-    // One line: egui puts its line breaks as spaces.
-    assert!(hostile.replace(['\r', '\n'], " ").starts_with(harness.state().as_str()), "its beginning is kept");
+    // Its control and bidi characters are dropped as it goes in, then the cap holds what is kept.
+    let kept: String = hostile.chars().filter(|c| !c.is_control() && !matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')).collect();
+    assert!(kept.starts_with(harness.state().as_str()), "its beginning is kept, cleaned");
     harness.run();
     // Typed past the cap, nothing more goes in.
     harness.event(egui::Event::Text("zzz".to_owned()));
@@ -472,10 +492,55 @@ fn at_rest_it_rests_and_with_the_focus_only_the_caret_blinks() {
 
 #[test]
 fn ten_thousand_hostile_characters_cost_no_more_than_the_cap() {
+    // The work of a frame is what is handed to layout: never more than the cap, from the very first frame.
+    super::LAID_OUT.with(|most| most.set(0));
     let hostile: String = "\u{202e}x\u{0}\r".repeat(2_500);
     let (mut harness, _) = live(&hostile, Scope::Open);
-    assert!(harness.state().chars().count() <= MOST);
     harness.get_by_role_and_label(Role::TextInput, spoken()).focus();
+    harness.event(egui::Event::Paste("y".repeat(10_000)));
     harness.run_steps(4);
     assert!(harness.state().chars().count() <= MOST);
+    let laid = super::LAID_OUT.with(std::cell::Cell::get);
+    assert!(laid > 0 && laid <= MOST, "{laid} characters laid out at once");
+}
+
+#[test]
+fn what_enters_the_field_is_one_line_of_plain_words() {
+    // A paste holding LF, NUL and U+202E: dropped, and the caret after what was kept.
+    let (mut harness, _) = live("", Scope::Open);
+    harness.get_by_role_and_label(Role::TextInput, spoken()).focus();
+    harness.run();
+    harness.event(egui::Event::Paste("ab\ncd\u{0}e\u{202e}f\u{2067}g".to_owned()));
+    harness.run();
+    assert_eq!(harness.state(), "abcdefg");
+    harness.event(egui::Event::Text("h".to_owned()));
+    harness.run();
+    assert_eq!(harness.state(), "abcdefgh", "the caret stands after what was kept");
+    // A typed text event holding a newline and a tab.
+    harness.event(egui::Event::Text("i\nj\tk".to_owned()));
+    harness.run();
+    assert_eq!(harness.state(), "abcdefghijk");
+    // The cap holds after cleaning: 2 000 kept letters of a 4 000-character paste.
+    harness.event(egui::Event::Paste("\u{0}z".repeat(2_000)));
+    harness.run();
+    assert_eq!(harness.state().chars().count(), MOST);
+    assert!(harness.state().chars().all(|c| !c.is_control()));
+    // The caller's text is cleaned before it is laid out, and stays so.
+    super::LAID_OUT.with(|most| most.set(0));
+    let (harness, _) = live("p\u{0}q\r\n\u{2066}r\u{85}s", Scope::Open);
+    assert_eq!(harness.state(), "pqrs");
+}
+
+#[test]
+fn a_screen_readers_value_is_cleaned_too() {
+    let (mut harness, _) = live("", Scope::Open);
+    let target = Id::unique("command").accesskit_id();
+    harness.event(egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+        action: egui::accesskit::Action::SetValue,
+        target_tree: egui::accesskit::TreeId::ROOT,
+        target_node: target,
+        data: Some(egui::accesskit::ActionData::Value("one\ntwo\u{202e}".into())),
+    }));
+    harness.run();
+    assert_eq!(harness.state(), "onetwo");
 }
