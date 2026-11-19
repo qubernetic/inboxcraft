@@ -196,7 +196,7 @@ const EDITOR: [&str; 7] =
 type Row = (&'static str, Facts, &'static [&'static [&'static str]], &'static [&'static [&'static str]]);
 
 fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
-    let rows: [Row; 16] = [
+    let rows: [Row; 17] = [
         ("place", MAIL, &[&WINDOW, &LIST], &[&WINDOW, &LIST]),
         ("float", Facts { float: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
         ("palette", Facts { palette: true, ..MAIL }, &[], &[]),
@@ -214,6 +214,8 @@ fn today() -> Vec<(&'static str, Facts, Vec<&'static str>, Vec<&'static str>)> {
         ("palette_over_editor", Facts { palette: true, editor: true, ..CALENDAR }, &[], &[]),
         ("float_over_full_width", Facts { float: true, full_width: true, ..MAIL }, &[&WINDOW], &[&WINDOW]),
         ("float_over_composer", Facts { float: true, composer: true, ..MAIL }, &[], &[&COMPOSER]),
+        // Three deep: what the sheet keeps holds over the composer under it too.
+        ("float_over_sheet_over_composer", Facts { float: true, sheet: true, composer: true, ..MAIL }, &[], &[&SHEET]),
         ("palette_over_composer", Facts { palette: true, composer: true, ..MAIL }, &[], &[]),
     ];
     rows.into_iter()
@@ -229,7 +231,9 @@ fn allows_matches_today() {
     for (name, facts, bare, command) in today() {
         let surfaces = of(facts);
         for action in keymap::actions().into_iter().map(|action| action.id).filter(|id| *id != keymap::SEND) {
-            for (modifiers, ran) in [(Modifiers::NONE, &bare), (Modifiers::COMMAND, &command)] {
+            // Alt is a modifier as Command is; Shift alone is not (a bare key).
+            let columns = [(Modifiers::NONE, &bare), (Modifiers::COMMAND, &command), (Modifiers::ALT, &command), (Modifiers::SHIFT, &bare)];
+            for (modifiers, ran) in columns {
                 let mut keys = Keymap::empty();
                 keys.bind(action, KeyboardShortcut::new(modifiers, Key::F20));
                 assert_eq!(surfaces.allows(action, &keys), ran.contains(&action), "{name}: {action} with {modifiers:?}");
