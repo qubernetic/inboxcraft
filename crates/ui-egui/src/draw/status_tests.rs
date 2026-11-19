@@ -66,6 +66,18 @@ fn a_press_on_reply_reply_all_and_forward_reaches_them_while_an_undo_shows() {
             press(&mut harness, at.center());
             assert!(harness.state().composer().is_some(), "{size:?} {percent}: the press on {answer} answers");
             assert!(flagged(&harness, id), "{size:?} {percent}: and undid nothing");
+            // And the answer lies above the line, never over it: a press on the line straight under it is the line's.
+            let (mut harness, id) = reading(size, percent);
+            harness.state_mut().mailbox_mut().act(id, Act::Flag);
+            harness.run();
+            let undo = harness.get_by_role_and_label(Role::Button, "undo").rect();
+            let mut under = Pos2::new(at.center().x, line(&harness).center().y);
+            if undo.expand(4.0).contains(under) {
+                under.x = undo.right() + 8.0;
+            }
+            press(&mut harness, under);
+            assert!(harness.state().composer().is_none(), "{size:?} {percent}: a press on the line under {answer} answers nothing");
+            assert!(flagged(&harness, id), "{size:?} {percent}: nor undoes");
         }
     }
 }
