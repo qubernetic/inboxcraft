@@ -884,6 +884,19 @@ fn the_lists_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
 }
 
 #[test]
+fn the_home_sets_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "home_sets": true}}"#))).unwrap();
+        let size = crate::component::gallery_home::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""lists": true"#, r#""components": true"#, r#""calendar_sets": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "home_sets": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}
+
+#[test]
 fn a_click_presses_before_the_picture_and_what_it_opens_is_drawn() {
     // A button that paints its ground cyan once it has been pressed.
     let pressed = std::cell::Cell::new(false);
@@ -922,6 +935,19 @@ fn the_screens_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
     }
     for extra in [r#""select": "logo""#, r#""fields": true"#, r#""blocks": true"#] {
         let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "screens": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}
+
+#[test]
+fn the_status_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "status_sets": true}}"#))).unwrap();
+        let size = crate::component::gallery_status::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""lists": true"#, r#""calendar_sets": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "status_sets": true, {extra}}}"#))).unwrap_err();
         assert!(error.to_string().contains("x.png:"), "{error}");
     }
 }

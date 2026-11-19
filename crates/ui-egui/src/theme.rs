@@ -237,6 +237,8 @@ pub struct Sizes {
     pub reader: [f32; 5],
     /// A hairline table's rows: its head, a row of one line and the total.
     pub table: [f32; 3],
+    /// The status line's height, and its items' and messages'.
+    pub status: f32,
 }
 
 pub(crate) const SIZES: Sizes = Sizes {
@@ -264,6 +266,7 @@ pub(crate) const SIZES: Sizes = Sizes {
     settings_row: 56.0,
     reader: [32.0, 40.0, 40.0, 44.0, 28.0],
     table: [28.0, 32.0, 36.0],
+    status: 26.0,
 };
 
 /// The one shadow, under what floats over the window: 12 px down, 32 px blur, black at 40 %.
@@ -850,6 +853,7 @@ impl Theme {
             settings_row: self.size(z.settings_row),
             reader: z.reader.map(|height| self.size(height)),
             table: z.table.map(|height| self.size(height)),
+            status: self.size(z.status),
             ..z
         }
     }

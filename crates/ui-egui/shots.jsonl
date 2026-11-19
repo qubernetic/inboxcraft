@@ -293,3 +293,12 @@
 # The same with the pointer resting on the left edge of the first board's emblem: its cells and the field's warm (#275).
 {"out": "docs/images/character-field-warm-light.png", "mode": "light", "character_field": true, "pointer": [112, 420]}
 {"out": "docs/images/character-field-warm-dark.png", "mode": "dark", "character_field": true, "pointer": [112, 420]}
+# The page of the status line's sets: the status item and the status message in every state (#287).
+{"out": "docs/images/components-status-light.png", "mode": "light", "status_sets": true}
+{"out": "docs/images/components-status-dark.png", "mode": "dark", "status_sets": true}
+# Home's sets (#288): count tile, block, block line, on a page of their own.
+{"out": "docs/images/components-home-light.png", "mode": "light", "home_sets": true}
+{"out": "docs/images/components-home-dark.png", "mode": "dark", "home_sets": true}
+# The command line's sets on their own page: the command field, the key hint and the window controls (#286).
+{"out": "docs/images/components-commands-light.png", "mode": "light", "command_sets": true}
+{"out": "docs/images/components-commands-dark.png", "mode": "dark", "command_sets": true}

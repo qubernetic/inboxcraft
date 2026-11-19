@@ -13,6 +13,8 @@
 //! - [`checkbox`]: a filled check box and a radio button.
 //! - [`tooltip`]: the bubble with the action's name and its key chip.
 //! - [`key`]: the chip of a key, its words read from a shortcut.
+//! - [`key_hint`]: a key chip and the word of its action, in the status line.
+//! - [`command_field`]: the command line's field, its prompt, scope, text, caret and key.
 //! - [`tag`]: a short mark in a 1 px box, and the coming-soon mark.
 //! - [`label`]: the bracketed section label and the written form of a count.
 //! - [`avatar`]: a person's initials, `muted` on a `stage` square.
@@ -34,6 +36,7 @@
 //! - [`account_bar`]: the 3 × 12 px mark in an account's colour.
 //! - [`soon`]: what is designed and not built yet, drawn unavailable, and its "coming soon" tag.
 //! - [`time_picker`]: presets and a typed time for snooze, send later and reminders ([`typed_time`] reads the text).
+//! - [`window_controls`]: minimise, maximise or restore, and close, for the window's own frame.
 //!
 //! [`gallery`] draws every one of them on one page for `ui_shot`, [`gallery_fields`] the fields, pickers and menus on a
 //! second, [`gallery_screens`] the screens' own sets on another.
@@ -43,13 +46,17 @@ pub mod attachment;
 pub mod avatar;
 pub mod badge;
 pub mod banner;
+pub mod block;
+pub mod block_line;
 pub mod button;
 pub mod button_row;
 pub mod calendar_sync;
 pub mod card;
 pub mod check_step;
 pub mod checkbox;
+pub mod command_field;
 pub mod content_bar;
+pub mod count_tile;
 pub mod draft_file;
 pub mod draft_row;
 pub mod empty;
@@ -58,18 +65,22 @@ pub mod field;
 pub mod gallery;
 pub mod gallery_blocks;
 pub mod gallery_calendar;
+pub mod gallery_commands;
 pub mod gallery_field;
 pub mod gallery_fields;
+pub mod gallery_home;
 pub mod gallery_index;
 pub mod gallery_lists;
 pub mod gallery_reader;
 pub mod gallery_screens;
+pub mod gallery_status;
 pub mod group_head;
 pub mod hairline_table;
 pub mod hover;
 pub mod icon;
 pub mod invite_card;
 pub mod key;
+pub mod key_hint;
 pub mod label;
 pub mod later_row;
 pub mod mail_row;
@@ -89,6 +100,8 @@ pub mod select;
 pub mod settings_row;
 pub mod slider;
 pub mod soon;
+pub mod status_item;
+pub mod status_message;
 pub mod switch;
 pub mod tag;
 pub mod thread_row;
@@ -97,6 +110,7 @@ pub mod toast;
 pub mod tooltip;
 pub mod typed_time;
 pub mod why_line;
+pub mod window_controls;
 
 use std::sync::Arc;
 
