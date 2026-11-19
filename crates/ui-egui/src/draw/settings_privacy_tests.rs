@@ -180,3 +180,15 @@ fn a_held_key_on_ask_again_forgets_one_sender_only() {
         assert_eq!(kept(&mut harness), THREE[1..], "a held {key:?} on ask again forgets one sender");
     }
 }
+
+#[test]
+fn a_stale_note_clears_when_the_list_is_read_again() {
+    let mut harness = on_privacy(&THREE);
+    harness.state_mut().settings_mut().privacy_mut().set_note(Some("The list could not be read.".to_owned()));
+    harness.run();
+    assert!(harness.query_by_label("The list could not be read.").is_some());
+    harness.get_by_label(&again(THREE[0])).click();
+    harness.run();
+    assert_eq!(kept(&mut harness), THREE[1..]);
+    assert!(harness.query_by_label("The list could not be read.").is_none(), "the old note goes when the list reads well");
+}

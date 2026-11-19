@@ -116,7 +116,11 @@ impl super::super::InboxApp {
     /// Reads the senders whose pictures always load; a refusal leaves none and says why on the page.
     fn read_privacy(&mut self) {
         match self.mailbox.run("remote.list", &serde_json::json!({})) {
-            Ok(answer) => self.settings.privacy_mut().read(&answer),
+            Ok(answer) => {
+                // A note from a read that failed before goes once the list reads well.
+                self.settings.privacy_mut().read(&answer);
+                self.settings.privacy_mut().set_note(None);
+            }
             Err(error) => {
                 self.settings.privacy_mut().read(&serde_json::Value::Null);
                 self.settings.privacy_mut().set_note(Some(error.to_string()));
