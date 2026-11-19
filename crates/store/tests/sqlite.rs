@@ -12,8 +12,8 @@ use std::path::Path;
 
 use contract::{account, body, folder, m, message, two_accounts};
 use inboxcraft_model::{
-    Account, AccountId, AlertId, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, Due, EmailAddress, FolderId, Job, JobId, JobKind,
-    MessageState, OutboxState,
+    AccountId, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, Due, EmailAddress, FolderId, Job, JobId, JobKind, MessageState,
+    OutboxState,
 };
 use inboxcraft_store::{Batch, Change, DATABASE_FILE, SCHEMA_VERSION, SOURCES_DIR, Search, Sqlite, Storage, StoreConfig, StoreError};
 
@@ -211,15 +211,6 @@ fn a_damaged_record_is_reported() {
 }
 
 #[test]
-fn an_id_sqlite_cannot_hold_is_refused() {
-    let (mut store, _tmp) = fresh();
-    let big = Account::new(AccountId::new(u64::MAX), "Big", EmailAddress::new("big@example.org").unwrap(), "big", account(1).imap().clone()).unwrap();
-    let refused = store.apply(&Batch::new().with(Change::PutAccount(big)));
-    assert_eq!(refused, Err(StoreError::Database(format!("id {} is out of range", u64::MAX))));
-    assert!(store.accounts().unwrap().is_empty());
-}
-
-#[test]
 fn the_database_runs_in_wal_mode_with_full_sync() {
     let tmp = dir();
     let dir = tmp.path();
@@ -388,33 +379,6 @@ fn every_store_has_an_id_of_its_own_for_good() {
 }
 
 #[test]
-fn a_local_id_sqlite_cannot_hold_is_refused() {
-    let (mut store, _tmp) = fresh();
-    two_accounts(&mut store);
-    let out_of_range = Err(StoreError::Database(format!("id {} is out of range", u64::MAX)));
-    for change in [
-        Change::QueueJob(Job::new(JobId::new(u64::MAX), AccountId::new(1), JobKind::SyncFolderList)),
-        Change::PutDraft(contract::draft(u64::MAX, 1, "x")),
-        Change::PutOutgoing(contract::outgoing(u64::MAX, OutboxState::Waiting)),
-        Change::PutScheduled(contract::scheduled(1, 1, Due::Send(DraftId::new(u64::MAX)))),
-        Change::PutScheduled(contract::scheduled(1, 1, Due::FollowUp(m(u64::MAX)))),
-        Change::PutScheduled(contract::scheduled(1, 1, Due::Alert(AlertId::new(u64::MAX)))),
-        Change::SetMessageState(m(u64::MAX), MessageState::default()),
-        Change::PutCalendar(contract::calendar(u64::MAX, 1, "home")),
-        Change::SetSyncToken(CalendarId::new(u64::MAX), None),
-        Change::PutCalendarEvent(contract::event(1, u64::MAX)),
-        Change::PutAlert(contract::alert(1, u64::MAX, 1)),
-        Change::RemoveJob(JobId::new(u64::MAX)),
-    ] {
-        assert_eq!(store.apply(&Batch::new().with(change)), out_of_range);
-    }
-    store.apply(&Batch::new().with(Change::PutDraft(contract::draft(1, 1, "x")))).unwrap();
-    let entry = Change::PutScheduled(contract::scheduled(u64::MAX, 1, Due::Send(DraftId::new(1))));
-    assert_eq!(store.apply(&Batch::new().with(entry)), out_of_range);
-    assert_eq!(store.drafts(AccountId::new(u64::MAX)), out_of_range.map(|()| Vec::new()));
-}
-
-#[test]
 fn a_removed_draft_leaves_no_words_in_the_files() {
     let tmp = dir();
     let dir = tmp.path();
@@ -464,4 +428,45 @@ fn a_forgotten_sender_refusal_or_sync_token_leaves_nothing_in_the_files() {
         store.apply(&Batch::new().with(change)).unwrap();
         assert_eq!(holding(dir, marker), Vec::<String>::new(), "{marker}");
     }
+}
+
+/// A record whose own id is past `i64::MAX` cannot be kept: its own error, not a database failure, and nothing written.
+/// `i64::MAX` itself is kept.
+#[test]
+fn a_record_whose_own_id_is_past_the_largest_key_is_refused() {
+    let (mut store, _tmp) = fresh();
+    two_accounts(&mut store);
+    let near = Batch::new()
+        .with(Change::PutDraft(contract::draft(1, 1, "near")))
+        .with(Change::PutCalendar(contract::calendar(1, 1, "home")))
+        .with(Change::PutCalendarEvent(contract::event(1, 1)));
+    store.apply(&near).unwrap();
+    for id in [u64::MAX, i64::MAX.unsigned_abs() + 1] {
+        for change in [
+            Change::PutAccount(account(id)),
+            Change::PutFolder(folder(id, 1, "Far")),
+            Change::PutMessage(message(id, 1, 1, 9, "far", None)),
+            Change::QueueJob(Job::new(JobId::new(id), AccountId::new(1), JobKind::SyncFolderList)),
+            Change::PutDraft(contract::draft(id, 1, "far")),
+            Change::PutCalendar(contract::calendar(id, 1, "far")),
+            Change::PutScheduled(contract::scheduled(id, 1, Due::Send(DraftId::new(1)))),
+            Change::PutCalendarEvent(contract::event(id, 1)),
+            Change::PutAlert(contract::alert(id, 1, 1)),
+        ] {
+            let what = format!("{change:?}");
+            let refused = store.apply(&Batch::new().with(change));
+            assert!(matches!(refused, Err(StoreError::IdOutOfRange(held)) if held == id), "{what}: {refused:?}");
+        }
+    }
+    assert_eq!(store.accounts().unwrap().len(), 2);
+    assert_eq!(store.folders(AccountId::new(1)).unwrap().len(), 2);
+    assert!(store.messages(FolderId::new(1)).unwrap().is_empty());
+    assert!(store.queued_jobs().unwrap().is_empty());
+    assert_eq!(store.drafts(AccountId::new(1)).unwrap(), [contract::draft(1, 1, "near")]);
+    assert_eq!(store.calendars(AccountId::new(1)).unwrap().len(), 1);
+    assert_eq!(store.calendar_events(CalendarId::new(1)).unwrap(), [contract::event(1, 1)]);
+    assert!(store.alerts(CalendarEventId::new(1)).unwrap().is_empty() && store.schedule().unwrap().is_empty());
+    let largest = i64::MAX.unsigned_abs();
+    store.apply(&Batch::new().with(Change::PutAccount(account(largest))).with(Change::PutFolder(folder(largest, largest, "Last")))).unwrap();
+    assert_eq!(store.folders(AccountId::new(largest)).unwrap(), [folder(largest, largest, "Last")]);
 }

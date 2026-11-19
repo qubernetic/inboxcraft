@@ -187,7 +187,8 @@ time from the code as it is, not measured.
 - `store` keeps no lock on its directory: keeping a second process away from an open store is the app's single
   instance guard, which is not built yet. The memory backend copies its rows on every batch, which is fine for tests and
   the browser build but not for a large mailbox (#24).
-- `store` ids above `i64::MAX` are refused by the SQLite backend; the memory backend takes them. A source file
+- `store`: a record whose own id is above `i64::MAX` is refused by the SQLite backend (`IdOutOfRange`); the memory
+  backend keeps it. Such an id naming a thing to read, change or remove is an unknown id on both (#276). A source file
   that is missing or damaged is reported as `Corrupt` and is not fetched again by the store itself (#24).
 - `store` makes its directories `0700` and its files `0600` on unix, whatever the umask, and narrows wider ones at
   open. The directories above the store directory are left as they are. On Windows it sets no ACL of its own: the

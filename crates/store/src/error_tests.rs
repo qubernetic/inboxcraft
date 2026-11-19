@@ -17,6 +17,7 @@ fn every_error_says_what_failed() {
         (StoreError::UnknownAlert(AlertId::new(7)), "no alert l7 in the store"),
         (StoreError::WrongAccount { folder: FolderId::new(2), account: AccountId::new(1) }, "folder f2 does not belong to account a1"),
         (StoreError::DuplicateUid { folder: FolderId::new(2), uid: Uid::new(5).unwrap() }, "folder f2 already holds UID 5"),
+        (StoreError::IdOutOfRange(u64::MAX), "id 18446744073709551615 is past the largest the store can keep"),
         (StoreError::TooLarge, "the message source is too large to keep"),
         (StoreError::NewerSchema { found: 9, known: 2 }, "the store has schema version 9, newer than this build's 2"),
         (StoreError::Corrupt("a record"), "the store is damaged: a record"),

@@ -14,8 +14,11 @@ use inboxcraft_store::{Batch, Body, Change, Search, Storage, StoreError};
 use inboxcraft_time::Timestamp;
 
 mod local;
+mod range;
 #[allow(unused_imports)]
 pub use local::*;
+#[allow(unused_imports)]
+pub use range::*;
 
 pub const DAY: i64 = 86_400;
 
@@ -469,6 +472,9 @@ macro_rules! contract_tests {
             calendars_hold_events_and_alerts,
             a_removed_account_takes_its_local_records,
             a_refused_batch_changes_no_local_record,
+            an_id_past_what_a_store_holds_reads_as_unknown,
+            a_change_that_needs_an_id_past_what_a_store_holds_is_refused_as_unknown,
+            a_removal_of_an_id_past_what_a_store_holds_removes_nothing,
         );
     };
     ($make:expr; $($name:ident),+ $(,)?) => {

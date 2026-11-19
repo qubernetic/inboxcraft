@@ -8,7 +8,7 @@ use inboxcraft_model::{
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 
-use super::{exists, json, key};
+use super::{exists, json, key, stored};
 use crate::StoreError;
 use crate::memory::sender_key;
 
@@ -19,7 +19,7 @@ fn held(tx: &Transaction<'_>, table: &str, id: i64) -> Result<bool, StoreError> 
 
 /// Whether `account` is held, or the error that names it.
 fn account(tx: &Transaction<'_>, account: AccountId) -> Result<i64, StoreError> {
-    let id = key(account.get())?;
+    let id = key(account.get());
     if held(tx, "account", id)? { Ok(id) } else { Err(StoreError::UnknownAccount(account)) }
 }
 
@@ -28,7 +28,7 @@ pub(super) fn queue_job(tx: &Transaction<'_>, job: &Job) -> Result<(), StoreErro
     tx.execute(
         "INSERT INTO job (id, account, record) VALUES (?1, ?2, ?3)
          ON CONFLICT (id) DO UPDATE SET account = excluded.account, record = excluded.record",
-        params![key(job.id.get())?, account, json(job)?],
+        params![stored(job.id.get())?, account, json(job)?],
     )?;
     Ok(())
 }
@@ -38,13 +38,13 @@ pub(super) fn put_draft(tx: &Transaction<'_>, draft: &Draft) -> Result<(), Store
     tx.execute(
         "INSERT INTO draft (id, account, record) VALUES (?1, ?2, ?3)
          ON CONFLICT (id) DO UPDATE SET account = excluded.account, record = excluded.record",
-        params![key(draft.id.get())?, account, json(draft)?],
+        params![stored(draft.id.get())?, account, json(draft)?],
     )?;
     Ok(())
 }
 
 pub(super) fn put_outgoing(tx: &Transaction<'_>, outgoing: &Outgoing) -> Result<(), StoreError> {
-    let draft = key(outgoing.draft.get())?;
+    let draft = key(outgoing.draft.get());
     if !held(tx, "draft", draft)? {
         return Err(StoreError::UnknownDraft(outgoing.draft));
     }
@@ -59,7 +59,7 @@ pub(super) fn put_scheduled(tx: &Transaction<'_>, entry: &Scheduled) -> Result<(
     let (mut draft, mut message, mut alert) = (None, None, None);
     match entry.what {
         Due::Send(id) => {
-            let held_draft = key(id.get())?;
+            let held_draft = key(id.get());
             if !held(tx, "draft", held_draft)? {
                 return Err(StoreError::UnknownDraft(id));
             }
@@ -67,7 +67,7 @@ pub(super) fn put_scheduled(tx: &Transaction<'_>, entry: &Scheduled) -> Result<(
         }
         Due::Unsnooze(id) | Due::FollowUp(id) => message = Some(exists(tx, id)?),
         Due::Alert(id) => {
-            let held_alert = key(id.get())?;
+            let held_alert = key(id.get());
             if !held(tx, "alert", held_alert)? {
                 return Err(StoreError::UnknownAlert(id));
             }
@@ -78,7 +78,7 @@ pub(super) fn put_scheduled(tx: &Transaction<'_>, entry: &Scheduled) -> Result<(
         "INSERT INTO schedule (id, due, draft, message, alert, record) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT (id) DO UPDATE SET due = excluded.due, draft = excluded.draft, message = excluded.message,
              alert = excluded.alert, record = excluded.record",
-        params![key(entry.id.get())?, entry.due.unix_seconds(), draft, message, alert, json(entry)?],
+        params![stored(entry.id.get())?, entry.due.unix_seconds(), draft, message, alert, json(entry)?],
     )?;
     Ok(())
 }
@@ -109,46 +109,46 @@ pub(super) fn put_calendar(tx: &Transaction<'_>, calendar: &Calendar) -> Result<
     tx.execute(
         "INSERT INTO calendar (id, account, record) VALUES (?1, ?2, ?3)
          ON CONFLICT (id) DO UPDATE SET account = excluded.account, record = excluded.record",
-        params![key(calendar.id.get())?, account, json(calendar)?],
+        params![stored(calendar.id.get())?, account, json(calendar)?],
     )?;
     Ok(())
 }
 
 pub(super) fn set_sync_token(tx: &Transaction<'_>, calendar: CalendarId, token: Option<&str>) -> Result<(), StoreError> {
-    if tx.execute("UPDATE calendar SET sync_token = ?2 WHERE id = ?1", params![key(calendar.get())?, token])? == 0 {
+    if tx.execute("UPDATE calendar SET sync_token = ?2 WHERE id = ?1", params![key(calendar.get()), token])? == 0 {
         return Err(StoreError::UnknownCalendar(calendar));
     }
     Ok(())
 }
 
 pub(super) fn put_calendar_event(tx: &Transaction<'_>, event: &CalendarEvent) -> Result<(), StoreError> {
-    let calendar = key(event.calendar.get())?;
+    let calendar = key(event.calendar.get());
     if !held(tx, "calendar", calendar)? {
         return Err(StoreError::UnknownCalendar(event.calendar));
     }
     tx.execute(
         "INSERT INTO calendar_event (id, calendar, record) VALUES (?1, ?2, ?3)
          ON CONFLICT (id) DO UPDATE SET calendar = excluded.calendar, record = excluded.record",
-        params![key(event.id.get())?, calendar, json(event)?],
+        params![stored(event.id.get())?, calendar, json(event)?],
     )?;
     Ok(())
 }
 
 pub(super) fn put_alert(tx: &Transaction<'_>, alert: &Alert) -> Result<(), StoreError> {
-    let event = key(alert.event.get())?;
+    let event = key(alert.event.get());
     if !held(tx, "calendar_event", event)? {
         return Err(StoreError::UnknownCalendarEvent(alert.event));
     }
     tx.execute(
         "INSERT INTO alert (id, event, at, record) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT (id) DO UPDATE SET event = excluded.event, at = excluded.at, record = excluded.record",
-        params![key(alert.id.get())?, event, alert.at.unix_seconds(), json(alert)?],
+        params![stored(alert.id.get())?, event, alert.at.unix_seconds(), json(alert)?],
     )?;
     Ok(())
 }
 
 /// Removes the row `id` of `table` (by its column `column`); nothing when it is not there.
 pub(super) fn remove(tx: &Transaction<'_>, table: &str, column: &str, id: u64) -> Result<(), StoreError> {
-    tx.execute(&format!("DELETE FROM {table} WHERE {column} = ?1"), [key(id)?])?;
+    tx.execute(&format!("DELETE FROM {table} WHERE {column} = ?1"), [key(id)])?;
     Ok(())
 }

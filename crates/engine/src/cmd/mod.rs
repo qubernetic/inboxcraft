@@ -91,6 +91,9 @@ mod group_tests;
 #[path = "hostile_tests.rs"]
 mod hostile_tests;
 #[cfg(test)]
+#[path = "id_range_tests.rs"]
+mod id_range_tests;
+#[cfg(test)]
 #[path = "invite_tests.rs"]
 mod invite_tests;
 #[cfg(test)]

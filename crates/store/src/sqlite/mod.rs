@@ -161,9 +161,19 @@ fn phrase(words: &[String]) -> Option<String> {
     (!words.is_empty()).then(|| format!("\"{}\"", words.join(" ").replace('"', "\"\"")))
 }
 
-/// An id as SQLite stores it.
-fn key(id: u64) -> Result<i64, StoreError> {
-    i64::try_from(id).map_err(|_| StoreError::Database(format!("id {id} is out of range")))
+/// The key no row has: every key is written through [`stored`], from a `u64`, so none is negative.
+const NO_ROW: i64 = -1;
+
+/// An id as SQLite looks it up. An id past `i64::MAX` cannot be held, so it looks up [`NO_ROW`] and finds nothing,
+/// as an unknown id does: a read gives nothing, a change that needs the thing gives the kind's `Unknown…` error and a
+/// removal removes nothing. No caller has to tell the two apart. Never bound where a row is written.
+fn key(id: u64) -> i64 {
+    i64::try_from(id).unwrap_or(NO_ROW)
+}
+
+/// A record's own id as SQLite stores it; [`StoreError::IdOutOfRange`] past `i64::MAX`.
+fn stored(id: u64) -> Result<i64, StoreError> {
+    i64::try_from(id).map_err(|_| StoreError::IdOutOfRange(id))
 }
 
 fn json<T: Serialize>(value: &T) -> Result<String, StoreError> {
@@ -180,12 +190,12 @@ fn parse<T: DeserializeOwned>(text: &str) -> Result<T, StoreError> {
 
 /// The account a held folder belongs to.
 fn folder_account(tx: &Transaction<'_>, folder: FolderId) -> Result<Option<i64>, StoreError> {
-    Ok(tx.query_row("SELECT account FROM folder WHERE id = ?1", [key(folder.get())?], |row| row.get(0)).optional()?)
+    Ok(tx.query_row("SELECT account FROM folder WHERE id = ?1", [key(folder.get())], |row| row.get(0)).optional()?)
 }
 
 /// The key of a held message.
 fn exists(tx: &Transaction<'_>, id: MessageId) -> Result<i64, StoreError> {
-    let held = key(id.get())?;
+    let held = key(id.get());
     let found = tx.query_row("SELECT 1 FROM message WHERE id = ?1", [held], |_| Ok(())).optional()?;
     found.map(|()| held).ok_or(StoreError::UnknownMessage(id))
 }
@@ -218,40 +228,40 @@ fn change(tx: &Transaction<'_>, sources: &Path, change: &Change, files: &mut Fil
         Change::PutAccount(account) => {
             tx.execute(
                 "INSERT INTO account (id, record) VALUES (?1, ?2) ON CONFLICT (id) DO UPDATE SET record = excluded.record",
-                params![key(account.id().get())?, json(account)?],
+                params![stored(account.id().get())?, json(account)?],
             )?;
         }
         Change::RemoveAccount(id) => {
-            let id = key(id.get())?;
+            let id = key(id.get());
             drop_bodies(tx, "message.account = ?1", id, files)?;
             tx.execute("DELETE FROM account WHERE id = ?1", [id])?;
         }
         Change::PutFolder(folder) => put_folder(tx, folder)?,
         Change::RemoveFolder(id) => {
-            let id = key(id.get())?;
+            let id = key(id.get());
             drop_bodies(tx, "message.folder = ?1", id, files)?;
             tx.execute("DELETE FROM folder WHERE id = ?1", [id])?;
         }
         Change::SetFolderState(id, state) => {
-            if tx.execute("UPDATE folder SET state = ?2 WHERE id = ?1", params![key(id.get())?, json(state)?])? == 0 {
+            if tx.execute("UPDATE folder SET state = ?2 WHERE id = ?1", params![key(id.get()), json(state)?])? == 0 {
                 return Err(StoreError::UnknownFolder(*id));
             }
         }
         Change::PutMessage(message) => put_message(tx, message)?,
         Change::SetFlags(id, flags) => {
-            let id_key = key(id.get())?;
+            let id_key = key(id.get());
             let held: Option<String> = tx.query_row("SELECT record FROM message WHERE id = ?1", [id_key], record).optional()?;
             let message: Message = parse(&held.ok_or(StoreError::UnknownMessage(*id))?)?;
             tx.execute("UPDATE message SET record = ?2 WHERE id = ?1", params![id_key, json(&with_flags(&message, flags))?])?;
         }
         Change::RemoveMessage(id) => {
-            let id = key(id.get())?;
+            let id = key(id.get());
             drop_bodies(tx, "message.id = ?1", id, files)?;
             tx.execute("DELETE FROM message WHERE id = ?1", [id])?;
         }
         Change::PutBody(id, body) => put_body(tx, sources, exists(tx, *id)?, body, files)?,
         Change::RemoveBody(id) => {
-            let id = key(id.get())?;
+            let id = key(id.get());
             drop_bodies(tx, "message.id = ?1", id, files)?;
             tx.execute("DELETE FROM body WHERE message = ?1", [id])?;
         }
@@ -283,32 +293,30 @@ fn change(tx: &Transaction<'_>, sources: &Path, change: &Change, files: &mut Fil
 }
 
 fn put_folder(tx: &Transaction<'_>, folder: &Folder) -> Result<(), StoreError> {
-    let account = key(folder.account().get())?;
-    if tx.query_row("SELECT id FROM account WHERE id = ?1", [account], |row| row.get::<_, i64>(0)).optional()?.is_none() {
-        return Err(StoreError::UnknownAccount(folder.account()));
-    }
+    let held = tx.query_row("SELECT id FROM account WHERE id = ?1", [key(folder.account().get())], |row| row.get::<_, i64>(0)).optional()?;
+    let Some(account) = held else { return Err(StoreError::UnknownAccount(folder.account())) };
     if folder_account(tx, folder.id())?.is_some_and(|held| held != account) {
         return Err(StoreError::WrongAccount { folder: folder.id(), account: folder.account() });
     }
     tx.execute(
         "INSERT INTO folder (id, account, record) VALUES (?1, ?2, ?3) ON CONFLICT (id) DO UPDATE SET record = excluded.record",
-        params![key(folder.id().get())?, account, json(folder)?],
+        params![stored(folder.id().get())?, account, json(folder)?],
     )?;
     Ok(())
 }
 
 fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError> {
     let folder = message.folder();
-    match folder_account(tx, folder)? {
+    let account = match folder_account(tx, folder)? {
         None => return Err(StoreError::UnknownFolder(folder)),
-        Some(account) if account != key(message.account().get())? => {
+        Some(account) if account != key(message.account().get()) => {
             return Err(StoreError::WrongAccount { folder, account: message.account() });
         }
-        Some(_) => {}
-    }
-    let (id, uid) = (key(message.id().get())?, message.summary().uid());
+        Some(account) => account,
+    };
+    let (id, folder_key, uid) = (stored(message.id().get())?, stored(folder.get())?, message.summary().uid());
     let other: Option<i64> =
-        tx.query_row("SELECT id FROM message WHERE folder = ?1 AND uid = ?2", params![key(folder.get())?, uid.get()], |row| row.get(0)).optional()?;
+        tx.query_row("SELECT id FROM message WHERE folder = ?1 AND uid = ?2", params![folder_key, uid.get()], |row| row.get(0)).optional()?;
     if other.is_some_and(|other| other != id) {
         return Err(StoreError::DuplicateUid { folder, uid });
     }
@@ -319,17 +327,7 @@ fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError
          ON CONFLICT (id) DO UPDATE SET account = excluded.account, folder = excluded.folder, uid = excluded.uid,
              date = excluded.date, from_text = excluded.from_text, to_text = excluded.to_text,
              subject_text = excluded.subject_text, record = excluded.record",
-        params![
-            id,
-            key(message.account().get())?,
-            key(folder.get())?,
-            uid.get(),
-            fields.date,
-            fields.from,
-            fields.to,
-            fields.subject,
-            json(message)?
-        ],
+        params![id, account, folder_key, uid.get(), fields.date, fields.from, fields.to, fields.subject, json(message)?],
     )?;
     Ok(())
 }
@@ -385,22 +383,22 @@ impl Storage for Sqlite {
 
     fn folders(&self, account: AccountId) -> Result<Vec<Folder>, StoreError> {
         let mut statement = self.conn.prepare("SELECT record FROM folder WHERE account = ?1 ORDER BY id")?;
-        let rows = statement.query_map([key(account.get())?], record)?;
+        let rows = statement.query_map([key(account.get())], record)?;
         rows.map(|row| parse(&row?)).collect()
     }
 
     fn folder_state(&self, folder: FolderId) -> Result<Option<FolderState>, StoreError> {
         let state: Option<Option<String>> =
-            self.conn.query_row("SELECT state FROM folder WHERE id = ?1", [key(folder.get())?], |row| row.get(0)).optional()?;
+            self.conn.query_row("SELECT state FROM folder WHERE id = ?1", [key(folder.get())], |row| row.get(0)).optional()?;
         state.flatten().map(|state| parse(&state)).transpose()
     }
 
     fn messages(&self, folder: FolderId) -> Result<Vec<Entry>, StoreError> {
-        self.entries("folder = ?1", key(folder.get())?)
+        self.entries("folder = ?1", key(folder.get()))
     }
 
     fn message(&self, id: MessageId) -> Result<Option<Entry>, StoreError> {
-        Ok(self.entries("id = ?1", key(id.get())?)?.into_iter().next())
+        Ok(self.entries("id = ?1", key(id.get()))?.into_iter().next())
     }
 
     fn body(&self, id: MessageId) -> Result<Option<Body>, StoreError> {
@@ -408,7 +406,7 @@ impl Storage for Sqlite {
             .conn
             .query_row(
                 "SELECT body.id, body.length, body_text.text FROM body JOIN body_text ON body_text.rowid = body.message WHERE body.message = ?1",
-                [key(id.get())?],
+                [key(id.get())],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
@@ -417,8 +415,8 @@ impl Storage for Sqlite {
     }
 
     fn search(&self, search: &Search) -> Result<Vec<MessageId>, StoreError> {
-        let account = search.account().map(|account| key(account.get())).transpose()?;
-        let folder = search.folder().map(|folder| key(folder.get())).transpose()?;
+        let account = search.account().map(|account| key(account.get()));
+        let folder = search.folder().map(|folder| key(folder.get()));
         let text = phrase(search.text());
         let limit = i64::try_from(search.limit()).unwrap_or(i64::MAX);
         self.ids(
@@ -438,11 +436,11 @@ impl Storage for Sqlite {
     }
 
     fn drafts(&self, account: AccountId) -> Result<Vec<Draft>, StoreError> {
-        self.records("SELECT record FROM draft WHERE account = ?1 ORDER BY id", [key(account.get())?])
+        self.records("SELECT record FROM draft WHERE account = ?1 ORDER BY id", [key(account.get())])
     }
 
     fn draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError> {
-        self.one("SELECT record FROM draft WHERE id = ?1", [key(id.get())?])
+        self.one("SELECT record FROM draft WHERE id = ?1", [key(id.get())])
     }
 
     fn outbox(&self) -> Result<Vec<Outgoing>, StoreError> {
@@ -462,7 +460,7 @@ impl Storage for Sqlite {
     }
 
     fn message_state(&self, id: MessageId) -> Result<MessageState, StoreError> {
-        Ok(self.one("SELECT record FROM message_state WHERE message = ?1", [key(id.get())?])?.unwrap_or_default())
+        Ok(self.one("SELECT record FROM message_state WHERE message = ?1", [key(id.get())])?.unwrap_or_default())
     }
 
     fn message_states(&self) -> Result<Vec<(MessageId, MessageState)>, StoreError> {
@@ -477,29 +475,29 @@ impl Storage for Sqlite {
     }
 
     fn calendars(&self, account: AccountId) -> Result<Vec<Calendar>, StoreError> {
-        self.records("SELECT record FROM calendar WHERE account = ?1 ORDER BY id", [key(account.get())?])
+        self.records("SELECT record FROM calendar WHERE account = ?1 ORDER BY id", [key(account.get())])
     }
 
     fn sync_token(&self, calendar: CalendarId) -> Result<Option<String>, StoreError> {
         let token: Option<Option<String>> =
-            self.conn.query_row("SELECT sync_token FROM calendar WHERE id = ?1", [key(calendar.get())?], |row| row.get(0)).optional()?;
+            self.conn.query_row("SELECT sync_token FROM calendar WHERE id = ?1", [key(calendar.get())], |row| row.get(0)).optional()?;
         Ok(token.flatten())
     }
 
     fn calendar_events(&self, calendar: CalendarId) -> Result<Vec<CalendarEvent>, StoreError> {
-        self.records("SELECT record FROM calendar_event WHERE calendar = ?1 ORDER BY id", [key(calendar.get())?])
+        self.records("SELECT record FROM calendar_event WHERE calendar = ?1 ORDER BY id", [key(calendar.get())])
     }
 
     fn calendar_event(&self, id: CalendarEventId) -> Result<Option<CalendarEvent>, StoreError> {
-        self.one("SELECT record FROM calendar_event WHERE id = ?1", [key(id.get())?])
+        self.one("SELECT record FROM calendar_event WHERE id = ?1", [key(id.get())])
     }
 
     fn alerts(&self, event: CalendarEventId) -> Result<Vec<Alert>, StoreError> {
-        self.records("SELECT record FROM alert WHERE event = ?1 ORDER BY at, id", [key(event.get())?])
+        self.records("SELECT record FROM alert WHERE event = ?1 ORDER BY at, id", [key(event.get())])
     }
 
     fn alert(&self, id: AlertId) -> Result<Option<Alert>, StoreError> {
-        self.one("SELECT record FROM alert WHERE id = ?1", [key(id.get())?])
+        self.one("SELECT record FROM alert WHERE id = ?1", [key(id.get())])
     }
 
     fn stale_bodies(&self, cutoff: Timestamp) -> Result<Vec<MessageId>, StoreError> {
@@ -516,7 +514,7 @@ impl Storage for Sqlite {
              WHERE folder = ?1 AND NOT EXISTS (SELECT 1 FROM body WHERE body.message = message.id)
                AND (opened = 1 OR date IS NULL OR date >= ?2)
              ORDER BY uid",
-            params![key(folder.get())?, cutoff.unix_seconds()],
+            params![key(folder.get()), cutoff.unix_seconds()],
         )
     }
 }
