@@ -164,13 +164,49 @@ fn typing_narrows_the_commands_and_enter_runs_the_first() {
     assert_eq!(harness.state().command().text(), "", "a command typed goes with it");
 }
 
+/// Which row of `role` the AccessKit tree says is picked: the one row said selected, which the field names as its
+/// active descendant. People are told from the mail's rows (also list box options) by their address.
+fn said_picked(harness: &Harness<'static, InboxApp>, role: Role) -> Option<usize> {
+    let person = |row: &egui_kittest::Node<'_>| {
+        role != Role::ListBoxOption || row.accesskit_node().label().is_some_and(|label| label.contains("@example.org"))
+    };
+    let rows: Vec<_> = harness.query_all_by_role(role).filter(person).collect();
+    let selected: Vec<usize> =
+        rows.iter().enumerate().filter(|(_, row)| row.accesskit_node().is_selected() == Some(true)).map(|(at, _)| at).collect();
+    let field = harness.get_by_role_and_label(Role::TextInput, "Command line");
+    let active = field.accesskit_node().active_descendant().map(|node| node.id());
+    match selected.as_slice() {
+        [at] if active == rows.get(*at).map(|row| row.accesskit_node().id()) => Some(*at),
+        _ => None,
+    }
+}
+
+#[test]
+fn the_people_and_the_mailboxes_say_the_row_picked() {
+    let mut harness = opened(egui::Theme::Light, "#a");
+    assert!(rows(&harness).len() > 1, "more than one mailbox");
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert_eq!(said_picked(&harness, Role::MenuItem), Some(1), "#");
+    let mut harness = opened(egui::Theme::Light, "@e");
+    let people =
+        harness.query_all_by_role(Role::ListBoxOption).filter(|row| row.accesskit_node().label().is_some_and(|label| label.contains("@example.org")));
+    assert!(people.count() > 1, "more than one person");
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert_eq!(said_picked(&harness, Role::ListBoxOption), Some(1), "@");
+}
+
 #[test]
 fn the_arrows_move_the_pick_and_enter_runs_the_picked_command() {
     let mut harness = opened(egui::Theme::Light, ">mode");
     let selected = harness.state().mailbox().selected();
+    assert_eq!(said_picked(&harness, Role::MenuItem), Some(0), "the first row is said picked");
     harness.key_press(Key::ArrowDown);
     harness.run();
     assert_eq!(harness.state().command().picked(), 1);
+    assert_eq!(said_picked(&harness, Role::MenuItem), Some(1), "the second row is said picked, the field's active descendant");
+    assert!(field_focused(&harness), "the keyboard stays in the field");
     assert_eq!(harness.state().mailbox().selected(), selected, "the arrows are the command line's, not the list's");
     harness.key_press(Key::Enter);
     harness.run();

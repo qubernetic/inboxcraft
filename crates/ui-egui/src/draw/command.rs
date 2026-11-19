@@ -264,15 +264,29 @@ fn results(ctx: &Context, theme: &Theme, keymap: &Keymap, command: &mut Command,
         .fade_in(false)
         .show(ctx, |ui| popup::panel(ui, theme, rect.width(), |ui| rows(ui, theme, keymap, command, lists, room)));
     ctx.move_to_top(shown.response.layer_id);
-    asked.extend(shown.inner);
+    let (pressed, picked) = shown.inner;
+    // The keyboard stays in the field (a combobox): the row picked is its active descendant, and is said selected.
+    if let Some(picked) = picked {
+        ctx.accesskit_node_builder(field_id(), |node| node.set_active_descendant(picked.accesskit_id()));
+    }
+    asked.extend(pressed);
     asked
 }
 
-/// The results' rows for the mode typed, and the line of prefixes; what a press asked for.
-fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, lists: &Lists, room: f32) -> Option<Asked> {
+/// Says whether the row `response` is the one picked (`picked`), and keeps its id when it is.
+fn said_picked(ui: &Ui, response: &egui::Response, picked: bool, kept: &mut Option<Id>) {
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_selected(picked));
+    if picked {
+        *kept = Some(response.id);
+    }
+}
+
+/// The results' rows for the mode typed, and the line of prefixes; what a press asked for, and the picked row's id.
+fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, lists: &Lists, room: f32) -> (Option<Asked>, Option<Id>) {
     let picked = command.picked();
     let text = command.text().to_owned();
     let mut asked = None;
+    let mut picked_id = None;
     let count = lists.count(command.mode());
     let counted = count.to_string();
     match command.mode() {
@@ -282,8 +296,8 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
             // The head, the line of prefixes and the plugin's row keep their room; the commands scroll in the rest.
             let most = (room - theme.boxes().menu_row * 3.0).max(theme.boxes().menu_row);
             let scrolled = egui::ScrollArea::vertical().id_salt("command-line-rows").max_height(most).auto_shrink([false, true]);
-            asked = crate::component::scroll::show(ui, theme, scrolled, |ui| {
-                let mut asked = None;
+            (asked, picked_id) = crate::component::scroll::show(ui, theme, scrolled, |ui| {
+                let (mut asked, mut picked_id) = (None, None);
                 for (at, listed) in lists.commands.iter().enumerate() {
                     let state = match (listed.refused, at == picked) {
                         (Some(_), _) => ItemState::Unavailable,
@@ -300,6 +314,7 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
                     };
                     let item = Item { icon: Some(listed.row.icon), name: &listed.row.name, caption: Some(&caption), action: None, state };
                     let response = popup::menu_item(ui, theme, keymap, &item);
+                    said_picked(ui, &response, at == picked, &mut picked_id);
                     if at == picked && command.stepped() {
                         ui.scroll_to_rect(response.rect, None);
                     }
@@ -307,7 +322,7 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
                         asked = chosen(command, lists, at);
                     }
                 }
-                asked
+                (asked, picked_id)
             })
             .inner;
             // A plugin's command: planned, drawn coming soon.
@@ -325,7 +340,9 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
         Mode::Person => {
             popup::head(ui, theme, tr!("People"), Some(&counted));
             for (at, person) in lists.people.iter().enumerate() {
-                if popup::suggestion_row(ui, theme, &person.name, &person.address, at == picked).clicked() {
+                let response = popup::suggestion_row(ui, theme, &person.name, &person.address, at == picked);
+                said_picked(ui, &response, at == picked, &mut picked_id);
+                if response.clicked() {
                     asked = chosen(command, lists, at);
                 }
             }
@@ -335,7 +352,9 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
             for (at, mailbox) in lists.mailboxes.iter().enumerate() {
                 let state = if at == picked { ItemState::Chosen } else { ItemState::Default };
                 let item = Item { icon: Some(IconId::Move), name: &mailbox.name, caption: Some(&mailbox.account), action: None, state };
-                if popup::menu_item(ui, theme, keymap, &item).clicked() {
+                let response = popup::menu_item(ui, theme, keymap, &item);
+                said_picked(ui, &response, at == picked, &mut picked_id);
+                if response.clicked() {
                     asked = chosen(command, lists, at);
                 }
             }
@@ -357,7 +376,7 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
             }
         }
     });
-    asked
+    (asked, picked_id)
 }
 
 /// The `#` results for `text`: every account's mailboxes whose path holds it (case left aside), at most
