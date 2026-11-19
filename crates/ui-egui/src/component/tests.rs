@@ -377,6 +377,18 @@ pub(crate) fn keyboard_walk<State>(harness: &mut Harness<'_, State>) -> Vec<Stri
             None => {}
         }
     }
+    // The walk ends where it began. A window's first stop is the command line's field, whose caret blinks: one Tab on
+    // leaves the keyboard on a control, as a walk that began on one does, so a rest checked after the walk is the
+    // window's, not the caret's.
+    let in_a_field = harness.root().children_recursive().any(|node| {
+        let node = node.accesskit_node();
+        node.is_focused() && node.role() == accesskit::Role::TextInput
+    });
+    if in_a_field {
+        harness.key_press(Key::Tab);
+        harness.step();
+        harness.step();
+    }
     // A radio button in a group Tab reached is reached through it (a segmented control's option: the group takes the
     // focus and the arrow keys move the choice): the group holds it in the tree, or its options stand inside its box.
     let groups: Vec<Rect> = harness

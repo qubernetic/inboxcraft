@@ -65,13 +65,11 @@ use serde_json::{Value, json};
 use crate::calendar::Calendar;
 use crate::command::Command;
 use crate::component::banner::{self, BannerKind, BannerLink};
-use crate::component::button::IconButton;
 use crate::component::soon;
 use crate::component::toast::{self, Toast};
 use crate::compose::Composer;
 use crate::desk::Desk;
 use crate::fetch::{Fetch, Offline};
-use crate::iconset::IconId;
 use crate::keep::{Keep, NoKeep, Triage};
 use crate::keymap::{self, Captured, Keymap};
 use crate::mailbox::{Act, InboxView, Mailbox, Pile, Place};
@@ -563,8 +561,8 @@ impl InboxApp {
         }
     }
 
-    /// Draws the index and the command line; what of the index was asked for and whether New message was pressed, both
-    /// through the one gate of the two: whatever pressed them (the pointer, a key, a screen reader's activate, which
+    /// Draws the index and the command line; what of the index and of the command line was asked for, the index's
+    /// through its gate: whatever pressed it (the pointer, a key, a screen reader's activate, which
     /// egui's modal layers do not stop), nothing of it runs unless the `surfaces` in front allow it. A place runs as a
     /// press may run its action ([`Surfaces::allows_press`]); a mailbox, an account or an account row changes the mail
     /// under the surface, so none of them runs under the palette or the event editor. A press on the index while a key
@@ -575,13 +573,16 @@ impl InboxApp {
         command: &mut Ui,
         theme: &Theme,
         surfaces: &Surfaces,
-        (setting, corner): (bool, f32),
+        setting: bool,
         (regions, keys): (shell::Regions, command::Early),
-    ) -> (index::Asked, bool, Vec<command::Asked>) {
-        // The command line first: its New message and its field stand above the index, and Tab walks the drawn order.
-        self.own_frame_parts(command, theme, corner);
-        let new_message = self.new_message(command, theme) && surfaces.allows_press(keymap::COMPOSE);
+    ) -> (index::Asked, Vec<command::Asked>) {
+        // The command line first, the title bar in the own frame: its field and the window controls stand above the
+        // index, and Tab walks the drawn order.
+        self.own_frame_parts(command, theme, regions.command);
         let commanded = self.command_line(command, theme, regions, keys);
+        if self.draws_frame() {
+            frame::controls(command.ctx(), theme, regions.command);
+        }
         let at = self.index_place(setting);
         let flags = (Self::index_live(surfaces), self.checking_elsewhere());
         let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, false, flags);
@@ -595,7 +596,7 @@ impl InboxApp {
             index::toggle(index.ctx(), id);
         }
 
-        (indexed, new_message, commanded)
+        (indexed, commanded)
     }
 
     /// Whether what the index `asked` shows a list: a mailbox, Mail or Later.
@@ -839,6 +840,26 @@ impl InboxApp {
             keymap::VIEW_GROUPED | keymap::VIEW_SMART | keymap::VIEW_LIST => !self.list_hidden,
             _ => keymap::action(id).is_some(),
         }
+    }
+
+    /// Whether the command line's `>` may run the action `id`: as [`InboxApp::can_run`], but Send sends whatever draft is
+    /// drawn, floating too: from the line the keyboard is never in the composer. Never a folded draft, which the owner
+    /// cannot see.
+    fn can_run_from_the_line(&self, id: &str) -> bool {
+        if id == keymap::SEND { self.composer_drawn() && !self.composer_folded() } else { self.can_run(id) }
+    }
+
+    /// Whether the draft drawn is the floating panel folded to its head.
+    fn composer_folded(&self) -> bool {
+        self.composer.as_ref().is_some_and(Composer::folded)
+    }
+
+    /// Why `>` cannot run `id` now, its row listed disabled with it; none when it can.
+    fn refused_on_the_line(&self, ctx: &egui::Context, id: &str) -> Option<&'static str> {
+        if id == keymap::SEND && self.composer_drawn() && self.composer_folded() {
+            return Some(tr!("Unfold the draft to send it"));
+        }
+        (!self.can_run_from_the_line(id) || soon::blocked(ctx, id)).then(|| command::refusal(id))
     }
 
     /// Runs the action `id` of [`keymap::actions`], as its key, the index or the palette do; an action that cannot run
@@ -1823,9 +1844,15 @@ impl InboxApp {
     /// picked, a toast saying when (`mail.send_later`). A blocked one stays, saying why, and so does one the engine
     /// refuses.
     pub fn send_composer(&mut self) {
+        self.send_drawn();
+    }
+
+    /// [`InboxApp::send_composer`]; whether the draft was kept for a reason its Send shows (no recipient, a blank to
+    /// fill in), not sent and not refused by the engine.
+    fn send_drawn(&mut self) -> bool {
         // A composer opened or moved in this frame has not been seen yet: Send acts once it has been painted.
         let frame = self.frame;
-        let Some(composer) = self.composer.as_mut().filter(|composer| composer.seen(frame)) else { return };
+        let Some(composer) = self.composer.as_mut().filter(|composer| composer.seen(frame)) else { return false };
         let (draft, later) = (composer.draft(), composer.later());
         match composer.send(&mut self.mailbox) {
             Ok(Some(at)) => {
@@ -1838,9 +1865,13 @@ impl InboxApp {
                 }
                 // The engine holds the message now; it goes to the worker once the hold is over.
                 self.pump();
+                false
             }
-            Ok(None) => {}
-            Err(error) => self.mailbox.fail(error),
+            Ok(None) => true,
+            Err(error) => {
+                self.mailbox.fail(error);
+                false
+            }
         }
     }
 
@@ -2282,7 +2313,7 @@ impl InboxApp {
         self.appear("ui.frame.set", &json!({ "frame": frame.id() }));
     }
 
-    /// Lets the app draw the window's frame: the native window calls it, so the strip, the window controls and the
+    /// Lets the app draw the window's frame: the native window calls it, so the title bar, the window controls and the
     /// resizing edges show when the appearance asks for the app's own frame. Pictures and the web build leave it off.
     pub fn set_own_frame(&mut self, own: bool) {
         self.own_frame = own;
@@ -2393,7 +2424,7 @@ impl InboxApp {
         // The panes touch; a hairline divides them.
         let corner = self.window_corner(ui.ctx());
         ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
-        // The frame's four regions ([`shell::regions`]): the old strip in the command line, the index at the left,
+        // The frame's four regions ([`shell::regions`]): the command line (the title bar in the own frame), the index at the left,
         // everything else in the body; the status line is reserved and holds nothing yet. The index stays wide until
         // the widths slice turns its breakpoint on.
         let window = ui.max_rect();
@@ -2404,7 +2435,7 @@ impl InboxApp {
         let mut region = |salt: &str, rect: Rect| ui.new_child(egui::UiBuilder::new().id_salt(salt).max_rect(rect).layout(layout));
         let (mut command, mut index, mut body) =
             (region("shell-command", regions.command), region("shell-index", regions.index), region("shell-body", regions.body));
-        // In the app's own frame the banner stands under the strip, so it comes after it.
+        // In the app's own frame the banner stands under the command line, after the title bar.
         let early = self.error_banner(&mut body, &theme, corner, false);
         let mut asked = MailAsked::default();
         let mut add = false;
@@ -2422,13 +2453,11 @@ impl InboxApp {
         #[cfg(test)]
         body.data_mut(|data| data.remove::<egui::Rect>(egui::Id::unique("reader-rect")));
         let (gap, half) = (0.0, 0.0);
-        let (indexed, new_message, commanded) =
-            self.index_and_command(&mut index, &mut command, &theme, &surfaces, (setting, corner), (regions, command_keys));
+        let (indexed, commanded) = self.index_and_command(&mut index, &mut command, &theme, &surfaces, setting, (regions, command_keys));
         let index_to_list = Self::shows_list(&indexed);
         ran.extend(indexed.place.and_then(Self::index_action));
         asked.open = indexed.mailbox;
         asked.narrow = indexed.account;
-        ran.extend(new_message.then_some(keymap::COMPOSE));
         let late = self.error_banner(&mut body, &theme, corner, true);
         let (mut dismiss, banner) = (early.0 | late.0, early.1.or(late.1));
         layers.capped(banner);
@@ -2462,7 +2491,7 @@ impl InboxApp {
                     let searched = Panel::top("list-header")
                         .show_separator_line(false)
                         .frame(Frame::new().inner_margin(Margin { left: pad.left.saturating_add(1), ..pad }))
-                        .show(ui, |ui| frame::beside(ui, &theme, |ui| list::header(ui, &theme, mailbox)))
+                        .show(ui, |ui| list::header(ui, &theme, mailbox))
                         .inner;
                     let listed = CentralPanel::no_frame()
                         .frame(Frame::new().inner_margin(Margin { left: 1, right: 0, top: 0, bottom: 0 }))
@@ -2514,12 +2543,14 @@ impl InboxApp {
             composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
         }
         // The toasts keep clear of the composer drawn this pass, docked or floating ([`compose::drawn_now`]).
-        let (undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests(), regions.body);
+        let (mut undone, unsent) = self.toasts(ui, &theme, quiet, surfaces.undo_rests(), regions.body);
         // The one gate for the place under a modal surface ([`Surfaces::modal`]): whatever pressed it (the pointer, a key,
         // a screen reader's activate, which egui's layers do not stop), nothing the list, the reader, the composer, Home,
-        // the calendar, the settings' page or the error banner asked for in this frame is applied. The index has its own
-        // gate ([`InboxApp::index_allowed`]).
+        // the calendar, the settings' page, the error banner or the act's toast asked for in this frame is applied. The
+        // index has its own gate ([`InboxApp::index_allowed`]). The send's countdown and a draft's discard keep their
+        // Undo: it stops a loss whose time runs out, and changes nothing else under the results.
         if surfaces.modal() {
+            undone = false;
             listed = list::Asked { out: listed.out, ..list::Asked::default() };
             header = list::Header::default();
             drawn.asked.clear();
@@ -2641,38 +2672,24 @@ impl InboxApp {
         }
     }
 
-    /// The app's own frame before the panes, when it draws one: the strip in the command line with the title and the
-    /// window controls, or the band of the top row that moves the window; and the resizing edges.
-    fn own_frame_parts(&self, ui: &mut Ui, theme: &Theme, corner: f32) {
-        let drawn = self.draws_frame();
-        frame::top_row_begins(ui, drawn && self.mailbox.appearance().frame == WindowFrame::TopRow);
-        if !drawn {
+    /// The command line's mark, and the app's own frame before the panes when it draws one: the command line `line` as
+    /// the title bar (its handle, before the field and the controls take their presses) and the resizing edges.
+    fn own_frame_parts(&self, ui: &Ui, theme: &Theme, line: Rect) {
+        frame::mark(ui, theme, line);
+        if !self.draws_frame() {
             return;
         }
-        if self.mailbox.appearance().frame == WindowFrame::Strip {
-            let place = match self.screen {
-                Screen::Calendar => tr!("Calendar").to_owned(),
-                Screen::Home => tr!("Home").to_owned(),
-                Screen::Mail => self.mailbox.title(),
-            };
-            let title = tr!("{place} · InboxCraft", place = place);
-            // The strip fills the command line; the frame's hairline under it is its bottom edge.
-            Panel::top("window-strip")
-                .exact_size(ui.max_rect().height())
-                .show_separator_line(false)
-                .frame(Frame::NONE)
-                .show(ui, |ui| frame::strip(ui, theme, &self.keymap, &title, corner));
-        }
+        frame::title_bar(ui, line);
         frame::edges(ui.ctx());
     }
 
     /// The error banner of the design, when there is an error: the `panel` ground, 8 above and below and 12 at the
     /// sides, its act a small link. Its last row holds the one `minus` hairline between it and what stands under it;
     /// the panes there draw no line of their own ([`Panes::capped`]). In the system's frame it runs across the window
-    /// with a `minus` hairline on its top and sides. In the app's own frame (`framed`) it stands under the strip and
+    /// with a `minus` hairline on its top and sides. In the app's own frame (`framed`) it stands under the command line and
     /// beside the index, whose lines are its top and left edges, and the frame's outline its right one; where it
-    /// reaches the window's top (the top row) its top right corner is the window's `corner`. Whether Dismiss was
-    /// pressed, and the banner's rect. Called twice a frame, before the strip and after it; it draws in
+    /// reaches the window's top its top right corner is the window's `corner`. Whether Dismiss was
+    /// pressed, and the banner's rect. Called twice a frame, before the title bar and after it; it draws in
     /// the call `framed` names (the own frame's or not).
     fn error_banner(&self, ui: &mut Ui, theme: &Theme, corner: f32, framed: bool) -> (bool, Option<Rect>) {
         let Some(error) = self.mailbox.error().filter(|_| self.draws_frame() == framed) else { return (false, None) };
@@ -2707,16 +2724,11 @@ impl InboxApp {
         (dismiss, Some(r))
     }
 
-    /// The app's own frame over the panes, when it draws one: the controls of the top row at the end of the right
-    /// pane's first row, and the window's outline.
+    /// The app's own frame over the panes, when it draws one: the window's outline.
     fn own_frame_over(&self, ctx: &egui::Context, theme: &Theme, corner: f32) {
-        if !self.draws_frame() {
-            return;
+        if self.draws_frame() {
+            frame::outline(ctx, theme, corner);
         }
-        if self.mailbox.appearance().frame == WindowFrame::TopRow {
-            frame::top_row(ctx, theme, &self.keymap);
-        }
-        frame::outline(ctx, theme, corner);
     }
 
     /// The command line in its region (`ui`): the field from the index's column to the window's controls, and its
@@ -2742,11 +2754,15 @@ impl InboxApp {
             match self.command.mode() {
                 crate::command::Mode::Command => {
                     let screen = if self.screen == Screen::Calendar { keymap::Scope::Calendar } else { keymap::Scope::Mail };
+                    // Over the event editor only what comes over it and the window's look: nothing of the mail or the
+                    // calendar under it (until a half-typed event can be kept as a draft).
+                    let editing = self.editing_event();
                     lists.commands = crate::palette::rows(self.command.text())
                         .into_iter()
                         .filter(|row| keymap::scope(row.id).meets(screen))
+                        .filter(|row| !editing || crate::surface::EDITOR_KEYS.contains(&row.id))
                         .map(|row| {
-                            let refused = (!self.can_run(row.id) || soon::blocked(&ctx, row.id)).then(|| command::refusal(row.id));
+                            let refused = self.refused_on_the_line(&ctx, row.id);
                             command::Listed { row, refused }
                         })
                         .collect();
@@ -2758,23 +2774,9 @@ impl InboxApp {
             }
         }
         let index = regions.index.right() + 1.0 - regions.command.left();
+        let room = if self.draws_frame() { frame::CONTROLS_ROOM } else { frame::NO_CONTROLS_ROOM };
         let mailbox = self.mailbox.title();
-        command::show(ui, theme, &self.keymap, &mut self.command, (regions.command, index, &mailbox), &lists, early)
-    }
-
-    /// New message at the left of the command line (`ui`), while there is an account: the frames draw none, and until
-    /// the command line is built it is the pointer's way to a new message. Whether it was pressed.
-    fn new_message(&self, ui: &mut Ui, theme: &Theme) -> bool {
-        if self.mailbox.accounts().is_empty() {
-            return false;
-        }
-        let rect = ui.max_rect();
-        let side = (rect.height() - 2.0 * theme.spacing.s1).clamp(0.0, 32.0);
-        let at = Rect::from_min_size(pos2(rect.left() + theme.spacing.s3, rect.center().y - side / 2.0), egui::vec2(side, side));
-        ui.scope_builder(egui::UiBuilder::new().max_rect(at).id_salt("command-new-message"), |ui| {
-            IconButton::new(IconId::Compose, tr!("New message")).action(keymap::COMPOSE).side(side).show(ui, theme, &self.keymap).clicked()
-        })
-        .inner
+        command::show(ui, theme, &self.keymap, &mut self.command, (regions.command, index, room, &mailbox), &lists, early)
     }
 
     /// The place the index shows selected: Settings while they are shown (`setting`), else Home, the calendar, Later
@@ -3107,6 +3109,19 @@ impl InboxApp {
     /// Applies what was asked for in the command line; the action to run, when one was chosen.
     fn apply_command(&mut self, ctx: &egui::Context, asked: command::Asked) -> Option<&'static str> {
         match asked {
+            // Send from the line sends the draft drawn, floating or docked, on the owner's Enter or press alone (the
+            // line runs nothing of an agent's); the keyboard is in the line, not in the composer, so the key's rule
+            // ([`InboxApp::can_run`]) is not the one that decides here.
+            command::Asked::Run(keymap::SEND) => {
+                self.command.close(ctx);
+                // A draft kept for a reason says it, in its Send's words: the line closed, they may not be in sight.
+                if self.can_run_from_the_line(keymap::SEND) && !soon::blocked(ctx, keymap::SEND) && self.send_drawn() {
+                    let problem = self.composer.as_ref().and_then(|composer| compose::send_problem(&self.mailbox, composer));
+                    if let Some(problem) = problem {
+                        self.say(&problem);
+                    }
+                }
+            }
             command::Asked::Run(id) => {
                 self.command.close(ctx);
                 return Some(id);

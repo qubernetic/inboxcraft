@@ -612,6 +612,8 @@ fn the_window_is_flat() {
                     Some(format!("{rect:?}"))
                 }
                 egui::Shape::Mesh(mesh) if dashed.iter().any(|edge| edge.contains_rect(mesh.calc_bounds())) => None,
+                // A picture (the app's mark in the command line): its own texture, not a gradient.
+                egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => None,
                 egui::Shape::Mesh(mesh) => Some(format!("a mesh {:?}", mesh.calc_bounds())),
                 _ => None,
             })
@@ -904,4 +906,11 @@ fn the_line_under_the_error_banner_is_its_minus_edge() {
         assert_eq!(level_line_rows(&harness, &[p.minus], from, to).len(), wide, "{ppp}: the sheet's minus edge all round");
         assert!(level_line_rows(&harness, &[p.line], from, to).is_empty(), "{ppp}: and no pane line beside it");
     }
+}
+
+/// New message as its key and `>` run it (the command line draws no New message control): the composer opens in the
+/// next frame drawn.
+pub(super) fn new_message(harness: &mut Harness<'static, InboxApp>) {
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::COMPOSE);
 }

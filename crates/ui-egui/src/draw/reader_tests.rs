@@ -2537,7 +2537,7 @@ fn inbox_at(width: f32, view: crate::mailbox::InboxView, compose: bool) -> Harne
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     if compose {
-        harness.get_by_role_and_label(Role::Button, "New message").click();
+        crate::draw::tests::new_message(&mut harness);
         settle(&mut harness);
     }
     harness

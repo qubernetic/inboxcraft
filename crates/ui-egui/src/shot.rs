@@ -56,7 +56,7 @@
 //! the start place),
 //! `command_sets` set to `true` the page of the command line's sets ([`crate::component::gallery_commands`]).
 //! The typeface and the icons are fixed, so a script that names a
-//! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
+//! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`own`; the older `strip` and `top_row` read as it); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
 //! before the picture, so what that opens (a menu, a list) is in it; `put_away` set to `true` snoozes, pins, parks and marks
 //! done some of the sample's mail first ([`sample::put_away`]), `later` opens a pile of "Later" (`snoozed`, `pins`
@@ -275,7 +275,8 @@ pub struct Shot {
     /// `everything-failing`; `@130` after it for 130 % text) in the body of a 1440 × 872 window, instead of the window.
     #[serde(default)]
     pub home: Option<String>,
-    /// The app's own window frame, as a native window draws it: `strip` or `top_row`; none when left out.
+    /// The app's own window frame, as a native window draws it: `own` (the older `strip` and `top_row` read as it); none
+    /// when left out.
     #[serde(default)]
     pub frame: Option<String>,
     /// Where the pointer rests, in points, so what lies under it shows its hover; nowhere when left out.
@@ -1705,9 +1706,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     app.set_reduce_motion(true);
     if let Some(name) = &shot.frame {
-        let frame = WindowFrame::named(name)
+        let frame = WindowFrame::read(name)
             .filter(|frame| *frame != WindowFrame::System)
-            .ok_or_else(|| bad(format!("{}: frame {name} is not strip or top_row", shot.out)))?;
+            .ok_or_else(|| bad(format!("{}: frame {name} is not own", shot.out)))?;
         app.set_frame(frame);
         app.set_own_frame(true);
     }

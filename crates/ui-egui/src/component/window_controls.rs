@@ -70,6 +70,16 @@ pub fn spoken(control: Control, maximised: bool) -> &'static str {
 /// The three controls for `window`, under `id`, `forced` drawing one of them in a state whatever the pointer and the
 /// keyboard do (a board). Which was pressed, by the pointer or by Enter or Space.
 pub fn window_controls(ui: &mut Ui, theme: &Theme, id: Id, window: Window, forced: Option<(Control, Shown)>) -> Option<Control> {
+    drawn(ui, theme, id, window, forced, true)
+}
+
+/// The three controls for `window` under `id`, Tab stops only while `keyboard` (a surface in front that keeps the
+/// keyboard leaves them to the pointer). Which was pressed.
+pub fn window_controls_keyed(ui: &mut Ui, theme: &Theme, id: Id, window: Window, keyboard: bool) -> Option<Control> {
+    drawn(ui, theme, id, window, None, keyboard)
+}
+
+fn drawn(ui: &mut Ui, theme: &Theme, id: Id, window: Window, forced: Option<(Control, Shown)>, keyboard: bool) -> Option<Control> {
     let p = &theme.palette;
     let high = height(theme);
     let (whole, _) = ui.allocate_exact_size(vec2(CELL * 3.0, high), Sense::hover());
@@ -77,7 +87,7 @@ pub fn window_controls(ui: &mut Ui, theme: &Theme, id: Id, window: Window, force
     let mut pressed = None;
     for (at, control) in (0_u8..).zip(Control::ALL) {
         let cell = Rect::from_min_size(pos2(whole.left() + CELL * f32::from(at), whole.top()), vec2(CELL, high));
-        let response = ui.interact(cell, id.with(at), Sense::click());
+        let response = ui.interact(cell, id.with(at), if keyboard { Sense::click() } else { Sense::CLICK });
         let words = spoken(control, window.maximised);
         response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), words));
         if response.clicked() {

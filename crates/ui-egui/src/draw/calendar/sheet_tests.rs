@@ -44,7 +44,7 @@ fn sending() -> Mailbox {
 fn window() -> Harness<'static, InboxApp> {
     let mut app = InboxApp::at_mail(sending());
     app.set_own_frame(true);
-    app.set_frame(WindowFrame::Strip);
+    app.set_frame(WindowFrame::Own);
     app.show_calendar();
     let (calendar, mailbox) = app.calendar_mut();
     calendar.set_view(mailbox, View::Week);

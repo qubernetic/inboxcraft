@@ -92,7 +92,8 @@ fn reply_all_and_forward_open_theirs_and_forward_asks_whom() {
 #[test]
 fn a_reply_keeps_the_draft_that_was_being_written() {
     let mut harness = harness(egui::Theme::Light);
-    press(&mut harness, "New message");
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
     let first = harness.state().composer().unwrap().draft();
     harness.query_all_by_label_contains(ROTA).next().unwrap().click();
     harness.run();
@@ -110,7 +111,8 @@ fn a_reply_keeps_the_draft_that_was_being_written() {
 #[test]
 fn without_templates_the_menu_says_there_are_none() {
     let mut harness = harness(egui::Theme::Light);
-    press(&mut harness, "New message");
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
     let button = harness.get_by_role_and_label(Role::Button, "Templates");
     assert!(button.accesskit_node().is_disabled());
 }
@@ -120,7 +122,8 @@ fn a_template_with_a_blank_blocks_send_until_it_is_filled_in() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let mut harness = harness(theme);
         template(&mut harness, "Work party", "We meet at the plot at {?time} and finish by noon.");
-        press(&mut harness, "New message");
+        crate::draw::tests::new_message(&mut harness);
+        harness.run();
         harness.get_by_role_and_label(Role::TextInput, "To").type_text("odile@example.org,");
         harness.run();
         press(&mut harness, "Templates");
@@ -146,7 +149,8 @@ fn a_template_with_a_blank_blocks_send_until_it_is_filled_in() {
 fn the_fill_in_button_takes_what_is_typed_and_asks_for_the_next_blank() {
     let mut harness = harness(egui::Theme::Light);
     template(&mut harness, "Plot", "At {?time} by {?place}.");
-    press(&mut harness, "New message");
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
     press(&mut harness, "Templates");
     harness.get_by_label("Plot").click();
     harness.run();
@@ -165,7 +169,8 @@ fn the_template_menu_opens_by_the_pointer_enter_and_space_and_keeps_tab_inside()
         let mut harness = harness(egui::Theme::Light);
         template(&mut harness, "Thanks", "Thank you, [name].");
         template(&mut harness, "Later", "I will answer on [day].");
-        press(&mut harness, "New message");
+        crate::draw::tests::new_message(&mut harness);
+        harness.run();
         crate::component::popup::tests::walk_a_menu(&mut harness, (Role::Button, "Templates"), key);
     }
 }
@@ -183,7 +188,8 @@ fn answers(harness: &Harness<'static, InboxApp>) -> Vec<egui::Rect> {
 /// New message, then a message opened by a press: the composer floats beside the open message; `folded` folds it.
 fn floating_over_a_message(folded: bool) -> Harness<'static, InboxApp> {
     let mut harness = harness(egui::Theme::Light);
-    press(&mut harness, "New message");
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
     harness.query_all_by_label_contains(ROTA).next().unwrap().click();
     harness.run();
     assert!(harness.state().composer().unwrap().floating());
@@ -244,7 +250,8 @@ fn the_floating_panel_s_shadow_falls_whole_under_its_foot() {
 #[test]
 fn with_no_message_open_the_floating_panel_stands_where_it_did() {
     let mut harness = harness(egui::Theme::Light);
-    press(&mut harness, "New message");
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
     harness.state_mut().composer_mut().0.unwrap().set_floating(true);
     harness.run();
     assert!(harness.state().reader().open_id().is_none(), "nothing open");

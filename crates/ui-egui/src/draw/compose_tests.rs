@@ -61,7 +61,7 @@ fn sending_mailbox() -> Mailbox {
 /// The harness with the composer open from the pane's New message.
 fn composing(theme: egui::Theme) -> Harness<'static, InboxApp> {
     let mut harness = harness(theme);
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     harness
 }
@@ -222,7 +222,7 @@ fn the_keys_on_a_message_rest_while_the_composer_hides_it() {
 fn the_from_menu_changes_the_account_and_its_signature() {
     let mut harness = harness(egui::Theme::Light);
     harness.state_mut().mailbox_mut().run("compose.signature", &json!({ "account": 2, "signature": "Mira\nStudio" })).unwrap();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     harness.get_by_role_and_label(Role::ComboBox, "From Mira Holloway <mira@example.org>").click();
     harness.run();
@@ -237,7 +237,7 @@ fn the_from_menu_changes_the_account_and_its_signature() {
 #[test]
 fn send_sends_and_the_toast_says_so() {
     let mut harness = sending();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     type_into(&mut harness, "To", "odile@example.org");
     type_into(&mut harness, "Subject", "Hello");
@@ -252,7 +252,7 @@ fn send_sends_and_the_toast_says_so() {
 fn the_window_asks_for_a_frame_when_a_held_send_is_due() {
     let mut harness = sending();
     harness.state_mut().mailbox_mut().run("send.set", &json!({ "hold_seconds": 30 })).unwrap();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     type_into(&mut harness, "To", "odile@example.org");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
@@ -289,7 +289,7 @@ fn discard_removes_the_draft_and_new_message_starts_afresh() {
     assert!(harness.state().composer().is_none());
     harness.get_by_label("Draft discarded");
     assert!(harness.state_mut().mailbox_mut().run("compose.show", &json!({ "id": id })).is_err());
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     assert_ne!(harness.state().composer().unwrap().draft(), id);
 }
@@ -373,7 +373,7 @@ fn a_refused_paste_is_said_in_view_and_forgotten_when_the_composer_closes() {
     assert_eq!(harness.state().composer().unwrap().text(), "We meet at the plot at ten.", "nothing of it was taken");
     harness.get_by_role_and_label(Role::Button, "Close; the draft is kept").click();
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     assert_eq!(too_long(&harness), 0, "a new composer says nothing of the last one's paste");
 }
@@ -565,7 +565,7 @@ fn typed_text_an_agent_left_in_bcc_is_drawn_and_sent_only_as_shown() {
 #[test]
 fn the_owners_leftover_cc_text_comes_back_drawn_after_a_kill() {
     let mut harness = sending();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     type_into(&mut harness, "To", "odile@example.org,");
     harness.get_by_role_and_label(Role::Button, "Cc  Bcc").click();
@@ -608,7 +608,7 @@ fn a_refused_address_in_cc_typed_text_is_drawn_with_its_sentence() {
 #[test]
 fn send_refuses_typed_text_in_a_line_not_drawn_and_shows_the_line() {
     let mut harness = sending();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     type_into(&mut harness, "To", "odile@example.org,");
     let id = harness.state().composer().unwrap().draft();
@@ -637,7 +637,7 @@ fn composing_over(mailbox: Mailbox) -> Harness<'static, InboxApp> {
         .with_step_dt(1.0 / 60.0)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     harness
 }
@@ -793,7 +793,7 @@ fn the_reason_stands_beside_send_when_it_waits() {
 fn the_tab_order_is_the_reading_order() {
     let mut harness = harness(egui::Theme::Dark);
     harness.state_mut().mailbox_mut().run("template.save", &json!({ "account": 1, "name": "Thanks", "text": "Thank you." })).unwrap();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     type_into(&mut harness, "To", "odile@example.org,");
     harness.get_by_role_and_label(Role::Button, "Cc  Bcc").click();
@@ -1187,7 +1187,7 @@ fn opening_the_held_back_message_beside_the_docked_composer_opens_it_as_a_press_
             .with_max_steps(12)
             .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
         harness.run();
-        harness.get_by_role_and_label(Role::Button, "New message").click();
+        crate::draw::tests::new_message(&mut harness);
         harness.run();
         type_into(&mut harness, "Message text", "Hello Odile");
         if width < 980.0 {
@@ -1316,7 +1316,7 @@ fn the_composer_wipes_in_over_300_ms_then_rests() {
         .with_step_dt(0.05)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.step();
     // The caret of the line that has the keys blinks on its own: without it, only the wipe asks for frames.
     harness.ctx.memory_mut(|memory| memory.surrender_focus(super::compose::field_id(Line::To)));
@@ -1344,7 +1344,7 @@ fn typing_during_the_wipe_ends_it_at_once() {
         .with_step_dt(0.02)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.step();
     harness.step();
     assert_eq!(scan_lines(&harness).len(), 1, "wiping in");
@@ -1356,7 +1356,7 @@ fn typing_during_the_wipe_ends_it_at_once() {
 
 /// The sending harness with a new message written, ready to go: a recipient and a subject; its draft's id.
 fn written(harness: &mut Harness<'static, InboxApp>) -> u64 {
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(harness);
     harness.run();
     type_into(harness, "To", "odile@example.org,");
     type_into(harness, "Subject", "Plot");
@@ -1584,7 +1584,7 @@ fn wiping() -> Harness<'static, InboxApp> {
         .with_step_dt(0.02)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.step();
     harness.step();
     assert_eq!(scan_lines(&harness).len(), 1, "wiping in");
@@ -1628,7 +1628,7 @@ fn with_reduced_motion_the_composer_is_there_at_once() {
     harness.state_mut().run_action(&ctx, keymap::MOTION);
     harness.run();
     assert!(crate::motion::reduced(&harness.ctx), "motion reduced");
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.step();
     harness.step();
     assert!(scan_lines(&harness).is_empty(), "no wipe");
@@ -1707,7 +1707,7 @@ fn many_templates_in_a_short_window_stay_in_it() {
         let params = json!({ "account": 1, "name": format!("Template {n:02}"), "text": "Thank you." });
         harness.state_mut().mailbox_mut().run("template.save", &params).unwrap();
     }
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     harness.get_by_role_and_label(Role::Button, "Templates").click();
     harness.run();
@@ -1776,7 +1776,7 @@ fn in_a_narrow_pane_the_foot_s_coming_soon_gives_way_and_nothing_paints_through_
             .with_max_steps(12)
             .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())));
         harness.run();
-        harness.get_by_role_and_label(Role::Button, "New message").click();
+        crate::draw::tests::new_message(&mut harness);
         harness.run();
         for written in [false, true] {
             if written {
@@ -1839,7 +1839,7 @@ fn composing_at(width: f32, percent: u16) -> Harness<'static, InboxApp> {
     app.set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
     let mut harness = Harness::builder().with_size(vec2(width, 800.0)).with_max_steps(12).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     type_into(&mut harness, "To", "odile@example.org,");
     harness.run();
@@ -1885,7 +1885,7 @@ fn at_every_width_the_foot_s_controls_stand_apart_inside_the_composer_and_a_pres
 #[test]
 fn on_the_settings_the_undo_key_takes_back_a_send_during_its_countdown() {
     let mut harness = sending();
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     type_into(&mut harness, "To", "odile@example.org");
     type_into(&mut harness, "Subject", "Hello");
@@ -1905,4 +1905,79 @@ fn on_the_settings_the_undo_key_takes_back_a_send_during_its_countdown() {
     harness.run();
     harness.run();
     assert!(harness.state().counting().is_none(), "Ctrl+Z takes the send back, as the countdown's Undo names it");
+}
+
+#[test]
+fn send_from_the_command_line_sends_a_floating_draft_and_an_agent_s_call_is_refused() {
+    let mut harness = sending();
+    let id = written(&mut harness);
+    // The draft floats over the mail, the keyboard out of it.
+    harness.state_mut().composer_mut().0.unwrap().set_floating(true);
+    harness.run();
+    let focused = harness.ctx.memory(|memory| memory.focused());
+    if let Some(focused) = focused {
+        harness.ctx.memory_mut(|memory| memory.surrender_focus(focused));
+    }
+    harness.run();
+    assert!(harness.state().composer().is_some_and(crate::compose::Composer::floating), "the draft floats");
+    // An agent's call to send it is refused, by the engine's command and by the window's: nothing goes.
+    let refused = harness.state_mut().mailbox_mut().run_for_agent("mail.send", &json!({ "id": id })).unwrap_err();
+    assert_eq!(refused.code(), "not_allowed");
+    assert!(harness.state_mut().mailbox_mut().run_for_agent(keymap::SEND, &json!({})).is_err(), "the window's Send is no agent's");
+    harness.run();
+    assert!(!queued(&mut harness, id), "an agent sent the draft");
+    // Folded, the draft is not in sight: `>` lists Send disabled, saying why, and Enter sends nothing.
+    harness.state_mut().composer_mut().0.unwrap().toggle_fold();
+    harness.run();
+    assert!(harness.state().composer().is_some_and(crate::compose::Composer::folded), "the draft is folded");
+    send_from_the_line(&mut harness);
+    let send = keymap::action(keymap::SEND).unwrap().name;
+    assert!(harness.get_by_role_and_label(Role::MenuItem, send).accesskit_node().is_disabled(), "Send is listed disabled while folded");
+    assert!(super::command_line_tests::painted_text(&harness, "Unfold the draft to send it"), "the row says why");
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(!queued(&mut harness, id), "a folded draft the owner cannot see was sent");
+    assert!(harness.state().command().results(), "the refused Send stays listed, the line open");
+    assert!(harness.state().composer().is_some(), "the folded draft stays");
+    harness.key_press(Key::Escape);
+    harness.run();
+    // Unfolded, the owner's `>` Send sends it.
+    harness.state_mut().composer_mut().0.unwrap().toggle_fold();
+    harness.run();
+    send_from_the_line(&mut harness);
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(queued(&mut harness, id), "the owner's Send from the command line sent the floating draft");
+}
+
+/// Ctrl K, then `>send the message` in the command line, its results showing.
+fn send_from_the_line(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    harness.state_mut().command_mut().set_text(">send the message");
+    harness.run();
+}
+
+#[test]
+fn send_from_the_command_line_of_a_draft_that_cannot_go_says_why_as_its_send_does() {
+    let mut harness = sending();
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
+    type_into(&mut harness, "Subject", "Plot");
+    let id = harness.state().composer().unwrap().draft();
+    harness.state_mut().composer_mut().0.unwrap().set_floating(true);
+    harness.run();
+    let focused = harness.ctx.memory(|memory| memory.focused());
+    if let Some(focused) = focused {
+        harness.ctx.memory_mut(|memory| memory.surrender_focus(focused));
+    }
+    harness.run();
+    send_from_the_line(&mut harness);
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(!queued(&mut harness, id), "a draft with no recipient was sent");
+    let composer = harness.state().composer().expect("the draft stays");
+    let problem = composer.problem().expect("its Send says why");
+    assert_eq!(problem, "Add a recipient to send");
+    assert_eq!(harness.state().notice(), Some(problem.as_str()), "`>` Send says why, in the composer's own words");
 }

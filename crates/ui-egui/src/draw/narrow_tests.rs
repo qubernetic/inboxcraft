@@ -32,7 +32,7 @@ fn window(width: f32, percent: u16) -> Harness<'static, InboxApp> {
 /// [`window`] with New message open in the reader's place.
 fn composing(width: f32, percent: u16) -> Harness<'static, InboxApp> {
     let mut harness = window(width, percent);
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     harness
 }
@@ -152,7 +152,7 @@ fn the_hidden_list_takes_no_tab_stop_and_no_key() {
         harness.state_mut().run_action(&ctx, keymap::FLAG);
         harness.run();
         assert!(harness.state().can_run(keymap::DELETE) && harness.state().can_run(keymap::UNDO), "{percent}: before");
-        harness.get_by_role_and_label(Role::Button, "New message").click();
+        crate::draw::tests::new_message(&mut harness);
         harness.run();
         assert!(search_box(&harness).is_none(), "{percent}: the composer has the list's place");
         // The palette lists what `can_run` lets through and runs it through `run_action`: nothing of the hidden rows.
@@ -213,7 +213,7 @@ fn closing_the_composer_brings_the_list_back_with_its_place_and_its_pick() {
     harness.run();
     let (picked, before) = (harness.state().mailbox().selected(), row(&harness));
     assert!(picked.is_some() && before.is_some());
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     assert!(search_box(&harness).is_none(), "hidden while the composer is docked");
     harness.get_by_label("Close; the draft is kept").click();
@@ -289,7 +289,7 @@ fn where_the_list_stands_at_its_least_a_group_s_head_hovered_stands_whole() {
             let ids = harness.state().mailbox().messages().iter().map(|row| row.id).collect();
             let group = crate::mailbox::Group { icon: crate::iconset::IconId::Inbox, name: "Bakery orders".to_owned(), messages: ids };
             harness.state_mut().mailbox_mut().set_showcase(crate::mailbox::Showcase { screener: Vec::new(), groups: vec![group] });
-            harness.get_by_role_and_label(Role::Button, "New message").click();
+            crate::draw::tests::new_message(&mut harness);
             harness.run();
             harness
         };

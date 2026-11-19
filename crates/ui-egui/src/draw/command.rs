@@ -25,9 +25,6 @@ use crate::palette::Row;
 use crate::theme::Theme;
 use crate::tr;
 
-/// The room the window's controls keep at the command line's right end, in points: 12, the three controls' 108, 4.
-const CONTROLS: f32 = 124.0;
-
 /// The most rows of people or mailboxes listed.
 const MOST_ROWS: usize = 50;
 
@@ -147,25 +144,25 @@ fn inside_results(ctx: &Context) -> bool {
     ctx.memory(|memory| memory.focused()).and_then(|focused| ctx.read_response(focused)).is_some_and(|focused| focused.layer_id == layer)
 }
 
-/// The field's box in the command line `rect`: from the index's column to the window's controls, its height
-/// centred.
-fn field_rect(rect: Rect, theme: &Theme, index: f32) -> Rect {
+/// The field's box in the command line `rect`: from the index's column to `room` before the line's right end (the
+/// window's controls, when they stand there), its height centred.
+fn field_rect(rect: Rect, theme: &Theme, index: f32, room: f32) -> Rect {
     let high = command_field::height(theme);
     let left = rect.left() + index;
-    let right = (rect.right() - CONTROLS).max(left + high);
+    let right = (rect.right() - room).max(left + high);
     let top = (rect.center().y - high / 2.0).round();
     Rect::from_min_max(pos2(left, top), pos2(right, top + high))
 }
 
 /// Draws the command line into `ui` over `line` (the command line's region; `index` how far in from its left the field
-/// starts), `mailbox` the name of the
-/// mailbox shown for a narrowed search, and its results for `lists`; what was asked for.
+/// starts, `room` what it leaves at the line's right end), `mailbox` the name of the mailbox shown for a narrowed
+/// search, and its results for `lists`; what was asked for.
 pub(super) fn show(
     ui: &mut Ui,
     theme: &Theme,
     keymap: &Keymap,
     command: &mut Command,
-    (line, index, mailbox): (Rect, f32, &str),
+    (line, index, room, mailbox): (Rect, f32, f32, &str),
     lists: &Lists,
     early: Early,
 ) -> Vec<Asked> {
@@ -177,7 +174,7 @@ pub(super) fn show(
     if command.results() && !command.has_focus(&ctx) && !inside_results(&ctx) {
         ctx.memory_mut(|memory| memory.request_focus(field_id()));
     }
-    let rect = field_rect(line, theme, index);
+    let rect = field_rect(line, theme, index, room);
     let scope = match command.mode() {
         Mode::Command => Scope::Commands,
         Mode::Person => Scope::People,

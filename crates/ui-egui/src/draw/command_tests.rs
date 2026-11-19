@@ -24,7 +24,13 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn sized(theme: egui::Theme, size: egui::Vec2) -> Harness<'static, InboxApp> {
-    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    sized_in(theme, size, false)
+}
+
+/// [`sized`], in a native window that draws its own frame when `own`: the command line is the title bar.
+fn sized_in(theme: egui::Theme, size: egui::Vec2, own: bool) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.set_own_frame(own);
     let mut harness =
         Harness::builder().with_size(size).with_theme(theme).with_max_steps(12).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
@@ -53,7 +59,7 @@ fn type_in(harness: &mut Harness<'static, InboxApp>, text: &str) {
 }
 
 /// Whether the last frame painted a text that reads `wanted`.
-fn painted_text(harness: &Harness<'static, InboxApp>, wanted: &str) -> bool {
+pub(super) fn painted_text(harness: &Harness<'static, InboxApp>, wanted: &str) -> bool {
     fn find(shape: &egui::Shape, wanted: &str) -> bool {
         match shape {
             egui::Shape::Vec(inner) => inner.iter().any(|shape| find(shape, wanted)),
@@ -117,7 +123,9 @@ fn palette_list(harness: &Harness<'static, InboxApp>, screen: keymap::Scope) -> 
         .into_iter()
         .filter(|row| keymap::scope(row.id).meets(screen))
         .map(|row| {
-            let runs = app.can_run(row.id) && !crate::component::soon::blocked(&harness.ctx, row.id);
+            // Send from the line sends any draft drawn, floating too.
+            let can = if row.id == keymap::SEND { app.composer().is_some() && !app.settings().is_open() } else { app.can_run(row.id) };
+            let runs = can && !crate::component::soon::blocked(&harness.ctx, row.id);
             (row.name.into_owned(), runs)
         })
         .collect()
@@ -444,13 +452,13 @@ fn a_press_beside_the_results_closes_them_and_reaches_nothing() {
     assert_eq!(harness.state().mailbox().selected(), selected);
 }
 
-/// The eight frames of the command line at 1440 × 900, each in dark and light: the field 1081 × 28 at 234,9 (the
-/// command line's 233,8 inside the window's 1 px edge), the results the field's width straight under it.
+/// The eight frames of the command line at 1440 × 900 in the app's own frame, each in dark and light: the field 1081 × 28
+/// at 234,9 (the command line's 233,8 inside the window's 1 px edge), the results the field's width straight under it.
 #[test]
 fn the_eight_frames_stand_where_the_design_draws_them() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         // rest: the hint and the key that opens it.
-        let mut harness = sized(theme, vec2(1440.0, 900.0));
+        let mut harness = sized_in(theme, vec2(1440.0, 900.0), true);
         // The harness lays the window 8 in: the frame's numbers are from the window's corner.
         let laid = super::shell::laid(&harness.ctx).unwrap();
         let corner = laid.command.min - egui::vec2(1.0, 1.0);
@@ -511,6 +519,19 @@ fn every_control_is_reached_by_tab_and_the_open_line_rests_but_for_the_caret() {
     let unreached = keyboard_walk(&mut harness);
     assert!(!unreached.iter().any(|label| label == "Command line"), "{unreached:?}");
     assert!(rests(&mut harness, 8), "the closed command line asks for no frame");
+}
+
+#[test]
+fn the_closed_command_field_with_the_keyboard_repaints_only_on_the_caret_s_timer() {
+    let mut harness = harness_resting();
+    // The window's first Tab stop is the command line's field.
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert!(field_focused(&harness), "Tab reaches the field");
+    assert!(!harness.state().command().results(), "with nothing typed the line stays closed");
+    harness.run_steps(60);
+    let delay = harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap_or(std::time::Duration::MAX);
+    assert!(delay >= std::time::Duration::from_millis(200), "the closed field with the keyboard asks for a frame in {delay:?}");
 }
 
 fn harness_resting() -> Harness<'static, InboxApp> {
@@ -612,5 +633,38 @@ fn a_page_row_has_no_key_where_settings_shows_its_own() {
         let unbound: Vec<usize> = names.iter().map(|name| texts_in(&harness, harness.get_by_role_and_label(Role::MenuItem, name).rect())).collect();
         assert_eq!(bound, unbound, "no key column on a page row");
         assert!(bound.iter().all(|texts| *texts >= 2), "its icon and its name: {bound:?}");
+    }
+}
+
+#[test]
+fn over_the_event_editor_the_command_list_offers_only_the_editor_s_and_the_window_s_commands() {
+    let window: Vec<String> = crate::palette::rows("")
+        .into_iter()
+        .filter(|row| crate::surface::EDITOR_KEYS.contains(&row.id) && keymap::scope(row.id).meets(keymap::Scope::Calendar))
+        .map(|row| row.name.into_owned())
+        .chain(["A plugin's command".to_owned()])
+        .collect();
+    for editing in [false, true] {
+        let mut harness = harness(egui::Theme::Light);
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, keymap::CALENDAR);
+        harness.run();
+        if editing {
+            harness.get_by_role_and_label(Role::Button, "New event").click();
+            harness.run();
+            assert!(harness.state().calendar().editor().is_some(), "the editor shows");
+        }
+        harness.state_mut().run_action(&ctx, keymap::PALETTE);
+        harness.run();
+        type_in(&mut harness, ">");
+        let names: Vec<String> = rows(&harness).into_iter().map(|(name, _)| name).collect();
+        if editing {
+            assert_eq!(names, window, "over the editor: the window's commands (settings, shortcuts, the look, this line)");
+        } else {
+            assert!(names.len() > window.len(), "the calendar alone lists more: {names:?}");
+            for name in ["Show mail", "New message", "Show the calendar"] {
+                assert!(names.iter().any(|listed| listed.starts_with(name)), "{name} without the editor: {names:?}");
+            }
+        }
     }
 }

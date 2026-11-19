@@ -211,7 +211,7 @@ fn on_the_settings_a_key_with_ctrl_runs_nothing_of_the_mail_and_new_message_leav
     esc(&mut harness);
     assert!(!harness.state().command().results() && harness.state().settings().is_open(), "one Esc, the palette's");
     // New message, its button pressed, leaves the settings for the mail and begins a message.
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     harness.run();
     assert!(!harness.state().settings().is_open(), "New message leaves the settings");
@@ -227,21 +227,19 @@ fn on_the_settings_a_key_with_ctrl_runs_nothing_of_the_mail_and_new_message_leav
 }
 
 #[test]
-fn the_new_message_button_on_the_settings_begins_a_message_with_the_default_keys_by_a_press_and_by_activate() {
-    for activate in [false, true] {
-        let mut harness = harness(false);
-        open_settings(&mut harness);
-        let button = harness.get_by_role_and_label(Role::Button, "New message");
-        if activate {
-            button.click_accesskit();
-        } else {
-            button.click();
-        }
-        harness.run();
-        harness.run();
-        assert!(!harness.state().settings().is_open(), "activate {activate}: New message leaves the settings");
-        assert!(harness.state().composer().is_some(), "activate {activate}: and begins a message, its key C being bare");
-    }
+fn new_message_from_the_command_line_on_the_settings_begins_a_message() {
+    // The command line draws no New message control: `>` lists it, and from the settings it begins a message too.
+    let mut harness = harness(false);
+    open_settings(&mut harness);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    harness.state_mut().command_mut().set_text(">new message");
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.run();
+    assert!(!harness.state().settings().is_open(), "New message leaves the settings");
+    assert!(harness.state().composer().is_some(), "and begins a message");
 }
 
 #[test]
@@ -371,7 +369,7 @@ fn new_message_pressed_with_the_composer_in_front_keeps_its_draft_and_starts_no_
     harness.get_by_role_and_label(Role::MultilineTextInput, "Message text").type_text("Seeds on Friday");
     harness.run();
     let text = harness.state().composer().map(|composer| composer.text().to_owned());
-    harness.get_by_role_and_label(Role::Button, "New message").click();
+    crate::draw::tests::new_message(&mut harness);
     harness.run();
     harness.run();
     let composer = harness.state().composer().unwrap();
@@ -402,4 +400,36 @@ fn on_the_settings_the_undo_key_without_a_toast_takes_nothing_back() {
     harness.run();
     harness.run();
     assert!(archived(&harness, first), "the older act stays: Undo rests on the settings without a toast");
+}
+
+/// The act's toast stands over the window while the command line's results show; a screen reader's activate (which
+/// egui's layers do not stop) or a press on its Undo takes back nothing under them, as no control under them acts.
+#[test]
+fn the_act_s_undo_takes_nothing_back_under_the_command_line_s_results() {
+    for activate in [true, false] {
+        let mut harness = harness(false);
+        let first = harness.state().mailbox().messages().first().map(|row| row.id).unwrap();
+        harness.state_mut().mailbox_mut().act(first, crate::mailbox::Act::Archive);
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        harness.state_mut().command_mut().set_text(">zz");
+        harness.run();
+        assert!(harness.state().command().results(), "the results show");
+        let undo = harness.get_by_role_and_label(Role::Button, "Undo");
+        if activate {
+            undo.click_accesskit();
+        } else {
+            undo.click();
+        }
+        harness.run();
+        assert!(!harness.state().mailbox().messages().iter().any(|row| row.id == first), "activate {activate}: Undo ran under the results");
+        assert!(harness.state().mailbox().can_undo(), "activate {activate}: the act is still there to undo");
+        // Closed, the toast's Undo takes it back.
+        harness.key_press(Key::Escape);
+        harness.run();
+        harness.get_by_role_and_label(Role::Button, "Undo").click();
+        harness.run();
+        assert!(harness.state().mailbox().messages().iter().any(|row| row.id == first), "activate {activate}: Undo after the results");
+    }
 }

@@ -563,8 +563,8 @@ fn press_off_the_settings(harness: &mut Harness<'static, InboxApp>, label: &str)
 fn the_typed_form_outlasts_every_way_out_of_the_settings() {
     let ways = ["settings' key", "Appearance", "back", "index place", "mailbox", "account picker", "New message", "palette"];
     for way in ways {
-        // The ways by the index and the command line on the sample, whose index has its mailboxes and account picker and
-        // whose command line has New message.
+        // The ways by the index and New message (as `>` runs it) on the sample, whose index has its mailboxes and
+        // account picker and which has an account to write from.
         let sample = matches!(way, "index place" | "mailbox" | "account picker" | "New message");
         let app = if sample {
             InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()))
@@ -583,7 +583,10 @@ fn the_typed_form_outlasts_every_way_out_of_the_settings() {
             "palette" => harness.key_press_modifiers(Modifiers::COMMAND, Key::K),
             "index place" => press_off_the_settings(&mut harness, "Calendar"),
             "mailbox" => press_off_the_settings(&mut harness, "Sent"),
-            "New message" => press_off_the_settings(&mut harness, "New message"),
+            "New message" => {
+                let ctx = harness.ctx.clone();
+                harness.state_mut().run_action(&ctx, crate::keymap::COMPOSE);
+            }
             _ => {
                 press_off_the_settings(&mut harness, "Show mail of");
                 harness.run();
@@ -1466,7 +1469,7 @@ fn form_with_a_password(list: bool, own: bool) -> Harness<'static, InboxApp> {
     let mut app = app(&Kept::default(), FakeWorkers::passing());
     if own {
         app.set_own_frame(true);
-        app.set_frame(inboxcraft_engine::appearance::WindowFrame::Strip);
+        app.set_frame(inboxcraft_engine::appearance::WindowFrame::Own);
     }
     let mut harness = Harness::builder()
         .with_size(vec2(1440.0, 900.0))

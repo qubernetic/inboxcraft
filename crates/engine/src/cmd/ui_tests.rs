@@ -29,23 +29,29 @@ fn a_new_session_has_the_default_appearance() {
     assert_eq!(Appearance::default().theme, ThemeMode::System);
     assert_eq!(Appearance::default().text_scale, 100);
     assert_eq!(Appearance::default().motion, Motion::System);
-    assert_eq!(Appearance::default().frame, WindowFrame::Strip);
+    assert_eq!(Appearance::default().frame, WindowFrame::Own);
 }
 
 #[test]
-fn frame_set_takes_system_top_row_or_strip_and_refuses_anything_else() {
+fn frame_set_takes_system_or_own_reads_the_old_own_frames_as_own_and_refuses_anything_else() {
     let mut session = session();
-    for (name, expected) in [("system", WindowFrame::System), ("top_row", WindowFrame::TopRow), ("strip", WindowFrame::Strip)] {
+    for (name, expected) in [
+        ("system", WindowFrame::System),
+        ("own", WindowFrame::Own),
+        ("system", WindowFrame::System),
+        ("top_row", WindowFrame::Own),
+        ("system", WindowFrame::System),
+        ("strip", WindowFrame::Own),
+    ] {
         let answer = session.run_as(Caller::Agent, "ui.frame.set", &json!({ "frame": name })).unwrap();
-        assert_eq!(answer["appearance"]["frame"], name);
-        assert_eq!(session.appearance().frame, expected);
+        assert_eq!(answer["appearance"]["frame"], expected.id(), "{name}: the answer says the frame mapped");
+        assert_eq!(session.appearance().frame, expected, "{name}");
     }
-    for junk in [json!({}), json!({ "frame": "title" }), json!({ "frame": 1 }), json!({ "frame": "strip", "more": true })] {
+    for junk in [json!({}), json!({ "frame": "title" }), json!({ "frame": 1 }), json!({ "frame": "strip", "more": true }), json!({ "frame": "Own" })]
+    {
         assert!(bad(session.run("ui.frame.set", &junk)), "{junk}");
     }
-    let kept = Appearance::from_value(&json!({ "frame": "top_row" }));
-    assert_eq!(kept.frame, WindowFrame::TopRow);
-    assert_eq!(Appearance::from_value(&json!({ "frame": "window" })).frame, WindowFrame::Strip);
+    assert_eq!(session.appearance().frame, WindowFrame::Own, "a refused set changes nothing");
 }
 
 #[test]
@@ -145,13 +151,13 @@ fn one_command_changes_only_its_own_choice() {
     assert_eq!(appearance.theme, ThemeMode::Dark);
     assert_eq!(appearance.motion, Motion::Reduce);
     assert_eq!(appearance.text_scale, 120);
-    assert_eq!(appearance.frame, WindowFrame::Strip);
+    assert_eq!(appearance.frame, WindowFrame::Own);
 }
 
 #[test]
 fn a_restored_appearance_is_what_the_commands_start_from() {
     let mut session = session();
-    let restored = Appearance { theme: ThemeMode::Light, frame: WindowFrame::TopRow, ..Appearance::default() };
+    let restored = Appearance { theme: ThemeMode::Light, frame: WindowFrame::System, ..Appearance::default() };
     session.set_appearance(restored);
     session.run("ui.motion.set", &json!({ "reduce": "on" })).unwrap();
     assert_eq!(*session.appearance(), Appearance { motion: Motion::Reduce, ..restored });
@@ -181,19 +187,6 @@ fn the_removed_appearance_commands_are_unknown() {
     ] {
         assert_eq!(session.run(id, &params).unwrap_err(), EngineError::UnknownCommand(id.into()), "{id}");
         assert!(session.registry().get(id).is_none(), "{id}");
-    }
-}
-
-#[test]
-fn the_desktop_s_frame_keeps_the_own_frame_last_on_to_come_back_to() {
-    let mut session = session();
-    assert_eq!(session.appearance().own_frame, WindowFrame::Strip, "the strip until another own frame is on");
-    for own in [WindowFrame::Strip, WindowFrame::TopRow] {
-        session.run("ui.frame.set", &json!({ "frame": own.id() })).unwrap();
-        let answer = session.run("ui.frame.set", &json!({ "frame": "system" })).unwrap();
-        assert_eq!(session.appearance().frame, WindowFrame::System);
-        assert_eq!(session.appearance().own_frame, own, "the own frame left for the desktop's");
-        assert_eq!(answer["appearance"]["own_frame"], own.id());
     }
 }
 

@@ -106,17 +106,24 @@ pub const fn effective(level: MotionLevel, chosen: bool, system_reduces: bool) -
 }
 
 choice! {
-    /// Who draws the window's frame: the desktop's title bar, or the app's own (its window controls in the top row,
-    /// or on a slim strip of its own above the panes). Only a native window has a frame; elsewhere this is kept and
+    /// Who draws the window's frame: the desktop's title bar, or the app's own (the command line is the title bar: it
+    /// moves the window and holds the window controls). Only a native window has a frame; elsewhere this is kept and
     /// does nothing.
     WindowFrame {
         /// The desktop's title bar.
         System = "system",
-        /// The window controls in the top row, no title bar.
-        TopRow = "top_row",
-        /// A slim strip of the app's own with the title and the window controls.
-        Strip = "strip",
-    } default Strip
+        /// The app's own: the command line is the title bar.
+        Own = "own",
+    } default Own
+}
+
+impl WindowFrame {
+    /// The choice with this id, or the own frame for the ids of the two own frames of older versions (`top_row`,
+    /// `strip`): what a kept appearance and the `ui.frame.set` command read.
+    #[must_use]
+    pub fn read(id: &str) -> Option<Self> {
+        Self::named(id).or_else(|| matches!(id, "top_row" | "strip").then_some(Self::Own))
+    }
 }
 
 /// Every appearance choice.
@@ -138,15 +145,11 @@ pub struct Appearance {
     pub motion_reduced: bool,
     /// Who draws the window's frame.
     pub frame: WindowFrame,
-    /// The app's own frame last on, the top row or the strip, never [`WindowFrame::System`]: the one the own frame
-    /// comes back as after the desktop's title bar.
-    pub own_frame: WindowFrame,
 }
 
 impl Default for Appearance {
     fn default() -> Self {
-        let frame = WindowFrame::default();
-        Self { theme: ThemeMode::default(), text_scale: 100, motion: Motion::default(), motion_reduced: false, frame, own_frame: frame }
+        Self { theme: ThemeMode::default(), text_scale: 100, motion: Motion::default(), motion_reduced: false, frame: WindowFrame::default() }
     }
 }
 
@@ -161,7 +164,6 @@ impl Appearance {
             "motion_level": self.motion_level().id(),
             "motion_chosen": self.motion_chosen(),
             "frame": self.frame.id(),
-            "own_frame": self.own_frame.id(),
         })
     }
 
@@ -171,14 +173,14 @@ impl Appearance {
     ///
     /// Motion is `motion_level` with `motion_chosen` (missing or not a boolean: chosen; not chosen: the default
     /// level). Without a level that can be read, the field `motion` of older versions maps: `system` to the default
-    /// level not chosen, `reduce` to off, `full` to full; a level's own name there reads as that level, chosen.
+    /// level not chosen, `reduce` to off, `full` to full; a level's own name there reads as that level, chosen. The
+    /// frame `top_row` or `strip` of older versions reads as the own frame ([`WindowFrame::read`]).
     #[must_use]
     pub fn from_value(value: &Value) -> Self {
         let empty = Map::new();
         let object = value.as_object().unwrap_or(&empty);
         let text = |key: &str| object.get(key).and_then(Value::as_str);
         let default = Self::default();
-        let frame = text("frame").and_then(WindowFrame::named).unwrap_or(default.frame);
         let motion = match text("motion_level").and_then(MotionLevel::named) {
             Some(level) => Some((level, object.get("motion_chosen").and_then(Value::as_bool).unwrap_or(true))),
             None => text("motion").and_then(|old| match Motion::named(old) {
@@ -197,8 +199,7 @@ impl Appearance {
                 .and_then(|percent| u16::try_from(percent).ok())
                 .filter(|percent| TEXT_SCALES.contains(percent))
                 .unwrap_or(default.text_scale),
-            frame,
-            own_frame: Self::own_of(frame, text("own_frame").and_then(WindowFrame::named)),
+            frame: text("frame").and_then(WindowFrame::read).unwrap_or(default.frame),
             ..default
         }
         .with_motion(level, chosen)
@@ -239,13 +240,6 @@ impl Appearance {
     #[must_use]
     pub const fn motion_chosen(&self) -> bool {
         self.motion_reduced || !matches!(self.motion, Motion::System)
-    }
-
-    /// The own frame to keep beside `frame`: `frame` itself when it is one of the app's own, else `kept` when that is
-    /// one, else the default.
-    #[must_use]
-    pub fn own_of(frame: WindowFrame, kept: Option<WindowFrame>) -> WindowFrame {
-        [Some(frame), kept].into_iter().flatten().find(|own| *own != WindowFrame::System).unwrap_or_default()
     }
 }
 

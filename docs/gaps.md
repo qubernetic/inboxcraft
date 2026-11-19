@@ -474,8 +474,8 @@ time from the code as it is, not measured.
 
 - **The app's own window frame** (#104) has round corners (12 points) and a one-pixel outline but no shadow of its
   own, and the corners need a compositor that shows a window's see-through pixels. It resizes from a 5-point band
-  at each edge and corner. In the top-row frame a drag moves the window only in the band of the panes' first rows
-  where no control takes the press; the strip moves it by any drag. The desktop's own snapping and its window menu
+  at each edge and corner. The command line is the title bar: a drag moves the window where neither the field nor a
+  window control takes the press (the mark's column, the gap before the controls). The desktop's own snapping and its window menu
   (right click on a title bar) are not offered. Pictures and the web build draw no
   frame, so the screens in `docs/images` show the window's content only.
 - **The rail** (#104) offers Start and Pins before those views exist: they are disabled and say "Not available
