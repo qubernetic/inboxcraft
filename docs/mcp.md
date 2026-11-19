@@ -54,6 +54,9 @@ letters, digits, `_` and `-` only.
 | `mail_why` | `mail.why` | `id` |
 | `week_settings` | `week.settings` | none |
 
+The tools are this fixed list, not every `safe` command: `sync.status`, for one, is not a tool and runs through the
+CLI and the control channel.
+
 Each tool's `inputSchema` lists its arguments; unknown ones are refused. `mail_read` marks the message opened on this
 computer, as reading it in the app does, and changes nothing on the server.
 

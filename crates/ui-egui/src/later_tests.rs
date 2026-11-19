@@ -175,8 +175,25 @@ fn the_presets_come_from_the_engine_with_their_names() {
     assert!(mailbox.presets().is_empty(), "read when a picker opens");
     mailbox.load_presets();
     let names: Vec<&str> = mailbox.presets().iter().map(|(name, _)| name.as_str()).collect();
-    assert_eq!(names, ["Later today", "This evening", "Tomorrow morning"]);
+    assert_eq!(names, ["Later today", "This evening", "Tomorrow morning", "This weekend", "Next week"]);
     assert!(mailbox.presets().iter().all(|(_, at)| *at > mailbox.now()));
+    // Thursday 5 November 2026 09:00 UTC: Saturday 7 at 09:00, and the week from Monday 9 at 09:00 (not 08:00).
+    let at = |name: &str| mailbox.presets().iter().find(|(shown, _)| shown == name).map(|(_, at)| at.unix_seconds());
+    assert_eq!(at("This weekend"), Some(NOW + 2 * 86_400));
+    assert_eq!(at("Next week"), Some(NOW + 4 * 86_400));
+}
+
+#[test]
+fn with_saturday_first_this_weekend_and_next_week_both_show_at_the_same_time() {
+    let mut mailbox = mailbox();
+    mailbox.run("week.set", &serde_json::json!({ "first_day": "saturday" })).unwrap();
+    mailbox.load_presets();
+    let names: Vec<&str> = mailbox.presets().iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, ["Later today", "This evening", "Tomorrow morning", "This weekend", "Next week"], "both, in the engine's order");
+    let at = |name: &str| mailbox.presets().iter().find(|(shown, _)| shown == name).map(|(_, at)| at.unix_seconds());
+    // The week holding Thursday 12 November starts on Saturday 7: the same moment as this weekend.
+    assert_eq!(at("This weekend"), Some(NOW + 2 * 86_400));
+    assert_eq!(at("Next week"), Some(NOW + 2 * 86_400));
 }
 
 #[test]

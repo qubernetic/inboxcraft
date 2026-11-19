@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! A day of the calendar, counted from 1 January 1970, with the names the calendar screen gives it. Weeks start on
-//! Monday.
+//! A day of the calendar, counted from 1 January 1970, with the names the calendar screen gives it. Weeks are counted
+//! by the owner's [`WeekRule`] (the session's `week.set`): the day they start on and the year's first week come from
+//! the time crate, never from arithmetic of the calendar's own.
 
-use inboxcraft_time::{CivilDateTime, Offset, Timestamp, Weekday};
+use inboxcraft_time::{CivilDateTime, Offset, Timestamp, WeekRule, Weekday};
 
 use crate::tr;
 
@@ -80,17 +81,11 @@ impl Day {
         self.civil().map_or(Weekday::Thursday, CivilDateTime::weekday)
     }
 
-    /// The days since Monday: 0 on a Monday, 6 on a Sunday.
+    /// The first day of the day's week as `rule` counts it ([`WeekRule::first_day_of`]); the day itself when that
+    /// week starts outside the years the calendar knows.
     #[must_use]
-    pub fn weekday_index(self) -> i64 {
-        // 1 January 1970 was a Thursday.
-        self.0.saturating_add(3).rem_euclid(7)
-    }
-
-    /// The Monday of the day's week.
-    #[must_use]
-    pub fn monday(self) -> Self {
-        self.plus(-self.weekday_index())
+    pub fn week_start(self, rule: WeekRule) -> Self {
+        self.civil().and_then(|civil| rule.first_day_of(civil)).and_then(|first| Self::new(first.year(), first.month(), first.day())).unwrap_or(self)
     }
 
     /// The first day of the day's month.
@@ -107,12 +102,11 @@ impl Day {
         u8::try_from(month).ok().and_then(|month| Self::new(year, month, 1)).unwrap_or(self.first_of_month())
     }
 
-    /// The day's week of the year as ISO 8601 counts it (weeks from Monday; week 1 holds the year's first Thursday).
+    /// The number of the day's week in its week-year as `rule` counts it ([`WeekRule::week`]), 1 to 53; `None` when
+    /// that week starts outside the years the calendar knows.
     #[must_use]
-    pub fn iso_week(self) -> i64 {
-        let thursday = self.monday().plus(3);
-        let first = Self::new(thursday.year(), 1, 1).unwrap_or(thursday);
-        thursday.since(first).div_euclid(7).saturating_add(1)
+    pub fn week_number(self, rule: WeekRule) -> Option<u8> {
+        rule.week(self.civil()?).map(|week| week.number)
     }
 
     /// The day's midnight in UTC, as the engine reads a moment: `2026-11-09T00:00:00Z`.
@@ -159,15 +153,15 @@ pub fn weekday_short(weekday: Weekday) -> &'static str {
     }
 }
 
-/// The letter of the weekday `index` days after Monday, over a column of the mini month.
+/// The letter of `weekday`, over a column of the mini month.
 #[must_use]
-pub fn weekday_letter(index: i64) -> &'static str {
-    match index {
-        0 => tr!("M"),
-        1 | 3 => tr!("T"),
-        2 => tr!("W"),
-        4 => tr!("F"),
-        _ => tr!("S"),
+pub fn weekday_letter(weekday: Weekday) -> &'static str {
+    match weekday {
+        Weekday::Monday => tr!("M"),
+        Weekday::Tuesday | Weekday::Thursday => tr!("T"),
+        Weekday::Wednesday => tr!("W"),
+        Weekday::Friday => tr!("F"),
+        Weekday::Saturday | Weekday::Sunday => tr!("S"),
     }
 }
 

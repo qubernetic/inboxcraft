@@ -7,7 +7,7 @@
 mod support;
 
 use inboxcraft_model::{
-    AccountId, CheckStep, ConnectionState, ErrorKind, EventKind, FolderId, FolderState, Job, JobId, JobKind, SpecialUse, StepStatus,
+    AccountId, CheckStep, ConnectionState, ErrorKind, EventKind, FolderId, FolderState, Job, JobId, JobKind, SpecialUse, StepStatus, UidSet,
 };
 use inboxcraft_net::SyncConfig;
 use inboxcraft_testkit::Fault;
@@ -311,6 +311,216 @@ fn the_worker_ends_when_nobody_listens() -> Result {
     run.job(JobKind::SyncFolderList)?;
     drop(run.events);
     // The thread sees the closed channel after the first event and ends; stop does not hang.
+    run.worker.stop();
+    Ok(())
+}
+
+/// The progress the events tell, as `(done, of)`, with `None` for an end of a round.
+fn told(events: &[EventKind]) -> Vec<Option<(u32, u32)>> {
+    events
+        .iter()
+        .filter_map(|kind| match kind {
+            EventKind::SyncProgress { done, of } => Some(Some((*done, *of))),
+            EventKind::SyncFinished { .. } => Some(None),
+            _ => None,
+        })
+        .collect()
+}
+
+fn sync(run: &mut Run, folder: u64, name: &str) -> Result<JobId> {
+    run.job(JobKind::SyncFolder { folder: FolderId::new(folder), path: path(name)?, known: None })
+}
+
+#[test]
+fn a_round_of_folder_syncs_tells_its_progress_and_its_end() -> Result {
+    let before = support::wall().now();
+    let mut run = Run::sample()?;
+    sync(&mut run, 10, "INBOX")?;
+    sync(&mut run, 11, "Sent")?;
+    sync(&mut run, 12, "Lists/Rust")?;
+    // Up to the end of the round that brings the folders counted to three.
+    let mut ended = 0;
+    let events = run.rounds(|kind| {
+        if let EventKind::SyncProgress { done, of } = kind
+            && done == of
+        {
+            ended += *of;
+        }
+        ended == 3 && matches!(kind, EventKind::SyncFinished { .. })
+    })?;
+    // The jobs may come in one round or more, as the worker takes them; each round starts at 0, counts up by one
+    // and ends with every folder done.
+    let mut rounds = Vec::new();
+    let mut round: Vec<(u32, u32)> = Vec::new();
+    for told in told(&events) {
+        match told {
+            Some(progress) => round.push(progress),
+            None => rounds.push(std::mem::take(&mut round)),
+        }
+    }
+    assert!(round.is_empty(), "{events:?}");
+    let mut all = 0;
+    for round in &rounds {
+        let of = round.first().map_or(0, |(_, of)| *of);
+        let expected: Vec<(u32, u32)> = (0..=of).map(|done| (done, of)).collect();
+        assert_eq!(round, &expected, "{events:?}");
+        all += of;
+    }
+    assert_eq!(all, 3, "{events:?}");
+    // Each step comes after the sync of its folder: the folders counted never outrun the folders synced.
+    let (mut synced, mut counted) = (0_u32, 0_u32);
+    for kind in &events {
+        match kind {
+            EventKind::FolderSynced { .. } => synced += 1,
+            EventKind::SyncProgress { done, of } => {
+                assert!(counted + *done <= synced, "progress {done} of {of} before its folder's sync: {events:?}");
+                if done == of {
+                    counted += *of;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(EventKind::SyncFinished { at }) = events.last() else { return Err("no end".into()) };
+    assert!(*at >= before, "the worker's clock");
+    run.finish()?;
+    Ok(())
+}
+
+#[test]
+fn a_round_with_a_folder_that_failed_tells_no_end() -> Result {
+    let mut run = Run::sample()?;
+    sync(&mut run, 99, "Nowhere")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::SyncProgress { done: 1, .. }))?;
+    assert_eq!(told(&events), [Some((0, 1)), Some((1, 1))], "{events:?}");
+    // The next round tells its own end, and nothing of the failed one came in between.
+    sync(&mut run, 10, "INBOX")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::SyncFinished { .. }))?;
+    assert_eq!(told(&events), [Some((0, 1)), Some((1, 1)), None], "{events:?}");
+    run.finish()?;
+    Ok(())
+}
+
+#[test]
+fn a_round_that_cannot_sign_in_ends_without_an_end() -> Result {
+    let mut run = Run::start(FakeImap::new(), Some("wrong"), SyncConfig::default())?;
+    sync(&mut run, 10, "INBOX")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::SyncProgress { done: 1, .. }))?;
+    assert_eq!(told(&events), [Some((0, 1)), Some((1, 1))], "{events:?}");
+    assert!(events.contains(&EventKind::Failed { kind: ErrorKind::LoginRefused, folder: Some(INBOX) }), "{events:?}");
+    run.worker.stop();
+    Ok(())
+}
+
+#[test]
+fn a_resync_of_the_watched_folder_tells_that_the_account_is_current() -> Result {
+    let mut run = Run::sample()?;
+    run.job(JobKind::Idle { folder: INBOX, path: path("INBOX")? })?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::FolderSynced { folder, .. } if *folder == INBOX))?;
+    assert_eq!(told(&events), [], "a resync is no round: {events:?}");
+    // The end comes right after the resync.
+    let next = run.rounds(|_| true)?;
+    assert!(matches!(next[..], [EventKind::SyncFinished { .. }]), "{next:?}");
+    run.finish()?;
+    Ok(())
+}
+
+#[test]
+fn after_a_failed_round_the_watched_folder_tells_no_end_until_a_round_ends_clean() -> Result {
+    let mut run = Run::sample()?;
+    run.job(JobKind::Idle { folder: INBOX, path: path("INBOX")? })?;
+    run.rounds(|kind| matches!(kind, EventKind::SyncFinished { .. }))?;
+    run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
+    sync(&mut run, 99, "Nowhere")?;
+    // The round fails; the watched folder is synced again after it, and tells no end.
+    let events = run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
+    assert_eq!(told(&events), [Some((0, 1)), Some((1, 1))], "{events:?}");
+    assert!(events.iter().any(|kind| matches!(kind, EventKind::FolderSynced { folder, .. } if *folder == INBOX)), "{events:?}");
+    sync(&mut run, 11, "Sent")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::SyncFinished { .. }))?;
+    assert_eq!(told(&events), [Some((0, 1)), Some((1, 1)), None], "{events:?}");
+    run.finish()?;
+    Ok(())
+}
+
+#[test]
+fn a_round_with_any_job_that_failed_in_it_tells_no_end() -> Result {
+    let mut run = Run::sample()?;
+    run.job(JobKind::Idle { folder: INBOX, path: path("INBOX")? })?;
+    run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
+    // Sent while the worker waits in IDLE: one round of two folder syncs, with a move out of a folder that is gone
+    // between them.
+    sync(&mut run, 11, "Sent")?;
+    run.job(JobKind::Move {
+        folder: FolderId::new(99),
+        path: path("Nowhere")?,
+        uid_validity: validity(7)?,
+        uids: [uid(1)?].into_iter().collect::<UidSet>(),
+        to: FolderId::new(11),
+        to_path: path("Sent")?,
+    })?;
+    sync(&mut run, 12, "Lists/Rust")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::SyncProgress { done: 2, of: 2 }))?;
+    assert!(events.iter().any(|kind| matches!(kind, EventKind::Failed { .. })), "{events:?}");
+    // The watched folder's resync after it tells no end either.
+    let events = run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
+    assert_eq!(told(&events), [], "{events:?}");
+    run.finish()?;
+    Ok(())
+}
+
+#[test]
+fn a_body_fetch_that_failed_in_a_round_does_not_hold_its_end_back() -> Result {
+    let mut run = Run::sample()?;
+    run.job(JobKind::Idle { folder: INBOX, path: path("INBOX")? })?;
+    run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::Watching)))?;
+    sync(&mut run, 11, "Sent")?;
+    run.job(JobKind::FetchBody { folder: FolderId::new(99), path: path("Nowhere")?, uid_validity: validity(7)?, uid: uid(1)? })?;
+    sync(&mut run, 12, "Lists/Rust")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::SyncProgress { done: 2, of: 2 }))?;
+    assert!(events.iter().any(|kind| matches!(kind, EventKind::Failed { .. })), "{events:?}");
+    let next = run.rounds(|_| true)?;
+    assert!(matches!(next[..], [EventKind::SyncFinished { .. }]), "the round ends: {next:?}");
+    run.finish()?;
+    Ok(())
+}
+
+#[test]
+fn a_drop_under_a_folder_sync_tells_that_folder_ended_before_the_connection_goes_offline() -> Result {
+    // The second folder's EXAMINE drops the connection, and the fake serves no second one: the worker backs off.
+    let fake = FakeImap::sample().on(When::command("EXAMINE"), []).on(When::command("EXAMINE"), [Action::Fault(Fault::Drop)]);
+    let mut run = Run::with(fake, Options { connections: 1, ..Options::default() })?;
+    sync(&mut run, 10, "INBOX")?;
+    sync(&mut run, 11, "Sent")?;
+    sync(&mut run, 12, "Lists/Rust")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::Connection(ConnectionState::BackingOff { .. })))?;
+    let offline = events.iter().position(|kind| *kind == EventKind::Connection(ConnectionState::Offline)).ok_or("no offline")?;
+    let (before, after) = events.split_at(offline);
+    // The engine drops the round's progress on the offline: nothing may store it again while the worker backs off.
+    assert_eq!(told(before).last(), Some(&Some((2, 3))), "{events:?}");
+    assert!(told(after).is_empty(), "{events:?}");
+    run.worker.stop();
+    Ok(())
+}
+
+#[test]
+fn after_a_drop_in_a_round_the_new_sign_in_tells_its_progress_again_at_once() -> Result {
+    // The second folder's EXAMINE drops the connection; the worker signs in again on the fake's second connection.
+    let fake = FakeImap::sample().on(When::command("EXAMINE"), []).on(When::command("EXAMINE"), [Action::Fault(Fault::Drop)]);
+    let mut run = Run::with(fake, Options { connections: 2, ..Options::default() })?;
+    sync(&mut run, 10, "INBOX")?;
+    sync(&mut run, 11, "Sent")?;
+    sync(&mut run, 12, "Lists/Rust")?;
+    let mut onlines = 0;
+    let events = run.rounds(|kind| {
+        onlines += usize::from(*kind == EventKind::Connection(ConnectionState::Online));
+        onlines == 2
+    })?;
+    assert!(events.contains(&EventKind::Connection(ConnectionState::Offline)), "{events:?}");
+    let last = told(&events).into_iter().flatten().last().ok_or("no progress before the sign-in")?;
+    let events = run.rounds(|kind| matches!(kind, EventKind::SyncProgress { .. }))?;
+    assert!(!events.iter().any(|kind| matches!(kind, EventKind::FolderSynced { .. })), "told before the next folder: {events:?}");
+    assert_eq!(told(&events), [Some(last)], "{events:?}");
     run.worker.stop();
     Ok(())
 }
