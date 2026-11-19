@@ -177,7 +177,8 @@ pub struct Shot {
     #[serde(default)]
     pub notifications: Option<bool>,
     /// The settings shown on the section of this name (`appearance` … `plugins`, [`crate::settings::Section::id`]), or on
-    /// the page under one (`templates`; `scheduled`, over the sending sample; [`crate::settings::Under::id`]).
+    /// the page under one (`templates`; `scheduled`, over the sending sample; [`crate::settings::Under::id`]); `privacy`
+    /// with the sample's senders whose pictures always load.
     #[serde(default)]
     pub section: Option<String>,
     /// How the unified inbox shows its groups: `smart` when left out, `grouped` or `list` (the earlier `cards` and
@@ -647,6 +648,10 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
             crate::sample::scheduled(app.mailbox_mut()).map_err(|error| bad(format!("{}: {error}", shot.out)))?;
             app.open_scheduled();
         } else {
+            if crate::settings::Section::named(name) == Some(crate::settings::Section::Privacy) {
+                // The senders whose pictures always load (the window's own choices, not an agent's).
+                crate::sample::always_load(app.mailbox_mut()).map_err(|error| bad(format!("{}: {error}", shot.out)))?;
+            }
             let section = crate::settings::Section::named(name).ok_or_else(|| bad(format!("{}: no settings section {name:?}", shot.out)))?;
             app.settings_mut().open_at(section);
         }

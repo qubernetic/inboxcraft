@@ -3191,6 +3191,7 @@ impl InboxApp {
             | settings::Asked::AskCancelScheduled(_)
             | settings::Asked::CancelScheduled(_)
             | settings::Asked::KeepScheduled) => self.apply_scheduled(asked),
+            asked @ (settings::Asked::ReadPrivacy | settings::Asked::AskAgain(_)) => self.apply_privacy(asked),
         }
     }
 

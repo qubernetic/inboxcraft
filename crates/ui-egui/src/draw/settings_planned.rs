@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The settings pages that are designed and not built yet, drawn as coming soon: Calendar (the alerts switch and each
-//! account's calendars with "read again"; the week's first day is a fact), Privacy (the senders whose remote pictures
-//! always load), and the three sections that are planned whole, with the coming-soon mark on their head: About (the
+//! account's calendars with "read again"; the week's first day is a fact), and the three sections that are planned whole, with the coming-soon mark on their head: About (the
 //! program, its licences, its makers and contributors), AI (where a model runs, and the consent to send mail to one
 //! elsewhere) and Plugins. Nothing on them can be pressed or focused.
 
@@ -12,7 +11,7 @@ use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, pos2, vec2};
 use super::{Asked, body, group, head};
 use crate::component::button::{LinkSize, link_sized};
 use crate::component::segmented::segmented_for;
-use crate::component::settings_row::{settings_row, settings_row_soon, settings_row_soon_with};
+use crate::component::settings_row::{settings_row, settings_row_soon};
 use crate::component::soon::soon;
 use crate::component::switch::{SwitchState, switch_in};
 use crate::keymap::Keymap;
@@ -93,33 +92,6 @@ fn calendars(ui: &mut Ui, theme: &Theme, keymap: &Keymap, account: &AccountRow) 
     });
     let y = rect.bottom() - 1.0;
     super::paint::hairline(ui.painter(), pos2(rect.left(), y), pos2(rect.right() - 1.0, y), p.panel_line);
-}
-
-/// The Privacy page: what a remote picture tells, and the senders whose pictures always load.
-pub(super) fn privacy(ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Option<Asked> {
-    let intro = [
-        tr!(
-            "A remote picture tells its server that the message was opened, when and from where. InboxCraft asks every time before it loads one, unless you chose “always for this sender” in the reader."
-        ),
-        tr!("Nothing in a message runs, and a picture's request carries nothing but its address."),
-    ];
-    head(ui, theme, Section::Privacy, &intro, |_| {});
-    body(ui, theme, "privacy", |ui| {
-        let note = tr!(
-            "The senders whose remote pictures load without asking. “ask again” takes one off the list: its pictures are held again, in every message."
-        );
-        group(ui, theme, "A", tr!("Pictures always load"), Some(note));
-        settings_row_soon_with(
-            ui,
-            theme,
-            tr!("Senders whose pictures always load"),
-            tr!("The list, with “ask again” beside each sender, comes with this page."),
-            |ui| {
-                link_sized(ui, theme, keymap, tr!("ask again"), LinkSize::Small);
-            },
-        );
-    });
-    None
 }
 
 /// The About page, planned whole: the program, Qubernetic, the contributors.

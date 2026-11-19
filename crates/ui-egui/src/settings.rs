@@ -132,6 +132,10 @@ pub struct Settings {
     templates: crate::templates::Templates,
     /// The Scheduled page's state.
     scheduled: crate::scheduled::Scheduled,
+    /// The Privacy page's state.
+    privacy: crate::privacy::Privacy,
+    /// The keyboard goes to the shown section's row of the settings' own column when it is drawn next.
+    nav_hand: bool,
 }
 
 /// A page under a section, reached from a row of the section's page, with a link back to it.
@@ -241,6 +245,7 @@ impl Settings {
         self.under = None;
         self.templates.leave();
         self.scheduled.leave();
+        self.privacy.leave();
     }
 
     /// Shows the page `under` its section.
@@ -277,6 +282,28 @@ impl Settings {
         &mut self.scheduled
     }
 
+    /// The Privacy page's state.
+    #[must_use]
+    pub fn privacy(&self) -> &crate::privacy::Privacy {
+        &self.privacy
+    }
+
+    /// The Privacy page's state, to change.
+    pub fn privacy_mut(&mut self) -> &mut crate::privacy::Privacy {
+        &mut self.privacy
+    }
+
+    /// Asks that the keyboard go to the shown section's row of the settings' own column when it is drawn next: where
+    /// a page's last control went.
+    pub fn hand_to_nav(&mut self) {
+        self.nav_hand = true;
+    }
+
+    /// Whether the keyboard was asked to go to the shown section's row, taken.
+    pub fn take_nav_hand(&mut self) -> bool {
+        std::mem::take(&mut self.nav_hand)
+    }
+
     /// Another place is shown: an action waiting for a key stops waiting and the notes on what the last change did go;
     /// the page, the text that narrows the Shortcuts page and a signature typed stay.
     pub fn leave(&mut self) {
@@ -286,6 +313,8 @@ impl Settings {
         self.login_note = None;
         self.templates.leave();
         self.scheduled.leave();
+        self.privacy.leave();
+        self.nav_hand = false;
     }
 
     /// The action waiting for a key, if one is.

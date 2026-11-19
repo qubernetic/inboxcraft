@@ -56,6 +56,7 @@ pub mod motion;
 pub mod onboard;
 pub mod palette;
 pub mod picture;
+pub mod privacy;
 pub mod quote;
 pub mod reader;
 pub mod sample;

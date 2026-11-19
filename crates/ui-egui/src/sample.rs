@@ -891,6 +891,21 @@ pub fn templates(mailbox: &mut crate::mailbox::Mailbox) -> Result<(), UiError> {
     Ok(())
 }
 
+/// The invented senders whose remote pictures the Privacy page's pictures show loading always.
+const ALWAYS_LOAD: [&str; 3] = ["hello@typeweekly.example.org", "orders@kettle.example.org", "finds@quietweb.example.org"];
+
+/// Lets the sample's invented senders' remote pictures load always in `mailbox`, through `remote.allow`.
+///
+/// # Errors
+///
+/// [`UiError`] when the session refuses one.
+pub fn always_load(mailbox: &mut crate::mailbox::Mailbox) -> Result<(), UiError> {
+    for address in ALWAYS_LOAD {
+        mailbox.run("remote.allow", &serde_json::json!({ "address": address }))?;
+    }
+    Ok(())
+}
+
 /// What the sample schedules for the Scheduled page's pictures: a message snoozed, a follow-up reminder on a sent
 /// one, a new message sent later and a Studio event with its alert. Hours from now.
 const SCHEDULED_SNOOZE: (&str, i64) = ("A question about the font licence", 7);

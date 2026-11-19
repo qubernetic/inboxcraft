@@ -46,6 +46,8 @@ use crate::tr;
 #[path = "settings_planned.rs"]
 mod planned;
 
+#[path = "settings_privacy.rs"]
+pub(super) mod privacy;
 #[path = "settings_scheduled.rs"]
 pub(super) mod scheduled;
 #[path = "settings_templates.rs"]
@@ -179,6 +181,10 @@ pub(super) enum Asked {
     CancelScheduled(u64),
     /// The cancel was not confirmed.
     KeepScheduled,
+    /// Read the senders whose pictures always load, for the Privacy page.
+    ReadPrivacy,
+    /// The sender of this address: its pictures ask again.
+    AskAgain(String),
 }
 
 /// What the settings show and change.
@@ -565,7 +571,7 @@ fn section_count() -> String {
 
 /// The list of sections: its head ("Settings" and how many sections there are), a `line` hairline, then a row per
 /// section, the one shown selected. The section pressed.
-fn nav(ui: &mut Ui, theme: &Theme, shown: Section) -> Option<Asked> {
+fn nav(ui: &mut Ui, theme: &Theme, shown: Section, to_shown: bool) -> Option<Asked> {
     let p = &theme.palette;
     let f = &theme.fonts;
     let width = ui.available_width();
@@ -588,7 +594,11 @@ fn nav(ui: &mut Ui, theme: &Theme, shown: Section) -> Option<Asked> {
     rule_in(ui, p.line);
     ui.add_space(NAV_GAP);
     for section in Section::ALL {
-        if section_row(ui, theme, section, section == shown).clicked() && section != shown {
+        let row = section_row(ui, theme, section, section == shown);
+        if to_shown && section == shown {
+            row.request_focus();
+        }
+        if row.clicked() && section != shown {
             asked = Some(Asked::Section(section));
         }
     }
@@ -613,7 +623,7 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
         Section::Triage => triage(ui, theme, mailbox),
         Section::Notifications => notifications(ui, theme, mailbox, view.settings, view.desk),
         Section::Calendar => planned::calendar(ui, theme, keymap, mailbox),
-        Section::Privacy => planned::privacy(ui, theme, keymap),
+        Section::Privacy => privacy::page(ui, theme, keymap, view.settings),
         Section::About => planned::about(ui, theme),
         Section::Ai => planned::ai(ui, theme),
         Section::Plugins => planned::plugins(ui, theme),
@@ -1076,11 +1086,12 @@ pub(super) fn place(ui: &mut Ui, theme: &Theme, mut view: Sheet<'_>) -> Option<A
     place.widget_info(|| WidgetInfo::labeled(Role::Pane, true, tr!("Settings")));
     ui.painter().rect_filled(body, 0.0, p.surface);
     let shown = view.settings.section();
+    let to_shown = view.settings.take_nav_hand();
     let columns = Columns::of(body, shown);
     paint::hairline(ui.painter(), pos2(columns.divider, body.top()), pos2(columns.divider, body.bottom() - 1.0), p.line);
     let mut asked = ui
         .scope_builder(UiBuilder::new().id_salt("settings-sections").max_rect(columns.nav).layout(Layout::top_down(Align::Min)), |ui| {
-            nav(ui, theme, shown)
+            nav(ui, theme, shown, to_shown)
         })
         .inner;
     ui.scope_builder(UiBuilder::new().id_salt("settings-page").max_rect(columns.page).layout(Layout::top_down(Align::Min)), |ui| {
