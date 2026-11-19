@@ -284,3 +284,18 @@ fn a_time_is_today_a_weekday_within_the_week_and_a_date_further_on() {
     assert_eq!(when(at(-2), now, Offset::UTC), "Today 07:00");
     assert_eq!(when(at(-24), now, Offset::UTC), "Yesterday", "a day gone by, as the list dates it");
 }
+
+#[test]
+fn a_frame_formats_the_time_of_the_rows_it_draws_only() {
+    let mut harness = on_scheduled(|mailbox| {
+        for n in 0..200 {
+            let id = mailbox.run("compose.new", &json!({ "account": 1 })).unwrap()["id"].as_u64().unwrap();
+            mailbox.run("compose.update", &json!({ "id": id, "to": ["a@example.org"], "subject": format!("S{n:03}") })).unwrap();
+            mailbox.run("mail.send_later", &json!({ "id": id, "at": format!("2026-11-05T{:02}:{:02}:00Z", 10 + n / 60, n % 60) })).unwrap();
+        }
+    });
+    crate::scheduled::WHENS.with(|whens| whens.set(0));
+    harness.step();
+    let formatted = crate::scheduled::WHENS.with(std::cell::Cell::get);
+    assert!(formatted > 0 && formatted < 60, "a frame formats the rows near the view and the two ends, not all 200: {formatted}");
+}

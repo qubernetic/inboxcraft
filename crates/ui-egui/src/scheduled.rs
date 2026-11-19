@@ -129,10 +129,18 @@ impl ScheduledRow {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times [`when`] ran on this thread: a test's count of the rows formatted.
+    pub(crate) static WHENS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// `due` as a row shows it at `now` in `offset`: "Today 14:50", the weekday within the coming week, the day and month
 /// further on; a time gone by as the mail list dates it.
 #[must_use]
 pub fn when(due: Timestamp, now: Timestamp, offset: Offset) -> String {
+    #[cfg(test)]
+    WHENS.with(|whens| whens.set(whens.get().saturating_add(1)));
     let (Some(day), Some(today)) = (due.to_civil(offset), now.to_civil(offset)) else { return String::new() };
     let ahead = crate::mailbox::day_number(day).zip(crate::mailbox::day_number(today)).map_or(i64::MIN, |(day, today)| day.saturating_sub(today));
     let time = format!("{:02}:{:02}", day.hour(), day.minute());

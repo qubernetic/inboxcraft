@@ -129,12 +129,13 @@ fn list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, scheduled: &Scheduled, mail
         for (at, row) in scheduled.rows().iter().enumerate() {
             let ends = at == 0 || at.saturating_add(1) == total;
             let account = row.account.and_then(|id| accounts.iter().find(|account| account.id == id));
-            let when = crate::scheduled::when(row.due, now, offset);
+            // The time is formatted only for a row that is drawn: a row out of sight only takes its room.
+            let when = || crate::scheduled::when(row.due, now, offset);
             let pressed = if scheduled.confirming() == Some(row.id) {
                 let own = egui::UiBuilder::new().scope_id(Id::unique("settings-scheduled-confirm"));
-                ui.scope_builder(own, |ui| confirmation(ui, theme, keymap, row, &when, hand)).inner
+                ui.scope_builder(own, |ui| confirmation(ui, theme, keymap, row, &when(), hand)).inner
             } else {
-                entry_row(ui, theme, keymap, row, &when, account, ends, hand)
+                entry_row(ui, theme, keymap, row, when, account, ends, hand)
             };
             if pressed.is_some() {
                 *asked = pressed;
@@ -150,7 +151,7 @@ fn entry_row(
     theme: &Theme,
     keymap: &Keymap,
     row: &ScheduledRow,
-    when: &str,
+    when: impl FnOnce() -> String,
     account: Option<&AccountRow>,
     ends: bool,
     hand: &mut Option<Hand>,
@@ -166,6 +167,8 @@ fn entry_row(
     }
     let p = &theme.palette;
     let mut asked = None;
+    let when = when();
+    let when = when.as_str();
     // The row's own scope, so rows above it laid out or passed over as the page scrolls never change its link's id.
     let own =
         egui::UiBuilder::new().scope_id(Id::unique("settings-scheduled").with(row.id)).max_rect(rect).layout(Layout::left_to_right(Align::Center));
