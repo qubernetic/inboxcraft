@@ -3,18 +3,18 @@
 
 use std::collections::HashMap;
 use std::num::NonZeroU16;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use inboxcraft_model::{EmailAddress, ErrorKind, Host, Security, Server};
 use inboxcraft_time::{Clock, FakeClock, Timestamp};
 
 use super::{Checked, DetectConfig, ISPDB, Lookup, MAX_TRIES, Outside, Proposal, Source, base_domain, detect, https_host, within};
-use crate::NetError;
 use crate::candidates::{MAX_MX, MAX_PROVIDERS};
 use crate::dns::Srv;
 use crate::probe::{Probe, Service};
 use crate::web::{Web, WebAnswer};
+use crate::{Deadline, NetError};
 
 /// A stand-in web: canned answers by URL, 404 for the rest, and every URL asked for.
 #[derive(Debug, Default)]
@@ -95,7 +95,7 @@ struct FakeProbe {
     answering: Option<Vec<&'static str>>,
     fails_with: ErrorKind,
     tried: Mutex<Vec<String>>,
-    clock: FakeClock,
+    clock: Arc<FakeClock>,
     step: Duration,
 }
 
@@ -105,7 +105,7 @@ impl FakeProbe {
             answering: None,
             fails_with: ErrorKind::ConnectionRefused,
             tried: Mutex::default(),
-            clock: FakeClock::new(Timestamp::UNIX_EPOCH),
+            clock: Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
             step: Duration::ZERO,
         }
     }
@@ -120,9 +120,10 @@ impl FakeProbe {
 }
 
 impl Probe for FakeProbe {
-    fn probe(&self, server: &Server, service: Service) -> Result<(), NetError> {
+    fn probe(&self, server: &Server, service: Service, deadline: &Deadline) -> Result<(), NetError> {
         self.tried.lock().unwrap().push(format!("{} {server}", service.word()));
-        self.clock.advance(self.step);
+        // A probe lasts `step`, or until its deadline when that comes first.
+        self.clock.advance(self.step.min(deadline.left().unwrap_or_default()));
         match &self.answering {
             Some(answering) if !answering.contains(&server.to_string().as_str()) => Err(NetError::new(self.fails_with, "fake")),
             _ => Ok(()),
@@ -136,7 +137,7 @@ fn run(config: &DetectConfig, dns: &FakeDns, web: &FakeWeb) -> Proposal {
 }
 
 fn run_probed(config: &DetectConfig, dns: &FakeDns, web: &FakeWeb, probe: &FakeProbe) -> Proposal {
-    detect(&address(), config, &Outside { dns, web, probe, clock: &probe.clock })
+    detect(&address(), config, &Outside { dns, web, probe, clock: probe.clock.clone(), stop: None })
 }
 
 fn address() -> EmailAddress {
@@ -225,8 +226,11 @@ fn no_request_carries_the_local_part_or_the_address() {
     let mut dns = FakeDns { mx: vec!["mx.mail.provider.example.net"], ..FakeDns::default() };
     dns.srv.insert("_imaps._tcp.example.org".to_owned(), vec![("imap.provider.example.net", 993)]);
     dns.srv.insert("_submission._tcp.example.org".to_owned(), vec![("smtp.provider.example.net", 587)]);
-    let proposal =
-        detect(&address, &config_on, &Outside { dns: &dns, web: &web, probe: &FakeProbe::all(), clock: &FakeClock::new(Timestamp::UNIX_EPOCH) });
+    let proposal = detect(
+        &address,
+        &config_on,
+        &Outside { dns: &dns, web: &web, probe: &FakeProbe::all(), clock: Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)), stop: None },
+    );
     // Every source was asked: the failing autoconfig, the redirect and its target, the ISPDB and SRV.
     assert!(proposal.asked.iter().any(|asked| asked.starts_with(ISPDB)), "{:?}", proposal.asked);
     assert!(proposal.asked.contains(&target.to_owned()), "{:?}", proposal.asked);
@@ -451,10 +455,46 @@ fn the_tries_are_capped() {
 fn the_time_is_capped() {
     let dns = FakeDns { mx: vec!["mx1.privateemail.com"], ..FakeDns::default() };
     let probe = FakeProbe { step: Duration::from_secs(50), ..FakeProbe::only(&[]) };
-    let proposal = run_probed(&DetectConfig::default(), &dns, &FakeWeb::default(), &probe);
-    // Probes start at 0, 50 and 100 seconds; at 150 the 120 seconds are over.
+    let config = DetectConfig { probe_within: Duration::from_secs(200), ..DetectConfig::default() };
+    let proposal = run_probed(&config, &dns, &FakeWeb::default(), &probe);
+    // Probes start at 0, 50 and 100 seconds; the third is given the run's deadline and ends at 120, not at 150.
     assert_eq!(probe.tried().len(), 3);
+    assert_eq!(probe.clock.monotonic(), Duration::from_secs(120));
     assert!(proposal.failed.contains(&("detect: the cap of 120 s".to_owned(), ErrorKind::TimedOut)));
+}
+
+#[test]
+fn each_probe_has_a_deadline_of_its_own() {
+    let dns = FakeDns { mx: vec!["mx1.privateemail.com"], ..FakeDns::default() };
+    let probe = FakeProbe { step: Duration::from_secs(50), ..FakeProbe::only(&[]) };
+    run_probed(&DetectConfig::default(), &dns, &FakeWeb::default(), &probe);
+    // Each probe ends after its 20 seconds: six of them fill the 120.
+    assert_eq!(probe.tried().len(), 6);
+    assert_eq!(probe.clock.monotonic(), Duration::from_secs(120));
+}
+
+/// A stop ends the run: no lookup or probe starts after it.
+#[test]
+fn a_stopped_run_asks_nothing_more() {
+    let dns = FakeDns { mx: vec!["mx1.privateemail.com"], ..FakeDns::default() };
+    let web = FakeWeb::default();
+    let probe = Arc::new(FakeProbe::only(&[]));
+    let seen = Arc::clone(&probe);
+    // Stop once the first probe has run.
+    let stop: crate::Stop = Arc::new(move || !seen.tried().is_empty());
+    let proposal =
+        detect(&address(), &DetectConfig::default(), &Outside { dns: &dns, web: &web, probe: &*probe, clock: probe.clock.clone(), stop: Some(stop) });
+    assert_eq!(probe.tried().len(), 1);
+    // The lookups before it ran; none after: the last thing asked is the one probe.
+    assert_eq!(proposal.asked.last().map(String::as_str), Some("imap mail.example.org:993 (TLS)"));
+    assert!(!web.asked().iter().any(|url| url.contains("privateemail")));
+    // A stop before anything asks nothing at all.
+    let web = FakeWeb::default();
+    let probe = FakeProbe::all();
+    let stop: crate::Stop = Arc::new(|| true);
+    let proposal =
+        detect(&address(), &DetectConfig::default(), &Outside { dns: &dns, web: &web, probe: &probe, clock: probe.clock.clone(), stop: Some(stop) });
+    assert!(proposal.asked.is_empty() && web.asked().is_empty() && probe.tried().is_empty());
 }
 
 #[test]

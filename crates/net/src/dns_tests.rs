@@ -209,6 +209,20 @@ fn a_silent_server_times_out() {
 }
 
 #[test]
+fn a_silent_server_is_given_up_at_the_deadline() {
+    use inboxcraft_time::{Clock, SystemClock};
+    let fake = Fake::start(Box::new(|_| Vec::new()), None);
+    // The resolver's own timeout is 30 seconds; the deadline ends the wait after 300 ms.
+    let resolver = Resolver::new(vec![fake.addr], Duration::from_secs(30));
+    let clock = std::sync::Arc::new(SystemClock::new());
+    let start = clock.monotonic();
+    let deadline = crate::Deadline::new(clock.clone(), Duration::from_millis(300));
+    assert_eq!(resolver.mx_by(&Host::new("example.org").unwrap(), &deadline).unwrap_err().kind(), ErrorKind::TimedOut);
+    assert!(clock.monotonic().saturating_sub(start) < Duration::from_secs(5));
+    fake.finish();
+}
+
+#[test]
 fn a_truncated_answer_is_asked_again_over_tcp() {
     let truncated: Answer = Box::new(|query: &Message| {
         let mut answer = reply(query, ResponseCode::NoError, Vec::new());

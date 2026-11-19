@@ -15,6 +15,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
@@ -23,7 +24,7 @@ use inboxcraft_model::{Account, AccountId, EmailAddress, Event, EventKind, Job, 
 use inboxcraft_net::detect::{self, Candidate, Checked, DetectConfig, Outside, Proposal as Found, Source as Where};
 use inboxcraft_net::dns::Resolver;
 use inboxcraft_net::web::Https;
-use inboxcraft_net::{Connector, Credentials, Password, Timeouts, TlsSettings, Worker, WorkerSettings};
+use inboxcraft_net::{Connector, Credentials, Password, Stop, Timeouts, TlsSettings, Worker, WorkerSettings};
 use inboxcraft_ui_egui::fetch::Wake;
 use inboxcraft_ui_egui::onboard::{self, Keychain, Proposal, Suggestion};
 use inboxcraft_ui_egui::workers::Workers;
@@ -297,7 +298,20 @@ pub fn proposal(found: &Found) -> Proposal {
     Proposal { imap: suggestions(&found.imap), submission: suggestions(&found.submission), asked: found.asked.clone(), failed }
 }
 
-/// Detect for `address` over the system's name servers and HTTPS with `tls`; the ISPDB only when `ispdb`.
+/// Detect's runs started in this process: a newer one ends the older ones.
+static RUNS: AtomicU64 = AtomicU64::new(0);
+
+/// Counts a new run in `runs`, and the stop that ends it once a newer run starts: the form drops an older run's answer,
+/// so the run stops asking the network as soon as it can (before its next lookup or probe, or within its current
+/// wait).
+#[must_use]
+pub fn newer_run_stops(runs: &'static AtomicU64) -> Stop {
+    let mine = runs.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    Arc::new(move || runs.load(Ordering::SeqCst) != mine)
+}
+
+/// Detect for `address` over the system's name servers and HTTPS with `tls`; the ISPDB only when `ispdb`. A newer
+/// run ends this one ([`newer_run_stops`]).
 #[must_use]
 pub fn detect(tls: &TlsSettings, address: &str, ispdb: bool) -> Proposal {
     let Ok(address) = EmailAddress::new(address) else {
@@ -308,7 +322,7 @@ pub fn detect(tls: &TlsSettings, address: &str, ispdb: bool) -> Proposal {
     let dns = Resolver::system(DNS_TIMEOUT).unwrap_or_else(|_| Resolver::new(Vec::new(), DNS_TIMEOUT));
     let web = Https::new(tls.clone(), WEB_TIMEOUT);
     let probe = Connector::new(tls.clone()).with_timeouts(PROBE_TIMEOUTS);
-    let outside = Outside { dns: &dns, web: &web, probe: &probe, clock: tls.clock().as_ref() };
+    let outside = Outside { dns: &dns, web: &web, probe: &probe, clock: Arc::clone(tls.clock()), stop: Some(newer_run_stops(&RUNS)) };
     proposal(&detect::detect(&address, &config, &outside))
 }
 

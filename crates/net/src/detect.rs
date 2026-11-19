@@ -22,14 +22,17 @@
 //!
 //! A host whose probe timed out or whose name was not found is not probed again in the run, on any port.
 //!
-//! The whole run is capped: at most [`DetectConfig::tries`] probes and [`DetectConfig::within`] of time, checked
-//! before each lookup and each probe (one probe that has started runs to its own timeouts). A lookup or a probe that
+//! The whole run is capped: at most [`DetectConfig::tries`] probes, and [`DetectConfig::within`] of time as a deadline
+//! every lookup and probe is given, so the run ends at its cap; each probe has its own deadline inside it
+//! ([`DetectConfig::probe_within`], [`PROBE_TIME`]) that a server sending a byte at a time cannot stretch, and tries at
+//! most [`crate::probe::PROBE_ADDRESSES`] addresses of a host. [`Outside::stop`] ends the run at once. A lookup or a probe that
 //! fails, times out or returns junk is noted in [`Proposal::failed`] and skipped. No user name and no password is
 //! sent by Detect.
 //!
 //! The MX domain (for the redirect and the ISPDB) is the MX host's last two labels, or three when the second last is
 //! a short label under a two-letter country label (`example.co.uk`): a rule of thumb without the public suffix list.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use inboxcraft_model::{EmailAddress, ErrorKind, Host, Server};
@@ -38,9 +41,9 @@ use inboxcraft_time::Clock;
 use crate::autoconfig::{self, Autoconfig};
 use crate::candidates::{Lookups, Reached, SrvName, candidates, provider_domains};
 use crate::dns::{Resolver, Srv};
-use crate::probe::{Probe, Service};
+use crate::probe::{PROBE_TIME, Probe, Service};
 use crate::web::Web;
-use crate::{CheckTarget, NetError};
+use crate::{CheckTarget, Deadline, NetError, Stop};
 
 /// Mozilla's ISPDB: `<base><domain>` is the autoconfig file of a domain it knows.
 pub const ISPDB: &str = "https://autoconfig.thunderbird.net/v1.1/";
@@ -48,7 +51,7 @@ pub const ISPDB: &str = "https://autoconfig.thunderbird.net/v1.1/";
 /// The most probes of one run.
 pub const MAX_TRIES: usize = 24;
 
-/// The longest one run goes on starting lookups and probes.
+/// The run's deadline: every lookup and probe it gives ends by then.
 pub const MAX_TIME: Duration = Duration::from_secs(120);
 
 /// How Detect runs.
@@ -60,14 +63,16 @@ pub struct DetectConfig {
     pub ispdb_base: String,
     /// The most probes ([`MAX_TRIES`]).
     pub tries: usize,
-    /// How long the run starts lookups and probes ([`MAX_TIME`]).
+    /// The run's deadline: every lookup and probe ends by then ([`MAX_TIME`]).
     pub within: Duration,
+    /// One probe's deadline, from its name lookup to the capabilities, inside the run's ([`PROBE_TIME`]).
+    pub probe_within: Duration,
 }
 
 impl Default for DetectConfig {
     /// The ISPDB off, at [`ISPDB`]; [`MAX_TRIES`] and [`MAX_TIME`].
     fn default() -> Self {
-        Self { ispdb: false, ispdb_base: ISPDB.to_owned(), tries: MAX_TRIES, within: MAX_TIME }
+        Self { ispdb: false, ispdb_base: ISPDB.to_owned(), tries: MAX_TRIES, within: MAX_TIME, probe_within: PROBE_TIME }
     }
 }
 
@@ -86,6 +91,26 @@ pub trait Lookup {
     ///
     /// The cause, when no server answered.
     fn srv(&self, name: &str) -> Result<Vec<Srv>, NetError>;
+
+    /// As [`Lookup::mx`], over by `deadline` at the latest.
+    ///
+    /// # Errors
+    ///
+    /// As [`Lookup::mx`]; [`ErrorKind::TimedOut`] once `deadline` has passed.
+    fn mx_by(&self, domain: &Host, deadline: &Deadline) -> Result<Vec<Host>, NetError> {
+        deadline.wait(Duration::MAX)?;
+        self.mx(domain)
+    }
+
+    /// As [`Lookup::srv`], over by `deadline` at the latest.
+    ///
+    /// # Errors
+    ///
+    /// As [`Lookup::srv`]; [`ErrorKind::TimedOut`] once `deadline` has passed.
+    fn srv_by(&self, name: &str, deadline: &Deadline) -> Result<Vec<Srv>, NetError> {
+        deadline.wait(Duration::MAX)?;
+        self.srv(name)
+    }
 }
 
 impl Lookup for Resolver {
@@ -96,10 +121,18 @@ impl Lookup for Resolver {
     fn srv(&self, name: &str) -> Result<Vec<Srv>, NetError> {
         Resolver::srv(self, name)
     }
+
+    fn mx_by(&self, domain: &Host, deadline: &Deadline) -> Result<Vec<Host>, NetError> {
+        Resolver::mx_by(self, domain, deadline)
+    }
+
+    fn srv_by(&self, name: &str, deadline: &Deadline) -> Result<Vec<Srv>, NetError> {
+        Resolver::srv_by(self, name, deadline)
+    }
 }
 
-/// What Detect asks: DNS, the web, the probe, and the clock its caps run on.
-#[derive(Clone, Copy)]
+/// What Detect asks: DNS, the web, the probe, the clock its caps run on, and the stop that ends it.
+#[derive(Clone)]
 pub struct Outside<'a> {
     /// The MX and SRV records.
     pub dns: &'a dyn Lookup,
@@ -107,8 +140,10 @@ pub struct Outside<'a> {
     pub web: &'a dyn Web,
     /// The candidates.
     pub probe: &'a dyn Probe,
-    /// Its monotonic time measures [`DetectConfig::within`].
-    pub clock: &'a dyn Clock,
+    /// Its monotonic time measures [`DetectConfig::within`] and [`DetectConfig::probe_within`].
+    pub clock: Arc<dyn Clock>,
+    /// Asked before every lookup and probe and inside every wait: `true` ends the run at once, with what it found.
+    pub stop: Option<Stop>,
 }
 
 /// Where a candidate came from: one of a fixed set, never text.
@@ -199,12 +234,16 @@ pub struct Proposal {
 /// Detects settings for `address`, asking `outside`.
 #[must_use]
 pub fn detect(address: &EmailAddress, config: &DetectConfig, outside: &Outside<'_>) -> Proposal {
-    let start = outside.clock.monotonic();
+    let deadline = Deadline::new(Arc::clone(&outside.clock), config.within);
+    let deadline = match &outside.stop {
+        Some(stop) => deadline.with_stop(Arc::clone(stop)),
+        None => deadline,
+    };
     let mut run = Run {
         address,
         config,
         outside,
-        start,
+        deadline,
         lookups: Lookups::default(),
         proposal: Proposal::default(),
         tried: Vec::new(),
@@ -215,7 +254,7 @@ pub fn detect(address: &EmailAddress, config: &DetectConfig, outside: &Outside<'
     if run.time_left() {
         let asked = format!("dns MX {domain}");
         run.proposal.asked.push(asked.clone());
-        match outside.dns.mx(&domain) {
+        match outside.dns.mx_by(&domain, &run.deadline) {
             Ok(hosts) => run.lookups.set_mx(hosts),
             Err(error) => run.proposal.failed.push((asked, error.kind())),
         }
@@ -277,7 +316,8 @@ struct Run<'a> {
     address: &'a EmailAddress,
     config: &'a DetectConfig,
     outside: &'a Outside<'a>,
-    start: Duration,
+    /// The run's cap and stop, given to every lookup and probe.
+    deadline: Deadline,
     lookups: Lookups,
     proposal: Proposal,
     /// Every server probed, for what, and why it failed.
@@ -294,8 +334,10 @@ impl Run<'_> {
         if self.ended {
             return false;
         }
-        let spent = self.outside.clock.monotonic().saturating_sub(self.start);
-        if spent >= self.config.within {
+        if self.deadline.is_stopped() {
+            // Stopped: whoever stopped it no longer listens.
+            self.ended = true;
+        } else if self.deadline.left().is_none() {
             self.end(format!("detect: the cap of {} s", self.config.within.as_secs()), ErrorKind::TimedOut);
         }
         !self.ended
@@ -373,7 +415,7 @@ impl Run<'_> {
 
                 let what = format!("{} {}", service.word(), candidate.server);
                 self.proposal.asked.push(what.clone());
-                match self.outside.probe.probe(&candidate.server, service) {
+                match self.outside.probe.probe(&candidate.server, service, &self.deadline.sooner(self.config.probe_within)) {
                     Ok(()) => {
                         self.tried.push((service, candidate.server.clone(), None));
                         let answered = Candidate { checked: Checked::Answered, ..candidate.clone() };
@@ -425,7 +467,7 @@ impl Run<'_> {
             return None;
         }
         self.proposal.asked.push(url.to_owned());
-        match self.outside.web.get(url) {
+        match self.outside.web.get_by(url, &self.deadline) {
             Ok(answer) if answer.status == 200 => {
                 let found = autoconfig::parse(&answer.body, self.address);
                 if found.is_none() {
@@ -447,7 +489,7 @@ impl Run<'_> {
             return None;
         }
         self.proposal.asked.push(url.to_owned());
-        match self.outside.web.get(url) {
+        match self.outside.web.get_by(url, &self.deadline) {
             Ok(answer) if matches!(answer.status, 301 | 302 | 303 | 307 | 308) => answer.location,
             Ok(_) => None,
             Err(error) => {
@@ -465,7 +507,7 @@ impl Run<'_> {
             }
             let asked = format!("dns SRV {}._tcp.{domain}", name.label());
             self.proposal.asked.push(asked.clone());
-            match self.outside.dns.srv(&format!("{}._tcp.{domain}", name.label())) {
+            match self.outside.dns.srv_by(&format!("{}._tcp.{domain}", name.label()), &self.deadline) {
                 Ok(records) => self.lookups.add_srv(name, records),
                 Err(error) => self.proposal.failed.push((asked, error.kind())),
             }

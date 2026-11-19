@@ -246,6 +246,10 @@ impl SmtpConnection {
     /// One read from the socket into the client.
     fn pump(&mut self) -> Result<(), NetError> {
         let now = self.connector.tls().clock().now();
+        // A probe's deadline ends the read however slowly the server sends.
+        if let Some(wait) = self.connector.read_wait()? {
+            self.stream.set_read_timeout(Some(wait)).map_err(|error| NetError::io(&error, now))?;
+        }
         let read = self.stream.read(&mut self.buffer).map_err(|error| NetError::io(&error, now))?;
         if read == 0 {
             return Err(NetError::new(ErrorKind::ConnectionDropped, "the server closed the connection"));

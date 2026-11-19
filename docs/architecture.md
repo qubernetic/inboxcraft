@@ -447,7 +447,9 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   (`net::probe`, which sends no user name or password). A server the domain names (its autoconfig, the ISPDB, SRV)
   that no probe reached is still proposed, marked `Checked::NoAnswer`, and while the domain names servers of a kind
   no guess of that kind is tried. It stops once it has an IMAP and a submission server, after
-  24 probes or after 120 seconds. DNS is `hickory-proto` messages over our own blocking UDP and TCP
+  24 probes, or at its deadline of 120 seconds, which every lookup and probe is given (`net::Deadline`, with a stop
+  the app sets when a newer run starts); a probe has 20 seconds of its own and tries at most four addresses, and
+  the connector ends every connect, handshake and read at the deadline however slowly a server sends. DNS is `hickory-proto` messages over our own blocking UDP and TCP
   exchange with the resolver configuration of the system, HTTPS is `ureq` with `rustls` and the same trust as the
   mail connections, following no redirect and sending nothing but the URL. A candidate is detected settings
   (`CheckTarget::detected`): the check signs in to it only after the owner has seen it and its certificate

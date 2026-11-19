@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::net::TcpListener;
 use std::num::NonZeroU16;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
@@ -23,7 +23,7 @@ use inboxcraft_ui_egui::mailbox::Mailbox;
 use inboxcraft_ui_egui::onboard::{self, Keychain};
 use inboxcraft_ui_egui::workers::Workers;
 
-use super::{Entries, NetWorkers, OsKeychain, SERVICE, described, detect, entry_name, proposal};
+use super::{Entries, NetWorkers, OsKeychain, SERVICE, described, detect, entry_name, newer_run_stops, proposal};
 
 const SECRET: &str = "maple-Harbour-42-lantern";
 
@@ -255,6 +255,15 @@ fn a_named_server_no_probe_reached_is_shown_and_said_to_be_unchecked() {
     assert_eq!(shown.imap[0].host, "imap.example.org");
     assert!(shown.failed.contains(&"imap.example.org:993 (TLS) was not checked: it did not answer from here".to_owned()), "{:?}", shown.failed);
     assert_eq!(shown.failed.len(), 2);
+}
+
+#[test]
+fn a_newer_detect_run_stops_the_older_one() {
+    static RUNS: AtomicU64 = AtomicU64::new(0);
+    let first = newer_run_stops(&RUNS);
+    assert!(!first());
+    let second = newer_run_stops(&RUNS);
+    assert!(first() && !second());
 }
 
 #[test]

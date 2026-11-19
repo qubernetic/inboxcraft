@@ -6,14 +6,14 @@
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use inboxcraft_model::{ErrorKind, Host, Server};
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, StreamOwned};
 
-use crate::{NetError, TlsSettings};
+use crate::{Deadline, NetError, TlsSettings};
 
 /// How long to wait for a connection, and for the server on an open one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,13 +87,50 @@ pub struct Connector {
     dialer: Arc<dyn Dialer>,
     /// Looks host names up in place of the system.
     resolver: Option<Arc<dyn Resolve>>,
+    /// The end of everything this connector does, for a probe: none for the sync, IDLE and send connections.
+    deadline: Option<Deadline>,
+    /// The most addresses of one host tried.
+    most_addresses: usize,
 }
 
 impl Connector {
     /// A connector that looks host names up with the system's resolver.
     #[must_use]
     pub fn new(tls: TlsSettings) -> Self {
-        Self { tls, timeouts: Timeouts::default(), dial: Dial::Lookup, on_port: Vec::new(), dialer: Arc::new(SystemDialer), resolver: None }
+        Self {
+            tls,
+            timeouts: Timeouts::default(),
+            dial: Dial::Lookup,
+            on_port: Vec::new(),
+            dialer: Arc::new(SystemDialer),
+            resolver: None,
+            deadline: None,
+            most_addresses: MAX_ADDRESSES,
+        }
+    }
+
+    /// Ends everything it does at `deadline`: the name lookup (the system's on a thread of its own, waited for at
+    /// most until then), each connection attempt, the TLS handshake and every read, however slowly a server sends.
+    /// For Detect's probe.
+    #[must_use]
+    pub fn with_deadline(self, deadline: Deadline) -> Self {
+        Self { deadline: Some(deadline), ..self }
+    }
+
+    /// Tries at most `most` addresses of a host (at least one, at most 16).
+    #[must_use]
+    pub fn with_most_addresses(self, most: usize) -> Self {
+        Self { most_addresses: most.clamp(1, MAX_ADDRESSES), ..self }
+    }
+
+    /// How long the next read may wait: the I/O timeout, or the time left before the deadline when that is shorter;
+    /// `None` without a deadline (the socket's own timeout holds).
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::TimedOut`] once the deadline has passed.
+    pub(crate) fn read_wait(&self) -> Result<Option<Duration>, NetError> {
+        self.deadline.as_ref().map(|deadline| deadline.wait(self.timeouts.io)).transpose()
     }
 
     /// Looks host names up with `resolver` in place of the system's (the given addresses still come first). For the
@@ -150,6 +187,11 @@ impl Connector {
     pub(crate) fn tcp(&self, server: &Server) -> Result<Stream, NetError> {
         let mut last = NetError::new(ErrorKind::HostNotFound, format!("no address for {}", server.host()));
         for address in self.resolve(server)? {
+            if let Some(deadline) = &self.deadline
+                && let Err(error) = deadline.wait(self.timeouts.connect)
+            {
+                return Err(error);
+            }
             match self.dial(address) {
                 Ok(stream) => return Ok(stream),
                 Err(error) => last = error,
@@ -169,13 +211,16 @@ impl Connector {
                     .resolve(server.host(), port)
                     .map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?
                     .into_iter()
-                    .take(MAX_ADDRESSES)
+                    .take(self.most_addresses)
                     .collect(),
-                None => (server.host().as_str(), port)
-                    .to_socket_addrs()
-                    .map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?
-                    .take(MAX_ADDRESSES)
-                    .collect(),
+                None => match &self.deadline {
+                    Some(deadline) => lookup_by(server.host().as_str(), port, deadline)?.into_iter().take(self.most_addresses).collect(),
+                    None => (server.host().as_str(), port)
+                        .to_socket_addrs()
+                        .map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?
+                        .take(self.most_addresses)
+                        .collect(),
+                },
             },
         };
         if addresses.is_empty() {
@@ -187,9 +232,13 @@ impl Connector {
     /// A TCP connection to `address` with the timeouts set, not encrypted yet.
     pub(crate) fn dial(&self, address: SocketAddr) -> Result<Stream, NetError> {
         let now = self.tls.clock().now();
-        let socket = self.dialer.dial(address, self.timeouts.connect).map_err(|error| NetError::io(&error, now))?;
-        socket.set_read_timeout(Some(self.timeouts.io)).map_err(|error| NetError::io(&error, now))?;
-        socket.set_write_timeout(Some(self.timeouts.io)).map_err(|error| NetError::io(&error, now))?;
+        let (connect, io) = match &self.deadline {
+            Some(deadline) => (deadline.wait(self.timeouts.connect)?, deadline.wait(self.timeouts.io)?),
+            None => (self.timeouts.connect, self.timeouts.io),
+        };
+        let socket = self.dialer.dial(address, connect).map_err(|error| NetError::io(&error, now))?;
+        socket.set_read_timeout(Some(io)).map_err(|error| NetError::io(&error, now))?;
+        socket.set_write_timeout(Some(io)).map_err(|error| NetError::io(&error, now))?;
         socket.set_nodelay(true).map_err(|error| NetError::io(&error, now))?;
         Ok(Stream::Plain(socket))
     }
@@ -201,9 +250,32 @@ impl Connector {
         let name = ServerName::try_from(host.as_str().to_owned()).map_err(|error| NetError::new(ErrorKind::Tls, error.to_string()))?;
         let mut connection = ClientConnection::new(Arc::clone(config), name).map_err(|error| NetError::tls(&error, now))?;
         while connection.is_handshaking() {
+            if let Some(wait) = self.read_wait()? {
+                socket.set_read_timeout(Some(wait)).map_err(|error| NetError::io(&error, now))?;
+            }
             connection.complete_io(&mut socket).map_err(|error| NetError::io(&error, now))?;
         }
         Ok(Stream::Tls(Box::new(StreamOwned::new(connection, socket))))
+    }
+}
+
+/// The system's addresses of `host` on `port`, looked up on a thread of its own and waited for at most until
+/// `deadline`: the system's lookup has no timeout of ours. A lookup still running then is left to end by itself.
+fn lookup_by(host: &str, port: u16, deadline: &Deadline) -> Result<Vec<SocketAddr>, NetError> {
+    let wait = deadline.wait(Duration::MAX)?;
+    let (sender, receiver) = mpsc::channel();
+    let name = host.to_owned();
+    std::thread::Builder::new()
+        .name("inboxcraft-lookup".to_owned())
+        .spawn(move || {
+            let found = (name.as_str(), port).to_socket_addrs().map(|addresses| addresses.take(MAX_ADDRESSES).collect::<Vec<_>>());
+            // Nobody listens once the wait is over.
+            let _ = sender.send(found);
+        })
+        .map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?;
+    match receiver.recv_timeout(wait) {
+        Ok(found) => found.map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string())),
+        Err(_) => Err(NetError::new(ErrorKind::TimedOut, format!("the name {host} was not found in time"))),
     }
 }
 
