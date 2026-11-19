@@ -243,6 +243,8 @@ mod bridge_tests;
 #[cfg(test)]
 mod hostile_tests;
 #[cfg(test)]
+mod store_failure_tests;
+#[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests;
