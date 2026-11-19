@@ -521,6 +521,19 @@ fn every_control_is_reached_by_tab_and_the_open_line_rests_but_for_the_caret() {
     assert!(rests(&mut harness, 8), "the closed command line asks for no frame");
 }
 
+#[test]
+fn the_closed_command_field_with_the_keyboard_repaints_only_on_the_caret_s_timer() {
+    let mut harness = harness_resting();
+    // The window's first Tab stop is the command line's field.
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert!(field_focused(&harness), "Tab reaches the field");
+    assert!(!harness.state().command().results(), "with nothing typed the line stays closed");
+    harness.run_steps(60);
+    let delay = harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap_or(std::time::Duration::MAX);
+    assert!(delay >= std::time::Duration::from_millis(200), "the closed field with the keyboard asks for a frame in {delay:?}");
+}
+
 fn harness_resting() -> Harness<'static, InboxApp> {
     harness(egui::Theme::Light)
 }
