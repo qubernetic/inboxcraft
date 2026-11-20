@@ -831,3 +831,23 @@ fn only_a_read_leaves_the_writes_count_as_it_was() {
         assert!(!super::changes_nothing(write), "{write} may change what the window shows");
     }
 }
+
+#[test]
+fn outside_the_drafts_place_only_the_drafts_count_is_asked_for() {
+    // The index's Drafts count asks `compose.list` for one draft and reads its `total`: the store reads one row (#301).
+    let mut mailbox = mailbox();
+    let account = mailbox.accounts().first().map(|account| account.id).unwrap();
+    for subject in ["Kiln rota", "Glaze order", "Notes"] {
+        let id = mailbox.run("compose.new", &json!({ "account": account })).unwrap().get("id").and_then(Value::as_u64).unwrap();
+        mailbox.run("compose.update", &json!({ "id": id, "subject": subject })).unwrap();
+    }
+    let asked = super::draft_count_asked(None);
+    assert_eq!(asked.get("limit").and_then(Value::as_u64), Some(1), "{asked}");
+    let answer = mailbox.run("compose.list", &asked).unwrap();
+    assert_eq!(answer.get("drafts").and_then(Value::as_array).map(Vec::len), Some(1), "one draft read");
+    let total = answer.get("total").and_then(Value::as_u64).unwrap();
+    assert!(total >= 3, "the total counts every draft: {total}");
+    mailbox.keep_drafts_fresh();
+    assert_eq!(mailbox.drafts_total(), total);
+    assert!(mailbox.drafts().next().is_none(), "outside the drafts place no draft is listed");
+}

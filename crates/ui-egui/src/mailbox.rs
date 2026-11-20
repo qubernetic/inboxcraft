@@ -490,6 +490,12 @@ pub struct DraftItem {
 /// The characters of a draft's text a screen reader is told, at most.
 const DRAFT_START: usize = 80;
 
+/// What the index's Drafts count asks `compose.list` for over `account` (all shown when `None`): one draft, so the
+/// store reads one row (#301), and the answer's `total`.
+fn draft_count_asked(account: Option<u64>) -> Value {
+    json!({ "account": account, "limit": 1 })
+}
+
 /// A draft of `compose.list` as the drafts place lists it; `None` without an id. Every text is capped and made plain
 /// here, where the list is built, so a draft of 10 000 characters costs a frame no more than a short one.
 fn draft_item(mailbox: &Mailbox, row: &Value) -> Option<DraftItem> {
@@ -1892,8 +1898,7 @@ impl Mailbox {
     }
 
     /// Reads the drafts the drafts place lists (`compose.list`), newest first, at most [`MAX_LIST`] of the accounts
-    /// shown. The engine answers only the newest asked for; the store still reads them all to pick those (#301 makes
-    /// it read only what is asked).
+    /// shown. The engine answers only the newest asked for, and the store reads only those (#301).
     fn load_drafts(&mut self) -> Result<(), UiError> {
         let answer = self.run("compose.list", &json!({ "account": self.narrowed, "limit": MAX_LIST }))?;
         let drafts: Vec<DraftItem> = array("compose.list", &answer, "drafts")?.iter().filter_map(|row| draft_item(self, row)).collect();
@@ -1913,7 +1918,7 @@ impl Mailbox {
     fn count_drafts(&mut self) -> Result<(), UiError> {
         // A read for the index, in none of the window's tallies (as the status line's reads).
         let account = self.narrowed;
-        let answer = self.quietly(|mailbox| mailbox.run("compose.list", &json!({ "account": account, "limit": 1 })))?;
+        let answer = self.quietly(|mailbox| mailbox.run("compose.list", &draft_count_asked(account)))?;
         let total = answer.get("total").and_then(Value::as_u64).unwrap_or(0);
         if total != self.drafts_total {
             self.drafts_total = total;
