@@ -21,7 +21,7 @@
 
 use egui::{Align, Id, Layout, Rect, Response, Role, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use inboxcraft_engine::ScreenerMode;
-use inboxcraft_engine::appearance::{Appearance, ComposerHost, ThemeMode, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, ComposerHost, ReaderHost, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
 use inboxcraft_engine::shown::SettingsAsked;
 
@@ -118,6 +118,8 @@ pub(super) enum Asked {
     Frame(WindowFrame),
     /// Where a message is written (`ui.layout.set`), chosen by the owner.
     Composer(ComposerHost),
+    /// Where a message opens: in the pane or in a window of its own (`ui.layout.set`, the owner's).
+    ReaderHost(ReaderHost),
     /// Another page of the settings.
     Section(Section),
     /// Add account on the Accounts page: the form opens on it.
@@ -599,9 +601,13 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, level: crate::mo
                 asked = Some(Asked::InboxView(chosen));
             }
         });
-        let places = [(0_u8, tr!("Pane"), f.button), (1, tr!("Window"), f.button)];
-        settings_row_soon_with(ui, theme, tr!("Open a message"), tr!("In the pane beside the list, or in a window of its own."), |ui| {
-            segmented_for(ui, theme, &places, 0, Some(tr!("Open a message")));
+        let readers = [(ReaderHost::Docked, tr!("Pane"), f.button), (ReaderHost::Window, tr!("Window"), f.button)];
+        let reader_help = tr!("In the pane beside the list, or in a window of its own.");
+        settings_row(ui, theme, tr!("Open a message"), Some(reader_help), |ui| {
+            // A press on the host shown asks nothing: the control answers another host only.
+            if let Some(host) = segmented_for(ui, theme, &readers, current.layout.reader, Some(tr!("Open a message"))) {
+                asked = Some(Asked::ReaderHost(host));
+            }
         });
         // The owner's three hosts; a choice of the one shown asks nothing, and a held key's repeat chooses nothing.
         let hosts = [

@@ -26,6 +26,7 @@ pub(crate) enum Host {
     /// In its place in the main window (the composer in the reader's place, the reader in its pane).
     Docked,
     /// Over the main window, in a float of its own.
+    #[cfg_attr(not(test), allow(dead_code, reason = "the floating composer moves into the host in its own task"))]
     Floating,
     /// In a window of its own, the viewport `0`.
     Window(ViewportId),

@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 
 use crate::fetch::Fetch;
 use crate::invite::{Invite, Rsvp};
-use crate::mailbox::{Mailbox, parse_date, plainly_named, sender, shown};
+use crate::mailbox::{Mailbox, MessageRow, parse_date, plainly_named, sender, shown};
 use crate::picture::{Decoded, decode_within};
 use crate::quote::{MAX_TEXT, Segment, split};
 use crate::save::Save;
@@ -328,6 +328,9 @@ pub struct Reader {
     changing: BTreeSet<u64>,
     /// Why the open message is here, in the window's words, and where it stood when the engine was asked.
     why: (Vec<String>, Option<crate::why::Place>),
+    /// The open message's row as a reader in a window of its own last read it: what its head shows once the list the
+    /// message was opened from has moved on (another place, a search). The pane's reader keeps none.
+    kept_row: Option<MessageRow>,
     /// How many times the engine was asked why.
     #[cfg(test)]
     pub(crate) asked_why: u64,
@@ -365,6 +368,7 @@ impl Reader {
             saves: BTreeMap::new(),
             changing: BTreeSet::new(),
             why: (Vec::new(), None),
+            kept_row: None,
             #[cfg(test)]
             asked_why: 0,
         }
@@ -383,6 +387,7 @@ impl Reader {
         self.saves.clear();
         self.notice = None;
         self.why = (Vec::new(), None);
+        self.kept_row = None;
         let Some(id) = id else {
             self.full_width = false;
             return;
@@ -773,6 +778,17 @@ impl Reader {
     #[must_use]
     pub fn open_id(&self) -> Option<u64> {
         self.open
+    }
+
+    /// The open message's row kept for a window of its own ([`Reader::keep_row`]).
+    #[must_use]
+    pub(crate) fn kept_row(&self) -> Option<&MessageRow> {
+        self.kept_row.as_ref().filter(|row| Some(row.id) == self.open)
+    }
+
+    /// Keeps `row` as the open message's row, for a reader in a window of its own; a row of another message keeps none.
+    pub(crate) fn keep_row(&mut self, row: Option<MessageRow>) {
+        self.kept_row = row.filter(|row| Some(row.id) == self.open);
     }
 
     /// The thread, oldest first.
