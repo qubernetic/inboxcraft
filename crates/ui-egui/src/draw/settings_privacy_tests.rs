@@ -210,22 +210,6 @@ fn painted(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<(egui::
     harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
 }
 
-#[test]
-fn a_sender_s_address_stands_in_the_frame_s_column_in_muted_mono() {
-    // The frame's row: the name at 16 (180, not kept: a gaps line), the address at 208 (424) in mono muted, "ask again"
-    // at 644 to 704.
-    let harness = on_privacy(&THREE);
-    let (note, _) = painted(&harness, "The senders whose remote pictures").expect("the group's note");
-    let column = note.left() - 16.0;
-    let (address, colour) = painted(&harness, "hello@typeweekly.example.org").expect("the address is drawn");
-    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
-    assert!((address.left() - column - 208.0).abs() <= 0.5, "the address at 208: {}", address.left() - column);
-    assert!(address.width() <= 424.0, "the address in 424: {}", address.width());
-    assert_eq!(colour, theme.palette.muted, "the address in muted");
-    let link = harness.get_by_label(&again("hello@typeweekly.example.org")).rect();
-    assert!((link.right() - column - 704.0).abs() <= 1.0, "ask again ends 16 in: {}", link.right() - column);
-}
-
 /// What the galley laid out from `wanted` shows (an elided run ends in `…`), and where it stands.
 fn shown(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<(egui::Rect, String)> {
     fn find(shape: &egui::Shape, wanted: &str) -> Option<(egui::Rect, String)> {
@@ -241,23 +225,115 @@ fn shown(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<(egui::Re
     harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
 }
 
+/// The left of the rows (the group's note stands 16 in from it).
+fn rows_left(harness: &Harness<'static, InboxApp>) -> f32 {
+    painted(harness, "The senders whose remote pictures").expect("the group's note").0.left() - 16.0
+}
+
+/// The sample on the Privacy page, its list shown as `rows`.
+fn showing(rows: Vec<SenderRow>, size: egui::Vec2) -> Harness<'static, InboxApp> {
+    let mut harness = on_privacy_at(&THREE, size);
+    harness.state_mut().settings_mut().privacy_mut().show(rows);
+    harness.run();
+    harness
+}
+
+fn row(address: &str) -> SenderRow {
+    SenderRow::read(&json!(address)).unwrap()
+}
+
 #[test]
-fn on_a_narrow_page_the_empty_name_column_gives_way_before_the_address_is_cut() {
-    // At 1200 the frame's columns stay: the address at 208. At 800 the page is narrower than the frame's row needs:
-    // the empty name column gives way and the address shows whole, "ask again" still beside it (#325, I-4).
+fn without_a_name_the_address_stands_at_16_in_muted_mono_and_takes_the_name_column() {
+    // No name is kept: the address starts at the row's inner left, 16, and has the name's column and gap besides the
+    // frame's 424 (616 in a 720 row), "ask again" at 644 to 704 as the frame draws it.
+    let harness = on_privacy(&THREE);
+    let column = rows_left(&harness);
+    let (address, colour) = painted(&harness, "hello@typeweekly.example.org").expect("the address is drawn");
+    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    assert!((address.left() - column - 16.0).abs() <= 0.5, "the address at 16: {}", address.left() - column);
+    assert_eq!(colour, theme.palette.muted, "the address in muted");
+    let link = harness.get_by_label(&again("hello@typeweekly.example.org")).rect();
+    assert!((link.right() - column - 704.0).abs() <= 1.0, "ask again ends 16 in: {}", link.right() - column);
+    // An address wider than the frame's 424 but within 616 shows whole.
+    let long = "newsletters-and-weekly-digest@longer-typeweekly.example.org";
+    let harness = showing(vec![row(long)], vec2(1440.0, 900.0));
+    let column = rows_left(&harness);
+    let (drawn, glyphs) = shown(&harness, long).expect("the long address is drawn");
+    assert!(drawn.width() > 424.0, "the test's address is wider than the frame's column: {}", drawn.width());
+    assert_eq!(glyphs, long, "the address takes the name's column and shows whole");
+    assert!((drawn.left() - column - 16.0).abs() <= 0.5, "the long address at 16: {}", drawn.left() - column);
+}
+
+#[test]
+fn with_a_name_the_frame_s_columns_stand() {
+    // The frame's row: the name at 16 in 180 (strong, ink), the address at 208 in 424, "ask again" at 644 to 704.
     let address = "hello@typeweekly.example.org";
-    for (width, frame_s) in [(1200.0, true), (800.0, false)] {
+    let harness = showing(vec![row(address).named("Type Weekly")], vec2(1440.0, 900.0));
+    let column = rows_left(&harness);
+    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    let (name, colour) = painted(&harness, "Type Weekly").expect("the name is drawn");
+    assert!((name.left() - column - 16.0).abs() <= 0.5, "the name at 16: {}", name.left() - column);
+    assert!(name.width() <= 180.0, "the name in 180: {}", name.width());
+    assert_eq!(colour, theme.palette.ink, "the name in ink");
+    let (drawn, _) = painted(&harness, address).expect("the address is drawn");
+    assert!((drawn.left() - column - 208.0).abs() <= 0.5, "the address at 208: {}", drawn.left() - column);
+    let link = harness.get_by_label(&again(address)).rect();
+    assert!((link.right() - column - 704.0).abs() <= 1.0, "ask again ends 16 in: {}", link.right() - column);
+    // A long name is cut in its column and the address still starts at 208.
+    let harness = showing(vec![row(address).named(&"Weekly ".repeat(40))], vec2(1440.0, 900.0));
+    let column = rows_left(&harness);
+    let (name, glyphs) = shown(&harness, "Weekly").expect("the long name is drawn");
+    assert!(name.width() <= 180.0 && glyphs.ends_with('…'), "the long name cut in 180: {} {glyphs}", name.width());
+    let (drawn, _) = painted(&harness, address).expect("the address is drawn");
+    assert!((drawn.left() - column - 208.0).abs() <= 0.5, "the address at 208 after a long name: {}", drawn.left() - column);
+    assert_eq!(SenderRow::read(&json!(address)).unwrap().named(" \r\n ").name, None, "a blank name keeps none");
+}
+
+#[test]
+fn a_long_address_is_cut_on_one_line_before_ask_again_its_start_kept() {
+    // The frame's address is one line that truncates at its end (an ellipsis after the start it keeps); the cut keeps
+    // 12 before "ask again", on a wide page and on a narrow one.
+    let long = format!("{}@example.org", "a-very-long-local-part".repeat(8));
+    for width in [1440.0, 800.0] {
+        let harness = showing(vec![row(&long)], vec2(width, 700.0));
+        let column = rows_left(&harness);
+        let (drawn, glyphs) = shown(&harness, "a-very-long").unwrap_or_else(|| panic!("{width}: the address is drawn"));
+        assert!(glyphs.ends_with('…') && long.starts_with(glyphs.trim_end_matches('…')), "{width}: cut at its end: {glyphs}");
+        assert!((drawn.left() - column - 16.0).abs() <= 0.5, "{width}: at 16: {}", drawn.left() - column);
+        let link = harness.get_by_label(&again(&long)).rect();
+        assert!(drawn.right() <= link.left() - 11.5, "{width}: the address {drawn:?} ends 12 before ask again {link:?}");
+        if width >= 1440.0 {
+            assert!((link.right() - column - 704.0).abs() <= 1.0, "ask again ends 16 in: {}", link.right() - column);
+        }
+        assert!(drawn.width() >= link.left() - 12.0 - drawn.left() - 16.0, "{width}: the cut uses the room: {drawn:?} {link:?}");
+    }
+}
+
+#[test]
+fn a_hostile_address_and_name_are_one_line_inside_their_row() {
+    let hostile = format!("a\r\nb\u{0}\u{202E}c\u{2066}{}{}@example.org", "\u{0301}".repeat(200), "y".repeat(400));
+    let rows = vec![row(&hostile), row("hello@typeweekly.example.org").named(&format!("Ty\npe\u{202E}{}", "W".repeat(5_000)))];
+    let harness = showing(rows, vec2(1440.0, 900.0));
+    let column = rows_left(&harness);
+    for (wanted, right) in [("a b", 704.0 - 60.0 - 12.0), ("Ty pe", 16.0 + 180.0)] {
+        let (rect, glyphs) = shown(&harness, wanted).unwrap_or_else(|| panic!("{wanted}: drawn"));
+        assert!(!glyphs.chars().any(|c| c.is_control() || c == '\u{202E}' || c == '\u{2066}'), "{wanted}: plain: {glyphs:?}");
+        assert!(rect.height() <= 22.5, "{wanted}: one line: {rect:?}");
+        assert!(rect.left() - column >= 15.5 && rect.right() - column <= right + 0.5, "{wanted}: inside its column: {rect:?}");
+    }
+}
+
+#[test]
+fn on_a_narrow_page_the_address_without_a_name_stays_at_16_whole() {
+    // At 1200 and at 800 the address stands at 16 and shows whole, "ask again" still beside it (#325, #337).
+    let address = "hello@typeweekly.example.org";
+    for width in [1200.0, 800.0] {
         let harness = on_privacy_at(&THREE, vec2(width, 700.0));
-        let (note, _) = painted(&harness, "The senders whose remote pictures").expect("the group's note");
-        let column = note.left() - 16.0;
-        let (shown, glyphs) = shown(&harness, address).unwrap_or_else(|| panic!("{width}: the address is drawn"));
+        let column = rows_left(&harness);
+        let (drawn, glyphs) = shown(&harness, address).unwrap_or_else(|| panic!("{width}: the address is drawn"));
         assert_eq!(glyphs, address, "{width}: the address whole");
         let link = harness.get_by_label(&again(address)).rect();
-        assert!(shown.right() <= link.left() - 11.5, "{width}: the address {shown:?} ends 12 before ask again {link:?}");
-        if frame_s {
-            assert!((shown.left() - column - 208.0).abs() <= 0.5, "{width}: the address at 208: {}", shown.left() - column);
-        } else {
-            assert!(shown.left() - column < 208.0 && shown.left() - column >= 16.0, "{width}: the column gave way: {}", shown.left() - column);
-        }
+        assert!(drawn.right() <= link.left() - 11.5, "{width}: the address {drawn:?} ends 12 before ask again {link:?}");
+        assert!((drawn.left() - column - 16.0).abs() <= 0.5, "{width}: the address at 16: {}", drawn.left() - column);
     }
 }
