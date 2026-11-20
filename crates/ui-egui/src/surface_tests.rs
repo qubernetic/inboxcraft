@@ -121,7 +121,7 @@ fn every_surface_at_once_is_held_in_eight_and_the_place_stays_last() {
 /// stacking: the actions it let run. Send is left out: its key needs the keyboard in the composer, which no surface
 /// is. Generated once from those functions (the test `draw::surface_old_tests`, removed with them), checked against
 /// `Surfaces::allows` there.
-const WINDOW: [&str; 22] = [
+const WINDOW: [&str; 26] = [
     "ui.palette.open",
     "ui.command.open",
     "ui.search.focus",
@@ -141,6 +141,10 @@ const WINDOW: [&str; 22] = [
     "ui.mode.light",
     "ui.mode.dark",
     "ui.mode.system",
+    "ui.text_size.larger",
+    "ui.text_size.larger_equals",
+    "ui.text_size.smaller",
+    "ui.text_size.reset",
     "ui.view.grouped",
     "ui.view.smart",
     "ui.view.list",
@@ -164,7 +168,7 @@ const LIST: [&str; 11] = [
 /// What runs on the settings, with a modifier only: the window's keys but those of the mail (Undo, the views, Back,
 /// the held-back message, Snooze, the composer's fold). Under the sheet New message did not run; on the settings it
 /// shows the place the owner came from and opens the composer there.
-const ON_SETTINGS: [&str; 15] = [
+const ON_SETTINGS: [&str; 19] = [
     "ui.palette.open",
     "ui.command.open",
     "ui.search.focus",
@@ -180,14 +184,18 @@ const ON_SETTINGS: [&str; 15] = [
     "ui.mode.light",
     "ui.mode.dark",
     "ui.mode.system",
+    "ui.text_size.larger",
+    "ui.text_size.larger_equals",
+    "ui.text_size.smaller",
+    "ui.text_size.reset",
 ];
 
 /// What runs on Home, with a modifier or without (Home has no field the letters are for): the window's keys but those
 /// of the mail, the same rule as on the settings.
-const ON_HOME: [&str; 15] = ON_SETTINGS;
+const ON_HOME: [&str; 19] = ON_SETTINGS;
 
 /// What runs with a modifier beside the composer in front: the window's keys but Undo, the composer's text's.
-const COMPOSER: [&str; 22] = [
+const COMPOSER: [&str; 26] = [
     "ui.palette.open",
     "ui.command.open",
     "ui.search.focus",
@@ -207,6 +215,10 @@ const COMPOSER: [&str; 22] = [
     "ui.mode.light",
     "ui.mode.dark",
     "ui.mode.system",
+    "ui.text_size.larger",
+    "ui.text_size.larger_equals",
+    "ui.text_size.smaller",
+    "ui.text_size.reset",
     "ui.view.grouped",
     "ui.view.smart",
     "ui.view.list",
@@ -216,8 +228,19 @@ const COMPOSER: [&str; 22] = [
 /// fix it ran on the mail and the calendar with or without one, and rested on Home though Home draws the floating one.
 const FOLD: [&str; 1] = ["ui.compose.fold"];
 
-/// What runs under the event editor: what comes over it and the look.
-const EDITOR: [&str; 6] = ["ui.palette.open", "ui.settings.open", "ui.shortcuts.open", "ui.mode.light", "ui.mode.dark", "ui.mode.system"];
+/// What runs under the event editor: what comes over it and the look (the mode and the text size).
+const EDITOR: [&str; 10] = [
+    "ui.palette.open",
+    "ui.settings.open",
+    "ui.shortcuts.open",
+    "ui.mode.light",
+    "ui.mode.dark",
+    "ui.mode.system",
+    "ui.text_size.larger",
+    "ui.text_size.larger_equals",
+    "ui.text_size.smaller",
+    "ui.text_size.reset",
+];
 
 /// What ran: `(stacking, its facts, without a modifier, with Command)`, each a set of lists.
 type Row = (&'static str, Facts, &'static [&'static [&'static str]], &'static [&'static [&'static str]]);
