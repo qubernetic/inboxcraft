@@ -126,6 +126,7 @@ fn commands() -> Vec<(&'static str, Value)> {
         // A message, and the thread it is in.
         ("mail.read", json!({ "id": "$" })),
         ("mail.why", json!({ "id": "$" })),
+        ("mail.row", json!({ "id": "$" })),
         ("mail.thread", json!({ "id": "$" })),
         ("mail.attachment", json!({ "id": "$", "index": 0 })),
         ("invite.show", json!({ "id": "$" })),
