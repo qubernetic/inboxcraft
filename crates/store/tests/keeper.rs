@@ -212,6 +212,37 @@ fn removing_the_account_of_a_draft_whose_keep_failed_ends_the_draft() {
 }
 
 #[test]
+fn a_wait_on_a_keeper_gone_writes_what_it_held_at_once() {
+    let tmp = dir();
+    let mut store = keeping(tmp.path());
+    let _hold = store.hold_keeps().unwrap();
+    keep(&mut store, "held");
+    store.stop_keeper();
+    // The close of a window finds the keeper gone: it does not wait for a thread that ended.
+    assert_eq!(store.settle(Duration::from_secs(1)), Ok(()));
+    assert_eq!(on_disk(tmp.path()).as_deref(), Some("held"));
+    assert!(store.unkept().is_empty());
+}
+
+#[test]
+fn a_wake_that_panics_ends_neither_the_keeper_nor_its_write() {
+    let tmp = dir();
+    let mut store = keeping(tmp.path());
+    let woken = Arc::new(AtomicUsize::new(0));
+    let theirs = Arc::clone(&woken);
+    store.wake_on_keep(Arc::new(move || {
+        assert!(theirs.fetch_add(1, Ordering::SeqCst) > 0, "the first wake panics");
+    }));
+    keep(&mut store, "one");
+    store.settle(Duration::from_secs(5)).unwrap();
+    keep(&mut store, "two");
+    store.settle(Duration::from_secs(5)).unwrap();
+    assert_eq!(on_disk(tmp.path()).as_deref(), Some("two"));
+    assert_eq!(store.keeper_tries(), 2, "the keeper wrote both: it lives on");
+    assert_eq!(woken.load(Ordering::SeqCst), 2);
+}
+
+#[test]
 fn a_batch_on_a_draft_whose_keep_failed_is_refused_every_time_and_a_discard_goes_through() {
     let tmp = dir();
     let mut store = keeping(tmp.path());

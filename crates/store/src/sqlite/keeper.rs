@@ -342,9 +342,28 @@ impl Drop for Keeper {
                 eprintln!("inboxcraft: a draft kept may not be on the disk: {error}");
             }
         }
-        for (id, error) in self.unkept() {
-            eprintln!("inboxcraft: draft {id} was not kept, the disk holds it as it was before: {error}");
+        for line in self.not_kept() {
+            eprintln!("{line}");
         }
+    }
+}
+
+impl Keeper {
+    /// A line for each draft not on the disk: each whose last write failed, and, when the keeper's thread ended, each
+    /// it held, written or not; the end of the store says them on the app's standard error.
+    pub(super) fn not_kept(&self) -> Vec<String> {
+        let mut lines: Vec<String> = self
+            .unkept()
+            .into_iter()
+            .map(|(id, error)| format!("inboxcraft: draft {id} was not kept, the disk holds it as it was before: {error}"))
+            .collect();
+        if self.is_gone() {
+            let queue = self.shared.lock();
+            for id in queue.held.keys().filter(|id| !queue.failing.contains_key(id)) {
+                lines.push(format!("inboxcraft: draft {id} was not kept, the draft keeper stopped: the disk holds it as it was before"));
+            }
+        }
+        lines
     }
 }
 
@@ -417,9 +436,10 @@ fn run(shared: &Shared, mut conn: Connection) {
         }
         let wake = queue.wake.clone();
         drop(queue);
-        // The window is woken before a wait for the keeper ends: what it reads then is how the write went.
+        // The window is woken before a wait for the keeper ends: what it reads then is how the write went. A wake that
+        // panics ends neither the keeper nor the write.
         if let Some(wake) = wake {
-            wake();
+            let _ = catch_unwind(AssertUnwindSafe(|| wake()));
         }
         shared.lock().writing = false;
         shared.changed.notify_all();

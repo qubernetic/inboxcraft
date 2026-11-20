@@ -197,10 +197,24 @@ impl Sqlite {
     /// once from now on, said once on standard error. Until what it held is written the keeper stays, its drafts
     /// with it.
     fn outlive_keeper(&mut self) -> Result<(), StoreError> {
-        let Some(keeper) = self.keeper.as_ref().filter(|keeper| keeper.is_gone()) else { return Ok(()) };
+        if !self.write_what_a_gone_keeper_held()? {
+            return Ok(());
+        }
+        eprintln!("inboxcraft: the draft keeper stopped; drafts are written on the window's thread from now on");
+        self.keeper = None;
+        Ok(())
+    }
+
+    /// When the keeper's thread ended, writes what it held on this connection and forgets it there; whether it ended.
+    ///
+    /// # Errors
+    ///
+    /// What it held could not be written: the keeper keeps it, and the disk holds those drafts as they were before.
+    fn write_what_a_gone_keeper_held(&self) -> Result<bool, StoreError> {
+        let Some(keeper) = self.keeper.as_ref().filter(|keeper| keeper.is_gone()) else { return Ok(false) };
         let held = keeper.all_held();
         if !held.is_empty() {
-            let tx = self.conn.transaction()?;
+            let tx = self.conn.unchecked_transaction()?;
             for draft in &held {
                 local::put_draft(&tx, draft)?;
             }
@@ -209,9 +223,7 @@ impl Sqlite {
                 keeper.forget(draft.id);
             }
         }
-        eprintln!("inboxcraft: the draft keeper stopped; drafts are written on the window's thread from now on");
-        self.keeper = None;
-        Ok(())
+        Ok(true)
     }
 
     /// The drafts of `batch` when the keeper may write it behind: only drafts, every one held by the store from the
@@ -683,6 +695,10 @@ impl Storage for Sqlite {
     }
 
     fn settle(&self, within: Duration) -> Result<(), StoreError> {
+        // A keeper whose thread ended writes nothing more: what it held is written here, or the wait says why not.
+        if self.write_what_a_gone_keeper_held()? {
+            return Ok(());
+        }
         self.keeper.as_ref().map_or(Ok(()), |keeper| keeper.settle_all(within))
     }
 
