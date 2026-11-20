@@ -102,3 +102,22 @@ fn the_answers_of_a_sender_card_end_on_its_padding() {
     assert!((keep_out.left() - let_in.right() - 8.0).abs() <= 0.5, "8 apart: {let_in:?} {keep_out:?}");
     assert!((keep_out.right() - (left + 900.0 - 21.0)).abs() <= 0.5, "on the card's padding: {keep_out:?} from {left}");
 }
+
+/// `inbox-grouped/screener-card`: Review (32) centred on the 64 card, 16 from its top, on a whole pixel; the first
+/// group's head under the card; at 130 % the card is 84 and Review 42. (The design draws the card's line under its 64;
+/// here it is inside, a line's height staying even.)
+#[test]
+fn the_screener_card_centres_review_on_its_64() {
+    for (scale, card, review) in [(TextScale::default(), 64.0, 32.0), (TextScale::from_percent(130).unwrap(), 84.0, 42.0)] {
+        let harness = grouped(1440.0, scale);
+        let pressed = harness.get_by_role_and_label(Role::Button, "Review").rect();
+        let head = harness.get_by_label_contains("People, ").rect();
+        // `text-130/inbox-reader`: a group's head 32 (42), a row 56 (72).
+        let (head_high, row_high) = if card > 64.0 { (42.0, 72.0) } else { (32.0, 56.0) };
+        assert_eq!(head.height(), head_high, "{scale:?}: the group's head");
+        let row = harness.get_all_by_role(Role::ListBoxOption).next().unwrap().rect();
+        assert_eq!(row.height(), row_high, "{scale:?}: a row {row:?}");
+        let top = head.top() - card;
+        assert_eq!(pressed.top() - top, (card - review) / 2.0, "{scale:?}: Review {pressed:?} in the card from {top}");
+    }
+}

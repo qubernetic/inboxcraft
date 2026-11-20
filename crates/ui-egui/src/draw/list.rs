@@ -1364,7 +1364,8 @@ impl Rows<'_> {
     }
 }
 
-/// The screener card's height at 100 % text, in points: the design's 64, its line under it inside.
+/// The screener card's height at 100 % text, in points: the design's 64, its line under it inside (the design draws
+/// the line under the 64; a line's height stays even, for whole pixels at 1.5×).
 const SCREENER_HEIGHT: f32 = 64.0;
 
 /// The screener card across `ui`'s line, as the design draws it on top of the inbox: the people mark, how many new
@@ -1385,7 +1386,8 @@ fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, waiting: &[Waiting]) ->
     // Review at the right end, the avatars before it, the two lines in what is left.
     let face = Theme::size(theme, 24.0);
     let shown: Vec<&Waiting> = waiting.iter().take(3).collect();
-    let row = Rect::from_min_max(pos2(rect.left() + PAD, rect.top()), pos2(rect.right() - PAD, rect.bottom() - 1.0));
+    // Review and the avatars centred on the whole 64, as the design centres them on its card (16 from its top).
+    let row = Rect::from_min_max(pos2(rect.left() + PAD, rect.top()), pos2(rect.right() - PAD, rect.bottom()));
     let (review, right) = ui
         .scope_builder(UiBuilder::new().max_rect(row).id_salt("screener-parts").layout(Layout::right_to_left(Align::Center)), |ui| {
             ui.spacing_mut().item_spacing.x = GAP;
