@@ -679,6 +679,8 @@ impl InboxApp {
         let at = self.index_place(setting);
         let flags = (Self::index_live(surfaces), self.checking_elsewhere());
         let narrow = regions.index.width() < shell::INDEX;
+        // The index's Drafts count is read before it is drawn: a draft written since counts in this frame (#328).
+        self.mailbox.keep_drafts_fresh();
         let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, narrow, flags);
         let indexed = Self::index_allowed(surfaces, indexed);
         // A row of the index pressed while a key is waited for ends the wait first, then acts.
@@ -2176,7 +2178,7 @@ impl InboxApp {
     }
 
     /// Says `text` in the status line, for the `notice` token's time once it shows.
-    fn say(&mut self, text: &str) {
+    pub(crate) fn say(&mut self, text: &str) {
         self.status.push(crate::status::Message::Notice { text: text.to_owned(), until: crate::status::NOTICE_SECONDS });
     }
 

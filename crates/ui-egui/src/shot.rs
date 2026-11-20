@@ -53,7 +53,8 @@
 //! status line's sets ([`crate::component::gallery_status`]),
 //! `home_sets` set to `true` the page of Home's sets ([`crate::component::gallery_home`]), `home_place` set to `true`
 //! shows Home, the start place, in the window (every other scene starts on the mail, as it was taken before Home was
-//! the start place; synced, as its frames are, unless `sync` says otherwise),
+//! the start place; synced, as its frames are, unless `sync` says otherwise), `fail` makes accounts fail after the
+//! sync (`refused` the last one's sign-in, `everything` every account), `notice` says its text in the status line,
 //! `command_sets` set to `true` the page of the command line's sets ([`crate::component::gallery_commands`]).
 //! The typeface and the icons are fixed, so a script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`own`; the older `strip` and `top_row` read as it); `pointer` rests the pointer
@@ -241,6 +242,13 @@ pub struct Shot {
     /// synced).
     #[serde(default)]
     pub sync: Option<String>,
+    /// Accounts failing, as their workers would tell it, after `sync`: `refused` the last account's sign-in refused,
+    /// `everything` that and every other account's connection refused.
+    #[serde(default)]
+    pub fail: Option<String>,
+    /// A notice said in the status line, as the window says one (a draft saved, a link copied).
+    #[serde(default)]
+    pub notice: Option<String>,
     /// Whether `act` (`done` or `delete`) is caught with its row sliding out, before the toast.
     #[serde(default)]
     pub slide: Option<bool>,
@@ -591,6 +599,35 @@ fn sync(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     Ok(())
 }
 
+/// With `shot.fail`, the sample's accounts failing as their workers would tell it, over what `sync` told: `refused`
+/// the last account's sign-in refused, `everything` that and every other account's connection refused. Nothing
+/// connects: the failures are told as events.
+fn fail(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    use inboxcraft_model::{AccountId, ErrorKind, Event, EventKind};
+    let Some(state) = shot.fail.as_deref() else { return Ok(()) };
+    let out = &shot.out;
+    let accounts: Vec<u64> = app.mailbox().accounts().iter().map(|account| account.id).collect();
+    let Some((last, rest)) = accounts.split_last() else { return Err(bad(format!("{out}: fail needs an account"))) };
+    let others = match state {
+        "refused" => &[][..],
+        "everything" => rest,
+        other => return Err(bad(format!("{out}: fail {other:?} is not refused or everything"))),
+    };
+    let failed = |kind| EventKind::Failed { kind, folder: None };
+    for account in others {
+        app.mailbox_mut().tell(&Event::new(AccountId::new(*account), None, failed(ErrorKind::ConnectionRefused)))?;
+    }
+    app.mailbox_mut().tell(&Event::new(AccountId::new(*last), None, failed(ErrorKind::LoginRefused)))?;
+    Ok(())
+}
+
+/// With `shot.notice`, its text said in the status line as the window says a notice.
+fn notice(app: &mut InboxApp, shot: &Shot) {
+    if let Some(text) = &shot.notice {
+        app.say(text);
+    }
+}
+
 /// Puts the calendar screen in the view of `shot` and picks its event.
 fn calendar(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     let (calendar, mailbox) = app.calendar_mut();
@@ -899,6 +936,8 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.step.is_some()
         || shot.act.is_some()
         || shot.sync.is_some()
+        || shot.fail.is_some()
+        || shot.notice.is_some()
         || shot.slide.is_some()
         || shot.motion.is_some()
         || shot.text_scale.is_some()
@@ -1881,6 +1920,8 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     act(&mut app, shot)?;
     sync(&mut app, shot)?;
+    fail(&mut app, shot)?;
+    notice(&mut app, shot);
     if let Some(typed) = &shot.picker {
         if app.mailbox().selected().is_none() {
             return Err(bad(format!("{}: the time picker needs a selected row", shot.out)));
@@ -1978,3 +2019,7 @@ mod tests;
 #[cfg(test)]
 #[path = "shot_steps_tests.rs"]
 mod steps_tests;
+
+#[cfg(test)]
+#[path = "shot_fail_tests.rs"]
+mod fail_tests;

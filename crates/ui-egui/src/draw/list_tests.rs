@@ -156,7 +156,7 @@ fn done_and_delete_and_their_undo_act_on_the_sample() {
     assert_eq!(rows(&harness), 11);
     press(&mut harness, TEODOR, "Delete");
     assert!(harness.query_by_label(TEODOR).is_none());
-    harness.get_by_label("Moved to Trash");
+    harness.get_by_label("Moved to Bin");
     harness.state_mut().mailbox_mut().open(Place::View(inboxcraft_model::Role::Trash));
     harness.run();
     assert!(harness.query_all_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").count() == 1, "in the Trash");
@@ -200,7 +200,7 @@ fn the_keys_act_on_the_keyboard_selected_row_and_the_undo_key_undoes() {
     harness.key_press(Key::Delete);
     harness.run();
     assert!(harness.query_by_label(ODILE_READ).is_none());
-    harness.get_by_label("Moved to Trash");
+    harness.get_by_label("Moved to Bin");
 }
 
 #[test]
@@ -3851,6 +3851,32 @@ fn the_group_menu_is_the_design_files_box() {
         _ => false,
     });
     assert!(!painted_line, "no hairline under the head");
+}
+
+#[test]
+fn the_group_menu_keeps_its_256_at_every_text_size_and_its_note_wraps() {
+    // The owner's answer: a menu keeps the design's width at every text size; at 130 % the note takes more lines, the
+    // menu does not grow.
+    let mut lines = Vec::new();
+    for scale in crate::theme::TextScale::ALL {
+        let mut app = app(false);
+        app.set_reduce_motion(true);
+        app.set_text_scale(scale);
+        let mut harness = harness_of(app);
+        harness.key_press(Key::J);
+        harness.run();
+        let keyed = harness.state().mailbox().selected().unwrap();
+        harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
+        harness.run();
+        harness.run();
+        let menu = harness.ctx.memory(|memory| memory.area_rect(super::list::group_menu_id(keyed))).unwrap();
+        assert_eq!(menu.width(), 256.0, "{scale:?}: {menu:?}");
+        for node in harness.query_all_by_role(Role::MenuItem) {
+            assert!(menu.contains_rect(node.rect()), "{scale:?}: {:?} out of {menu:?}", node.rect());
+        }
+        lines.push(menu.height());
+    }
+    assert!(lines.last() > lines.get(1), "at 130 % the menu is taller, not wider: {lines:?}");
 }
 
 /// A landing asked again forgets where the last one went: a note left by a landing nobody read (its row scrolled away,

@@ -386,7 +386,7 @@ fn delete_in_the_toolbar_moves_the_open_message_to_trash() {
         harness.run();
     }
     assert!(harness.state().mailbox().messages().iter().all(|row| row.id != id));
-    harness.get_by_label("Moved to Trash");
+    harness.get_by_label("Moved to Bin");
 }
 
 #[test]
@@ -901,7 +901,7 @@ fn after_the_open_message_is_taken_away_the_reader_shows_nothing_open() {
     assert!(harness.query_by_role_and_label(Role::Button, "Reply").is_none());
     // The bare empty state, its lines centred in the reader's pane.
     let label = harness.get_by_label("Pick a message.\nIt opens here.").rect();
-    // The help says how a message opens from here: the arrows (the lists' J, K and Enter come with them).
+    // The help says how a message opens from here: the lists' J, K and Enter, as the frames write it.
     fn texts(shape: &egui::Shape, found: &mut String) {
         match shape {
             egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, found)),
@@ -911,8 +911,8 @@ fn after_the_open_message_is_taken_away_the_reader_shows_nothing_open() {
     }
     let mut painted = String::new();
     harness.output().shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut painted));
-    assert!(painted.contains("The arrow keys move in the list and open"), "{painted}");
-    assert!(painted.contains("Ctrl K runs any"), "{painted}");
+    // The frames' words, the keys from the keymap (#328).
+    assert!(painted.contains("J and K move in the list, Enter opens the message. Ctrl K runs any"), "{painted}");
     let pane_middle = (pane.0 + pane.1) / 2.0;
     assert!((label.center().x - pane_middle).abs() <= 1.0, "in the middle of the reader's pane: {label:?} {pane:?}");
     // A row picked by a click opens again.
@@ -1292,6 +1292,30 @@ fn more_and_move_hang_with_their_right_edge_on_their_button_s_right_edge() {
         let item = harness.get_by_role_and_label(Role::MenuItem, row).rect();
         assert!((item.right() + 1.0 - opener.right()).abs() <= 0.5, "{button}: the menu's right edge on the button's: {item:?} {opener:?}");
         assert!((item.left() - 1.0 - (opener.right() - width)).abs() <= 0.5, "{button}: {width} wide: {item:?} {opener:?}");
+    }
+}
+
+#[test]
+fn more_and_move_keep_the_design_s_width_at_every_text_size() {
+    // The owner's answer: every menu keeps its fixed width, as the design draws it; at 130 % text a row's words wrap
+    // or are cut, the menu does not grow.
+    for scale in crate::theme::TextScale::ALL {
+        for (button, row, width, id) in
+            [("More", "Archive", 288.0, super::reader::more_menu()), ("Move to a folder", "Receipts", 256.0, super::reader::move_menu())]
+        {
+            let fetch = Recorder::default();
+            let mut harness = opened_at(&fetch, "Photos from the coast walk", 1440.0, scale);
+            harness.get_by_role_and_label(Role::Button, button).click();
+            harness.run();
+            let menu = harness.ctx.memory(|memory| memory.area_rect(id)).unwrap();
+            assert!((menu.width() - width).abs() <= 0.5, "{scale:?} {button}: the menu {width} wide: {menu:?}");
+            let item = harness.get_by_role_and_label(Role::MenuItem, row).rect();
+            let rows: Vec<_> = harness.query_all_by_role(Role::MenuItem).map(|node| node.rect()).collect();
+            for rect in &rows {
+                assert!(rect.width() <= width - 2.0 + 0.5, "{scale:?} {button}: a row wider than the menu: {rect:?} of {rows:?}");
+            }
+            assert!((item.width() - (width - 2.0)).abs() <= 0.5, "{scale:?} {button}: {width} wide: {item:?}");
+        }
     }
 }
 

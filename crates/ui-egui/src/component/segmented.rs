@@ -11,7 +11,7 @@
 //! inside the group for a screen reader, selected or not, which its own click chooses; it is no Tab stop. Nothing moves
 //! (the design gives it no transition).
 
-use egui::{Color32, EventFilter, Key, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
+use egui::{Color32, EventFilter, Key, Rect, Response, Role, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint::{self, Ring};
 use crate::theme::{Font, Theme};
@@ -185,7 +185,8 @@ fn segmented_core<T: Copy + PartialEq>(
     let painter = solid(ui);
     if visible {
         if enabled {
-            painter.rect(track, 0.0, p.term, Stroke::new(1.0, p.line), StrokeKind::Inside);
+            painter.rect_filled(paint::on_pixels(&painter, track), 0.0, p.term);
+            paint::edge(&painter, track, 0.0, 1.0, p.line);
         } else {
             paint::dashed(&painter, track, p.line);
         }
@@ -205,15 +206,21 @@ fn segmented_core<T: Copy + PartialEq>(
             (true, true, false) => (p.stage, p.ink),
             (true, false, false) => (Color32::TRANSPARENT, if hovered == Some(index) { p.ink } else { p.muted }),
         };
+        // Fill, bar and hairline on whole pixels, as the track's edge.
+        let whole = paint::on_pixels(&painter, *rect);
         if fill != Color32::TRANSPARENT {
-            painter.rect_filled(*rect, 0.0, fill);
+            painter.rect_filled(whole, 0.0, fill);
         }
         if on {
             let bar = if open { p.cyan_edge } else { p.muted };
-            painter.rect_filled(Rect::from_min_max(pos2(rect.left(), rect.bottom() - BAR), rect.max), 0.0, bar);
+            painter.rect_filled(paint::on_pixels(&painter, Rect::from_min_max(pos2(rect.left(), rect.bottom() - BAR), rect.max)), 0.0, bar);
         }
         if index + 1 < options.len() {
-            painter.rect_filled(Rect::from_min_size(pos2(rect.right(), rect.top()), vec2(1.0, rect.height())), 0.0, p.line);
+            painter.rect_filled(
+                paint::on_pixels(&painter, Rect::from_min_size(pos2(whole.right(), whole.top()), vec2(1.0, whole.height()))),
+                0.0,
+                p.line,
+            );
         }
         let pad = if squeezed { theme.spacing.s1 } else { PAD };
         // A point more than the name needs, so that rounding never cuts a name that fits.

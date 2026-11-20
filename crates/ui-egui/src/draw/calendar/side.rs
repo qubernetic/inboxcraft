@@ -58,7 +58,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
     let line = line_width(ppp);
     let rect = ui.max_rect();
     let view = calendar.sync_view();
-    let foot = snap(rect.bottom() - calendar_sync::height(&view) - line, ppp);
+    let foot = snap(rect.bottom() - calendar_sync::height(theme, &view) - line, ppp);
     // On whole pixels: the mini month's box and the foot's hairline never blur.
     let inner = super::grid::whole(Rect::from_min_max(pos2(rect.left() + PAD, rect.top() + PAD), pos2(rect.right() - PAD, foot)), ppp);
     ui.scope_builder(UiBuilder::new().max_rect(inner).id_salt("calendar-side-scroll"), |ui| {

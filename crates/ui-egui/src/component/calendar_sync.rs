@@ -27,11 +27,20 @@ use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::tr;
 
-/// The line's height, in points, idle, syncing and synced.
+/// The line's height at 100 %, in points, idle, syncing and synced; at other text sizes to the nearest even pixel.
 pub const HIGH: f32 = 40.0;
 
-/// The line's height with a failure, in points: the failure's line and the ways out under it.
+/// The line's height with a failure at 100 %, in points: the failure's line and the ways out under it.
 pub const HIGH_FAILED: f32 = 58.0;
+
+/// A status item's height at 100 %, in points.
+const ITEM: f32 = 26.0;
+
+/// A small link's height at 100 %, in points.
+const LINK: f32 = 16.0;
+
+/// Over and under a failure's item and links, in points, at every text size.
+const FAILED_PAD: [f32; 2] = [6.0, 10.0];
 
 /// The line's width on the gallery's boards, in points: the side panel's room.
 const BOARD: f32 = 222.0;
@@ -48,10 +57,15 @@ pub struct Drawn {
     pub still: bool,
 }
 
-/// The height of the line for `view`.
+/// The height of the line for `view` at `theme`'s text size: the heights grow with the text (to the nearest even
+/// pixel), the paddings stay (`text-130/calendar`).
 #[must_use]
-pub fn height(view: &SyncView) -> f32 {
-    if matches!(view.state, SyncState::Failed { .. }) { HIGH_FAILED } else { HIGH }
+pub fn height(theme: &Theme, view: &SyncView) -> f32 {
+    if matches!(view.state, SyncState::Failed { .. }) {
+        FAILED_PAD[0] + Theme::size(theme, ITEM) + Theme::size(theme, LINK) + FAILED_PAD[1]
+    } else {
+        Theme::size(theme, HIGH)
+    }
 }
 
 /// The sync line over `ui`'s whole room for `view`, drawn as `drawn` says. Whether the control was pressed.
@@ -60,25 +74,29 @@ pub fn calendar_sync(ui: &mut Ui, theme: &Theme, keymap: &Keymap, view: &SyncVie
     let font = theme.fonts.mono_s;
     let area = ui.max_rect();
     let read = view.read.map(Moment::clock);
+    let (item_high, link_high) = (Theme::size(theme, ITEM), Theme::size(theme, LINK));
+    // Idle and the progress line stand centred in the line.
+    let centred = |high: f32| area.top() + ((Theme::size(theme, HIGH) - high) / 2.0).round();
     let (press, link, spoken) = match &view.state {
         SyncState::Idle => {
             let galley = super::galley(ui, tr!("sync now"), font, p.cyan_text);
             let wide = galley.size().x.ceil();
-            let link = Rect::from_min_size(pos2(area.right() - wide, area.top() + 12.0), vec2(wide, 16.0));
+            let link = Rect::from_min_size(pos2(area.right() - wide, centred(link_high)), vec2(wide, link_high));
             let status = read.as_ref().map_or_else(|| tr!("calendars not read yet").to_owned(), |time| tr!("calendars read {time}", time = time));
-            let item = Rect::from_min_max(pos2(area.left(), area.top() + 7.0), pos2((link.left() - 8.0).max(area.left()), area.top() + 33.0));
+            let top = centred(item_high);
+            let item = Rect::from_min_max(pos2(area.left(), top), pos2((link.left() - 8.0).max(area.left()), top + item_high));
             status_item(ui, theme, item, &status, read.is_some().then_some(p.plus), p.muted);
             (link, Some(galley), format!("{status}, {}", tr!("sync now")))
         }
         SyncState::Syncing { done, of, account } => {
             // Of the jobs handed out so far: the bar fills as they come back.
             let fraction = if *of == 0 { 0.0 } else { (*done as f32 / *of as f32).min(1.0) };
-            let line = progress_line(ui, theme, keymap, area, (ProgressState::Running(fraction), account), drawn.still);
+            let line = progress_line(ui, theme, keymap, area, (ProgressState::Running(fraction), account), drawn.still, centred);
             (line, None, tr!("syncing calendars: {account}, {done} of {of}", account = account, done = done, of = of))
         }
         SyncState::Synced { at } => {
             let time = (*at).or(view.read).map(Moment::clock).unwrap_or_default();
-            let line = progress_line(ui, theme, keymap, area, (ProgressState::Done, &time), drawn.still);
+            let line = progress_line(ui, theme, keymap, area, (ProgressState::Done, &time), drawn.still, centred);
             (line, None, format!("{}, {}", tr!("calendars synced {time}", time = time), tr!("sync now")))
         }
         SyncState::Failed { account, why } => {
@@ -86,10 +104,10 @@ pub fn calendar_sync(ui: &mut Ui, theme: &Theme, keymap: &Keymap, view: &SyncVie
                 || tr!("calendars: {why}", why = why.words()),
                 |account| tr!("{account} calendars: {why}", account = account, why = why.words()),
             );
-            let item = Rect::from_min_size(pos2(area.left(), area.top() + 6.0), vec2(area.width(), 26.0));
+            let item = Rect::from_min_size(pos2(area.left(), area.top() + FAILED_PAD[0]), vec2(area.width(), item_high));
             status_item(ui, theme, item, &status, Some(p.minus), p.minus);
             let galley = super::galley(ui, tr!("try again"), font, p.cyan_text);
-            let link = Rect::from_min_size(pos2(area.left() + 6.0, area.top() + 32.0), vec2(galley.size().x.ceil(), 16.0));
+            let link = Rect::from_min_size(pos2(area.left() + 6.0, item.bottom()), vec2(galley.size().x.ceil(), link_high));
             // No log to open yet: drawn, coming soon, 16 after "try again" (its tag leaves no room on the line).
             let log = Rect::from_min_max(pos2(link.right() + 16.0, link.top()), pos2(area.right().max(link.right() + 17.0), link.bottom()));
             ui.scope_builder(UiBuilder::new().max_rect(log).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
@@ -141,9 +159,17 @@ fn status_item(ui: &Ui, theme: &Theme, rect: Rect, text: &str, mark: Option<egui
     run_at(ui.painter(), pos2(left, top), galley, ink);
 }
 
-/// The sync's progress line 6 in from `area`'s left and 8 down: `state` with its note cut to what is left of the
-/// line. Its box.
-fn progress_line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, area: Rect, (state, note): (ProgressState, &str), still: bool) -> Rect {
+/// The sync's progress line 6 in from `area`'s left, its top where `centred` puts a strip (8 down at 100 %): `state`
+/// with its note cut to what is left of the line. Its box.
+fn progress_line(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    area: Rect,
+    (state, note): (ProgressState, &str),
+    still: bool,
+    centred: impl Fn(f32) -> f32,
+) -> Rect {
     let font = theme.fonts.mono_s;
     let ink = theme.palette.muted;
     let word = tr!("calendars");
@@ -152,7 +178,8 @@ fn progress_line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, area: Rect, (state
     let taken = 11.0 + 8.0 + measure(word) + 8.0 + measure(&bar(state)) + 8.0;
     let room = (area.width() - 6.0 - taken).max(1.0);
     let note = fit(ui, theme, note, room);
-    let line = Rect::from_min_size(pos2(area.left() + 6.0, area.top() + 8.0), vec2((area.width() - 6.0).max(1.0), theme.boxes().strip));
+    let strip = theme.boxes().strip;
+    let line = Rect::from_min_size(pos2(area.left() + 6.0, centred(strip)), vec2((area.width() - 6.0).max(1.0), strip));
     let mut child = ui.new_child(UiBuilder::new().max_rect(line).layout(egui::Layout::left_to_right(egui::Align::Center)));
     progress_with(&mut child, theme, keymap, word, state, &note, still);
     child.min_rect()
@@ -191,8 +218,9 @@ fn fit(ui: &Ui, theme: &Theme, text: &str, room: f32) -> String {
 /// The gallery's board of the line in `view`, 222 wide: the control under `id`, its press running nothing, the ring
 /// standing.
 pub fn board(ui: &mut Ui, theme: &Theme, keymap: &Keymap, view: &SyncView, id: Id) {
-    let (rect, _) = ui.allocate_exact_size(vec2(BOARD, HIGH_FAILED), Sense::hover());
-    let rect = Rect::from_min_size(rect.min, vec2(BOARD, height(view)));
+    let failed = SyncView { state: SyncState::Failed { account: None, why: crate::calendar::sync::Why::Failed }, read: None };
+    let (rect, _) = ui.allocate_exact_size(vec2(BOARD, height(theme, &failed)), Sense::hover());
+    let rect = Rect::from_min_size(rect.min, vec2(BOARD, height(theme, view)));
     ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| calendar_sync(ui, theme, keymap, view, Drawn { id, resting: false, still: true }));
 }
 

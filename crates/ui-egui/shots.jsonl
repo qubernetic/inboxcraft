@@ -117,6 +117,9 @@
 {"out": "docs/images/settings-plugins-dark.png", "mode": "dark", "size": [1200, 820], "section": "plugins"}
 {"out": "docs/images/settings-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "section": "appearance", "motion": "reduced"}
 {"out": "docs/images/settings-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "section": "appearance", "motion": "reduced"}
+# The appearance page in a 1440 window, as its frame (#328).
+{"out": "docs/images/settings-appearance-1440-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "section": "appearance", "motion": "reduced"}
+{"out": "docs/images/settings-appearance-1440-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "section": "appearance", "motion": "reduced"}
 {"out": "docs/images/shortcuts-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
 {"out": "docs/images/shortcuts-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
 # The message list (E1.17a): the screener and group cards and the hover actions on the row selected by
@@ -150,6 +153,15 @@
 {"out": "docs/images/status-line-undo-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "step": 1, "act": "done"}
 {"out": "docs/images/status-line-error-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "open": {"folder": 4242}}
 {"out": "docs/images/status-line-error-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "open": {"folder": 4242}}
+{"out": "docs/images/status-line-notice-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "notice": "Link copied: https://example.org/open-day"}
+{"out": "docs/images/status-line-notice-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "notice": "Link copied: https://example.org/open-day"}
+{"out": "docs/images/status-line-account-refused-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "fail": "refused"}
+{"out": "docs/images/status-line-account-refused-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "fail": "refused"}
+{"out": "docs/images/status-line-everything-failing-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "fail": "everything"}
+{"out": "docs/images/status-line-everything-failing-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "fail": "everything"}
+# The window with every account failing and a message open (#328).
+{"out": "docs/images/shell-everything-failing-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "fail": "everything", "select": "Photos from the coast walk"}
+{"out": "docs/images/shell-everything-failing-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "fail": "everything", "select": "Photos from the coast walk"}
 {"out": "docs/images/size-1100-frame-light.png", "mode": "light", "size": [1100, 900], "sync": "synced"}
 {"out": "docs/images/size-1100-frame-dark.png", "mode": "dark", "size": [1100, 900], "sync": "synced"}
 {"out": "docs/images/size-1100-inbox-reader-light.png", "mode": "light", "size": [1100, 900], "sync": "synced", "select": "Photos from the coast walk"}

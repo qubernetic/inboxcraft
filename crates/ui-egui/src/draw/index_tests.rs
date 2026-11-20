@@ -153,7 +153,7 @@ fn the_shared_mailboxes_are_the_frames_and_no_hidden_folder_of_our_own() {
     let rows = rows_down(&harness);
     let from = rows.iter().position(|label| label == "Mail").unwrap() + 1;
     let to = rows.iter().position(|label| label == "Personal").unwrap();
-    assert_eq!(rows[from..to], ["Inbox", "New senders", "Drafts", "Sent", "Archive", "Junk", "Trash"], "{rows:?}");
+    assert_eq!(rows[from..to], ["Inbox", "New senders", "Drafts", "Sent", "Archive", "Junk", "Bin"], "{rows:?}");
     assert!(!rows.iter().any(|label| label.starts_with("Screener")), "{rows:?}");
 }
 
@@ -328,6 +328,32 @@ fn the_account_picker_stands_on_the_owner_s_row_as_its_frame_draws_it() {
     // The float's own 1 px edge lies around its rows.
     assert_eq!((head.left() - 1.0, head.right() + 1.0), (3.0, 233.0), "{head:?}");
     assert_eq!(studio.bottom() + 1.0, 786.0, "the picker's foot on the owner's row: {studio:?}");
+}
+
+#[test]
+fn all_accounts_leaves_the_account_bar_s_room_in_the_picker() {
+    // popup/account-picker/open: every name of the picker starts 47 into its row, All accounts' too ("no bar" keeps
+    // the bar's room).
+    let mut harness = harness_in(two(), Place::Mail, false, TextScale::default(), 826.0, false, 400.0);
+    harness.query_all_by_role(Role::Button).find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("Show mail of"))).unwrap().click();
+    harness.run();
+    harness.run();
+    let all = harness.get_by_role_and_label(Role::MenuItemRadio, "All accounts").rect();
+    let personal = harness.get_by_role_and_label(Role::MenuItemRadio, "Personal, mira@example.org").rect();
+    fn texts(shape: &egui::Shape, found: &mut Vec<(String, egui::Pos2)>) {
+        match shape {
+            egui::Shape::Text(text) => found.push((text.galley.job.text.clone(), text.pos)),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, found)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut found));
+    let at = |words: &str, row: egui::Rect| {
+        found.iter().find(|(text, pos)| text == words && row.contains(*pos + egui::vec2(0.0, 1.0))).map(|(_, pos)| pos.x - row.left())
+    };
+    assert_eq!(at("Personal", personal), Some(47.0), "{found:?}");
+    assert_eq!(at("All accounts", all), Some(47.0), "{found:?}");
 }
 
 #[test]

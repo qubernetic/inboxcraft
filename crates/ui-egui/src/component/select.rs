@@ -12,7 +12,7 @@
 //! arrow keys walk the choices, Enter takes one. A press beside it or Escape closes it. The caller keeps whether it is
 //! open, so that a form can close it with itself.
 
-use egui::{Color32, Id, Key, Rect, Response, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui::{Color32, Id, Key, Rect, Response, Role, ScrollArea, Sense, Shape, Stroke, Ui, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint::{self, Ring};
 use crate::iconset::IconId;
@@ -194,7 +194,8 @@ impl<T: Copy + PartialEq> Select<'_, T> {
         };
         match edge {
             Some(colour) => {
-                painter.rect(rect, 0.0, fill, Stroke::new(1.0, colour), StrokeKind::Inside);
+                painter.rect_filled(paint::on_pixels(&painter, rect), 0.0, fill);
+                paint::edge(&painter, rect, 0.0, 1.0, colour);
             }
             None => paint::dashed(&painter, rect, p.line),
         }

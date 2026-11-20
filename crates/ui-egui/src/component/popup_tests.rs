@@ -1312,3 +1312,40 @@ fn a_float_open_when_its_place_stopped_being_drawn_is_closed_when_it_shows_again
     harness.run();
     assert!(harness.state().0 && harness.query_by_label("First").is_some(), "one press opens it and it stays open");
 }
+
+#[test]
+fn a_long_head_is_cut_inside_its_menu_s_fixed_width() {
+    // A menu keeps the design's width; a head longer than its room is cut with one `…` before the count, never painted
+    // past the menu's edge.
+    let theme = theme();
+    let long = "A folder name far longer than any menu of the design has room for";
+    let mut harness = builder().build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), true);
+        show(ui.ctx(), &theme, Id::unique("menu"), pos2(40.0, 30.0), 256.0, |ui| super::title(ui, &theme, long, Some("40")));
+    });
+    harness.run();
+    let mut texts = Vec::new();
+    for clipped in harness.output().shapes.iter() {
+        let mut found = Vec::new();
+        collect(&clipped.shape, &mut found);
+        texts.extend(found);
+    }
+    let mut ends = Vec::new();
+    fn ends_of(shape: &egui::Shape, ends: &mut Vec<(String, bool, f32, f32)>) {
+        match shape {
+            egui::Shape::Text(text) => {
+                ends.push((text.galley.job.text.clone(), text.galley.elided, text.pos.x, text.pos.x + text.galley.rect.right()))
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| ends_of(shape, ends)),
+            _ => {}
+        }
+    }
+    for clipped in harness.output().shapes.iter() {
+        ends_of(&clipped.shape, &mut ends);
+    }
+    let (_, elided, _, right) =
+        ends.iter().find(|(text, ..)| text.to_uppercase().starts_with("A FOLDER")).cloned().unwrap_or_else(|| panic!("{texts:?}"));
+    let (_, _, count, _) = ends.iter().find(|(text, ..)| text == "40").cloned().unwrap_or_else(|| panic!("{texts:?}"));
+    assert!(elided, "cut with one ellipsis");
+    assert!(right <= count - 8.0 + 0.5, "the head ends 8 before the count: {right} {count} {ends:?}");
+}

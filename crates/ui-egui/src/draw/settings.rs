@@ -553,8 +553,8 @@ fn section_row(ui: &mut Ui, theme: &Theme, section: Section, shown: bool) -> Res
         let painter = ui.painter();
         let hovered = response.hovered() && !shown;
         if shown {
-            painter.rect_filled(rect, 0.0, p.stage);
-            painter.rect_filled(Rect::from_min_size(rect.min, vec2(2.0, rect.height())), 0.0, p.cyan_edge);
+            painter.rect_filled(paint::on_pixels(painter, rect), 0.0, p.stage);
+            painter.rect_filled(paint::on_pixels(painter, Rect::from_min_size(rect.min, vec2(2.0, rect.height()))), 0.0, p.cyan_edge);
         } else if hovered {
             painter.rect_filled(rect, 0.0, p.grid);
         }
