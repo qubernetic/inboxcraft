@@ -315,3 +315,52 @@ fn a_name_taken_in_another_case_says_save_replaces_it() {
     harness.run();
     harness.get_by_label("Studio has a template named “quote for a SHOP front”: Save replaces it.");
 }
+
+/// Every text painted in the last frame that starts with `wanted`: where it is drawn and its colour.
+fn painted(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<(egui::Rect, egui::Color32)> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<(egui::Rect, egui::Color32)> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text().starts_with(wanted) => {
+                let colour = text.galley.job.sections.first().map_or(text.fallback_color, |section| section.format.color);
+                Some((egui::Rect::from_min_size(text.pos, text.galley.size()), colour))
+            }
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn a_row_s_parts_stand_twelve_apart_and_its_line_is_370_wide_as_the_frame() {
+    // The frame's row: the bar at 16, the name at 31 (200), the line at 243 (370), edit at 625, delete at 664 to 704.
+    let harness = on_templates(&FIVE);
+    let (name, _) = painted(&harness, "Workshop invitation").expect("the name is drawn");
+    let (line, _) = painted(&harness, "Thursday workshop").expect("the line is drawn");
+    let edit = harness.get_by_label("Edit the template Workshop invitation").rect();
+    let delete = harness.get_by_label("Delete the template Workshop invitation").rect();
+    let column = name.left() - 31.0;
+    assert!((line.left() - column - 243.0).abs() <= 0.5, "the line 12 after the name's 200: {}", line.left() - column);
+    assert!((edit.left() - column - 625.0).abs() <= 1.0, "edit 12 after the line's 370: {}", edit.left() - column);
+    assert!((delete.left() - edit.right() - 12.0).abs() <= 1.0, "12 between the links: {}", delete.left() - edit.right());
+    assert!((delete.right() - column - 704.0).abs() <= 1.0, "16 in from the column's end: {}", delete.right() - column);
+}
+
+#[test]
+fn the_intro_says_what_the_frame_says() {
+    let harness = on_templates(&FIVE);
+    let intro = "A template is a subject and a text kept on an account; the composer's Templates menu puts one into a draft. \
+                 {name}, {first_name} and {my_name} are filled in; {?prompt} leaves a blank the draft asks for.";
+    assert!(painted(&harness, intro).is_some(), "the frame's intro");
+}
+
+#[test]
+fn the_form_s_account_stands_200_wide_beside_the_name_16_on_as_the_frame() {
+    let mut harness = on_templates(&FIVE);
+    press(&mut harness, "Edit the template Workshop invitation");
+    let account = harness.get_by_role_and_label(Role::ComboBox, "Account").rect();
+    let name = harness.get_by_role_and_label(Role::TextInput, "Name").rect();
+    assert!((account.width() - 200.0).abs() <= 1.0 && (account.height() - 36.0).abs() <= 1.0, "the select 200 × 36: {account:?}");
+    assert!((name.left() - account.left() - 216.0).abs() < 0.5, "the name 16 after the select: {}", name.left() - account.left());
+    assert!((name.top() - account.top()).abs() <= 1.0 && (name.height() - 36.0).abs() <= 1.0, "one row of 36: {account:?} {name:?}");
+}

@@ -192,3 +192,34 @@ fn a_stale_note_clears_when_the_list_is_read_again() {
     assert_eq!(kept(&mut harness), THREE[1..]);
     assert!(harness.query_by_label("The list could not be read.").is_none(), "the old note goes when the list reads well");
 }
+
+/// The text painted in the last frame that starts with `wanted`: where its galley stands and its colour.
+fn painted(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<(egui::Rect, egui::Color32)> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<(egui::Rect, egui::Color32)> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text().starts_with(wanted) => {
+                let colour = text.galley.job.sections.first().map_or(text.fallback_color, |section| section.format.color);
+                Some((egui::Rect::from_min_size(text.pos, text.galley.size()), colour))
+            }
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn a_sender_s_address_stands_in_the_frame_s_column_in_muted_mono() {
+    // The frame's row: the name at 16 (180, not kept: a gaps line), the address at 208 (424) in mono muted, "ask again"
+    // at 644 to 704.
+    let harness = on_privacy(&THREE);
+    let (note, _) = painted(&harness, "The senders whose remote pictures").expect("the group's note");
+    let column = note.left() - 16.0;
+    let (address, colour) = painted(&harness, "hello@typeweekly.example.org").expect("the address is drawn");
+    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    assert!((address.left() - column - 208.0).abs() <= 0.5, "the address at 208: {}", address.left() - column);
+    assert!(address.width() <= 424.0, "the address in 424: {}", address.width());
+    assert_eq!(colour, theme.palette.muted, "the address in muted");
+    let link = harness.get_by_label(&again("hello@typeweekly.example.org")).rect();
+    assert!((link.right() - column - 704.0).abs() <= 1.0, "ask again ends 16 in: {}", link.right() - column);
+}

@@ -67,15 +67,16 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, hand: &mut Option<Hand>) ->
             ui,
             theme.fonts.body,
             tr!(
-                "Everything that waits for its time, the next first: a send, a snooze that comes back, a reminder if no reply comes, and an event's alert."
+                "Everything that waits for its time, the next first: a send, a snooze that comes back, a reminder when no reply came, a calendar alert."
             ),
             p.muted,
         );
+        ui.add_space(super::HEAD_GAP);
         words(
             ui,
             theme.fonts.body,
             tr!(
-                "Cancelling a send puts the message back in Drafts. Cancelling a snooze brings the message back now. Cancelling a reminder or an alert takes only its time off the schedule."
+                "Cancelling a send puts the message back in Drafts. Cancelling a snooze brings the message back to the inbox now. Cancelling a reminder or an alert removes only that entry: the message and the event stay as they are."
             ),
             p.muted,
         );
