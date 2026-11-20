@@ -27,6 +27,7 @@ fn event(repeat: Option<&str>) -> EventRow {
         repeat: repeat.map(str::to_owned),
         zone: None,
         guests: Vec::new(),
+        alert: crate::calendar::Alert::Default,
         untitled: false,
     }
 }

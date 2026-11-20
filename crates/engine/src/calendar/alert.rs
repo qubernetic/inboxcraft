@@ -19,7 +19,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use inboxcraft_ical::{Calendar, Event, PartStat, Span, Status, Trigger};
+use inboxcraft_ical::{Alarm, Calendar, Component, Event, PartStat, Property, Span, Status, Trigger};
 use inboxcraft_model::{AccountId, Alert, AlertId, CalendarEvent, CalendarEventId, CalendarId, Due, ScheduleId, Scheduled};
 use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{CivilDateTime, Offsets, Timestamp};
@@ -136,7 +136,7 @@ fn triggers(event: &Event) -> Vec<Trigger> {
         .alarms
         .iter()
         .take(MAX_ALARMS)
-        .filter(|alarm| alarm.action.eq_ignore_ascii_case("DISPLAY") || alarm.action.eq_ignore_ascii_case("AUDIO"))
+        .filter(|alarm| rings_here(alarm))
         .map(|alarm| alarm.trigger)
         .filter(|trigger| match trigger {
             Trigger::Start(span) | Trigger::End(span) => seconds(*span).is_some(),
@@ -184,6 +184,203 @@ impl Ids {
         }
         ids
     }
+}
+
+/// The longest lead the `alert` parameter takes, in minutes: a week.
+pub(crate) const MAX_ALERT_MINUTES: u32 = 7 * 24 * 60;
+
+/// An event's alert as the owner picks it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Lead {
+    /// No alert.
+    None,
+    /// This many minutes before the start, at most [`MAX_ALERT_MINUTES`].
+    Before(u32),
+}
+
+/// The lead a new event gets when the owner picks none: [`DEFAULT_LEAD`] before a timed event, a day before an all-day
+/// one, as an event without alarms rings here.
+pub(crate) fn default_lead(all_day: bool) -> Lead {
+    if all_day { Lead::Before(1440) } else { Lead::Before(u32::try_from(DEFAULT_LEAD.as_secs() / 60).unwrap_or(10)) }
+}
+
+/// When the `ACTION:NONE` alarm of RFC 9074 section 7 is due: a moment long past, as the RFC's example writes it.
+const NONE_AT: i64 = 197_168_145;
+
+/// Whether `alarm` alerts the owner here: a display or a sound.
+fn rings_here(alarm: &Alarm) -> bool {
+    alarm.action.eq_ignore_ascii_case("DISPLAY") || alarm.action.eq_ignore_ascii_case("AUDIO")
+}
+
+/// The properties that make an alarm a location alarm (RFC 9074 section 8, and another program's own name for it).
+const PROXIMITY: [&str; 2] = ["PROXIMITY", "X-APPLE-PROXIMITY"];
+
+/// Whether `alarm` goes off at a place rather than a time: it names a proximity, or its trigger is the moment long past
+/// such alarms are written with.
+fn at_a_place(alarm: &Alarm) -> bool {
+    alarm.other.iter().any(|property| PROXIMITY.iter().any(|name| property.name().eq_ignore_ascii_case(name)))
+        || matches!(alarm.trigger, Trigger::At(at) if at.unix_seconds() <= NONE_AT)
+}
+
+/// Whether `alarm` is the event's alert as the field sees it: a display or a sound at a time, not at a place.
+fn timed_ringer(alarm: &Alarm) -> bool {
+    rings_here(alarm) && !at_a_place(alarm)
+}
+
+/// The properties a moved alarm drops: another program's mark of an alarm it added from its own default, and the
+/// moment an earlier trigger was dismissed (RFC 9074 section 6).
+const DROPPED_ON_MOVE: [&str; 2] = ["X-APPLE-DEFAULT-ALARM", "ACKNOWLEDGED"];
+
+/// The most characters of the event's summary a new alarm shows.
+const MAX_ALARM_TEXT: usize = 200;
+
+/// Sets `event`'s alert to `lead`. A lead moves the first timed display or sound alarm (one `DISPLAY` alarm is added
+/// when it has none) and leaves every other alarm as it is, a location alarm too; no alert takes every timed display and
+/// sound alarm off, and an event left without any alarm gets the `ACTION:NONE` alarm (RFC 9074) so the default lead does not ring either.
+pub(crate) fn set_lead(event: &mut Event, lead: Lead) {
+    match lead {
+        Lead::Before(minutes) => {
+            let minutes = i64::from(minutes.min(MAX_ALERT_MINUTES));
+            let span = if minutes > 0 && minutes % 1440 == 0 { Span::new(-(minutes / 1440), 0) } else { Span::new(0, -(minutes * 60)) };
+            let Some(span) = span else { return };
+            let trigger = Trigger::Start(span);
+            event.alarms.retain(|alarm| !alarm.action.eq_ignore_ascii_case("NONE"));
+            match event.alarms.iter_mut().find(|alarm| timed_ringer(alarm)) {
+                Some(alarm) => {
+                    alarm.trigger = trigger;
+                    alarm.other.retain(|property| !DROPPED_ON_MOVE.iter().any(|name| property.name().eq_ignore_ascii_case(name)));
+                }
+                None => {
+                    let mut alarm = Alarm::display(trigger, &alarm_text(event));
+                    alarm.other.push(Property::new("UID", alarm_uid(event)));
+                    event.alarms.push(alarm);
+                }
+            }
+        }
+        Lead::None => {
+            event.alarms.retain(|alarm| !timed_ringer(alarm));
+            if event.alarms.is_empty()
+                && let Some(at) = Timestamp::from_unix(NONE_AT, 0)
+            {
+                event.alarms.push(Alarm { action: "NONE".into(), trigger: Trigger::At(at), description: None, other: Vec::new() });
+            }
+        }
+    }
+}
+
+/// The text a new alarm of `event` shows: its summary on one line, each control character a space, at most
+/// [`MAX_ALARM_TEXT`] characters, or "Reminder" without one.
+fn alarm_text(event: &Event) -> String {
+    let summary = event.summary.as_deref().unwrap_or_default();
+    let line: String = summary.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let text: String = words.join(" ").chars().take(MAX_ALARM_TEXT).collect();
+    let text = text.trim_end().to_owned();
+    if text.is_empty() { "Reminder".to_owned() } else { text }
+}
+
+/// The `UID` (RFC 9074 section 4) of a new alarm of `event`: the event's own, with the changed instance it belongs to.
+fn alarm_uid(event: &Event) -> String {
+    match &event.recurrence_id {
+        Some(instance) => format!("alert-{}-{}", instance.to_property("RECURRENCE-ID").value(), event.uid),
+        None => format!("alert-{}", event.uid),
+    }
+}
+
+/// Sets the alert of every event of `calendar` to `lead`: the series and each changed instance of it, as alarms are
+/// the owner's own and not the organiser's.
+pub(crate) fn set_every_lead(calendar: &mut Calendar, lead: Lead) {
+    for event in &mut calendar.events {
+        set_lead(event, lead);
+    }
+}
+
+/// The calendar object `text` with the alert of every event set to `lead` and nothing else changed: its other
+/// properties and components are written back as they came, so the times, `DTSTAMP`, `SEQUENCE` and the scheduling
+/// parameters stay (RFC 5546 does not count alarms as a significant change). A `VEVENT` that cannot be read is written
+/// back as it came, as the calendar keeps it; `None` when none can be read, or the object cannot.
+pub(crate) fn relead(text: &str, lead: Lead) -> Option<String> {
+    let top = inboxcraft_ical::parse(text.as_bytes()).ok()?;
+    let mut out = Component::new(top.name());
+    for property in top.properties() {
+        out.push_property(property.clone());
+    }
+    let mut led = false;
+    for inner in top.components() {
+        match (inner.name() == "VEVENT").then(|| releaded(inner, lead)).flatten() {
+            Some(event) => {
+                out.push_component(event);
+                led = true;
+            }
+            None => out.push_component(inner.clone()),
+        }
+    }
+    if !led {
+        return None;
+    }
+    out.write().ok()
+}
+
+/// The `VEVENT` `component` with its alert set to `lead`: the alarms it reads put back in their place, the others
+/// (one whose trigger cannot be read) left where they were. An alarm the lead leaves as it was is written as it came,
+/// byte for byte as read; only the moved or new one is written afresh.
+fn releaded(component: &Component, lead: Lead) -> Option<Component> {
+    let mut event = Event::from_component(component).ok()?;
+    set_lead(&mut event, lead);
+    let mut out = Component::new(component.name());
+    for property in component.properties() {
+        out.push_property(property.clone());
+    }
+    let originals: Vec<(&Component, Alarm)> = component
+        .components()
+        .iter()
+        .filter(|inner| inner.name() == "VALARM")
+        .filter_map(|inner| Some((inner, Alarm::from_component(inner).ok()?)))
+        .collect();
+    let mut next = 0;
+    let mut written = Vec::with_capacity(event.alarms.len());
+    for alarm in &event.alarms {
+        match originals.iter().enumerate().skip(next).find(|(_, (_, original))| original == alarm) {
+            Some((at, (inner, _))) => {
+                written.push((*inner).clone());
+                next = at.saturating_add(1);
+            }
+            None => written.push(alarm.to_component()),
+        }
+    }
+    let mut alarms = written.into_iter();
+    let mut placed = false;
+    for inner in component.components() {
+        if inner.name() == "VALARM" && Alarm::from_component(inner).is_ok() {
+            if !placed {
+                alarms.by_ref().for_each(|alarm| out.push_component(alarm));
+                placed = true;
+            }
+        } else {
+            out.push_component(inner.clone());
+        }
+    }
+    alarms.for_each(|alarm| out.push_component(alarm));
+    Some(out)
+}
+
+/// `event`'s alert as `event.list` says it: `null` without any alarm (the default lead rings), `"none"` without a
+/// timed display or sound alarm (a location alarm is not one), the minutes before the start of its one timed display or
+/// sound alarm, or `"custom"` for what the field cannot name (after the start, from the end, at a moment, not in whole minutes, further than [`MAX_LEAD`], or more than one).
+pub(crate) fn lead_of(event: &Event) -> serde_json::Value {
+    if event.alarms.is_empty() {
+        return serde_json::Value::Null;
+    }
+    let mut ringing = event.alarms.iter().filter(|alarm| timed_ringer(alarm));
+    let Some(alarm) = ringing.next() else { return "none".into() };
+    if ringing.next().is_some() {
+        return "custom".into();
+    }
+    let minutes = match alarm.trigger {
+        Trigger::Start(span) => seconds(span).filter(|seconds| *seconds <= 0 && seconds % 60 == 0).map(|seconds| seconds.unsigned_abs() / 60),
+        Trigger::End(_) | Trigger::At(_) => None,
+    };
+    minutes.map_or_else(|| "custom".into(), serde_json::Value::from)
 }
 
 /// The changes that keep the alerts of the events `batch` puts in step with them, made after it in the same batch.
