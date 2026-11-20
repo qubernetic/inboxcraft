@@ -425,3 +425,17 @@ fn a_press_on_the_dimmed_window_keeps_the_entry_and_presses_nothing_under_it() {
     assert_eq!(harness.state().settings().under(), Some(crate::settings::Under::Scheduled), "the link under the scrim is not pressed");
     assert_eq!(kept(&mut harness).len(), 4, "the entry stays");
 }
+
+#[test]
+fn the_dialog_stands_where_the_frame_draws_it() {
+    // The frame `scheduled-list/cancel-confirm`: the card 480 wide, centred across the window, 12 under the entry it
+    // asks about (the frame's entry ends at 429, its card is at 441). The entries here stand where this page draws
+    // them, so the card is checked against the entry drawn: 12 under its rule.
+    let mut harness = four();
+    let row = harness.get_by_label(SEND).rect().center().y;
+    press(&mut harness, SEND);
+    let (label, _) = painted(&harness, "CONFIRM").expect("the card's label is drawn");
+    // The entry is 40 high with its link in the middle, then its 1 px rule.
+    assert_eq!(label.min - egui::vec2(25.0, 25.0), egui::pos2(480.0, row + 20.0 + 1.0 + 12.0), "the card's corner");
+    assert!(harness.query_by_label("Esc keep it").is_some_and(|hint| hint.rect().center().y > 873.0), "the status line says Esc keeps it");
+}

@@ -4,8 +4,11 @@
 //! The confirmation dialog over the dimmed window, as the confirm frames draw it (`settings-templates/delete-confirm`,
 //! `scheduled-list/cancel-confirm`, `account-remove/confirm`).
 //!
-//! The `scrim` lies over the whole window down to the status line, which stays as it is. Over it, in the middle of the
-//! dimmed part, a card 480 wide whose height follows its words: the float's `surface`, 1 px `cyan_edge` inside and its
+//! The `scrim` lies over the whole window down to the status line, which stays bright and says Esc's answer. Over it a
+//! card 480 wide, centred across the window, 12 under the thing it asks about or 12 over it where there is no room
+//! under (centred in the dimmed part when it asks about nothing in sight, [`place`]). Its height follows its words, at
+//! most the dimmed part's less 12 at each end: lines that do not fit scroll, the label, the question and the buttons
+//! stay in sight. It is the float's `surface`, 1 px `cyan_edge` inside and its
 //! one shadow ([`crate::draw::paint::float_shapes`]), square; 24 in at the top and the sides, 21 at the foot (each 1
 //! further for the edge); its parts 12 apart: the `CONFIRM` label in `muted`, the question in `heading`, the lines
 //! in `body` (`ink` or `muted`), one point of room, then the buttons 12 apart in a row 3 in on every side (room for
@@ -21,7 +24,11 @@
 //! plain words: each control character a space, each bidi override left out, at most [`MOST_CHARS`] characters, the
 //! question on at most [`QUESTION_ROWS`] rows and each line on at most [`LINE_ROWS`], the last cut with an ellipsis.
 
-use egui::{Align, Area, Context, Id, Key, LayerId, Layout, Margin, Modifiers, Order, Rect, Role, Sense, Shape, Ui, WidgetInfo, pos2, vec2};
+use std::sync::Arc;
+
+use egui::{
+    Align, Area, Context, Galley, Id, Key, LayerId, Layout, Margin, Modifiers, Order, Pos2, Rect, Role, Sense, Shape, Ui, WidgetInfo, pos2, vec2,
+};
 
 use super::button::{TextButton, owner_pressed};
 use crate::keymap::Keymap;
@@ -92,6 +99,8 @@ pub struct Dialog<'a> {
     pub keep: &'a str,
     /// The danger button's words (Delete template, Remove account).
     pub act: &'a str,
+    /// What it asks about, where the window shows it (a row, a button): the card stands by it ([`place`]).
+    pub near: Option<Rect>,
 }
 
 /// What the dialog kept from the pass before: when it showed and where.
@@ -131,23 +140,95 @@ pub fn layer(id: Id) -> LayerId {
     LayerId::new(Order::Foreground, id)
 }
 
-/// Shows `dialog` over the dimmed window, as the module says; the owner's answer in this pass, if any. The caller
-/// shows it every pass while its question is open and stops when an answer closed it.
-pub fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, dialog: &Dialog<'_>) -> Option<Answer> {
+/// The room the card keeps from the dimmed part's top and foot, and from the thing asked about, in points.
+pub const NEAR: f32 = 12.0;
+
+/// Where the card `size` stands in `cover` at `ppp` pixels a point, as the design file's dialog puts it: centred
+/// across the window; 12 under `near` (the thing asked about), or 12 over it where there is no room under, at least
+/// 12 from the top; without `near`, or with `near` out of the dimmed part, in the middle of the dimmed part, floored.
+/// On whole pixels.
+#[must_use]
+pub fn place(cover: Rect, size: egui::Vec2, near: Option<Rect>, ppp: f32) -> Pos2 {
+    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
+    let floor = |points: f32| (points * ppp).floor() / ppp;
+    let clear = cover.height();
+    let y = match near.filter(|near| near.is_finite() && near.intersects(cover)) {
+        Some(near) => {
+            let (top, bottom) = (near.top() - cover.top(), near.bottom() - cover.top());
+            if bottom + NEAR + size.y <= clear - NEAR { bottom + NEAR } else { (top - NEAR - size.y).max(NEAR) }
+        }
+        None => ((clear - size.y) / 2.0).max(0.0),
+    };
+    pos2(cover.left() + floor(((cover.width() - size.x) / 2.0).max(0.0)), cover.top() + floor(y))
+}
+
+/// The card's parts laid out, before it is placed: its words, and the room its lines get.
+struct Laid {
+    label: Arc<Galley>,
+    question: (String, Arc<Galley>),
+    lines: Vec<(String, Arc<Galley>, egui::Color32)>,
+    /// The lines' own height, their gaps between them.
+    lines_high: f32,
+    /// The room the lines get: their height, or less where the card would leave the dimmed part.
+    room: f32,
+    /// The card's size.
+    size: egui::Vec2,
+}
+
+/// The card's parts in `ui`, `width` wide, its height bound to `most`.
+fn lay(ui: &Ui, theme: &Theme, dialog: &Dialog<'_>, width: f32, most: f32) -> Laid {
+    let p = &theme.palette;
+    let f = &theme.fonts;
+    let inner = (width - 2.0 * (PAD + EDGE)).max(1.0);
+    let label = super::galley(ui, tr!("Confirm"), f.label, p.muted);
+    let question = clean(dialog.question);
+    let heading = super::wrapped(ui, &question, f.heading, p.ink, inner, QUESTION_ROWS, Align::Min);
+    let lines: Vec<_> = dialog
+        .lines
+        .iter()
+        .map(|(text, tone)| {
+            let colour = match tone {
+                Tone::Ink => p.ink,
+                Tone::Muted => p.muted,
+            };
+            let text = clean(text);
+            let galley = super::wrapped(ui, &text, f.body, colour, inner, LINE_ROWS, Align::Min);
+            (text, galley, colour)
+        })
+        .collect();
+    let lines_high = lines.iter().map(|(_, galley, _)| galley.size().y.ceil()).sum::<f32>() + GAP * lines.len().saturating_sub(1) as f32;
+    let row = super::control_side(theme) + 2.0 * RING;
+    // The label, the question, the point of room and the buttons' row, each with its gap, and the card's margins.
+    let fixed = f32::from(MARGIN.top) + label.size().y.ceil() + GAP + heading.size().y.ceil() + GAP + 1.0 + GAP + row + f32::from(MARGIN.bottom);
+    let (room, high) = if lines.is_empty() {
+        (0.0, fixed)
+    } else {
+        let room = lines_high.min((most - fixed - GAP).max(0.0));
+        (room, fixed + room + GAP)
+    };
+    Laid { label, question: (question, heading), lines, lines_high, room, size: vec2(width, high) }
+}
+
+/// Shows `dialog` over the dimmed window, as the module says, near what it asks about ([`place`]); the owner's
+/// answer in this pass, if any. The caller shows it every pass while its question is open and stops when an answer
+/// closed it.
+pub fn show(ui: &Ui, theme: &Theme, keymap: &Keymap, dialog: &Dialog<'_>) -> Option<Answer> {
+    let ctx = ui.ctx();
     let key = dialog.id.with("dialog-kept");
     let pass = ctx.cumulative_pass_nr();
     let kept = ctx.data(|data| data.get_temp::<Kept>(key)).filter(|kept| kept.pass.saturating_add(1) >= pass);
     let opening = kept.is_none();
     let cover = cover(ctx, theme);
     let mine = layer(dialog.id);
-    let mut answer = None;
+    // Esc is the safe answer, from the opening pass on.
+    let escaped = ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape));
+    let mut answer = escaped.then_some(Answer::Keep);
     if let Some(kept) = kept {
-        // Esc and a press on the dimmed window are the safe answer; a press on the card is its own.
-        let (escaped, beside) = ctx.input_mut(|input| {
-            let beside = input.pointer.any_pressed() && input.pointer.interact_pos().is_some_and(|at| cover.contains(at) && !kept.rect.contains(at));
-            (input.consume_key(Modifiers::NONE, Key::Escape), beside)
+        // A press on the dimmed window is the safe answer; a press on the card is its own.
+        let beside = ctx.input(|input| {
+            input.pointer.any_pressed() && input.pointer.interact_pos().is_some_and(|at| cover.contains(at) && !kept.rect.contains(at))
         });
-        if escaped || beside {
+        if beside {
             answer = Some(Answer::Keep);
         }
     }
@@ -159,48 +240,52 @@ pub fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, dialog: &Dialog<'_>) 
     // Only the card takes the keyboard and the pointer: Tab goes round its buttons.
     ctx.memory_mut(|memory| memory.set_modal_layer(mine));
     ctx.move_to_top(mine);
-    let width = width(cover);
-    let high = kept.map_or(0.0, |kept| kept.rect.height());
-    let at = pos2((cover.center().x - width / 2.0).round(), (cover.center().y - high / 2.0).round().max(cover.top()));
+    // Laid out before it is placed, so its first frame stands where the next ones do.
+    let laid = lay(ui, theme, dialog, width(cover), (cover.height() - 2.0 * NEAR).max(0.0));
+    let at = place(cover, laid.size, dialog.near, ctx.pixels_per_point());
     let shown = Area::new(dialog.id)
         .order(Order::Foreground)
         .fixed_pos(at)
         .constrain(false)
         .fade_in(false)
-        .show(ctx, |ui| card(ui, theme, keymap, dialog, width, opening));
+        .show(ctx, |ui| card(ui, theme, keymap, dialog, laid, opening));
     ctx.data_mut(|data| data.insert_temp(key, Kept { pass, rect: shown.response.rect }));
     // An answer of the keyboard or the pointer this pass goes before Esc's: both are the owner's.
     shown.inner.or(answer)
 }
 
-/// The card `width` wide in `ui`: its parts and its buttons; the button pressed, if one was. The safe button takes the
-/// keyboard when the dialog is `opening`.
-fn card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, dialog: &Dialog<'_>, width: f32, opening: bool) -> Option<Answer> {
+/// The card `laid` out in `ui`: its parts and its buttons; the button pressed, if one was. The safe button takes the
+/// keyboard when the dialog is `opening`. Where its lines have less room than they need, they scroll; the label, the
+/// question and the buttons stay in sight.
+fn card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, dialog: &Dialog<'_>, laid: Laid, opening: bool) -> Option<Answer> {
     let p = &theme.palette;
-    let f = &theme.fonts;
     let slot = ui.painter().add(Shape::Noop);
-    let inner = (width - 2.0 * (PAD + EDGE)).max(1.0);
+    let inner = (laid.size.x - 2.0 * (PAD + EDGE)).max(1.0);
+    let Laid { label, question: (question, heading), lines, lines_high, room, .. } = laid;
     let framed = egui::Frame::new().inner_margin(MARGIN).show(ui, |ui| {
         ui.set_width(inner);
         ui.spacing_mut().item_spacing = vec2(GAP, GAP);
-        let label = super::galley(ui, tr!("Confirm"), f.label, p.muted);
         let (rect, _) = ui.allocate_exact_size(vec2(inner, label.size().y.ceil()), Sense::hover());
         ui.painter().galley(rect.min, label, p.muted);
-        let question = clean(dialog.question);
-        let heading = super::wrapped(ui, &question, f.heading, p.ink, inner, QUESTION_ROWS, Align::Min);
         let (rect, said) = ui.allocate_exact_size(vec2(inner, heading.size().y.ceil()), Sense::hover());
         ui.painter().galley(rect.min, heading, p.ink);
         said.widget_info(|| WidgetInfo::labeled(Role::Heading, true, &question));
-        for (text, tone) in dialog.lines {
-            let colour = match tone {
-                Tone::Ink => p.ink,
-                Tone::Muted => p.muted,
-            };
-            let text = clean(text);
-            let line = super::wrapped(ui, &text, f.body, colour, inner, LINE_ROWS, Align::Min);
-            let (rect, said) = ui.allocate_exact_size(vec2(inner, line.size().y.ceil()), Sense::hover());
-            ui.painter().galley(rect.min, line, colour);
-            said.widget_info(|| WidgetInfo::labeled(Role::Label, true, &text));
+        let draw_lines = |ui: &mut Ui| {
+            for (text, line, colour) in lines {
+                let (rect, said) = ui.allocate_exact_size(vec2(inner, line.size().y.ceil()), Sense::hover());
+                ui.painter().galley(rect.min, line, colour);
+                said.widget_info(|| WidgetInfo::labeled(Role::Label, true, &text));
+            }
+        };
+        if room < lines_high {
+            let area =
+                egui::ScrollArea::vertical().id_salt(dialog.id.with("lines")).max_height(room).min_scrolled_height(room).auto_shrink([false, false]);
+            super::scroll::show(ui, theme, area, |ui| {
+                ui.spacing_mut().item_spacing = vec2(GAP, GAP);
+                draw_lines(ui);
+            });
+        } else {
+            draw_lines(ui);
         }
         // The frames' point of room before the buttons.
         ui.allocate_exact_size(vec2(1.0, 1.0), Sense::hover());

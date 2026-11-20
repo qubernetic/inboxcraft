@@ -399,9 +399,15 @@ fn a_press_on_the_dimmed_window_keeps_the_template_and_presses_nothing_under_it(
 
 #[test]
 fn the_dialog_stands_where_the_frame_draws_it() {
-    // The frame `settings-templates/delete-confirm`: the card 480 wide in the middle of the window, its question 25 in.
+    // The frame `settings-templates/delete-confirm`: the card 480 wide, centred across the window, 12 under the row it
+    // asks about (the frame's row ends at 411, its card is at 423); its label and question 25 in. The rows here stand
+    // where this page draws them, so the card is checked against the row drawn: 12 under its rule.
     let mut harness = on_templates(&FIVE);
+    let row = harness.get_by_label("Edit the template Away from the studio").rect().center().y;
     press(&mut harness, "Delete the template Away from the studio");
+    let (label, _) = painted(&harness, "CONFIRM").expect("the card's label is drawn");
+    // The row is 48 high with its link in the middle, then its 1 px rule.
+    assert_eq!(label.min - egui::vec2(25.0, 25.0), egui::pos2(480.0, row + 24.0 + 1.0 + 12.0), "the card's corner");
     let (question, colour) = painted(&harness, "Delete the template “Away").expect("the question is drawn");
     assert_eq!(colour, crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default()).palette.ink);
     assert!((question.left() - (480.0 + 25.0)).abs() <= 0.5, "{question:?}");
@@ -423,4 +429,37 @@ fn a_screen_reader_s_activate_under_the_dialog_runs_nothing_of_the_page() {
     assert_eq!(harness.state().settings().templates().confirming(), Some((2, "Away from the studio")), "the question stays as it was asked");
     harness.get_by_label("It goes from Studio.");
     assert_eq!(kept(&mut harness).len(), 5);
+}
+
+#[test]
+fn the_status_line_under_the_dialog_says_esc_cancels_and_takes_no_press() {
+    // The frame `settings-templates/delete-confirm`: the status line stays out of the scrim and its one key hint is
+    // "Esc cancel".
+    let mut harness = on_templates(&FIVE);
+    assert!(harness.query_by_label("Esc cancel").is_none());
+    press(&mut harness, "Delete the template Away from the studio");
+    let hint = harness.get_by_label("Esc cancel").rect();
+    assert!(hint.center().y > 873.0, "in the status line: {hint:?}");
+    assert!(harness.query_by_label_contains("commands").is_none(), "the window's hints go while the dialog shows");
+    press_at(&mut harness, hint.center());
+    assert_eq!(harness.state().settings().templates().confirming(), Some((2, "Away from the studio")), "a press on it answers nothing");
+    harness.get_by_label("It goes from Studio.");
+    press(&mut harness, "Cancel");
+    assert!(harness.query_by_label("Esc cancel").is_none(), "it goes with the dialog");
+}
+
+#[test]
+fn an_answer_in_the_pass_after_a_float_closed_is_not_dropped() {
+    let mut harness = on_templates(&FIVE);
+    press(&mut harness, "Delete the template Away from the studio");
+    // Through every pass of the press a float counts as shown ([`crate::component::popup::any_open`], which covers the
+    // pass after a float closed): it stands on top of the surfaces, the dialog under it.
+    let pass = harness.ctx.cumulative_pass_nr().saturating_add(1000);
+    harness.ctx.data_mut(|data| data.insert_temp(egui::Id::unique("inboxcraft-float-shown"), pass));
+    assert_eq!(harness.state().surfaces(&harness.ctx).top(), crate::surface::Surface::Float);
+    harness.get_by_label("Delete template").click();
+    harness.step();
+    harness.step();
+    assert_eq!(kept(&mut harness).len(), 4, "the owner's press of Delete template deletes");
+    assert!(!kept(&mut harness).contains(&"Away from the studio".to_owned()));
 }

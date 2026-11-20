@@ -3,10 +3,10 @@
 
 //! The Scheduled page, under Sending: everything that waits for its time, the next first, in one group
 //! (`[ A ] WAITING · 7`), a row per entry (its time, its kind as a tag, the account's bar, its subject, whom it names
-//! or how long before its event it rings, `cancel`). A cancel is confirmed in a dialog over the dimmed window
-//! ([`crate::component::dialog`]): what is cancelled, when it was due, and what follows (the engine keeps no undo for
-//! `schedule.cancel`). Nothing is cancelled but on the owner's press of the dialog's danger button; `Esc`, a focus, a
-//! hover or a preview runs nothing.
+//! or how long before its event it rings, `cancel`). A cancel is confirmed in a dialog over the dimmed window, by
+//! its row ([`crate::component::dialog`]): what is cancelled, when it was due, and what follows (the engine keeps no
+//! undo for `schedule.cancel`). Nothing is cancelled but on the owner's press of the dialog's danger button; `Esc`, a
+//! focus, a hover or a preview runs nothing.
 
 use egui::{Align, Id, Layout, Rect, Role, Ui, WidgetInfo, pos2, vec2};
 
@@ -108,11 +108,11 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut S
         ui.add_space(12.0);
         inset(ui, |ui| words(ui, theme.fonts.body, &note, theme.palette.warn));
     }
-    list(ui, theme, keymap, scheduled, mailbox, &mut hand, &mut asked);
+    let near = list(ui, theme, keymap, scheduled, mailbox, &mut hand, &mut asked);
     // The confirmation, over the dimmed window: its answer is the only ask while it shows.
     if let Some(row) = scheduled.confirming().and_then(|id| scheduled.rows().iter().find(|row| row.id == id)) {
         let when = crate::scheduled::when(row.due, mailbox.now(), mailbox.offset());
-        if let Some(answer) = confirmation(ui, theme, keymap, row, &when) {
+        if let Some(answer) = confirmation(ui, theme, keymap, row, &when, near) {
             asked = Some(answer);
         }
     }
@@ -123,9 +123,18 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut S
     asked
 }
 
-/// The entries, in one group.
-fn list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, scheduled: &Scheduled, mailbox: &Mailbox, hand: &mut Option<Hand>, asked: &mut Option<Asked>) {
+/// The entries, in one group; where the entry asked about stands, while it is in sight.
+fn list(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    scheduled: &Scheduled,
+    mailbox: &Mailbox,
+    hand: &mut Option<Hand>,
+    asked: &mut Option<Asked>,
+) -> Option<Rect> {
     let accounts = mailbox.accounts();
+    let mut near = None;
     let (now, offset) = (mailbox.now(), mailbox.offset());
     body(ui, theme, "scheduled", |ui| {
         if scheduled.rows().is_empty() {
@@ -149,12 +158,18 @@ fn list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, scheduled: &Scheduled, mail
             let account = row.account.and_then(|id| accounts.iter().find(|account| account.id == id));
             // The time is formatted only for a row that is drawn: a row out of sight only takes its room.
             let when = || crate::scheduled::when(row.due, now, offset);
+            let (top, left, right) = (ui.cursor().top(), ui.max_rect().left(), ui.max_rect().right());
             let pressed = entry_row(ui, theme, keymap, row, when, account, ends, hand);
             if pressed.is_some() {
                 *asked = pressed;
             }
+            let drawn = Rect::from_min_max(pos2(left, top), pos2(right, ui.cursor().top()));
+            if scheduled.confirming() == Some(row.id) && ui.clip_rect().intersects(drawn) {
+                near = Some(drawn);
+            }
         }
     });
+    near
 }
 
 /// An entry's row; drawn only near the view unless it `ends` the list.
@@ -226,7 +241,7 @@ fn entry_row(
 
 /// The confirmation of a cancel, in its dialog: what is cancelled, when it was due, what follows; "Keep it" and the
 /// danger button. What the owner answered, if anything.
-fn confirmation(ui: &Ui, theme: &Theme, keymap: &Keymap, row: &ScheduledRow, when: &str) -> Option<Asked> {
+fn confirmation(ui: &Ui, theme: &Theme, keymap: &Keymap, row: &ScheduledRow, when: &str, near: Option<Rect>) -> Option<Asked> {
     let title = row.title();
     let (question, follows, press) = match row.kind {
         Kind::Send if !row.who.is_empty() => (
@@ -262,8 +277,8 @@ fn confirmation(ui: &Ui, theme: &Theme, keymap: &Keymap, row: &ScheduledRow, whe
         tr!("Due {when}.", when = when)
     };
     let lines = [(due.as_str(), Tone::Ink), (follows, Tone::Muted)];
-    let dialog = Dialog { id: Id::unique("settings-scheduled-confirm"), question: &question, lines: &lines, keep: tr!("Keep it"), act: press };
-    match dialog::show(ui.ctx(), theme, keymap, &dialog)? {
+    let dialog = Dialog { id: Id::unique("settings-scheduled-confirm"), question: &question, lines: &lines, keep: tr!("Keep it"), act: press, near };
+    match dialog::show(ui, theme, keymap, &dialog)? {
         Answer::Keep => Some(Asked::KeepScheduled),
         Answer::Act => Some(Asked::CancelScheduled(row.id)),
     }

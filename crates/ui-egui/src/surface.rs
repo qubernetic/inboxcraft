@@ -145,8 +145,9 @@ impl Surfaces {
     }
 
     /// Whether a modal surface stands in front: the command line's results or a confirmation dialog. Nothing of the
-    /// place under them runs while they show, whatever pressed it (the dialog's own answer is not the place's). A capture holds the keys, not the pointer (a press on its page ends the wait);
-    /// the event editor's own asks come with the calendar's, which it lies over.
+    /// place under them runs while they show, whatever pressed it (the dialog's own answer is not the place's). A
+    /// capture holds the keys, not the pointer (a press on its page ends the wait); the event editor's own asks come
+    /// with the calendar's, which it lies over.
     pub(crate) fn modal(&self) -> bool {
         self.has(Surface::Command) || self.has(Surface::Dialog)
     }

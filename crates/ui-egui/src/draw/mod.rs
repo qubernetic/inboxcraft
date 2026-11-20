@@ -2740,7 +2740,7 @@ impl InboxApp {
             on_calendar.clear();
             on_home = None;
             // A confirmation dialog's own answer is no ask of the place under it: it passes ([`settings::Asked::answers`]).
-            changed = changed.filter(|asked| surfaces.top() == Surface::Dialog && asked.answers());
+            changed = changed.filter(|asked| surfaces.has(Surface::Dialog) && asked.answers());
             add = false;
             dismiss = false;
         }
@@ -3310,12 +3310,22 @@ impl InboxApp {
             }
             _ => {}
         }
-        // Done's key is the list's (an act on the selected row): its hint shows while the list has the keys.
-        let hints: Vec<(&'static str, String, &'static str)> = status::hints(self.status_keys(surfaces))
-            .iter()
-            .filter(|(action, _)| surfaces.allows(action, &self.keymap) || (*action == keymap::DONE && surfaces.list_has_keyboard()))
-            .filter_map(|(action, word)| Some((*action, self.keymap.chip(ui.ctx(), action)?, *word)))
-            .collect();
+        // Done's key is the list's (an act on the selected row): its hint shows while the list has the keys. Under a
+        // confirmation dialog the line says only its Esc, in the safe button's word; a press on it does nothing (the
+        // gate under a modal surface drops it).
+        let dialog = self.settings.confirm_keep(self.onboarding.asking_remove()).filter(|_| surfaces.has(Surface::Dialog));
+        let hints: Vec<(&'static str, String, &'static str)> = match dialog {
+            Some(word) => vec![(
+                status::DIALOG_ESC,
+                crate::component::key::key_words(&egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Escape)),
+                word,
+            )],
+            None => status::hints(self.status_keys(surfaces))
+                .iter()
+                .filter(|(action, _)| surfaces.allows(action, &self.keymap) || (*action == keymap::DONE && surfaces.list_has_keyboard()))
+                .filter_map(|(action, word)| Some((*action, self.keymap.chip(ui.ctx(), action)?, *word)))
+                .collect(),
+        };
         let countdown_shown = matches!(shown, Some(crate::status::Message::Countdown { .. }));
         let rests = surfaces.undo_rests() && !countdown_shown;
         // Under a modal surface the Undo of a loss whose time runs out stays in reach: the message lies over the surface's

@@ -277,3 +277,76 @@ fn press_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
         harness.run();
     }
 }
+
+/// Where the text starting with `wanted` was painted in the last frame.
+fn painted(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<egui::Rect> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<egui::Rect> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text().starts_with(wanted) => Some(egui::Rect::from_min_size(text.pos, text.galley.size())),
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn the_dialog_stands_where_the_frame_draws_it() {
+    // The frame `account-remove/confirm`: "Remove account…" has no room under it, so the card (328 high) stands 12
+    // over it, centred across the window. The frame's button is at 602, so its card at 480, 262; the form here draws
+    // the button lower (the design README's gaps), and the card keeps the rule.
+    let mut harness = on_studio(&Kept::default());
+    press(&mut harness, "Remove account…");
+    let label = painted(&harness, "CONFIRM").expect("the card's label is drawn");
+    let card = label.min - vec2(25.0, 25.0);
+    let asked = harness.get_all_by_label("Remove account…").next().unwrap().rect();
+    assert_eq!(card, egui::pos2(480.0, asked.top() - 12.0 - 328.0), "the card's corner, over {asked:?}");
+    assert!(harness.query_by_label("Esc cancel").is_some(), "the status line says Esc cancels");
+}
+
+#[test]
+fn in_the_least_window_at_130_the_dialog_s_buttons_stay_in_reach() {
+    // The window's least size and 130 % text, with the message being written: the card stays in the dimmed part and
+    // the owner's press of its danger button removes.
+    let kept = Kept::default();
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())).with_accounts(
+        Arc::new(kept.clone()),
+        Box::new(NoDetect::default()),
+        Box::new(NoWorkers),
+    );
+    app.set_reduce_motion(true);
+    app.set_text_scale(crate::theme::TextScale::ALL[4]);
+    app.compose();
+    let (composer, mailbox) = app.composer_mut();
+    let composer = composer.unwrap();
+    composer.set_account(mailbox, 2).unwrap();
+    composer.text_mut().push_str(WRITTEN);
+    composer.edited();
+    composer.save(mailbox).unwrap();
+    app.open_accounts();
+    let (onboarding, mailbox) = app.onboarding_mut();
+    onboarding.edit(mailbox, 2);
+    let mut harness = Harness::builder()
+        .with_size(vec2(800.0, 480.0))
+        .with_max_steps(40)
+        .with_theme(egui::Theme::Dark)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    press(&mut harness, "Remove account…");
+    harness.get_by_label(WRITING);
+    let cover = crate::component::dialog::cover(&harness.ctx, &crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::ALL[4]));
+    let dialog = crate::component::dialog::layer(egui::Id::unique("account-remove-confirm"));
+    for label in ["Cancel", "Remove account"] {
+        let button = harness.get_all_by_label(label).map(|node| node.rect()).find(|rect| harness.ctx.layer_id_at(rect.center()) == Some(dialog));
+        let button = button.unwrap_or_else(|| panic!("the dialog's {label}"));
+        assert!(cover.contains_rect(button), "{label}: {button:?} in {cover:?}");
+    }
+    let remove = harness.get_all_by_label("Remove account").map(|node| node.rect()).find(|rect| cover.contains_rect(*rect)).unwrap();
+    harness.hover_at(remove.center());
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: remove.center(), button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+    assert_eq!(accounts(&harness), [1], "the owner's press of Remove account removes");
+}

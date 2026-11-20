@@ -3,10 +3,11 @@
 
 //! The Templates page, under Sending: the templates of every account, a group per account (`[ A ] STUDIO · 4`), a row
 //! per template (the account's bar, its name, its subject and text on one line, `edit` and `delete`), "New template" at
-//! the title's right end. A delete is confirmed in a dialog over the dimmed window ([`crate::component::dialog`]): the
-//! template's name, the account it goes from, and that what was written with it keeps its text. Edit and New template open the form on the page: the account, the name, the
-//! subject and the text, Save and Cancel. Nothing is saved or deleted but on the owner's press of Save or of the
-//! confirmation's "Delete template"; a focus, a hover or a preview runs nothing.
+//! the title's right end. A delete is confirmed in a dialog over the dimmed window ([`crate::component::dialog`]), by
+//! its row: the template's name, the account it goes from, and that what was written with it keeps its text. Edit and
+//! New template open the form on the page: the account, the name, the subject and the text, Save and Cancel. Nothing
+//! is saved or deleted but on the owner's press of Save or of the confirmation's "Delete template"; a focus, a hover
+//! or a preview runs nothing.
 
 use egui::{Align, Id, Layout, Rect, Role, Ui, WidgetInfo, pos2, vec2};
 
@@ -129,6 +130,9 @@ fn list(
         ui.add_space(12.0);
         inset(ui, |ui| words(ui, theme.fonts.body, note, theme.palette.warn));
     }
+    // Where the row asked about stands, while it is in sight: the dialog stands by it.
+    let mut near = None;
+    let confirming = templates.confirming().map(|(account, name)| (account, name.to_owned()));
     body(ui, theme, "templates", |ui| {
         if templates.rows().is_empty() {
             ui.add_space(super::GROUP_TOP);
@@ -157,10 +161,15 @@ fn list(
             for offset in 0..run {
                 let shown = at.saturating_add(offset);
                 let ends = shown == 0 || shown.saturating_add(1) == total;
-                if let Some(row) = templates.rows().get(shown)
-                    && let Some(pressed) = template_row(ui, theme, keymap, row, label, ends, hand)
-                {
+                let Some(row) = templates.rows().get(shown) else { continue };
+                let (top, left, right) = (ui.cursor().top(), ui.max_rect().left(), ui.max_rect().right());
+                if let Some(pressed) = template_row(ui, theme, keymap, row, label, ends, hand) {
                     *asked = Some(pressed);
+                }
+                let drawn = Rect::from_min_max(pos2(left, top), pos2(right, ui.cursor().top()));
+                if confirming.as_ref().is_some_and(|(account, name)| row.account == *account && row.name == *name) && ui.clip_rect().intersects(drawn)
+                {
+                    near = Some(drawn);
                 }
             }
             at = at.saturating_add(run);
@@ -172,7 +181,7 @@ fn list(
         && let Some(row) = templates.rows().iter().find(|row| row.account == account && row.name == name)
     {
         let label = accounts.iter().find(|row| row.id == account);
-        if let Some(answer) = confirmation(ui, theme, keymap, row, label) {
+        if let Some(answer) = confirmation(ui, theme, keymap, row, label, near) {
             *asked = Some(answer);
         }
     }
@@ -253,14 +262,20 @@ fn template_row(
 
 /// The confirmation of a delete, in its dialog: what goes, from where, what keeps its text; Cancel and "Delete
 /// template". What the owner answered, if anything.
-fn confirmation(ui: &Ui, theme: &Theme, keymap: &Keymap, row: &TemplateRow, account: Option<&AccountRow>) -> Option<Asked> {
+fn confirmation(ui: &Ui, theme: &Theme, keymap: &Keymap, row: &TemplateRow, account: Option<&AccountRow>, near: Option<Rect>) -> Option<Asked> {
     let from = account.map_or_else(|| tr!("its account").to_owned(), |account| crate::component::plain(&account.label).into_owned());
     let question = tr!("Delete the template “{name}”?", name = row.shown);
     let goes = tr!("It goes from {account}.", account = from);
     let lines = [(goes.as_str(), Tone::Ink), (tr!("Drafts and sent messages that were written with it keep their text."), Tone::Muted)];
-    let dialog =
-        Dialog { id: Id::unique("settings-template-confirm"), question: &question, lines: &lines, keep: tr!("Cancel"), act: tr!("Delete template") };
-    match dialog::show(ui.ctx(), theme, keymap, &dialog)? {
+    let dialog = Dialog {
+        id: Id::unique("settings-template-confirm"),
+        question: &question,
+        lines: &lines,
+        keep: tr!("Cancel"),
+        act: tr!("Delete template"),
+        near,
+    };
+    match dialog::show(ui, theme, keymap, &dialog)? {
         Answer::Keep => Some(Asked::KeepTemplate),
         Answer::Act => Some(Asked::DeleteTemplate(row.account, row.name.clone())),
     }

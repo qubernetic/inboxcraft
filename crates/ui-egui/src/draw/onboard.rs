@@ -631,6 +631,7 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     let f = &theme.fonts;
     let p = &theme.palette;
     let mut asked = None;
+    let mut remove_at = None;
     let width = ui.available_width().min(FORM);
     head(ui, theme, tr!("Account settings"), None, width);
     ui.add_space(HEAD_BELOW - HEAD_GAP);
@@ -667,6 +668,7 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let ask = TextButton::new(tr!("Remove account…")).danger().show(ui, theme, keymap);
+                remove_at = Some(ask.rect).filter(|rect| ui.clip_rect().intersects(*rect));
                 if hand == Some(RemoveHand::Ask) {
                     ask.request_focus();
                 }
@@ -680,7 +682,7 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
         onboarding.edited(slot);
     }
     // The question, over the dimmed window: its answer is the only ask while it shows.
-    if asking && let Some(answer) = remove_question(ui, theme, keymap, &question) {
+    if asking && let Some(answer) = remove_question(ui, theme, keymap, &question, remove_at) {
         asked = Some(answer);
     }
     asked
@@ -697,7 +699,7 @@ struct Question {
 /// The question whether to remove the account, in its dialog: first that it cannot be undone, then what goes from
 /// this computer and what stays on the server; Cancel takes the keyboard, "Remove account" removes. What the owner
 /// answered, if anything.
-fn remove_question(ui: &Ui, theme: &Theme, keymap: &Keymap, question: &Question) -> Option<Asked> {
+fn remove_question(ui: &Ui, theme: &Theme, keymap: &Keymap, question: &Question, near: Option<egui::Rect>) -> Option<Asked> {
     let heading = tr!("Remove {name} from this computer?", name = question.name);
     let goes = tr!(
         "From this computer go: the mail and folders of {name} kept here, its calendars, its drafts, and its password in your system's credential store.",
@@ -713,11 +715,17 @@ fn remove_question(ui: &Ui, theme: &Theme, keymap: &Keymap, question: &Question)
         lines.push((writing.as_str(), Tone::Ink));
     }
     lines.push((stays.as_str(), Tone::Muted));
-    let dialog =
-        Dialog { id: egui::Id::unique("account-remove-confirm"), question: &heading, lines: &lines, keep: tr!("Cancel"), act: tr!("Remove account") };
+    let dialog = Dialog {
+        id: egui::Id::unique("account-remove-confirm"),
+        question: &heading,
+        lines: &lines,
+        keep: tr!("Cancel"),
+        act: tr!("Remove account"),
+        near,
+    };
     // A key already down when the button took the keyboard, or held on from the press that asked, is no answer
     // ([`crate::component::button::owner_pressed`], in the dialog).
-    match dialog::show(ui.ctx(), theme, keymap, &dialog)? {
+    match dialog::show(ui, theme, keymap, &dialog)? {
         Answer::Keep => Some(Asked::KeepAccount),
         Answer::Act => Some(Asked::Remove),
     }
