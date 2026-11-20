@@ -776,8 +776,8 @@ pub const FALLBACK_PROBES: [(&str, char); 26] = [
     ("bopomofo", 'ㄅ'),
 ];
 
-/// [`font_definitions`] with `fallbacks` behind every text family: IBM Plex first, then egui's bundled faces, then
-/// these, in their order. The icon family keeps Phosphor alone. A fallback egui could not read as a font at its index
+/// [`font_definitions`] with `fallbacks` behind every text family: after IBM Plex, the shipped Noto faces and egui's
+/// bundled faces (see [`font_definitions`]), these, in their order. The icon family keeps Phosphor alone. A fallback egui could not read as a font at its index
 /// (egui panics on one) and one whose name is taken are left out. Copies the bytes: [`font_definitions_from`] takes
 /// them.
 #[must_use]
