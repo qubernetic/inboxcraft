@@ -351,6 +351,61 @@ fn chips_show_the_name_or_the_address_fit_for_one_line() {
     assert_eq!(Line::Cc.key(), "cc");
 }
 
+/// Nothing goes to a recipient the owner was not shown: a chip never shows a name that could be taken for another
+/// address, nor one that shows nothing. It shows the address instead; a plain name keeps its address in the
+/// tooltip and in what a screen reader hears.
+#[test]
+fn a_chip_never_shows_a_name_that_could_be_taken_for_another_address() {
+    let chip = |text: &str| Chip { text: text.to_owned(), ok: true };
+    let spoof = chip("\"odile@example.org\" <eve@example.net>");
+    assert_eq!(spoof.shown(), "eve@example.net");
+    assert_eq!(spoof.spoken(), "eve@example.net");
+    assert_eq!(spoof.tip(), None, "the chip already shows the address");
+    for name in ["odile\u{FF20}example.org", "odile\u{FE6B}example.org", "\u{202E}", "\u{202E}\u{2066}", "\u{7}\u{1}", "\u{200B}\u{FEFF}", "\t"] {
+        let hidden = chip(&format!("\"{name}\" <eve@example.net>"));
+        assert_eq!(hidden.shown(), "eve@example.net", "{name:?}");
+        assert_eq!(hidden.spoken(), "eve@example.net", "{name:?}");
+    }
+    let plain = chip("Odile <odile@example.org>");
+    assert_eq!(plain.shown(), "Odile");
+    assert_eq!(plain.spoken(), "Odile, odile@example.org");
+    assert_eq!(plain.tip().as_deref(), Some("odile@example.org"));
+    assert_eq!(chip("odile@example.org").tip(), None);
+}
+
+/// A name of characters that look blank (fillers, the Braille blank, tag characters, the musical format marks, every
+/// other default-ignorable code point) shows nothing: the chip shows the address, never an empty-looking name.
+#[test]
+fn a_chip_never_shows_a_name_that_only_looks_blank() {
+    let chip = |text: &str| Chip { text: text.to_owned(), ok: true };
+    let blanks = [
+        "\u{3164}",
+        "\u{2800}",
+        "\u{115F}",
+        "\u{1160}",
+        "\u{FFA0}",
+        "\u{E0000}",
+        "\u{E0041}\u{E0042}",
+        "\u{E007F}",
+        "\u{1D173}",
+        "\u{1D17A}",
+        "\u{17B4}\u{17B5}",
+        "\u{180B}\u{180F}",
+        "\u{FE00}\u{FE0F}",
+        "\u{FFF0}\u{FFF8}",
+        "\u{1BCA0}\u{1BCA3}",
+        "\u{E0100}\u{E0FFF}",
+        "\u{3164} \u{2800}\u{200B}",
+    ];
+    for name in blanks {
+        let hidden = chip(&format!("\"{name}\" <eve@example.net>"));
+        assert_eq!(hidden.shown(), "eve@example.net", "{name:?}");
+        assert_eq!(hidden.tip(), None, "{name:?}");
+    }
+    // A name with something that shows beside them still shows.
+    assert_eq!(chip("\"Odile\u{3164}\" <odile@example.org>").shown(), "Odile\u{3164}");
+}
+
 #[test]
 fn the_highlight_moves_within_the_suggestions_and_without_any_there_is_none() {
     let mut mailbox = mailbox();

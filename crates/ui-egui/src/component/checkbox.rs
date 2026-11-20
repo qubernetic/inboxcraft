@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use egui::text::LayoutJob;
-use egui::{Color32, Galley, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui::{Color32, Galley, Rect, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint::{self, Ring};
 use crate::theme::{Font, Theme};
@@ -119,13 +119,16 @@ fn toggle(ui: &mut Ui, theme: &Theme, kind: Kind, name: &str, on: bool, shown: O
     };
     painter.galley(pos2(mark.right() + GAP, top), text, ink);
     let look = look(theme, kind, on, enabled, lit);
+    // The box on whole pixels, its edge a whole number of them.
+    let mark = paint::on_pixels(&painter, mark);
     match look.edge {
         Some((colour, true)) => {
             painter.rect_filled(mark, 0.0, look.fill);
             paint::dashed(&painter, mark, colour);
         }
         Some((colour, false)) => {
-            painter.rect(mark, 0.0, look.fill, Stroke::new(1.0, colour), StrokeKind::Inside);
+            painter.rect_filled(mark, 0.0, look.fill);
+            paint::edge(&painter, mark, 0.0, 1.0, colour);
         }
         None => {
             painter.rect_filled(mark, 0.0, look.fill);

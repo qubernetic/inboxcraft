@@ -132,7 +132,9 @@ fn lines<'a>(mailbox: &'a Mailbox, open: &BTreeSet<u64>) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
     let sends = u64::try_from(mailbox.outbox().len()).unwrap_or(u64::MAX);
     for view in mailbox.views().iter().filter(|view| !matches!(view.role, Role::Screener | Role::Snoozed)) {
-        lines.push(Line::Shared(mailbox::Place::View(view.role), role_text(view.role), icon(Some(view.role)), view.unread));
+        // Drafts counts the drafts kept, as the frames draw it (`index/with-counts`), not unread mail.
+        let count = if view.role == Role::Drafts { mailbox.drafts_total() } else { view.unread };
+        lines.push(Line::Shared(mailbox::Place::View(view.role), role_text(view.role), icon(Some(view.role)), count));
         if view.role == Role::Inbox {
             // New senders counts the senders the screener holds back, as Home's TO SCREEN does.
             let waiting = u64::try_from(mailbox.waiting().len()).unwrap_or(u64::MAX);
@@ -173,6 +175,9 @@ fn line(ui: &mut Ui, theme: &Theme, line: &Line<'_>, active: Option<mailbox::Pla
                 (mailbox::Place::Outbox, _) => tr!("Outbox, {count} sends", count = count),
                 (mailbox::Place::Senders, 0) => name.to_owned(),
                 (mailbox::Place::Senders, _) => tr!("{name}, {count} waiting", name = name, count = count),
+                (mailbox::Place::View(Role::Drafts), 0) => name.to_owned(),
+                (mailbox::Place::View(Role::Drafts), 1) => tr!("{name}, 1 draft", name = name),
+                (mailbox::Place::View(Role::Drafts), _) => tr!("{name}, {count} drafts", name = name, count = count),
                 _ => spoken(name, None, count),
             };
             let row = MailboxRow {
@@ -458,7 +463,7 @@ fn picker(ui: &Ui, theme: &Theme, mailbox: &Mailbox, opener: &Response) -> Optio
     popup::menu_up(ui.ctx(), theme, &on_row, Id::unique("index-account-picker"), PICKER, |ui| {
         popup::head(ui, theme, tr!("Show mail of"), None);
         let mut chosen = None;
-        if !only && popup::choice(ui, theme, tr!("All accounts"), narrowed.is_none()).clicked() {
+        if !only && popup::choice_among_accounts(ui, theme, tr!("All accounts"), narrowed.is_none()).clicked() {
             chosen = Some(None);
         }
         for (id, name, address, index) in &accounts {

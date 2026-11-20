@@ -176,3 +176,55 @@ fn a_cut_recipient_keeps_its_whole_room() {
         }
     }
 }
+
+/// A held Enter on a row's button presses it once: every button of the row runs an owner's command (send again, take
+/// back, edit), and a key's repeats are not the owner pressing again.
+#[test]
+fn a_held_enter_presses_a_row_s_button_once() {
+    let presses = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let counted = std::rc::Rc::clone(&presses);
+    let keymap = keymap();
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(ROW_WIDTH + 48.0, 140.0),
+        move |ui, theme| {
+            let buttons = [super::SendButton { name: "Send again", spoken: "Send “Lunch” again" }];
+            let row = super::OutboxRow {
+                id: egui::Id::unique("held-enter-row"),
+                spoken: "To Odile, Lunch, not sent",
+                to: SEND_TO,
+                account: None,
+                subject: SEND_SUBJECT,
+                words: "not sent",
+                standing: Standing::Refused,
+                reply: Some(SEND_REPLY),
+                buttons: &buttons,
+                last: true,
+            };
+            ui.set_width(ROW_WIDTH);
+            if super::outbox_row(ui, theme, &keymap, &row, None) == Some(0) {
+                counted.set(counted.get() + 1);
+            }
+        },
+    );
+    harness.get_by_role_and_label(Role::Button, "Send “Lunch” again").focus();
+    harness.run();
+    harness.key_down(egui::Key::Enter);
+    harness.run();
+    assert_eq!(presses.get(), 1, "the press");
+    for _ in 0..3 {
+        harness.event(egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: true, modifiers: egui::Modifiers::NONE });
+        harness.run();
+    }
+    harness.key_up(egui::Key::Enter);
+    harness.run();
+    assert_eq!(presses.get(), 1, "the repeats press nothing");
+    // Let go and pressed again, it is pressed again.
+    harness.key_down(egui::Key::Enter);
+    harness.run();
+    harness.key_up(egui::Key::Enter);
+    harness.run();
+    assert_eq!(presses.get(), 2);
+}

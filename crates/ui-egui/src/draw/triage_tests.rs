@@ -546,6 +546,11 @@ fn the_new_senders_cards_are_the_design_files() {
     let sizes: Vec<_> = cards.iter().map(|rect| rect.size()).collect();
     assert_eq!(sizes, [vec2(900.0, 140.0), vec2(900.0, 104.0)], "{cards:?}");
     let card = cards[0];
+    // The queue 56 in from the body, as the frame's 289 = 233 + 56 (#328): here the body starts at 242, 9 in for the
+    // window's own frame, the index's 232 and its hairline.
+    let index = harness.get_by_role_and_label(Role::Button, "Home").rect();
+    assert_eq!(index.left(), 9.0, "the window's frame: {index:?}");
+    assert_eq!(card.left(), 242.0 + 56.0, "{card:?}");
     let title = harness.get_by_label("Who gets in?").rect();
     assert_eq!((title.height(), card.top() - title.top()), (48.0, 166.0), "{title:?}");
     let at =

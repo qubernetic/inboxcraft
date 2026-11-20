@@ -149,7 +149,8 @@ pub fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &OutboxRow<'
                 let response = TextButton::new(button.name).secondary().show(ui, theme, keymap);
                 let said = button.spoken;
                 ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(said));
-                if response.clicked() {
+                // Each of them runs an owner's command: a held key's repeat presses none.
+                if crate::component::button::owner_pressed(ui, &response) {
                     pressed = Some(index);
                 }
             }

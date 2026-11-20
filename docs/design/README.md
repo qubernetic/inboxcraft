@@ -7,8 +7,10 @@
 the source of truth for the look.** [`docs/design.md`](../design.md) puts its rules and tokens into words. A change
 of look starts in the file.
 
-**The app does not follow this file yet.** It replaced the earlier glass and gradient design file on 2026-11-17;
-the code and the screenshots in `docs/images/` still show that earlier look until the new one is implemented.
+**The app follows most of this file.** It replaced the earlier glass and gradient design file on 2026-11-17; the
+frame, Home, the lists, the reader, the composer, the calendar, the settings and the motion levels are built to it,
+and the screenshots in `docs/images/` show the new look. What the app still owes the file is listed under
+[Not in the code yet](#not-in-the-code-yet).
 
 Every person, address and message in the file is invented (`example.org`).
 
@@ -72,8 +74,68 @@ The InboxCraft mark and wordmark and the Qubernetic mark shown in the file and i
 Qubernetic. They are not under the MIT or Apache licence of the rest of this repository; see `NOTICE`.
 
 ## Not in the code yet
-Everything. The app is built with the earlier look; the code follows no page of this file until the new look is
-implemented. This list will name what is still missing once that work has begun.
+What the app still owes this file, one line each. The finer differences, with their numbers, are in
+[`docs/gaps.md`](../gaps.md).
+
+**Windows**
+- The reader and the composer in a window of their own (Reader, Composer) are not built: Appearance › Layout shows
+  both rows coming soon.
+- With the own window frame the desktop's window menu is not offered on a right press of the command line.
+- A window narrower than 800 is laid out 800 wide and clipped at its right.
+
+**Where the composer lives**
+- The composer is docked in the reader's place or floats; its window of its own is not built, and which place it
+  opens in by default is not settled yet.
+
+**Messages**
+- The fitted view does not yet draw a message's backgrounds, buttons, alignment and table widths as the Messages
+  page does, and the original cannot be opened in the browser from a cleaned copy.
+- A reply's quote is plain `> ` lines in the body, not the file's quote block.
+
+**Event drafts and the event editor**
+- A half-typed event is not kept as a draft; while the editor is open the command line offers only the editor's
+  and the window's commands. The file does not draw event drafts yet either.
+
+**The marks**
+- The Home emblem, the wordmarks under it and the brand's compact mark in the command line are not drawn until the
+  project owner decides the marks' licence: Home shows the character field alone, the command line the tray
+  picture.
+
+**Sample content**
+- The sample mailbox and the pictures in `docs/images/` use their own people, subjects, times and counts, not the
+  file's, and no picture shows the status line's notice, a refused account or everything failing.
+
+**Waiting for the file to be redrawn**
+- The owner's rulings of 2026-11-18 are in the code but not yet in this file: the invitation card has one primary
+  answer and keeps "Keep my answer", and the add form's Detect and "Check and add" can always be pressed.
+- Removing a template, cancelling a scheduled message and removing an account are confirmed in place, where the
+  file draws a dialog over a scrim; which one stays is open.
+
+**Frame, command line and status line**
+- The command line's search of all mail, its GO TO and LAST COMMANDS groups and mixed results are not built; plain
+  text searches the mail shown.
+- The status line says "offline" with no time since and no "try again", the send countdown has no "send now", and
+  its first failure is the first failing account, not the worst.
+- Every "open log" is coming soon: there is no log to open.
+- On Home, the calendar, the settings and in one pane the status line keeps the mail's key hints.
+- The index keeps Blocked, Junk and Screener rows the file does not draw, names a folder under another by its whole
+  path, and shows every account's sync state as quiet.
+
+**Home**
+- No source yet for "offline since" or a refused sign-in: the failing banner names refused sends only, on one line.
+- "Look around with sample mail" is coming soon; Home shows two drafts where one frame draws three.
+
+**Lists and the reader**
+- Later is the inbox's group heads over the snoozed mail, not the file's page with scheduled sends and pins.
+- The why line leaves out what the engine does not keep: when a sender was let in, a move by the owner, SPF and
+  DKIM.
+- At 130 % text the list's view switch stands on the pills' line, not in the head.
+
+**Settings and the calendar**
+- The settings are drawn to the 1440 frames; under about 1060 their narrow sizes are the code's own.
+- Privacy leaves the name column empty (only the address is kept), About is one column, and "After an act" and the
+  week's two rows on Calendar have no frame.
+- The calendar's sync line has no "sync now" link at rest; the line itself takes the press.
 
 ## Limits
 - The Planned page shows direction: where a feature stands and how it looks. Numbers and steps in it are invented,

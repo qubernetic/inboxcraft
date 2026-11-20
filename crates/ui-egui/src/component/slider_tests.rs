@@ -408,3 +408,24 @@ fn every_size_s_name_is_centred_on_the_left_edge_of_its_tick_as_the_sheet_s_slot
         }
     }
 }
+
+#[test]
+fn names_wider_than_their_slots_keep_a_gap_and_stay_inside() {
+    // The ticks 50 apart from 20 in a 240 wide slider; names centred on their ticks, the last kept inside, push their
+    // left neighbours so that two never come closer than 4 — whatever their width (a longer translation, a larger text).
+    let ticks = [20.0, 70.0, 120.0, 170.0, 220.0];
+    for widths in [[34.3, 42.9, 42.9, 42.9, 42.9], [40.0, 44.0, 44.0, 44.0, 44.0], [30.0, 48.0, 48.0, 48.0, 48.0], [10.0, 10.0, 10.0, 10.0, 10.0]] {
+        let lefts = super::name_lefts(0.0, 240.0, &ticks, &widths, 4.0);
+        assert_eq!(lefts.len(), 5);
+        for index in 0..5 {
+            assert!(lefts[index] >= 0.0 && lefts[index] + widths[index] <= 240.0 + 0.01, "{widths:?}: {lefts:?} inside");
+            if index + 1 < 5 {
+                assert!(lefts[index] + widths[index] + 4.0 <= lefts[index + 1] + 0.01, "{widths:?}: {lefts:?} apart");
+            }
+        }
+        // Names that fit where they are centred stay there.
+        if widths[0] < 20.0 {
+            assert_eq!(lefts[2], 115.0, "{lefts:?}");
+        }
+    }
+}

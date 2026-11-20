@@ -541,7 +541,7 @@ fn delete_moves_the_row_to_the_trash_and_undo_brings_it_back() {
     let logo = id_of(&mailbox, LOGO);
     mailbox.act(logo, Act::Delete);
     assert_eq!(listed(&mailbox, logo), None);
-    assert_eq!(toast(&mailbox).map(|toast| (toast.3, toast.4)), Some(("Moved to Trash", true)));
+    assert_eq!(toast(&mailbox).map(|toast| (toast.3, toast.4)), Some(("Moved to Bin", true)));
     mailbox.narrow(Some(2));
     mailbox.open(Place::View(Role::Trash));
     assert_eq!(listed(&mailbox, logo), Some(false), "in the Studio Trash, still unread");
@@ -830,4 +830,41 @@ fn only_a_read_leaves_the_writes_count_as_it_was() {
     for write in ["compose.update", "compose.discard", "event.create", "event.update", "mail.send", "history.undo", "calendar.server"] {
         assert!(!super::changes_nothing(write), "{write} may change what the window shows");
     }
+}
+
+#[test]
+fn outside_the_drafts_place_only_the_drafts_count_is_asked_for() {
+    // The index's Drafts count asks `compose.list` for one draft and reads its `total`: the store reads one row (#301).
+    let mut mailbox = mailbox();
+    let account = mailbox.accounts().first().map(|account| account.id).unwrap();
+    for subject in ["Kiln rota", "Glaze order", "Notes"] {
+        let id = mailbox.run("compose.new", &json!({ "account": account })).unwrap().get("id").and_then(Value::as_u64).unwrap();
+        mailbox.run("compose.update", &json!({ "id": id, "subject": subject })).unwrap();
+    }
+    let asked = super::draft_count_asked(None);
+    assert_eq!(asked.get("limit").and_then(Value::as_u64), Some(1), "{asked}");
+    let answer = mailbox.run("compose.list", &asked).unwrap();
+    assert_eq!(answer.get("drafts").and_then(Value::as_array).map(Vec::len), Some(1), "one draft read");
+    let total = answer.get("total").and_then(Value::as_u64).unwrap();
+    assert!(total >= 3, "the total counts every draft: {total}");
+    mailbox.keep_drafts_fresh();
+    assert_eq!(mailbox.drafts_total(), total);
+    assert!(mailbox.drafts().next().is_none(), "outside the drafts place no draft is listed");
+}
+
+/// A draft's row in the drafts place says whom it goes to by name only where the name could not be taken for another
+/// address: else by the address.
+#[test]
+fn a_draft_row_never_names_a_recipient_as_another_address() {
+    let mut mailbox = mailbox();
+    let account = mailbox.accounts().first().map(|account| account.id).unwrap();
+    for to in ["\"odile@example.org\" <eve@example.net>", "Odile <odile@example.org>"] {
+        let id = mailbox.run("compose.new", &json!({ "account": account })).unwrap().get("id").and_then(Value::as_u64).unwrap();
+        mailbox.run("compose.update", &json!({ "id": id, "to": [to] })).unwrap();
+    }
+    mailbox.open(Place::View(Role::Drafts));
+    let to: Vec<String> = mailbox.drafts().map(|draft| draft.to.clone()).collect();
+    assert!(to.iter().any(|to| to == "to eve@example.net"), "{to:?}");
+    assert!(to.iter().any(|to| to == "to Odile"), "{to:?}");
+    assert!(!to.iter().any(|to| to.contains("odile@")), "{to:?}");
 }

@@ -679,6 +679,8 @@ impl InboxApp {
         let at = self.index_place(setting);
         let flags = (Self::index_live(surfaces), self.checking_elsewhere());
         let narrow = regions.index.width() < shell::INDEX;
+        // The index's Drafts count is read before it is drawn: a draft written since counts in this frame (#328).
+        self.mailbox.keep_drafts_fresh();
         let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, narrow, flags);
         let indexed = Self::index_allowed(surfaces, indexed);
         // A row of the index pressed while a key is waited for ends the wait first, then acts.
@@ -2123,7 +2125,19 @@ impl InboxApp {
     fn outbox(&mut self, draft: u64, asked: list::Outbox) {
         match asked {
             list::Outbox::Unsend => self.unsend(draft),
-            list::Outbox::Edit => self.reopen(draft),
+            list::Outbox::Edit => {
+                // A send that changed since it was refused, or keeps no record of how it went: its chips show where
+                // each recipient goes until the composer closes.
+                let changed = self
+                    .mailbox
+                    .outbox()
+                    .iter()
+                    .any(|row| row.draft == draft && matches!(row.state, crate::mailbox::SendState::Refused { .. }) && !row.changed.is_empty());
+                self.reopen(draft);
+                if let Some(composer) = self.composer.as_mut().filter(|composer| changed && composer.draft() == draft) {
+                    composer.show_addresses();
+                }
+            }
             list::Outbox::Retry => self.retry(draft),
         }
     }
@@ -2176,7 +2190,7 @@ impl InboxApp {
     }
 
     /// Says `text` in the status line, for the `notice` token's time once it shows.
-    fn say(&mut self, text: &str) {
+    pub(crate) fn say(&mut self, text: &str) {
         self.status.push(crate::status::Message::Notice { text: text.to_owned(), until: crate::status::NOTICE_SECONDS });
     }
 

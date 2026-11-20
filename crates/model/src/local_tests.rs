@@ -228,3 +228,33 @@ fn a_hostile_typed_record_reads_within_the_cap() {
     let written = serde_json::to_value(read(r#"["a","b","c","d"]"#)).unwrap();
     assert_eq!(written["typed"], serde_json::json!(["a", "b", "c"]));
 }
+
+/// What a draft sent looked like: kept with its outbox item, read back, and each part that changed named, never shown
+/// in `Debug`.
+#[test]
+fn a_send_keeps_the_draft_as_it_went_and_names_what_changed() {
+    let draft = Draft {
+        to: vec!["Béla <bela@example.org>".to_owned()],
+        subject: "Budget".to_owned(),
+        text: "Secret".to_owned(),
+        ..Draft::new(DraftId::new(3), AccountId::new(1), at(1_000))
+    };
+    let outgoing = Outgoing::of(&draft, OutboxState::Waiting);
+    round_trip(&outgoing);
+    assert_eq!(outgoing.changes(&draft), Vec::<&str>::new());
+    let shown = format!("{outgoing:?}");
+    assert!(!shown.contains("Secret") && !shown.contains("bela") && !shown.contains("Budget"), "{shown}");
+    let changed = Draft {
+        account: AccountId::new(2),
+        cc: vec!["ann@example.org".to_owned()],
+        bcc: vec!["mallory@example.org".to_owned()],
+        forwards: Some(MessageId::new(9)),
+        calendar: Some(String::new()),
+        ..draft.clone()
+    };
+    assert_eq!(outgoing.changes(&changed), ["from", "cc", "bcc", "attachments", "invitation"]);
+    let changed = Draft { to: Vec::new(), subject: "Budget!".to_owned(), text: String::new(), ..draft.clone() };
+    assert_eq!(outgoing.changes(&changed), ["to", "subject", "text"]);
+    // A record kept nothing of it: it may have changed.
+    assert_eq!(Outgoing::new(DraftId::new(3), OutboxState::Waiting).changes(&draft), ["unknown"]);
+}

@@ -19,7 +19,9 @@
 //! the chips 12 after it, 4 apart and wrapping 4 apart, 6 above and below them, and "Cc  Bcc" as a small link at the
 //! right end; the composer rules a hairline under it. The caret says that it has the keys.
 
-use egui::{Color32, Id, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
+use std::sync::Arc;
+
+use egui::{Color32, Galley, Id, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint;
 use crate::iconset::IconId;
@@ -71,12 +73,20 @@ enum Look {
 /// A recipient's chip (see the module), 24 high: its response is the cross's, clicked when the recipient is to go.
 /// A screen reader hears the chip as `name` and the cross as "Remove `name`".
 pub fn recipient_chip(ui: &mut Ui, theme: &Theme, name: &str, state: RecipientState) -> Response {
-    chip_with(ui, theme, name, name, state, None)
+    chip_with(ui, theme, name, name, None, state, None)
 }
 
-/// [`recipient_chip`] heard as `spoken`, drawn in `shown` whatever the pointer and the keyboard do (a board of the
-/// gallery).
-pub(crate) fn chip_with(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str, state: RecipientState, shown: Option<Shown>) -> Response {
+/// [`recipient_chip`] heard as `spoken`, with `tip` (its address, where it shows a name) under the pointer, drawn in
+/// `shown` whatever the pointer and the keyboard do (a board of the gallery).
+pub(crate) fn chip_with(
+    ui: &mut Ui,
+    theme: &Theme,
+    name: &str,
+    spoken: &str,
+    tip: Option<&str>,
+    state: RecipientState,
+    shown: Option<Shown>,
+) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
     let enabled = ui.is_enabled() && !soon::is_soon(ui);
@@ -89,12 +99,15 @@ pub(crate) fn chip_with(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str, st
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
     let tail = s.s1 + glyph + s.s1 + 1.0;
     // In a line narrower than a chip's 176, the chip is cut to the line's room ([`chip_width`]).
-    let widest = WIDEST.min(ui.available_width()).max(1.0);
-    let most = (widest - lead - tail).max(1.0);
-    let words = cut(ui, name, theme.fonts.body, ink, most);
-    let width = (lead + words_box(ui, theme, name, ink, &words, most) + tail).ceil();
+    let laid = chip_words(ui, theme, name, ink, lead + tail, ui.available_width());
+    let (words, width) = (laid.words, (lead + laid.width + tail).ceil());
     let (rect, chip) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     chip.widget_info(|| WidgetInfo::labeled(Role::ListItem, enabled, spoken));
+    // A cut chip that shows its address has the whole of it under the pointer.
+    let chip = match tip.or_else(|| laid.cut.then_some(name)) {
+        Some(tip) => chip.on_hover_text(tip),
+        None => chip,
+    };
     let cross = Rect::from_min_size(pos2(rect.right() - 1.0 - s.s1 - glyph, rect.center().y - glyph / 2.0), vec2(glyph, glyph));
     let remove = tr!("Remove {recipient}", recipient = name);
     // Two chips may show one name; what a screen reader hears holds the address.
@@ -149,6 +162,8 @@ pub struct Recipient {
     pub shown: String,
     /// What a screen reader says for it.
     pub spoken: String,
+    /// Its tooltip: the address, where it shows a name.
+    pub tip: Option<String>,
     /// Whether it is an address.
     pub state: RecipientState,
 }
@@ -168,6 +183,14 @@ pub struct Recipients<'a> {
     pub error: Option<&'a str>,
     /// Whether it can be used.
     pub enabled: bool,
+    /// Whether the line shows more rows of chips before it scrolls ([`GROWN_ROWS`], not [`MOST_ROWS`]): the composer
+    /// grows its lines to bring every recipient into sight before it sends.
+    pub grown: bool,
+    /// The most height the line takes, in points, whatever its rows: fewer rows show and it scrolls, one row at least.
+    /// The composer's lines keep to the room over its foot, so every row they show is in sight.
+    pub room: Option<f32>,
+    /// The chip, by its place, to scroll into view in this frame.
+    pub bring: Option<usize>,
 }
 
 /// What a person did to a recipient line in this frame.
@@ -179,6 +202,8 @@ pub struct RecipientsOutput {
     pub removed: Option<usize>,
     /// "Cc Bcc" was pressed.
     pub copies: bool,
+    /// The chips, by their places, drawn whole in sight in this frame (not cut off by a scroll or an edge).
+    pub in_sight: Vec<usize>,
 }
 
 /// The least room the text being typed keeps beside the last chip before it goes to a row of its own, in points.
@@ -243,21 +268,25 @@ fn recipients_drawn(
     let widths: Vec<f32> =
         line.chips.iter().zip(&inks).map(|(recipient, ink)| chip_width(ui, theme, recipient, *ink, room - theme.sizes.scrollbar - s.s1)).collect();
     let (mut places, mut typing_at, mut rows) = flow(&widths, room, s.s1);
-    // Past its most rows the line scrolls: the bar's room comes off the chips' row.
-    let scrolls = rows > MOST_ROWS;
+    let inner = |rows: f32| rows * chip + (rows - 1.0).max(0.0) * row_gap;
+    // What the rows of a wrapped line stand in, above and below them.
+    let edges = if boxed { (s.s1 + s.s1 / 2.0 + 1.0) * 2.0 } else { field_height - chip };
+    // Past its most rows the line scrolls: the bar's room comes off the chips' row. It shows no more rows than its
+    // height holds, so every row it shows is in sight.
+    let most_rows = if line.grown { GROWN_ROWS } else { MOST_ROWS };
+    let most_rows = match line.room {
+        None => most_rows,
+        Some(most) => (1..=most_rows).rev().find(|shown| inner(*shown as f32) + edges <= most).unwrap_or(1),
+    };
+    let scrolls = rows > most_rows;
     if scrolls {
         (places, typing_at, rows) = flow(&widths, (room - theme.sizes.scrollbar - s.s1).max(1.0), s.s1);
     }
-    let shown_rows = rows.min(MOST_ROWS) as f32;
+    let shown_rows = rows.min(most_rows) as f32;
     let wrapped = rows > 1;
-    let inner = |rows: f32| rows * chip + (rows - 1.0).max(0.0) * row_gap;
-    let height = match (wrapped, boxed) {
-        (false, _) => field_height,
-        (true, true) => inner(shown_rows) + (s.s1 + s.s1 / 2.0 + 1.0) * 2.0,
-        (true, false) => inner(shown_rows) + (field_height - chip),
-    };
+    let height = if wrapped { inner(shown_rows) + edges } else { field_height };
     ui.vertical(|ui| {
-        let (mut removed, mut copies_pressed) = (None, false);
+        let (mut removed, mut copies_pressed, mut in_sight) = (None, false, Vec::new());
         ui.spacing_mut().item_spacing.y = s.s2;
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         let focused = shown == Some(Shown::Focus) || (enabled && ui.memory(|memory| memory.has_focus(id)));
@@ -295,8 +324,17 @@ fn recipients_drawn(
                 if !enabled {
                     child.disable();
                 }
+                // Its row at the top of the line: the rows after it, not yet seen, come into sight with it.
+                if line.bring == Some(index) {
+                    child.scroll_to_rect(place, Some(egui::Align::TOP));
+                }
+                // Whole in sight: inside every clip over it (the line's scroll, the composer's edges, the window).
+                if child.clip_rect().expand(0.5).contains_rect(place) {
+                    in_sight.push(index);
+                }
                 let chip_shown = if enabled { None } else { Some(Shown::Rest) };
-                if chip_with(&mut child, theme, &recipient.shown, &recipient.spoken, recipient.state, chip_shown).clicked() {
+                if chip_with(&mut child, theme, &recipient.shown, &recipient.spoken, recipient.tip.as_deref(), recipient.state, chip_shown).clicked()
+                {
                     removed = Some(index);
                 }
             }
@@ -363,13 +401,16 @@ fn recipients_drawn(
             }
             paint::rows_at(&painter, place.min, width, text, p.minus);
         }
-        RecipientsOutput { field: typed, removed, copies: copies_pressed }
+        RecipientsOutput { field: typed, removed, copies: copies_pressed, in_sight }
     })
     .inner
 }
 
 /// The most rows of chips a line shows before it scrolls.
 const MOST_ROWS: usize = 4;
+
+/// The most rows of chips a grown line shows before it scrolls, where its room holds them ([`Recipients::grown`]).
+const GROWN_ROWS: usize = 8;
 
 /// Where chips `widths` wide go in rows `room` wide, `gap` apart: each chip's `(x, row)`, the typing's, and the rows.
 fn flow(widths: &[f32], room: f32, gap: f32) -> (Vec<(f32, usize)>, (f32, usize), usize) {
@@ -410,15 +451,79 @@ fn chip_width(ui: &Ui, theme: &Theme, recipient: &Recipient, ink: Color32, room:
     let invalid = recipient.state == RecipientState::Invalid;
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
     let tail = s.s1 + glyph + s.s1 + 1.0;
-    let most = (WIDEST.min(room).max(1.0) - lead - tail).max(1.0);
-    let words = cut(ui, &recipient.shown, theme.fonts.body, ink, most);
-    (lead + words_box(ui, theme, &recipient.shown, ink, &words, most) + tail).ceil()
+    (lead + chip_words(ui, theme, &recipient.shown, ink, lead + tail, room).width + tail).ceil()
 }
 
-/// The box a chip gives its `name` laid out as `words` within `most`: the words' width, or all of `most` when the name
-/// is cut there, as the design's long chip keeps its 144.
-fn words_box(ui: &Ui, theme: &Theme, name: &str, ink: Color32, words: &egui::Galley, most: f32) -> f32 {
-    if galley(ui, name, theme.fonts.body, ink).size().x > most { most } else { words.size().x }
+/// A chip's words as [`chip_words`] lays them out.
+struct ChipWords {
+    /// What the chip shows: the name whole, or cut with an ellipsis.
+    words: Arc<Galley>,
+    /// The box the words take: their width, or all the room they were cut to, as the design's long chip keeps its 144.
+    width: f32,
+    /// Whether something of the name does not show.
+    cut: bool,
+}
+
+/// The words of a chip showing `name`, its edges and cross taking `sides`, in a line `room` wide: cut at the chip's
+/// 176 with an ellipsis. An address is cut in its local part, never in its domain (everything after its last at sign,
+/// which says where the mail goes); a domain wider than a chip grows the chip to `room`, and one wider than that is
+/// cut only from its left, so its registrable end shows.
+fn chip_words(ui: &Ui, theme: &Theme, name: &str, ink: Color32, sides: f32, room: f32) -> ChipWords {
+    let font = theme.fonts.body;
+    let room = if room.is_finite() { room.max(1.0) } else { WIDEST };
+    let most = (WIDEST.min(room) - sides).max(1.0);
+    let whole = galley(ui, name, font, ink);
+    if whole.size().x <= most {
+        let width = whole.size().x;
+        return ChipWords { words: whole, width, cut: false };
+    }
+    let Some(domain) = name.rfind('@').and_then(|at| name.get(at..)).filter(|domain| domain.len() > 1) else {
+        return ChipWords { words: cut(ui, name, font, ink, most), width: most, cut: true };
+    };
+    let local = name.get(..name.len().saturating_sub(domain.len())).unwrap_or_default();
+    let grown = (room - sides).max(1.0);
+    for most in [most, grown] {
+        if whole.size().x <= most {
+            let width = whole.size().x;
+            return ChipWords { words: whole, width, cut: false };
+        }
+        // The most letters of the local part that fit before the ellipsis and the whole domain.
+        let fits = |kept: usize| {
+            let end = local.char_indices().nth(kept).map_or(local.len(), |(at, _)| at);
+            let words = galley(ui, &format!("{}…{domain}", local.get(..end).unwrap_or_default()), font, ink);
+            (words.size().x <= most).then_some(words)
+        };
+        if let Some(words) = most_that_fit(local.chars().count(), fits) {
+            return ChipWords { words, width: most, cut: true };
+        }
+    }
+    // The domain alone is wider than the line: its right end, after an ellipsis.
+    let count = domain.chars().count();
+    let fits = |kept: usize| {
+        let start = domain.char_indices().nth(count.saturating_sub(kept)).map_or(domain.len(), |(at, _)| at);
+        let words = galley(ui, &format!("…{}", domain.get(start..).unwrap_or_default()), font, ink);
+        (words.size().x <= grown).then_some(words)
+    };
+    let words = most_that_fit(count, fits).unwrap_or_else(|| cut(ui, name, font, ink, grown));
+    ChipWords { words, width: grown, cut: true }
+}
+
+/// What `fits` gives for the most of `0..=most` that it gives something for (it gives something for every count up to
+/// that one), by halving; `None` when it gives nothing even for none.
+fn most_that_fit(most: usize, fits: impl Fn(usize) -> Option<Arc<Galley>>) -> Option<Arc<Galley>> {
+    let mut best = fits(0)?;
+    let (mut low, mut high) = (0_usize, most);
+    while low < high {
+        let mid = low + (high - low).div_ceil(2);
+        match fits(mid) {
+            Some(words) => {
+                best = words;
+                low = mid;
+            }
+            None => high = mid.saturating_sub(1),
+        }
+    }
+    Some(best)
 }
 
 #[cfg(test)]

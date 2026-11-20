@@ -9,8 +9,8 @@
 //! no reason is cut in the middle, except the first when it stands alone, which is cut between grapheme clusters with
 //! one ellipsis. The rule reads the width the line has, never the window's. A screen reader hears every reason as one
 //! sentence, the ones that left included. The log the link opens is not built yet: the link stands unavailable while
-//! the first reason fits whole beside it, and the `coming soon` tag stands in the room the reasons leave, or
-//! where they go while there are none. Nothing paints past the line, nothing in it moves, and it takes no Tab stop.
+//! the first reason fits whole beside it; the `coming soon` tag stands where the reasons go while there are none, and
+//! beside reasons, as the frames draw them, not at all. Nothing paints past the line, nothing in it moves, and it takes no Tab stop.
 
 use std::sync::Arc;
 
@@ -98,9 +98,9 @@ pub fn why_line<S: AsRef<str>>(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reas
     let words_right = if link { link_left - PAD_X } else { right };
     let room = (words_right - left).max(0.0);
     let words = fitting(ui, theme, reasons, room);
-    // With no reason the tag stands where the reasons go; with reasons, only in the room they leave.
-    let tag_left = if reasons.is_empty() { left } else { left + paint::run_box(words.size().x) + PAD_X };
-    let tag = tag_left + tag_width <= words_right;
+    // With no reason the tag stands where the reasons go; beside reasons the frames draw none.
+    let tag_left = left;
+    let tag = reasons.is_empty() && tag_left + tag_width <= words_right;
     let words_rect = Rect::from_min_size(pos2(left, rect.top()), vec2(room.max(1.0), high));
     if !reasons.is_empty() {
         let said_rect = ui.interact(words_rect, id.with("words"), Sense::hover());

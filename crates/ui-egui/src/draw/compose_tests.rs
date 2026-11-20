@@ -721,6 +721,22 @@ fn the_end_of_the_app_in_the_frame_after_a_keystroke_keeps_it() {
     assert!(kept.text.starts_with("Plot 14"), "{:?}", kept.text);
 }
 
+/// A keep while typing that the engine refuses (here the draft was discarded from outside) is said in the window,
+/// never dropped in silence: what was typed stays in the composer, still to be kept (#243).
+#[test]
+fn a_refused_keep_while_typing_is_said_and_keeps_what_was_typed() {
+    let mut harness = composing_over(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let id = harness.state().composer().unwrap().draft();
+    harness.state_mut().mailbox_mut().run("compose.discard", &json!({ "id": id })).unwrap();
+    typed_by_frames(&mut harness, "Plot 14");
+    for _ in 0..70 {
+        harness.step();
+    }
+    assert!(harness.state().mailbox().error().is_some(), "the refused keep is said");
+    assert!(text_of(&harness).starts_with("Plot 14"), "{:?}", text_of(&harness));
+    assert!(harness.state().composer().unwrap().changed(), "still to be kept");
+}
+
 #[test]
 fn send_waits_for_a_composer_that_was_never_painted() {
     let mut harness = sending();

@@ -278,9 +278,8 @@ fn subtitle(mailbox: &Mailbox) -> (Option<String>, String) {
     if mailbox.drafts_listed() {
         return (None, mailbox.drafts_count());
     }
-    // The unified inbox of every account, in a view with groups, holds what is left to read, as the design words it
-    // (the List view still counts its messages after whose they are).
-    if switch_shown(mailbox) && mailbox.narrowed().is_none() && !mailbox.groups().is_empty() {
+    // The unified inbox of every account holds what is left to read, as the design words it, in every view.
+    if switch_shown(mailbox) && mailbox.narrowed().is_none() {
         let count = mailbox.messages().iter().filter(|row| !row.seen).count();
         return (None, tr!("{count} to read", count = count));
     }
@@ -1307,8 +1306,11 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
         (SendState::Sending, _) => Standing::Sending,
         (SendState::Refused { .. }, _) => Standing::Refused,
     };
-    let reply = match &row.state {
-        SendState::Refused { reply, .. } => Some(reply.as_str()),
+    // A refused send whose draft changed since says what changed before the server's reply.
+    let changes = mailbox.changes_shown(row);
+    let reply = match (&row.state, &changes) {
+        (SendState::Refused { reply, .. }, Some(changes)) => Some(tr!("{changes} · {reply}", changes = changes, reply = reply)),
+        (SendState::Refused { reply, .. }, None) => Some(reply.clone()),
         _ => None,
     };
     let label = &row.subject;
@@ -1320,26 +1322,30 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
         Standing::Countdown { .. } => (vec![SendButton { name: tr!("Undo"), spoken: &undo }], vec![Outbox::Unsend]),
         Standing::Scheduled => (vec![SendButton { name: tr!("Edit"), spoken: &take_back }], vec![Outbox::Unsend]),
         Standing::Sending => (Vec::new(), Vec::new()),
-        // An answer to an invitation changes only from the invitation.
+        // A send that changed since it was refused (or keeps no record of how it went) is not sent from its row: Edit
+        // opens it in the composer, which shows every address and the text whole, and sends it from there. An answer
+        // to an invitation changes only from the invitation, so it has no Edit.
+        Standing::Refused if !row.changed.is_empty() && row.invite_answer => (Vec::new(), Vec::new()),
+        Standing::Refused if !row.changed.is_empty() => (vec![SendButton { name: tr!("Edit"), spoken: &edit }], vec![Outbox::Edit]),
         Standing::Refused if row.invite_answer => (vec![SendButton { name: tr!("Send again"), spoken: &again }], vec![Outbox::Retry]),
         Standing::Refused => (
             vec![SendButton { name: tr!("Send again"), spoken: &again }, SendButton { name: tr!("Edit"), spoken: &edit }],
             vec![Outbox::Retry, Outbox::Edit],
         ),
     };
-    let to = tr!("To {whom}", whom = mailbox.recipients(row));
+    let to = &row.addressed;
     let words = mailbox.standing_shown(row);
     let spoken = mailbox.spoken_outbox(row);
     let account = account_marker.then(|| mailbox.account(row.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0)));
     let shown = OutboxRowView {
         id: Id::unique("list-send-row").with(row.draft),
         spoken: &spoken,
-        to: &to,
+        to,
         account,
         subject,
         words: &words,
         standing,
-        reply,
+        reply: reply.as_deref(),
         buttons: &buttons,
         last: slot.last,
     };
@@ -2256,7 +2262,9 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
     let area = ScrollArea::vertical().id_salt("new-senders").auto_shrink([false, false]);
     crate::component::scroll::show(ui, theme, area, |ui| {
         let pad = if ui.available_width() > CARD_WIDE { QUEUE_PAD.0 } else { theme.spacing.s4 };
-        Frame::new().inner_margin(Margin::symmetric(i8::try_from(pad as i32).unwrap_or(16), 36)).show(ui, |ui| {
+        // From the body's left edge: the list's 1 px line column is already behind the room (#328).
+        let side = i8::try_from(pad as i32).unwrap_or(16);
+        Frame::new().inner_margin(Margin { left: side.saturating_sub(1), right: side, top: 36, bottom: 36 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, QUEUE_GAP);
             let count = askers.len();
             let word = if count == 1 {

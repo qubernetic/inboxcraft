@@ -151,8 +151,10 @@ fn the_unified_inbox_lists_its_rows_by_sender_subject_and_date() {
     harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, unread");
     harness.get_by_label("Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged");
     harness.get_by_label("Inbox");
-    harness.get_by_label("All accounts");
-    harness.get_by_label("· 11 messages");
+    // The List view's head words as the frames': what is left to read, as the grouped views say it.
+    let unread = harness.state().mailbox().messages().iter().filter(|row| !row.seen).count();
+    harness.get_by_label(&format!("{unread} to read"));
+    assert!(harness.query_by_label("· 11 messages").is_none());
     assert_eq!(harness.get_all_by_role(Role::ListBoxOption).count(), 11);
 }
 

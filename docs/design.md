@@ -7,10 +7,9 @@ the FigCraft design file [`docs/design/inboxcraft.figcraft`](design/README.md): 
 state drawn in dark and in light. This page puts that file into words; where the two differ, the file is right and
 this page is changed.
 
-**The app does not follow this design yet.** The code and the screenshots in `docs/images/` still show the earlier
-glass and gradient look. This page describes the look the app is being built towards;
+**The app follows most of this design.** The code and the screenshots in `docs/images/` show the Qubernetic look;
 [the design file's README](design/README.md#not-in-the-code-yet) lists the file's pages and what is not in the
-code yet, which today is everything.
+code yet.
 
 Everything here is original (see `AGENTS.md`, "Assets"). The InboxCraft mark and wordmark and the Qubernetic mark
 are trademarks of Qubernetic and are not under this repository's licences; see [`NOTICE`](../NOTICE).
@@ -451,8 +450,8 @@ each feature's behaviour is decided when it is designed. Two things on it are id
   reading area.
 
 ## Limits
-- **The code does not follow this page.** `crates/ui-egui/src/theme.rs`, the app and the pictures in
-  `docs/images/` show the earlier look.
+- **The code follows most of this page.** What it does not follow yet is listed in
+  [the design file's README](design/README.md#not-in-the-code-yet).
 - The file decides the look, not the behaviour of features that are not built. Where a screen is new against the
   app, the engine work behind it is not decided here.
 - The file does not define what counts as a tracker, so the content bar's tracker count has no rule yet.
