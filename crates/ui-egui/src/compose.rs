@@ -978,7 +978,7 @@ impl Composer {
     /// The command's refusal (a draft on its way is not changed); the composer keeps what was typed.
     pub fn save(&mut self, mailbox: &mut Mailbox) -> Result<(), UiError> {
         let list = |line: Line| self.chips(line).iter().map(|chip| chip.text.clone()).collect::<Vec<_>>();
-        let params = json!({
+        let mut params = json!({
             "id": self.draft,
             "to": list(Line::To),
             "cc": list(Line::Cc),
@@ -988,6 +988,12 @@ impl Composer {
             "subject": self.subject,
             "text": self.text,
         });
+        // From the account its From line shows: one an agent put in its place while the composer was open is put back.
+        if self.account != 0
+            && let Value::Object(fields) = &mut params
+        {
+            fields.insert("account".to_owned(), json!(self.account));
+        }
         let answer = mailbox.run("compose.update", &params)?;
         self.take_answer(&answer);
         self.changed = false;

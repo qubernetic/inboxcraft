@@ -43,6 +43,24 @@ fn sending(clock: &FakeClock, theme: egui::Theme) -> Harness<'static, InboxApp> 
     harness
 }
 
+/// [`sending`], both accounts of the sample able to send.
+fn sending_from_both(clock: &FakeClock) -> Harness<'static, InboxApp> {
+    let mut store = sample::mailbox(Timestamp::from_unix(NOW, 0).unwrap()).unwrap();
+    let server = Server::new(Host::new("smtp.example.org").unwrap(), Security::Tls.submission_port(), Security::Tls);
+    let mut batch = Batch::new();
+    for account in store.accounts().unwrap() {
+        batch.push(Change::PutAccount(account.with_submission(Some(server.clone()))));
+    }
+    store.apply(&batch).unwrap();
+    let mailbox = Mailbox::new(Session::new(Box::new(store), Box::new(clock.clone())).unwrap(), Box::new(clock.clone()));
+    let mut harness = Harness::builder()
+        .with_size(vec2(1300.0, 820.0))
+        .with_max_steps(12)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
+    harness.run();
+    harness
+}
+
 fn clock() -> FakeClock {
     FakeClock::new(Timestamp::from_unix(NOW, 0).unwrap())
 }
@@ -712,4 +730,23 @@ fn the_composer_sends_only_once_every_recipient_was_in_sight() {
     harness.get_by_role_and_label(Role::Button, "Send").click();
     harness.run();
     assert_eq!(harness.state().counting(), Some((draft, 5)), "the second press sends");
+}
+/// An agent changes the account of the draft while the composer is open on it: the composer's Send sends from the
+/// account its From line shows, not the agent's.
+#[test]
+fn the_composer_sends_from_the_account_it_shows() {
+    let clock = clock();
+    let mut harness = sending_from_both(&clock);
+    write(&mut harness, "From the first");
+    let draft = harness.state().composer().unwrap().draft();
+    assert_eq!(harness.state().composer().unwrap().account(), 1);
+    let from = harness.query_all_by_role(Role::ComboBox).filter_map(|node| node.accesskit_node().label()).find(|label| label.starts_with("From"));
+    harness.state_mut().mailbox_mut().run_for_agent("compose.update", &serde_json::json!({ "id": draft, "account": 2 })).unwrap();
+    harness.run();
+    let shown = harness.query_all_by_role(Role::ComboBox).filter_map(|node| node.accesskit_node().label()).find(|label| label.starts_with("From"));
+    assert_eq!(shown, from, "the From line still shows the first account");
+    harness.get_by_role_and_label(Role::Button, "Send").click();
+    harness.run();
+    let row = harness.state().mailbox().outbox().iter().find(|row| row.draft == draft).map(|row| row.account);
+    assert_eq!(row, Some(1), "sent from the account the composer showed");
 }
