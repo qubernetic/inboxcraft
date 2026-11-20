@@ -629,6 +629,18 @@ pub fn menu_choice(ui: &mut Ui, theme: &Theme, name: &str, on: bool, available: 
 /// [`menu_choice`] unavailable when there is a `reason`, which stands at its right end in `mono_s` and `muted` (empty:
 /// none); drawn in `shown` for a board of the gallery.
 pub(crate) fn menu_choice_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool, reason: Option<&str>, shown: Option<Shown>) -> Response {
+    choice_row(ui, theme, name, on, reason, shown, 0.0)
+}
+
+/// A [`choice`] among [`account_choice`] rows (the account picker's All accounts): its name stands where theirs do,
+/// after the room of an account bar it does not draw.
+pub fn choice_among_accounts(ui: &mut Ui, theme: &Theme, name: &str, chosen: bool) -> Response {
+    let room = ACCOUNT_BAR.x + theme.spacing.s2;
+    choice_row(ui, theme, name, chosen, None, None, room)
+}
+
+/// [`menu_choice_with`] with its name `room` further in.
+fn choice_row(ui: &mut Ui, theme: &Theme, name: &str, on: bool, reason: Option<&str>, shown: Option<Shown>, room: f32) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
     let soon = soon::is_soon(ui);
@@ -655,7 +667,7 @@ pub(crate) fn menu_choice_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool,
         let tick = if soon || !available { p.dim } else { p.cyan_text };
         crate::iconset::paint_glyph(&painter, at, CHECK, arriving(theme, tick, shown));
     }
-    let left = row.rect.left() + inset + side + s.s2;
+    let left = row.rect.left() + inset + side + s.s2 + room;
     let mut right = row.rect.right() - inset;
     if let Some(reason) = reason.filter(|reason| !reason.is_empty()) {
         let reason = galley(ui, reason, theme.fonts.mono_s, p.muted);

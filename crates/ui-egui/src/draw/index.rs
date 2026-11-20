@@ -458,7 +458,7 @@ fn picker(ui: &Ui, theme: &Theme, mailbox: &Mailbox, opener: &Response) -> Optio
     popup::menu_up(ui.ctx(), theme, &on_row, Id::unique("index-account-picker"), PICKER, |ui| {
         popup::head(ui, theme, tr!("Show mail of"), None);
         let mut chosen = None;
-        if !only && popup::choice(ui, theme, tr!("All accounts"), narrowed.is_none()).clicked() {
+        if !only && popup::choice_among_accounts(ui, theme, tr!("All accounts"), narrowed.is_none()).clicked() {
             chosen = Some(None);
         }
         for (id, name, address, index) in &accounts {
