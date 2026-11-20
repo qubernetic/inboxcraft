@@ -24,17 +24,19 @@ const THREE: [&str; 3] = ["finds@quietweb.example.org", "hello@typeweekly.exampl
 
 /// The sample window with `allowed` senders' pictures loading always, on the Privacy page.
 fn on_privacy(allowed: &[&str]) -> Harness<'static, InboxApp> {
+    on_privacy_at(allowed, vec2(1440.0, 900.0))
+}
+
+/// [`on_privacy`] in a window `size` big.
+fn on_privacy_at(allowed: &[&str], size: egui::Vec2) -> Harness<'static, InboxApp> {
     let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     for address in allowed {
         app.mailbox_mut().run("remote.allow", &json!({ "address": address })).unwrap();
     }
     app.settings_mut().open_at(Section::Privacy);
-    let mut harness = Harness::builder()
-        .with_size(vec2(1440.0, 900.0))
-        .with_max_steps(40)
-        .with_theme(egui::Theme::Dark)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    let mut harness =
+        Harness::builder().with_size(size).with_max_steps(40).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness
 }
@@ -222,4 +224,40 @@ fn a_sender_s_address_stands_in_the_frame_s_column_in_muted_mono() {
     assert_eq!(colour, theme.palette.muted, "the address in muted");
     let link = harness.get_by_label(&again("hello@typeweekly.example.org")).rect();
     assert!((link.right() - column - 704.0).abs() <= 1.0, "ask again ends 16 in: {}", link.right() - column);
+}
+
+/// What the galley laid out from `wanted` shows (an elided run ends in `…`), and where it stands.
+fn shown(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<(egui::Rect, String)> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<(egui::Rect, String)> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text().starts_with(wanted) => {
+                let glyphs: String = text.galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+                Some((egui::Rect::from_min_size(text.pos, text.galley.size()), glyphs))
+            }
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn on_a_narrow_page_the_empty_name_column_gives_way_before_the_address_is_cut() {
+    // At 1200 the frame's columns stay: the address at 208. At 800 the page is narrower than the frame's row needs:
+    // the empty name column gives way and the address shows whole, "ask again" still beside it (#325, I-4).
+    let address = "hello@typeweekly.example.org";
+    for (width, frame_s) in [(1200.0, true), (800.0, false)] {
+        let harness = on_privacy_at(&THREE, vec2(width, 700.0));
+        let (note, _) = painted(&harness, "The senders whose remote pictures").expect("the group's note");
+        let column = note.left() - 16.0;
+        let (shown, glyphs) = shown(&harness, address).unwrap_or_else(|| panic!("{width}: the address is drawn"));
+        assert_eq!(glyphs, address, "{width}: the address whole");
+        let link = harness.get_by_label(&again(address)).rect();
+        assert!(shown.right() <= link.left() - 11.5, "{width}: the address {shown:?} ends 12 before ask again {link:?}");
+        if frame_s {
+            assert!((shown.left() - column - 208.0).abs() <= 0.5, "{width}: the address at 208: {}", shown.left() - column);
+        } else {
+            assert!(shown.left() - column < 208.0 && shown.left() - column >= 16.0, "{width}: the column gave way: {}", shown.left() - column);
+        }
+    }
 }

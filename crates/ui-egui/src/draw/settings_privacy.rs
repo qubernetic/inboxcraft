@@ -20,7 +20,8 @@ use crate::tr;
 const ROW: f32 = 44.0;
 
 /// The column the frame gives a sender's name, and the gap after it, in points: `remote.list` keeps no name, so the
-/// column stands empty and the address keeps the frame's place.
+/// column stands empty and the address keeps the frame's place; on a page too narrow for the whole address there, the
+/// column gives way first.
 const NAME: f32 = 180.0 + 12.0;
 
 /// The Privacy page.
@@ -92,9 +93,13 @@ fn sender_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &SenderRow, ends
     ui.scope_builder(own, |ui| {
         ui.set_min_height(high);
         ui.spacing_mut().item_spacing.x = 0.0;
-        ui.add_space(16.0 + NAME);
         let word = tr!("ask again");
         let link = crate::component::galley(ui, word, theme.fonts.mono_s, p.ink).size().x.ceil() + 16.0;
+        // The empty name column gives way to what the whole address lacks beside it, never under nothing; the address
+        // is cut only when it alone does not fit.
+        let whole = crate::component::galley(ui, &row.shown, theme.fonts.mono, p.muted).size().x.ceil();
+        let lacks = (whole - (ui.available_width() - 16.0 - NAME - link - 12.0)).max(0.0);
+        ui.add_space(16.0 + (NAME - lacks).max(0.0));
         let room = (ui.available_width() - link - 12.0).max(1.0);
         let shown = crate::component::cut(ui, &row.shown, theme.fonts.mono, p.muted, room);
         let (place, _) = ui.allocate_exact_size(vec2(room, high), egui::Sense::hover());
