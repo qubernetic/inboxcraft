@@ -90,3 +90,15 @@ fn the_screener_label_stands_centred_on_its_switch() {
     assert!((label.center().y - switch.center().y).abs() <= 1.0, "{label:?} centred on {switch:?}");
     assert!((label.left() + label.width() + 12.0 - switch.left()).abs() <= 1.0, "12 before the switch: {label:?} {switch:?}");
 }
+
+/// `new-senders/before-inbox`: the card is 900 wide; Let in and Keep out, as wide as they draw themselves and 8
+/// apart, end 20 inside its 1 px edge.
+#[test]
+fn the_answers_of_a_sender_card_end_on_its_padding() {
+    let harness = queue(1440.0);
+    let left = harness.get_by_label("Who gets in?").rect().left();
+    let let_in = harness.get_all_by_role_and_label(Role::Button, "Let in").next().unwrap().rect();
+    let keep_out = harness.get_all_by_role_and_label(Role::Button, "Keep out").next().unwrap().rect();
+    assert!((keep_out.left() - let_in.right() - 8.0).abs() <= 0.5, "8 apart: {let_in:?} {keep_out:?}");
+    assert!((keep_out.right() - (left + 900.0 - 21.0)).abs() <= 0.5, "on the card's padding: {keep_out:?} from {left}");
+}

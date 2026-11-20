@@ -2445,13 +2445,16 @@ fn sender_card(
                     });
                 };
                 // Let in, then Keep out, read from the left and laid so: Tab reaches them in the order they are drawn.
+                let tone = if current { crate::component::button::Tone::Primary } else { crate::component::button::Tone::Secondary };
+                let pair = [
+                    (button::TextButton::new(tr!("Let in")).tone(tone), Act::Accept { group: None, open: false }),
+                    (button::TextButton::new(tr!("Keep out")).secondary(), Act::Block),
+                ];
+                // The two answers as wide as they draw themselves, 8 apart.
+                let answers_wide = pair.iter().map(|(shown, _)| shown.width(ui, theme, keymap)).sum::<f32>() + s.s2;
                 let mut answers = |ui: &mut Ui| {
                     ui.spacing_mut().item_spacing.x = s.s2;
-                    let tone = if current { crate::component::button::Tone::Primary } else { crate::component::button::Tone::Secondary };
-                    for keep_out in [false, true] {
-                        let (name, act) =
-                            if keep_out { (tr!("Keep out"), Act::Block) } else { (tr!("Let in"), Act::Accept { group: None, open: false }) };
-                        let shown = if keep_out { button::TextButton::new(name).secondary() } else { button::TextButton::new(name).tone(tone) };
+                    for (shown, act) in pair {
                         if shown.show(ui, theme, keymap).clicked() {
                             answer = Some(act);
                         }
@@ -2464,9 +2467,6 @@ fn sender_card(
                         ui.horizontal(|ui| answers(ui));
                     });
                 } else {
-                    // The two answers as wide as they are drawn (the button's label and its 12 each side), 8 apart.
-                    let answer = |name: &str| crate::component::galley(ui, name, f.button, egui::Color32::PLACEHOLDER).size().x.ceil() + s.s3 * 2.0;
-                    let answers_wide = answer(tr!("Let in")) + s.s2 + answer(tr!("Keep out"));
                     ui.allocate_ui(vec2((ui.available_width() - answers_wide - 16.0).max(1.0), 0.0), |ui| text(ui));
                     // The pair ends at the card's right padding, laid left to right from where it starts.
                     let room = ui.available_rect_before_wrap();
