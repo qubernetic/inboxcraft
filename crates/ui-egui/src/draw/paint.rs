@@ -75,11 +75,11 @@ pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> A
 /// egui puts each letter on a rounded place, so the galley's own width can be a fraction under the added-up advances,
 /// or over them; the larger of the two is taken. egui adds the spacing before every shaped cluster but a section's
 /// first, never after the last letter, so a run of `n` clusters has `n - 1` gaps. Its clusters are not in the galley:
-/// they are counted as the more of the grapheme clusters and the letters with an advance (a flag or Thai sara am is
-/// two shaped clusters in one grapheme). A shaped cluster of no advance inside a grapheme (a zero-width non-joiner) is
-/// not counted, and the drawn reach covers it. The count is over for a letter with marks of their own advance or an
-/// emoji selector: at most one spacing (0.88 pt in the label style at 100 %) per such mark or selector. A galley of
-/// several sections is counted with its widest spacing; a tightened style (a negative spacing) by its advances alone.
+/// they are counted as the more of the grapheme clusters of its text and the letters with an advance (a flag or Thai
+/// sara am is two shaped clusters in one grapheme). A shaped cluster of no advance inside a grapheme (a zero-width non-joiner) is
+/// not counted, and the drawn reach covers it. The count is over for a letter with marks of their own advance: at most
+/// one spacing (0.88 pt in the label style at 100 %) per such mark. A galley of several sections is counted with its
+/// widest spacing; a tightened style (a negative spacing) by its advances alone.
 /// So a run is never measured narrower than it is drawn. A run of no added spacing is not counted.
 fn advances(galley: &Galley) -> f32 {
     let letters: f32 = galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum();
@@ -100,19 +100,30 @@ pub(crate) fn measured(galley: &Galley) -> f32 {
     advances(galley)
 }
 
-/// How many gaps between clusters a galley's rows may show: per row, the more of its grapheme clusters and its letters
-/// with an advance, less one. A row's glyphs are at most one line, so this is bounded by what a line holds.
+/// How many gaps between clusters a galley's rows may show: per row, the more of the grapheme clusters of the text it
+/// was laid out from (a cut row: the letters before its ellipsis, and the ellipsis) and its letters with an advance,
+/// less one. The clusters are counted in the text, not in the glyphs' characters: egui gives a joiner, a variation
+/// selector or a right-to-left letter's rest a glyph of no width of its own that carries a letter's character again,
+/// and counting those took a spacing each that is never drawn. A row's glyphs are at most one line, so this is bounded
+/// by what a line holds.
 fn gaps(galley: &Galley) -> usize {
     use unicode_segmentation::UnicodeSegmentation as _;
-    galley
-        .rows
-        .iter()
-        .map(|row| {
-            let shown: String = row.glyphs.iter().map(|glyph| glyph.chr).collect();
-            let advancing = row.glyphs.iter().filter(|glyph| glyph.advance_width > 0.0).count();
-            shown.graphemes(true).count().max(advancing).saturating_sub(1)
-        })
-        .sum()
+    let mut rest = galley.job.text.chars();
+    let count = galley.rows.len();
+    let mut gaps = 0_usize;
+    for (index, row) in galley.rows.iter().enumerate() {
+        let cut = galley.elided && index + 1 == count;
+        let kept = row.glyphs.len().saturating_sub(usize::from(cut));
+        let own: String = rest.by_ref().take(kept).collect();
+        let held: usize = row.char_count_including_newline().into();
+        for _ in kept..held {
+            rest.next();
+        }
+        let advancing = row.glyphs.iter().filter(|glyph| glyph.advance_width > 0.0).count();
+        let clusters = own.graphemes(true).count().saturating_add(usize::from(cut));
+        gaps = gaps.saturating_add(clusters.max(advancing).saturating_sub(1));
+    }
+    gaps
 }
 
 /// How far a run's added-up advances may pass its box and still fit: what adding up the advances in `f32` drifts by.

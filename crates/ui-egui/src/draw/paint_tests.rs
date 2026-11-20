@@ -1202,17 +1202,37 @@ fn a_tracked_label_is_never_measured_narrower_than_drawn_whatever_zero_width_sig
     for percent in [100, 130] {
         let font = Theme::new(Mode::Dark, TextScale::from_percent(percent).unwrap_or_default()).fonts.label;
         for ppp in [1.0, 1.5] {
-            // A joiner or a selector after a letter is counted as a gap egui may not draw (the over-count of
-            // `advances`, one spacing each at most): such a line may be cut a letter before it would have to be. The
-            // Arabic letter mark is one too since a shipped face (Noto Sans Arabic) holds it as a sign of no advance.
-            let over_counted = |fault: &String| {
-                fault.contains("cut although")
-                    && ['\u{200D}', '\u{FE0F}', '\u{FE00}', '\u{061C}'].iter().any(|sign| fault.contains(&sign.escape_unicode().to_string()))
-            };
-            let found: Vec<String> =
-                faults(font, ppp, &texts, &[60.0, 100.0, 150.0, 240.0]).into_iter().filter(|fault| !over_counted(fault)).collect();
+            // No sign is counted as a gap egui does not draw: a line holding one is cut only where it must be.
+            let found = faults(font, ppp, &texts, &[60.0, 100.0, 150.0, 240.0]);
             assert!(found.is_empty(), "{percent} % at ppp {ppp}: {} faults: {:#?}", found.len(), found.iter().take(8).collect::<Vec<_>>());
         }
+    }
+}
+
+#[test]
+fn a_joiner_a_selector_or_an_arabic_letter_mark_takes_no_spacing_it_does_not_draw() {
+    let font = Theme::new(Mode::Dark, TextScale::default()).fonts.label;
+    let spacing = font.tracking * font.size;
+    assert!(spacing > 0.0, "the label style is tracked");
+    let mut found = Vec::new();
+    let shapes = frame_shapes(1.0, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        found = ['\u{200D}', '\u{FE0F}', '\u{061C}']
+            .iter()
+            .map(|sign| {
+                let text: String = format!("A{sign}B{sign}").repeat(10);
+                let mut job = egui::text::LayoutJob::single_section(text, font.format(Color32::WHITE));
+                job.wrap.max_width = f32::INFINITY;
+                ui.painter().layout_job(job)
+            })
+            .collect();
+    });
+    drop(shapes);
+    for galley in &found {
+        let reach = super::reach(galley);
+        let measured = super::measured(galley);
+        // Measured as drawn, give or take egui's rounding of each letter's place: never a spacing more.
+        assert!(measured - reach < spacing, "{:?}: measured {measured}, drawn {reach}", galley.job.text.chars().take(4).collect::<String>());
     }
 }
 
