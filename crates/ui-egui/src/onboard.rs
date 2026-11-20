@@ -795,8 +795,6 @@ pub enum Stage {
 /// Where the keyboard goes next on an account's form while removing it is asked or was just let be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoveHand {
-    /// The question's Cancel: it has just opened.
-    Cancel,
     /// The form's "Remove account…": the question has just closed.
     Ask,
 }
@@ -1768,12 +1766,12 @@ impl Onboarding {
         self.asking_remove && matches!(self.stage, Stage::Edit(_))
     }
 
-    /// Asks, on the account's form, whether to remove the account; the question takes the keyboard on its Cancel.
-    /// Nothing is removed yet.
+    /// Asks, on the account's form, whether to remove the account; the question's dialog takes the keyboard on its
+    /// Cancel. Nothing is removed yet.
     pub fn ask_remove(&mut self) {
         if matches!(self.stage, Stage::Edit(_)) {
             self.asking_remove = true;
-            self.remove_hand = Some(RemoveHand::Cancel);
+            self.remove_hand = None;
         }
     }
 

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The Scheduled page under Sending: its list and empty states, the cancel confirmed in place, the keyboard walk, the
+//! The Scheduled page under Sending: its list and empty states, the cancel confirmed in a dialog, the keyboard walk, the
 //! page at rest, hostile subjects and recipients, and that `schedule.cancel` runs only on the owner's press of the
 //! confirmation.
 
@@ -119,12 +119,13 @@ fn with_nothing_waiting_the_page_says_so() {
 }
 
 #[test]
-fn a_cancel_asks_in_place_says_it_cannot_be_undone_and_runs_only_on_the_owner_s_press() {
+fn a_cancel_asks_in_a_dialog_over_the_dimmed_window_and_runs_only_on_the_owner_s_press() {
     let mut harness = four();
     press(&mut harness, SEND);
     harness.get_by_role_and_label(Role::Heading, "Cancel the send to Greta Lindqvist?");
-    harness.get_by_label("This cannot be undone.");
+    harness.get_by_label_contains("“Thank-you cards: the proof” will not go at its time,");
     harness.get_by_label("The message goes back to Drafts, where you can change it or send it.");
+    assert!(harness.state().surfaces(&harness.ctx).modal(), "the dialog is a modal surface");
     assert_eq!(focused(&harness).as_deref(), Some("Keep it"), "the confirmation takes the keyboard on Keep it");
     assert_eq!(kept(&mut harness).len(), 4, "asking cancels nothing");
     // A hover and the keyboard on the danger button run nothing.
@@ -135,7 +136,8 @@ fn a_cancel_asks_in_place_says_it_cannot_be_undone_and_runs_only_on_the_owner_s_
     assert_eq!(kept(&mut harness).len(), 4, "a focus or a hover cancels nothing");
     // Esc is the confirmation's: it closes, the entry stays, the keyboard goes back to its cancel.
     key(&mut harness, Key::Escape, Modifiers::NONE);
-    assert!(harness.query_by_label("This cannot be undone.").is_none());
+    assert!(harness.query_by_label("The message goes back to Drafts, where you can change it or send it.").is_none());
+    assert!(!harness.state().surfaces(&harness.ctx).modal());
     assert_eq!(focused(&harness).as_deref(), Some(SEND));
     assert!(harness.state().settings().is_open(), "Esc closes the confirmation only");
     assert_eq!(kept(&mut harness).len(), 4);
@@ -161,10 +163,10 @@ fn keep_it_keeps_the_entry_and_each_kind_says_what_its_cancel_does() {
     ] {
         press(&mut harness, row);
         harness.get_by_role_and_label(Role::Heading, heading);
-        harness.get_by_label("This cannot be undone.");
+        harness.get_by_label_contains("Due ");
         harness.get_by_label(follows);
         press(&mut harness, "Keep it");
-        assert!(harness.query_by_label("This cannot be undone.").is_none());
+        assert!(harness.query_by_label(follows).is_none());
         assert_eq!(focused(&harness).as_deref(), Some(row), "Keep it hands the keyboard back to the row's cancel");
     }
     assert_eq!(kept(&mut harness).len(), 4);
@@ -405,4 +407,21 @@ fn a_row_s_parts_stand_where_the_frame_puts_them() {
     assert!((subject.left() - column - 223.0).abs() <= 0.5, "the subject at 223: {}", subject.left() - column);
     assert!((note.left() - column - 503.0).abs() <= 0.5, "the note at 503: {}", note.left() - column);
     assert!((cancel.left() - column - 664.0).abs() <= 1.0, "cancel at 664: {}", cancel.left() - column);
+}
+
+#[test]
+fn a_press_on_the_dimmed_window_keeps_the_entry_and_presses_nothing_under_it() {
+    let mut harness = four();
+    let back = harness.get_by_label("← Sending").rect().center();
+    press(&mut harness, SEND);
+    harness.get_by_role_and_label(Role::Heading, "Cancel the send to Greta Lindqvist?");
+    harness.hover_at(back);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: back, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+    assert!(harness.query_by_label("Cancel the send to Greta Lindqvist?").is_none(), "the press on the scrim closes the dialog");
+    assert_eq!(harness.state().settings().under(), Some(crate::settings::Under::Scheduled), "the link under the scrim is not pressed");
+    assert_eq!(kept(&mut harness).len(), 4, "the entry stays");
 }

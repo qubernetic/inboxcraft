@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Removing an account from its form: "Remove account…" at the form's right end asks in place, the question says first
+//! Removing an account from its form: "Remove account…" at the form's right end asks in a dialog over the dimmed
+//! window, the question says first
 //! that it cannot be undone, and `account.remove` runs only on the owner's press of the question's "Remove account" —
 //! never from a hover, a focus, Enter on "Remove account…" alone, or Esc. The removal takes the account's password out
 //! of the system's credential store, says so in the status line and goes back to the list.
@@ -82,7 +83,7 @@ fn key(harness: &mut Harness<'static, InboxApp>, key: Key) {
 const QUESTION: &str = "Remove Studio from this computer?";
 
 #[test]
-fn removing_asks_in_place_says_first_it_cannot_be_undone_and_runs_only_on_the_owner_s_press() {
+fn removing_asks_in_a_dialog_says_first_it_cannot_be_undone_and_runs_only_on_the_owner_s_press() {
     let kept = Kept::default();
     let mut harness = on_studio(&kept);
     assert_eq!(harness.state().onboarding().stage(), Stage::Edit(2));
@@ -99,6 +100,7 @@ fn removing_asks_in_place_says_first_it_cannot_be_undone_and_runs_only_on_the_ow
     let goes = harness.get_by_label_contains("From this computer go:").rect();
     let stays = harness.get_by_label_contains("Everything on the server stays:").rect();
     assert!(heading.bottom() <= first.top() && first.bottom() <= goes.top() && goes.bottom() <= stays.top(), "{first:?} {goes:?} {stays:?}");
+    assert!(harness.state().surfaces(&harness.ctx).modal(), "the dialog is a modal surface");
     assert_eq!(focused(&harness).as_deref(), Some("Cancel"), "the question takes the keyboard on Cancel");
     // A hover and the keyboard on the question's "Remove account" run nothing.
     harness.get_by_label("Remove account").hover();
@@ -131,7 +133,10 @@ fn cancel_keeps_the_account_and_hands_the_keyboard_back() {
     let kept = Kept::default();
     let mut harness = on_studio(&kept);
     press(&mut harness, "Remove account…");
-    press(&mut harness, "Cancel");
+    // Two Cancels: the form's, under the dimmed window, and the dialog's, which has the keyboard.
+    assert_eq!(focused(&harness).as_deref(), Some("Cancel"));
+    let dialogs = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).unwrap().rect().center();
+    press_at(&mut harness, dialogs);
     assert_eq!(accounts(&harness), [1, 2]);
     assert!(kept.forgotten.lock().unwrap().is_empty());
     assert!(harness.query_by_label("This cannot be undone.").is_none());
@@ -140,13 +145,19 @@ fn cancel_keeps_the_account_and_hands_the_keyboard_back() {
 }
 
 #[test]
-fn the_question_stands_in_the_buttons_place_and_does_not_outlast_the_page() {
+fn the_form_under_the_question_saves_nothing_and_the_question_does_not_outlast_the_page() {
     let kept = Kept::default();
     let mut harness = on_studio(&kept);
+    let save = harness.get_by_label("Save").rect().center();
     press(&mut harness, "Remove account…");
     harness.get_by_role_and_label(Role::Heading, QUESTION);
-    assert!(harness.query_by_label("Save").is_none(), "nothing to save half-way through the question");
-    assert_eq!(harness.get_all_by_label("Cancel").count(), 1, "one Cancel on the page: the question's");
+    // Save lies under the dimmed window: a press there closes the question and saves nothing.
+    press_at(&mut harness, save);
+    assert!(harness.query_by_label("This cannot be undone.").is_none(), "the press on the scrim closes the question");
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(2), "Save under the scrim is not pressed");
+    assert_eq!(accounts(&harness), [1, 2]);
+    press(&mut harness, "Remove account…");
+    harness.get_by_role_and_label(Role::Heading, QUESTION);
     // Another page of the settings and back: the form asks nothing.
     harness.state_mut().leave_settings();
     harness.run();
@@ -255,4 +266,14 @@ fn a_message_written_from_another_account_stays_with_its_text() {
         harness.run();
     }
     assert_eq!(harness.state().mailbox().error(), None);
+}
+
+/// A press of the pointer at `at`, down in one frame and up in the next.
+fn press_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
+    harness.hover_at(at);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
 }

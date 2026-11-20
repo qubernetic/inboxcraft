@@ -158,8 +158,6 @@ pub fn when(due: Timestamp, now: Timestamp, offset: Offset) -> String {
 /// Where the keyboard goes when the page is drawn next.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Hand {
-    /// The confirmation's "Keep it".
-    Keep,
     /// The `cancel` of the row of this entry.
     Cancel(u64),
     /// The link back to Sending.

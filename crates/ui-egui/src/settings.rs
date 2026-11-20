@@ -260,6 +260,18 @@ impl Settings {
         self.under
     }
 
+    /// Whether the page shown asks a confirmation in its dialog over the dimmed window: a template's delete, an entry's
+    /// cancel, or, on Accounts, the account's removal (`removing`: the account's form asks it).
+    #[must_use]
+    pub fn confirms(&self, removing: bool) -> bool {
+        self.open
+            && match self.under {
+                Some(Under::Templates) => self.templates.form().is_none() && self.templates.confirming().is_some(),
+                Some(Under::Scheduled) => self.scheduled.confirming().is_some(),
+                None => self.section == Section::Accounts && removing,
+            }
+    }
+
     /// The Templates page's state.
     #[must_use]
     pub fn templates(&self) -> &crate::templates::Templates {

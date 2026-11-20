@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The Templates page under Sending: its list, empty and form states, the delete confirmed in place, the keyboard walk,
+//! The Templates page under Sending: its list, empty and form states, the delete confirmed in a dialog, the keyboard walk,
 //! the page at rest, hostile names and texts, and that `template.delete` runs only on the owner's press of the
 //! confirmation.
 
@@ -103,12 +103,13 @@ fn with_none_the_page_says_so_and_offers_new_template() {
 }
 
 #[test]
-fn a_delete_asks_in_place_says_it_cannot_be_undone_and_runs_only_on_the_owner_s_press() {
+fn a_delete_asks_in_a_dialog_over_the_dimmed_window_and_runs_only_on_the_owner_s_press() {
     let mut harness = on_templates(&FIVE);
     press(&mut harness, "Delete the template Away from the studio");
     harness.get_by_role_and_label(Role::Heading, "Delete the template “Away from the studio”?");
-    harness.get_by_label("This cannot be undone.");
     harness.get_by_label("It goes from Studio.");
+    harness.get_by_label("Drafts and sent messages that were written with it keep their text.");
+    assert!(harness.state().surfaces(&harness.ctx).modal(), "the dialog is a modal surface");
     assert_eq!(focused(&harness).as_deref(), Some("Cancel"), "the confirmation takes the keyboard on Cancel");
     assert_eq!(kept(&mut harness).len(), 5, "asking deletes nothing");
     // A hover and the keyboard on "Delete template" run nothing.
@@ -119,14 +120,17 @@ fn a_delete_asks_in_place_says_it_cannot_be_undone_and_runs_only_on_the_owner_s_
     assert_eq!(kept(&mut harness).len(), 5, "a focus or a hover deletes nothing");
     // Esc is the confirmation's: it closes, the template stays, the keyboard goes back to its delete.
     key(&mut harness, Key::Escape, Modifiers::NONE);
-    assert!(harness.query_by_label("This cannot be undone.").is_none());
+    assert!(harness.query_by_label("It goes from Studio.").is_none());
+    assert!(!harness.state().surfaces(&harness.ctx).modal());
     assert_eq!(focused(&harness).as_deref(), Some("Delete the template Away from the studio"));
     assert!(harness.state().settings().is_open(), "Esc closes the confirmation only");
     assert_eq!(kept(&mut harness).len(), 5);
     // The owner's press of the confirmation deletes it.
     press(&mut harness, "Delete the template Away from the studio");
     press(&mut harness, "Delete template");
-    assert!(!kept(&mut harness).iter().any(|name| name == "Away from the studio"));
+    let names = kept(&mut harness);
+    assert!(!names.iter().any(|name| name == "Away from the studio"));
+    assert_eq!(names.len(), 4, "one press, one delete: {names:?}");
     assert!(harness.query_by_label("Delete the template Away from the studio").is_none());
     harness.get_by_label_contains("] Studio · 3");
     harness.run();
@@ -139,7 +143,7 @@ fn cancel_keeps_the_template() {
     press(&mut harness, "Delete the template Out of town");
     press(&mut harness, "Cancel");
     assert_eq!(kept(&mut harness).len(), 5);
-    assert!(harness.query_by_label("This cannot be undone.").is_none());
+    assert!(harness.query_by_label("It goes from Personal.").is_none());
 }
 
 #[test]
@@ -191,6 +195,12 @@ fn hostile_names_and_texts_are_one_clean_row() {
     // Its delete still deletes it by its kept name.
     harness.get_by_label_contains("Delete the template Bad").click();
     harness.run();
+    // Its dialog's question is one clean line of plain words.
+    let question = harness.get_by_label_contains("Delete the template “Bad").accesskit_node().label().unwrap_or_default();
+    assert!(question.starts_with("Delete the template “Bad namegnol”"), "{question:?}");
+    assert!(!question.chars().any(|c| c.is_control() || c == '\u{202E}'), "{question:?}");
+    let (drawn, _) = painted(&harness, "Delete the template “Bad").expect("the question is drawn");
+    assert!(drawn.height() <= 30.0 && drawn.right() <= 480.0 + 455.0, "one line inside the card: {drawn:?}");
     press(&mut harness, "Delete template");
     assert_eq!(kept(&mut harness), vec!["Plain".to_owned()]);
 }
@@ -363,4 +373,54 @@ fn the_form_s_account_stands_200_wide_beside_the_name_16_on_as_the_frame() {
     assert!((account.width() - 200.0).abs() <= 1.0 && (account.height() - 36.0).abs() <= 1.0, "the select 200 × 36: {account:?}");
     assert!((name.left() - account.left() - 216.0).abs() < 0.5, "the name 16 after the select: {}", name.left() - account.left());
     assert!((name.top() - account.top()).abs() <= 1.0 && (name.height() - 36.0).abs() <= 1.0, "one row of 36: {account:?} {name:?}");
+}
+
+/// A press of the pointer at `at`, down in one frame and up in the next.
+fn press_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
+    harness.hover_at(at);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+}
+
+#[test]
+fn a_press_on_the_dimmed_window_keeps_the_template_and_presses_nothing_under_it() {
+    let mut harness = on_templates(&FIVE);
+    let new = harness.get_by_label("New template").rect().center();
+    press(&mut harness, "Delete the template Away from the studio");
+    harness.get_by_label("It goes from Studio.");
+    press_at(&mut harness, new);
+    assert!(harness.query_by_label("It goes from Studio.").is_none(), "the press on the scrim closes the dialog");
+    assert!(harness.state().settings().templates().form().is_none(), "New template under the scrim is not pressed");
+    assert_eq!(kept(&mut harness).len(), 5, "the template stays");
+}
+
+#[test]
+fn the_dialog_stands_where_the_frame_draws_it() {
+    // The frame `settings-templates/delete-confirm`: the card 480 wide in the middle of the window, its question 25 in.
+    let mut harness = on_templates(&FIVE);
+    press(&mut harness, "Delete the template Away from the studio");
+    let (question, colour) = painted(&harness, "Delete the template “Away").expect("the question is drawn");
+    assert_eq!(colour, crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default()).palette.ink);
+    assert!((question.left() - (480.0 + 25.0)).abs() <= 0.5, "{question:?}");
+    let cancel = harness.get_by_label("Cancel").rect();
+    let delete = harness.get_by_label("Delete template").rect();
+    assert!((cancel.left() - (480.0 + 28.0)).abs() <= 0.5 && (delete.left() - cancel.right() - 12.0).abs() <= 0.5, "{cancel:?} {delete:?}");
+}
+
+#[test]
+fn a_screen_reader_s_activate_under_the_dialog_runs_nothing_of_the_page() {
+    // egui's layers stop the pointer, not a screen reader's activate: the window's gate does.
+    let mut harness = on_templates(&FIVE);
+    press(&mut harness, "Delete the template Away from the studio");
+    harness.get_by_label("New template").click_accesskit();
+    harness.run();
+    harness.get_by_label("Edit the template Workshop invitation").click_accesskit();
+    harness.run();
+    assert!(harness.state().settings().templates().form().is_none(), "New template under the dialog opens no form");
+    assert_eq!(harness.state().settings().templates().confirming(), Some((2, "Away from the studio")), "the question stays as it was asked");
+    harness.get_by_label("It goes from Studio.");
+    assert_eq!(kept(&mut harness).len(), 5);
 }

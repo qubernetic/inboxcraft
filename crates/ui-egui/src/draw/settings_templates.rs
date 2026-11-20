@@ -3,15 +3,16 @@
 
 //! The Templates page, under Sending: the templates of every account, a group per account (`[ A ] STUDIO · 4`), a row
 //! per template (the account's bar, its name, its subject and text on one line, `edit` and `delete`), "New template" at
-//! the title's right end. A delete is confirmed in place, where the row stood: the template's name, the account it goes
-//! from, and that it cannot be undone. Edit and New template open the form on the page: the account, the name, the
+//! the title's right end. A delete is confirmed in a dialog over the dimmed window ([`crate::component::dialog`]): the
+//! template's name, the account it goes from, and that what was written with it keeps its text. Edit and New template open the form on the page: the account, the name, the
 //! subject and the text, Save and Cancel. Nothing is saved or deleted but on the owner's press of Save or of the
 //! confirmation's "Delete template"; a focus, a hover or a preview runs nothing.
 
-use egui::{Align, Id, Key, Layout, Modifiers, Rect, Role, Ui, WidgetInfo, pos2, vec2};
+use egui::{Align, Id, Layout, Rect, Role, Ui, WidgetInfo, pos2, vec2};
 
 use super::{Asked, body, inset, rule, words};
 use crate::component::button::{LinkSize, TextButton, link_sized};
+use crate::component::dialog::{self, Answer, Dialog, Tone};
 use crate::component::field;
 use crate::component::label::section_label;
 use crate::component::select::Select;
@@ -124,10 +125,6 @@ fn list(
     if left {
         *asked = Some(Asked::Section(Section::Sending));
     }
-    // Esc with the confirmation open is the confirmation's: the template stays.
-    if templates.confirming().is_some() && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape)) {
-        *asked = Some(Asked::KeepTemplate);
-    }
     if let Some(note) = templates.note() {
         ui.add_space(12.0);
         inset(ui, |ui| words(ui, theme.fonts.body, note, theme.palette.warn));
@@ -160,17 +157,25 @@ fn list(
             for offset in 0..run {
                 let shown = at.saturating_add(offset);
                 let ends = shown == 0 || shown.saturating_add(1) == total;
-                if let Some(row) = templates.rows().get(shown) {
-                    let confirming = templates.confirming().is_some_and(|(account, name)| account == row.account && name == row.name);
-                    if let Some(pressed) = template_row(ui, theme, keymap, row, label, confirming, ends, hand) {
-                        *asked = Some(pressed);
-                    }
+                if let Some(row) = templates.rows().get(shown)
+                    && let Some(pressed) = template_row(ui, theme, keymap, row, label, ends, hand)
+                {
+                    *asked = Some(pressed);
                 }
             }
             at = at.saturating_add(run);
             letter = letter.saturating_add(1);
         }
     });
+    // The confirmation, over the dimmed window: its answer is the only ask while it shows.
+    if let Some((account, name)) = templates.confirming()
+        && let Some(row) = templates.rows().iter().find(|row| row.account == account && row.name == name)
+    {
+        let label = accounts.iter().find(|row| row.id == account);
+        if let Some(answer) = confirmation(ui, theme, keymap, row, label) {
+            *asked = Some(answer);
+        }
+    }
 }
 
 /// The letter of the `n`th group, from A; past Z the groups count on.
@@ -178,22 +183,16 @@ fn group_letter(n: u32) -> String {
     char::from_u32(u32::from(b'A').saturating_add(n)).filter(char::is_ascii_uppercase).map_or_else(|| n.saturating_add(1).to_string(), String::from)
 }
 
-/// A template's row, or its confirmation in its place; drawn only near the view unless it `ends` the list.
-#[allow(clippy::too_many_arguments, reason = "the row's parts and the page's hand, each its own")]
+/// A template's row; drawn only near the view unless it `ends` the list.
 fn template_row(
     ui: &mut Ui,
     theme: &Theme,
     keymap: &Keymap,
     row: &TemplateRow,
     account: Option<&AccountRow>,
-    confirming: bool,
     ends: bool,
     hand: &mut Option<Hand>,
 ) -> Option<Asked> {
-    if confirming {
-        let own = egui::UiBuilder::new().scope_id(Id::unique("settings-template-confirm"));
-        return ui.scope_builder(own, |ui| confirmation(ui, theme, keymap, row, account, hand)).inner;
-    }
     let width = ui.available_width();
     let high = ROW.max(theme.fonts.body.line + 26.0).round();
     let top = ui.cursor().top();
@@ -252,45 +251,19 @@ fn template_row(
     asked
 }
 
-/// The confirmation of a delete, in the row's place: what goes, from where, that it cannot be undone, Cancel and
-/// "Delete template".
-fn confirmation(
-    ui: &mut Ui,
-    theme: &Theme,
-    keymap: &Keymap,
-    row: &TemplateRow,
-    account: Option<&AccountRow>,
-    hand: &mut Option<Hand>,
-) -> Option<Asked> {
-    let p = &theme.palette;
-    let mut asked = None;
+/// The confirmation of a delete, in its dialog: what goes, from where, what keeps its text; Cancel and "Delete
+/// template". What the owner answered, if anything.
+fn confirmation(ui: &Ui, theme: &Theme, keymap: &Keymap, row: &TemplateRow, account: Option<&AccountRow>) -> Option<Asked> {
     let from = account.map_or_else(|| tr!("its account").to_owned(), |account| crate::component::plain(&account.label).into_owned());
-    ui.add_space(16.0);
-    inset(ui, |ui| {
-        let question = tr!("Delete the template “{name}”?", name = row.shown);
-        let heading = crate::component::label(ui, theme.fonts.heading, &question, p.ink);
-        heading.widget_info(|| WidgetInfo::labeled(Role::Heading, true, &question));
-        ui.add_space(8.0);
-        words(ui, theme.fonts.body, tr!("This cannot be undone."), p.ink);
-        words(ui, theme.fonts.body, &tr!("It goes from {account}.", account = from), p.ink);
-        words(ui, theme.fonts.body, tr!("Drafts and sent messages that were written with it keep their text."), p.muted);
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 12.0;
-            let cancel = TextButton::new(tr!("Cancel")).secondary().show(ui, theme, keymap);
-            take(hand, &Hand::Cancel, &cancel);
-            let delete = TextButton::new(tr!("Delete template")).danger().show(ui, theme, keymap);
-            if cancel.clicked() {
-                asked = Some(Asked::KeepTemplate);
-            }
-            if crate::component::button::owner_pressed(ui, &delete) {
-                asked = Some(Asked::DeleteTemplate(row.account, row.name.clone()));
-            }
-        });
-    });
-    ui.add_space(16.0);
-    rule(ui, theme);
-    asked
+    let question = tr!("Delete the template “{name}”?", name = row.shown);
+    let goes = tr!("It goes from {account}.", account = from);
+    let lines = [(goes.as_str(), Tone::Ink), (tr!("Drafts and sent messages that were written with it keep their text."), Tone::Muted)];
+    let dialog =
+        Dialog { id: Id::unique("settings-template-confirm"), question: &question, lines: &lines, keep: tr!("Cancel"), act: tr!("Delete template") };
+    match dialog::show(ui.ctx(), theme, keymap, &dialog)? {
+        Answer::Keep => Some(Asked::KeepTemplate),
+        Answer::Act => Some(Asked::DeleteTemplate(row.account, row.name.clone())),
+    }
 }
 
 /// The form: the account and the name side by side, the subject, the text; Save and Cancel.
@@ -440,10 +413,8 @@ impl super::super::InboxApp {
                 self.settings.templates_mut().hand_to(Hand::New);
             }
             Asked::SaveTemplate => self.save_template(),
-            Asked::AskDeleteTemplate(account, name) => {
-                self.settings.templates_mut().ask_delete(account, &name);
-                self.settings.templates_mut().hand_to(Hand::Cancel);
-            }
+            // The dialog takes the keyboard on its Cancel as it opens.
+            Asked::AskDeleteTemplate(account, name) => self.settings.templates_mut().ask_delete(account, &name),
             Asked::KeepTemplate => {
                 if let Some((account, name)) = self.settings.templates().confirming().map(|(account, name)| (account, name.to_owned())) {
                     self.settings.templates_mut().hand_to(Hand::Delete(account, name));

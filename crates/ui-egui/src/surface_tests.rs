@@ -14,6 +14,7 @@ fn of(facts: Facts) -> Surfaces {
 /// Mail, the list shown.
 const MAIL: Facts = Facts {
     float: false,
+    dialog: false,
     command: false,
     capture: false,
     editor: false,
@@ -56,6 +57,7 @@ fn stackings() -> Vec<(&'static str, Facts, Surface)> {
         ("a float over the list", Facts { float: true, ..MAIL }, Surface::Float),
         ("a float over a settings page", Facts { float: true, ..SETTINGS }, Surface::Float),
         ("a capture on the settings", Facts { capture: true, ..SETTINGS }, Surface::Capture),
+        ("a confirmation on the settings", Facts { dialog: true, ..SETTINGS }, Surface::Dialog),
         ("a float over a capture on the settings", Facts { float: true, capture: true, ..SETTINGS }, Surface::Float),
         ("the command results over the settings", Facts { command: true, ..SETTINGS }, Surface::Command),
         ("a float over the command results over the settings", Facts { float: true, command: true, ..SETTINGS }, Surface::Float),
@@ -95,9 +97,10 @@ fn one_esc_closes_one_surface_in_every_stacking() {
 }
 
 #[test]
-fn every_surface_at_once_is_held_in_eight_and_the_place_stays_last() {
+fn every_surface_at_once_is_held_in_nine_and_the_place_stays_last() {
     let all = Facts {
         float: true,
+        dialog: true,
         command: true,
         capture: true,
         editor: true,
@@ -110,7 +113,7 @@ fn every_surface_at_once_is_held_in_eight_and_the_place_stays_last() {
         composer_drawn: true,
     };
     let surfaces = of(all);
-    assert_eq!(surfaces.all().len(), 8);
+    assert_eq!(surfaces.all().len(), 9);
     assert_eq!(surfaces.top(), Surface::Float);
     assert_eq!(surfaces.all().last(), Some(&Surface::Place));
     assert!(!surfaces.list_has_keyboard());
@@ -366,4 +369,18 @@ fn send_runs_wherever_a_composer_is_drawn_and_rests_where_none_is() {
         assert_eq!(of(facts).allows(keymap::SEND, &keys), runs, "{name}: its key");
         assert_eq!(of(facts).allows_press(keymap::SEND), runs, "{name}: a press");
     }
+}
+
+#[test]
+fn a_confirmation_dialog_is_modal_holds_the_keys_and_lets_no_key_of_the_window_run() {
+    let surfaces = of(Facts { dialog: true, ..SETTINGS });
+    assert_eq!(surfaces.top(), Surface::Dialog);
+    assert!(surfaces.modal(), "nothing of the place runs under it");
+    assert!(surfaces.held(), "its keys are its own");
+    let keymap = Keymap::default();
+    for action in WINDOW.iter().chain(LIST.iter()) {
+        assert!(!surfaces.allows(action, &keymap), "{action} rests under the dialog");
+        assert!(!surfaces.allows_press(action), "{action}'s control rests under the dialog");
+    }
+    assert!(!of(SETTINGS).modal(), "the settings alone are no modal surface");
 }

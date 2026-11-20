@@ -1354,6 +1354,7 @@ impl InboxApp {
         let home = self.screen == Screen::Home && !settings;
         Surfaces::new(Facts {
             float: crate::component::popup::any_open(ctx),
+            dialog: self.settings.confirms(self.onboarding.asking_remove()),
             command: self.command.results(),
             capture: self.settings.capturing().is_some(),
             editor: self.editing_event(),
@@ -2738,7 +2739,8 @@ impl InboxApp {
             composed.clear();
             on_calendar.clear();
             on_home = None;
-            changed = None;
+            // A confirmation dialog's own answer is no ask of the place under it: it passes ([`settings::Asked::answers`]).
+            changed = changed.filter(|asked| surfaces.top() == Surface::Dialog && asked.answers());
             add = false;
             dismiss = false;
         }
