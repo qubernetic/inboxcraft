@@ -455,3 +455,10 @@ fn an_alert_alone_tells_no_guest_even_when_asked() {
     assert!(answer["guests"].as_u64().unwrap() > 0, "{answer}");
     assert!(text(&session, 5).contains("SEQUENCE:2\r\n"), "{}", text(&session, 5));
 }
+
+#[test]
+fn a_new_alarm_shows_no_control_character_of_the_summary() {
+    let mut session = session();
+    let id = create(&mut session, json!({ "alert": 30, "summary": "Dentist\u{1b}at\u{7}the\u{9b}clinic\u{7f}" })).unwrap();
+    assert_eq!(held(&session, id).events[0].alarms[0].description.as_deref(), Some("Dentist at the clinic"));
+}

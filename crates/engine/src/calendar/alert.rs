@@ -268,11 +268,11 @@ pub(crate) fn set_lead(event: &mut Event, lead: Lead) {
     }
 }
 
-/// The text a new alarm of `event` shows: its summary on one line, at most [`MAX_ALARM_TEXT`] characters, or
-/// "Reminder" without one.
+/// The text a new alarm of `event` shows: its summary on one line, each control character a space, at most
+/// [`MAX_ALARM_TEXT`] characters, or "Reminder" without one.
 fn alarm_text(event: &Event) -> String {
     let summary = event.summary.as_deref().unwrap_or_default();
-    let line: String = summary.chars().map(|c| if matches!(c, '\r' | '\n' | '\0') { ' ' } else { c }).collect();
+    let line: String = summary.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     let words: Vec<&str> = line.split_whitespace().collect();
     let text: String = words.join(" ").chars().take(MAX_ALARM_TEXT).collect();
     let text = text.trim_end().to_owned();
