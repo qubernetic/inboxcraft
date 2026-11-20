@@ -364,8 +364,12 @@ time from the code as it is, not measured.
   come from fontconfig's files, read by the app with limits (`<dir>`, `<remap-dir>`, `<include>`; nothing else of
   fontconfig's rules); in the Flatpak the host's folders should arrive through the runtime's `<remap-dir>` entries,
   which is not checked inside a Flatpak yet, nor on a real desktop. A configuration or font file swapped for a FIFO
-  between the type check and the open blocks the search's worker thread (the window is not affected) (#233). Right-to-left text is laid out left to right (egui has no
-  bidi). egui's Ubuntu Light and Hack stand behind Plex only for the signs Plex lacks; they come
+  between the type check and the open blocks the search's worker thread (the window is not affected) (#233).
+  Hebrew and Arabic letters are shaped right to left inside a word, but the words and runs still stand left to
+  right (egui has no bidi), so a right-to-left sentence reads with its words in reverse order, and the cursor and
+  selection in a right-to-left run follow the order of the letters, not the picture. A label too long for its room
+  is cut at its right edge, so it can keep a right-to-left word's end and lose its start (#348, #356). egui's
+  Ubuntu Light and Hack stand behind Plex only for the signs Plex lacks; they come
   with the `epaint_default_fonts` crate (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml` for that
   crate only, the project owner's to confirm). Most views take the styles through egui's own labels, which carry the
   size but not the line height or tracking; the drawn rows and controls carry all three. egui's text fields still
