@@ -130,6 +130,27 @@ fn the_index_stands_as_its_frame_draws_with_mail_open() {
     assert_eq!(harness.query_all_by_label("coming soon").count(), 0, "a row inside soon carries no tag of its own");
 }
 
+/// The labels of the index's buttons from top to bottom, each cut at its first comma (a count or "open" after it).
+fn rows_down(harness: &Harness<'_, State>) -> Vec<String> {
+    let mut rows: Vec<(f32, String)> = harness
+        .query_all_by_role(Role::Button)
+        .map(|node| (node.rect().top(), node.accesskit_node().label().unwrap_or_default().split(',').next().unwrap_or_default().to_owned()))
+        .collect();
+    rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+    rows.into_iter().map(|(_, label)| label).collect()
+}
+
+#[test]
+fn the_shared_mailboxes_are_the_frames_and_no_hidden_folder_of_our_own() {
+    // The sample's Personal holds `InboxCraft/Screener`, whose mail New senders shows: no row of its own (#325, 3.1).
+    let harness = harness(two(), Place::Mail, false, TextScale::default(), 826.0, false);
+    let rows = rows_down(&harness);
+    let from = rows.iter().position(|label| label == "Mail").unwrap() + 1;
+    let to = rows.iter().position(|label| label == "Personal").unwrap();
+    assert_eq!(rows[from..to], ["Inbox", "New senders", "Drafts", "Sent", "Archive", "Junk", "Trash"], "{rows:?}");
+    assert!(!rows.iter().any(|label| label.starts_with("Screener")), "{rows:?}");
+}
+
 #[test]
 fn the_place_shown_is_the_selected_row() {
     for place in [Place::Calendar, Place::Later, Place::Settings] {

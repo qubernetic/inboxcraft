@@ -122,11 +122,12 @@ fn open_id() -> Id {
     Id::unique("index-open-accounts")
 }
 
-/// The mailboxes' rows, in order: the shared ones, the gap, each account and, open, its folders.
+/// The mailboxes' rows, in order: the shared ones, the gap, each account and, open, its folders. Our own hidden folders
+/// (the screener's, snoozed and blocked mail) have no row: New senders, Later and the settings show what is in them.
 fn lines<'a>(mailbox: &'a Mailbox, open: &BTreeSet<u64>) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
     let sends = u64::try_from(mailbox.outbox().len()).unwrap_or(u64::MAX);
-    for view in mailbox.views() {
+    for view in mailbox.views().iter().filter(|view| !view.role.is_hidden()) {
         lines.push(Line::Shared(mailbox::Place::View(view.role), role_text(view.role), icon(Some(view.role)), view.unread));
         if view.role == Role::Inbox {
             lines.push(Line::Shared(mailbox::Place::Senders, tr!("New senders"), iconset::glyph(IconId::People), 0));
