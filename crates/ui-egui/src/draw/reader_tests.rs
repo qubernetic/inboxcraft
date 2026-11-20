@@ -2984,3 +2984,25 @@ fn a_sender_let_in_from_the_lists_card_leaves_no_reason_stale() {
         fresh(&mut harness);
     }
 }
+
+#[test]
+fn in_one_pane_back_to_the_list_leads_the_head_8_before_the_tags() {
+    // The frame `size-800/inbox-reader`: the way back at the tool line's left (40 in, as the subject), the group's tag
+    // 8 after it, the acts at the right from Done to More.
+    let fetch = Recorder::default();
+    let harness = opened_at(&fetch, "Photos from the coast walk", 800.0, crate::theme::TextScale::default());
+    let back = harness.get_by_role_and_label(Role::Button, "Back to the list").rect();
+    let subject = harness.get_by_label("Photos from the coast walk").rect();
+    assert!((back.left() - subject.left()).abs() < 0.5, "the arrow at the head's left: {back:?} {subject:?}");
+    let tag = harness
+        .query_all_by_role(Role::Label)
+        .map(|node| node.rect())
+        .filter(|rect| (rect.center().y - back.center().y).abs() < 1.0 && rect.left() > back.right())
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .unwrap();
+    assert_eq!(tag.left() - back.right(), 8.0, "the first tag 8 after the arrow: {back:?} {tag:?}");
+    let done = harness.get_by_role_and_label(Role::Button, "Done").rect();
+    let more =
+        harness.query_all_by_role_and_label(Role::Button, "More").map(|node| node.rect()).max_by(|a, b| a.left().total_cmp(&b.left())).unwrap();
+    assert!(done.left() > tag.right() && more.right() <= subject.right() + 0.5, "the acts at the right: {done:?} {more:?} {subject:?}");
+}
