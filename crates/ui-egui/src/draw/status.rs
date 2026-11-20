@@ -49,6 +49,9 @@ pub(crate) const HINTS: [(&str, &str); 5] =
 /// The key hints beside a list with nothing open (the frames `shell/default`, `drafts-list/filled`).
 const LIST_HINTS: [(&str, &str); 4] = [(keymap::NEXT, "next"), (keymap::PREVIOUS, "previous"), (keymap::OPEN, "open"), (keymap::PALETTE, "commands")];
 
+/// The key hints beside the outbox, whose rows do not open (the frame `outbox/mixed`).
+const OUTBOX_HINTS: [(&str, &str); 3] = [(keymap::NEXT, "next"), (keymap::PREVIOUS, "previous"), (keymap::PALETTE, "commands")];
+
 /// The key hints beside a list that holds nothing (the frame `drafts-list/empty`).
 const EMPTY_HINTS: [(&str, &str); 2] = [(keymap::COMPOSE, "write"), (keymap::PALETTE, "commands")];
 
@@ -64,6 +67,8 @@ pub(crate) enum Keys {
     List,
     /// A list that holds nothing.
     Empty,
+    /// The outbox with sends in it: nothing opens from it.
+    Outbox,
     /// The docked composer.
     Composer,
 }
@@ -74,6 +79,7 @@ pub(crate) fn hints(keys: Keys) -> &'static [(&'static str, &'static str)] {
         Keys::Message => &HINTS,
         Keys::List => &LIST_HINTS,
         Keys::Empty => &EMPTY_HINTS,
+        Keys::Outbox => &OUTBOX_HINTS,
         Keys::Composer => &COMPOSER_HINTS,
     }
 }

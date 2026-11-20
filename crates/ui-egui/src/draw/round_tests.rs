@@ -67,7 +67,7 @@ fn painted(harness: &Harness<'static, InboxApp>) -> Vec<(String, egui::Pos2)> {
 }
 
 /// The words of the status line's key hints, left to right.
-fn key_words(harness: &Harness<'static, InboxApp>) -> Vec<String> {
+pub(super) fn key_words(harness: &Harness<'static, InboxApp>) -> Vec<String> {
     let status = regions(harness).status;
     let hints = ["next", "previous", "done", "snooze", "open", "write", "send", "commands"];
     let mut found: Vec<(f32, String)> = painted(harness)

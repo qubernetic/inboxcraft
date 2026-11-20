@@ -200,6 +200,23 @@ fn the_outbox_shows_in_the_pane_while_anything_waits_and_lists_it() {
 }
 
 #[test]
+fn beside_the_outbox_the_reader_says_nothing_opens_and_the_line_offers_no_open_key() {
+    // `outbox/mixed`: a row of the outbox is a send, not a message; the keys are next, previous, commands (#325, I-2).
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Dark);
+    send(&mut harness, "Work party on Saturday");
+    assert!(harness.state().composer().is_none(), "the send closed the composer");
+    harness.state_mut().mailbox_mut().open(Place::Outbox);
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::Outbox);
+    assert!(harness.state().reader.open_id().is_none());
+    assert!(harness.query_by_label_contains("Nothing opens from here.").is_some());
+    assert!(harness.query_by_label_contains("Pick a message.").is_none());
+    let words: Vec<String> = ["next", "previous", "commands"].map(str::to_owned).into();
+    assert_eq!(super::round_tests::key_words(&harness), words);
+}
+
+#[test]
 fn a_time_picked_makes_send_a_schedule_and_the_outbox_says_when() {
     let clock = clock();
     let mut harness = sending(&clock, egui::Theme::Light);

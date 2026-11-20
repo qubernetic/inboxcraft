@@ -394,13 +394,22 @@ enum ReaderSays {
     Draft,
     /// A list that holds nothing: nothing to open.
     Nothing,
+    /// The outbox with sends in it: a send is not a message to read, nothing opens from it.
+    Outbox,
 }
 
-/// The reader's empty state beside the drafts (`Draft`) or a list that holds nothing (`Nothing`): in the middle of the
-/// pane, 40 from its sides, as the frames `drafts-list/filled` and `/empty` draw it.
+/// The reader's empty state beside the drafts (`Draft`), the outbox (`Outbox`) or a list that holds nothing
+/// (`Nothing`): in the middle of the pane, 40 from its sides, as the frames `drafts-list/filled`, `/empty` and
+/// `outbox/mixed` draw it.
 fn nothing_to_open(ui: &mut Ui, theme: &Theme, keymap: &Keymap, says: ReaderSays) {
     let words = |action: &str| keymap.shortcut(action).map(|shortcut| crate::component::key::key_words(&shortcut));
-    let (title, help) = if says == ReaderSays::Draft {
+    let (title, help) = if says == ReaderSays::Outbox {
+        (
+            tr!("Nothing opens from here."),
+            tr!("A row of the outbox is a send, not a message to read. Undo or Edit takes it back into the composer, where it can be read and changed.")
+                .to_owned(),
+        )
+    } else if says == ReaderSays::Draft {
         let help = match (words(keymap::NEXT), words(keymap::PREVIOUS), words(keymap::OPEN)) {
             (Some(next), Some(previous), Some(open)) => tr!(
                 "{next} and {previous} move in the list, {open} opens the draft where you left it.",
@@ -2282,17 +2291,19 @@ impl InboxApp {
     fn reader_says(&self) -> ReaderSays {
         let mailbox = &self.mailbox;
         let drafts = mailbox.drafts_listed();
-        let none = if mailbox.place() == Place::Outbox && mailbox.query().is_empty() {
+        let outbox = mailbox.place() == Place::Outbox && mailbox.query().is_empty();
+        let none = if outbox {
             mailbox.outbox().is_empty()
         } else if drafts {
             mailbox.drafts().next().is_none()
         } else {
             mailbox.messages().is_empty()
         };
-        match (none, drafts) {
-            (true, _) => ReaderSays::Nothing,
-            (false, true) => ReaderSays::Draft,
-            (false, false) => ReaderSays::Message,
+        match (none, outbox, drafts) {
+            (true, _, _) => ReaderSays::Nothing,
+            (false, true, _) => ReaderSays::Outbox,
+            (false, false, true) => ReaderSays::Draft,
+            (false, false, false) => ReaderSays::Message,
         }
     }
 
@@ -2304,7 +2315,7 @@ impl InboxApp {
             CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| {
                 layers.card(ui, Margin::ZERO, |ui| match empty {
                     ReaderSays::Message => reader::nothing_open(ui, theme, &self.keymap),
-                    ReaderSays::Draft | ReaderSays::Nothing => nothing_to_open(ui, theme, &self.keymap, empty),
+                    ReaderSays::Draft | ReaderSays::Nothing | ReaderSays::Outbox => nothing_to_open(ui, theme, &self.keymap, empty),
                 });
             });
             return reader::Drawn::default();
@@ -3318,10 +3329,12 @@ impl InboxApp {
             status::Keys::Composer
         } else if self.reader.open_id().is_some() {
             status::Keys::Message
-        } else if self.reader_says() == ReaderSays::Nothing {
-            status::Keys::Empty
         } else {
-            status::Keys::List
+            match self.reader_says() {
+                ReaderSays::Nothing => status::Keys::Empty,
+                ReaderSays::Outbox => status::Keys::Outbox,
+                ReaderSays::Message | ReaderSays::Draft => status::Keys::List,
+            }
         }
     }
 
