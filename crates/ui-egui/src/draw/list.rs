@@ -2227,7 +2227,9 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
             ui.label(f.display.rich(tr!("Who gets in?")).color(p.ink));
             let about = tr!("Nobody new reaches the inbox before you say so. If you keep a sender out, their mail goes to Blocked from then on.");
             ui.add(egui::Label::new(f.read.rich(about).color(p.muted)).wrap());
-            ui.horizontal(|ui| {
+            // The label centred on the switch's 32 line (8 above its 16), 12 before it.
+            let line = vec2(ui.available_width(), theme.boxes().button);
+            ui.allocate_ui_with_layout(line, Layout::left_to_right(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = theme.spacing.s3;
                 crate::component::label(ui, f.label, tr!("Screener"), p.muted);
                 let modes = ScreenerMode::ALL.map(|choice| (choice, super::settings::screener_name(choice), f.button));

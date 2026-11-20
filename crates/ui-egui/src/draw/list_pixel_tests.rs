@@ -68,3 +68,25 @@ fn the_list_head_is_one_line_with_the_view_switch_at_its_right_and_the_pills_und
         }
     }
 }
+
+/// The window on New senders, `width` wide.
+fn queue(width: f32) -> Harness<'static, InboxApp> {
+    let mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
+    let app = InboxApp::at_mail(mailbox);
+    let mut harness = crate::component::tests::builder().with_size(vec2(width, 900.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Review").click();
+    harness.run();
+    harness.run();
+    harness
+}
+
+/// `new-senders/before-inbox`: SCREENER (16 high) stands centred on the switch's 32 line, 8 from its top.
+#[test]
+fn the_screener_label_stands_centred_on_its_switch() {
+    let harness = queue(1440.0);
+    let label = harness.get_by_label("Screener").rect();
+    let switch = harness.get_by_role_and_label(Role::RadioGroup, "the screener").rect();
+    assert!((label.center().y - switch.center().y).abs() <= 1.0, "{label:?} centred on {switch:?}");
+    assert!((label.left() + label.width() + 12.0 - switch.left()).abs() <= 1.0, "12 before the switch: {label:?} {switch:?}");
+}
