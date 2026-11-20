@@ -1,9 +1,13 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `ui.*.set`: the appearance choices, one command each, all `safe`: they change how the window looks and nothing
-//! that leaves the computer. Each answers the whole [`Appearance`] after the change; the front end draws with it and
-//! keeps it on disk.
+//! `ui.*.set`: the appearance choices, one command each, `safe` but `ui.layout.set`: they change how the window looks
+//! and nothing that leaves the computer. Each answers the whole [`Appearance`] after the change; the front end draws
+//! with it and keeps it on disk.
+//!
+//! `ui.layout.set` (`owner`) says where the reader and the composer show: `reader` (`docked` or `window`) and
+//! `composer` (`docked`, `floating` or `window`), one of them or both. It is the owner's, as `after.set` is: it moves
+//! the owner's work about the screen.
 //!
 //! `ui.settings.open` (`safe`) asks the window to show the settings, on the page its optional `page` names (one of
 //! [`crate::shown::SETTINGS_PAGES`]); a `page` that names none is no page, never an error. It changes nothing; its
@@ -15,17 +19,17 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::appearance::{Appearance, MotionLevel, TEXT_SCALES, ThemeMode, WindowFrame};
+use crate::appearance::{Appearance, ComposerHost, Layout, MotionLevel, ReaderHost, TEXT_SCALES, ThemeMode, WindowFrame};
 use crate::params::decode;
 use crate::shown::{self, SettingsAsked};
 use crate::{AgentClass, Caller, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[FRAME, MOTION, SETTINGS, TEXT_SCALE, THEME];
+pub(crate) const COMMANDS: &[CommandSpec] = &[FRAME, LAYOUT, MOTION, SETTINGS, TEXT_SCALE, THEME];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["mode", "percent", "level", "reduce", "frame", "page"];
+pub(crate) const FIELDS: &[&str] = &["mode", "percent", "level", "reduce", "frame", "page", "reader", "composer"];
 
 /// `ui.theme.set`: light, dark or the system's.
 pub(crate) const THEME: CommandSpec =
@@ -45,6 +49,14 @@ pub(crate) const FRAME: CommandSpec = CommandSpec {
     class: Some(AgentClass::Safe),
     summary: "Draw the window frame: the system's, or the app's own with the command line as its title bar",
     run: frame,
+};
+
+/// `ui.layout.set`: where the reader and the composer show.
+pub(crate) const LAYOUT: CommandSpec = CommandSpec {
+    id: "ui.layout.set",
+    class: Some(AgentClass::Owner),
+    summary: "Show the reader and the composer docked, the composer floating, or each in a window of its own",
+    run: layout,
 };
 
 /// `ui.settings.open`: the settings, on a page when one is named.
@@ -132,6 +144,32 @@ fn frame(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> 
     let params: FrameParams = decode(FRAME.id, params)?;
     let frame = WindowFrame::read(&params.frame).ok_or_else(|| EngineError::bad_params(FRAME.id, "frame is system or own"))?;
     Ok(changed(Appearance { frame, ..context.state().appearance }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LayoutParams {
+    /// `docked` or `window`.
+    reader: Option<String>,
+    /// `docked`, `floating` or `window`.
+    composer: Option<String>,
+}
+
+fn layout(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: LayoutParams = decode(LAYOUT.id, params)?;
+    if params.reader.is_none() && params.composer.is_none() {
+        return Err(EngineError::bad_params(LAYOUT.id, "give reader, composer or both"));
+    }
+    let appearance = context.state().appearance;
+    let reader = match params.reader.as_deref() {
+        None => appearance.layout.reader,
+        Some(id) => ReaderHost::named(id).ok_or_else(|| EngineError::bad_params(LAYOUT.id, "reader is docked or window"))?,
+    };
+    let composer = match params.composer.as_deref() {
+        None => appearance.layout.composer,
+        Some(id) => ComposerHost::named(id).ok_or_else(|| EngineError::bad_params(LAYOUT.id, "composer is docked, floating or window"))?,
+    };
+    Ok(changed(Appearance { layout: Layout { reader, composer }, ..appearance }))
 }
 
 /// Reads `page` alone, by hand: a `page` that is no page's id is no page, and a refusal repeats nothing it was sent. The
