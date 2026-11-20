@@ -2385,7 +2385,7 @@ impl InboxApp {
             }
             Asked::Fill => {
                 composer.unsee();
-                ctx.memory_mut(|memory| memory.request_focus(compose::blank_id()));
+                focus_composer(ctx, windowed, &mut self.window_focus, compose::blank_id());
                 composer.fill(mailbox)
             }
             Asked::Later(at) => {

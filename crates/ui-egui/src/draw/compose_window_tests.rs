@@ -582,3 +582,30 @@ fn send_and_discard_in_the_composer_s_window_work_while_the_main_window_s_palett
     click_in_window(&mut harness, "Discard the draft");
     assert!(harness.state().composer().is_none(), "discarded");
 }
+
+#[test]
+fn fill_in_the_composer_s_window_leaves_the_keys_in_the_window_s_blank_and_the_main_window_s_where_they_were() {
+    let mut harness = app(false, ComposerHost::Window, true);
+    harness.query_all_by_role(Role::ListBoxOption).next().unwrap().focus();
+    harness.run();
+    let row = harness.ctx.memory(|memory| memory.focused());
+    assert!(row.is_some());
+    new_message(&mut harness);
+    {
+        let (Some(composer), mailbox) = harness.state_mut().composer_mut() else { panic!("no composer") };
+        let account = composer.account();
+        mailbox.run("template.save", &json!({ "account": account, "name": "Plot", "subject": "At {?time}", "text": "By {?place}." })).unwrap();
+        composer.use_template(mailbox, "Plot").unwrap();
+    }
+    harness.run();
+    harness.state_mut().window_focus = Some(compose::blank_id());
+    harness.run();
+    assert_eq!(seen().focused.last().copied().flatten(), Some(compose::blank_id()), "the keys in the blank");
+    in_window(&mut harness, vec![Event::Text("ten".to_owned())]);
+    assert_eq!(harness.state().composer().unwrap().filling(), "ten", "typed in the blank");
+    in_window(&mut harness, vec![key(Key::Enter, Modifiers::NONE)]);
+    let composer = harness.state().composer().unwrap();
+    assert_eq!((composer.subject(), composer.blank().as_deref()), ("At ten", Some("place")), "filled in");
+    assert_eq!(seen().focused.last().copied().flatten(), Some(compose::blank_id()), "the window's keys in the next blank");
+    assert_eq!(harness.ctx.memory(|memory| memory.focused()), row, "the main window's keyboard stays on its row");
+}
