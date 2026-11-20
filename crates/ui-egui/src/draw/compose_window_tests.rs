@@ -48,8 +48,8 @@ thread_local! {
     static EVENTS: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
     /// The desktop asks the window to close in its next pass.
     static CLOSE: Cell<bool> = const { Cell::new(false) };
-    /// The window is gone without a close (the desktop killed it): its passes do not run.
-    static KILLED: Cell<bool> = const { Cell::new(false) };
+    /// The window loses its keyboard: each pass ends with none in it.
+    static UNFOCUSED: Cell<bool> = const { Cell::new(false) };
     static SEEN: RefCell<Seen> = RefCell::new(Seen::default());
 }
 
@@ -75,13 +75,12 @@ fn texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
 fn windowing(ctx: &Context) {
     EVENTS.with(|events| events.borrow_mut().clear());
     CLOSE.set(false);
-    KILLED.set(false);
+    UNFOCUSED.set(false);
     SEEN.with(|seen| *seen.borrow_mut() = Seen::default());
     Context::set_immediate_viewport_renderer(|ctx, mut viewport| {
         let this = viewport.ids.this;
-        if KILLED.get() {
-            // Gone without a close: the desktop shows nothing of it, and the window that opens again starts afresh,
-            // its keyboard nowhere.
+        if UNFOCUSED.get() {
+            // The keyboard leaves the window: it starts every pass with none.
             let mut raw = RawInput { viewport_id: this, ..RawInput::default() };
             raw.viewports.insert(this, ViewportInfo::default());
             let mut output = ctx.run_ui(raw, |ui| {
@@ -264,18 +263,18 @@ fn a_1_mib_draft_in_its_window_survives_every_way_out_and_sends_once_with_undo_i
     assert!(harness.state().composer().is_none(), "the desktop's close closes it");
     assert_eq!(kept(&mut harness, draft).unwrap()["text"].as_str().map(str::len), Some(text.len()), "kept whole");
     main_keys_not_in_the_composer(&harness, "closed");
-    // Open again, then the window is gone without a close: the composer stays, all of it, and its window comes back.
+    // Open again, then the window loses its keyboard: the composer stays, all of it, and its keyboard comes back.
     harness.state_mut().reopen(draft);
     harness.run();
-    KILLED.set(true);
+    UNFOCUSED.set(true);
     for _ in 0..3 {
         harness.step();
     }
     assert_eq!(harness.state().composer().map(|composer| composer.text().len()), Some(text.len()), "nothing lost");
-    KILLED.set(false);
+    UNFOCUSED.set(false);
     let before = seen().passes;
     harness.run();
-    assert!(seen().passes > before, "the window opens again");
+    assert!(seen().passes > before, "the window draws on");
     // The motion level changes under it.
     for level in [Level::Full, Level::Off, Level::Reduced] {
         harness.state_mut().set_motion_level(level);
@@ -360,25 +359,38 @@ fn in_the_composer_s_window_no_key_of_the_main_window_acts_and_the_look_keys_do(
     assert!(harness.state().text_scale().percent() > size.percent(), "the text grows from the window");
 }
 
+/// One frame with the main window's input as eframe gives it: its input hook first ([`InboxApp::release_after_window_grab`]),
+/// `events` in the window's pass. Whether the main window heard a button come up in that frame.
+fn frame_as_eframe(harness: &mut Harness<'static, InboxApp>, events: Vec<Event>) -> bool {
+    let ctx = harness.ctx.clone();
+    InboxApp::release_after_window_grab(&ctx, harness.input_mut());
+    EVENTS.with(|queued| *queued.borrow_mut() = events);
+    harness.step();
+    harness.ctx.input(|input| input.pointer.any_released())
+}
+
 #[test]
 fn the_desktop_s_grab_of_the_composer_s_window_gives_the_release_to_that_window() {
     let mut harness = app(false, ComposerHost::Window, true);
     new_message(&mut harness);
     let window = super::composer_window();
-    // A press on the window's title bar, away from its controls, then a drag: the desktop moves the window.
+    // A press on the window's title bar, away from its controls, then a drag: the desktop moves the window. Each frame
+    // is checked: the main window hears no release in any of them, the one after the grab above all.
     let at = Pos2::new(300.0, 22.0);
-    in_window(
+    let mut heard = vec![frame_as_eframe(
         &mut harness,
         vec![
             Event::PointerMoved(at),
             Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
         ],
-    );
-    in_window(&mut harness, vec![Event::PointerMoved(at + vec2(30.0, 0.0))]);
-    // The desktop kept the release: the window's next pass hears the button come up, the main window's never.
-    in_window(&mut harness, vec![]);
+    )];
+    heard.push(frame_as_eframe(&mut harness, vec![Event::PointerMoved(at + vec2(30.0, 0.0))]));
+    for _ in 0..4 {
+        heard.push(frame_as_eframe(&mut harness, vec![]));
+    }
+    // The desktop kept the release: the main window never hears the button come up, the window's next pass does.
+    assert!(!heard.contains(&true), "the main window heard a release: {heard:?}");
     assert!(!harness.ctx.input_for(window, |input| input.pointer.any_down()), "the window's button counts as up");
-    assert!(!harness.ctx.input(|input| input.pointer.any_released()), "the main window heard no release");
 }
 
 /// The Composer page's window states, each drawn in the window: its title and what tells the state.
