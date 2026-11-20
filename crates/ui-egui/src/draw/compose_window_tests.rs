@@ -671,3 +671,14 @@ fn a_window_gone_without_a_close_leaves_the_composer_in_the_main_window_and_keep
     assert!(harness.state().docked(), "the composer in the reader's place");
     assert_eq!(harness.state().composer().map(|composer| composer.subject().to_owned()).as_deref(), Some("Kiln rota!?"), "nothing lost");
 }
+
+#[test]
+fn the_layout_row_moves_the_open_composer_from_its_window_to_float_at_once() {
+    let mut harness = app(false, ComposerHost::Window, true);
+    write(&mut harness, "Kiln rota", "Friday at ten.");
+    assert!(seen().passes > 0, "in its window");
+    harness.state_mut().set_composer_host(ComposerHost::Floating);
+    harness.run();
+    assert!(harness.state().composer().is_some_and(crate::compose::Composer::floating), "floating at once");
+    assert!(!harness.state().docked(), "not docked");
+}

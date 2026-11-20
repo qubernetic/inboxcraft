@@ -2552,6 +2552,14 @@ impl InboxApp {
             // In its window it is never the floating panel, folded or not.
             composer.set_floating(false);
         }
+        if was
+            && !self.composer_window
+            && self.composer_host() == Host::Floating
+            && let Some(composer) = &mut self.composer
+        {
+            // Out of its window into the floating host: the open composer floats at once, as a new one opens.
+            composer.set_floating(true);
+        }
         if !self.composer_window {
             self.window_typing = false;
             self.window_focus = None;
