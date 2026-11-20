@@ -315,7 +315,8 @@ pub(crate) fn relead(text: &str, lead: Lead) -> Option<String> {
 }
 
 /// The `VEVENT` `component` with its alert set to `lead`: the alarms it reads put back in their place, the others
-/// (one whose trigger cannot be read) left where they were.
+/// (one whose trigger cannot be read) left where they were. An alarm the lead leaves as it was is written as it came,
+/// byte for byte as read; only the moved or new one is written afresh.
 fn releaded(component: &Component, lead: Lead) -> Option<Component> {
     let mut event = Event::from_component(component).ok()?;
     set_lead(&mut event, lead);
@@ -323,7 +324,24 @@ fn releaded(component: &Component, lead: Lead) -> Option<Component> {
     for property in component.properties() {
         out.push_property(property.clone());
     }
-    let mut alarms = event.alarms.iter().map(Alarm::to_component);
+    let originals: Vec<(&Component, Alarm)> = component
+        .components()
+        .iter()
+        .filter(|inner| inner.name() == "VALARM")
+        .filter_map(|inner| Some((inner, Alarm::from_component(inner).ok()?)))
+        .collect();
+    let mut next = 0;
+    let mut written = Vec::with_capacity(event.alarms.len());
+    for alarm in &event.alarms {
+        match originals.iter().enumerate().skip(next).find(|(_, (_, original))| original == alarm) {
+            Some((at, (inner, _))) => {
+                written.push((*inner).clone());
+                next = at.saturating_add(1);
+            }
+            None => written.push(alarm.to_component()),
+        }
+    }
+    let mut alarms = written.into_iter();
     let mut placed = false;
     for inner in component.components() {
         if inner.name() == "VALARM" && Alarm::from_component(inner).is_ok() {

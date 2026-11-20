@@ -415,3 +415,16 @@ fn a_location_alarm_is_not_the_alert_and_stays() {
         assert_eq!(shown(&mut session, 5), json!("none"), "{variant}");
     }
 }
+
+#[test]
+fn alarms_the_lead_leaves_alone_are_written_as_they_came() {
+    let mut session = session();
+    let mail = "BEGIN:VALARM\r\nACTION:EMAIL\r\nTRIGGER;VALUE=DURATION;RELATED=START:-P0DT1H0M0S\r\nDESCRIPTION:Mail me\r\n\
+                SUMMARY:Plants\r\nATTENDEE:mailto:anna@example.org\r\nEND:VALARM\r\n";
+    let display = "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nDESCRIPTION:Plants\r\nEND:VALARM\r\n";
+    synced(&mut session, "plants", plants(&format!("{mail}{PROXIMITY}{display}")));
+    session.run("event.update", &json!({ "id": 5, "alert": 30 })).unwrap();
+    let written = text(&session, 5);
+    let moved = display.replace("-PT15M", "-PT30M");
+    assert!(written.contains(&format!("{mail}{PROXIMITY}{moved}")), "{written}");
+}
