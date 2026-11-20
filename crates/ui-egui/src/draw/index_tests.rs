@@ -485,3 +485,25 @@ fn new_message_is_the_index_s_first_tab_stop() {
     assert_eq!(order.first().map(String::as_str), Some("New message"), "{order:?}");
     assert!(order.get(1).is_some_and(|label| label.starts_with("Home")), "{order:?}");
 }
+
+#[test]
+fn drafts_has_a_glyph_of_its_own_wide_and_narrow() {
+    // screen/index/active-mail: Drafts U+E704 (file-dashed), not New message's pencil (#354).
+    for narrow in [false, true] {
+        let harness = harness(two(), Place::Mail, narrow, TextScale::default(), 826.0, false);
+        let drafts =
+            harness.query_all_by_role(Role::Button).find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("Drafts"))).unwrap().rect();
+        let mut glyphs = Vec::new();
+        fn texts(shape: &egui::Shape, found: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => found.push((text.galley.job.text.clone(), egui::Rect::from_min_size(text.pos, text.galley.size()))),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, found)),
+                _ => {}
+            }
+        }
+        harness.output().shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut glyphs));
+        let in_row: Vec<&String> = glyphs.iter().filter(|(_, rect)| drafts.contains(rect.center())).map(|(text, _)| text).collect();
+        assert!(in_row.iter().any(|text| text.as_str() == "\u{e704}"), "narrow {narrow}: {in_row:?}");
+        assert!(!in_row.iter().any(|text| text.contains('\u{ebc6}')), "narrow {narrow}: no pencil: {in_row:?}");
+    }
+}

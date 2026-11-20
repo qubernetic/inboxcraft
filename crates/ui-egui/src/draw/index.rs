@@ -85,6 +85,9 @@ const MENU_DROP: f32 = 4.0;
 /// The phosphor glyph of the Outbox (tray-arrow-up).
 const OUTBOX: char = '\u{ee52}';
 
+/// The phosphor glyph of Drafts (file-dashed): a page not finished yet, not New message's pencil.
+pub(crate) const DRAFTS: char = '\u{e704}';
+
 /// A row of the mailboxes, built only near the viewport.
 #[derive(Debug, Clone, Copy)]
 enum Line<'a> {
@@ -117,10 +120,12 @@ pub(crate) fn clean(name: &str) -> String {
 
 /// The icon of a shared mailbox or folder of `role`.
 fn icon(role: Option<Role>) -> char {
+    if role == Some(Role::Drafts) {
+        return DRAFTS;
+    }
     iconset::glyph(match role {
         Some(Role::Inbox) => IconId::Inbox,
         Some(Role::Sent) => IconId::Send,
-        Some(Role::Drafts) => IconId::Compose,
         Some(Role::Trash) => IconId::Delete,
         Some(Role::Junk) => IconId::Junk,
         Some(Role::Archive) => IconId::Archive,
