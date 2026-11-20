@@ -331,9 +331,10 @@ newest text, the reads see it, the status line says it once (the keeper wakes th
 1 s, 2 s, 4 s … at most 30 s apart until it lands or the draft is discarded; meanwhile a batch that names the draft
 first tries it again and is then refused ("not on the disk yet"), a discard excepted. Closing the composer waits at
 most 3 s for its draft and stays open, saying why, when it is not on the disk ("Draft saved" only once it is). The
-window's close waits at most 3 s too; when a draft is not on the disk it is taken back once, the draft open in the
-composer and the failure in the status line, and a second close goes through, losing that draft's newest text. A quit
-from the tray without a window says it in a notification. The end of the app waits once, about 3 s in all. If the
+window's close waits at most 3 s too; when a draft is not on the disk it is taken back, the draft open in the
+composer and the failure in the status line with how many more drafts are not kept, and a second close in a row
+(within 10 s, nothing kept since) goes through, losing those drafts' newest text; a close after new typing is taken
+back again. A quit from the tray without a window says it in a notification. The end of the app waits once, about 3 s in all. If the
 keeper's thread ever ends, the store writes what it held and every later draft at once. A new draft, one moved to
 another account, and every store without a keeper (the sample, the browser, the CLI) are written at once.
 What is typed in the field that fills a template's blank is not part of the draft: it lives in the composer only, and closing it, answering, opening
