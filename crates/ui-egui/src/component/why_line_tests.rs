@@ -94,7 +94,8 @@ fn the_why_line_looks_as_its_sheet_says_in_every_state() {
             assert_eq!(link.rect().left() - rect.left(), 562.0, "{at}");
             let said = harness.get_by_label(&reasons.join(", ")).rect();
             assert_eq!((said.left() - rect.left(), said.width()), (83.0, 467.0), "{at}");
-            assert!(harness.query_all_by_label("coming soon").count() <= 1, "{at}");
+            // The frames draw no tag beside the reasons (shell/reader-open): the tag stands only where there are none.
+            assert_eq!(harness.query_all_by_label("coming soon").count(), 0, "{at}");
         }
     }
 }
