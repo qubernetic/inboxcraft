@@ -272,6 +272,9 @@ pub struct InboxApp {
     /// The draft discarded from Home whose discard waits behind its toast, and when the toast came: carried out when
     /// the toast ends, the window closes or the app ends, dropped by its Undo ([`InboxApp::discard_draft`]).
     discarding: Option<(u64, Option<f64>)>,
+    /// The composer whose own Discard put its draft behind the toast, as it was: its Undo brings it back, and it goes
+    /// with the discard ([`InboxApp::discard_composer`]).
+    discarded: Option<Box<Composer>>,
     /// Whether the window is a native one whose frame the app may draw (`set_own_frame`).
     own_frame: bool,
     /// The frame the window was last told to show.
@@ -534,6 +537,7 @@ impl InboxApp {
             workers: Box::new(NoWorkers),
             toast: None,
             discarding: None,
+            discarded: None,
             own_frame: false,
             frame_applied: None,
             composer: None,
@@ -2203,11 +2207,34 @@ impl InboxApp {
                 return;
             }
         }
+        self.wait_discard(draft);
+    }
+
+    /// Hides the kept draft `draft` behind the toast with Undo, its discard waiting; a discard already waiting for
+    /// another draft is carried out first.
+    fn wait_discard(&mut self, draft: u64) {
         if self.discarding.is_some_and(|(waiting, _)| waiting != draft) {
             self.discard_waiting();
         }
         self.status.forget_notices();
         self.discarding = Some((draft, None));
+        self.discarded = None;
+    }
+
+    /// Drops the discard that waits behind its toast: the draft stays. A composer its own Discard closed comes back as
+    /// it was, in the reader's place or floating ([`InboxApp::discard_composer`]); the draft being written then is closed
+    /// and kept first, and when the engine does not keep it, it stays open and the discarded draft stays a kept draft.
+    fn undiscard(&mut self) {
+        self.discarding = None;
+        let Some(composer) = self.discarded.take() else { return };
+        if self.composer.is_some() {
+            self.close_composer();
+            if self.composer.is_some() {
+                return;
+            }
+        }
+        self.composer = Some(*composer);
+        self.list_over_composer = false;
     }
 
     /// The draft whose discard waits behind its toast, if one does.
@@ -2218,6 +2245,7 @@ impl InboxApp {
 
     /// Carries out the discard that waits behind its toast, if one does.
     fn discard_waiting(&mut self) {
+        self.discarded = None;
         if let Some((draft, _)) = self.discarding.take()
             && let Err(error) = self.mailbox.run("compose.discard", &json!({ "id": draft }))
         {
@@ -2225,16 +2253,33 @@ impl InboxApp {
         }
     }
 
-    /// Removes the draft being written here and on the server.
-    fn discard_composer(&mut self) {
-        let Some(composer) = &self.composer else { return };
-        match composer.discard(&mut self.mailbox) {
-            Ok(()) => {
-                self.composer = None;
-                self.say(tr!("Draft discarded"));
+    /// Discards the draft being written with an Undo, as a discard from Home does ([`InboxApp::discard_draft`]): the
+    /// draft is kept as it stands and waited for on the disk, the composer closes, and "Draft discarded" offers Undo for
+    /// [`crate::status::UNDO_SECONDS`]. Undo brings the composer back as it was; when the time ends, the window closes
+    /// or the app ends, the draft goes here and on the server (`compose.discard`). A new message nothing was written
+    /// in goes at once, with no Undo. A draft the engine does not keep leaves the composer open, saying why.
+    pub fn discard_composer(&mut self) {
+        let Some(composer) = &mut self.composer else { return };
+        let draft = composer.draft();
+        if composer.untouched() {
+            match composer.discard(&mut self.mailbox) {
+                Ok(()) => {
+                    self.composer = None;
+                    self.say(tr!("Draft discarded"));
+                }
+                Err(error) => self.mailbox.fail(error),
             }
-            Err(error) => self.mailbox.fail(error),
+            return;
         }
+        // Kept as it stands, what is typed in a recipient line left typed, so Undo brings back exactly this.
+        if let Err(error) = composer.save(&mut self.mailbox).and_then(|()| self.mailbox.wait_for_keep(draft, KEEP_WAIT)) {
+            return self.mailbox.fail(error);
+        }
+        let Some(mut composer) = self.composer.take() else { return };
+        composer.dismiss_suggestions();
+        composer.unsee();
+        self.wait_discard(draft);
+        self.discarded = Some(Box::new(composer));
     }
 
     /// Says `text` in the status line, for the `notice` token's time once it shows.
@@ -3489,7 +3534,7 @@ impl InboxApp {
     fn apply_line(&mut self, line: &status::Pressed, undid: Option<Undone>) -> (bool, bool) {
         match undid.filter(|_| line.undo) {
             Some(Undone::Send(draft)) => self.unsend(draft),
-            Some(Undone::Discard) => self.discarding = None,
+            Some(Undone::Discard) => self.undiscard(),
             _ => {}
         }
         let dismissed =
@@ -3831,6 +3876,9 @@ mod appearance_tests;
 #[cfg(test)]
 #[path = "command_tests.rs"]
 mod command_line_tests;
+#[cfg(test)]
+#[path = "compose_discard_tests.rs"]
+mod compose_discard_tests;
 #[cfg(test)]
 #[path = "compose_tests.rs"]
 mod compose_tests;
