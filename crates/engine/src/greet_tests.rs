@@ -138,10 +138,12 @@ fn invisible_format_characters_are_dropped_before_the_name_is_read() {
     assert_eq!(word(GreetBy::First, "\u{feff}Dr. Anna"), "Anna", "a title behind a BOM is still a title");
     assert_eq!(word(GreetBy::First, "Dr.\u{200b} Anna"), "Anna");
     assert_eq!(word(GreetBy::First, "Dr.\u{00ad} Anna"), "Anna");
-    assert_eq!(word(GreetBy::Last, "Anna Ko\u{200d}vács\u{e0041}\u{e007f}"), "Kovács");
+    assert_eq!(word(GreetBy::Last, "Anna Ko\u{2060}vács\u{e0041}\u{e007f}"), "Kovács");
     assert_eq!(word(GreetBy::Full, "\u{206a}Anna\u{2060} Kovács\u{206f}"), "Anna Kovács");
     for c in INVISIBLE {
-        let name = format!("{c}Dr.{c} An{c}na{c} Kovács{c}");
+        // The joiners stay between two characters of a word (see below); every other one goes from inside it too.
+        let inside = if matches!(c, '\u{200c}' | '\u{200d}') { String::new() } else { c.to_string() };
+        let name = format!("{c}Dr.{c} An{inside}na{c} Kovács{c}");
         for by in GreetBy::ALL {
             let got = by.word(&name).unwrap_or_default();
             assert!(!got.contains(c), "{by:?} of U+{:04X} kept it: {got:?}", u32::from(c));
@@ -207,4 +209,23 @@ fn an_address_past_the_cap_still_gives_no_word() {
     for by in GreetBy::ALL {
         assert_eq!(by.word(&name), None, "{by:?}");
     }
+}
+
+#[test]
+fn a_joiner_inside_a_word_stays_and_at_its_ends_goes() {
+    // "Nik\u{200c}nam": the non-joiner keeps the Persian letters apart, as the name is written.
+    let persian = "\u{0645}\u{0647}\u{0633}\u{0627} \u{0646}\u{06cc}\u{06a9}\u{200c}\u{0646}\u{0627}\u{0645}";
+    let family = "\u{0646}\u{06cc}\u{06a9}\u{200c}\u{0646}\u{0627}\u{0645}";
+    assert_eq!(word(GreetBy::Last, persian), family);
+    assert_eq!(word(GreetBy::Full, persian), persian);
+    // At the ends of a word, of the name, or next to a quote or a comma, a joiner joins nothing and goes.
+    let ends = "\u{200c}\u{0645}\u{0647}\u{0633}\u{0627}\u{200c} \u{200d}\u{0646}\u{06cc}\u{06a9}\u{200c}\u{0646}\u{0627}\u{0645}\u{200d}";
+    assert_eq!(word(GreetBy::First, ends), "\u{0645}\u{0647}\u{0633}\u{0627}");
+    assert_eq!(word(GreetBy::Last, ends), family);
+    assert_eq!(word(GreetBy::Full, ends), persian);
+    assert_eq!(word(GreetBy::First, "\"\u{200c}Anna\u{200d}\", Kovács"), "Kovács");
+    assert_eq!(word(GreetBy::Last, "Kovács, \"\u{200c}Anna\u{200d}\""), "Kovács");
+    assert_eq!(word(GreetBy::First, "Kovács\u{200d}, \"\u{200c}Anna\u{200d}\""), "Anna");
+    // An emoji sequence keeps its joiner in the full name.
+    assert_eq!(word(GreetBy::Full, "Anna \u{1f469}\u{200d}\u{1f4bb}"), "Anna \u{1f469}\u{200d}\u{1f4bb}");
 }

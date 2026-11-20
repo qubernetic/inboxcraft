@@ -183,8 +183,9 @@ choice too, `greeting.set` (`owner`): the first word (the default), the last, th
 (`greet::GreetBy`; the same keeping). The first and the last word skip a short list of titles (Dr, Mr, Mrs, Ms,
 Prof, Sir, Dame, with or without a dot, any case); a comma reads as "last, first", the given name ending at the next
 comma and a part of suffixes only (Jr, Sr, II, III, PhD, MD, Esq) not one; quotes and brackets around a word and
-invisible format characters are not read; no other order is guessed, so a family-name-first name is greeted by its
-family name with the first word. A name that is an address, empty or only titles gives no word.
+invisible format characters are not read, but for a zero-width joiner or non-joiner inside a word; no other order is
+guessed, so a family-name-first name is greeted by its family name with the first word. A name that is an address,
+empty or only titles gives no word.
 
 Snooze (`mail.snooze`, `safe`, in `engine::cmd::triage`; the stage and the return in `engine::arrive::snooze`) puts
 a message away until a time, given as `until` or a preset of `schedule.presets`. The message goes to the account's

@@ -10,8 +10,8 @@
 //! reads as last name, then first; the given name ends at the next comma, and a part made of [`SUFFIXES`] ("Smith,
 //! John, Jr.", "Anna Kovács, PhD") is not one. The titles of [`TITLES`] are skipped for the first and the last word,
 //! never for the full name. Quotes and brackets around a word, or around the whole name, are not read; invisible format
-//! characters are dropped first. A name that is an address (it holds `@`), is empty, or has nothing but titles gives no
-//! word, and the headline greets without a name.
+//! characters are dropped first, but for a joiner inside a word. A name that is an address (it holds `@`), is empty, or
+//! has nothing but titles gives no word, and the headline greets without a name.
 
 /// The titles the first and the last word skip, compared without case and without one dot at the end: "Dr", "Dr.",
 /// "dr." (the Hungarian), "Mr", "Mrs", "Ms", "Prof", "Sir", "Dame".
@@ -59,18 +59,19 @@ impl GreetBy {
         Self::ALL.into_iter().find(|by| by.name() == name)
     }
 
-    /// The word of `name` the greeting uses, on one line, with no control or invisible format character; `None` for no
-    /// word.
+    /// The word of `name` the greeting uses, on one line, with no control or invisible format character but a joiner
+    /// inside a word; `None` for no word.
     #[must_use]
     pub fn word(self, name: &str) -> Option<String> {
         // An address anywhere in the name, past the cap too, gives no word.
         if self == Self::None || name.contains('@') {
             return None;
         }
-        let plain: String = name.chars().take(MOST).map(|c| if c.is_control() { ' ' } else { c }).filter(|c| !invisible(*c)).collect();
+        // The joiners stay for now: inside a word they shape it; at a word's ends they go below.
+        let plain: String = name.chars().take(MOST).map(|c| if c.is_control() { ' ' } else { c }).filter(|c| !invisible(*c) || joiner(*c)).collect();
         if self == Self::Full {
-            let full = plain.split_whitespace().collect::<Vec<_>>().join(" ");
-            let full = full.trim_matches(|c: char| wrapping(c) || c.is_whitespace());
+            let full = plain.split_whitespace().map(|word| word.trim_matches(joiner)).filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ");
+            let full = full.trim_matches(|c: char| wrapping(c) || joiner(c) || c.is_whitespace());
             return (!words(full).is_empty()).then(|| full.to_owned());
         }
         // "Last, First …, Suffix": the first comma ends the family name; the given name is the next part, up to the
@@ -84,10 +85,10 @@ impl GreetBy {
     }
 }
 
-/// The words of `text` that hold a letter or a digit, each without the quotes and brackets around it.
+/// The words of `text` that hold a letter or a digit, each without the quotes, brackets and joiners around it.
 fn words(text: &str) -> Vec<String> {
     text.split_whitespace()
-        .map(|word| word.trim_matches(wrapping))
+        .map(|word| word.trim_matches(|c: char| wrapping(c) || joiner(c)))
         .filter(|word| word.chars().any(char::is_alphanumeric))
         .map(str::to_owned)
         .collect()
@@ -100,6 +101,12 @@ const fn wrapping(c: char) -> bool {
         '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | '\u{2018}'..='\u{201f}' | '\u{00ab}' | '\u{00bb}' | '\u{2039}' | '\u{203a}'
             | '\u{300c}'..='\u{300f}' | '\u{ff02}' | '\u{ff07}' | '\u{ff08}' | '\u{ff09}' | '\u{ff3b}' | '\u{ff3d}'
     )
+}
+
+/// Whether `c` is the zero-width non-joiner or joiner: between two characters of a word they change how Persian,
+/// Indic scripts and emoji join, so they stay there and go only from a word's ends.
+const fn joiner(c: char) -> bool {
+    matches!(c, '\u{200c}' | '\u{200d}')
 }
 
 /// Whether `word` is one of [`SUFFIXES`], without case and without its dots.
