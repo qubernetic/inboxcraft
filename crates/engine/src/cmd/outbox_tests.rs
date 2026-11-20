@@ -111,13 +111,6 @@ fn a_refused_draft_is_sent_again_by_command() {
     assert!(bad(session.run("outbox.retry", &json!({ "id": id, "to": "x" }))));
 }
 
-/// The `outbox.retry` params that send the refused draft `id` as `outbox.list` shows it now.
-fn as_listed(session: &mut Session, id: u64) -> Value {
-    let listed = items(session);
-    let item = listed.iter().find(|item| item["draft"] == json!(id)).unwrap();
-    json!({ "id": id, "seen": item["seen"].clone() })
-}
-
 /// The envelope of the one send job waiting.
 fn envelope(session: &mut Session) -> Vec<String> {
     let jobs = session.take_jobs();
@@ -137,7 +130,7 @@ fn the_outbox_lists_every_recipient_and_what_changed_since_the_refusal() {
     failed(&mut session, id, ErrorKind::MessageRefused, Some("550 5.1.1 No such user"));
     let listed = items(&mut session);
     assert_eq!((&listed[0]["cc"], &listed[0]["bcc"], &listed[0]["changed"]), (&json!([]), &json!([]), &json!([])));
-    assert!(listed[0]["seen"].is_string(), "{listed:?}");
+    assert!(listed[0].get("seen").is_none(), "no mark: a changed draft is not sent again by command at all");
     // An agent may change a draft, a refused one too: the outbox says what changed, Bcc as Bcc.
     let update = json!({ "id": id, "cc": ["Ann <ann@example.org>"], "bcc": ["Mallory <mallory@example.org>"], "text": "New" });
     session.run_as(Caller::Agent, "compose.update", &update).unwrap();
@@ -148,46 +141,68 @@ fn the_outbox_lists_every_recipient_and_what_changed_since_the_refusal() {
     assert_eq!(listed[0]["changed"], json!(["cc", "bcc", "text"]));
 }
 
-#[test]
-fn a_refused_send_changed_since_goes_again_only_as_the_owner_saw_it() {
-    let (mut session, clock) = session();
-    let id = sent(&mut session, &clock, "Budget");
-    failed(&mut session, id, ErrorKind::MessageRefused, Some("550 5.1.1 No such user"));
-    let update = json!({ "id": id, "bcc": ["Mallory <mallory@example.org>"] });
-    session.run_as(Caller::Agent, "compose.update", &update).unwrap();
-    // Retry as before is refused: it would go to a recipient the owner was not shown.
-    assert!(bad(session.run("outbox.retry", &json!({ "id": id }))));
-    // Nor may an agent send it, shown or not.
-    let seen = as_listed(&mut session, id);
-    assert!(matches!(session.run_as(Caller::Agent, "outbox.retry", &seen), Err(EngineError::NotAllowed { .. })));
-    // What was not shown does not pass.
-    assert!(bad(session.run("outbox.retry", &json!({ "id": id, "seen": "0" }))));
-    assert!(session.take_jobs().is_empty());
-    assert!(matches!(session.store().outbox().unwrap()[0].state, OutboxState::Refused { .. }));
-    // As the owner saw it, every recipient listed, it goes.
-    let answer = session.run("outbox.retry", &seen).unwrap();
-    assert_eq!(answer["state"], json!("waiting"));
-    clock.advance(session.send_hold().duration());
-    session.tick().unwrap();
-    assert_eq!(envelope(&mut session), ["bela@example.org", "mallory@example.org"]);
-    // Sent again, it is what the owner last saw: refused again, nothing changed since.
-    failed(&mut session, id, ErrorKind::MessageRefused, Some("451 4.3.0 Try again later"));
-    assert_eq!(items(&mut session)[0]["changed"], json!([]));
+/// Each change an agent can make to a refused draft: a recipient named as another address (C1), a twenty-first Bcc
+/// past what a row lists (C2), new text (I1), a new subject.
+fn changes() -> Vec<(&'static str, Value)> {
+    let mut bcc: Vec<String> = (0..20).map(|n| format!("Friend {n} <friend{n}@example.org>")).collect();
+    bcc.push("Mallory <mallory@example.net>".to_owned());
+    vec![
+        ("to", json!({ "to": ["\"bela@example.org\" <eve@example.net>"] })),
+        ("bcc", json!({ "bcc": bcc })),
+        ("text", json!({ "text": "Words the owner never read" })),
+        ("subject", json!({ "subject": "Budget, changed" })),
+    ]
 }
 
 #[test]
-fn a_change_after_the_owner_looked_is_not_sent() {
+fn a_refused_send_that_changed_is_never_sent_again_by_command() {
+    for (part, change) in changes() {
+        let (mut session, clock) = session();
+        let id = sent(&mut session, &clock, "Budget");
+        failed(&mut session, id, ErrorKind::MessageRefused, Some("550 5.1.1 No such user"));
+        let mut update = change.clone();
+        update["id"] = json!(id);
+        session.run_as(Caller::Agent, "compose.update", &update).unwrap();
+        assert_eq!(items(&mut session)[0]["changed"], json!([part]), "{part}");
+        // Not by the owner, and no mark lets it through.
+        let refused = session.run("outbox.retry", &json!({ "id": id }));
+        assert!(matches!(&refused, Err(EngineError::BadParams { reason, .. }) if reason.contains(part)), "{part}: {refused:?}");
+        assert!(bad(session.run("outbox.retry", &json!({ "id": id, "seen": "0" }))), "{part}");
+        // Nor by an agent.
+        assert!(matches!(session.run_as(Caller::Agent, "outbox.retry", &json!({ "id": id })), Err(EngineError::NotAllowed { .. })), "{part}");
+        clock.advance(session.send_hold().duration());
+        session.tick().unwrap();
+        assert!(session.take_jobs().is_empty(), "{part}");
+        assert!(matches!(session.store().outbox().unwrap()[0].state, OutboxState::Refused { .. }), "{part}");
+    }
+}
+
+/// A changed refused draft goes as every draft does, from the composer's own Send (`mail.send`), as it is now.
+#[test]
+fn a_changed_refused_send_goes_from_the_composer_s_send() {
+    let (mut session, clock) = session();
+    let id = sent(&mut session, &clock, "Budget");
+    failed(&mut session, id, ErrorKind::MessageRefused, Some("550 5.1.1 No such user"));
+    session.run_as(Caller::Agent, "compose.update", &json!({ "id": id, "bcc": ["Mallory <mallory@example.org>"] })).unwrap();
+    send_now(&mut session, &clock, "mail.send", id);
+    assert_eq!(envelope(&mut session), ["bela@example.org", "mallory@example.org"]);
+    // Sent so, it is what the owner last sent: refused again, nothing changed since, and Retry is plain again.
+    failed(&mut session, id, ErrorKind::MessageRefused, Some("451 4.3.0 Try again later"));
+    assert_eq!(items(&mut session)[0]["changed"], json!([]));
+    send_now(&mut session, &clock, "outbox.retry", id);
+    assert_eq!(envelope(&mut session), ["bela@example.org", "mallory@example.org"]);
+}
+
+#[test]
+fn a_draft_changed_back_to_what_was_sent_goes_again() {
     let (mut session, clock) = session();
     let id = sent(&mut session, &clock, "Budget");
     failed(&mut session, id, ErrorKind::MessageRefused, Some("550 5.1.1 No such user"));
     session.run_as(Caller::Agent, "compose.update", &json!({ "id": id, "cc": ["Ann <ann@example.org>"] })).unwrap();
-    let seen = as_listed(&mut session, id);
-    // Between the look and the press, the recipients change again.
-    session.run_as(Caller::Agent, "compose.update", &json!({ "id": id, "bcc": ["Mallory <mallory@example.org>"] })).unwrap();
-    assert!(bad(session.run("outbox.retry", &seen)));
+    assert!(bad(session.run("outbox.retry", &json!({ "id": id }))));
     assert!(session.take_jobs().is_empty());
-    // Changed back to just what the owner sent, it goes as before, nothing to look at again.
-    session.run_as(Caller::Agent, "compose.update", &json!({ "id": id, "cc": [], "bcc": [] })).unwrap();
+    // Changed back to just what the owner sent, it goes as before.
+    session.run_as(Caller::Agent, "compose.update", &json!({ "id": id, "cc": [] })).unwrap();
     assert_eq!(items(&mut session)[0]["changed"], json!([]));
     send_now(&mut session, &clock, "outbox.retry", id);
     assert_eq!(envelope(&mut session), ["bela@example.org"]);
@@ -201,6 +216,5 @@ fn a_refused_send_kept_without_how_it_went_counts_as_changed() {
     crate::test_support::change(&mut session, inboxcraft_store::Change::PutOutgoing(inboxcraft_model::Outgoing::new(DraftId::new(id), refused)));
     assert_eq!(items(&mut session)[0]["changed"], json!(["unknown"]));
     assert!(bad(session.run("outbox.retry", &json!({ "id": id }))));
-    let seen = as_listed(&mut session, id);
-    session.run("outbox.retry", &seen).unwrap();
+    assert!(session.take_jobs().is_empty());
 }
