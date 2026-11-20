@@ -488,6 +488,33 @@ fn a_control_call_runs_for_an_agent_with_or_without_a_window() {
     drop(send);
 }
 
+#[test]
+fn an_agent_s_undo_is_refused_while_an_event_is_edited_in_the_window_and_runs_once_it_closes() {
+    let (send, heard) = mpsc::channel();
+    let (calls_in, calls) = mpsc::channel();
+    let mut desktop = Desktop::new(sample_app(), heard).with_control(calls);
+    let ctx = egui::Context::default();
+    let (flag, flagged) = call("mail.flag", json!({ "id": 1, "flagged": true }));
+    calls_in.send(flag).unwrap();
+    tick(&mut desktop, &ctx, false);
+    assert!(flagged.try_recv().unwrap().is_ok());
+    desktop.app_mut().show_calendar();
+    desktop.app_mut().calendar_mut().0.new_event();
+    assert!(desktop.app().calendar().editor().is_some(), "the editor is open");
+    let (undo, undone) = call("history.undo", json!({}));
+    calls_in.send(undo).unwrap();
+    tick(&mut desktop, &ctx, false);
+    let refused = undone.try_recv().unwrap().unwrap_err();
+    assert_eq!((refused.code.as_str(), refused.message.as_str()), ("editing", "an event is being edited"));
+    // The window closes with the editor in it: nobody edits, the agent's undo runs, also without a window.
+    let (undo, undone) = call("history.undo", json!({}));
+    calls_in.send(undo).unwrap();
+    tick(&mut desktop, &ctx, true);
+    assert!(!desktop.has_window());
+    assert_eq!(undone.try_recv().unwrap().unwrap()["command"], json!("mail.flag"));
+    drop(send);
+}
+
 /// One frame of the window, 1200 × 820, with `events` from the keyboard.
 fn frame(desktop: &mut Desktop, ctx: &egui::Context, events: Vec<egui::Event>) {
     let raw = RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 820.0))), events, ..RawInput::default() };

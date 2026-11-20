@@ -1507,6 +1507,13 @@ impl InboxApp {
         (&mut self.calendar, &mut self.mailbox)
     }
 
+    /// Tells the session whether the owner has an event open in the editor, with the window `shown`: while one is, an
+    /// agent's `history.undo` is refused. Worked out from the editor each time, never kept apart from it, so it cannot
+    /// outlive the editor; without a window it is `false`.
+    pub fn tell_editing(&mut self, shown: bool) {
+        self.mailbox.set_editing(shown && self.calendar.editor().is_some());
+    }
+
     /// Applies what was pressed on the calendar screen.
     fn apply_calendar(&mut self, asked: Vec<calendar::Asked>) {
         let accounts = asked.contains(&calendar::Asked::Accounts);
@@ -1535,6 +1542,8 @@ impl InboxApp {
                 }
             }
         }
+        // Every press that opens or ends the editor (New event, Edit, Save, Cancel, Esc, Delete) comes through here.
+        self.tell_editing(true);
         if accounts {
             self.open_settings_on("accounts");
         }
@@ -3874,6 +3883,9 @@ mod account_remove_tests;
 #[cfg(test)]
 #[path = "after_stay_tests.rs"]
 mod after_stay_tests;
+#[cfg(test)]
+#[path = "agent_undo_tests.rs"]
+mod agent_undo_tests;
 #[cfg(test)]
 #[path = "appearance_tests.rs"]
 mod appearance_tests;
