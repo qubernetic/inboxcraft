@@ -324,7 +324,8 @@ fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl F
         ctx.memory_mut(|memory| memory.set_modal_layer(mine));
         // It says itself that a float is open, for the window's Esc ([`any_open`]): another
         // surface may be a modal layer too. A quiet float (the event editor under the palette) says nothing.
-        ctx.data_mut(|data| data.insert_temp(shown_id(), pass));
+        let note = shown_id(ctx);
+        ctx.data_mut(|data| data.insert_temp(note, pass));
         // Drawn after the float it may be opened from, it stands over it: a float opened from another is on top.
         ctx.move_to_top(mine);
     }
@@ -1030,9 +1031,10 @@ fn menu_at<R>(
     }
 }
 
-/// Where [`float`] notes the pass it last showed in.
-fn shown_id() -> Id {
-    Id::unique("inboxcraft-float-shown")
+/// Where [`float`] notes the pass it last showed in, one note per viewport: a float in a window of its own is that
+/// window's, and never holds the main window's `Esc` (nor one of the main window the window's).
+fn shown_id(ctx: &Context) -> Id {
+    Id::unique("inboxcraft-float-shown").with(ctx.viewport_id())
 }
 
 /// Whether a float (an open list or menu) showed in this pass or the one before: the surface on top, which takes Esc
@@ -1040,7 +1042,8 @@ fn shown_id() -> Id {
 #[must_use]
 pub fn any_open(ctx: &Context) -> bool {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data(|data| data.get_temp::<u64>(shown_id())).is_some_and(|shown| shown.saturating_add(1) >= pass)
+    let note = shown_id(ctx);
+    ctx.data(|data| data.get_temp::<u64>(note)).is_some_and(|shown| shown.saturating_add(1) >= pass)
 }
 
 /// Whether `Esc` was pressed for a control under the floats: false while a float is open, which takes it.
