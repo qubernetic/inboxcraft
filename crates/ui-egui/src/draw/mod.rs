@@ -2885,15 +2885,23 @@ impl InboxApp {
                     // Over the event editor only what comes over it and the window's look: nothing of the mail or the
                     // calendar under it (until a half-typed event can be kept as a draft).
                     let editing = self.editing_event();
+                    let listed = |row: &crate::palette::Row| {
+                        keymap::scope(row.id).meets(screen) && (!editing || crate::surface::EDITOR_KEYS.contains(&row.id))
+                    };
                     lists.commands = crate::palette::rows(self.command.text())
                         .into_iter()
-                        .filter(|row| keymap::scope(row.id).meets(screen))
-                        .filter(|row| !editing || crate::surface::EDITOR_KEYS.contains(&row.id))
+                        .filter(|row| listed(row))
                         .map(|row| {
                             let refused = self.refused_on_the_line(&ctx, row.id);
                             command::Listed { row, refused }
                         })
                         .collect();
+                    // How many the line lists with nothing typed: the head says "2 of 82".
+                    lists.all_commands = if self.command.text().trim().is_empty() {
+                        lists.commands.len()
+                    } else {
+                        crate::palette::rows("").iter().filter(|row| listed(row)).count()
+                    };
                 }
                 crate::command::Mode::Mailbox => lists.mailboxes = command::mailboxes(&self.mailbox, self.command.text()),
                 // At most six, looked up only when the text changed.
