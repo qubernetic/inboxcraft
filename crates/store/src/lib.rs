@@ -55,7 +55,7 @@ use inboxcraft_time::Timestamp;
 pub use memory::Memory;
 pub use search::{MAX_QUERY_CHARS, MAX_QUERY_WORDS, MAX_RESULTS, Search};
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
-pub use sqlite::{DATABASE_FILE, SCHEMA_VERSION, SOURCES_DIR, Sqlite};
+pub use sqlite::{DATABASE_FILE, KeepHold, SCHEMA_VERSION, SOURCES_DIR, Sqlite};
 
 /// The local-first store. Reads give accounts, folders and messages in id order, messages of a folder in UID order.
 pub trait Storage {
@@ -161,6 +161,22 @@ pub trait Storage {
     ///
     /// As [`Storage::accounts`].
     fn draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError>;
+
+    /// Waits at most `within` until every draft written behind (a native store's draft keeper) is on the disk. A
+    /// store that writes everything at once has nothing to wait for.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::DatabaseBusy`] when it is not written in that time.
+    fn settle(&self, within: core::time::Duration) -> Result<(), StoreError> {
+        let _ = within;
+        Ok(())
+    }
+
+    /// A draft written behind whose write failed, with why, each once: the disk holds the draft as it was before.
+    fn failed_keep(&self) -> Option<(DraftId, StoreError)> {
+        None
+    }
 
     /// The outbox, in draft id order.
     ///
