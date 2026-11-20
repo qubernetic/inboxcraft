@@ -1295,6 +1295,30 @@ fn more_and_move_hang_with_their_right_edge_on_their_button_s_right_edge() {
     }
 }
 
+#[test]
+fn more_and_move_keep_the_design_s_width_at_every_text_size() {
+    // The owner's answer: every menu keeps its fixed width, as the design draws it; at 130 % text a row's words wrap
+    // or are cut, the menu does not grow.
+    for scale in crate::theme::TextScale::ALL {
+        for (button, row, width, id) in
+            [("More", "Archive", 288.0, super::reader::more_menu()), ("Move to a folder", "Receipts", 256.0, super::reader::move_menu())]
+        {
+            let fetch = Recorder::default();
+            let mut harness = opened_at(&fetch, "Photos from the coast walk", 1440.0, scale);
+            harness.get_by_role_and_label(Role::Button, button).click();
+            harness.run();
+            let menu = harness.ctx.memory(|memory| memory.area_rect(id)).unwrap();
+            assert!((menu.width() - width).abs() <= 0.5, "{scale:?} {button}: the menu {width} wide: {menu:?}");
+            let item = harness.get_by_role_and_label(Role::MenuItem, row).rect();
+            let rows: Vec<_> = harness.query_all_by_role(Role::MenuItem).map(|node| node.rect()).collect();
+            for rect in &rows {
+                assert!(rect.width() <= width - 2.0 + 0.5, "{scale:?} {button}: a row wider than the menu: {rect:?} of {rows:?}");
+            }
+            assert!((item.width() - (width - 2.0)).abs() <= 0.5, "{scale:?} {button}: {width} wide: {item:?}");
+        }
+    }
+}
+
 /// The app with `subject` open in a window `width` wide, its text at `scale`.
 fn opened_at(fetch: &Recorder, subject: &str, width: f32, scale: crate::theme::TextScale) -> Harness<'static, InboxApp> {
     let mut app = app_with(fetch);
