@@ -493,9 +493,23 @@ fn texture(ctx: &Context, mark: Mark, mode: Mode, ppp: f32, shift: Vec2) -> Opti
         return Some(kept);
     }
     let image = image(&mark.picture(mode)?, ppp, shift)?;
+    #[cfg(test)]
+    ctx.data_mut(|data| *data.get_temp_mut_or_default::<u32>(rasterised_id()) += 1);
     let texture = ctx.load_texture("brand-mark", image, TextureOptions::NEAREST);
     ctx.data_mut(|data| data.insert_temp(id, texture.clone()));
     Some(texture)
+}
+
+/// Where the tests count the pictures drawn in a context.
+#[cfg(test)]
+fn rasterised_id() -> Id {
+    Id::unique("brand-rasterised")
+}
+
+/// How many pictures of a mark were drawn (rasterised and uploaded) in `ctx`: once each, then kept.
+#[cfg(test)]
+pub(crate) fn rasterised(ctx: &Context) -> u32 {
+    ctx.data(|data| data.get_temp::<u32>(rasterised_id())).unwrap_or(0)
 }
 
 /// Paints `mark` for `mode` with its box's top left corner at `at`, pixel for pixel; the rect of the picture painted

@@ -401,6 +401,40 @@ fn at_125_and_150_percent_the_names_sit_on_the_emblem_s_pixel_grid() {
     }
 }
 
+/// The two wordmarks are drawn into pictures once and kept: a frame after that draws none again.
+#[test]
+fn the_wordmarks_are_drawn_once_and_kept() {
+    let body = Rect::from_min_size(pos2(0.0, 0.0), BODY);
+    let mut harness = harness_with(sample("today").unwrap(), Mode::Dark, 100, BODY, body, Some(crate::brand::emblem().clone()), Level::Off, false);
+    assert_eq!(crate::brand::rasterised(&harness.ctx), 2, "the Qubernetic and the InboxCraft wordmarks");
+    for _ in 0..3 {
+        harness.step();
+    }
+    assert_eq!(crate::brand::rasterised(&harness.ctx), 2, "kept: no frame draws them again");
+}
+
+/// At 125 % and 150 % each wordmark is painted from the whole pixel its box starts in, as wide as its box and the
+/// part of a pixel it is shifted by.
+#[test]
+fn at_125_and_150_percent_the_wordmarks_start_on_whole_pixels() {
+    for ppp in [1.25_f32, 1.5] {
+        let body = Rect::from_min_size(pos2(0.0, 0.0), BODY);
+        let harness = harness_at(ppp, sample("today").unwrap(), Mode::Dark, 100, BODY, body, Some(crate::brand::emblem().clone()), Level::Off, false);
+        let (qubernetic, inboxcraft) = harness.state().drawn.parts.wordmarks.unwrap();
+        let painted = pictures(&harness);
+        for (name, wordmark) in [("Qubernetic", qubernetic), ("InboxCraft", inboxcraft)] {
+            let (pixel, shift) = crate::brand::placed(wordmark.min, ppp);
+            let wide = (wordmark.width() * ppp + shift.x).ceil();
+            assert!(
+                painted.iter().any(|rect| (rect.left() * ppp - pixel.x).abs() < 1e-3
+                    && (rect.top() * ppp - pixel.y).abs() < 1e-3
+                    && (rect.width() * ppp - wide).abs() < 1e-3),
+                "{name} at {ppp}: from pixel {pixel:?}, {wide} wide, in {painted:?}"
+            );
+        }
+    }
+}
+
 /// Home puts the stage's emblem on its field, and takes it off when the stage has none.
 #[test]
 fn home_puts_the_stage_s_emblem_on_its_field() {
