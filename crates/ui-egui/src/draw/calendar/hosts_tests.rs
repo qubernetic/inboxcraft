@@ -31,10 +31,12 @@ struct Seen {
     passes: usize,
     title: Option<String>,
     size: Option<Vec2>,
-    /// Each control's role and name, as a screen reader hears them.
-    named: Vec<(Role, String)>,
+    /// Each control's role and name, as a screen reader hears them, with where it stands.
+    named: Vec<(Role, String, Rect)>,
     /// Whether the keyboard was on a control at the end of the last pass.
     focused: bool,
+    /// The name of the control the keyboard was on, as a screen reader hears it.
+    focus: Option<String>,
 }
 
 thread_local! {
@@ -49,7 +51,7 @@ fn seen() -> Seen {
 
 /// Whether the window's last pass had a control of `role` named `name`.
 fn in_window(role: Role, name: &str) -> bool {
-    seen().named.iter().any(|(r, n)| *r == role && n == name)
+    seen().named.iter().any(|(r, n, _)| *r == role && n == name)
 }
 
 /// Lets `ctx` open windows of their own, simulated on this thread.
@@ -80,12 +82,21 @@ fn windowing(ctx: &Context) {
             seen.title.clone_from(&viewport.builder.title);
             seen.size = viewport.builder.inner_size;
             seen.focused = focused;
+            seen.focus = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .and_then(|update| update.nodes.iter().find(|(id, _)| *id == update.focus).and_then(|(_, node)| node.label().map(str::to_owned)));
             seen.named = output
                 .platform_output
                 .accesskit_update
                 .iter()
                 .flat_map(|update| update.nodes.iter())
-                .filter_map(|(_, node)| Some((node.role(), node.label()?.to_owned())))
+                .filter_map(|(_, node)| {
+                    let bounds = node.bounds()?;
+                    let rect = Rect::from_min_max(Pos2::new(bounds.x0 as f32, bounds.y0 as f32), Pos2::new(bounds.x1 as f32, bounds.y1 as f32));
+                    Some((node.role(), node.label()?.to_owned(), rect))
+                })
                 .collect();
         });
     });
@@ -325,6 +336,10 @@ fn an_agent_s_undo_is_refused_while_any_host_holds_the_editor() {
         let refused = harness.state_mut().mailbox_mut().run_for_agent("history.undo", &json!({})).unwrap_err();
         assert_eq!(refused.code(), "editing", "{host:?}");
         // The owner's way to the mail does not end the refusal while the editor holds the event.
+        harness.state_mut().show_mail();
+        harness.run();
+        let refused = harness.state_mut().mailbox_mut().run_for_agent("history.undo", &json!({})).unwrap_err();
+        assert_eq!(refused.code(), "editing", "{host:?}: off the calendar too");
         harness.state_mut().apply_calendar(vec![Asked::Cancel]);
         harness.run();
         assert!(harness.state_mut().mailbox_mut().run_for_agent("history.undo", &json!({})).is_ok(), "{host:?}: runs again once it closes");
@@ -364,4 +379,229 @@ fn the_new_event_opens_row_offers_three_hosts_full_chosen_and_runs_the_owner_s_l
     harness.get_by_label("Small for New event opens").click();
     harness.run();
     assert_eq!(harness.state().mailbox().appearance().layout.event_editor, EventEditorHost::Small);
+}
+
+/// The desktop asks the main window to close: the app's end. Whether the close was taken back.
+fn quit(harness: &mut Harness<'static, InboxApp>) -> bool {
+    harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(ViewportEvent::Close);
+    harness.step();
+    let cancelled = harness
+        .output()
+        .viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .is_some_and(|asked| asked.commands.contains(&egui::ViewportCommand::CancelClose));
+    let told = harness.state_mut().took_back_close();
+    assert_eq!(cancelled, told, "the desktop's owner is told what the window did");
+    cancelled
+}
+
+/// Where the window's control `name` of `role` stood in its last pass.
+fn window_rect(role: Role, name: &str) -> Rect {
+    let named = seen().named;
+    let found = named.iter().find(|(r, n, _)| *r == role && n == name).map(|(_, _, rect)| *rect);
+    found.unwrap_or_else(|| panic!("no {name:?} in {named:?}"))
+}
+
+/// A press of the pointer at `at` in the window with `modifiers` held: over it first, then down, then up.
+fn click_in_window(harness: &mut Harness<'static, InboxApp>, at: Pos2, modifiers: Modifiers) {
+    let button = |pressed| Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
+    window_keys(harness, vec![Event::ModifiersChanged(modifiers), Event::PointerMoved(at)]);
+    window_keys(harness, vec![button(true)]);
+    window_keys(harness, vec![button(false), Event::ModifiersChanged(Modifiers::NONE)]);
+}
+
+/// The id of the first message the list shows.
+fn first_message(harness: &Harness<'static, InboxApp>) -> u64 {
+    harness.state().mailbox().messages().first().map(|row| row.id).unwrap()
+}
+
+fn listed(harness: &Harness<'static, InboxApp>, id: u64) -> bool {
+    harness.state().mailbox().messages().iter().any(|row| row.id == id)
+}
+
+#[test]
+fn the_owner_s_undo_runs_off_the_calendar_and_beside_the_editor_s_window() {
+    for host in [EventEditorHost::Small, EventEditorHost::Full, EventEditorHost::Window] {
+        let mut harness = app(host, true, egui::Theme::Light);
+        new_event(&mut harness);
+        typed(&mut harness, "Kiln");
+        if host != EventEditorHost::Window {
+            // The editor and its typing are kept while the owner is on the mail.
+            harness.state_mut().show_mail();
+            harness.run();
+        }
+        let id = first_message(&harness);
+        harness.state_mut().mailbox_mut().act(id, crate::mailbox::Act::Done);
+        harness.run();
+        assert!(!listed(&harness, id), "{host:?}: archived");
+        assert!(harness.state().can_run(crate::keymap::UNDO), "{host:?}: Undo is offered");
+        assert!(!harness.state().surfaces(&harness.ctx).undo_rests(), "{host:?}: and does not rest");
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, crate::keymap::UNDO);
+        harness.run();
+        assert!(listed(&harness, id), "{host:?}: Undo takes the archive back");
+        let editor = harness.state().calendar().editor().cloned();
+        assert_eq!(editor.map(|editor| editor.form().summary.clone()).as_deref(), Some("Kiln"), "{host:?}: the typing is whole");
+    }
+}
+
+#[test]
+fn a_window_opened_again_after_a_select_was_used_takes_its_esc_at_once() {
+    let mut harness = app(EventEditorHost::Window, true, egui::Theme::Light);
+    new_event(&mut harness);
+    // Many passes of the window, so that its float's note is far past what a window opened again counts from.
+    harness.run_steps(80);
+    let repeat = window_rect(Role::ComboBox, "Repeat");
+    click_in_window(&mut harness, repeat.center(), Modifiers::NONE);
+    assert!(
+        harness.ctx.data(|data| data.get_temp::<u64>(egui::Id::unique("inboxcraft-float-shown").with(super::super::event_editor_window()))).is_some(),
+        "the select's list showed in the window"
+    );
+    typed(&mut harness, "Kiln");
+    harness.state_mut().apply_calendar(vec![Asked::Save]);
+    harness.run();
+    assert!(!open(&harness), "saved");
+    new_event(&mut harness);
+    assert_eq!(shown(&harness), Some(Shown::Window));
+    window_keys(&mut harness, vec![esc()]);
+    assert!(!open(&harness), "nothing typed: the first Esc closes it");
+}
+
+#[test]
+fn quitting_with_an_event_typed_takes_the_close_back_once_in_every_host() {
+    for host in [EventEditorHost::Small, EventEditorHost::Full, EventEditorHost::Window] {
+        let mut harness = app(host, true, egui::Theme::Light);
+        new_event(&mut harness);
+        typed(&mut harness, "Kiln");
+        if host == EventEditorHost::Full {
+            // Kept off the calendar: the close brings it back into sight.
+            harness.state_mut().show_mail();
+            harness.run();
+        }
+        assert!(quit(&mut harness), "{host:?}: the first close is taken back");
+        harness.run();
+        let editor = harness.state().calendar().editor().cloned();
+        assert!(editor.as_ref().is_some_and(crate::calendar::Editor::warned), "{host:?}: the editor says the event is not saved");
+        assert_eq!(editor.map(|editor| editor.form().summary.clone()).as_deref(), Some("Kiln"), "{host:?}: nothing lost");
+        let expected = match host {
+            EventEditorHost::Small => Shown::Small,
+            EventEditorHost::Full => Shown::Full,
+            EventEditorHost::Window => Shown::Window,
+        };
+        assert_eq!(shown(&harness), Some(expected), "{host:?}: the question is in sight");
+        harness.get_by_label_contains("close again to quit without it");
+        assert!(!quit(&mut harness), "{host:?}: a second close quits");
+    }
+    // Nothing typed: nothing to lose, the close goes through.
+    let mut harness = app(EventEditorHost::Full, true, egui::Theme::Light);
+    new_event(&mut harness);
+    assert!(!quit(&mut harness));
+}
+
+#[test]
+fn esc_and_the_desktop_s_close_in_one_pass_never_throw_the_typing_away() {
+    let mut harness = app(EventEditorHost::Window, true, egui::Theme::Light);
+    new_event(&mut harness);
+    typed(&mut harness, "Kiln");
+    window_keys(&mut harness, vec![esc()]);
+    assert!(harness.state().calendar().editor().is_some_and(crate::calendar::Editor::warned_by_escape), "Esc warned");
+    CLOSE.set(true);
+    window_keys(&mut harness, vec![esc()]);
+    let editor = harness.state().calendar().editor().cloned();
+    assert_eq!(editor.map(|editor| editor.form().summary.clone()).as_deref(), Some("Kiln"), "the close is no second Esc");
+}
+
+#[test]
+fn the_main_window_leaves_the_window_s_event_whole_and_brings_the_window_forward() {
+    let mut harness = app(EventEditorHost::Window, true, egui::Theme::Light);
+    edit(&mut harness, None);
+    let id = harness.state().calendar().editor().and_then(crate::calendar::Editor::id).unwrap();
+    typed(&mut harness, " moved");
+    // Delete of the very event the window edits, from the main window's details: refused, saying why.
+    harness.state_mut().apply_calendar(vec![Asked::Delete]);
+    harness.run();
+    assert!(harness.state().calendar().events().any(|event| event.id == id), "the event is not deleted");
+    assert!(open(&harness), "the editor stays");
+    harness.get_by_label_contains("is being edited in its window");
+    // New event in the main window while the window holds typing: the window comes forward and the line says so.
+    let window = super::super::event_editor_window();
+    harness.state_mut().apply_calendar(vec![Asked::New]);
+    harness.step();
+    let forward = harness.output().viewport_output.get(&window).is_some_and(|asked| asked.commands.contains(&egui::ViewportCommand::Focus));
+    assert!(forward, "the window is brought forward");
+    harness.run();
+    assert_eq!(harness.state().notice(), Some("The event editor's window holds typing: save or throw it away there first"));
+    assert_eq!(harness.state().calendar().editor().and_then(crate::calendar::Editor::id), Some(id), "the typed event stays");
+}
+
+#[test]
+fn an_empty_editor_replaced_in_place_gives_the_new_title_the_keyboard() {
+    let mut harness = app(EventEditorHost::Window, true, egui::Theme::Light);
+    new_event(&mut harness);
+    harness.run();
+    assert_eq!(seen().focus.as_deref(), Some("Title"));
+    let tab = Event::Key { key: Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+    window_keys(&mut harness, vec![tab]);
+    harness.run();
+    assert_ne!(seen().focus.as_deref(), Some("Title"), "the keyboard moved on");
+    edit(&mut harness, None);
+    harness.run();
+    assert!(harness.state().calendar().editor().and_then(crate::calendar::Editor::id).is_some(), "Edit replaced the empty editor");
+    assert_eq!(seen().focus.as_deref(), Some("Title"), "the new event's title has the keyboard");
+}
+
+#[test]
+fn the_day_beside_the_full_editor_starts_at_the_morning() {
+    let mut harness = app(EventEditorHost::Full, false, egui::Theme::Light);
+    // An event late in the day: in sight only once the hours start at the morning.
+    new_event(&mut harness);
+    {
+        let (calendar, _) = harness.state_mut().calendar_mut();
+        let form = calendar.editor_mut().unwrap().form_mut();
+        form.summary = "Late kiln".to_owned();
+        form.start = form.start.replace("09:00", "20:00");
+        form.end = form.end.replace("10:00", "21:00");
+    }
+    harness.state_mut().apply_calendar(vec![Asked::Save]);
+    harness.run();
+    assert!(!open(&harness), "saved");
+    new_event(&mut harness);
+    let late = harness.query_all_by_label_contains("Late kiln").map(|node| node.rect()).collect::<Vec<_>>();
+    assert!(!late.is_empty(), "the day beside shows the late event");
+    assert!(late.iter().all(|rect| rect.top() < 900.0), "and has it in sight: {late:?}");
+}
+
+#[test]
+fn ctrl_and_a_press_on_a_link_copies_it_in_the_full_editor_and_the_window() {
+    use egui::PointerButton;
+    let link = "Boards: https://files.example.org/boards";
+    // The full editor.
+    let mut harness = app(EventEditorHost::Full, false, egui::Theme::Light);
+    edit(&mut harness, Some("Call with Petra about the logo"));
+    harness.state_mut().calendar_mut().0.editor_mut().unwrap().form_mut().description = link.to_owned();
+    harness.run();
+    let rect = harness.get_by_role_and_label(Role::MultilineTextInput, "Description").rect();
+    let at = egui::pos2(rect.left() + rect.width() / 3.0, rect.top() + 18.0);
+    harness.event(Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event_modifiers(
+            Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::COMMAND },
+            Modifiers::COMMAND,
+        );
+        harness.run();
+    }
+    assert_eq!(harness.state().notice(), Some("Link copied: https://files.example.org/boards"), "full");
+    assert!(open(&harness));
+    // The window.
+    let mut harness = app(EventEditorHost::Window, true, egui::Theme::Light);
+    edit(&mut harness, Some("Call with Petra about the logo"));
+    harness.state_mut().calendar_mut().0.editor_mut().unwrap().form_mut().description = link.to_owned();
+    harness.run();
+    let rect = window_rect(Role::MultilineTextInput, "Description");
+    let at = egui::pos2(rect.left() + rect.width() / 3.0, rect.top() + 18.0);
+    click_in_window(&mut harness, at, Modifiers::COMMAND);
+    harness.run();
+    assert_eq!(harness.state().notice(), Some("Link copied: https://files.example.org/boards"), "window");
+    assert!(open(&harness));
 }
