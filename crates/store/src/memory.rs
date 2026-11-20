@@ -188,7 +188,9 @@ impl State {
                 self.senders.remove(&sender_key(address));
             }
             Change::SetMessageState(id, state) => {
-                self.held(*id)?;
+                if !self.messages.contains_key(id) {
+                    return Err(StoreError::UnknownMessage(*id));
+                }
                 if state.is_empty() {
                     self.states.remove(id);
                 } else {

@@ -3,7 +3,10 @@
 
 use std::sync::Arc;
 
-use inboxcraft_model::{Account, AccountId, Draft, DraftId, EmailAddress, Host, Security, Server};
+use inboxcraft_model::{
+    Account, AccountId, Draft, DraftId, EmailAddress, Envelope, Folder, FolderId, FolderListing, FolderPath, Host, Message, MessageId, MessageState,
+    Security, Server, Summary, Uid,
+};
 use inboxcraft_time::Timestamp;
 
 use super::Memory;
@@ -31,6 +34,24 @@ fn a_kept_draft_copies_the_drafts_and_shares_every_other_table() {
     assert!(!Arc::ptr_eq(&drafts, &store.state.drafts.0), "the drafts changed in place of a copy");
     assert_eq!(store.draft(DraftId::new(1)).unwrap().map(|draft| draft.text), Some("Plot 14, at ten".to_owned()));
     assert_eq!(drafts.get(&DraftId::new(1)).map(|draft| draft.text.as_str()), Some("Plot 14"), "the old table is left as it was");
+}
+
+/// Pinning, parking or snoozing a message writes its state, never the messages: the state change checked the message
+/// with a write borrow before and so copied the whole messages table (#243).
+#[test]
+fn a_message_state_copies_the_states_and_shares_the_messages() {
+    let mut store = Memory::new(StoreConfig::default());
+    let folder = Folder::new(FolderId::new(1), AccountId::new(1), FolderListing::new(FolderPath::new("INBOX", Some('/')).unwrap(), vec![], true));
+    let message = Message::new(MessageId::new(1), AccountId::new(1), FolderId::new(1), Summary::new(Uid::new(1).unwrap(), Envelope::new("Plot 14")));
+    store.apply(&Batch::new().with(Change::PutAccount(account(1))).with(Change::PutFolder(folder)).with(Change::PutMessage(message))).unwrap();
+    let (messages, states) = (Arc::clone(&store.state.messages.0), Arc::clone(&store.state.states.0));
+    let pinned = MessageState { pinned: true, ..MessageState::default() };
+    store.apply(&Batch::new().with(Change::SetMessageState(MessageId::new(1), pinned.clone()))).unwrap();
+    assert!(Arc::ptr_eq(&messages, &store.state.messages.0), "the messages were copied");
+    assert!(!Arc::ptr_eq(&states, &store.state.states.0), "the states changed in place of a copy");
+    assert_eq!(store.message_state(MessageId::new(1)).unwrap(), pinned);
+    let refused = store.apply(&Batch::new().with(Change::SetMessageState(MessageId::new(9), pinned)));
+    assert_eq!(refused, Err(StoreError::UnknownMessage(MessageId::new(9))));
 }
 
 /// A batch refused halfway leaves the tables it wrote to as they were, also while they are shared.
