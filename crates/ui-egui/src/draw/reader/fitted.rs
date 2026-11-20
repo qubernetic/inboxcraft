@@ -16,9 +16,18 @@
 //! A table is a hairline table as its sheet draws one: a 1 px `line` edge round it, a 1 px `panel_line` between two
 //! rows and none between the columns, the words 12 in from the sides and the columns 12 apart, a row of one line 32
 //! high (a row of head cells 28, on `panel`, its words in `label` and `muted`) and a taller one 6 above and below its
-//! words. Its columns get their widths from [`column_widths`], each what its words ask while all fit (the cleaner
-//! keeps no widths of the mail's own), cut at whole pixels; a column keeps at least 36, and a table that cannot keep
-//! that in its room scrolls sideways inside itself. Tables nest 4 deep; a deeper one is set as its cells' blocks one
+//! words. A table that asks for a width (pixels or a share) is that wide, never wider than its room, and its columns
+//! that ask for one take it (scaled to fit); the others get their widths from [`column_widths`], each what its words
+//! ask while all fit, cut at whole pixels; a column keeps at least 36, and a table that cannot keep that in its room
+//! scrolls sideways inside itself. A cell's kept background fills the cell.
+//!
+//! What the message keeps of its look ([`inboxcraft_html::Look`]): a block stands left, in the middle or right; a
+//! picture or a table narrower than its room moves with it. Blocks on a kept background stand in a band of it, 14
+//! above, 16 below and 32 in from the sides, 6 apart, their words and links in the background's own ink (a near
+//! black or white that reaches 4.5:1 on it). A link styled as a button is drawn as a secondary button 36 high, its
+//! words in `button` 16 in from its sides (on its own background where the message keeps one): a Tab stop like any
+//! link, whose target the status float shows under the pointer or the focus; Enter or a click copies it, nothing
+//! opens. Tables nest 4 deep; a deeper one is set as its cells' blocks one
 //! after another. At most 64 columns and 1 000 rows are drawn; a line under the table says what was left out.
 //!
 //! Everything in a message is data and bounded: the blocks are laid out once for a message, a width and the state of
@@ -32,9 +41,10 @@ use std::sync::{Arc, Mutex};
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    ColorImage, Galley, Id, Pos2, Rect, Role, ScrollArea, Sense, Stroke, StrokeKind, TextureOptions, Ui, UiBuilder, Vec2, WidgetInfo, pos2, vec2,
+    Color32, ColorImage, Galley, Id, Pos2, Rect, Role, ScrollArea, Sense, Stroke, StrokeKind, TextureOptions, Ui, UiBuilder, Vec2, WidgetInfo, pos2,
+    vec2,
 };
-use inboxcraft_html::{Block, Cell, Document, Image, ImageSource, LinkTarget, Marker, Span, TextKind};
+use inboxcraft_html::{Align, Block, Cell, Document, Image, ImageSource, LinkTarget, Look, Marker, Paint, Rgb, Span, TextKind, Width};
 
 use crate::component::picture_box::{self, Measured, PictureLook};
 use crate::component::quote_fold::{FOLD_EDGE, fold_line};
@@ -47,6 +57,15 @@ use crate::tr;
 
 use super::body::column_widths;
 use super::{Asked, Drawn, Textures};
+
+/// A band of a kept background: how far its blocks stand in from its top, foot and sides, and apart.
+const BAND_PAD: (f32, f32, f32) = (14.0, 16.0, 32.0);
+
+/// The room between two blocks in a band of a kept background.
+const BAND_GAP: f32 = 6.0;
+
+/// A button-link's height, and how far its words stand in from its sides.
+const BUTTON: (f32, f32) = (36.0, 16.0);
 
 /// The room between two blocks, in points.
 const GAP: f32 = 12.0;
@@ -108,6 +127,10 @@ const KEPT_GLYPHS: usize = 4 * 1024 * 1024;
 /// A message's blocks laid out: what stands where, relative to the top left of the message.
 pub(super) struct Laid {
     items: Vec<Item>,
+    /// The bands of kept backgrounds, from the top down (an outer band before the ones inside it), with their colour.
+    grounds: Vec<(Rect, Color32)>,
+    /// For each band, the lowest foot of the bands down to it, so the first in sight is found by halving.
+    ground_reach: Vec<f32>,
     /// The quotes' rules and fold edges; once laid out, in columns (one for each left edge), each from the top down.
     rules: Vec<Rect>,
     /// The columns of `rules`: where each begins and ends in it.
@@ -122,7 +145,30 @@ pub(super) struct Laid {
 impl Laid {
     /// Nothing laid out.
     fn empty() -> Self {
-        Self { items: Vec::new(), rules: Vec::new(), columns: Vec::new(), reach: Vec::new(), stops: Vec::new(), height: 0.0 }
+        Self {
+            items: Vec::new(),
+            grounds: Vec::new(),
+            ground_reach: Vec::new(),
+            rules: Vec::new(),
+            columns: Vec::new(),
+            reach: Vec::new(),
+            stops: Vec::new(),
+            height: 0.0,
+        }
+    }
+
+    /// Orders the bands from the top down, once all are made.
+    fn order_grounds(&mut self) {
+        self.grounds.sort_by(|a, b| a.0.top().total_cmp(&b.0.top()));
+        let mut lowest = f32::NEG_INFINITY;
+        self.ground_reach = self
+            .grounds
+            .iter()
+            .map(|(rect, _)| {
+                lowest = lowest.max(rect.bottom());
+                lowest
+            })
+            .collect();
     }
 
     /// Notes which items hold a Tab stop, once all are placed.
@@ -159,9 +205,13 @@ struct Item {
 
 /// What a placed block is.
 enum Kind {
-    /// Words: the galley at `left` in the item, a list item's mark before it, the links in it, what a screen reader
-    /// hears (none where the words are only links, which say themselves).
-    Text { galley: Arc<Galley>, left: f32, mark: Option<Arc<Galley>>, links: Vec<Piece>, spoken: Option<String> },
+    /// Words: the galley in a box `left` into the item, its origin `shift` further (in the box's middle or at its right
+    /// for centred or right-aligned words), a list item's mark before it, the links in it and their ink, what a screen
+    /// reader hears (none where the words are only links, which say themselves).
+    Text { galley: Arc<Galley>, left: f32, shift: f32, mark: Option<Arc<Galley>>, links: Vec<Piece>, ink: Color32, spoken: Option<String> },
+    /// A link styled as a button: its words, the link, and its own background and ink where the message keeps one.
+    /// `on_ground` says it stands on a kept background whose ink it takes.
+    ButtonLink { galley: Arc<Galley>, link: usize, fill: Option<Color32>, ink: Color32, on_ground: bool },
     /// Preformatted text in its box.
     Pre { galley: Arc<Galley>, spoken: String },
     /// A horizontal rule.
@@ -191,6 +241,7 @@ impl Kind {
         let linked = |link: Option<usize>| link.is_some_and(|index| document.links.get(index).is_some());
         match self {
             Self::Text { links, .. } => !links.is_empty(),
+            Self::ButtonLink { link, .. } => linked(Some(*link)),
             Self::Picture { image, .. } => linked(image.link),
             Self::Missing { measured, link, .. } => linked(*link) || measured.retry,
             Self::Fold { .. } => true,
@@ -220,6 +271,7 @@ struct Section {
 /// A table laid out: its columns' lefts and widths, its rows, how wide and high it is, and what was left out.
 struct Grid {
     lefts: Vec<f32>,
+    widths: Vec<f32>,
     rows: Vec<GridRow>,
     /// The rows that hold a Tab stop, in order.
     stops: Vec<usize>,
@@ -237,13 +289,17 @@ struct GridRow {
     tops: Vec<f32>,
     /// The cells that hold a Tab stop, in order.
     stops: Vec<usize>,
+    /// Each cell's kept background.
+    fills: Vec<Option<Color32>>,
 }
 
-/// How the text of a block is set: the style of its paragraphs, and whether it is a table's head.
+/// How the text of a block is set: the style of its paragraphs, whether it is a table's head, and the kept background
+/// its blocks already stand on (whose ink they take).
 #[derive(Clone, Copy)]
 struct Style {
     text: Font,
     head: bool,
+    ground: Option<Paint>,
 }
 
 /// What laying out needs to know.
@@ -292,7 +348,7 @@ pub(super) fn blocks(
     let probe = ui.painter().layout_job(LayoutJob::single_section("fitted".to_owned(), theme.fonts.read.format(theme.palette.ink)));
     let Some(laid) = kept(ui, probe, who, key, || {
         let context = Context { ui, theme, reader, document, id, quotes, ppp };
-        Arc::new(lay(&context, list, width, Style { text: theme.fonts.read, head: false }, depth))
+        Arc::new(lay(&context, list, width, Style { text: theme.fonts.read, head: false, ground: None }, depth))
     }) else {
         return false;
     };
@@ -432,7 +488,7 @@ fn glyphs(laid: &Laid) -> usize {
         .iter()
         .map(|item| match &item.kind {
             Kind::Text { galley, mark, .. } => of(galley).saturating_add(mark.as_ref().map_or(0, |mark| of(mark))),
-            Kind::Pre { galley, .. } => of(galley),
+            Kind::Pre { galley, .. } | Kind::ButtonLink { galley, .. } => of(galley),
             Kind::Missing { measured, .. } => measured.galleys().map(|galley| of(galley)).fold(0, usize::saturating_add),
             Kind::Table(grid) => grid
                 .rows
@@ -528,6 +584,17 @@ fn lay(context: &Context<'_>, list: &[Block], width: f32, style: Style, depth: u
         let quote = quote_of(block);
         if quote == 0 {
             own = true;
+            // A run of blocks on a kept background other than the one they stand on already: a band of it.
+            if let Some(ground) = look_of(block).background.filter(|ground| style.ground != Some(*ground)) {
+                let length = list
+                    .get(index..)
+                    .map_or(0, |rest| rest.iter().take_while(|block| quote_of(block) == 0 && look_of(block).background == Some(ground)).count())
+                    .max(1);
+                let run = list.get(index..index.saturating_add(length)).unwrap_or_default();
+                band(context, &mut laid, &mut y, &mut previous, run, width, Style { ground: Some(ground), ..style }, depth);
+                index = index.saturating_add(length);
+                continue;
+            }
             place(context, &mut laid, &mut y, &mut previous, block, width, style, depth, 0);
             index += 1;
             continue;
@@ -569,8 +636,83 @@ fn lay(context: &Context<'_>, list: &[Block], width: f32, style: Style, depth: u
     }
     laid.height = y.ceil();
     laid.order_rules();
+    laid.order_grounds();
     laid.find_stops(context.document);
     laid
+}
+
+/// Places `run`, blocks on one kept background (`style.ground`), as a band of it under what stands at `y`, and moves
+/// `y` to its foot; nothing where none of them has anything to draw.
+#[expect(clippy::too_many_arguments, reason = "the state of a layout in progress")]
+fn band<'b>(
+    context: &Context<'_>,
+    laid: &mut Laid,
+    y: &mut f32,
+    previous: &mut Option<&'b Block>,
+    run: &'b [Block],
+    width: f32,
+    style: Style,
+    depth: usize,
+) {
+    let Some(ground) = style.ground else { return };
+    let (top, foot, side) = BAND_PAD;
+    let inner = lay(context, run, (width - side * 2.0).max(1.0), style, depth);
+    if inner.items.is_empty() {
+        return;
+    }
+    if previous.is_some() {
+        *y += GAP;
+    }
+    let shift = vec2(side, *y + top);
+    let high = top + inner.height + foot;
+    laid.grounds.push((Rect::from_min_size(pos2(0.0, *y), vec2(width, high)), colour_of(ground.fill)));
+    laid.grounds.extend(inner.grounds.into_iter().map(|(rect, colour)| (rect.translate(shift), colour)));
+    laid.items.extend(inner.items.into_iter().map(|item| Item { rect: item.rect.translate(shift), kind: item.kind }));
+    laid.rules.extend(inner.rules.into_iter().map(|rule| rule.translate(shift)));
+    *y += high;
+    *previous = run.last();
+}
+
+/// A colour of the message as egui paints it.
+fn colour_of(rgb: Rgb) -> Color32 {
+    Color32::from_rgb(rgb.r, rgb.g, rgb.b)
+}
+
+/// What a block keeps of the message's look (a rule keeps none).
+fn look_of(block: &Block) -> Look {
+    match block {
+        Block::Text { look, .. } | Block::Image { look, .. } | Block::Table { look, .. } => *look,
+        Block::Rule { .. } => Look::default(),
+    }
+}
+
+/// How far into `room` a thing `wide` of a block aligned `align` starts.
+fn across(align: Align, room: f32, wide: f32) -> f32 {
+    let spare = (room - wide).max(0.0);
+    match align {
+        Align::Left => 0.0,
+        Align::Centre => (spare / 2.0).round(),
+        Align::Right => spare,
+    }
+}
+
+/// The link all of a text's words belong to, when it is a button-link.
+fn button_of(document: &Document, spans: &[Span]) -> Option<usize> {
+    let mut found = None;
+    for span in spans {
+        match (found, span.link) {
+            (_, None) if span.text.trim().is_empty() => {}
+            (None, Some(link)) => found = Some(link),
+            (Some(had), Some(link)) if had == link => {}
+            _ => return None,
+        }
+    }
+    found.filter(|link| document.links.get(*link).is_some_and(|link| link.button))
+}
+
+/// The room between two blocks in `style`: less in a band of a kept background.
+fn gap_in(style: Style) -> f32 {
+    if style.ground.is_some() { BAND_GAP } else { GAP }
 }
 
 /// Places `block` under what stands at `y`, `level` levels into a quote, and moves `y` to its foot.
@@ -587,22 +729,27 @@ fn place<'b>(
     level: u8,
 ) {
     let listed = |block: &Block| matches!(block, Block::Text { kind: TextKind::ListItem { .. }, .. });
+    let gap = gap_in(style);
     if let Some(before) = previous {
-        *y += if listed(before) && listed(block) { LIST_GAP } else { GAP };
+        *y += if listed(before) && listed(block) { LIST_GAP } else { gap };
     }
     let indent = LEVEL * f32::from(level);
     let room = (width - indent).max(1.0);
     let at = pos2(indent, *y);
+    let align = look_of(block).align;
+    // A thing narrower than its room stands where its block's alignment puts it.
+    let aligned = |(kind, size): (Kind, Vec2)| Item { rect: Rect::from_min_size(at + vec2(across(align, room, size.x), 0.0), size), kind };
     let item = match block {
-        Block::Text { kind, spans, .. } => {
-            text(context, *kind, spans, level > 0, style, room).map(|(kind, size)| Item { rect: Rect::from_min_size(at, size), kind })
-        }
+        Block::Text { kind, spans, .. } => match button_of(context.document, spans) {
+            Some(link) if *kind != TextKind::Preformatted => button(context, spans, link, style, room).map(aligned),
+            _ => text(context, *kind, spans, level > 0, style, align, room).map(|(kind, size)| Item { rect: Rect::from_min_size(at, size), kind }),
+        },
         Block::Rule { .. } => Some(Item { rect: Rect::from_min_size(at, vec2(room, 1.0)), kind: Kind::Rule }),
-        Block::Image { image, .. } => picture(context, image, room).map(|(kind, size)| Item { rect: Rect::from_min_size(at, size), kind }),
-        Block::Table { rows, .. } if depth < MAX_DEPTH => {
-            let grid = grid(context, rows, room, depth);
+        Block::Image { image, .. } => picture(context, image, room).map(aligned),
+        Block::Table { rows, width, .. } if depth < MAX_DEPTH => {
+            let grid = grid(context, rows, room, *width, style, depth);
             let size = vec2(grid.size.x.min(room), grid.size.y + grid.note.as_ref().map_or(0.0, |note| LIST_GAP + note.size().y));
-            Some(Item { rect: Rect::from_min_size(at, size), kind: Kind::Table(Box::new(grid)) })
+            Some(aligned((Kind::Table(Box::new(grid)), size)))
         }
         Block::Table { rows, .. } => {
             // Too deep to draw as a table: its cells' blocks one after another.
@@ -614,20 +761,22 @@ fn place<'b>(
                     continue;
                 }
                 if top > 0.0 {
-                    top += GAP;
+                    top += gap;
                 }
                 let shift = vec2(indent, *y + top);
                 flat.items.extend(inner.items.into_iter().map(|item| Item { rect: item.rect.translate(shift), kind: item.kind }));
                 flat.rules.extend(inner.rules.into_iter().map(|rule| rule.translate(shift)));
+                flat.grounds.extend(inner.grounds.into_iter().map(|(rect, colour)| (rect.translate(shift), colour)));
                 top += inner.height;
             }
             if top > 0.0 {
                 laid.items.append(&mut flat.items);
                 laid.rules.append(&mut flat.rules);
+                laid.grounds.append(&mut flat.grounds);
                 *y += top;
                 *previous = Some(block);
             } else if previous.is_some() {
-                *y -= if previous.is_some_and(listed) && listed(block) { LIST_GAP } else { GAP };
+                *y -= if previous.is_some_and(listed) && listed(block) { LIST_GAP } else { gap };
             }
             return;
         }
@@ -641,7 +790,7 @@ fn place<'b>(
         None => {
             // Nothing to draw: the room before it goes too.
             if let Some(before) = previous {
-                *y -= if listed(before) && listed(block) { LIST_GAP } else { GAP };
+                *y -= if listed(before) && listed(block) { LIST_GAP } else { gap };
             }
         }
     }
@@ -660,8 +809,8 @@ fn font_of(theme: &Theme, kind: TextKind, style: Style) -> Font {
     }
 }
 
-/// A text block laid out `room` wide: its kind and size; nothing for a block of no words.
-fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, style: Style, room: f32) -> Option<(Kind, Vec2)> {
+/// A text block laid out `room` wide, its lines aligned `align`: its kind and size; nothing for a block of no words.
+fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, style: Style, align: Align, room: f32) -> Option<(Kind, Vec2)> {
     let theme = context.theme;
     let p = &theme.palette;
     let f = &theme.fonts;
@@ -669,7 +818,10 @@ fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, sty
         return None;
     }
     let font = font_of(theme, kind, style);
-    let colour = if quoted || style.head { p.muted } else { p.ink };
+    // On a kept background the words and the links are in its ink.
+    let ground = style.ground.map(|ground| colour_of(ground.ink));
+    let colour = ground.unwrap_or(if quoted || style.head { p.muted } else { p.ink });
+    let link_ink = ground.unwrap_or(p.cyan_text);
     let (mark, left) = match kind {
         TextKind::ListItem { depth, marker } => {
             let mark = match marker {
@@ -686,6 +838,18 @@ fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, sty
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap.max(1.0);
     job.wrap.break_anywhere = pre;
+    // A list item and preformatted text stand at the left whatever the message says.
+    let halign = match (align, kind) {
+        (_, TextKind::ListItem { .. } | TextKind::Preformatted) | (Align::Left, _) => egui::Align::Min,
+        (Align::Centre, _) => egui::Align::Center,
+        (Align::Right, _) => egui::Align::Max,
+    };
+    job.halign = halign;
+    let shift = match halign {
+        egui::Align::Min => 0.0,
+        egui::Align::Center => wrap.max(1.0) / 2.0,
+        egui::Align::Max => wrap.max(1.0),
+    };
     let mut sections: Vec<Section> = Vec::new();
     let mut chars = 0_usize;
     let mut words = String::new();
@@ -699,7 +863,7 @@ fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, sty
             font.face
         };
         let linked = span.link.is_some();
-        let mut format: TextFormat = Font { face, ..font }.format(if linked { p.cyan_text } else { colour });
+        let mut format: TextFormat = Font { face, ..font }.format(if linked { link_ink } else { colour });
         format.italics = span.italic;
         // A link's underline is painted as the design draws it (the face's own place and weight, see `pieces`).
         if span.underline && !linked {
@@ -728,7 +892,29 @@ fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, sty
     let only_links = sections.iter().all(|section| section.link.is_some() || section.start == section.end);
     let spoken = (!only_links).then(|| crate::component::spoken(crate::component::capped(&words, MOST_SPOKEN).0));
     let size = vec2(room, galley.size().y.ceil().max(font.line));
-    Some((Kind::Text { galley, left, mark, links, spoken }, size))
+    Some((Kind::Text { galley, left, shift, mark, links, ink: link_ink, spoken }, size))
+}
+
+/// A button-link laid out in `room`: its words in `button`, in the middle of a box 36 high and 16 wider on each side;
+/// nothing for one of no words.
+fn button(context: &Context<'_>, spans: &[Span], link: usize, style: Style, room: f32) -> Option<(Kind, Vec2)> {
+    let theme = context.theme;
+    let words: String = spans.iter().map(|span| span.text.as_str()).collect();
+    let words = crate::component::plain_lines(words.trim());
+    if words.trim().is_empty() {
+        return None;
+    }
+    let own = context.document.links.get(link).and_then(|link| link.fill).map(|paint| (colour_of(paint.fill), colour_of(paint.ink)));
+    let ground = style.ground.map(|ground| colour_of(ground.ink));
+    let ink = own.map(|(_, ink)| ink).or(ground).unwrap_or(theme.palette.ink);
+    let font = theme.fonts.button;
+    let (high, pad) = BUTTON;
+    let mut job = LayoutJob::single_section(font.text(&words), font.format(ink));
+    job.wrap.max_width = (room - pad * 2.0).max(1.0);
+    job.halign = egui::Align::Center;
+    let galley = paint::on_baseline(context.ui.painter().layout_job(job));
+    let size = vec2((galley.size().x + pad * 2.0).ceil().min(room.max(1.0)), (galley.size().y + 20.0).ceil().max(high));
+    Some((Kind::ButtonLink { galley, link, fill: own.map(|(fill, _)| fill), ink, on_ground: ground.is_some() }, size))
 }
 
 /// The boxes of the links of `galley`, whose `sections` say which characters belong to which link.
@@ -833,6 +1019,7 @@ fn wanted_width(context: &Context<'_>, block: &Block, depth: usize) -> f32 {
             Some(PictureState::Ready(decoded)) => decoded.width as f32,
             _ => WANTED_PICTURE,
         },
+        Block::Table { width: Some(Width::Pixels(pixels)), .. } if depth < MAX_DEPTH => *pixels as f32,
         Block::Table { rows, .. } if depth < MAX_DEPTH => {
             let columns = wanted_columns(context, rows, depth.saturating_add(1));
             columns.iter().map(|column| column + CELL_GAP).sum::<f32>() + CELL_GAP
@@ -859,15 +1046,27 @@ fn wanted_columns(context: &Context<'_>, rows: &[Vec<Cell>], depth: usize) -> Ve
 /// whole pixels and at least [`LEAST_COLUMN`] (wider than the room, it scrolls); a row of one line 32 high and a head
 /// 28, its cells' words in the middle; a row of more lines 6 above and below its tallest cell, its cells at the top; a
 /// 1 px rule between two rows.
-fn grid(context: &Context<'_>, rows: &[Vec<Cell>], room: f32, depth: usize) -> Grid {
+///
+/// A table that asks for a `width` is that wide (no wider than `room`, unless its columns cannot keep 36 there), and
+/// its columns that ask for one take it, scaled down together when they ask for more than there is; the rest share
+/// what is left. `style` is the background the table stands on, which its cells without one of their own keep.
+fn grid(context: &Context<'_>, rows: &[Vec<Cell>], room: f32, width: Option<Width>, style: Style, depth: usize) -> Grid {
     let theme = context.theme;
     let wanted = wanted_columns(context, rows, depth);
     let count = wanted.len();
     let gaps = CELL_GAP * (count as f32 + 1.0);
     let least = LEAST_COLUMN * count as f32;
-    let widths = column_widths(&wanted, (room - gaps).max(least), 0.0);
+    let widths = asked_widths(rows, &wanted, room, width, gaps, least);
     let ppp = if context.ppp.is_finite() && context.ppp > 0.0 { context.ppp } else { 1.0 };
-    let widths: Vec<f32> = widths.into_iter().map(|width| ((width * ppp).floor() / ppp).max(1.0)).collect();
+    let asked_total: f32 = widths.iter().sum();
+    let mut widths: Vec<f32> = widths.into_iter().map(|width| ((width * ppp).floor() / ppp).max(1.0)).collect();
+    // A table that asks for a width keeps it: what the whole pixels cut off goes to its last column.
+    let cut = ((asked_total * ppp).floor() / ppp - widths.iter().sum::<f32>()).max(0.0);
+    if width.is_some()
+        && let Some(last) = widths.last_mut()
+    {
+        *last += cut;
+    }
     let mut lefts = Vec::with_capacity(count);
     let mut x = CELL_GAP;
     for width in &widths {
@@ -882,15 +1081,18 @@ fn grid(context: &Context<'_>, rows: &[Vec<Cell>], room: f32, depth: usize) -> G
             top += 1.0;
         }
         let head = !row.is_empty() && row.iter().all(|cell| cell.header);
-        let style = Style { text: theme.fonts.body, head };
+        let ground = |cell: &Cell| cell.background.or(style.ground);
         let cells: Vec<Laid> = widths
             .iter()
             .enumerate()
             .map(|(index, width)| match row.get(index) {
-                Some(cell) => lay(context, &cell.blocks, *width, style, depth.saturating_add(1)),
+                Some(cell) => {
+                    lay(context, &cell.blocks, *width, Style { text: theme.fonts.body, head, ground: ground(cell) }, depth.saturating_add(1))
+                }
                 None => Laid::empty(),
             })
             .collect();
+        let fills = (0..count).map(|index| row.get(index).and_then(|cell| cell.background).map(|paint| colour_of(paint.fill))).collect();
         // A row of one line (of a head's labels, or of the cells' words) stands as high as the sheet's; a taller one
         // takes its tallest cell and 6 above and below.
         let (line, least) = if head { (theme.fonts.label.line, head_high) } else { (theme.fonts.body.line, row_high) };
@@ -899,14 +1101,56 @@ fn grid(context: &Context<'_>, rows: &[Vec<Cell>], room: f32, depth: usize) -> G
         let high = if single { least } else { (tallest + CELL_PAD_Y * 2.0).ceil().max(least) };
         let tops = cells.iter().map(|cell| if single { ((high - cell.height) / 2.0).round().max(0.0) } else { CELL_PAD_Y }).collect();
         let stops = cells.iter().enumerate().filter(|(_, cell)| !cell.stops.is_empty()).map(|(index, _)| index).collect();
-        laid_rows.push(GridRow { top, high, head, cells, tops, stops });
+        laid_rows.push(GridRow { top, high, head, cells, tops, stops, fills });
         top += high;
     }
     let shown_columns = rows.iter().take(MOST_ROWS).map(Vec::len).max().unwrap_or(0);
     let note = crate::component::hairline_table::left_out(shown_columns.saturating_sub(count), rows.len().saturating_sub(MOST_ROWS))
         .map(|note| crate::component::wrapped(context.ui, &note, theme.fonts.caption, theme.palette.muted, room.max(1.0), 2, egui::Align::LEFT));
     let stops = laid_rows.iter().enumerate().filter(|(_, row)| !row.stops.is_empty()).map(|(index, _)| index).collect();
-    Grid { lefts, rows: laid_rows, stops, size: vec2(x, top.max(2.0)), note }
+    Grid { lefts, widths, rows: laid_rows, stops, size: vec2(x, top.max(2.0)), note }
+}
+
+/// Points of a width the message asks for, in `room`.
+fn points(width: Width, room: f32) -> f32 {
+    match width {
+        Width::Pixels(pixels) => (pixels as f32).min(room),
+        Width::Share(share) => room * f32::from(share.min(100)) / 100.0,
+    }
+}
+
+/// The widths of a table's columns, their gaps (`gaps` in all) left out: what the table and its cells ask for
+/// ([`grid`]), else what their words ask while all fit in `room` ([`column_widths`]); `least` is what they keep.
+fn asked_widths(rows: &[Vec<Cell>], wanted: &[f32], room: f32, width: Option<Width>, gaps: f32, least: f32) -> Vec<f32> {
+    let count = wanted.len();
+    let target = width.map(|width| (points(width, room) - gaps).max(least));
+    let space = target.unwrap_or((room - gaps).max(least));
+    // Each column's width as its cells ask for it, the widest ask.
+    let mut asked: Vec<Option<f32>> = vec![None; count];
+    for row in rows.iter().take(MOST_ROWS) {
+        for (cell, slot) in row.iter().zip(asked.iter_mut()) {
+            if let Some(width) = cell.width {
+                let points = points(width, space);
+                *slot = Some(slot.map_or(points, |had: f32| had.max(points)));
+            }
+        }
+    }
+    if target.is_none() && asked.iter().all(Option::is_none) {
+        return column_widths(wanted, space, 0.0);
+    }
+    let rest: Vec<f32> = wanted.iter().zip(&asked).filter(|(_, asked)| asked.is_none()).map(|(wanted, _)| *wanted).collect();
+    // The columns that ask for nothing keep at least 36 each: those that ask share the rest.
+    let sum: f32 = asked.iter().flatten().sum();
+    let room_asked = (space - LEAST_COLUMN * rest.len() as f32).max(0.0);
+    let scale = if sum > room_asked && sum > 0.0 { room_asked / sum } else { 1.0 };
+    let mut shared = column_widths(&rest, (space - sum * scale).max(0.0), 0.0).into_iter();
+    let mut widths: Vec<f32> = asked.iter().map(|asked| asked.map_or_else(|| shared.next().unwrap_or(0.0), |asked| asked * scale)).collect();
+    // A table that asks for a width is that wide: what its columns leave over goes to them all alike.
+    if target.is_some() && count > 0 {
+        let spare = (space - widths.iter().sum::<f32>()).max(0.0) / count as f32;
+        widths.iter_mut().for_each(|width| *width += spare);
+    }
+    widths
 }
 
 /// The drawing of a laid out message: what it needs and what it gives back.
@@ -987,6 +1231,17 @@ impl Show<'_> {
         let sight = ui.clip_rect();
         let p = &self.theme.palette;
         if let Reach::Near(_) = reach {
+            // The bands of kept backgrounds in sight, under everything else: the first found by halving.
+            let first = laid.ground_reach.partition_point(|foot| origin.y + foot < sight.top());
+            for (band, colour) in laid.grounds.iter().skip(first) {
+                let band = band.translate(origin.to_vec2());
+                if band.top() > sight.bottom() {
+                    break;
+                }
+                if band.intersects(sight) {
+                    ui.painter().rect_filled(paint::on_pixels(ui.painter(), band), 0.0, *colour);
+                }
+            }
             // The rules in sight, column by column: the first found by halving, the rest until one starts below sight.
             for column in &laid.columns {
                 let (Some(rules), Some(reach)) = (laid.rules.get(column.clone()), laid.reach.get(column.clone())) else { continue };
@@ -1032,17 +1287,23 @@ impl Show<'_> {
         let p = &theme.palette;
         let shows = rect.intersects(sight);
         match &item.kind {
-            Kind::Text { galley, left, mark, links, spoken } => {
+            Kind::Text { galley, left, shift, mark, links, ink, spoken } => {
                 if let (Some(spoken), Reach::Near(_)) = (spoken, reach) {
                     let response = ui.interact(rect, id.with("words"), Sense::hover());
                     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, spoken));
                 }
-                let at = pos2(rect.left() + left, rect.top());
+                let boxed = pos2(rect.left() + left, rect.top());
+                // The galley's origin: the box's left, or its middle or right for aligned words.
+                let at = pos2(boxed.x + shift, boxed.y);
                 if shows {
                     if let Some(mark) = mark {
-                        paint::run_at(ui.painter(), pos2(at.x - MARK, at.y), mark.clone(), p.ink);
+                        paint::run_at(ui.painter(), pos2(boxed.x - MARK, boxed.y), mark.clone(), p.ink);
                     }
-                    paint::rows_at(ui.painter(), at, (rect.width() - left).max(1.0), galley.clone(), p.ink);
+                    if *shift > 0.0 && galley.job.sections.len() > 1 {
+                        ui.painter().galley(at, galley.clone(), p.ink);
+                    } else {
+                        paint::rows_at(ui.painter(), boxed, (rect.width() - left).max(1.0), galley.clone(), p.ink);
+                    }
                 }
                 // Only the links near sight take the pointer and the keyboard (found by halving: a paragraph may hold
                 // thousands), with the nearest before and after them and the one with the focus.
@@ -1063,13 +1324,55 @@ impl Show<'_> {
                 let mut holds = None;
                 for (index, _) in picks(reach, near, around, edges, focused) {
                     if let Some(piece) = links.get(index)
-                        && self.link_piece(ui, piece, at, id.with(("link", index)))
+                        && self.link_piece(ui, piece, at, *ink, id.with(("link", index)))
                     {
                         holds = Some(index);
                     }
                 }
                 remember(ui, slot, holds);
                 holds.is_some()
+            }
+            Kind::ButtonLink { galley, link, fill, ink, on_ground } => {
+                let response = ui.interact(rect, id.with("button"), Sense::click());
+                let name = self.document.links.get(*link).map_or_else(String::new, |link| {
+                    if link.text.trim().is_empty() { link_status(link) } else { crate::component::spoken(&link.text) }
+                });
+                // A button-link is a link: it says so, and what it does is what a link does.
+                response.widget_info(|| WidgetInfo::labeled(Role::Link, true, &name));
+                if shows {
+                    let painter = ui.painter();
+                    let pressed = response.is_pointer_button_down_on();
+                    let hovered = response.hovered();
+                    match fill {
+                        // The message's own button: its background, and an edge in its ink under the pointer.
+                        Some(fill) => {
+                            painter.rect_filled(paint::on_pixels(painter, rect), 0.0, *fill);
+                            if hovered || pressed {
+                                paint::edge(painter, rect, 0.0, 1.0, *ink);
+                            }
+                        }
+                        // A secondary button: an edge at rest, `stage` under the pointer (on a kept background, its
+                        // ink's edge throughout).
+                        None => {
+                            if (hovered || pressed) && !on_ground {
+                                painter.rect_filled(paint::on_pixels(painter, rect), 0.0, p.stage);
+                            }
+                            let edge = if *on_ground {
+                                *ink
+                            } else if pressed {
+                                p.ink
+                            } else if hovered {
+                                p.muted
+                            } else {
+                                p.line
+                            };
+                            paint::edge(painter, rect, 0.0, 1.0, edge);
+                        }
+                    }
+                    let words = pos2(rect.left(), (rect.center().y - galley.size().y / 2.0).round());
+                    paint::rows_at(painter, words, rect.width(), galley.clone(), *ink);
+                }
+                self.picture_link(ui, &response, rect, Some(*link))
             }
             Kind::Pre { galley, spoken } => {
                 if let Reach::Near(_) = reach {
@@ -1175,6 +1478,14 @@ impl Show<'_> {
                 if row.head {
                     painter.rect_filled(Rect::from_min_size(pos2(origin.x, origin.y + row.top), vec2(grid.size.x, row.high)), 0.0, p.panel);
                 }
+                // A cell's kept background fills it, half the gap to its neighbours included.
+                for (column, fill) in row.fills.iter().enumerate() {
+                    let (Some(fill), Some(left), Some(width)) = (fill, grid.lefts.get(column), grid.widths.get(column)) else { continue };
+                    let from = if column == 0 { 0.0 } else { left - CELL_GAP / 2.0 };
+                    let to = if column + 1 >= grid.lefts.len() { grid.size.x } else { left + width + CELL_GAP / 2.0 };
+                    let cell = Rect::from_min_max(pos2(origin.x + from, origin.y + row.top), pos2(origin.x + to, origin.y + row.top + row.high));
+                    painter.rect_filled(paint::on_pixels(painter, cell), 0.0, *fill);
+                }
                 if row.top > 0.0 {
                     let y = origin.y + row.top - 1.0;
                     paint::hairline(painter, pos2(origin.x, y), pos2(origin.x + grid.size.x - 1.0, y), p.panel_line);
@@ -1259,7 +1570,7 @@ impl Show<'_> {
 
     /// The link of `piece` in a text at `at`: a Tab stop on its first box, the pointer on all of them; whether it has
     /// the focus.
-    fn link_piece(&mut self, ui: &mut Ui, piece: &Piece, at: Pos2, id: Id) -> bool {
+    fn link_piece(&mut self, ui: &mut Ui, piece: &Piece, at: Pos2, ink: Color32, id: Id) -> bool {
         let Some(link) = self.document.links.get(piece.link) else { return false };
         let mut boxes = piece.rects.iter().map(|rect| rect.translate(at.to_vec2()));
         let Some(first) = boxes.next() else { return false };
@@ -1287,7 +1598,7 @@ impl Show<'_> {
         if ui.is_rect_visible(first) || rest.iter().any(|rect| ui.is_rect_visible(*rect)) {
             for band in &piece.bands {
                 let band = band.translate(at.to_vec2());
-                paint::sampled_band(ui.painter(), band.left()..=band.right(), (band.top(), band.bottom()), self.theme.palette.cyan_text);
+                paint::sampled_band(ui.painter(), band.left()..=band.right(), (band.top(), band.bottom()), ink);
             }
         }
         if focus {
@@ -1380,3 +1691,7 @@ fn sideways_keys(ui: &Ui, theme: &Theme, shown: Rect, id: Id) -> (f32, bool) {
 #[cfg(test)]
 #[path = "fitted_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "fitted_look_tests.rs"]
+mod look_tests;

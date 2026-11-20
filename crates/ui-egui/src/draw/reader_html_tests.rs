@@ -767,3 +767,37 @@ fn a_failed_box_too_short_or_too_narrow_for_try_again_is_no_tab_stop() {
         assert!(harness.query_by_label("try again").is_none(), "{width} × {height}: no try again where none is drawn");
     }
 }
+
+#[test]
+fn a_button_link_is_a_tab_stop_that_shows_its_target_and_only_copies_it() {
+    let html = r##"<p>Winter lamps.</p><p><a href="https://shop.example.org/sale" style="display:inline-block;background:#FFE600;padding:10px 16px">Shop the sale</a></p>"##;
+    let mut harness = fitted(display(html), false, 640.0, 400.0);
+    // The mail's own yellow is painted under its words.
+    let yellow = egui::Color32::from_rgb(0xFF, 0xE6, 0x00);
+    assert!(leaves(&harness).iter().any(|shape| matches!(shape, Shape::Rect(rect) if rect.fill == yellow)), "the button's background");
+    // Under the pointer, the status float says where it goes.
+    harness.get_by_role_and_label(Role::Link, "Shop the sale").hover();
+    harness.run();
+    assert_eq!(harness.state().hover.as_deref(), Some("https://shop.example.org/sale"));
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness), Some((Role::Link, "Shop the sale".to_owned())));
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().asked, vec![Asked::Copy("https://shop.example.org/sale".to_owned())], "Enter copies the address, nothing opens");
+}
+
+#[test]
+fn a_button_with_a_script_action_says_it_goes_nowhere_and_does_nothing() {
+    let html = r#"<p>Claim your prize.</p><button onclick="javascript:alert(1)" formaction="javascript:alert(1)">Claim</button>"#;
+    let mut harness = fitted(display(html), false, 640.0, 400.0);
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness), Some((Role::Link, "Claim".to_owned())));
+    assert!(harness.state().hover.as_deref().is_some_and(|said| said.starts_with("This link is not followed")), "{:?}", harness.state().hover);
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.get_by_role_and_label(Role::Link, "Claim").click();
+    harness.run();
+    assert!(harness.state().asked.is_empty(), "{:?}", harness.state().asked);
+}
