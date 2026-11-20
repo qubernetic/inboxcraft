@@ -260,6 +260,8 @@ pub struct Composer {
     grown: bool,
     /// The chip each line scrolls into view in the next frame, by its place.
     bring: [Option<usize>; 3],
+    /// The text a new message started with (its signature); `None` for a draft opened or made from a message.
+    started_with: Option<String>,
 }
 
 /// What a line refused of what was typed in it, which stays in its typed text as it was written.
@@ -279,7 +281,9 @@ impl Composer {
     /// The command's refusal (no account to write from), or an answer the composer does not read.
     pub fn start(mailbox: &mut Mailbox) -> Result<Self, UiError> {
         let answer = mailbox.run("compose.new", &json!({}))?;
-        Self::over("compose.new", &answer)?.with_templates(mailbox)
+        let mut composer = Self::over("compose.new", &answer)?;
+        composer.started_with = Some(composer.text.clone());
+        composer.with_templates(mailbox)
     }
 
     /// A composer over a new draft made from the message `id` as `answer` asks, filled in by the engine.
@@ -355,6 +359,7 @@ impl Composer {
             sighted: Vec::new(),
             grown: false,
             bring: [None; 3],
+            started_with: None,
         };
         composer.take_answer(answer);
         Ok(composer)
@@ -403,6 +408,16 @@ impl Composer {
             .map(|blanks| blanks.iter().filter_map(Value::as_str).map(str::to_owned).collect())
             .unwrap_or_default();
         self.copies |= [Line::Cc, Line::Bcc].into_iter().any(|line| !self.chips(line).is_empty() || !self.typing(line).trim().is_empty());
+    }
+
+    /// Whether it is a new message nothing was written in: no recipient, nothing typed, no subject, the text as it
+    /// started (its signature). Its Discard has nothing to take back.
+    #[must_use]
+    pub fn untouched(&self) -> bool {
+        self.started_with.as_deref() == Some(self.text.as_str())
+            && self.subject.is_empty()
+            && self.lines.iter().all(Vec::is_empty)
+            && self.typing.iter().all(|typed| typed.trim().is_empty())
     }
 
     /// The draft's id.

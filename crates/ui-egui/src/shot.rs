@@ -193,8 +193,9 @@ pub struct Shot {
     pub view: Option<String>,
     /// The composer, the first account signed: `new`, `written` (two people, a subject and a few lines), `bad`
     /// (written, with a recipient that is no address), `suggest` (one person, and a name half typed with the people it
-    /// could be under it), `floating` (written, then a message opened), `folded` (the same, folded), `reply` (a reply with a line written) or
-    /// `template` (two people and a template whose blank is left).
+    /// could be under it), `floating` (written, then a message opened), `folded` (the same, folded), `reply` (a reply with a line written),
+    /// `template` (two people and a template whose blank is left) or `discarded` (written, then its Discard: the
+    /// status line's "Draft discarded" with Undo).
     #[serde(default)]
     pub compose: Option<String>,
     /// The action waiting for a key on the Shortcuts page.
@@ -757,8 +758,8 @@ fn sign(app: &mut InboxApp) {
 
 /// Opens the composer as `scene` asks.
 fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
-    if !["new", "written", "bad", "suggest", "floating", "folded", "reply", "template"].contains(&scene) {
-        return Err(bad(format!("{out}: compose {scene:?} is not new, written, bad, suggest, floating, folded, reply or template")));
+    if !["new", "written", "bad", "suggest", "floating", "folded", "reply", "template", "discarded"].contains(&scene) {
+        return Err(bad(format!("{out}: compose {scene:?} is not new, written, bad, suggest, floating, folded, reply, template or discarded")));
     }
     sign(app);
     if scene == "reply" {
@@ -782,7 +783,9 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
         composer.typed(mailbox, Line::To)
     };
     match scene {
-        "written" | "bad" | "floating" | "folded" | "template" => to("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,")?,
+        "written" | "bad" | "floating" | "folded" | "template" | "discarded" => {
+            to("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,")?
+        }
         "suggest" => to("Odile Brannock <odile@example.org>, te")?,
         _ => {}
     }
@@ -820,6 +823,13 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
     if scene == "floating" || scene == "folded" {
         let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").map(|row| row.id);
         app.mailbox_mut().select(id);
+    }
+    if scene == "discarded" {
+        // The composer's own Discard: closed, "Draft discarded" with Undo in the status line.
+        app.discard_composer();
+        if app.discarding().is_none() {
+            return Err(bad(format!("{out}: the discard does not wait: {}", app.mailbox().error().unwrap_or("no reason"))));
+        }
     }
     Ok(())
 }

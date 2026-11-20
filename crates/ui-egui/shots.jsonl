@@ -151,6 +151,8 @@
 {"out": "docs/images/status-line-send-countdown-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "outbox": "countdown"}
 {"out": "docs/images/status-line-undo-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "step": 1, "act": "done"}
 {"out": "docs/images/status-line-undo-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "step": 1, "act": "done"}
+{"out": "docs/images/status-line-discard-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "compose": "discarded"}
+{"out": "docs/images/status-line-discard-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "compose": "discarded"}
 {"out": "docs/images/status-line-error-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "open": {"folder": 4242}}
 {"out": "docs/images/status-line-error-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "open": {"folder": 4242}}
 {"out": "docs/images/status-line-notice-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "notice": "Link copied: https://example.org/open-day"}
