@@ -13,7 +13,7 @@
 use inboxcraft_time::{CivilDateTime, Offset};
 use serde_json::{Map, Value, json};
 
-use super::{Day, EventRow, Moment};
+use super::{Day, EventRow, MAX_DESCRIPTION, Moment};
 use crate::tr;
 
 /// The repeat presets the editor offers, as `event.repeats` names them.
@@ -140,6 +140,8 @@ pub struct Form {
     pub alert: Alert,
     /// The guests' addresses, separated by commas.
     pub guests: String,
+    /// What the event says about itself, its lines kept.
+    pub description: String,
 }
 
 /// The event editor.
@@ -156,6 +158,12 @@ pub struct Editor {
     notify: bool,
     /// Why the last save was refused.
     problem: Option<String>,
+    /// The link a press in the description copied last, until the status line says so.
+    copied: Option<String>,
+    /// Someone else's event, opened read-only: who organises it (empty when the event does not say).
+    theirs: Option<String>,
+    /// Whether the description read was cut to [`MAX_DESCRIPTION`]: it is then shown, never sent back cut.
+    description_cut: bool,
     /// The list of choices open in the form, when one is.
     menu: Option<Menu>,
     /// The form and the guests' answer as they were when the editor said the typing is not saved, and whether Esc made
@@ -188,8 +196,21 @@ impl Editor {
             repeat: REPEATS[0].to_owned(),
             alert: Alert::Default,
             guests: String::new(),
+            description: String::new(),
         };
-        Self { id: None, was: form.clone(), form, choices, notify: false, problem: None, menu: None, warned: None }
+        Self {
+            id: None,
+            was: form.clone(),
+            form,
+            choices,
+            notify: false,
+            problem: None,
+            copied: None,
+            theirs: None,
+            description_cut: false,
+            menu: None,
+            warned: None,
+        }
     }
 
     /// The occurrence `event` to edit: its times as the screen shows them.
@@ -208,8 +229,21 @@ impl Editor {
             repeat: event.repeat.clone().unwrap_or_else(|| REPEATS[0].to_owned()),
             alert: event.alert,
             guests: addresses.join(", "),
+            description: event.description.clone(),
         };
-        Self { id: Some(event.id), was: form.clone(), form, choices: Vec::new(), notify: false, problem: None, menu: None, warned: None }
+        Self {
+            id: Some(event.id),
+            was: form.clone(),
+            form,
+            choices: Vec::new(),
+            notify: false,
+            problem: None,
+            copied: None,
+            theirs: (!event.own).then(|| event.organizer.clone().unwrap_or_default()),
+            description_cut: event.description.chars().count() >= MAX_DESCRIPTION,
+            menu: None,
+            warned: None,
+        }
     }
 
     /// The list of choices open in the form, when one is.
@@ -229,10 +263,54 @@ impl Editor {
         self.id
     }
 
-    /// The editor's title: `New event` or `Edit event`.
+    /// The editor's title: `New event`, `Edit event`, or `Event` for someone else's.
     #[must_use]
     pub fn title(&self) -> &'static str {
-        if self.id.is_none() { tr!("New event") } else { tr!("Edit event") }
+        match (self.id, &self.theirs) {
+            (None, _) => tr!("New event"),
+            (Some(_), Some(_)) => tr!("Event"),
+            (Some(_), None) => tr!("Edit event"),
+        }
+    }
+
+    /// Whether the event is someone else's: the editor shows it and changes nothing.
+    #[must_use]
+    pub fn read_only(&self) -> bool {
+        self.theirs.is_some()
+    }
+
+    /// Why someone else's event cannot be changed here, in words: `Teodor Lisk's event. …`; `None` for the owner's.
+    #[must_use]
+    pub fn read_only_note(&self) -> Option<String> {
+        self.theirs.as_ref().map(|name| {
+            if name.trim().is_empty() {
+                tr!("Someone else's event. You can read it here; only the organiser can change it.").to_owned()
+            } else {
+                tr!("{name}'s event. You can read it here; only the organiser can change it.", name = name)
+            }
+        })
+    }
+
+    /// A press in the description at character `at` (with Ctrl or Cmd held: `command`): on a link, while Ctrl or Cmd
+    /// is held or the event is someone else's, the link to copy, kept for [`Self::take_copied`].
+    pub fn press_description(&mut self, at: usize, command: bool) -> Option<String> {
+        if !command && !self.read_only() {
+            return None;
+        }
+        let link = link_at(&self.form.description, at)?;
+        self.copied = Some(link.clone());
+        Some(link)
+    }
+
+    /// The link a press in the description copied, once.
+    pub fn take_copied(&mut self) -> Option<String> {
+        self.copied.take()
+    }
+
+    /// Whether the description can be changed: not in someone else's event, nor one read cut short.
+    #[must_use]
+    pub fn description_editable(&self) -> bool {
+        !self.read_only() && !self.description_cut
     }
 
     /// What the form holds.
@@ -270,7 +348,7 @@ impl Editor {
     /// Whether the editor asks to tell the guests of the change: an edit of an event with guests.
     #[must_use]
     pub fn asks_notify(&self) -> bool {
-        self.id.is_some() && !guests_of(&self.form.guests).is_empty()
+        self.id.is_some() && !self.read_only() && !guests_of(&self.form.guests).is_empty()
     }
 
     /// The question: `Tell the 2 guests about this change?`.
@@ -339,6 +417,9 @@ impl Editor {
     ///
     /// What cannot be read in the form, in words.
     pub fn changes(&self, offset: Offset) -> Result<Option<(&'static str, Value)>, String> {
+        if self.read_only() {
+            return Ok(None);
+        }
         let form = &self.form;
         let times = || -> Result<(String, String), String> {
             if form.all_day {
@@ -372,6 +453,13 @@ impl Editor {
                 }
                 (params, _) => params,
             };
+            let params = match params {
+                Value::Object(mut fields) if !form.description.trim().is_empty() => {
+                    fields.insert("description".to_owned(), json!(form.description));
+                    Value::Object(fields)
+                }
+                params => params,
+            };
             return Ok(Some(("event.create", params)));
         };
         let was = &self.was;
@@ -404,6 +492,9 @@ impl Editor {
         if guests != guests_of(&was.guests) {
             params.insert("guests".to_owned(), json!(guests));
         }
+        if form.description != was.description && !self.description_cut {
+            params.insert("description".to_owned(), json!(form.description));
+        }
         if params.is_empty() {
             return Ok(None);
         }
@@ -413,6 +504,39 @@ impl Editor {
         }
         Ok(Some(("event.update", Value::Object(params))))
     }
+}
+
+/// The longest link the description gives to copy, in bytes.
+pub const MAX_LINK: usize = 2048;
+
+/// The link in `text` at character `at`, as a press there would copy it: a word starting `http://`, `https://` or
+/// `mailto:` (in any letter case), with the brackets, quotes and full stops around it left off; a web link needs a
+/// host. `None` where no link stands, or one longer than [`MAX_LINK`].
+#[must_use]
+pub fn link_at(text: &str, at: usize) -> Option<String> {
+    let (start, word) = text
+        .split(char::is_whitespace)
+        .scan(0_usize, |from, word| {
+            let start = *from;
+            *from = from.saturating_add(word.chars().count()).saturating_add(1);
+            Some((start, word))
+        })
+        .find(|(start, word)| at >= *start && at <= start.saturating_add(word.chars().count()))?;
+    let lead = word.chars().take_while(|c| matches!(c, '(' | '<' | '[' | '"' | '\'' | '«')).count();
+    let link =
+        word.trim_start_matches(['(', '<', '[', '"', '\'', '«']).trim_end_matches(['.', ',', ';', ':', '!', '?', ')', '>', ']', '"', '\'', '»']);
+    let first = start.saturating_add(lead);
+    if at < first || at > first.saturating_add(link.chars().count()) || link.len() > MAX_LINK || link.chars().any(char::is_control) {
+        return None;
+    }
+    let scheme = link.get(..link.find(':')?)?.to_ascii_lowercase();
+    let rest = link.get(scheme.len().saturating_add(1)..)?;
+    let usable = match scheme.as_str() {
+        "http" | "https" => rest.strip_prefix("//").is_some_and(|host| host.split(['/', '?', '#']).next().is_some_and(|host| !host.is_empty())),
+        "mailto" => !rest.is_empty(),
+        _ => false,
+    };
+    usable.then(|| link.to_owned())
 }
 
 /// A wall-clock moment as the form shows it: `2026-11-06 13:00`.
@@ -462,3 +586,6 @@ mod tests;
 #[cfg(test)]
 #[path = "editor_alert_tests.rs"]
 mod alert_tests;
+#[cfg(test)]
+#[path = "editor_owner_tests.rs"]
+mod owner_tests;

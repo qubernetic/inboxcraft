@@ -5,8 +5,11 @@
 //! its right edge on New event's; an edit's stands over the details at the calendar card's bottom right. In it: its
 //! title with the Esc key, the event's title, Starts and Ends side by side, All day and Private, Repeat as a select
 //! with Show as busy or free beside it, "this event only" for a series (coming soon), the calendar of a new event as a
-//! select, the guests' addresses, and for an edit of an event with guests the question whether to tell them; then why
-//! the last save was refused, and Cancel and Save. The fields are the project's field components with their input caps.
+//! select, the guests' addresses, the description (a press on a link in it with Ctrl or Cmd held copies the link and
+//! the status line says so), and for an edit of an event with guests the question whether to tell them; then why
+//! the last save was refused, and Cancel and Save. Someone else's event opens read-only, as the design's read-only
+//! frame draws it: its title `Event`, every field read-only and every control disabled, a note saying whose event it is
+//! and that only the organiser can change it, and Close alone; any press on a link in its description copies it. The fields are the project's field components with their input caps.
 //! Esc or a press outside comes back as [`Asked::Leave`]: the editor closes when nothing was typed; else it stays and
 //! says how to keep or throw away the typing (Save; Cancel or a second Esc), and a press outside never closes it. A
 //! press outside reaches nothing under the editor.
@@ -15,6 +18,7 @@ use egui::{Context, Id, Rect, Response, Ui, pos2, vec2};
 
 use super::Asked;
 use crate::calendar::Editor;
+use crate::calendar::MAX_DESCRIPTION;
 use crate::calendar::editor::{MAX_FIELD, MAX_GUESTS_TEXT, Menu, REPEATS, repeat_text};
 use crate::component::button::TextButton;
 use crate::component::checkbox::{checkbox, radio};
@@ -95,12 +99,19 @@ pub(in crate::draw) fn show(
 }
 
 /// A one-line field `width` points wide with its `label`, holding `text` (at most `limit` characters), `hint` while
-/// it is empty.
-fn line(ui: &mut Ui, theme: &Theme, (salt, label): (&str, &str), text: &mut String, hint: &str, (width, limit): (f32, usize)) -> Response {
+/// it is empty; read and copied but not changed while `read_only`.
+fn line(
+    ui: &mut Ui,
+    theme: &Theme,
+    (salt, label): (&str, &str),
+    text: &mut String,
+    hint: &str,
+    (width, limit, read_only): (f32, usize, bool),
+) -> Response {
     ui.vertical(|ui| {
         ui.set_width(width);
         let id = ui.make_persistent_id(("event-editor", salt));
-        field::text_field_limited(ui, theme, id, text, &Field::new(label, hint), limit)
+        field::text_field_limited(ui, theme, id, text, &Field { read_only, ..Field::new(label, hint) }, limit)
     })
     .inner
 }
@@ -138,18 +149,23 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
         });
     });
     let hint = if editor.form().all_day { "2026-11-06" } else { "2026-11-06 13:00" };
+    // Someone else's event: every field read-only, every control disabled, the note saying why, and Close alone.
+    let read_only = editor.read_only();
     {
         let form = editor.form_mut();
-        line(ui, theme, ("title", tr!("Title")), &mut form.summary, tr!("(No title)"), (width, MAX_FIELD));
+        line(ui, theme, ("title", tr!("Title")), &mut form.summary, tr!("(No title)"), (width, MAX_FIELD, read_only));
         let half = ((width - SIDE_GAP) / 2.0).max(1.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = SIDE_GAP;
-            line(ui, theme, ("starts", tr!("Starts")), &mut form.start, hint, (half, MAX_FIELD));
-            line(ui, theme, ("ends", tr!("Ends")), &mut form.end, hint, (half, MAX_FIELD));
+            line(ui, theme, ("starts", tr!("Starts")), &mut form.start, hint, (half, MAX_FIELD, read_only));
+            line(ui, theme, ("ends", tr!("Ends")), &mut form.end, hint, (half, MAX_FIELD, read_only));
         });
     }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 24.0;
+        if read_only {
+            ui.disable();
+        }
         let all_day = editor.form().all_day;
         if checkbox(ui, theme, tr!("All day"), all_day).clicked() {
             editor.set_all_day(!all_day);
@@ -160,7 +176,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
         }
     });
     repeat_and_show_as(ui, theme, editor, width);
-    if editor.id().is_some() && editor.form().repeat != REPEATS[0] {
+    if editor.id().is_some() && !read_only && editor.form().repeat != REPEATS[0] {
         // Changing one occurrence of a series is not built yet: the whole series changes.
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
@@ -171,9 +187,16 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
         });
     }
     calendar_choice(ui, theme, editor, width);
-    line(ui, theme, ("guests", tr!("Guests")), &mut editor.form_mut().guests, "name@example.org, …", (width, MAX_GUESTS_TEXT));
+    line(ui, theme, ("guests", tr!("Guests")), &mut editor.form_mut().guests, "name@example.org, …", (width, MAX_GUESTS_TEXT, read_only));
+    description(ui, theme, editor, asked);
     if editor.asks_notify() {
         notify(ui, theme, editor);
+    }
+    if let Some(note) = editor.read_only_note() {
+        let galley = crate::component::wrapped(ui, &note, theme.fonts.caption, p.muted, width, 4, egui::Align::Min);
+        let (rect, response) = ui.allocate_exact_size(vec2(width, galley.size().y), egui::Sense::hover());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Label, true, &note));
+        crate::draw::paint::rows_at(ui.painter(), rect.min, width, galley, p.muted);
     }
     if let Some(problem) = editor.problem() {
         let galley = crate::component::wrapped(ui, problem, theme.fonts.caption, p.ink, width, 4, egui::Align::Min);
@@ -183,6 +206,12 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
     }
     ui.allocate_ui_with_layout(vec2(width, theme.boxes().button), egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
+        if read_only {
+            if TextButton::new(tr!("Close")).secondary().icon(IconId::Close).show(ui, theme, keymap).clicked() {
+                asked.push(Asked::Cancel);
+            }
+            return;
+        }
         if TextButton::new(tr!("Save")).primary().show(ui, theme, keymap).clicked() {
             asked.push(Asked::Save);
         }
@@ -190,6 +219,20 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
             asked.push(Asked::Cancel);
         }
     });
+}
+
+/// The description, its lines kept: read-only in someone else's event and in one read cut short. A press on a link in
+/// it with Ctrl (Cmd on a Mac) held, or any press on one in someone else's event, copies the link, as the reader does.
+fn description(ui: &mut Ui, theme: &Theme, editor: &mut Editor, asked: &mut Vec<Asked>) {
+    let id = ui.make_persistent_id(("event-editor", "description"));
+    let field = Field { read_only: !editor.description_editable(), ..Field::new(tr!("Description"), tr!("optional")) };
+    field::multiline_field_holding(ui, theme, id, &mut editor.form_mut().description, &field, field::Cap::Chars(MAX_DESCRIPTION));
+    if let Some((at, command)) = field::take_press(ui.ctx(), id)
+        && let Some(link) = editor.press_description(at, command)
+    {
+        ui.ctx().copy_text(link);
+        asked.push(Asked::Copied);
+    }
 }
 
 /// Repeat as a select, filling what Show as, the segmented control beside it, leaves.
@@ -206,17 +249,21 @@ fn repeat_and_show_as(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f3
         let current = REPEATS.iter().position(|id| *id == editor.form().repeat);
         // A repeat the presets do not name stays as it is until a preset is picked.
         let shown = repeat_text(&editor.form().repeat);
+        let note = editor.read_only().then(|| tr!("Only the organiser can change this event."));
         let chosen = labelled(ui, theme, tr!("Repeat"), repeat, |ui| {
-            let (_, taken) =
-                Select { name: tr!("Repeat"), shown, options: &options, current, icon: IconId::Changed, width: repeat }.show(ui, theme, &mut open);
-            taken
+            let select = Select { name: tr!("Repeat"), shown, options: &options, current, icon: IconId::Changed, width: repeat };
+            select.show_noted(ui, theme, &mut open, note).1
         });
         keep_menu(editor, Menu::Repeat, open);
         if let Some(id) = chosen.and_then(|index| REPEATS.get(index)) {
             (*id).clone_into(&mut editor.form_mut().repeat);
         }
+        let read_only = editor.read_only();
         let form = editor.form_mut();
         labelled(ui, theme, tr!("Show as"), show_as, |ui| {
+            if read_only {
+                ui.disable();
+            }
             ui.add_space(2.0);
             if let Some(busy) = segmented(ui, theme, &shows, form.busy) {
                 form.busy = busy;

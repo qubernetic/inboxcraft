@@ -104,6 +104,8 @@ pub(super) enum Asked {
     Sync,
     /// Esc or a press outside the editor: it closes when nothing was typed, else it says how to keep the typing.
     Leave(crate::component::popup::Leave),
+    /// A press in the editor's description copied a link: the status line says so.
+    Copied,
 }
 
 /// The calendar's fixed heights and widths at the text scale (each through [`Theme::size`], as the design's 130 %

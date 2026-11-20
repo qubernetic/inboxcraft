@@ -99,7 +99,7 @@ fn the_notify_prompt_shows_only_when_the_event_has_guests() {
         assert!(!shows(&harness, "Tell the"), "the dentist has no guests");
         press(&mut harness, "Cancel");
         assert!(!editing(&harness));
-        pick(&mut harness, "Allotment work party");
+        pick(&mut harness, "Call with Petra about the logo");
         press(&mut harness, "Edit");
         harness.get_by_label("Tell the 1 guest about this change?");
         let quiet = harness.get_by_role_and_label(Role::RadioButton, "Don't tell them");
@@ -117,14 +117,14 @@ fn the_notify_prompt_shows_only_when_the_event_has_guests() {
 #[test]
 fn an_edit_with_its_guests_told_says_so_in_the_toast() {
     let mut harness = on_calendar(egui::Theme::Light);
-    pick(&mut harness, "Allotment work party");
+    pick(&mut harness, "Call with Petra about the logo");
     press(&mut harness, "Edit");
     type_into(&mut harness, "Title", " and soup");
     harness.get_by_role_and_label(Role::RadioButton, "Send them the update").click();
     harness.run();
     press(&mut harness, "Save");
     harness.get_by_label("Event saved; the guests are told");
-    assert!(shows(&harness, "Allotment work party and soup"));
+    assert!(shows(&harness, "Call with Petra about the logo and soup"));
 }
 
 #[test]
@@ -290,10 +290,10 @@ fn flat_rects(harness: &Harness<'static, InboxApp>) -> Vec<(egui::Rect, egui::Co
     out
 }
 
-/// The sample's Allotment work party (one guest) open in the editor by Edit.
+/// The sample's call with Petra (one guest) open in the editor by Edit.
 fn editing_the_party(theme: egui::Theme) -> Harness<'static, InboxApp> {
     let mut harness = on_calendar(theme);
-    pick(&mut harness, "Allotment work party");
+    pick(&mut harness, "Call with Petra about the logo");
     press(&mut harness, "Edit");
     // The editor stands where it was measured the frame before.
     harness.run();
@@ -355,4 +355,54 @@ fn the_small_editor_has_no_alert_field() {
     press(&mut harness, "Edit");
     assert!(editing(&harness));
     assert!(harness.query_by_role_and_label(Role::ComboBox, "Alert").is_none());
+}
+
+#[test]
+fn someone_elses_event_opens_read_only_with_close_alone() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = on_calendar(theme);
+        pick(&mut harness, "Allotment work party");
+        press(&mut harness, "Edit");
+        assert!(editing(&harness));
+        harness.get_by_label("Teodor Lisk's event. You can read it here; only the organiser can change it.");
+        assert!(harness.query_by_role_and_label(Role::Button, "Save").is_none(), "no Save in someone else's event");
+        assert!(harness.query_by_role_and_label(Role::Button, "Cancel").is_none(), "Close stands alone");
+        assert!(!shows(&harness, "Tell the"), "nothing changes, so nobody is asked about telling the guests");
+        harness.check_accessibility();
+        type_into(&mut harness, "Title", "X");
+        let editor = harness.state().calendar().editor().unwrap();
+        assert_eq!(editor.form().summary, "Allotment work party", "the title is read-only");
+        assert!(!editor.edited());
+        harness.get_by_role_and_label(Role::CheckBox, "Private").click();
+        harness.run();
+        assert!(!harness.state().calendar().editor().unwrap().form().private, "the ticks are disabled");
+        press(&mut harness, "Close");
+        assert!(!editing(&harness), "Close closes it");
+    }
+}
+
+#[test]
+fn ctrl_and_a_press_on_a_link_in_the_description_copies_it() {
+    use egui::{Event, PointerButton};
+    let mut harness = on_calendar(egui::Theme::Light);
+    pick(&mut harness, "Call with Petra about the logo");
+    press(&mut harness, "Edit");
+    harness.state_mut().calendar_mut().0.editor_mut().unwrap().form_mut().description = "Boards: https://files.example.org/boards".to_owned();
+    harness.run();
+    // A point on the link: the description's box, a third of the way along its first line.
+    let rect = harness.get_by_role_and_label(Role::MultilineTextInput, "Description").rect();
+    let at = egui::pos2(rect.left() + rect.width() / 3.0, rect.top() + 18.0);
+    let click = |harness: &mut Harness<'static, InboxApp>, modifiers: Modifiers| {
+        harness.event(Event::PointerMoved(at));
+        harness.run();
+        for pressed in [true, false] {
+            harness.event_modifiers(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers }, modifiers);
+            harness.run();
+        }
+    };
+    click(&mut harness, Modifiers::NONE);
+    assert_eq!(harness.state().notice(), None, "a plain press puts the caret down while editing");
+    click(&mut harness, Modifiers::COMMAND);
+    assert_eq!(harness.state().notice(), Some("Link copied: https://files.example.org/boards"));
+    assert!(editing(&harness), "the editor stays open");
 }

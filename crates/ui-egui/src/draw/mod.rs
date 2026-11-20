@@ -1510,6 +1510,7 @@ impl InboxApp {
     /// Applies what was pressed on the calendar screen.
     fn apply_calendar(&mut self, asked: Vec<calendar::Asked>) {
         let accounts = asked.contains(&calendar::Asked::Accounts);
+        let mut copied = None;
         let (calendar, mailbox) = (&mut self.calendar, &mut self.mailbox);
         for asked in asked {
             match asked {
@@ -1533,7 +1534,11 @@ impl InboxApp {
                 calendar::Asked::Sync => {
                     calendar.sync_now(mailbox);
                 }
+                calendar::Asked::Copied => copied = calendar.editor_mut().and_then(crate::calendar::Editor::take_copied),
             }
+        }
+        if let Some(url) = copied {
+            self.say(&tr!("Link copied: {url}", url = crate::mailbox::shown(&url)));
         }
         if accounts {
             self.open_settings_on("accounts");

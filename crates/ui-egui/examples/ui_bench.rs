@@ -401,6 +401,8 @@ fn crowd() -> Result<Vec<EventRow>, UiError> {
             zone: None,
             guests: Vec::new(),
             alert: inboxcraft_ui_egui::calendar::Alert::Default,
+            organizer: None,
+            own: true,
             untitled: false,
         });
     }

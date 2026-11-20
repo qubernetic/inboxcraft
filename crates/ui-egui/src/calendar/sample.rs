@@ -61,7 +61,7 @@ const EVENTS: [Sample; 11] = [
         start: 3,
         end: 3,
         lines: "DTSTART:{start}T093000Z\r\nDTEND:{end}T103000Z\r\nSUMMARY:Call with Petra about the logo\r\n\
-                ORGANIZER;CN=Mira Holloway:mailto:mira@holloway-studio.example.org\r\n\
+                ORGANIZER;CN=Mira Holloway:mailto:holloway.studio@example.org\r\n\
                 ATTENDEE;CN=Petra Lindqvist;PARTSTAT=ACCEPTED:mailto:petra@example.org\r\n",
     },
     Sample {
