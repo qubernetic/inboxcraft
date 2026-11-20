@@ -360,6 +360,27 @@ fn in_the_composer_s_window_no_key_of_the_main_window_acts_and_the_look_keys_do(
     assert!(harness.state().text_scale().percent() > size.percent(), "the text grows from the window");
 }
 
+#[test]
+fn the_desktop_s_grab_of_the_composer_s_window_gives_the_release_to_that_window() {
+    let mut harness = app(false, ComposerHost::Window, true);
+    new_message(&mut harness);
+    let window = super::composer_window();
+    // A press on the window's title bar, away from its controls, then a drag: the desktop moves the window.
+    let at = Pos2::new(300.0, 22.0);
+    in_window(
+        &mut harness,
+        vec![
+            Event::PointerMoved(at),
+            Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+        ],
+    );
+    in_window(&mut harness, vec![Event::PointerMoved(at + vec2(30.0, 0.0))]);
+    // The desktop kept the release: the window's next pass hears the button come up, the main window's never.
+    in_window(&mut harness, vec![]);
+    assert!(!harness.ctx.input_for(window, |input| input.pointer.any_down()), "the window's button counts as up");
+    assert!(!harness.ctx.input(|input| input.pointer.any_released()), "the main window heard no release");
+}
+
 /// The Composer page's window states, each drawn in the window: its title and what tells the state.
 #[test]
 fn every_window_state_of_the_composer_page_draws_in_its_window() {
