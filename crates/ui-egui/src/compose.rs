@@ -516,10 +516,11 @@ impl Composer {
         }
     }
 
-    /// The last chip of `line`, by its place, never drawn whole in sight in a frame that painted the whole composer.
+    /// The first chip of `line`, by its place, never drawn whole in sight in a frame that painted the whole composer:
+    /// each refused press brings the next unseen ones into sight, however few rows the line shows.
     fn unchecked(&self, line: Line) -> Option<usize> {
         let checked = self.checked.get(line.index())?;
-        self.chips(line).iter().rposition(|chip| !checked.contains(&chip.text))
+        self.chips(line).iter().position(|chip| !checked.contains(&chip.text))
     }
 
     /// Whether the Cc and Bcc lines show.
@@ -1060,8 +1061,8 @@ impl Composer {
             return Err(UiError::Refused(said));
         }
         // Nor does one whose chip was never whole in sight (scrolled out of its line, or in a line not shown): the
-        // lines grow, Cc and Bcc show, each line scrolls to the last such chip of it (those before it have mostly been
-        // in sight on the way), and Send waits for the next press. A composer no frame drew (a script's scene) has no
+        // lines grow in the room they have, Cc and Bcc show, each line scrolls to the first such chip of it, and Send
+        // waits for the next press: press by press the owner is walked through every chip. A composer no frame drew (a script's scene) has no
         // sight to go by.
         let unchecked = Line::ALL.map(|line| self.unchecked(line));
         if self.drawn_docked.is_some() && !self.scripted && unchecked.iter().any(Option::is_some) {

@@ -222,6 +222,7 @@ fn recipient_fields(ui: &mut Ui, theme: &Theme) {
                     error,
                     enabled,
                     grown: false,
+                    room: None,
                     bring: None,
                 };
                 let mut typing = typed.to_owned();

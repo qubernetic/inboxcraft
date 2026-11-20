@@ -750,3 +750,72 @@ fn the_composer_sends_from_the_account_it_shows() {
     let row = harness.state().mailbox().outbox().iter().find(|row| row.draft == draft).map(|row| row.account);
     assert_eq!(row, Some(1), "sent from the account the composer showed");
 }
+/// The text of each painted run of the last frame with the part of it in sight (inside its clip), and only runs with
+/// some part in sight.
+fn painted_places(harness: &Harness<'static, InboxApp>) -> Vec<(String, egui::Rect)> {
+    fn walk(shape: &egui::Shape, clip: egui::Rect, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, clip, out)),
+            egui::Shape::Text(text) => {
+                let place = egui::Rect::from_min_size(text.pos, text.galley.size()).intersect(clip);
+                if place.is_positive() {
+                    out.push((text.galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect(), place));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, clipped.clip_rect, &mut out));
+    out
+}
+
+/// The re-look's trap: 25 Bcc on a changed refused send, edited in a short composer (the app's least window, docked,
+/// and a short floating panel). Each refused press brings recipients not yet seen into sight, never under Send, and a
+/// bounded number of presses ends in a send once every address was shown.
+#[test]
+fn a_short_composer_walks_through_every_recipient_and_then_sends() {
+    let addresses: Vec<String> = (0..24).map(|n| format!("p{n}@example.org")).chain(["mallory@example.net".to_owned()]).collect();
+    for (size, floating) in [(vec2(800.0, 480.0), false), (vec2(1300.0, 500.0), true)] {
+        let clock = clock();
+        let mut harness = sending(&clock, egui::Theme::Light);
+        let draft = refused(&mut harness, &clock);
+        let bcc: Vec<String> = addresses.iter().enumerate().map(|(n, address)| format!("Friend {n} <{address}>")).collect();
+        agent_changes(&mut harness, draft, &serde_json::json!({ "bcc": bcc }));
+        only_edit_sends(&mut harness, draft);
+        if floating {
+            harness.state_mut().composer_mut().0.unwrap().set_floating(true);
+        }
+        harness.set_size(size);
+        harness.run();
+        assert_eq!(harness.state().composer().map(crate::compose::Composer::floating), Some(floating));
+        let mut seen = std::collections::BTreeSet::new();
+        let (mut presses, mut first_unseen) = (0, None);
+        while harness.state().counting().is_none() {
+            assert!(presses < 26, "{size:?}: still refused after {presses} presses; seen {seen:?}");
+            let send = harness.get_by_role_and_label(Role::Button, "Send").rect();
+            // The grown lines leave Subject in sight over the foot.
+            let subject = harness.get_by_role_and_label(Role::TextInput, "Subject").rect();
+            assert!(subject.bottom() <= send.top(), "{size:?}: Subject {subject:?} pushed down to Send {send:?}");
+            let painted: Vec<String> = painted_places(&harness)
+                .into_iter()
+                .filter(|(run, _)| addresses.contains(run))
+                .map(|(run, place)| {
+                    assert!(!place.intersects(send), "{size:?}: {run} at {place:?} under Send {send:?}");
+                    run
+                })
+                .collect();
+            // The press before brought the first recipient not seen yet into sight, not a later one.
+            if let Some(first) = first_unseen.take() {
+                assert!(painted.contains(&first), "{size:?}: press {presses} did not show {first}; painted {painted:?}");
+            }
+            seen.extend(painted);
+            first_unseen = addresses.iter().find(|address| !seen.contains(*address)).cloned();
+            harness.get_by_role_and_label(Role::Button, "Send").click();
+            harness.run();
+            presses += 1;
+        }
+        assert_eq!(harness.state().counting(), Some((draft, 5)), "{size:?}");
+        assert_eq!(seen.len(), addresses.len(), "{size:?}: every address was shown before the send; seen {seen:?}");
+    }
+}

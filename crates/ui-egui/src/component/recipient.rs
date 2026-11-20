@@ -186,6 +186,9 @@ pub struct Recipients<'a> {
     /// Whether the line shows more rows of chips before it scrolls ([`GROWN_ROWS`], not [`MOST_ROWS`]): the composer
     /// grows its lines to bring every recipient into sight before it sends.
     pub grown: bool,
+    /// The most height the line takes, in points, whatever its rows: fewer rows show and it scrolls, one row at least.
+    /// The composer's lines keep to the room over its foot, so every row they show is in sight.
+    pub room: Option<f32>,
     /// The chip, by its place, to scroll into view in this frame.
     pub bring: Option<usize>,
 }
@@ -265,20 +268,23 @@ fn recipients_drawn(
     let widths: Vec<f32> =
         line.chips.iter().zip(&inks).map(|(recipient, ink)| chip_width(ui, theme, recipient, *ink, room - theme.sizes.scrollbar - s.s1)).collect();
     let (mut places, mut typing_at, mut rows) = flow(&widths, room, s.s1);
-    // Past its most rows the line scrolls: the bar's room comes off the chips' row.
+    let inner = |rows: f32| rows * chip + (rows - 1.0).max(0.0) * row_gap;
+    // What the rows of a wrapped line stand in, above and below them.
+    let edges = if boxed { (s.s1 + s.s1 / 2.0 + 1.0) * 2.0 } else { field_height - chip };
+    // Past its most rows the line scrolls: the bar's room comes off the chips' row. It shows no more rows than its
+    // height holds, so every row it shows is in sight.
     let most_rows = if line.grown { GROWN_ROWS } else { MOST_ROWS };
+    let most_rows = match line.room {
+        None => most_rows,
+        Some(most) => (1..=most_rows).rev().find(|shown| inner(*shown as f32) + edges <= most).unwrap_or(1),
+    };
     let scrolls = rows > most_rows;
     if scrolls {
         (places, typing_at, rows) = flow(&widths, (room - theme.sizes.scrollbar - s.s1).max(1.0), s.s1);
     }
     let shown_rows = rows.min(most_rows) as f32;
     let wrapped = rows > 1;
-    let inner = |rows: f32| rows * chip + (rows - 1.0).max(0.0) * row_gap;
-    let height = match (wrapped, boxed) {
-        (false, _) => field_height,
-        (true, true) => inner(shown_rows) + (s.s1 + s.s1 / 2.0 + 1.0) * 2.0,
-        (true, false) => inner(shown_rows) + (field_height - chip),
-    };
+    let height = if wrapped { inner(shown_rows) + edges } else { field_height };
     ui.vertical(|ui| {
         let (mut removed, mut copies_pressed, mut in_sight) = (None, false, Vec::new());
         ui.spacing_mut().item_spacing.y = s.s2;
@@ -318,8 +324,9 @@ fn recipients_drawn(
                 if !enabled {
                     child.disable();
                 }
+                // Its row at the top of the line: the rows after it, not yet seen, come into sight with it.
                 if line.bring == Some(index) {
-                    child.scroll_to_rect(place, None);
+                    child.scroll_to_rect(place, Some(egui::Align::TOP));
                 }
                 // Whole in sight: inside every clip over it (the line's scroll, the composer's edges, the window).
                 if child.clip_rect().expand(0.5).contains_rect(place) {
@@ -402,7 +409,7 @@ fn recipients_drawn(
 /// The most rows of chips a line shows before it scrolls.
 const MOST_ROWS: usize = 4;
 
-/// The most rows of chips a grown line shows before it scrolls ([`Recipients::grown`]).
+/// The most rows of chips a grown line shows before it scrolls, where its room holds them ([`Recipients::grown`]).
 const GROWN_ROWS: usize = 8;
 
 /// Where chips `widths` wide go in rows `room` wide, `gap` apart: each chip's `(x, row)`, the typing's, and the rows.

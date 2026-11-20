@@ -177,6 +177,7 @@ fn line_in(mode: Mode, state: Line) -> (Rect, Own, crate::component::tests::Pain
                 error: (state == Line::Invalid).then_some("teodor@ is not an address"),
                 enabled: state != Line::Disabled,
                 grown: false,
+                room: None,
                 bring: None,
             };
             ui.vertical(|ui| {
@@ -290,6 +291,7 @@ fn a_recipient_line_takes_typing_removes_a_chip_and_opens_cc_bcc() {
                 error: None,
                 enabled: true,
                 grown: false,
+                room: None,
                 bring: None,
             };
             let out = recipient_field(ui, &theme, egui::Id::unique("to"), typing, &line);
@@ -328,6 +330,7 @@ fn line_of(chips: Vec<Recipient>) -> Harness<'static> {
                 error: None,
                 enabled: true,
                 grown: false,
+                room: None,
                 bring: None,
             };
             ui.vertical(|ui| {
@@ -472,6 +475,7 @@ fn composer_line(chips: Vec<Recipient>, focus: bool) -> Harness<'static> {
                 error: None,
                 enabled: true,
                 grown: false,
+                room: None,
                 bring: None,
             };
             ui.vertical(|ui| {

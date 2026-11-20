@@ -321,7 +321,8 @@ fn line_keys(ui: &Ui, composer: &Composer, line: Line, asked: &mut Vec<Asked>) {
 /// A recipient line: its name, its chips and the field to type in ([`recipient::recipient_line`]); the To line ends
 /// with "Cc  Bcc" while those are hidden. What the line refused of what was typed is said under it; a chip that is not
 /// an address is said at the foot, beside Send.
-fn recipients(ui: &mut Ui, theme: &Theme, composer: &mut Composer, line: Line, asked: &mut Vec<Asked>) {
+/// The line is never taller than `most`.
+fn recipients(ui: &mut Ui, theme: &Theme, composer: &mut Composer, line: Line, most: f32, asked: &mut Vec<Asked>) {
     let id = field_id(line);
     if ui.memory(|memory| memory.has_focus(id)) {
         line_keys(ui, composer, line, asked);
@@ -342,8 +343,17 @@ fn recipients(ui: &mut Ui, theme: &Theme, composer: &mut Composer, line: Line, a
     let copies = line == Line::To && !composer.copies();
     let (grown, bring) = (composer.grown(), composer.take_bring(line));
     let Some(typing) = composer.typing_mut(line) else { return };
-    let fields =
-        Recipients { name: line.name(), chips: &chips, hint: tr!("Name or address"), copies, error: wrong.as_deref(), enabled: true, grown, bring };
+    let fields = Recipients {
+        name: line.name(),
+        chips: &chips,
+        hint: tr!("Name or address"),
+        copies,
+        error: wrong.as_deref(),
+        enabled: true,
+        grown,
+        room: Some(most),
+        bring,
+    };
     let out = recipient::recipient_line(ui, theme, id, typing, &fields);
     composer.saw(line, &out.in_sight);
     if let Some(at) = out.removed {
@@ -824,8 +834,12 @@ fn lines(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &mut Composer,
     let value = Rect::from_min_max(pos2(rect.left() + value_left, rect.top() + s.s2 - 2.0), pos2(rect.right(), rect.bottom() - s.s2 + 2.0));
     from(ui, theme, mailbox, composer, value, place, asked);
     paint::rule(ui, p.panel_line);
-    for line in composer.drawn() {
-        recipients(ui, theme, composer, *line, asked);
+    let drawn = composer.drawn();
+    for (at, line) in drawn.iter().enumerate() {
+        // A line keeps over the foot one row for each line after it and for Subject, each with its rule under it.
+        let after = drawn.len().saturating_sub(at) as f32;
+        let most = ui.max_rect().bottom() - ui.cursor().top() - after * (height + 1.0) - 1.0;
+        recipients(ui, theme, composer, *line, most, asked);
         paint::rule(ui, p.panel_line);
     }
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
@@ -879,7 +893,8 @@ fn body(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     let blank_room = if composer.blank().is_some() { blank_height(theme) + s.s3 } else { 0.0 };
     let lines_top = head_rect.bottom() + s.s3;
     let mut column = ui.new_child(UiBuilder::new().max_rect(Rect::from_min_max(pos2(area.left(), lines_top), pos2(area.right(), foot_rect.top()))));
-    column.set_clip_rect(area.intersect(ui.clip_rect()));
+    // Nothing of it is painted over the foot (or counts as seen there), however short the composer.
+    column.set_clip_rect(Rect::from_min_max(area.min, pos2(area.right(), foot_rect.top())).intersect(ui.clip_rect()));
     column.spacing_mut().item_spacing = Vec2::ZERO;
     lines(&mut column, theme, mailbox, composer, place, &mut asked);
     // The text takes what is left over the foot, and three of its rows at least.
