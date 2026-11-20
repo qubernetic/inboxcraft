@@ -14,7 +14,7 @@ use egui::{Id, Rect, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use super::grid::{Lines, lane_pitch, line as line_width, pixels, snap};
 use super::{Asked, Kind, Sizes, Words, block};
 use crate::calendar::layout;
-use crate::calendar::{Calendar, EventRow, day};
+use crate::calendar::{Calendar, Day, EventRow, day};
 use crate::component::button::{LinkSize, link_sized};
 use crate::draw::paint::run_at;
 use crate::keymap::Keymap;
@@ -36,18 +36,22 @@ pub(super) const MOST_COLUMNS: usize = 4;
 
 /// The day or week view of `days` days from the first day of the calendar's span.
 pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, days: usize, asked: &mut Vec<Asked>) {
+    show_from(ui, theme, keymap, calendar, (calendar.span().0, days), asked);
+}
+
+/// The hours of `days` days from `first` (the full event editor's day beside it: its own day, wherever the view is).
+pub(super) fn show_from(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, (first, days): (Day, usize), asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     let z = Sizes::of(theme);
     let ppp = ui.pixels_per_point();
     let line = line_width(ppp);
     let rect = ui.max_rect();
-    let (first, _) = calendar.span();
     let events: Vec<&EventRow> = calendar.events().collect();
     let cols = Lines::cut(rect.left() + z.gutter, rect.right() - SCROLL_ROOM, days, ppp);
     let day_of = |index: usize| first.plus(i64::try_from(index).unwrap_or(0));
 
     let head_bottom = snap(rect.top() + z.head, ppp);
-    head(ui, theme, calendar, &cols, (rect.top(), head_bottom), days, asked);
+    head(ui, theme, calendar, &cols, (rect.top(), head_bottom), (first, days), asked);
     ui.painter().rect_filled(Rect::from_min_max(pos2(rect.left(), head_bottom), pos2(rect.right(), head_bottom + line)), 0.0, p.line);
 
     // The timed events of each day, and what is left out of each: bands past the lanes, events past the columns. Laid
@@ -205,11 +209,18 @@ pub(super) fn head_id(day: crate::calendar::Day) -> Id {
 }
 
 /// The days' heads over the hours: each a button that opens its day in the week (the day view's own is a label).
-fn head(ui: &mut Ui, theme: &Theme, calendar: &Calendar, cols: &Lines, (top, bottom): (f32, f32), days: usize, asked: &mut Vec<Asked>) {
+fn head(
+    ui: &mut Ui,
+    theme: &Theme,
+    calendar: &Calendar,
+    cols: &Lines,
+    (top, bottom): (f32, f32),
+    (first, days): (Day, usize),
+    asked: &mut Vec<Asked>,
+) {
     let p = &theme.palette;
     let ppp = ui.pixels_per_point();
     let line = cols.width;
-    let (first, _) = calendar.span();
     for index in 0..=days {
         let x = cols.line(index);
         ui.painter().rect_filled(Rect::from_min_max(pos2(x, top), pos2(x + line, bottom)), 0.0, p.panel_line);
