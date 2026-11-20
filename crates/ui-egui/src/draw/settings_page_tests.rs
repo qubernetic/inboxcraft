@@ -850,3 +850,55 @@ fn the_calendar_s_week_row_shows_the_rule_s_first_day() {
     harness.run();
     assert_eq!(shown(&harness).as_deref(), Some("Sunday"));
 }
+
+#[test]
+fn a_signature_s_field_stands_on_the_page_s_inset_side_by_side_and_stacked() {
+    // At 1440 the signatures stand two by two; at 800 and 130 % the column is under 240 and they stack. Either way the
+    // first field stands on the inset the group's note stands on (16 in), the same in both.
+    let mut offsets = Vec::new();
+    for (width, percent) in [(1440.0, 100), (800.0, 130)] {
+        let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+        let mut harness = Harness::builder()
+            .with_size(vec2(width, 900.0))
+            .with_context_setup(crate::theme::install_fonts)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        harness.state_mut().set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+        harness.state_mut().settings_mut().open_at(Section::Sending);
+        harness.run();
+        let note = text_at(&harness, "A signature goes under").expect("the group's note");
+        let first = format!("Signature of {}", harness.state().mailbox().accounts().first().unwrap().label);
+        let field = harness.get_by_role_and_label(Role::MultilineTextInput, &first).rect();
+        offsets.push(field.left() - note.x);
+    }
+    assert!(offsets.windows(2).all(|pair| (pair[0] - pair[1]).abs() < 0.5), "stacked as side by side: {offsets:?}");
+}
+
+/// Where the text painted in the last frame that starts with `wanted` is laid out (its galley's corner).
+fn text_at(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<egui::Pos2> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text().starts_with(wanted) => Some(text.pos),
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn at_the_frame_s_1440_every_appearance_help_stands_on_one_line_in_the_720_column() {
+    // The frame's rows: Mode, Open a message, Write a message and Window frame 66 high, a help of one line each. At 1200 the
+    // column is narrower than 720 and the Window frame's help wraps (a gaps line), as the frames draw no 1200.
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut harness = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_context_setup(crate::theme::install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.state_mut().settings_mut().open_at(Section::Appearance);
+    harness.run();
+    let texts = painted_texts(&harness);
+    for help in ["Auto follows", "In the pane beside", "Docked in the reader", "InboxCraft's own frame"] {
+        let (_, rect) = texts.iter().find(|(text, _)| text.starts_with(help)).unwrap_or_else(|| panic!("{help} is drawn"));
+        assert!(rect.height() < 22.0, "{help} on one line: {rect:?}");
+    }
+}
