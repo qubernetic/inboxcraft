@@ -40,7 +40,7 @@ use std::cell::Cell;
 use std::collections::HashSet;
 
 use egui::accesskit::Role as AccessRole;
-use egui::{Align, Frame, Id, Layout, Margin, Rect, RichText, ScrollArea, Sense, Ui, UiBuilder, pos2, vec2};
+use egui::{Align, Frame, Id, Layout, Margin, Rect, ScrollArea, Sense, Ui, UiBuilder, pos2, vec2};
 use inboxcraft_model::Role;
 use inboxcraft_time::Timestamp;
 
@@ -82,9 +82,18 @@ pub(super) struct Header {
     pub(super) view: Option<InboxView>,
 }
 
-/// How far the pills reach out of the header's margin, to the left edge of the cards under them, and how much nearer
-/// the next card they are than the header's margin keeps them.
-const PILL_PULL: i8 = 4;
+/// The list head's height at the text scale: the design's 48 line with the place, what it holds and the view switch.
+const HEAD: f32 = 48.0;
+
+/// The filters' line under the head at the text scale: the design's 36 line of pills.
+const FILTERS: f32 = 36.0;
+
+/// The room between the place and what it holds, and before the view switch, in points.
+const HEAD_GAP: f32 = 10.0;
+
+/// The least room the place and what it holds keep left of the view switch; with less, the switch stands at the
+/// start of the filters' line.
+const HEAD_WORDS_LEAST: f32 = 120.0;
 
 /// The view switch of the unified inbox, as the design file words and orders it: Grouped, Smart, List ([`InboxView::ALL`]'s
 /// order; the arrows walk it so). "Grouped" is the one list under headings ([`InboxView::Grouped`]).
@@ -92,98 +101,148 @@ fn view_switch() -> [(InboxView, &'static str); 3] {
     [(InboxView::Grouped, tr!("Grouped")), (InboxView::Smart, InboxView::Smart.text()), (InboxView::List, InboxView::List.text())]
 }
 
-/// The pills under the header: the piles in "Later"; elsewhere "Show done" and the park pile, after the view switch
-/// over a wide unified inbox with groups to show. Not while searching.
-fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) {
-    if !mailbox.query().is_empty() {
-        search_head(ui, theme, mailbox);
-        return;
-    }
-    if matches!(mailbox.place(), Place::Senders | Place::Outbox) || mailbox.drafts_listed() {
-        return;
-    }
-    ui.add_space(theme.spacing.s3);
-    let reach = Margin { left: -PILL_PULL, right: -PILL_PULL, top: 0, bottom: -PILL_PULL };
-    Frame::new().outer_margin(reach).show(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(theme.spacing.s2, theme.spacing.s1);
-            if let Place::Later(shown) = mailbox.place() {
-                for pile in Pile::ALL {
-                    // An empty pile's pill loses its number, never "(0)".
-                    let count = mailbox.pile_count(pile);
-                    let text = if count == 0 { pile.text().to_owned() } else { tr!("{pile} ({count})", pile = pile.text(), count = count) };
-                    if pill(ui, theme, &text, pile == shown).clicked() {
-                        asked.open = Some(Place::Later(pile));
-                    }
-                }
-                return;
-            }
-            // The view switch of the design's list head, here on the line of the pills until the head is the
-            // design's (stage I-2.2), the search field keeping its place.
-            if mailbox.place() == Place::View(Role::Inbox) && mailbox.can_group() {
-                let options = view_switch().map(|(view, text)| (view, text, theme.fonts.button));
-                if let Some(view) = segmented_for(ui, theme, &options, mailbox.inbox_view(), Some(tr!("the inbox"))) {
-                    asked.view = Some(view);
-                }
-            }
-            if pill(ui, theme, tr!("Show done"), mailbox.show_done()).clicked() {
-                asked.show_done = Some(!mailbox.show_done());
-            }
-            let parked = mailbox.parked();
-            if parked > 0 && pill(ui, theme, &tr!("Parked ({count})", count = parked), false).clicked() {
-                asked.open = Some(Place::Later(Pile::Parked));
-            }
-            // Several messages at once (the rows' check boxes and the bulk bar) are planned: the way in is drawn,
-            // coming soon, its mark once. A part that does not fit the line is left out whole, as the design's widths
-            // say: beside the reader the line keeps to one line and the planned Select gives way.
-            let gap = theme.spacing.s2;
-            let need =
-                gap + crate::component::pill::width(ui, theme, tr!("Select")) + gap + crate::component::tag::width(ui, theme, tr!("coming soon"));
-            if ui.available_size_before_wrap().x >= need {
-                crate::component::soon::soon(ui, theme, |ui| {
-                    let _ = pill(ui, theme, tr!("Select"), false);
-                });
-                let _ = crate::component::soon::soon_tag(ui, theme);
-            }
-        });
-    });
+/// Whether the list shows the view switch: the unified inbox with groups to show, not while searching.
+fn switch_shown(mailbox: &Mailbox) -> bool {
+    mailbox.query().is_empty() && mailbox.place() == Place::View(Role::Inbox) && mailbox.can_group()
 }
 
-/// The search's head under the list's head: what was searched and where, and the planned search in the text of
-/// messages, coming soon.
-fn search_head(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) {
-    ui.add_space(theme.spacing.s3);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = theme.spacing.s3;
-        let said = tr!("“{query}” in subjects, senders and recipients", query = mailbox.query());
-        ui.add(egui::Label::new(theme.fonts.mono_s.rich(&said).color(theme.palette.muted)).truncate());
+/// Whether the list has a filters' line under its head: the search's words, Later's piles, or "Show done" and the
+/// park pile; not in New senders, the outbox or the drafts.
+pub(super) fn has_filters(mailbox: &Mailbox) -> bool {
+    !mailbox.query().is_empty() || !(matches!(mailbox.place(), Place::Senders | Place::Outbox) || mailbox.drafts_listed())
+}
+
+/// The filters' line under the head, 36 high at the text scale, its parts 16 in from the pane's edges and 8 apart:
+/// the piles in "Later"; elsewhere "Show done" and the park pile (after the view switch when the head has no room
+/// for it). While searching, the search's words.
+fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header, switch_here: bool) {
+    let high = Theme::size(theme, FILTERS);
+    let pad = theme.spacing.s4;
+    let width = ui.available_width();
+    let rect = Rect::from_min_size(ui.cursor().min, vec2(width, high));
+    let inner = Rect::from_min_max(pos2(rect.left() + pad, rect.top()), pos2((rect.right() - pad).max(rect.left() + pad), rect.bottom()));
+    let mut line = ui.new_child(UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)));
+    if !mailbox.query().is_empty() {
+        search_head(&mut line, theme, mailbox);
+    } else {
+        pill_parts(&mut line, theme, mailbox, asked, switch_here);
+    }
+    // The line keeps its height; a part too tall for it (a larger text than the design's) makes it taller.
+    let used = line.min_rect().bottom().max(rect.bottom());
+    ui.allocate_rect(Rect::from_min_max(rect.min, pos2(rect.right(), used)), Sense::hover());
+}
+
+/// The parts of the filters' line, left to right.
+fn pill_parts(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header, switch_here: bool) {
+    ui.spacing_mut().item_spacing = vec2(theme.spacing.s2, theme.spacing.s1);
+    if let Place::Later(shown) = mailbox.place() {
+        for pile in Pile::ALL {
+            // An empty pile's pill loses its number, never "(0)".
+            let count = mailbox.pile_count(pile);
+            let text = if count == 0 { pile.text().to_owned() } else { tr!("{pile} ({count})", pile = pile.text(), count = count) };
+            if pill(ui, theme, &text, pile == shown).clicked() {
+                asked.open = Some(Place::Later(pile));
+            }
+        }
+        return;
+    }
+    if switch_here {
+        let options = view_switch().map(|(view, text)| (view, text, theme.fonts.button));
+        if let Some(view) = segmented_for(ui, theme, &options, mailbox.inbox_view(), Some(tr!("the inbox"))) {
+            asked.view = Some(view);
+        }
+    }
+    if pill(ui, theme, tr!("Show done"), mailbox.show_done()).clicked() {
+        asked.show_done = Some(!mailbox.show_done());
+    }
+    let parked = mailbox.parked();
+    if parked > 0 && pill(ui, theme, &tr!("Parked ({count})", count = parked), false).clicked() {
+        asked.open = Some(Place::Later(Pile::Parked));
+    }
+    // Several messages at once (the rows' check boxes and the bulk bar) are planned: the way in is drawn, coming soon,
+    // its mark once. A part that does not fit the line is left out whole: beside the reader the line keeps to one line
+    // and the planned Select gives way.
+    let gap = theme.spacing.s2;
+    let need = gap + crate::component::pill::width(ui, theme, tr!("Select")) + gap + crate::component::tag::width(ui, theme, tr!("coming soon"));
+    if ui.available_size_before_wrap().x >= need {
         crate::component::soon::soon(ui, theme, |ui| {
-            let _ = button::link_sized(ui, theme, &Keymap::empty(), tr!("in message text"), button::LinkSize::Small);
+            let _ = pill(ui, theme, tr!("Select"), false);
         });
         let _ = crate::component::soon::soon_tag(ui, theme);
-    });
+    }
 }
 
-/// The header above the list: the title, whose mail and how many, and the pills under them (the search is the command
-/// line's).
-pub(super) fn header(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Header {
-    let p = &theme.palette;
-    ui.add_space(theme.spacing.s1);
-    ui.horizontal(|ui| {
-        ui.vertical(|ui| {
-            ui.label(RichText::new(mailbox.title()).font(theme.fonts.title.id()).color(p.ink));
-            ui.label(theme.fonts.mono_s.rich(&subtitle(mailbox)).color(p.muted));
-        });
+/// The search's words on the filters' line: what was searched and where, and the planned search in the text of
+/// messages, coming soon.
+fn search_head(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) {
+    ui.spacing_mut().item_spacing.x = theme.spacing.s3;
+    let said = tr!("“{query}” in subjects, senders and recipients", query = mailbox.query());
+    ui.add(egui::Label::new(theme.fonts.mono_s.rich(&said).color(theme.palette.muted)).truncate());
+    crate::component::soon::soon(ui, theme, |ui| {
+        let _ = button::link_sized(ui, theme, &Keymap::empty(), tr!("in message text"), button::LinkSize::Small);
     });
+    let _ = crate::component::soon::soon_tag(ui, theme);
+}
+
+/// The head above the list, as the design draws it: one 48 line (at the text scale) with the place in `heading`, what
+/// it holds in `mono_s` 10 after it and the inbox's view switch at its right, 16 in from the pane's edges; a `line`
+/// hairline under it, then the filters' line. The rows draw the hairline under the head's last line. The pane's
+/// margin is the head's own: it stands from the pane's top and edges (the search is the command line's).
+pub(super) fn header(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Header {
     let mut asked = Header::default();
-    pills(ui, theme, mailbox, &mut asked);
+    let margin = theme.spacing.s4 as i8;
+    let reach = Margin { left: -margin, right: -margin, top: -margin, bottom: -margin };
+    Frame::new().outer_margin(reach).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        let switch_here = !head_line(ui, theme, mailbox, &mut asked);
+        if has_filters(mailbox) {
+            let room = ui.available_rect_before_wrap();
+            super::paint::hairline(ui.painter(), room.left_top(), room.right_top(), theme.palette.line);
+            ui.add_space(1.0);
+            pills(ui, theme, mailbox, &mut asked, switch_here);
+        }
+    });
     asked
 }
 
-/// The line under the list's title: whose mail and how much, or the outbox's summary.
+/// The head's line: the place, what it holds, and the view switch at the right where it has room. Whether the switch
+/// was drawn here (or has none to draw).
+fn head_line(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) -> bool {
+    let p = &theme.palette;
+    let pad = theme.spacing.s4;
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(vec2(width, Theme::size(theme, HEAD)), Sense::hover());
+    let inner = Rect::from_min_max(pos2(rect.left() + pad, rect.top()), pos2((rect.right() - pad).max(rect.left() + pad), rect.bottom()));
+    let options = view_switch().map(|(view, text)| (view, text, theme.fonts.button));
+    let switch_wide = crate::component::segmented::width(ui, theme, &options);
+    let switch = switch_shown(mailbox) && inner.width() >= switch_wide + HEAD_GAP + HEAD_WORDS_LEAST;
+    let words_right = if switch { inner.right() - switch_wide - HEAD_GAP } else { inner.right() };
+    let words = Rect::from_min_max(inner.min, pos2(words_right.max(inner.left()), inner.bottom()));
+    let mut line = ui.new_child(UiBuilder::new().max_rect(words).layout(Layout::left_to_right(Align::Center)));
+    line.spacing_mut().item_spacing.x = HEAD_GAP;
+    line.add(egui::Label::new(theme.fonts.heading.rich(&mailbox.title()).color(p.ink)).truncate());
+    line.add(egui::Label::new(theme.fonts.mono_s.rich(&subtitle(mailbox)).color(p.muted)).truncate());
+    if switch {
+        let high = theme.boxes().button;
+        let at = Rect::from_min_size(pos2(inner.right() - switch_wide, rect.center().y - high / 2.0), vec2(switch_wide, high));
+        let mut right = ui.new_child(UiBuilder::new().max_rect(at).layout(Layout::left_to_right(Align::Center)));
+        if let Some(view) = segmented_for(&mut right, theme, &options, mailbox.inbox_view(), Some(tr!("the inbox"))) {
+            asked.view = Some(view);
+        }
+    }
+    switch || !switch_shown(mailbox)
+}
+
+/// What the list holds, beside its place in the head: whose mail and how much, or the outbox's summary.
 fn subtitle(mailbox: &Mailbox) -> String {
     if mailbox.drafts_listed() {
         return mailbox.drafts_count();
+    }
+    // The unified inbox of every account, in a view with groups, holds what is left to read, as the design words it
+    // (the List view still counts its messages after whose they are).
+    if switch_shown(mailbox) && mailbox.narrowed().is_none() && !mailbox.groups().is_empty() {
+        let count = mailbox.messages().iter().filter(|row| !row.seen).count();
+        return tr!("{count} to read", count = count);
     }
     match mailbox.outbox_summary().filter(|_| mailbox.place() == Place::Outbox && mailbox.query().is_empty()) {
         Some(summary) => summary,
@@ -2618,9 +2677,11 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
 
 /// [`rows`] before the row's time picker.
 fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
-    // The line between the list's head and its rows, in the panel's line colour; the rows start under it.
+    // The line between the list's head and its rows: under the filters, in the panel's line colour; under the head
+    // alone (the drafts, the outbox, New senders), the head's `line`. The rows start under it.
     let room = ui.max_rect();
-    super::paint::hairline(ui.painter(), room.left_top(), room.right_top(), theme.palette.panel_line);
+    let edge = if has_filters(mailbox) { theme.palette.panel_line } else { theme.palette.line };
+    super::paint::hairline(ui.painter(), room.left_top(), room.right_top(), edge);
     ui.add_space(1.0);
     // A Snooze asked by its key lives for this one draw: served if its row is drawn now, else gone, never later.
     let ask = ui.data_mut(|data| data.remove_temp::<u64>(ask_snooze_id()));
@@ -2749,3 +2810,7 @@ pub(crate) mod rows_motion_tests;
 #[cfg(test)]
 #[path = "card_motion_tests.rs"]
 mod card_motion_tests;
+
+#[cfg(test)]
+#[path = "list_pixel_tests.rs"]
+mod list_pixel_tests;
