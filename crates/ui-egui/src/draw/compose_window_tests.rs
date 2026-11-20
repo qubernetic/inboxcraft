@@ -110,6 +110,10 @@ fn windowing(ctx: &Context) {
             focused = ui.ctx().memory(|memory| memory.focused());
         });
         output.textures_delta.clear();
+        // As eframe: the window's own Close asks the desktop to close it, which the window hears in its next pass.
+        if output.viewport_output.get(&this).is_some_and(|asked| asked.commands.contains(&egui::ViewportCommand::Close)) {
+            CLOSE.set(true);
+        }
         // As eframe: a window drawn inside its parent's pass asks the parent for the frame it wants.
         if let Some(asked) = output.viewport_output.get(&this).filter(|asked| asked.repaint_delay < std::time::Duration::MAX) {
             ctx.request_repaint_after_for(asked.repaint_delay, egui::ViewportId::ROOT);
@@ -608,4 +612,62 @@ fn fill_in_the_composer_s_window_leaves_the_keys_in_the_window_s_blank_and_the_m
     assert_eq!((composer.subject(), composer.blank().as_deref()), ("At ten", Some("place")), "filled in");
     assert_eq!(seen().focused.last().copied().flatten(), Some(compose::blank_id()), "the window's keys in the next blank");
     assert_eq!(harness.ctx.memory(|memory| memory.focused()), row, "the main window's keyboard stays on its row");
+}
+
+#[test]
+fn a_keep_the_store_refuses_at_the_window_s_close_leaves_the_window_open_with_everything_in_it() {
+    type Close = fn(&mut Harness<'static, InboxApp>);
+    let ways: [(&str, Close); 3] = [
+        ("the desktop's close", |harness| {
+            CLOSE.set(true);
+            harness.run();
+        }),
+        ("Esc", |harness| in_window(harness, vec![key(Key::Escape, Modifiers::NONE)])),
+        ("the frame's Close", |harness| click_in_window(harness, "Close the window")),
+    ];
+    for (way, close) in ways {
+        let mut harness = app(false, ComposerHost::Window, true);
+        let draft = write(&mut harness, "Kiln rota", "Friday at ten.");
+        // The draft was discarded from outside: the store keeps no more of it.
+        harness.state_mut().mailbox_mut().run("compose.discard", &json!({ "id": draft })).unwrap();
+        "Kiln rota for Friday".clone_into(harness.state_mut().composer_mut().0.unwrap().subject_mut());
+        harness.state_mut().composer_mut().0.unwrap().edited();
+        harness.run();
+        close(&mut harness);
+        let composer = harness.state().composer().unwrap_or_else(|| panic!("{way}: the composer closed with its draft not kept"));
+        assert_eq!((composer.subject(), composer.text()), ("Kiln rota for Friday", "Friday at ten."), "{way}: nothing lost");
+        assert!(harness.state().mailbox().error().is_some(), "{way}: the refused keep is said");
+        assert!(harness.state().composer_window, "{way}: the window stays open");
+        let before = seen().passes;
+        harness.run();
+        assert!(seen().passes > before, "{way}: the window draws on");
+    }
+}
+
+#[test]
+fn the_app_s_end_with_the_composer_s_window_open_keeps_the_draft() {
+    let mut harness = app(false, ComposerHost::Window, true);
+    let draft = write(&mut harness, "Kiln rota", "Friday at ten.");
+    type_in_window(&mut harness, &["!", "?"]);
+    assert!(harness.state().composer().unwrap().changed(), "the last piece waits for the next keep");
+    quit(&mut harness);
+    assert_eq!(kept(&mut harness, draft).unwrap()["subject"], "Kiln rota!?", "kept");
+}
+
+#[test]
+fn a_window_gone_without_a_close_leaves_the_composer_in_the_main_window_and_keeps_the_draft() {
+    let mut harness = app(false, ComposerHost::Window, true);
+    let draft = write(&mut harness, "Kiln rota", "Friday at ten.");
+    type_in_window(&mut harness, &["!", "?"]);
+    assert!(harness.state().composer().unwrap().changed(), "the last piece waits for the next keep");
+    // No window of its own can show any more: the app stops showing it, and the window hears no close.
+    harness.ctx.set_embed_viewports(true);
+    let before = seen().passes;
+    // No field of the composer has the keys in the main window: what waited is kept in the first frame.
+    harness.step();
+    assert_eq!(kept(&mut harness, draft).unwrap()["subject"], "Kiln rota!?", "kept at once");
+    harness.run();
+    assert_eq!(seen().passes, before, "the window is gone");
+    assert!(harness.state().docked(), "the composer in the reader's place");
+    assert_eq!(harness.state().composer().map(|composer| composer.subject().to_owned()).as_deref(), Some("Kiln rota!?"), "nothing lost");
 }
