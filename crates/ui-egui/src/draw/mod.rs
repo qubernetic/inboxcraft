@@ -2869,7 +2869,7 @@ impl InboxApp {
     /// the title bar (its handle, before the field and the controls take their presses) and the resizing edges.
     fn own_frame_parts(&self, ui: &Ui, theme: &Theme, regions: shell::Regions) {
         let line = regions.command;
-        frame::mark(ui, theme, line, regions.index.width() < shell::INDEX);
+        frame::mark(ui, theme, line, shell::narrow(ui.ctx()));
         if !self.draws_frame() {
             return;
         }

@@ -143,6 +143,34 @@ fn the_mark_stands_16_in_and_centred_in_the_narrow_index_s_column() {
     }
 }
 
+/// At 110 %, 120 %, 125 % and 150 % the mark stands 16 in beside the full index (at 1440) and centred beside the
+/// narrow one (at 1100), painted from the whole pixel its box starts in and as wide as its box and that part of a
+/// pixel: the full index, rounded to whole pixels, never reads as the narrow one.
+#[test]
+fn the_mark_stands_on_whole_pixels_at_fractional_scales() {
+    for ppp in [1.1_f32, 1.2, 1.25, 1.5] {
+        for (width, left) in [(1440.0, 16.0), (1100.0, 17.5)] {
+            let app = InboxApp::at_mail(Mailbox::new(sample::sending(clock()).unwrap(), clock()));
+            let mut harness =
+                Harness::builder().with_size(vec2(width, 900.0)).with_pixels_per_point(ppp).with_context_setup(install_fonts).build_ui_state(
+                    |ui, app: &mut InboxApp| {
+                        let whole = ui.ctx().content_rect();
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| app.ui(ui));
+                    },
+                    app,
+                );
+            harness.run();
+            let line = line(&harness);
+            let (pixel, shift) = crate::brand::placed(pos2(line.left() + left, line.center().y - 11.0), ppp);
+            let wide = (22.0 * ppp + shift.x).ceil();
+            let rect = mark_rect(&harness).unwrap();
+            let what = format!("{width} at {ppp}");
+            assert!((rect.left() * ppp - pixel.x).abs() < 1e-3 && (rect.top() * ppp - pixel.y).abs() < 1e-3, "{what}: {rect:?} from {pixel:?}");
+            assert!((rect.width() * ppp - wide).abs() < 1e-3, "{what}: {rect:?} {wide} pixels wide");
+        }
+    }
+}
+
 /// Sets what the window says of itself: maximised, in front.
 fn window_state(harness: &mut Harness<'static, InboxApp>, maximised: bool, focused: bool) {
     let viewport = harness.input_mut().viewports.entry(ViewportId::ROOT).or_default();
