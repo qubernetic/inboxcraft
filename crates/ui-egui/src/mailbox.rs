@@ -338,6 +338,9 @@ impl InboxView {
 /// the engine (`after.set`).
 pub use inboxcraft_engine::after::After;
 
+/// Which word of the sending name Home greets the owner by: the owner's choice, kept by the engine (`greeting.set`).
+pub use inboxcraft_engine::greet::GreetBy;
+
 /// An account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountRow {
@@ -1112,6 +1115,24 @@ impl Mailbox {
     /// Takes the next-message rule kept from an earlier run.
     pub(crate) fn restore_after(&mut self, after: After) {
         self.session.set_after(after);
+    }
+
+    /// Which word of the sending name Home greets by, as `greeting.set` left it.
+    #[must_use]
+    pub fn greet_by(&self) -> GreetBy {
+        self.session.greet_by()
+    }
+
+    /// Sets which word of the sending name Home greets by through `greeting.set`, as the owner.
+    pub fn set_greet_by(&mut self, by: GreetBy) {
+        if let Err(error) = self.run("greeting.set", &json!({ "greeting": by.name() })) {
+            self.fail(error);
+        }
+    }
+
+    /// Takes which word Home greets by, kept from an earlier run.
+    pub(crate) fn restore_greet_by(&mut self, by: GreetBy) {
+        self.session.set_greet_by(by);
     }
 
     /// Selects the row below the selected one (`forward`) or above it; the first row when none is selected. Stays at

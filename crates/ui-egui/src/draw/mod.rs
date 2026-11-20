@@ -594,6 +594,7 @@ impl InboxApp {
                 self.mailbox.set_inbox_view(kept.view);
                 self.mailbox.restore_pins(kept.keep_pins);
                 self.mailbox.restore_after(kept.after);
+                self.mailbox.restore_greet_by(kept.greet_by);
                 if let Some(hold) = kept.hold {
                     self.mailbox.restore_hold(hold);
                 }
@@ -607,6 +608,7 @@ impl InboxApp {
                     keep_pins: self.mailbox.pins_outlast_done(),
                     hold: Some(self.mailbox.hold_seconds()),
                     after: self.mailbox.after(),
+                    greet_by: self.mailbox.greet_by(),
                 };
             }
         }
@@ -824,6 +826,7 @@ impl InboxApp {
             keep_pins: self.mailbox.pins_outlast_done(),
             hold: Some(self.mailbox.hold_seconds()),
             after: self.mailbox.after(),
+            greet_by: self.mailbox.greet_by(),
         }
     }
 
@@ -3553,6 +3556,7 @@ impl InboxApp {
             settings::Asked::Grouped(account, grouped) => self.mailbox.set_grouped(account, grouped),
             settings::Asked::KeepPins(keep) => self.mailbox.set_pins_outlast_done(keep),
             settings::Asked::After(after) => self.mailbox.set_after(after),
+            settings::Asked::GreetBy(by) => self.mailbox.set_greet_by(by),
             settings::Asked::Hold(seconds) => self.mailbox.set_hold(seconds),
             settings::Asked::Level(account, level) => self.mailbox.set_notify_level(account, level),
             settings::Asked::Returns(on) => self.mailbox.set_notify_returns(on),
