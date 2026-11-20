@@ -299,7 +299,8 @@ another time than the computer's, its organiser, and whether it is the owner's o
 organiser is the account's own address; else it is someone else's, which the editor opens read-only). `event.create`, `event.update` and `event.delete` (`owner`) change the store at once
 and write to the server as kept jobs (`Put` new or over the copy seen, `Delete`); a new single event is written in UTC,
 a repeating one on the computer's wall clock (floating) so it keeps its time of day across a summer-time change, and an
-edit keeps the event's own form (its zone, the wall clock or UTC). Their `alert` (`"none"` or the minutes before the
+edit keeps the event's own form (its zone, the wall clock or UTC, a series in UTC too) and writes a time it does not
+change as it came. Their `alert` (`"none"` or the minutes before the
 start, at most a week) is set on every `VEVENT` of the object, the series and each changed instance: it moves the
 event's first timed display or sound alarm, dropping `X-APPLE-DEFAULT-ALARM` and `ACKNOWLEDGED`, or adds one `DISPLAY`
 alarm with a `UID` and the event's summary (control characters as spaces), and leaves every other alarm as it is; a
