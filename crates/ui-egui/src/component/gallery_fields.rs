@@ -196,6 +196,7 @@ fn recipient_fields(ui: &mut Ui, theme: &Theme) {
             .map(|name| Recipient {
                 shown: (*name).to_owned(),
                 spoken: (*name).to_owned(),
+                tip: None,
                 state: if name.ends_with('@') { RecipientState::Invalid } else { RecipientState::Valid },
             })
             .collect()
@@ -228,7 +229,7 @@ fn recipient_chips(ui: &mut Ui, theme: &Theme) {
     title(ui, theme, tr!("Recipient chip"));
     let teodor = "Teodor Vasquez";
     let one = |ui: &mut Ui, name: &str, state: RecipientState, shown: Option<Shown>| {
-        ui.push_id(ui.next_auto_id(), |ui| recipient::chip_with(ui, theme, name, name, state, shown));
+        ui.push_id(ui.next_auto_id(), |ui| recipient::chip_with(ui, theme, name, name, None, state, shown));
     };
     cells(ui, theme, |ui| {
         cell(ui, theme, tr!("valid"), |ui| one(ui, teodor, RecipientState::Valid, None));

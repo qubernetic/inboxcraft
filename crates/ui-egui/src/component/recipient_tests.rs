@@ -144,7 +144,7 @@ fn people(names: &[&str]) -> Vec<Recipient> {
         .iter()
         .map(|name| {
             let state = if name.ends_with('@') { RecipientState::Invalid } else { RecipientState::Valid };
-            Recipient { shown: (*name).to_owned(), spoken: (*name).to_owned(), state }
+            Recipient { shown: (*name).to_owned(), spoken: (*name).to_owned(), tip: None, state }
         })
         .collect()
 }
@@ -320,8 +320,12 @@ fn line_of(chips: Vec<Recipient>) -> Harness<'static> {
 
 #[test]
 fn two_chips_of_one_address_are_two_controls() {
-    let same =
-        Recipient { shown: "Teodor Vasquez".to_owned(), spoken: "Teodor Vasquez, teodor@example.org".to_owned(), state: RecipientState::Valid };
+    let same = Recipient {
+        shown: "Teodor Vasquez".to_owned(),
+        spoken: "Teodor Vasquez, teodor@example.org".to_owned(),
+        tip: None,
+        state: RecipientState::Valid,
+    };
     let harness = line_of(vec![same.clone(), same]);
     let crosses: Vec<_> = harness.query_all_by_label("Remove Teodor Vasquez").map(|node| node.accesskit_node().locate().0).collect();
     assert_eq!(crosses.len(), 2);
@@ -331,7 +335,12 @@ fn two_chips_of_one_address_are_two_controls() {
 #[test]
 fn five_hundred_recipients_stay_in_a_box_of_four_rows_that_scrolls() {
     let many: Vec<Recipient> = (0..500)
-        .map(|n| Recipient { shown: format!("person{n}@example.org"), spoken: format!("person{n}@example.org"), state: RecipientState::Valid })
+        .map(|n| Recipient {
+            shown: format!("person{n}@example.org"),
+            spoken: format!("person{n}@example.org"),
+            tip: None,
+            state: RecipientState::Valid,
+        })
         .collect();
     let clock = inboxcraft_time::SystemClock::new();
     let started = inboxcraft_time::Clock::monotonic(&clock);
@@ -375,7 +384,12 @@ fn drawn_fills(harness: &Harness<'static>) -> Vec<(Rect, egui::Color32)> {
 /// `n` recipients `person<k>@example.org`, all addresses.
 fn persons(n: usize) -> Vec<Recipient> {
     (0..n)
-        .map(|k| Recipient { shown: format!("person{k}@example.org"), spoken: format!("person{k}@example.org"), state: RecipientState::Valid })
+        .map(|k| Recipient {
+            shown: format!("person{k}@example.org"),
+            spoken: format!("person{k}@example.org"),
+            tip: None,
+            state: RecipientState::Valid,
+        })
         .collect()
 }
 

@@ -851,3 +851,20 @@ fn outside_the_drafts_place_only_the_drafts_count_is_asked_for() {
     assert_eq!(mailbox.drafts_total(), total);
     assert!(mailbox.drafts().next().is_none(), "outside the drafts place no draft is listed");
 }
+
+/// A draft's row in the drafts place says whom it goes to by name only where the name could not be taken for another
+/// address: else by the address.
+#[test]
+fn a_draft_row_never_names_a_recipient_as_another_address() {
+    let mut mailbox = mailbox();
+    let account = mailbox.accounts().first().map(|account| account.id).unwrap();
+    for to in ["\"odile@example.org\" <eve@example.net>", "Odile <odile@example.org>"] {
+        let id = mailbox.run("compose.new", &json!({ "account": account })).unwrap().get("id").and_then(Value::as_u64).unwrap();
+        mailbox.run("compose.update", &json!({ "id": id, "to": [to] })).unwrap();
+    }
+    mailbox.open(Place::View(Role::Drafts));
+    let to: Vec<String> = mailbox.drafts().map(|draft| draft.to.clone()).collect();
+    assert!(to.iter().any(|to| to == "to eve@example.net"), "{to:?}");
+    assert!(to.iter().any(|to| to == "to Odile"), "{to:?}");
+    assert!(!to.iter().any(|to| to.contains("odile@")), "{to:?}");
+}

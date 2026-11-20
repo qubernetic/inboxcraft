@@ -28,7 +28,7 @@ use std::collections::BTreeSet;
 use inboxcraft_time::Timestamp;
 use serde_json::{Value, json};
 
-use crate::mailbox::{Mailbox, engine_date, parse_date, shown};
+use crate::mailbox::{Mailbox, engine_date, parse_date, plainly_named, shown};
 use crate::{UiError, tr};
 
 /// The most suggestions shown under a recipient line.
@@ -141,11 +141,23 @@ fn split(text: &str) -> (Option<&str>, &str) {
 }
 
 impl Chip {
-    /// What the chip shows: the name, or the address when there is none, fit for one line.
+    /// The name it may show, fit for one line: none where there is none, or where it could be taken for another
+    /// address or shows nothing ([`plainly_named`]); the chip then shows the address, so nothing goes to an address
+    /// the owner was not shown.
+    fn name(&self) -> Option<String> {
+        split(&self.text).0.map(shown).filter(|name| plainly_named(name))
+    }
+
+    /// What the chip shows: the name, or the address where it may show none, fit for one line.
     #[must_use]
     pub fn shown(&self) -> String {
-        let (name, address) = split(&self.text);
-        shown(name.unwrap_or(address))
+        self.name().unwrap_or_else(|| self.address())
+    }
+
+    /// The chip's tooltip: its address, where the chip shows a name.
+    #[must_use]
+    pub fn tip(&self) -> Option<String> {
+        self.name().map(|_| self.address())
     }
 
     /// The address part, fit for one line.
@@ -157,10 +169,9 @@ impl Chip {
     /// The chip as a screen reader says it.
     #[must_use]
     pub fn spoken(&self) -> String {
-        let (name, address) = split(&self.text);
-        let named = match name {
-            Some(name) => tr!("{name}, {address}", name = shown(name), address = shown(address)),
-            None => shown(address),
+        let named = match self.name() {
+            Some(name) => tr!("{name}, {address}", name = name, address = self.address()),
+            None => self.address(),
         };
         if self.ok { named } else { tr!("{recipient}, not an address", recipient = named) }
     }

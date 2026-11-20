@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 
 use crate::fetch::Fetch;
 use crate::invite::{Invite, Rsvp};
-use crate::mailbox::{Mailbox, parse_date, sender, shown};
+use crate::mailbox::{Mailbox, parse_date, plainly_named, sender, shown};
 use crate::picture::{Decoded, decode_within};
 use crate::quote::{MAX_TEXT, Segment, split};
 use crate::save::Save;
@@ -59,10 +59,11 @@ pub struct Person {
 }
 
 impl Person {
-    /// The name, or the address without one.
+    /// The name, or the address where there is none or where the name could be taken for another address (it holds
+    /// an at sign) or shows nothing.
     #[must_use]
     pub fn shown(&self) -> &str {
-        if self.name.is_empty() { &self.address } else { &self.name }
+        if plainly_named(&self.name) { &self.name } else { &self.address }
     }
 
     /// `Name <address>`, or the address alone.

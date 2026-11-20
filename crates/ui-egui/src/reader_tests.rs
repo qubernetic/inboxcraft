@@ -595,3 +595,16 @@ fn try_again_works_in_every_open_message_that_shows_the_picture() {
     reader.retry(&mut mailbox, older, URL);
     assert_eq!(fetch.asked.lock().unwrap().len(), 2, "try again in the older message asks once more");
 }
+
+/// A name that could be taken for another address, or that shows nothing, is never shown for a person in a head: the
+/// address is.
+#[test]
+fn a_person_named_as_another_address_is_shown_by_the_address() {
+    let person = |name: &str| super::Person { name: name.to_owned(), address: "eve@example.net".to_owned() };
+    assert_eq!(person("odile@example.org").shown(), "eve@example.net");
+    assert_eq!(person("odile\u{FF20}example.org").shown(), "eve@example.net");
+    assert_eq!(person("   ").shown(), "eve@example.net");
+    assert_eq!(person("\u{200B}").shown(), "eve@example.net");
+    assert_eq!(person("").shown(), "eve@example.net");
+    assert_eq!(person("Odile").shown(), "Odile");
+}

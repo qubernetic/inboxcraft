@@ -71,12 +71,20 @@ enum Look {
 /// A recipient's chip (see the module), 24 high: its response is the cross's, clicked when the recipient is to go.
 /// A screen reader hears the chip as `name` and the cross as "Remove `name`".
 pub fn recipient_chip(ui: &mut Ui, theme: &Theme, name: &str, state: RecipientState) -> Response {
-    chip_with(ui, theme, name, name, state, None)
+    chip_with(ui, theme, name, name, None, state, None)
 }
 
-/// [`recipient_chip`] heard as `spoken`, drawn in `shown` whatever the pointer and the keyboard do (a board of the
-/// gallery).
-pub(crate) fn chip_with(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str, state: RecipientState, shown: Option<Shown>) -> Response {
+/// [`recipient_chip`] heard as `spoken`, with `tip` (its address, where it shows a name) under the pointer, drawn in
+/// `shown` whatever the pointer and the keyboard do (a board of the gallery).
+pub(crate) fn chip_with(
+    ui: &mut Ui,
+    theme: &Theme,
+    name: &str,
+    spoken: &str,
+    tip: Option<&str>,
+    state: RecipientState,
+    shown: Option<Shown>,
+) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
     let enabled = ui.is_enabled() && !soon::is_soon(ui);
@@ -95,6 +103,10 @@ pub(crate) fn chip_with(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str, st
     let width = (lead + words_box(ui, theme, name, ink, &words, most) + tail).ceil();
     let (rect, chip) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     chip.widget_info(|| WidgetInfo::labeled(Role::ListItem, enabled, spoken));
+    let chip = match tip {
+        Some(tip) => chip.on_hover_text(tip),
+        None => chip,
+    };
     let cross = Rect::from_min_size(pos2(rect.right() - 1.0 - s.s1 - glyph, rect.center().y - glyph / 2.0), vec2(glyph, glyph));
     let remove = tr!("Remove {recipient}", recipient = name);
     // Two chips may show one name; what a screen reader hears holds the address.
@@ -149,6 +161,8 @@ pub struct Recipient {
     pub shown: String,
     /// What a screen reader says for it.
     pub spoken: String,
+    /// Its tooltip: the address, where it shows a name.
+    pub tip: Option<String>,
     /// Whether it is an address.
     pub state: RecipientState,
 }
@@ -296,7 +310,8 @@ fn recipients_drawn(
                     child.disable();
                 }
                 let chip_shown = if enabled { None } else { Some(Shown::Rest) };
-                if chip_with(&mut child, theme, &recipient.shown, &recipient.spoken, recipient.state, chip_shown).clicked() {
+                if chip_with(&mut child, theme, &recipient.shown, &recipient.spoken, recipient.tip.as_deref(), recipient.state, chip_shown).clicked()
+                {
                     removed = Some(index);
                 }
             }

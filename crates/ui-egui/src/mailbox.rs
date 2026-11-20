@@ -514,7 +514,12 @@ fn draft_item(mailbox: &Mailbox, row: &Value) -> Option<DraftItem> {
     let account = row.get("account").and_then(Value::as_u64).unwrap_or(0);
     let subject = row.get("subject").and_then(Value::as_str).map(crate::home::kept).filter(|subject| !subject.trim().is_empty());
     let first = row.get("to").and_then(Value::as_array).and_then(|to| to.first()).and_then(|to| to.get("text")).and_then(Value::as_str);
-    let to = match first.map(|to| crate::home::kept(&recipient(to).0)).filter(|to| !to.trim().is_empty()) {
+    // By name only where the name could not be taken for another address: else by the address.
+    let whom = |to: &str| {
+        let (name, address) = recipient(to);
+        if plainly_named(&name) { name } else { address }
+    };
+    let to = match first.map(|to| crate::home::kept(&whom(to))).filter(|to| !to.trim().is_empty()) {
         Some(to) => tr!("to {who}", who = to),
         None => tr!("no recipient yet").to_owned(),
     };
@@ -777,6 +782,20 @@ pub(crate) fn shown(text: &str) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .take(MAX_SHOWN)
         .collect()
+}
+
+/// Whether a person's `name` may be shown for them: it holds no at sign (it could be taken for another address than
+/// theirs) and something that shows (not only spaces, control, bidi or other invisible characters). Where it may
+/// not, the address is shown instead.
+pub(crate) fn plainly_named(name: &str) -> bool {
+    let at = |c: char| matches!(c, '@' | '\u{FF20}' | '\u{FE6B}');
+    let invisible = |c: char| {
+        c.is_whitespace()
+            || c.is_control()
+            || matches!(c, '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}')
+            || matches!(c, '\u{2060}'..='\u{206F}' | '\u{FEFF}')
+    };
+    !name.chars().any(at) && name.chars().any(|c| !invisible(c))
 }
 
 /// The first sender's name, or the address when it has none.

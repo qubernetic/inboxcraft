@@ -332,6 +332,7 @@ fn recipients(ui: &mut Ui, theme: &Theme, composer: &mut Composer, line: Line, a
         .map(|chip| Recipient {
             shown: chip.shown(),
             spoken: chip.spoken(),
+            tip: chip.tip(),
             state: if chip.ok { RecipientState::Valid } else { RecipientState::Invalid },
         })
         .collect();

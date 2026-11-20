@@ -543,7 +543,29 @@ fn a_recipient_named_as_another_address_is_shown_by_its_address_and_only_edited(
         harness.get_by_label_contains("To odile@example.org <eve@example.net>, Work party on Saturday");
         harness.get_by_label_contains("Changed since it was refused: To; Edit to send it");
         only_edit_sends(&mut harness, draft);
+        // Opened with Edit, its chip shows where it goes, never the name that reads as another address.
+        let composer = harness.state().composer().unwrap();
+        assert_eq!(composer.chips(Line::To).iter().map(crate::compose::Chip::shown).collect::<Vec<_>>(), ["eve@example.net"]);
+        harness.get_by_role_and_label(Role::ListItem, "eve@example.net");
+        assert!(harness.query_by_role_and_label(Role::ListItem, "odile@example.org").is_none());
+        // No chip (the outbox row's own line, "To …", says both) shows or says the name that reads as an address.
+        let chips: Vec<String> = harness.query_all_by_role(Role::ListItem).filter_map(|item| item.accesskit_node().label()).collect();
+        assert!(chips.iter().filter(|label| !label.starts_with("To ")).all(|label| !label.contains("odile@")), "{chips:?}");
     }
+}
+
+/// A plain name keeps its chip in the composer, with the address in its tooltip and in what a screen reader hears.
+#[test]
+fn a_plain_name_shows_on_its_chip_with_the_address_beside_it() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Light);
+    write(&mut harness, "Work party on Saturday");
+    let chip = harness.get_by_role_and_label(Role::ListItem, "Odile Brannock, odile@example.org");
+    chip.hover();
+    for _ in 0..60 {
+        harness.step();
+    }
+    harness.get_by_label("odile@example.org");
 }
 
 /// C2: an agent adds twenty Bcc and a twenty-first; the row cannot list them all, says how many it leaves out, and
