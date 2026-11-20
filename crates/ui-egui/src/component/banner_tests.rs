@@ -211,6 +211,9 @@ fn hostile_words_keep_the_banner_at_its_sheet_size_cut_once_at_a_character() {
             shown.chars().rev().take(12).collect::<String>()
         );
     }
+    // The order itself, against a fixed line: a right-to-left phrase is laid out last word first, each word and the
+    // comma's run handed to the shaper as it turns them round, so it reads "שלום, עולם רב" from the right.
+    assert_eq!(shown_words("שלום, עולם רב"), "רב עולם ,שלום");
 }
 
 #[test]
