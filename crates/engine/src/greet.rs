@@ -63,13 +63,11 @@ impl GreetBy {
     /// word.
     #[must_use]
     pub fn word(self, name: &str) -> Option<String> {
-        if self == Self::None {
+        // An address anywhere in the name, past the cap too, gives no word.
+        if self == Self::None || name.contains('@') {
             return None;
         }
         let plain: String = name.chars().take(MOST).map(|c| if c.is_control() { ' ' } else { c }).filter(|c| !invisible(*c)).collect();
-        if plain.contains('@') {
-            return None;
-        }
         if self == Self::Full {
             let full = plain.split_whitespace().collect::<Vec<_>>().join(" ");
             let full = full.trim_matches(|c: char| wrapping(c) || c.is_whitespace());

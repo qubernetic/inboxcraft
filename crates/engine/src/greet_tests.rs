@@ -200,3 +200,11 @@ fn only_the_first_comma_turns_a_name_round_and_a_suffix_is_not_a_given_name() {
         assert_eq!(word(GreetBy::Full, name), name, "the full name stays as written: {name:?}");
     }
 }
+
+#[test]
+fn an_address_past_the_cap_still_gives_no_word() {
+    let name = format!("{} anna@example.org", "x".repeat(MOST + 44));
+    for by in GreetBy::ALL {
+        assert_eq!(by.word(&name), None, "{by:?}");
+    }
+}
