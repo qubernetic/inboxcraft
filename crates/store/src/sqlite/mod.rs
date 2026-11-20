@@ -710,6 +710,10 @@ impl Storage for Sqlite {
         self.keeper.as_ref().map(Keeper::unkept).unwrap_or_default()
     }
 
+    fn keeps(&self) -> u64 {
+        self.keeper.as_ref().map_or(0, Keeper::keeps)
+    }
+
     fn wake_on_keep(&self, wake: KeepWake) {
         if let Some(keeper) = &self.keeper {
             keeper.wake_on(wake);

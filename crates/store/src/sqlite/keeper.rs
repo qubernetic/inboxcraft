@@ -7,7 +7,7 @@
 //! the draft here, newest text and all, and is tried again after 1 s, 2 s, 4 s … at most 30 s apart, until it lands
 //! or the draft is removed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -76,6 +76,8 @@ struct Queue {
     wake: Option<KeepWake>,
     /// Every write fails (tests).
     refuse: bool,
+    /// Every write of these drafts fails, the others land (tests).
+    refuse_drafts: BTreeSet<DraftId>,
     /// The keeper's thread ends at once (tests: a keeper gone).
     stop: bool,
     /// How many writes the keeper started (tests).
@@ -205,6 +207,11 @@ impl Keeper {
         self.shared.lock().failing.iter().map(|(id, failing)| (*id, failing.error.clone())).collect()
     }
 
+    /// How many drafts were handed to the keeper so far.
+    pub(super) fn keeps(&self) -> u64 {
+        self.shared.lock().next
+    }
+
     /// A draft that started failing, with why, once.
     pub(super) fn take_failed(&self) -> Option<(DraftId, StoreError)> {
         self.shared.lock().untold.pop_first()
@@ -323,6 +330,18 @@ impl KeeperHooks {
         self.shared.lock().refuse = refuse;
         self.shared.changed.notify_all();
     }
+
+    /// Makes every write of draft `id` fail while `refuse` is on; the other drafts land.
+    pub fn refuse_draft(&self, id: DraftId, refuse: bool) {
+        let mut queue = self.shared.lock();
+        if refuse {
+            queue.refuse_drafts.insert(id);
+        } else {
+            queue.refuse_drafts.remove(&id);
+        }
+        drop(queue);
+        self.shared.changed.notify_all();
+    }
 }
 
 /// The end of the store: unless the window already waited for the keeper and nothing was kept since, gives every
@@ -402,20 +421,25 @@ fn run(shared: &Shared, mut conn: Connection) {
             }
             queue.writing = true;
             queue.tries = queue.tries.saturating_add(1);
-            (std::mem::take(&mut queue.waiting), queue.refuse)
+            let refused: BTreeSet<DraftId> = queue.waiting.keys().copied().filter(|id| queue.refuse || queue.refuse_drafts.contains(id)).collect();
+            (std::mem::take(&mut queue.waiting), refused)
         };
         let mut keeps: Vec<(DraftId, Keep)> = taken.into_iter().collect();
         keeps.sort_by_key(|(_, (number, _))| *number);
-        let written = if refuse {
-            Err(StoreError::DatabaseRefused("refused by a test".to_owned()))
+        // A test's refusal fails its drafts as a failing disk would; the others are written.
+        let (refused_keeps, keeps): (Vec<_>, Vec<_>) = keeps.into_iter().partition(|(id, _)| refuse.contains(id));
+        let written = if keeps.is_empty() {
+            Ok(())
         } else {
             catch_unwind(AssertUnwindSafe(|| write(&mut conn, &keeps)))
                 .unwrap_or_else(|_| Err(StoreError::Database("the draft keeper failed".to_owned())))
         };
+        let refusal = Err(StoreError::DatabaseRefused("refused by a test".to_owned()));
         let now = shared.clock.monotonic();
         let mut queue = shared.lock();
-        for (id, (number, _)) in &keeps {
-            match &written {
+        let results = keeps.iter().map(|keep| (keep, &written)).chain(refused_keeps.iter().map(|keep| (keep, &refusal)));
+        for ((id, (number, _)), written) in results {
+            match written {
                 Ok(()) => {
                     // A newer keep of the same draft came meanwhile: it stays held until it is written.
                     if queue.held.get(id).is_some_and(|(held, _)| held == number) {

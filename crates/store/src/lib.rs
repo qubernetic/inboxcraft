@@ -192,6 +192,12 @@ pub trait Storage {
         Vec::new()
     }
 
+    /// A count of the drafts handed to be written behind so far: a newer keep since a moment shows as another
+    /// number. A store that writes everything at once has none.
+    fn keeps(&self) -> u64 {
+        0
+    }
+
     /// Calls `wake` after each draft written behind, landed or failed, from now on. A store that writes everything at
     /// once never calls it.
     fn wake_on_keep(&self, wake: KeepWake) {
