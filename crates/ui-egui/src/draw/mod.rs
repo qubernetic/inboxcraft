@@ -3737,6 +3737,8 @@ mod settings_tests;
 mod shortcuts_tests;
 
 #[cfg(test)]
+mod round_tests;
+#[cfg(test)]
 #[path = "status_tests.rs"]
 mod status_tests;
 #[cfg(test)]
