@@ -48,6 +48,22 @@ fn harness_with(
     level: Level,
     glyphless: bool,
 ) -> Harness<'static, State> {
+    harness_at(1.0, home, mode, percent, size, rect, emblem, level, glyphless)
+}
+
+/// Home drawn from `home` over `rect` in a window of `size`, at `ppp` pixels per point.
+#[allow(clippy::too_many_arguments)]
+fn harness_at(
+    ppp: f32,
+    home: Home,
+    mode: Mode,
+    percent: u16,
+    size: Vec2,
+    rect: Rect,
+    emblem: Option<Emblem>,
+    level: Level,
+    glyphless: bool,
+) -> Harness<'static, State> {
     let field = emblem.clone().map_or_else(|| Field::new(0), |emblem| Field::new(0).with_emblem(emblem));
     let state = State {
         home,
@@ -60,7 +76,7 @@ fn harness_with(
         drawn: Drawn::default(),
         asked: None,
     };
-    let builder = Harness::builder().with_size(size).with_max_steps(60).with_context_setup(|ctx| {
+    let builder = Harness::builder().with_size(size).with_pixels_per_point(ppp).with_max_steps(60).with_context_setup(|ctx| {
         install_fonts(ctx);
         crate::motion::set_reduced(ctx, true);
     });
@@ -267,7 +283,7 @@ fn the_emblem_leaves_whole_at_a_1381_window_and_under_and_stays_from_1382() {
         }
     }
     let stage = Rect::from_min_size(pos2(600.0, 0.0), vec2(547.0, 499.0));
-    assert_eq!(emblem_place(stage, &emblem, 0.0), None, "a stage one point too low leaves no emblem");
+    assert_eq!(emblem_place(stage, &emblem, 0.0, 1.0), None, "a stage one point too low leaves no emblem");
 }
 
 /// The rects of the pictures (meshes with a texture of their own) painted this frame.
@@ -286,8 +302,8 @@ fn pictures(harness: &Harness<'_, State>) -> Vec<Rect> {
 /// `home/*` at 1440 × 900, in dark and light: the Qubernetic emblem (76 × 40 cells, 547 × 500) centred across the
 /// emblem's place, at 629 of the body as the frames draw it; the names' box (394 × 96, `bg`) 12 out from its left and
 /// 16 under it; in it, 12 in, the Qubernetic wordmark (88 × 14), the dot and the InboxCraft wordmark (102.17 × 13)
-/// centred on a line of 20, the InboxCraft wordmark at 120 of the box's content. Down, the emblem and the names stand
-/// centred together in the place: at 107 where the frames draw the emblem at 95.
+/// centred on a line of 20, the InboxCraft wordmark at 120 of the box's content. Down, the emblem stands 95 below the
+/// place's top, as the frames draw it, and the names at 611.
 #[test]
 fn the_emblem_and_the_names_stand_where_the_frames_draw_them_in_dark_and_light() {
     for mode in [Mode::Dark, Mode::Light] {
@@ -296,11 +312,11 @@ fn the_emblem_and_the_names_stand_where_the_frames_draw_them_in_dark_and_light()
             let harness = harness_with(sample(state).unwrap(), mode, 100, BODY, body, Some(crate::brand::emblem().clone()), Level::Off, false);
             let what = format!("{state}, {mode:?}");
             let p = harness.state().drawn.parts;
-            assert_eq!(at(p.emblem), (629.0, 107.0, 547.0, 500.0), "{what}: the emblem");
-            assert_eq!(at(p.names), (617.0, 623.0, 394.0, 96.0), "{what}: the names' box");
+            assert_eq!(at(p.emblem), (629.0, 95.0, 547.0, 500.0), "{what}: the emblem");
+            assert_eq!(at(p.names), (617.0, 611.0, 394.0, 96.0), "{what}: the names' box");
             let (qubernetic, inboxcraft) = p.wordmarks.unwrap();
-            assert_eq!(qubernetic, Rect::from_min_size(pos2(629.0, 638.0), vec2(88.0, 14.0)), "{what}: the Qubernetic wordmark");
-            assert_eq!(inboxcraft, Rect::from_min_size(pos2(749.0, 638.5), vec2(102.17, 13.0)), "{what}: the InboxCraft wordmark");
+            assert_eq!(qubernetic, Rect::from_min_size(pos2(629.0, 626.0), vec2(88.0, 14.0)), "{what}: the Qubernetic wordmark");
+            assert_eq!(inboxcraft, Rect::from_min_size(pos2(749.0, 626.5), vec2(102.17, 13.0)), "{what}: the InboxCraft wordmark");
             // Each is painted as a picture from the whole pixel its box starts in.
             let painted = pictures(&harness);
             for (name, wordmark) in [("Qubernetic", qubernetic), ("InboxCraft", inboxcraft)] {
@@ -314,13 +330,20 @@ fn the_emblem_and_the_names_stand_where_the_frames_draw_them_in_dark_and_light()
 }
 
 /// The names come with the emblem: where the emblem and the names do not fit whole together, neither stands, at a
-/// window of 1381 across and in a place too low for both; at 130 % text the names' lines grow and both still stand.
+/// window of 1381 across and in a place too low for both (95 + 500 + 16 + 96 = 707 high stands it at 95, 612 pulls it
+/// up to the top, 611 leaves none); at 130 % text the names' lines grow and both still stand.
 #[test]
 fn the_names_leave_with_the_emblem() {
     let emblem = crate::brand::emblem().clone();
-    for (width, high, percent, whole) in
-        [(1146.0, 826.0, 100, false), (1147.0, 826.0, 100, true), (1205.0, 611.0, 100, false), (1205.0, 612.0, 100, true), (1205.0, 826.0, 130, true)]
-    {
+    for (width, high, percent, whole) in [
+        (1146.0, 826.0, 100, false),
+        (1147.0, 826.0, 100, true),
+        (1205.0, 611.0, 100, false),
+        (1205.0, 612.0, 100, true),
+        (1205.0, 700.0, 100, true),
+        (1205.0, 707.0, 100, true),
+        (1205.0, 826.0, 130, true),
+    ] {
         let body = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, high));
         let harness = harness_with(sample("today").unwrap(), Mode::Dark, percent, body.size(), body, Some(emblem.clone()), Level::Off, false);
         let p = harness.state().drawn.parts;
@@ -331,6 +354,49 @@ fn the_names_leave_with_the_emblem() {
             let stage = p.stage.unwrap();
             assert!(stage.contains_rect(emblem), "{what}: the emblem never cut");
             assert!(names.bottom() <= stage.bottom() && names.top() == emblem.bottom() + 16.0, "{what}: the names 16 under it, inside");
+        }
+    }
+}
+
+/// The emblem stands 95 below the place's top in a place as high as the frames' and in a taller one (it is not
+/// centred down), and a place too short for that pulls it up just enough: the names end at the place's foot.
+#[test]
+fn the_emblem_stands_95_down_and_a_short_place_pulls_it_up() {
+    let emblem = crate::brand::emblem().clone();
+    for (high, percent, top) in
+        [(826.0, 100, 95.0), (1100.0, 100, 95.0), (707.0, 100, 95.0), (700.0, 100, 88.0), (612.0, 100, 0.0), (826.0, 130, 95.0)]
+    {
+        let body = Rect::from_min_size(pos2(0.0, 0.0), vec2(BODY.x, high));
+        let harness = harness_with(sample("today").unwrap(), Mode::Dark, percent, body.size(), body, Some(emblem.clone()), Level::Off, false);
+        let p = harness.state().drawn.parts;
+        let what = format!("{high} high at {percent} %");
+        assert_eq!(at(p.emblem), (629.0, top, 547.0, 500.0), "{what}: the emblem");
+        assert_eq!(p.names.unwrap().top(), top + 516.0, "{what}: the names 16 under it");
+        assert_eq!(harness.state().field.emblem_at(), p.emblem.map(|rect| rect.min), "{what}: the field draws it there");
+        if high < 707.0 {
+            assert_eq!(p.names.unwrap().bottom(), high, "{what}: pulled up just enough");
+        }
+    }
+}
+
+/// At 125 % and 150 % the emblem stands on the whole pixel the field draws it on, and the names 16 points (20 and 24
+/// pixels) under it, on the same pixel grid, from a place whose corner is a whole point or a part of one.
+#[test]
+fn at_125_and_150_percent_the_names_sit_on_the_emblem_s_pixel_grid() {
+    let emblem = crate::brand::emblem().clone();
+    for ppp in [1.25_f32, 1.5] {
+        for corner in [pos2(0.0, 0.0), pos2(0.3, 0.7)] {
+            let body = Rect::from_min_size(corner, BODY);
+            let harness =
+                harness_at(ppp, sample("today").unwrap(), Mode::Dark, 100, BODY + vec2(1.0, 1.0), body, Some(emblem.clone()), Level::Off, false);
+            let p = harness.state().drawn.parts;
+            let what = format!("{ppp} from {corner:?}");
+            let (Some(placed), Some(names)) = (p.emblem, p.names) else { panic!("{what}: none: {p:?}") };
+            assert_eq!(harness.state().field.emblem_at(), Some(placed.min), "{what}: where the field draws it");
+            let whole = |points: f32| ((points * ppp).round() - points * ppp).abs() < 1e-3;
+            assert!(whole(placed.left()) && whole(placed.top()), "{what}: the emblem at {placed:?} on whole pixels");
+            assert!(whole(names.left()) && whole(names.top()), "{what}: the names at {names:?} on whole pixels");
+            assert!(((names.top() - placed.bottom()) - 16.0).abs() < 1e-3, "{what}: 16 points under it");
         }
     }
 }

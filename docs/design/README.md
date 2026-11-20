@@ -98,8 +98,9 @@ What the app still owes this file, one line each. The finer differences, with th
   and the window's commands. The file does not draw event drafts yet either.
 
 **The marks**
-- Under Home's emblem the line "↳ the field reacts under the pointer here, and only here" is not drawn, and the emblem
-  with the names under it is centred in the emblem's place, 12 points lower than the frames draw it.
+- The file draws Home only in a window 900 high. In a lower one the code pulls the emblem and the names under it up
+  toward the top of their place, and drops them only where even that leaves no room. The line "↳ the field reacts
+  under the pointer here, and only here" is a note on the design, not drawn; the names' box keeps its room.
 
 **Sample content**
 - The sample mailbox and the pictures in `docs/images/` use their own people, subjects, times and counts, not the

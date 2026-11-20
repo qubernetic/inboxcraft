@@ -61,6 +61,9 @@ const BAR: egui::Vec2 = vec2(3.0, 12.0);
 const STEPS_PAD_Y: f32 = 10.0;
 const STEPS_GAP: f32 = 2.0;
 
+/// How far below the emblem's place's top the emblem stands where the place is high enough, in points.
+const EMBLEM_TOP: f32 = 95.0;
+
 /// The room between the emblem and the names under it, in points.
 const NAMES_GAP: f32 = 16.0;
 
@@ -163,21 +166,25 @@ pub struct Stage<'a> {
     pub level: Level,
 }
 
-/// Where `emblem` stands in `stage` with `under` points of names below it: centred across, the emblem and the names
-/// together centred down, at its one size, and only if both fit whole.
+/// Where `emblem` stands in `stage` at `ppp` with `under` points of names below it: centred across, [`EMBLEM_TOP`]
+/// below the stage's top (pulled up as far as a short stage needs), at its one size, on the whole pixel the field
+/// draws it on, and only if it and the names fit whole.
 #[must_use]
-pub fn emblem_place(stage: Rect, emblem: &Emblem, under: f32) -> Option<Rect> {
-    let size = emblem.size();
-    let area = emblem_area(stage, under)?;
-    (size.x > 0.0 && size.y > 0.0 && size.x <= area.width() && size.y <= area.height())
-        .then(|| Rect::from_min_size((area.center() - size / 2.0).round(), size))
+pub fn emblem_place(stage: Rect, emblem: &Emblem, under: f32, ppp: f32) -> Option<Rect> {
+    let band = emblem_band(stage, emblem, under, ppp)?;
+    field::emblem_corner(emblem, band, stage, ppp).map(|corner| Rect::from_min_size(corner, emblem.size()))
 }
 
-/// The area the emblem is centred in: `stage` less `under` points at its foot, so that the emblem and the names
-/// under it stand centred together.
-fn emblem_area(stage: Rect, under: f32) -> Option<Rect> {
-    let area = Rect::from_min_max(stage.min, pos2(stage.right(), stage.bottom() - under.max(0.0)));
-    (under.is_finite() && area.height() > 0.0).then_some(area)
+/// The band the emblem is centred in, as wide as `stage`: the emblem's height [`EMBLEM_TOP`] below the stage's top,
+/// or higher where the stage leaves less than that above the emblem and `under` points of names, and two pixels of
+/// `ppp` more each way: the field puts its first cell on the next whole pixel and the emblem on the nearest one from
+/// there, up to a pixel and a half off. `None` where not even a top of 0 leaves room.
+fn emblem_band(stage: Rect, emblem: &Emblem, under: f32, ppp: f32) -> Option<Rect> {
+    let size = emblem.size();
+    let top = EMBLEM_TOP.min(stage.height() - size.y - under.max(0.0));
+    let pixel = if ppp.is_finite() && ppp > 0.0 { 2.0 / ppp } else { 2.0 };
+    (under.is_finite() && top.is_finite() && top >= 0.0 && size.x > 0.0 && size.y > 0.0)
+        .then(|| Rect::from_min_size(pos2(stage.left(), stage.top() + top - pixel), vec2(stage.width(), size.y + pixel * 2.0)))
 }
 
 /// The names' height in `theme`: the wordmarks' line (`mono`'s), the tagline (`label`) and a line of `mono_s`, the
@@ -231,10 +238,11 @@ pub fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, rect: Rect
         if stage.field.emblem() != stage.emblem {
             stage.field.set_emblem(stage.emblem);
         }
-        let emblem = stage.emblem.and_then(|emblem| emblem_place(place, emblem, under));
-        // The field centres the emblem in its area itself, from the place's own corner: a place moving by parts of a
-        // pixel keeps the emblem on the same cells (a whole-point corner handed in would not).
-        let area = emblem.and_then(|_| emblem_area(place, under));
+        // The field centres the emblem in its band itself, from the place's own corner: a place moving by parts of a
+        // pixel keeps the emblem on the same cells, and the names are placed from the same pixel.
+        let ppp = ui.ctx().pixels_per_point();
+        let emblem = stage.emblem.and_then(|emblem| emblem_place(place, emblem, under, ppp));
+        let area = stage.emblem.zip(emblem).and_then(|(emblem, _)| emblem_band(place, emblem, under, ppp));
         field::show(ui, theme, stage.field, place, stage.level, Opts { on_home: true, on_pane: false, emblem: area });
         parts.stage = Some(place);
         parts.emblem = emblem;
