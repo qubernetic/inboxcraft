@@ -664,9 +664,10 @@ impl<'o> Builder<'o> {
         match name.as_str() {
             "table" => self.table(tag, elem),
             "tr" => {
-                self.restyle(tag, elem);
+                // The row before closes first (its `</tr>` may be left out), so its look does not outlast it.
                 self.close_to(at.0);
                 self.finish_implicit_cell();
+                self.restyle(tag, elem);
                 if let Some(Frame::Table(t)) = self.frames.last_mut() {
                     t.start_row();
                 }

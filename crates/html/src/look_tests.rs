@@ -226,3 +226,19 @@ fn text_align_on_a_mebibyte_of_text_and_a_mebibyte_of_style_is_read_in_one_pass(
     assert_eq!(d.blocks.len(), 1);
     assert!(looks(&d.blocks).iter().all(|(_, look)| look.align == Align::Centre));
 }
+
+#[test]
+fn a_row_whose_end_tags_are_left_out_keeps_its_own_look_and_the_table_s() {
+    // `</td>` and `</tr>` may be left out: each `<tr>` closes the row before it before it takes its own look.
+    let d = doc(r##"<table bgcolor="#2D5B45"><tr><td>a<td>b<tr bgcolor="#4B3FB5" align="right"><td>c<td>d<tr><td>e<td>f</table>"##);
+    let Some(Block::Table { rows, .. }) = d.blocks.first() else { panic!("{:?}", d.blocks) };
+    let seen: Vec<Vec<(Option<Rgb>, Option<Align>)>> = rows
+        .iter()
+        .map(|row| {
+            row.iter().map(|cell| (cell.background.map(|paint| paint.fill), looks(&cell.blocks).first().map(|(_, look)| look.align))).collect()
+        })
+        .collect();
+    let green = (Some(rgb(0x2D5B45)), Some(Align::Left));
+    let purple = (Some(rgb(0x4B3FB5)), Some(Align::Right));
+    assert_eq!(seen, [vec![green, green], vec![purple, purple], vec![green, green]]);
+}
