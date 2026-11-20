@@ -297,19 +297,26 @@ pub(crate) fn set_every_lead(calendar: &mut Calendar, lead: Lead) {
 
 /// The calendar object `text` with the alert of every event set to `lead` and nothing else changed: its other
 /// properties and components are written back as they came, so the times, `DTSTAMP`, `SEQUENCE` and the scheduling
-/// parameters stay (RFC 5546 does not count alarms as a significant change). `None` when it cannot be read.
+/// parameters stay (RFC 5546 does not count alarms as a significant change). A `VEVENT` that cannot be read is written
+/// back as it came, as the calendar keeps it; `None` when none can be read, or the object cannot.
 pub(crate) fn relead(text: &str, lead: Lead) -> Option<String> {
     let top = inboxcraft_ical::parse(text.as_bytes()).ok()?;
     let mut out = Component::new(top.name());
     for property in top.properties() {
         out.push_property(property.clone());
     }
+    let mut led = false;
     for inner in top.components() {
-        if inner.name() == "VEVENT" {
-            out.push_component(releaded(inner, lead)?);
-        } else {
-            out.push_component(inner.clone());
+        match (inner.name() == "VEVENT").then(|| releaded(inner, lead)).flatten() {
+            Some(event) => {
+                out.push_component(event);
+                led = true;
+            }
+            None => out.push_component(inner.clone()),
         }
+    }
+    if !led {
+        return None;
     }
     out.write().ok()
 }

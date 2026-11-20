@@ -428,3 +428,20 @@ fn alarms_the_lead_leaves_alone_are_written_as_they_came() {
     let moved = display.replace("-PT15M", "-PT30M");
     assert!(written.contains(&format!("{mail}{PROXIMITY}{moved}")), "{written}");
 }
+
+#[test]
+fn an_unreadable_instance_does_not_block_the_alert_of_the_others() {
+    let mut session = session();
+    let instance = "BEGIN:VEVENT\r\nUID:plants@example.org\r\nRECURRENCE-ID:20261107T140000Z\r\nDTSTAMP:20261101T080000Z\r\n\
+                    DTSTART:20261107T150000Z\r\nDTEND:20261107T160000Z\r\nSUMMARY:Plants\r\nSEQUENCE:x\r\nEND:VEVENT\r\n";
+    let series = plants("BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nDESCRIPTION:Plants\r\nEND:VALARM\r\n")
+        .replace("SUMMARY:Plants\r\n", "SUMMARY:Plants\r\nRRULE:FREQ=DAILY;COUNT=3\r\n")
+        .replace("END:VCALENDAR", &format!("{instance}END:VCALENDAR"));
+    synced(&mut session, "plants", series);
+    session.run("event.update", &json!({ "id": 5, "alert": 30 })).unwrap();
+    let written = text(&session, 5);
+    assert!(written.contains(instance), "{written}");
+    let master = held(&session, 5).events.into_iter().find(|event| event.recurrence_id.is_none()).unwrap();
+    let triggers: Vec<Trigger> = master.alarms.iter().map(|alarm| alarm.trigger).collect();
+    assert_eq!(triggers, [Trigger::Start(Span::new(0, -1800).unwrap())], "{written}");
+}
