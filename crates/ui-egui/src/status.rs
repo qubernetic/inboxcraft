@@ -80,6 +80,13 @@ impl Status {
         self.queue.push_back(Waiting { message, since: None });
     }
 
+    /// Queues `message` as [`Status::push`] does, in place of every notice still waiting or shown whose text `earlier`
+    /// holds for: a newer word on the same thing (the text size a key changed again) is not kept waiting behind an older.
+    pub(crate) fn push_in_place_of(&mut self, message: Message, earlier: impl Fn(&str) -> bool) {
+        self.queue.retain(|waiting| !matches!(&waiting.message, Message::Notice { text, .. } if earlier(text)));
+        self.push(message);
+    }
+
     /// The message the line shows at `now`, given the window's countdown and undo: the countdown, else the undo, else
     /// the oldest error, else the oldest notice, whose time starts now if it had not shown. A notice that ran out goes.
     pub(crate) fn shown(&mut self, now: f64, countdown: Option<Message>, undo: Option<Message>) -> Option<Message> {

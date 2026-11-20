@@ -1075,6 +1075,17 @@ impl InboxApp {
                     ctx.request_repaint();
                 }
             }
+            // A step of the text size through the engine; the status line says the size, or that it is at its end.
+            _ if keymap::TEXT_SIZE_KEYS.contains(&id) => {
+                let (scale, words) = keymap::text_size_step(id, self.text_scale());
+                if scale != self.text_scale() {
+                    self.set_text_scale(scale);
+                }
+                if self.text_scale() == scale {
+                    let notice = crate::status::Message::Notice { text: words, until: crate::status::NOTICE_SECONDS };
+                    self.status.push_in_place_of(notice, keymap::is_text_size_notice);
+                }
+            }
             _ if keymap::LIST_KEYS.contains(&id) => self.move_in_list(ctx, id),
             _ => {
                 if let Some((row, act)) = self.row_act(id) {
