@@ -105,15 +105,6 @@ fn whole_days_are_written_as_days_and_read_back_in_minutes() {
 }
 
 #[test]
-fn a_new_event_without_an_alert_has_no_alarm_and_the_default_lead() {
-    let mut session = session();
-    let id = create(&mut session, json!({})).unwrap();
-    assert!(held(&session, id).events[0].alarms.is_empty());
-    assert_eq!(shown(&mut session, id), Value::Null);
-    assert_eq!(alerts(&session, id), [utc(2026, 11, 6, 13, 50)], "ten minutes before, the default");
-}
-
-#[test]
 fn no_alert_is_written_so_the_default_does_not_ring() {
     let mut session = session();
     let id = create(&mut session, json!({ "alert": "none" })).unwrap();
@@ -366,4 +357,21 @@ fn no_alert_on_an_event_with_only_a_mail_alarm_adds_no_marker() {
     assert_eq!(actions, ["EMAIL"]);
     assert_eq!(shown(&mut session, 5), json!("none"));
     assert!(alerts(&session, 5).is_empty());
+}
+
+#[test]
+fn a_new_event_without_an_alert_carries_the_default_lead_as_its_alarm() {
+    let mut session = session();
+    let id = create(&mut session, json!({})).unwrap();
+    let calendar = held(&session, id);
+    let actions: Vec<&str> = calendar.events[0].alarms.iter().map(|alarm| alarm.action.as_str()).collect();
+    assert_eq!(actions, ["DISPLAY"]);
+    assert!(text(&session, id).contains("TRIGGER:-PT10M\r\n"), "{}", text(&session, id));
+    assert_eq!(shown(&mut session, id), json!(10));
+    assert_eq!(alerts(&session, id), [utc(2026, 11, 6, 13, 50)]);
+    let day = session.run("event.create", &json!({ "calendar": 1, "summary": "Holiday", "start": "2026-11-09", "all_day": true })).unwrap();
+    let day = day["id"].as_u64().unwrap();
+    assert!(text(&session, day).contains("TRIGGER:-P1D\r\n"), "{}", text(&session, day));
+    let none = create(&mut session, json!({ "alert": "none" })).unwrap();
+    assert!(held(&session, none).events[0].alarms.iter().all(|alarm| alarm.action == "NONE"));
 }

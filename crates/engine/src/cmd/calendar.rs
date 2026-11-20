@@ -529,7 +529,8 @@ fn create(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         params.private,
         params.guests,
     )?;
-    details.alert = lead(&CREATE, params.alert)?;
+    // Without an alert, the default lead is written as the event's alarm, so every device rings as this one does.
+    details.alert = Some(lead(&CREATE, params.alert)?.unwrap_or(alert::default_lead(params.all_day)));
     let now = context.now();
     let id = CalendarEventId::new(context.state().next_event);
     let name = format!("inboxcraft-{}-{:09}-{}", now.unix_seconds(), now.subsec_nanos(), id.get());

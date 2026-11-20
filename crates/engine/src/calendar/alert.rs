@@ -198,6 +198,12 @@ pub(crate) enum Lead {
     Before(u32),
 }
 
+/// The lead a new event gets when the owner picks none: [`DEFAULT_LEAD`] before a timed event, a day before an all-day
+/// one, as an event without alarms rings here.
+pub(crate) fn default_lead(all_day: bool) -> Lead {
+    if all_day { Lead::Before(1440) } else { Lead::Before(u32::try_from(DEFAULT_LEAD.as_secs() / 60).unwrap_or(10)) }
+}
+
 /// When the `ACTION:NONE` alarm of RFC 9074 section 7 is due: a moment long past, as the RFC's example writes it.
 const NONE_AT: i64 = 197_168_145;
 
