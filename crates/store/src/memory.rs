@@ -17,8 +17,9 @@ use crate::{Batch, Body, Change, Entry, Search, Storage, StoreConfig, StoreError
 
 /// A store that lives in memory and is gone with the process.
 ///
-/// A batch is applied to a copy of the state that replaces it only when every change went through; bodies are shared
-/// between the copies, so the copy costs the rows, not the sources.
+/// A batch is applied to a copy of the state that replaces it only when every change went through. The copy shares
+/// every table with the state until a change writes to it ([`Shared`]), and bodies are shared between the copies, so a
+/// batch costs the tables it changes: a kept draft copies the drafts, not the messages.
 #[derive(Debug, Clone, Default)]
 pub struct Memory {
     config: StoreConfig,
@@ -27,21 +28,46 @@ pub struct Memory {
 
 #[derive(Debug, Clone, Default)]
 struct State {
-    accounts: BTreeMap<AccountId, Account>,
-    folders: BTreeMap<FolderId, (Folder, Option<FolderState>)>,
-    messages: BTreeMap<MessageId, Held>,
-    uids: BTreeMap<FolderId, BTreeMap<Uid, MessageId>>,
+    accounts: Shared<BTreeMap<AccountId, Account>>,
+    folders: Shared<BTreeMap<FolderId, (Folder, Option<FolderState>)>>,
+    messages: Shared<BTreeMap<MessageId, Held>>,
+    uids: Shared<BTreeMap<FolderId, BTreeMap<Uid, MessageId>>>,
     /// The job queue, in order.
-    jobs: Vec<Job>,
-    drafts: BTreeMap<DraftId, Draft>,
-    outbox: BTreeMap<DraftId, Outgoing>,
-    schedule: BTreeMap<ScheduleId, Scheduled>,
+    jobs: Shared<Vec<Job>>,
+    drafts: Shared<BTreeMap<DraftId, Draft>>,
+    outbox: Shared<BTreeMap<DraftId, Outgoing>>,
+    schedule: Shared<BTreeMap<ScheduleId, Scheduled>>,
     /// By address in lower case.
-    senders: BTreeMap<String, Sender>,
-    states: BTreeMap<MessageId, MessageState>,
-    calendars: BTreeMap<CalendarId, (Calendar, Option<String>)>,
-    events: BTreeMap<CalendarEventId, CalendarEvent>,
-    alerts: BTreeMap<AlertId, Alert>,
+    senders: Shared<BTreeMap<String, Sender>>,
+    states: Shared<BTreeMap<MessageId, MessageState>>,
+    calendars: Shared<BTreeMap<CalendarId, (Calendar, Option<String>)>>,
+    events: Shared<BTreeMap<CalendarEventId, CalendarEvent>>,
+    alerts: Shared<BTreeMap<AlertId, Alert>>,
+}
+
+/// A table of the state, shared by its copies until one of them writes to it: a write (any `&mut` borrow) copies the
+/// table first if another copy still holds it, so a batch copies only the tables it changes.
+#[derive(Debug, Default)]
+struct Shared<T>(Arc<T>);
+
+impl<T> Clone for Shared<T> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<T> std::ops::Deref for Shared<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: Clone> std::ops::DerefMut for Shared<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        Arc::make_mut(&mut self.0)
+    }
 }
 
 /// The key a sender is kept under: its address in lower case.
@@ -349,7 +375,7 @@ impl Storage for Memory {
     }
 
     fn queued_jobs(&self) -> Result<Vec<Job>, StoreError> {
-        Ok(self.state.jobs.clone())
+        Ok(self.state.jobs.to_vec())
     }
 
     fn drafts(&self, account: AccountId) -> Result<Vec<Draft>, StoreError> {
@@ -441,3 +467,7 @@ impl Storage for Memory {
             .collect())
     }
 }
+
+#[cfg(test)]
+#[path = "memory_tests.rs"]
+mod tests;

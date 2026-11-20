@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+use std::sync::Arc;
+
+use inboxcraft_model::{Account, AccountId, Draft, DraftId, EmailAddress, Host, Security, Server};
+use inboxcraft_time::Timestamp;
+
+use super::Memory;
+use crate::{Batch, Change, Storage, StoreConfig, StoreError};
+
+fn account(id: u64) -> Account {
+    let imap = Server::new(Host::new("imap.example.org").unwrap(), Security::Tls.imap_port(), Security::Tls);
+    Account::new(AccountId::new(id), "Plot", EmailAddress::new("owner@example.org").unwrap(), "owner", imap).unwrap()
+}
+
+fn draft(id: u64, account: u64, text: &str) -> Draft {
+    Draft { text: text.to_owned(), ..Draft::new(DraftId::new(id), AccountId::new(account), Timestamp::from_unix(0, 0).unwrap()) }
+}
+
+/// Keeping a draft while the person types copies the drafts, never the messages or the other tables: the composer's
+/// keep was a copy of the whole mailbox before (#243).
+#[test]
+fn a_kept_draft_copies_the_drafts_and_shares_every_other_table() {
+    let mut store = Memory::new(StoreConfig::default());
+    store.apply(&Batch::new().with(Change::PutAccount(account(1))).with(Change::PutDraft(draft(1, 1, "Plot 14")))).unwrap();
+    let (messages, accounts, drafts) = (Arc::clone(&store.state.messages.0), Arc::clone(&store.state.accounts.0), Arc::clone(&store.state.drafts.0));
+    store.apply(&Batch::new().with(Change::PutDraft(draft(1, 1, "Plot 14, at ten")))).unwrap();
+    assert!(Arc::ptr_eq(&messages, &store.state.messages.0), "the messages were copied");
+    assert!(Arc::ptr_eq(&accounts, &store.state.accounts.0), "the accounts were copied");
+    assert!(!Arc::ptr_eq(&drafts, &store.state.drafts.0), "the drafts changed in place of a copy");
+    assert_eq!(store.draft(DraftId::new(1)).unwrap().map(|draft| draft.text), Some("Plot 14, at ten".to_owned()));
+    assert_eq!(drafts.get(&DraftId::new(1)).map(|draft| draft.text.as_str()), Some("Plot 14"), "the old table is left as it was");
+}
+
+/// A batch refused halfway leaves the tables it wrote to as they were, also while they are shared.
+#[test]
+fn a_refused_batch_leaves_a_shared_table_as_it_was() {
+    let mut store = Memory::new(StoreConfig::default());
+    store.apply(&Batch::new().with(Change::PutAccount(account(1))).with(Change::PutDraft(draft(1, 1, "Plot 14")))).unwrap();
+    let refused = store.apply(&Batch::new().with(Change::PutDraft(draft(1, 1, "Changed"))).with(Change::PutDraft(draft(2, 9, "Nobody's"))));
+    assert_eq!(refused, Err(StoreError::UnknownAccount(AccountId::new(9))));
+    assert_eq!(store.draft(DraftId::new(1)).unwrap().map(|draft| draft.text), Some("Plot 14".to_owned()));
+    assert_eq!(store.draft(DraftId::new(2)).unwrap(), None);
+}
