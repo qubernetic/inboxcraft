@@ -155,6 +155,8 @@ try:
   and the update that moves it (`sample::invitations`) to the inbox, where they are in the Invitations group. The
   update's card says what changed and what was answered before; Going is refused there, as the sample refuses every
   send, and works on an account with a submission server.
+- right-to-left mail: the `ui_shot` line `"right_to_left": true` adds a Hebrew and an Arabic message from invented
+  people (`sample::right_to_left`), the newest two in the inbox, for the pictures of right-to-left senders and subjects.
 
 The same acts work on a real account, through the same engine commands (`mail.seen`, `mail.flag`, `mail.archive`,
 `mail.delete`, `mail.move`, `mail.open`, `screener.accept`, `screener.block`, `group.set`, `history.undo`); there the
