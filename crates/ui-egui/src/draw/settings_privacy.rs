@@ -20,7 +20,7 @@ use crate::tr;
 /// A sender's row, in points at 100 %.
 const ROW: f32 = 44.0;
 
-/// The column the frame gives a sender's name, and the gap after it, in points. `remote.list` keeps no name today: a row
+/// The column the frame gives a sender's name, in points at 100 % (it grows with the type). `remote.list` keeps no name today: a row
 /// without one starts its address at 16 and gives it the name's column too.
 const NAME: f32 = 180.0;
 /// The gap after a name, in points.
@@ -99,8 +99,10 @@ fn sender_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &SenderRow, ends
         let link = crate::component::galley(ui, word, theme.fonts.mono_s, p.ink).size().x.ceil() + 16.0;
         ui.add_space(16.0);
         if let Some(name) = row.name.as_deref() {
-            let name = crate::component::cut(ui, name, theme.fonts.strong, p.ink, NAME);
-            let (place, _) = ui.allocate_exact_size(vec2(NAME, high), egui::Sense::hover());
+            // The column grows with the type, as a text's cap does at 130 %.
+            let column = Theme::size(theme, NAME);
+            let name = crate::component::cut(ui, name, theme.fonts.strong, p.ink, column);
+            let (place, _) = ui.allocate_exact_size(vec2(column, high), egui::Sense::hover());
             ui.painter().galley(pos2(place.left(), place.center().y - name.size().y / 2.0), name, p.ink);
             ui.add_space(NAME_GAP);
         }

@@ -69,7 +69,7 @@ fn the_columns_stand_where_the_settings_frames_draw_them() {
             Section::About => 24.0,
             _ => 16.0,
         };
-        let columns = Columns::of(body, section);
+        let columns = Columns::of(body, section, false);
         assert_eq!(columns.nav, rect(234.0, 46.0, 232.0, 826.0), "{section:?}");
         assert_eq!(columns.divider, 466.0, "{section:?}");
         assert_eq!(columns.page, rect(507.0, 70.0, 720.0, 826.0 - 24.0 - foot), "{section:?}");
@@ -81,7 +81,7 @@ fn the_columns_stand_where_the_settings_frames_draw_them() {
         assert_eq!(Some(place), super::shell::laid(&harness.ctx).map(|laid| laid.body), "{section:?}: the settings fill the body");
         let row = harness.get_by_label(&format!("{}, settings page", section.name())).rect();
         assert_eq!(row, rect(place.left(), place.top() + 57.0 + 30.0 * index as f32, 232.0, 30.0), "{section:?}");
-        let page = Columns::of(place, section).page;
+        let page = Columns::of(place, section, false).page;
         let title = harness.get_by_role_and_label(Role::Heading, section.name()).rect();
         assert!((title.left() - (page.left() + 16.0)).abs() <= 1.0, "{section:?}: the title {title:?} in {page:?}");
         assert!(title.top() >= page.top() && title.top() - page.top() <= 32.0, "{section:?}: the title {title:?} under the page's top");

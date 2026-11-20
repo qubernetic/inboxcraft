@@ -122,6 +122,54 @@
 {"out": "docs/images/settings-appearance-1440-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "section": "appearance", "motion": "reduced"}
 {"out": "docs/images/shortcuts-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
 {"out": "docs/images/shortcuts-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
+# Settings in a narrow window (#373), as the Sizes page's settings-800 and settings-1000-130 frames: at 800 one pane,
+# the list of sections (← Settings pressed) or a page alone; at 1000 with 130 % text the list beside a narrower page.
+{"out": "docs/images/settings-800-sections-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "appearance", "steps": [{"press": "← Settings"}]}
+{"out": "docs/images/settings-800-sections-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "appearance", "steps": [{"press": "← Settings"}]}
+{"out": "docs/images/settings-800-appearance-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "appearance"}
+{"out": "docs/images/settings-800-appearance-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "appearance"}
+{"out": "docs/images/settings-800-accounts-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "accounts"}
+{"out": "docs/images/settings-800-accounts-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "accounts"}
+{"out": "docs/images/settings-800-notifications-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "notifications"}
+{"out": "docs/images/settings-800-notifications-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "notifications"}
+{"out": "docs/images/settings-800-triage-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "triage"}
+{"out": "docs/images/settings-800-triage-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "triage"}
+{"out": "docs/images/settings-800-sending-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "sending"}
+{"out": "docs/images/settings-800-sending-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "sending"}
+{"out": "docs/images/settings-800-templates-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "templates"}
+{"out": "docs/images/settings-800-templates-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "templates"}
+{"out": "docs/images/settings-800-scheduled-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "scheduled"}
+{"out": "docs/images/settings-800-scheduled-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "scheduled"}
+{"out": "docs/images/settings-800-calendar-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "calendar"}
+{"out": "docs/images/settings-800-calendar-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "calendar"}
+{"out": "docs/images/settings-800-shortcuts-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "shortcuts"}
+{"out": "docs/images/settings-800-shortcuts-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "shortcuts"}
+{"out": "docs/images/settings-800-privacy-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "privacy"}
+{"out": "docs/images/settings-800-privacy-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "privacy"}
+{"out": "docs/images/settings-800-about-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "about"}
+{"out": "docs/images/settings-800-about-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "about"}
+{"out": "docs/images/settings-1000-130-appearance-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "appearance"}
+{"out": "docs/images/settings-1000-130-appearance-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "appearance"}
+{"out": "docs/images/settings-1000-130-accounts-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "accounts"}
+{"out": "docs/images/settings-1000-130-accounts-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "accounts"}
+{"out": "docs/images/settings-1000-130-notifications-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "notifications"}
+{"out": "docs/images/settings-1000-130-notifications-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "notifications"}
+{"out": "docs/images/settings-1000-130-triage-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "triage"}
+{"out": "docs/images/settings-1000-130-triage-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "triage"}
+{"out": "docs/images/settings-1000-130-sending-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "sending"}
+{"out": "docs/images/settings-1000-130-sending-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "sending"}
+{"out": "docs/images/settings-1000-130-templates-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "templates"}
+{"out": "docs/images/settings-1000-130-templates-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "templates"}
+{"out": "docs/images/settings-1000-130-scheduled-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "scheduled"}
+{"out": "docs/images/settings-1000-130-scheduled-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "scheduled"}
+{"out": "docs/images/settings-1000-130-calendar-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "calendar"}
+{"out": "docs/images/settings-1000-130-calendar-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "calendar"}
+{"out": "docs/images/settings-1000-130-shortcuts-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "shortcuts"}
+{"out": "docs/images/settings-1000-130-shortcuts-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "shortcuts"}
+{"out": "docs/images/settings-1000-130-privacy-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "privacy"}
+{"out": "docs/images/settings-1000-130-privacy-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "privacy"}
+{"out": "docs/images/settings-1000-130-about-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "about"}
+{"out": "docs/images/settings-1000-130-about-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "about"}
 # The message list (E1.17a): the screener and group cards and the hover actions on the row selected by
 # keyboard, with invented data the app does not show yet.
 {"out": "docs/images/list-showcase-light.png", "mode": "light", "size": [1400, 860], "showcase": true, "step": 2}

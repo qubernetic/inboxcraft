@@ -28,7 +28,7 @@ use crate::tr;
 /// A template's row, in points at 100 %.
 const ROW: f32 = 48.0;
 
-/// The name's column, in points.
+/// The name's column, in points at 100 % (it grows with the type).
 const NAME: f32 = 200.0;
 
 /// Between the row's parts, in points.
@@ -225,8 +225,10 @@ fn template_row(
         ui.add_space(16.0);
         let _ = crate::component::account_bar(ui, theme, account.map_or(0, |row| u64::try_from(row.index).unwrap_or(0)));
         ui.add_space(12.0);
-        let name = crate::component::cut(ui, &row.shown, theme.fonts.strong, p.ink, NAME);
-        let (place, _) = ui.allocate_exact_size(vec2(NAME, high), egui::Sense::hover());
+        // The column grows with the type, as a text's cap does at 130 %.
+        let column = Theme::size(theme, NAME);
+        let name = crate::component::cut(ui, &row.shown, theme.fonts.strong, p.ink, column);
+        let (place, _) = ui.allocate_exact_size(vec2(column, high), egui::Sense::hover());
         ui.painter().galley(pos2(place.left(), place.center().y - name.size().y / 2.0), name, p.ink);
         ui.add_space(GAP);
         // The links' room first, so the line can be cut to what is left and the keyboard meets edit before delete.

@@ -137,10 +137,6 @@ What the app still owes this file, one line each. The finer differences, with th
   account form draws "Remove account…" at 664 where the frame has 602, so its card is at 324, not 262. A
   scheduled send's says "“…” will not go at its time, Tue 08:00." where the frame says "on Tuesday at 08:00", and an
   account's says "its drafts" where the frame counts them.
-- Settings in a narrow window is not built as the Sizes page draws it: the code keeps the list of sections beside
-  the page at every width and lets the page's side room (40 to 24) and the list give way, where the file keeps the
-  40 and, under 980, shows one pane with `← Settings`; no setting gives its control a line of its own (the row's
-  stacked state).
 - Privacy keeps no sender name, so a row shows the address at 16 where the frames draw a name column; About is one
   column, and "After an act" and the week's two rows on Calendar have no frame.
 - The calendar's sync line has no "sync now" link at rest; the line itself takes the press.

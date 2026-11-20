@@ -136,6 +136,10 @@ pub struct Settings {
     privacy: crate::privacy::Privacy,
     /// The keyboard goes to the shown section's row of the settings' own column when it is drawn next.
     nav_hand: bool,
+    /// In one pane (a window narrower than Mail's breakpoint), the list of sections stands in the body, not the page.
+    listed: bool,
+    /// The keyboard goes to the page's way back to the list (`← Settings`) when it is drawn next.
+    back_hand: bool,
 }
 
 /// A page under a section, reached from a row of the section's page, with a link back to it.
@@ -241,6 +245,7 @@ impl Settings {
     /// Shows `section`; an action waiting for a key stops waiting and a page under a section closes.
     pub fn show(&mut self, section: Section) {
         self.section = section;
+        self.listed = false;
         self.capturing = None;
         self.under = None;
         self.templates.leave();
@@ -320,6 +325,32 @@ impl Settings {
         self.nav_hand = true;
     }
 
+    /// Whether, in one pane, the list of sections stands in the body in place of the page shown.
+    #[must_use]
+    pub fn listed(&self) -> bool {
+        self.listed
+    }
+
+    /// In one pane, the list of sections in place of the page (`← Settings`, `Esc`): an action waiting for a key stops
+    /// waiting and, when `hand` (a key took it there), the keyboard goes to the row of the section left. The section
+    /// stays the one shown next.
+    pub fn to_list(&mut self, hand: bool) {
+        self.listed = true;
+        self.capturing = None;
+        self.back_hand = false;
+        self.nav_hand |= hand;
+    }
+
+    /// Asks that the keyboard go to the page's way back to the list when it is drawn next.
+    pub fn hand_to_back(&mut self) {
+        self.back_hand = true;
+    }
+
+    /// Whether the keyboard was asked to go to the page's way back to the list, taken.
+    pub fn take_back_hand(&mut self) -> bool {
+        std::mem::take(&mut self.back_hand)
+    }
+
     /// Whether the keyboard was asked to go to the shown section's row, taken.
     pub fn take_nav_hand(&mut self) -> bool {
         std::mem::take(&mut self.nav_hand)
@@ -336,6 +367,7 @@ impl Settings {
         self.scheduled.leave();
         self.privacy.leave();
         self.nav_hand = false;
+        self.back_hand = false;
     }
 
     /// The action waiting for a key, if one is.
