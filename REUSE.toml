@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 #
 # REUSE (https://reuse.software) notes for the brand's files. The code is MIT OR Apache-2.0 (LICENSE-MIT,
-# LICENSE-APACHE); every asset, with its licence, has its row in ATTRIBUTION.md.
+# LICENSE-APACHE, and the same texts as LICENSES/MIT.txt and LICENSES/Apache-2.0.txt, where REUSE looks for each
+# licence a file names); every asset, with its licence, has its row in ATTRIBUTION.md.
 
 version = 1
 
