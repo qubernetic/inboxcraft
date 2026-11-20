@@ -303,10 +303,17 @@ pub(super) fn take_back_id(ctx: &egui::Context) -> Option<egui::Id> {
 
 /// The reader with no message open: the bare empty state in the middle of the pane, 40 from its sides.
 pub(super) fn nothing_open(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
-    let palette = keymap.shortcut(keymap::PALETTE).map(|shortcut| crate::component::key::key_words(&shortcut));
-    let help = match palette {
-        Some(key) => tr!("The arrow keys move in the list and open a message. {key} runs any command.", key = key),
-        None => tr!("The arrow keys move in the list and open a message.").to_owned(),
+    // The frames' words, with the keys as the keymap has them now.
+    let words = |action: &str| keymap.shortcut(action).map(|shortcut| crate::component::key::key_words(&shortcut));
+    let moves = match (words(keymap::NEXT), words(keymap::PREVIOUS), words(keymap::OPEN)) {
+        (Some(next), Some(previous), Some(open)) => {
+            tr!("{next} and {previous} move in the list, {open} opens the message.", next = next, previous = previous, open = open)
+        }
+        _ => tr!("The arrow keys move in the list and open a message.").to_owned(),
+    };
+    let help = match words(keymap::PALETTE) {
+        Some(key) => tr!("{moves} {key} runs any command.", moves = moves, key = key),
+        None => moves,
     };
     let side = margin(SIDE).left;
     Frame::new().inner_margin(Margin { left: side, right: side, top: 0, bottom: 0 }).show(ui, |ui| {

@@ -901,7 +901,7 @@ fn after_the_open_message_is_taken_away_the_reader_shows_nothing_open() {
     assert!(harness.query_by_role_and_label(Role::Button, "Reply").is_none());
     // The bare empty state, its lines centred in the reader's pane.
     let label = harness.get_by_label("Pick a message.\nIt opens here.").rect();
-    // The help says how a message opens from here: the arrows (the lists' J, K and Enter come with them).
+    // The help says how a message opens from here: the lists' J, K and Enter, as the frames write it.
     fn texts(shape: &egui::Shape, found: &mut String) {
         match shape {
             egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, found)),
@@ -911,8 +911,8 @@ fn after_the_open_message_is_taken_away_the_reader_shows_nothing_open() {
     }
     let mut painted = String::new();
     harness.output().shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut painted));
-    assert!(painted.contains("The arrow keys move in the list and open"), "{painted}");
-    assert!(painted.contains("Ctrl K runs any"), "{painted}");
+    // The frames' words, the keys from the keymap (#328).
+    assert!(painted.contains("J and K move in the list, Enter opens the message. Ctrl K runs any"), "{painted}");
     let pane_middle = (pane.0 + pane.1) / 2.0;
     assert!((label.center().x - pane_middle).abs() <= 1.0, "in the middle of the reader's pane: {label:?} {pane:?}");
     // A row picked by a click opens again.
