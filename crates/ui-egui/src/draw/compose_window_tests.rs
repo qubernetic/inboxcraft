@@ -41,6 +41,8 @@ struct Seen {
     focused: Vec<Option<Id>>,
     /// The texts the last pass painted.
     texts: Vec<String>,
+    /// What a screen reader heard of the last pass: each control's name and where it lies in the window.
+    named: Vec<(String, Rect)>,
 }
 
 thread_local! {
@@ -119,6 +121,19 @@ fn windowing(ctx: &Context) {
             seen.size = viewport.builder.inner_size;
             seen.focused.push(focused);
             seen.texts = texts(&output.shapes);
+            seen.named = output
+                .platform_output
+                .accesskit_update
+                .iter()
+                .flat_map(|update| update.nodes.iter())
+                .filter_map(|(_, node)| {
+                    let bounds = node.bounds()?;
+                    Some((
+                        node.label()?.to_owned(),
+                        Rect::from_min_max(Pos2::new(bounds.x0 as f32, bounds.y0 as f32), Pos2::new(bounds.x1 as f32, bounds.y1 as f32)),
+                    ))
+                })
+                .collect();
         });
     });
     ctx.set_embed_viewports(false);
@@ -505,4 +520,65 @@ fn typing_in_the_window_keeps_the_draft_at_most_once_a_while_not_at_every_key() 
     assert!(harness.state().composer().unwrap().subject().ends_with("!?!?!"), "typed in the window");
     // A key typed soon after a keep waits for the next one: not every key is a write.
     assert!(waited.contains(&true), "kept at every key: {waited:?}");
+}
+
+/// Opens the command palette in the main window.
+fn open_palette(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    assert!(harness.state().command().results(), "the palette is open");
+}
+
+/// The desktop asks the main window to close: the app's end.
+fn quit(harness: &mut Harness<'static, InboxApp>) {
+    harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(ViewportEvent::Close);
+    harness.step();
+}
+
+/// Types `typed` into the window's subject, one frame for each piece: the first is kept at once, the rest wait for the
+/// next keep.
+fn type_in_window(harness: &mut Harness<'static, InboxApp>, typed: &[&str]) {
+    harness.state_mut().window_focus = Some(compose::subject_id());
+    harness.run();
+    for piece in typed {
+        EVENTS.with(|queued| *queued.borrow_mut() = vec![Event::Text((*piece).to_owned())]);
+        harness.step();
+    }
+}
+
+/// Clicks the control the window names `name`, as the pointer does.
+fn click_in_window(harness: &mut Harness<'static, InboxApp>, name: &str) {
+    let named = seen().named;
+    let Some(at) = named.iter().find(|(label, _)| label == name).map(|(_, rect)| rect.center()) else { panic!("no {name:?} in {named:?}") };
+    let button = |pressed| Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    // In one pass: the frames between two runs are longer than a click lasts.
+    in_window(harness, vec![Event::PointerMoved(at), button(true), button(false)]);
+}
+
+#[test]
+fn the_main_window_s_palette_never_stops_typing_in_the_composer_s_window_from_reaching_the_disk() {
+    let mut harness = app(false, ComposerHost::Window, true);
+    let draft = write(&mut harness, "Kiln rota", "Friday at ten.");
+    open_palette(&mut harness);
+    type_in_window(&mut harness, &["!", "?", "!"]);
+    assert_eq!(harness.state().composer().map(|composer| composer.subject().to_owned()).as_deref(), Some("Kiln rota!?!"), "typed in the window");
+    assert!(harness.state().command().results(), "the palette is still open");
+    // The app ends from the main window, its palette open: the words typed in the window are on the disk.
+    quit(&mut harness);
+    assert_eq!(kept(&mut harness, draft).unwrap()["subject"], "Kiln rota!?!", "kept");
+}
+
+#[test]
+fn send_and_discard_in_the_composer_s_window_work_while_the_main_window_s_palette_is_open() {
+    let mut harness = app(true, ComposerHost::Window, true);
+    write(&mut harness, "Kiln rota", "Friday at ten.");
+    open_palette(&mut harness);
+    in_window(&mut harness, vec![key(Key::Enter, Modifiers::COMMAND)]);
+    assert!(harness.state().composer().is_none(), "sent");
+    assert_eq!(harness.state().mailbox().outbox().len(), 1, "one send");
+    let mut harness = app(false, ComposerHost::Window, true);
+    write(&mut harness, "Kiln rota", "Friday at ten.");
+    open_palette(&mut harness);
+    click_in_window(&mut harness, "Discard the draft");
+    assert!(harness.state().composer().is_none(), "discarded");
 }

@@ -3038,13 +3038,14 @@ impl InboxApp {
         if !setting {
             composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
         }
-        composed.extend(self.composer_in_window(ui.ctx(), &theme));
+        // The composer's window lies under no modal surface of the main window: what is asked in it passes the gate.
+        let windowed = self.composer_in_window(ui.ctx(), &theme);
         // The status line, a strip of its own at the window's foot: it covers nothing of the panes.
         let (mut line, mut undid) = self.status_line(ui, &theme, &surfaces, (quiet, undo_taken), regions.status);
         // The one gate for the place under a modal surface ([`Surfaces::modal`]): whatever pressed it (the pointer, a key,
-        // a screen reader's activate, which egui's layers do not stop), nothing the list, the reader, the composer, Home,
-        // the calendar, the settings' page or the status line asked for in this frame is applied. The index has its own
-        // gate ([`InboxApp::index_allowed`]). Its one exception is the Undo of a loss whose time runs out
+        // a screen reader's activate, which egui's layers do not stop), nothing the list, the reader, the composer in this
+        // window, Home, the calendar, the settings' page or the status line asked for in this frame is applied. The index
+        // has its own gate ([`InboxApp::index_allowed`]). Its one exception is the Undo of a loss whose time runs out
         // ([`Undone::outlasts_the_gate`]).
         if surfaces.modal() {
             undid = undid.filter(|undone| undone.outlasts_the_gate());
@@ -3060,6 +3061,7 @@ impl InboxApp {
             add = false;
             dismiss = false;
         }
+        composed.extend(windowed);
         let (undone, dismissed) = self.apply_line(&line, undid);
         dismiss |= dismissed;
         ran.extend(line.hint);
