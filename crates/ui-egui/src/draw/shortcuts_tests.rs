@@ -453,7 +453,7 @@ fn while_a_key_is_waited_for_every_row_of_the_index_ends_the_wait_and_acts() {
     let mut harness = busy_sheet();
     press_off_the_settings(&mut harness, "Show mail of");
     harness.run();
-    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio").click();
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio, holloway.studio@example.org").click();
     harness.run();
     harness.run();
     assert_eq!(harness.state().mailbox().narrowed(), Some(2), "the mail narrows");

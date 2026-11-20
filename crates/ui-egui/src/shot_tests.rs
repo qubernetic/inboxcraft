@@ -144,6 +144,17 @@ fn a_text_scale_draws_the_window_with_larger_type() {
 }
 
 #[test]
+fn home_in_the_window_is_synced_as_its_frame_unless_the_shot_says_otherwise() {
+    // The frames of Home in the window carry the synced status line, not the sample's offline one (#325, 3.10).
+    let home = r#""out": "x.png", "mode": "dark", "size": [1000, 760], "home_place": true"#;
+    let plain = shoot(&shot(&format!("{{{home}}}"))).unwrap();
+    let synced = shoot(&shot(&format!(r#"{{{home}, "sync": "synced"}}"#))).unwrap();
+    let syncing = shoot(&shot(&format!(r#"{{{home}, "sync": "syncing"}}"#))).unwrap();
+    assert_eq!(plain, synced, "Home in the window is synced");
+    assert_ne!(plain, syncing, "a sync the shot names is kept");
+}
+
+#[test]
 fn a_scale_of_two_doubles_the_picture() {
     let picture = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [300, 200], "scale": 2}"#)).unwrap();
     assert_eq!((picture.width(), picture.height()), (600, 400));
