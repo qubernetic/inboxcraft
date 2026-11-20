@@ -35,11 +35,6 @@ pub(crate) fn call(server: &mut Server, tool: &str, arguments: Value) -> Value {
     answer["result"].clone()
 }
 
-/// The result of calling the withheld tool `tool` with `arguments`, as it would answer once it is offered.
-pub(crate) fn call_withheld(server: &mut Server, tool: &str, arguments: Value) -> Value {
-    crate::tools::call_from(&crate::tools::WITHHELD, &mut *server.commands, &json!({ "name": tool, "arguments": arguments })).unwrap()
-}
-
 /// The text of a tool result, with whether it is an error.
 pub(crate) fn text(result: &Value) -> (String, bool) {
     let content = result["content"].as_array().unwrap();
