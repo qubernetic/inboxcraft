@@ -82,7 +82,6 @@ const TITLE_IN: f32 = 50.0;
 /// Shows a surface on `host`: in a window of its own titled `title`, looking as `look` says, where one can open; then
 /// `add` draws its content and is given the window's [`Surfaces`] for its keys. Elsewhere `add` is not called and the
 /// caller draws the surface in its place ([`Hosted::Here`]).
-#[cfg_attr(not(test), expect(dead_code, reason = "the reader moves into the host in its own task"))]
 pub(crate) fn show<R>(ctx: &Context, host: Host, title: &str, look: Look<'_>, add: impl FnMut(&mut Ui, &Surfaces) -> R) -> Hosted<R> {
     show_with(ctx, host, title, look, false, add)
 }
