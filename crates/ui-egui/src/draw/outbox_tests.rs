@@ -665,3 +665,24 @@ fn a_long_address_shows_its_whole_domain_on_its_chip_before_it_is_sent() {
     harness.run();
     assert_eq!(harness.state().counting(), Some((draft, 5)), "sent once its address was in sight");
 }
+/// The addresses stay on the chips of a send edited after it changed until the owner closes the composer; opened
+/// again, the chips show the names, with the addresses in their tooltips.
+#[test]
+fn a_changed_refused_send_shows_addresses_until_the_composer_closes() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Light);
+    let draft = refused(&mut harness, &clock);
+    agent_changes(&mut harness, draft, &serde_json::json!({ "bcc": ["Béla Kis <bela@example.net>"] }));
+    only_edit_sends(&mut harness, draft);
+    harness.run();
+    let runs = painted_runs(&harness);
+    assert!(runs.iter().any(|run| run == "odile@example.org") && runs.iter().any(|run| run == "bela@example.net"), "{runs:?}");
+    assert!(!runs.iter().any(|run| run == "Béla Kis" || run == "Odile Brannock"), "{runs:?}");
+    harness.state_mut().close_composer();
+    harness.run();
+    assert!(harness.state().composer().is_none());
+    harness.state_mut().reopen(draft);
+    harness.run();
+    let runs = painted_runs(&harness);
+    assert!(runs.iter().any(|run| run == "Béla Kis"), "the name again: {runs:?}");
+}

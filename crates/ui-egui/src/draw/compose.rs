@@ -326,13 +326,15 @@ fn recipients(ui: &mut Ui, theme: &Theme, composer: &mut Composer, line: Line, a
     if ui.memory(|memory| memory.has_focus(id)) {
         line_keys(ui, composer, line, asked);
     }
+    // A send refused and changed since shows where each recipient goes, not the name.
+    let addresses = composer.addresses();
     let chips: Vec<Recipient> = composer
         .chips(line)
         .iter()
         .map(|chip| Recipient {
-            shown: chip.shown(),
+            shown: if addresses { chip.address() } else { chip.shown() },
             spoken: chip.spoken(),
-            tip: chip.tip(),
+            tip: if addresses { None } else { chip.tip() },
             state: if chip.ok { RecipientState::Valid } else { RecipientState::Invalid },
         })
         .collect();

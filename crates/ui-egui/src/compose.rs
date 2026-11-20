@@ -248,6 +248,9 @@ pub struct Composer {
     /// Why the last fill of a blank was refused (it would make the subject or the text longer than the engine keeps),
     /// and the text it refused: said while that text stands.
     fill_refused: Option<(String, String)>,
+    /// Every chip shows its address, not the name: the draft was opened from a send refused and changed since (or one
+    /// that keeps no record of how it went), so what goes is shown as where it goes. Until the composer closes.
+    addresses: bool,
 }
 
 /// What a line refused of what was typed in it, which stays in its typed text as it was written.
@@ -338,6 +341,7 @@ impl Composer {
             drawn_docked: None,
             folded: false,
             saved: None,
+            addresses: false,
         };
         composer.take_answer(answer);
         Ok(composer)
@@ -450,6 +454,18 @@ impl Composer {
     #[must_use]
     pub fn changed(&self) -> bool {
         self.changed
+    }
+
+    /// Whether every chip shows its address, not the name ([`Composer::show_addresses`]).
+    #[must_use]
+    pub fn addresses(&self) -> bool {
+        self.addresses
+    }
+
+    /// Makes every chip show its address, not the name, until the composer closes: the draft of a refused send that
+    /// changed since, opened to be sent from here.
+    pub fn show_addresses(&mut self) {
+        self.addresses = true;
     }
 
     /// Whether the Cc and Bcc lines show.
