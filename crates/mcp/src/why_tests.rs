@@ -106,12 +106,14 @@ fn mail_why_keeps_a_subject_that_poses_as_an_instruction_out_of_its_answer() {
 #[test]
 fn mail_why_changes_nothing() {
     let mut server = why_server();
-    let before = text(&call(&mut server, "mail_list", json!({})));
-    assert!(before.0.contains("| unread"), "{}", before.0);
+    // What the store holds of every message: its folder, flags, `opened` and its own state, in every place it can be.
+    fn held(server: &mut crate::Server) -> Vec<serde_json::Value> {
+        ["inbox", "sent", "snoozed"].map(|role| server.commands.run("mail.list", &json!({ "role": role })).unwrap()).to_vec()
+    }
+    let before = held(&mut server);
+    assert_eq!(before[0]["messages"][0]["opened"], false, "{}", before[0]);
     for id in [RETURNED, ANSWER, WAITING, 999] {
         let _ = call(&mut server, "mail_why", json!({ "id": id }));
     }
-    assert_eq!(text(&call(&mut server, "mail_list", json!({}))), before, "the message stays unread and where it was");
-    let (snoozed, _) = text(&call(&mut server, "mail_list", json!({ "role": "snoozed" })));
-    assert!(snoozed.contains("\"Later\""), "{snoozed}");
+    assert_eq!(held(&mut server), before, "not opened, not seen, not moved, no state changed");
 }
