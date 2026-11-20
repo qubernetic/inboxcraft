@@ -2277,10 +2277,14 @@ impl InboxApp {
     fn composer_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, left: f32) -> Vec<compose::Asked> {
         let (keymap, mailbox) = (&self.keymap, &self.mailbox);
         let Some(composer) = self.composer.as_mut() else { return Vec::new() };
-        let shown = CentralPanel::no_frame()
-            .frame(around(left, theme.spacing.s2, theme.spacing.s2))
-            .show(ui, |ui| layers.card(ui, Margin::ZERO, |ui| compose::show(ui, theme, keymap, mailbox, composer)));
-        self.reader_place = Some(shown.response.rect);
+        // Flush with the body like the list: no band of the ground above, beside or under it.
+        let mut card = Rect::NOTHING;
+        let shown = CentralPanel::no_frame().frame(around(left, 0.0, 0.0)).show(ui, |ui| {
+            card = ui.max_rect();
+            layers.card(ui, Margin::ZERO, |ui| compose::show(ui, theme, keymap, mailbox, composer))
+        });
+        // The card's own rect, inside its pane's margins.
+        self.reader_place = Some(card);
         shown.inner
     }
 
