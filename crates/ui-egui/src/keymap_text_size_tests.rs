@@ -62,6 +62,16 @@ fn each_key_steps_the_text_size_by_one_and_the_status_line_says_the_size() {
     assert!(!harness.ctx.options(|options| options.zoom_with_keyboard));
 }
 
+/// A US keyboard sends Ctrl+Plus as Ctrl and Shift with the logical `+`: the extra Shift must not stop the step.
+#[test]
+fn ctrl_shift_plus_as_a_us_keyboard_sends_it_grows_the_text() {
+    let mut harness = window();
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Plus);
+    harness.run();
+    assert_eq!(percent(&harness), 110, "Ctrl Shift + (Ctrl Plus on a US keyboard): one step larger");
+    assert_eq!(harness.state().notice(), Some("Text size 110 %"));
+}
+
 #[test]
 fn ctrl_0_no_longer_shows_home_and_home_has_no_key_at_the_start() {
     let mut harness = window();
