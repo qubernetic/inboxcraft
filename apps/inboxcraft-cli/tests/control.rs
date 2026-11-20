@@ -258,6 +258,25 @@ fn without_a_store_mcp_runs_its_tools_in_the_running_app() {
 }
 
 #[test]
+fn without_a_store_mail_why_runs_in_the_running_app() {
+    let (runtime, seen) =
+        app(token(1), false, |_, _| Ok(json!({ "reasons": [{ "kind": "thread", "text_id": "why.thread.yours", "args": { "messages": 2 } }] })));
+    let input = format!(
+        "{INITIALIZE}\n{}\n",
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "mail_why", "arguments": { "id": 7 } } })
+    );
+    let (code, out, err) = cli_in(&reach(Some(runtime.path()), Some(token(1))), &["mcp"], &input);
+    assert_eq!((code, err.as_str()), (0, ""), "{out}");
+    let answers: Vec<Value> = out.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert_eq!(answers.len(), 2, "{out}");
+    assert_eq!(answers[1]["result"]["isError"], false, "{out}");
+    let text = answers[1]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.starts_with("mail_why: message 7, 1 reason, most specific first\n"), "{text}");
+    assert!(text.ends_with("\nthread | why.thread.yours | messages 2\n"), "{text}");
+    assert_eq!(seen.lock().unwrap().as_slice(), [("mail.why".to_owned(), json!({ "id": 7 }))]);
+}
+
+#[test]
 fn mcp_without_a_running_app_says_so_before_it_reads_a_line() {
     let empty = runtime_folder();
     let (code, out, err) = cli_in(&reach(Some(empty.path()), Some(token(1))), &["mcp"], INITIALIZE);

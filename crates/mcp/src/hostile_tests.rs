@@ -8,14 +8,13 @@ use proptest::prelude::*;
 use serde_json::{Map, Value, json};
 
 use crate::Server;
-use crate::test_support::{call, call_withheld, fixture_server, text};
-use crate::tools::{TOOLS, WITHHELD};
+use crate::test_support::{call, fixture_server, text};
+use crate::tools::TOOLS;
 
 /// Every argument name a tool's schema lists, and a few none does.
 fn fields() -> Vec<String> {
     let mut fields: Vec<String> = TOOLS
         .iter()
-        .chain(&WITHHELD)
         .flat_map(|tool| {
             (tool.schema)()["properties"].as_object().map(|properties| properties.keys().cloned().collect::<Vec<_>>()).unwrap_or_default()
         })
@@ -58,11 +57,6 @@ fn junk() -> Vec<Value> {
 fn call_everything(server: &mut Server, arguments: &Value) {
     for tool in &TOOLS {
         let (out, error) = text(&call(server, tool.name, arguments.clone()));
-        assert!(!out.contains("panicked"), "{} panicked on {arguments}: {out}", tool.name);
-        assert!(!error || out.starts_with("error "), "{}: {out}", tool.name);
-    }
-    for tool in &WITHHELD {
-        let (out, error) = text(&call_withheld(server, tool.name, arguments.clone()));
         assert!(!out.contains("panicked"), "{} panicked on {arguments}: {out}", tool.name);
         assert!(!error || out.starts_with("error "), "{}: {out}", tool.name);
     }
