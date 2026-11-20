@@ -72,8 +72,9 @@ fn a_press_on_reply_reply_all_and_forward_reaches_them_while_an_undo_shows() {
             harness.run();
             let undo = harness.get_by_role_and_label(Role::Button, "undo").rect();
             let mut under = Pos2::new(at.center().x, line(&harness).center().y);
-            if undo.expand(4.0).contains(under) {
-                under.x = undo.right() + 8.0;
+            if undo.expand(4.0).contains(under) || under.x > undo.right() {
+                // On the message's text before it: right of it the keys' hints run their actions (done among them).
+                under.x = undo.left() - 8.0;
             }
             press(&mut harness, under);
             assert!(harness.state().composer().is_none(), "{size:?} {percent}: a press on the line under {answer} answers nothing");

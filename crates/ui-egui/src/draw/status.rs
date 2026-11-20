@@ -42,9 +42,41 @@ const KEYS_PAD: f32 = 6.0;
 /// The gap between two key hints, in points.
 const KEYS_GAP: f32 = 16.0;
 
-/// The key hints the line may show, in order: the action and its word.
+/// The key hints the line may show with a message open, and away from the mail, in order: the action and its word.
 pub(crate) const HINTS: [(&str, &str); 5] =
-    [(keymap::NEXT, "next"), (keymap::PREVIOUS, "previous"), (keymap::DONE, "done"), (keymap::SNOOZE, "snooze"), (keymap::COMMAND_LINE, "commands")];
+    [(keymap::NEXT, "next"), (keymap::PREVIOUS, "previous"), (keymap::DONE, "done"), (keymap::SNOOZE, "snooze"), (keymap::PALETTE, "commands")];
+
+/// The key hints beside a list with nothing open (the frames `shell/default`, `drafts-list/filled`).
+const LIST_HINTS: [(&str, &str); 4] = [(keymap::NEXT, "next"), (keymap::PREVIOUS, "previous"), (keymap::OPEN, "open"), (keymap::PALETTE, "commands")];
+
+/// The key hints beside a list that holds nothing (the frame `drafts-list/empty`).
+const EMPTY_HINTS: [(&str, &str); 2] = [(keymap::COMPOSE, "write"), (keymap::PALETTE, "commands")];
+
+/// The key hints beside the docked composer (the frames `size-1100/composer`, `size-800/composer`).
+const COMPOSER_HINTS: [(&str, &str); 2] = [(keymap::SEND, "send"), (keymap::PALETTE, "commands")];
+
+/// What the window shows, for the line's key hints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Keys {
+    /// A message open, or a place other than the mail's lists.
+    Message,
+    /// A list with nothing open.
+    List,
+    /// A list that holds nothing.
+    Empty,
+    /// The docked composer.
+    Composer,
+}
+
+/// The key hints the line may show for `keys`, in order: the action and its word.
+pub(crate) fn hints(keys: Keys) -> &'static [(&'static str, &'static str)] {
+    match keys {
+        Keys::Message => &HINTS,
+        Keys::List => &LIST_HINTS,
+        Keys::Empty => &EMPTY_HINTS,
+        Keys::Composer => &COMPOSER_HINTS,
+    }
+}
 
 /// An event this near, in minutes, is the accent of the line.
 const SOON_MINUTES: i64 = 15;
@@ -357,6 +389,9 @@ fn tr_word(word: &str) -> &'static str {
         "previous" => tr!("previous"),
         "done" => tr!("done"),
         "snooze" => tr!("snooze"),
+        "open" => tr!("open"),
+        "write" => tr!("write"),
+        "send" => tr!("send"),
         _ => tr!("commands"),
     }
 }

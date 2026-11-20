@@ -3284,9 +3284,10 @@ impl InboxApp {
             }
             _ => {}
         }
-        let hints: Vec<(&'static str, String, &'static str)> = status::HINTS
+        // Done's key is the list's (an act on the selected row): its hint shows while the list has the keys.
+        let hints: Vec<(&'static str, String, &'static str)> = status::hints(self.status_keys(surfaces))
             .iter()
-            .filter(|(action, _)| surfaces.allows(action, &self.keymap))
+            .filter(|(action, _)| surfaces.allows(action, &self.keymap) || (*action == keymap::DONE && surfaces.list_has_keyboard()))
             .filter_map(|(action, word)| Some((*action, self.keymap.chip(ui.ctx(), action)?, *word)))
             .collect();
         let countdown_shown = matches!(shown, Some(crate::status::Message::Countdown { .. }));
@@ -3307,6 +3308,22 @@ impl InboxApp {
         };
         let pressed = status::line(ui, theme, &self.keymap, rect, &drawn);
         (pressed, which)
+    }
+
+    /// Which key hints the status line shows: the docked composer's, the open message's, or the list's with nothing
+    /// open (none in it: write); away from the mail's lists the open message's set.
+    fn status_keys(&self, surfaces: &Surfaces) -> status::Keys {
+        if self.screen != Screen::Mail || surfaces.on_settings() || self.mailbox.accounts().is_empty() {
+            status::Keys::Message
+        } else if self.composer.is_some() && self.docked() {
+            status::Keys::Composer
+        } else if self.reader.open_id().is_some() {
+            status::Keys::Message
+        } else if self.reader_says() == ReaderSays::Nothing {
+            status::Keys::Empty
+        } else {
+            status::Keys::List
+        }
     }
 
     /// Applies what was pressed in the status line on the message `undid` names: a send taken back, a discard dropped.
