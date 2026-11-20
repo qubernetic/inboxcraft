@@ -3,14 +3,16 @@
 
 //! The Scheduled page, under Sending: everything that waits for its time, the next first, in one group
 //! (`[ A ] WAITING · 7`), a row per entry (its time, its kind as a tag, the account's bar, its subject, whom it names
-//! or how long before its event it rings, `cancel`). A cancel is confirmed in place, where the row stood: what is
-//! cancelled, that it cannot be undone (the engine keeps no undo for `schedule.cancel`), and what follows. Nothing is
-//! cancelled but on the owner's press of the confirmation's danger button; a focus, a hover or a preview runs nothing.
+//! or how long before its event it rings, `cancel`). A cancel is confirmed in a dialog over the dimmed window, by
+//! its row ([`crate::component::dialog`]): what is cancelled, when it was due, and what follows (the engine keeps no
+//! undo for `schedule.cancel`). Nothing is cancelled but on the owner's press of the dialog's danger button; `Esc`, a
+//! focus, a hover or a preview runs nothing.
 
-use egui::{Align, Id, Key, Layout, Modifiers, Rect, Role, Ui, WidgetInfo, pos2, vec2};
+use egui::{Align, Id, Layout, Rect, Role, Ui, WidgetInfo, pos2, vec2};
 
 use super::{Asked, body, inset, rule, words};
-use crate::component::button::{LinkSize, TextButton, link_sized};
+use crate::component::button::{LinkSize, link_sized};
+use crate::component::dialog::{self, Answer, Dialog, Tone};
 use crate::component::label::section_label;
 use crate::component::tag::{TagKind, tag};
 use crate::keymap::Keymap;
@@ -92,10 +94,6 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut S
     if head(ui, theme, keymap, &mut hand) {
         asked = Some(Asked::Section(Section::Sending));
     }
-    // Esc with the confirmation open is the confirmation's: the entry stays.
-    if scheduled.confirming().is_some() && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape)) {
-        asked = Some(Asked::KeepScheduled);
-    }
     if let Some(note) = scheduled.note() {
         ui.add_space(12.0);
         inset(ui, |ui| words(ui, theme.fonts.body, note, theme.palette.warn));
@@ -110,7 +108,14 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut S
         ui.add_space(12.0);
         inset(ui, |ui| words(ui, theme.fonts.body, &note, theme.palette.warn));
     }
-    list(ui, theme, keymap, scheduled, mailbox, &mut hand, &mut asked);
+    let near = list(ui, theme, keymap, scheduled, mailbox, &mut hand, &mut asked);
+    // The confirmation, over the dimmed window: its answer is the only ask while it shows.
+    if let Some(row) = scheduled.confirming().and_then(|id| scheduled.rows().iter().find(|row| row.id == id)) {
+        let when = crate::scheduled::when(row.due, mailbox.now(), mailbox.offset());
+        if let Some(answer) = confirmation(ui, theme, keymap, row, &when, near) {
+            asked = Some(answer);
+        }
+    }
     // A hand to a row not drawn this frame (it went, or is out of sight) goes to the link back instead of nowhere.
     if hand.is_some() {
         scheduled.hand_to(Hand::Back);
@@ -118,9 +123,18 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut S
     asked
 }
 
-/// The entries, in one group.
-fn list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, scheduled: &Scheduled, mailbox: &Mailbox, hand: &mut Option<Hand>, asked: &mut Option<Asked>) {
+/// The entries, in one group; where the entry asked about stands, while it is in sight.
+fn list(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    scheduled: &Scheduled,
+    mailbox: &Mailbox,
+    hand: &mut Option<Hand>,
+    asked: &mut Option<Asked>,
+) -> Option<Rect> {
     let accounts = mailbox.accounts();
+    let mut near = None;
     let (now, offset) = (mailbox.now(), mailbox.offset());
     body(ui, theme, "scheduled", |ui| {
         if scheduled.rows().is_empty() {
@@ -144,17 +158,18 @@ fn list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, scheduled: &Scheduled, mail
             let account = row.account.and_then(|id| accounts.iter().find(|account| account.id == id));
             // The time is formatted only for a row that is drawn: a row out of sight only takes its room.
             let when = || crate::scheduled::when(row.due, now, offset);
-            let pressed = if scheduled.confirming() == Some(row.id) {
-                let own = egui::UiBuilder::new().scope_id(Id::unique("settings-scheduled-confirm"));
-                ui.scope_builder(own, |ui| confirmation(ui, theme, keymap, row, &when(), hand)).inner
-            } else {
-                entry_row(ui, theme, keymap, row, when, account, ends, hand)
-            };
+            let (top, left, right) = (ui.cursor().top(), ui.max_rect().left(), ui.max_rect().right());
+            let pressed = entry_row(ui, theme, keymap, row, when, account, ends, hand);
             if pressed.is_some() {
                 *asked = pressed;
             }
+            let drawn = Rect::from_min_max(pos2(left, top), pos2(right, ui.cursor().top()));
+            if scheduled.confirming() == Some(row.id) && ui.clip_rect().intersects(drawn) {
+                near = Some(drawn);
+            }
         }
     });
+    near
 }
 
 /// An entry's row; drawn only near the view unless it `ends` the list.
@@ -224,11 +239,9 @@ fn entry_row(
     asked
 }
 
-/// The confirmation of a cancel, in the row's place: what is cancelled, that it cannot be undone, what follows; "Keep
-/// it" and the danger button.
-fn confirmation(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &ScheduledRow, when: &str, hand: &mut Option<Hand>) -> Option<Asked> {
-    let p = &theme.palette;
-    let mut asked = None;
+/// The confirmation of a cancel, in its dialog: what is cancelled, when it was due, what follows; "Keep it" and the
+/// danger button. What the owner answered, if anything.
+fn confirmation(ui: &Ui, theme: &Theme, keymap: &Keymap, row: &ScheduledRow, when: &str, near: Option<Rect>) -> Option<Asked> {
     let title = row.title();
     let (question, follows, press) = match row.kind {
         Kind::Send if !row.who.is_empty() => (
@@ -257,31 +270,18 @@ fn confirmation(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &ScheduledRow,
             tr!("Cancel the alert"),
         ),
     };
-    ui.add_space(16.0);
-    inset(ui, |ui| {
-        let heading = crate::component::label(ui, theme.fonts.heading, &question, p.ink);
-        heading.widget_info(|| WidgetInfo::labeled(Role::Heading, true, &question));
-        ui.add_space(8.0);
-        words(ui, theme.fonts.body, tr!("This cannot be undone."), p.ink);
-        words(ui, theme.fonts.body, &tr!("Due {when}.", when = when), p.ink);
-        words(ui, theme.fonts.body, follows, p.muted);
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 12.0;
-            let keep = TextButton::new(tr!("Keep it")).secondary().show(ui, theme, keymap);
-            take(hand, &Hand::Keep, &keep);
-            let cancel = TextButton::new(press).danger().show(ui, theme, keymap);
-            if keep.clicked() {
-                asked = Some(Asked::KeepScheduled);
-            }
-            if crate::component::button::owner_pressed(ui, &cancel) {
-                asked = Some(Asked::CancelScheduled(row.id));
-            }
-        });
-    });
-    ui.add_space(16.0);
-    rule(ui, theme);
-    asked
+    // A send names whom it goes to in the question: the line names the message.
+    let due = if row.kind == Kind::Send && !row.who.is_empty() {
+        tr!("“{subject}” will not go at its time, {when}.", subject = title, when = when)
+    } else {
+        tr!("Due {when}.", when = when)
+    };
+    let lines = [(due.as_str(), Tone::Ink), (follows, Tone::Muted)];
+    let dialog = Dialog { id: Id::unique("settings-scheduled-confirm"), question: &question, lines: &lines, keep: tr!("Keep it"), act: press, near };
+    match dialog::show(ui, theme, keymap, &dialog)? {
+        Answer::Keep => Some(Asked::KeepScheduled),
+        Answer::Act => Some(Asked::CancelScheduled(row.id)),
+    }
 }
 
 /// What the Scheduled page asked for, done: a cancel through `schedule.cancel`, on the owner's press only.
@@ -307,10 +307,8 @@ impl super::super::InboxApp {
     pub(in crate::draw) fn apply_scheduled(&mut self, asked: Asked) {
         match asked {
             Asked::Scheduled => self.open_scheduled(),
-            Asked::AskCancelScheduled(id) => {
-                self.settings.scheduled_mut().ask_cancel(id);
-                self.settings.scheduled_mut().hand_to(Hand::Keep);
-            }
+            // The dialog takes the keyboard on its "Keep it" as it opens.
+            Asked::AskCancelScheduled(id) => self.settings.scheduled_mut().ask_cancel(id),
             Asked::KeepScheduled => {
                 if let Some(id) = self.settings.scheduled().confirming() {
                     self.settings.scheduled_mut().hand_to(Hand::Cancel(id));

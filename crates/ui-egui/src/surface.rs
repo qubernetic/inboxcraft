@@ -24,15 +24,17 @@ use egui::Key;
 
 use crate::keymap::{self, Keymap};
 
-/// The most surfaces a frame holds: seven in front and the place. Eight surfaces exist, and the command line's results and a capture
-/// never stand together with all the rest; an eighth in front would drop the lowest, never the top.
-const MOST: usize = 8;
+/// The most surfaces a frame holds: eight in front and the place, as many as exist; one more in front would drop the
+/// lowest, never the top.
+const MOST: usize = 9;
 
 /// One thing that stands in front of the window's place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Surface {
     /// A float: a menu, an open list, a picker.
     Float,
+    /// A confirmation over the dimmed window ([`crate::component::dialog`]): it holds the keys and the pointer.
+    Dialog,
     /// The command line's results: they hold the keys.
     Command,
     /// The Shortcuts page waiting for a key.
@@ -55,6 +57,8 @@ pub(crate) enum Surface {
 pub(crate) struct Facts {
     /// A float showed in this pass or the last.
     pub float: bool,
+    /// A confirmation dialog shows over the dimmed window.
+    pub dialog: bool,
     /// The command line's results show.
     pub command: bool,
     /// The Shortcuts page waits for a key.
@@ -99,6 +103,7 @@ impl Surfaces {
         let mail = facts.mail && !facts.settings;
         let order = [
             (facts.float, Surface::Float),
+            (facts.dialog, Surface::Dialog),
             (facts.capture, Surface::Capture),
             (facts.command, Surface::Command),
             (facts.editor, Surface::Editor),
@@ -133,16 +138,18 @@ impl Surfaces {
         self.all().contains(&surface)
     }
 
-    /// Whether the keys are held by a surface that reads them itself: the command line's results, or the Shortcuts page waiting.
+    /// Whether the keys are held by a surface that reads them itself: the command line's results, a confirmation
+    /// dialog, or the Shortcuts page waiting.
     pub(crate) fn held(&self) -> bool {
-        self.has(Surface::Command) || self.has(Surface::Capture)
+        self.has(Surface::Command) || self.has(Surface::Dialog) || self.has(Surface::Capture)
     }
 
-    /// Whether a modal surface stands in front: the command line's results. Nothing of the place under them runs while
-    /// they show, whatever pressed it. A capture holds the keys, not the pointer (a press on its page ends the wait);
-    /// the event editor's own asks come with the calendar's, which it lies over.
+    /// Whether a modal surface stands in front: the command line's results or a confirmation dialog. Nothing of the
+    /// place under them runs while they show, whatever pressed it (the dialog's own answer is not the place's). A
+    /// capture holds the keys, not the pointer (a press on its page ends the wait); the event editor's own asks come
+    /// with the calendar's, which it lies over.
     pub(crate) fn modal(&self) -> bool {
-        self.has(Surface::Command)
+        self.has(Surface::Command) || self.has(Surface::Dialog)
     }
 
     /// Whether a key without Command, Ctrl or Alt runs nothing of the window, and Undo is not the window's: under the

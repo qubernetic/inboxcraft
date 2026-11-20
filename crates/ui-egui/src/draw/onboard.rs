@@ -25,16 +25,16 @@
 use std::sync::Arc;
 
 use egui::{
-    Align, CentralPanel, Color32, Frame, Galley, Key, Layout, Margin, Modifiers, Pos2, Rect, Response, Role, ScrollArea, Sense, Ui, UiBuilder,
-    WidgetInfo, pos2, vec2,
+    Align, CentralPanel, Color32, Frame, Galley, Layout, Margin, Pos2, Rect, Response, Role, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2,
 };
 
 use super::paint::{self, Panes};
 use crate::component;
 use crate::component::banner::{BannerKind, banner};
-use crate::component::button::{TextButton, owner_pressed};
+use crate::component::button::TextButton;
 use crate::component::check_step::{self, check_step_named};
 use crate::component::checkbox::checkbox_wrapping;
+use crate::component::dialog::{self, Answer, Dialog, Tone};
 use crate::component::field::{self, Field};
 use crate::component::progress::{ProgressState, progress};
 use crate::component::select::Select;
@@ -631,6 +631,7 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     let f = &theme.fonts;
     let p = &theme.palette;
     let mut asked = None;
+    let mut remove_at = None;
     let width = ui.available_width().min(FORM);
     head(ui, theme, tr!("Account settings"), None, width);
     ui.add_space(HEAD_BELOW - HEAD_GAP);
@@ -642,10 +643,6 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     let hand = onboarding.take_remove_hand();
     let question =
         Question { name: onboarding.removed_name(), address: crate::component::plain(onboarding.form().address.trim()).into_owned(), writing };
-    // Esc while the question asks is the question's: the account stays, the form and the settings stay open.
-    if asking && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape)) {
-        asked = Some(Asked::KeepAccount);
-    }
     part(ui, width, |ui| {
         ui.spacing_mut().item_spacing.y = GAP;
         let form = onboarding.form_mut();
@@ -661,12 +658,6 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
             words(ui, text, f.caption, p.ink, width);
         }
         page_error(ui, theme, keymap, onboarding);
-        // The question stands in the buttons' place while it asks: one Cancel on the page, and nothing to save
-        // half-way through it.
-        if asking {
-            asked = remove_question(ui, theme, keymap, &question, hand, width).or(asked);
-            return;
-        }
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             if TextButton::new(label).primary().show(ui, theme, keymap).clicked() {
@@ -677,6 +668,7 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let ask = TextButton::new(tr!("Remove account…")).danger().show(ui, theme, keymap);
+                remove_at = Some(ask.rect).filter(|rect| ui.clip_rect().intersects(*rect));
                 if hand == Some(RemoveHand::Ask) {
                     ask.request_focus();
                 }
@@ -689,6 +681,10 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     for slot in edited {
         onboarding.edited(slot);
     }
+    // The question, over the dimmed window: its answer is the only ask while it shows.
+    if asking && let Some(answer) = remove_question(ui, theme, keymap, &question, remove_at) {
+        asked = Some(answer);
+    }
     asked
 }
 
@@ -700,56 +696,39 @@ struct Question {
     writing: bool,
 }
 
-/// The question whether to remove the account, in place under the form's buttons: first that it cannot be undone, then
-/// what goes from this computer and what stays on the server; Cancel takes the keyboard, "Remove account" removes.
-fn remove_question(ui: &mut Ui, theme: &Theme, keymap: &Keymap, question: &Question, hand: Option<RemoveHand>, width: f32) -> Option<Asked> {
-    let f = &theme.fonts;
-    let p = &theme.palette;
-    let mut asked = None;
-    ui.add_space(GAP);
+/// The question whether to remove the account, in its dialog: first that it cannot be undone, then what goes from
+/// this computer and what stays on the server; Cancel takes the keyboard, "Remove account" removes. What the owner
+/// answered, if anything.
+fn remove_question(ui: &Ui, theme: &Theme, keymap: &Keymap, question: &Question, near: Option<egui::Rect>) -> Option<Asked> {
     let heading = tr!("Remove {name} from this computer?", name = question.name);
-    let shown = crate::component::label(ui, f.heading, &heading, p.ink);
-    shown.widget_info(|| WidgetInfo::labeled(Role::Heading, true, &heading));
-    words(ui, tr!("This cannot be undone."), f.body, p.ink, width);
-    words(
-        ui,
-        &tr!(
-            "From this computer go: the mail and folders of {name} kept here, its calendars, its drafts, and its password in your system's credential store.",
-            name = question.name
-        ),
-        f.body,
-        p.ink,
-        width,
+    let goes = tr!(
+        "From this computer go: the mail and folders of {name} kept here, its calendars, its drafts, and its password in your system's credential store.",
+        name = question.name
     );
+    let writing = tr!("The message you are writing from {name} is discarded with it.", name = question.name);
+    let stays = tr!(
+        "Everything on the server stays: {address} keeps its mail and its calendars, and the account can be added again.",
+        address = question.address
+    );
+    let mut lines = vec![(tr!("This cannot be undone."), Tone::Ink), (goes.as_str(), Tone::Ink)];
     if question.writing {
-        words(ui, &tr!("The message you are writing from {name} is discarded with it.", name = question.name), f.body, p.ink, width);
+        lines.push((writing.as_str(), Tone::Ink));
     }
-    words(
-        ui,
-        &tr!(
-            "Everything on the server stays: {address} keeps its mail and its calendars, and the account can be added again.",
-            address = question.address
-        ),
-        f.body,
-        p.muted,
-        width,
-    );
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = GAP;
-        let cancel = TextButton::new(tr!("Cancel")).secondary().show(ui, theme, keymap);
-        if hand == Some(RemoveHand::Cancel) {
-            cancel.request_focus();
-        }
-        if cancel.clicked() {
-            asked = Some(Asked::KeepAccount);
-        }
-        let remove = TextButton::new(tr!("Remove account")).danger().show(ui, theme, keymap);
-        // A key already down when the button took the keyboard, or held on from the press that asked, is no answer.
-        if owner_pressed(ui, &remove) {
-            asked = Some(Asked::Remove);
-        }
-    });
-    asked
+    lines.push((stays.as_str(), Tone::Muted));
+    let dialog = Dialog {
+        id: egui::Id::unique("account-remove-confirm"),
+        question: &heading,
+        lines: &lines,
+        keep: tr!("Cancel"),
+        act: tr!("Remove account"),
+        near,
+    };
+    // A key already down when the button took the keyboard, or held on from the press that asked, is no answer
+    // ([`crate::component::button::owner_pressed`], in the dialog).
+    match dialog::show(ui, theme, keymap, &dialog)? {
+        Answer::Keep => Some(Asked::KeepAccount),
+        Answer::Act => Some(Asked::Remove),
+    }
 }
 
 /// A step's short name on its line, as a terminal prints it.

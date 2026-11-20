@@ -58,6 +58,10 @@ const EMPTY_HINTS: [(&str, &str); 2] = [(keymap::COMPOSE, "write"), (keymap::PAL
 /// The key hints beside the docked composer (the frames `size-1100/composer`, `size-800/composer`).
 const COMPOSER_HINTS: [(&str, &str); 2] = [(keymap::SEND, "send"), (keymap::PALETTE, "commands")];
 
+/// The id of the line's one key hint under a confirmation dialog: its `Esc`, the safe answer. It names no action: the
+/// window's gate under a modal surface drops whatever the line asks while the dialog shows.
+pub(crate) const DIALOG_ESC: &str = "dialog.esc";
+
 /// What the window shows, for the line's key hints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Keys {
@@ -420,6 +424,8 @@ fn tr_word(word: &str) -> &'static str {
         "open" => tr!("open"),
         "write" => tr!("write"),
         "send" => tr!("send"),
+        "cancel" => tr!("cancel"),
+        "keep it" => tr!("keep it"),
         _ => tr!("commands"),
     }
 }

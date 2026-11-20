@@ -260,6 +260,27 @@ impl Settings {
         self.under
     }
 
+    /// Whether the page shown asks a confirmation in its dialog over the dimmed window: a template's delete, an entry's
+    /// cancel, or, on Accounts, the account's removal (`removing`: the account's form asks it).
+    #[must_use]
+    pub fn confirms(&self, removing: bool) -> bool {
+        self.confirm_keep(removing).is_some()
+    }
+
+    /// The word of the safe answer of the confirmation the page shown asks ([`Settings::confirms`]), as the status
+    /// line's `Esc` hint says it, untranslated: "keep it" for an entry's cancel, "cancel" for the others.
+    #[must_use]
+    pub fn confirm_keep(&self, removing: bool) -> Option<&'static str> {
+        if !self.open {
+            return None;
+        }
+        match self.under {
+            Some(Under::Templates) => (self.templates.form().is_none() && self.templates.confirming().is_some()).then_some("cancel"),
+            Some(Under::Scheduled) => self.scheduled.confirming().is_some().then_some("keep it"),
+            None => (self.section == Section::Accounts && removing).then_some("cancel"),
+        }
+    }
+
     /// The Templates page's state.
     #[must_use]
     pub fn templates(&self) -> &crate::templates::Templates {

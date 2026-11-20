@@ -109,8 +109,6 @@ What the app still owes this file, one line each. The finer differences, with th
 **Waiting for the file to be redrawn**
 - The owner's rulings of 2026-11-18 are in the code but not yet in this file: the invitation card has one primary
   answer and keeps "Keep my answer", and the add form's Detect and "Check and add" can always be pressed.
-- Removing a template, cancelling a scheduled message and removing an account are confirmed in place, where the
-  file draws a dialog over a scrim; which one stays is open.
 
 **Frame, command line and status line**
 - The command line's search of all mail, its GO TO and LAST COMMANDS groups and mixed results are not built; plain
@@ -133,6 +131,12 @@ What the app still owes this file, one line each. The finer differences, with th
 - At 130 % text the list's view switch stands on the pills' line, not in the head.
 
 **Settings and the calendar**
+- The confirmation dialogs stand by what they ask about as the file's rule says, but what they ask about stands
+  elsewhere: the Templates page lists Personal before Studio and the Scheduled page the sample's four entries, so
+  the row asked about is not where the frames have it and the cards stand off the frames' y 423 and 441 of 900; the
+  account form draws "Remove account…" at 664 where the frame has 602, so its card is at 324, not 262. A
+  scheduled send's says "“…” will not go at its time, Tue 08:00." where the frame says "on Tuesday at 08:00", and an
+  account's says "its drafts" where the frame counts them.
 - The settings are drawn to the 1440 frames; under about 1060 their narrow sizes are the code's own.
 - Privacy keeps no sender name, so a row shows the address at 16 where the frames draw a name column; About is one
   column, and "After an act" and the week's two rows on Calendar have no frame.
