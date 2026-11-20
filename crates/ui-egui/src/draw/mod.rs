@@ -44,6 +44,7 @@ mod command;
 mod compose;
 mod frame;
 pub(crate) mod home;
+mod host;
 mod invite;
 mod list;
 mod onboard;

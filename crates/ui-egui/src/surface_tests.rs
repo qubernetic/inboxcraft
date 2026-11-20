@@ -407,3 +407,26 @@ fn a_confirmation_dialog_is_modal_holds_the_keys_and_lets_no_key_of_the_window_r
     }
     assert!(!of(SETTINGS).modal(), "the settings alone are no modal surface");
 }
+
+#[test]
+fn esc_in_a_window_of_its_own_closes_that_window_or_the_float_in_it() {
+    assert_eq!(in_a_pass(esc(), |ctx| Surfaces::window(false, false).escape(ctx)), Some(Surface::Window), "the window");
+    assert_eq!(in_a_pass(esc(), |ctx| Surfaces::window(true, false).escape(ctx)), Some(Surface::Float), "a float in it first");
+    assert_eq!(in_a_pass(Vec::new(), |ctx| Surfaces::window(false, false).escape(ctx)), None, "no Esc, nothing closes");
+}
+
+#[test]
+fn in_a_window_of_its_own_no_key_acts_on_the_main_window() {
+    let keymap = Keymap::default();
+    for composer in [false, true] {
+        let surfaces = Surfaces::window(false, composer);
+        assert!(!surfaces.list_has_keyboard(), "the main window's list never has the window's keys");
+        for action in WINDOW.iter().chain(LIST.iter()).chain(super::ROW_ACTS.iter()) {
+            let look = super::WINDOW_KEYS.contains(action);
+            assert_eq!(surfaces.allows(action, &keymap), look, "{action}: only the look of the app runs from a window");
+            assert_eq!(surfaces.allows_press(action), look, "{action}: a press");
+        }
+        assert_eq!(surfaces.allows(keymap::SEND, &keymap), composer, "Send runs where the window holds a composer");
+        assert_eq!(surfaces.allows(keymap::FOLD, &keymap), composer, "fold runs where the window holds a composer");
+    }
+}

@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use crate::appearance::{Appearance, Motion, MotionLevel, ThemeMode, WindowFrame};
+use crate::appearance::{Appearance, ComposerHost, Layout, Motion, MotionLevel, ReaderHost, ThemeMode, WindowFrame};
 use crate::test_support::session;
 use crate::{AgentClass, Caller, EngineError};
 
@@ -242,4 +242,50 @@ fn settings_open_says_whether_a_window_takes_the_ask() {
     session.set_window(true);
     let shown = session.run_as(Caller::Agent, "ui.settings.open", &json!({ "page": "accounts" })).unwrap();
     assert_eq!(shown, json!({ "page": "accounts", "window": true }));
+}
+
+#[test]
+fn layout_set_is_the_owners_and_an_agent_is_refused_without_a_change() {
+    let mut session = session();
+    assert_eq!(session.registry().get("ui.layout.set").unwrap().class, Some(AgentClass::Owner));
+    let refused = session.run_as(Caller::Agent, "ui.layout.set", &json!({ "composer": "window" })).unwrap_err();
+    assert_eq!(refused.code(), "not_allowed");
+    assert_eq!(session.appearance().layout, Layout::default(), "a refused set changes nothing");
+}
+
+#[test]
+fn layout_set_changes_the_part_named_and_answers_the_whole_appearance() {
+    let mut session = session();
+    let answer = session.run("ui.layout.set", &json!({ "composer": "floating" })).unwrap();
+    assert_eq!(answer["appearance"]["layout"], json!({ "reader": "docked", "composer": "floating" }));
+    assert_eq!(answer["appearance"]["theme"], "system", "the answer is the whole appearance");
+    let answer = session.run("ui.layout.set", &json!({ "reader": "window" })).unwrap();
+    assert_eq!(answer["appearance"]["layout"], json!({ "reader": "window", "composer": "floating" }), "the composer stays");
+    assert_eq!(session.appearance().layout, Layout { reader: ReaderHost::Window, composer: ComposerHost::Floating });
+    session.run("ui.layout.set", &json!({ "reader": "docked", "composer": "window" })).unwrap();
+    assert_eq!(session.appearance().layout, Layout { reader: ReaderHost::Docked, composer: ComposerHost::Window });
+    assert_eq!(session.appearance().theme, ThemeMode::System, "the other choices stay");
+}
+
+#[test]
+fn layout_set_refuses_anything_but_a_host_of_its_part() {
+    let mut session = session();
+    session.run("ui.layout.set", &json!({ "reader": "window", "composer": "floating" })).unwrap();
+    let before = *session.appearance();
+    for junk in [
+        json!(null),
+        json!({}),
+        json!({ "reader": null }),
+        json!({ "reader": "floating" }),
+        json!({ "reader": "Window" }),
+        json!({ "composer": "tab" }),
+        json!({ "composer": 1 }),
+        json!({ "composer": "window", "reader": "tab" }),
+        json!({ "composer": "window", "more": true }),
+        json!({ "layout": { "composer": "window" } }),
+        json!("window"),
+    ] {
+        assert!(bad(session.run("ui.layout.set", &junk)), "{junk}");
+        assert_eq!(*session.appearance(), before, "{junk}: a refused set changes nothing");
+    }
 }
