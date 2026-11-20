@@ -1317,21 +1317,16 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
     let undo = tr!("Undo the send of “{subject}”", subject = label);
     let take_back = tr!("Take “{subject}” back and edit it", subject = label);
     let again = tr!("Send “{subject}” again", subject = label);
-    let as_now = tr!("Send “{subject}” as it is now", subject = label);
     let edit = tr!("Edit “{subject}”", subject = label);
     let (buttons, asks): (Vec<SendButton<'_>>, Vec<Outbox>) = match standing {
         Standing::Countdown { .. } => (vec![SendButton { name: tr!("Undo"), spoken: &undo }], vec![Outbox::Unsend]),
         Standing::Scheduled => (vec![SendButton { name: tr!("Edit"), spoken: &take_back }], vec![Outbox::Unsend]),
         Standing::Sending => (Vec::new(), Vec::new()),
-        // An answer to an invitation changes only from the invitation.
-        // Send again on a send that changed since asked once: the second press sends it as the row shows it now.
-        Standing::Refused if mailbox.retry_asked(row) && row.invite_answer => {
-            (vec![SendButton { name: tr!("Send as it is now"), spoken: &as_now }], vec![Outbox::Retry])
-        }
-        Standing::Refused if mailbox.retry_asked(row) => (
-            vec![SendButton { name: tr!("Send as it is now"), spoken: &as_now }, SendButton { name: tr!("Edit"), spoken: &edit }],
-            vec![Outbox::Retry, Outbox::Edit],
-        ),
+        // A send that changed since it was refused (or keeps no record of how it went) is not sent from its row: Edit
+        // opens it in the composer, which shows every address and the text whole, and sends it from there. An answer
+        // to an invitation changes only from the invitation, so it has no Edit.
+        Standing::Refused if !row.changed.is_empty() && row.invite_answer => (Vec::new(), Vec::new()),
+        Standing::Refused if !row.changed.is_empty() => (vec![SendButton { name: tr!("Edit"), spoken: &edit }], vec![Outbox::Edit]),
         Standing::Refused if row.invite_answer => (vec![SendButton { name: tr!("Send again"), spoken: &again }], vec![Outbox::Retry]),
         Standing::Refused => (
             vec![SendButton { name: tr!("Send again"), spoken: &again }, SendButton { name: tr!("Edit"), spoken: &edit }],
