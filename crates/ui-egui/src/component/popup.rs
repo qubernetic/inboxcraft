@@ -1032,9 +1032,12 @@ fn menu_at<R>(
 }
 
 /// Where [`float`] notes the pass it last showed in, one note per viewport: a float in a window of its own is that
-/// window's, and never holds the main window's `Esc` (nor one of the main window the window's).
+/// window's, and never holds the main window's `Esc` (nor one of the main window the window's). The main window's
+/// note keeps the plain id.
 fn shown_id(ctx: &Context) -> Id {
-    Id::unique("inboxcraft-float-shown").with(ctx.viewport_id())
+    let id = Id::unique("inboxcraft-float-shown");
+    let viewport = ctx.viewport_id();
+    if viewport == egui::ViewportId::ROOT { id } else { id.with(viewport) }
 }
 
 /// Whether a float (an open list or menu) showed in this pass or the one before: the surface on top, which takes Esc
