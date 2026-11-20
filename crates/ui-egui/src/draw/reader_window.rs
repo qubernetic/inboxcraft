@@ -223,13 +223,15 @@ impl Windows {
             }
             reader::Asked::Dismiss => reader.dismiss_notice(),
             reader::Asked::Act(id, act) => {
+                let acts = mailbox.acts();
                 super::start(reader, mailbox, id, act);
+                let done = mailbox.acts() != acts;
                 // What the act changed (a pin, a reminder, a snooze, the sender's screening), read again for the head.
                 if let Ok(Some(read)) = mailbox.message_row(id) {
                     reader.keep_row(Some(fresher(mailbox, read)));
                 }
-                // An act that takes the message away ends the window's work.
-                if act.slides() {
+                // An act that took the message away ends the window's work; one that failed leaves it where it was.
+                if act.slides() && done {
                     self.shown.remove(at);
                 }
             }

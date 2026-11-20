@@ -1582,6 +1582,11 @@ impl Mailbox {
         }
     }
 
+    /// How many acts went through since the window opened: one more each time an act did what it was asked.
+    pub(crate) fn acts(&self) -> u64 {
+        self.acts
+    }
+
     /// The message the owner's own act took out of the list last, once: it is forgotten as it is read.
     pub fn take_taken(&mut self) -> Option<u64> {
         self.taken.take()

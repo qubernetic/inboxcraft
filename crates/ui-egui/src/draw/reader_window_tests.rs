@@ -553,3 +553,21 @@ fn an_act_in_the_window_shows_in_its_kept_row() {
     settle(&ctx, &mut app);
     assert_eq!(kept(&app).follow_up, None, "and stays gone");
 }
+
+/// An act that would take the message away but failed leaves its window open; once it goes through, the window closes.
+#[test]
+fn a_failed_act_leaves_the_window_open() {
+    let ctx = windowing();
+    let watch = Watch::default();
+    let mut app = watched_app(sample_store(), &watch);
+    settle(&ctx, &mut app);
+    let coast = open(&ctx, &mut app, COAST);
+    let window = window_of(&app, coast);
+    watch.fail_writes.store(true, Ordering::Relaxed);
+    press_in(&ctx, &mut app, window, Key::D);
+    assert_eq!(app.windows.messages(), vec![Some(coast)], "the act failed: the window stays");
+    assert!(shows(window, COAST));
+    watch.fail_writes.store(false, Ordering::Relaxed);
+    press_in(&ctx, &mut app, window, Key::D);
+    assert!(app.windows.messages().is_empty(), "done, the window closes");
+}
