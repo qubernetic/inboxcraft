@@ -670,22 +670,58 @@ pub fn icon_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(ICON.into()))
 }
 
-/// egui's fonts with IBM Plex in front: each face is first in its family, with egui's bundled faces behind it for
-/// the signs it does not hold (Hack, then Ubuntu Light behind Plex Mono; Ubuntu Light, then Hack behind Plex Sans and
-/// Audiowide; egui's icon font behind all). The icon family is Phosphor alone.
+/// The faces shipped for scripts IBM Plex does not hold, Regular only (SIL Open Font Licence 1.1; the licence texts
+/// are the `OFL.txt` files beside them): Noto Sans Hebrew, Arabic, Devanagari and Thai.
+const SCRIPT_FACES: [(&str, &[u8]); 4] = [
+    ("NotoSansHebrew-Regular", include_bytes!("../../../assets/fonts/noto/hebrew/NotoSansHebrew-Regular.ttf")),
+    ("NotoSansArabic-Regular", include_bytes!("../../../assets/fonts/noto/arabic/NotoSansArabic-Regular.ttf")),
+    ("NotoSansDevanagari-Regular", include_bytes!("../../../assets/fonts/noto/devanagari/NotoSansDevanagari-Regular.ttf")),
+    ("NotoSansThai-Regular", include_bytes!("../../../assets/fonts/noto/thai/NotoSansThai-Regular.ttf")),
+];
+
+/// The emoji face shipped: Noto Emoji, the one-colour one (SIL Open Font Licence 1.1, `OFL.txt` beside it). egui
+/// draws outlines, not the colour layers or bitmaps of a colour emoji font.
+const EMOJI_FACE: (&str, &[u8]) = ("NotoEmoji-Regular", include_bytes!("../../../assets/fonts/noto/emoji/NotoEmoji-Regular.ttf"));
+
+/// The names of the shipped fallback faces, in the order they stand in every text family: the four scripts, then the
+/// emoji.
+pub const SHIPPED_FALLBACKS: [&str; 5] = [SCRIPT_FACES[0].0, SCRIPT_FACES[1].0, SCRIPT_FACES[2].0, SCRIPT_FACES[3].0, EMOJI_FACE.0];
+
+/// egui's fonts with IBM Plex in front: each face is first in its family (behind Plex Mono, Hack next, so the signs it
+/// holds stay monospace), then the shipped Noto faces for Hebrew, Arabic, Devanagari and Thai, then egui's bundled
+/// faces for the signs Plex does not hold (Ubuntu Light behind Plex Mono; Ubuntu Light, then Hack behind Plex Sans and
+/// Audiowide; egui's icon font behind all), then Noto Emoji, behind the bundled faces so the arrows, shapes and keys
+/// they draw stay theirs. The icon family is Phosphor alone. The computer's fonts come behind all of these ([`font_definitions_from`]).
 #[must_use]
 pub fn font_definitions() -> egui::FontDefinitions {
     let mut definitions = egui::FontDefinitions::default();
-    let bundled = |family: &FontFamily| definitions.families.get(family).cloned().unwrap_or_default();
+    let bundled = |family: &FontFamily| {
+        let fonts = definitions.families.get(family).cloned().unwrap_or_default();
+        fonts.into_iter().filter(|font| !SHIPPED_FALLBACKS.contains(&font.as_str())).collect::<Vec<String>>()
+    };
     let (mut proportional, monospace) = (bundled(&FontFamily::Proportional), bundled(&FontFamily::Monospace));
     // Hack holds arrows, shapes and keys that Ubuntu Light and Plex Sans do not: behind Ubuntu Light, before the icons.
     let missing: Vec<String> = monospace.iter().filter(|font| !proportional.contains(font)).cloned().collect();
     let at = proportional.iter().position(|name| name == "Ubuntu-Light").map_or(0, |at| at + 1);
     proportional.splice(at..at, missing);
+    for (name, data) in SCRIPT_FACES {
+        definitions.font_data.insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_static(data)));
+    }
+    // Drawn a little smaller, as egui draws its own copy of Noto Emoji: its signs fill the whole em.
+    let emoji = egui::FontData::from_static(EMOJI_FACE.1).tweak(egui::FontTweak { scale: 0.81, ..egui::FontTweak::default() });
+    definitions.font_data.insert(EMOJI_FACE.0.to_owned(), std::sync::Arc::new(emoji));
+    let scripts = SCRIPT_FACES.map(|(name, _)| name.to_owned());
     for (face, data) in TYPEFACES {
         definitions.font_data.insert(face.name().to_owned(), std::sync::Arc::new(egui::FontData::from_static(data)));
         let behind = if face.is_mono() { &monospace } else { &proportional };
-        let fonts = std::iter::once(face.name().to_owned()).chain(behind.iter().cloned()).collect();
+        // Hack stands before the script faces behind Plex Mono, so the signs it holds keep its cell width.
+        let (cells, rest): (Vec<String>, Vec<String>) = behind.iter().cloned().partition(|name| face.is_mono() && name == "Hack");
+        let fonts = std::iter::once(face.name().to_owned())
+            .chain(cells)
+            .chain(scripts.iter().cloned())
+            .chain(rest)
+            .chain(std::iter::once(EMOJI_FACE.0.to_owned()))
+            .collect();
         definitions.families.insert(face.family(), fonts);
     }
     // The icons are drawn as their outlines are, as the design draws its SVGs: hinting would snap them half a pixel up.
@@ -721,12 +757,39 @@ pub struct Fallback {
     pub index: u32,
 }
 
-/// One sign of each script the app's fonts may lack: what the start looks for on the computer.
-pub const FALLBACK_PROBES: [(&str, char); 8] =
-    [("han", '日'), ("kana", 'あ'), ("hangul", '한'), ("arabic", 'ع'), ("hebrew", 'א'), ("thai", 'ท'), ("devanagari", 'अ'), ("emoji", '🙂')];
+/// One sign of each script the app's fonts may lack: what the start looks for on the computer, of these the ones
+/// [`missing_probes`] gives (the shipped Noto faces hold Arabic, Hebrew, Thai, Devanagari and emoji).
+pub const FALLBACK_PROBES: [(&str, char); 26] = [
+    ("han", '日'),
+    ("kana", 'あ'),
+    ("hangul", '한'),
+    ("arabic", 'ع'),
+    ("hebrew", 'א'),
+    ("thai", 'ท'),
+    ("devanagari", 'अ'),
+    ("emoji", '🙂'),
+    ("bengali", 'অ'),
+    ("gurmukhi", 'ਅ'),
+    ("gujarati", 'અ'),
+    ("oriya", 'ଅ'),
+    ("tamil", 'அ'),
+    ("telugu", 'అ'),
+    ("kannada", 'ಅ'),
+    ("malayalam", 'അ'),
+    ("sinhala", 'අ'),
+    ("lao", 'ກ'),
+    ("tibetan", 'ཀ'),
+    ("myanmar", 'က'),
+    ("khmer", 'ក'),
+    ("ethiopic", 'አ'),
+    ("syriac", 'ܐ'),
+    ("thaana", 'ހ'),
+    ("cherokee", 'Ꭰ'),
+    ("bopomofo", 'ㄅ'),
+];
 
-/// [`font_definitions`] with `fallbacks` behind every text family: IBM Plex first, then egui's bundled faces, then
-/// these, in their order. The icon family keeps Phosphor alone. A fallback egui could not read as a font at its index
+/// [`font_definitions`] with `fallbacks` behind every text family: after IBM Plex, the shipped Noto faces and egui's
+/// bundled faces (see [`font_definitions`]), these, in their order. The icon family keeps Phosphor alone. A fallback egui could not read as a font at its index
 /// (egui panics on one) and one whose name is taken are left out. Copies the bytes: [`font_definitions_from`] takes
 /// them.
 #[must_use]

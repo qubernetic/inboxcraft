@@ -70,8 +70,9 @@ colour pair reaches its WCAG contrast (142 pairs), no edge misses the line it be
 mailbox says the same on every page.
 
 ## The marks
-The InboxCraft mark and wordmark and the Qubernetic mark shown in the file and in `cover.png` are trademarks of
-Qubernetic. They are not under the MIT or Apache licence of the rest of this repository; see `NOTICE`.
+The InboxCraft mark and wordmark and the Qubernetic mark, wordmark and emblem shown in the file and in `cover.png` are
+by Qubernetic under CC BY-ND 4.0 (shared unchanged, with credit), not under the MIT or Apache licence of the rest of
+this repository, and remain trademarks of Qubernetic; see `NOTICE`.
 
 ## Not in the code yet
 What the app still owes this file, one line each. The finer differences, with their numbers, are in
@@ -98,9 +99,9 @@ What the app still owes this file, one line each. The finer differences, with th
   and the window's commands. The file does not draw event drafts yet either.
 
 **The marks**
-- The Home emblem, the wordmarks under it and the brand's compact mark in the command line are not drawn until the
-  project owner decides the marks' licence: Home shows the character field alone, the command line the tray
-  picture.
+- The file draws Home only in a window 900 high. In a lower one the code pulls the emblem and the names under it up
+  toward the top of their place, and drops them only where even that leaves no room. The line "↳ the field reacts
+  under the pointer here, and only here" is a note on the design, not drawn; the names' box keeps its room.
 
 **Sample content**
 - The sample mailbox and the pictures in `docs/images/` use their own people, subjects, times and counts, not the
@@ -137,6 +138,7 @@ What the app still owes this file, one line each. The finer differences, with th
 - Privacy keeps no sender name, so a row shows the address at 16 where the frames draw a name column; About is one
   column, and "After an act" and the week's two rows on Calendar have no frame.
 - The calendar's sync line has no "sync now" link at rest; the line itself takes the press.
+- Sending's "Your name", the choice of the word Home greets you by, has no frame.
 
 ## Limits
 - The Planned page shows direction: where a feature stands and how it looks. Numbers and steps in it are invented,

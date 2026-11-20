@@ -17,7 +17,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
 use crate::keep::{Keep, Triage};
-use crate::mailbox::{After, InboxView, Mailbox, Place};
+use crate::mailbox::{After, GreetBy, InboxView, Mailbox, Place};
 use crate::sample;
 use crate::settings::Section;
 use crate::theme::install_fonts;
@@ -289,8 +289,14 @@ fn real_app() -> InboxApp {
 #[test]
 fn the_kept_triage_choices_come_back_and_each_change_is_kept() {
     let keep = Held::default();
-    *keep.triage.lock().unwrap() =
-        Some(Triage { screener: ScreenerMode::Inside, view: InboxView::Grouped, keep_pins: false, hold: None, after: After::Next });
+    *keep.triage.lock().unwrap() = Some(Triage {
+        screener: ScreenerMode::Inside,
+        view: InboxView::Grouped,
+        keep_pins: false,
+        hold: None,
+        after: After::Next,
+        greet_by: GreetBy::First,
+    });
     let app = real_app().with_keep(Box::new(keep.clone()));
     assert_eq!(app.mailbox().screener_mode(), ScreenerMode::Inside);
     assert_eq!(app.mailbox().inbox_view(), InboxView::Grouped);
@@ -300,13 +306,27 @@ fn the_kept_triage_choices_come_back_and_each_change_is_kept() {
     harness.run();
     assert_eq!(
         *keep.stored.lock().unwrap(),
-        [Triage { screener: ScreenerMode::Inside, view: InboxView::List, keep_pins: false, hold: Some(5), after: After::Next }]
+        [Triage {
+            screener: ScreenerMode::Inside,
+            view: InboxView::List,
+            keep_pins: false,
+            hold: Some(5),
+            after: After::Next,
+            greet_by: GreetBy::First
+        }]
     );
     harness.state_mut().mailbox_mut().set_screener_mode(ScreenerMode::Off);
     harness.run();
     assert_eq!(
         keep.stored.lock().unwrap().last(),
-        Some(&Triage { screener: ScreenerMode::Off, view: InboxView::List, keep_pins: false, hold: Some(5), after: After::Next })
+        Some(&Triage {
+            screener: ScreenerMode::Off,
+            view: InboxView::List,
+            keep_pins: false,
+            hold: Some(5),
+            after: After::Next,
+            greet_by: GreetBy::First
+        })
     );
 }
 
@@ -320,15 +340,28 @@ fn without_kept_choices_the_window_keeps_its_own_from_the_first_change() {
     harness.run();
     assert_eq!(
         *keep.stored.lock().unwrap(),
-        [Triage { screener: ScreenerMode::Off, view: InboxView::Grouped, keep_pins: false, hold: Some(5), after: After::Next }]
+        [Triage {
+            screener: ScreenerMode::Off,
+            view: InboxView::Grouped,
+            keep_pins: false,
+            hold: Some(5),
+            after: After::Next,
+            greet_by: GreetBy::First
+        }]
     );
 }
 
 #[test]
 fn the_sample_takes_the_kept_view_but_never_keeps_its_screener_mode() {
     let keep = Held::default();
-    *keep.triage.lock().unwrap() =
-        Some(Triage { screener: ScreenerMode::Off, view: InboxView::List, keep_pins: false, hold: None, after: After::Next });
+    *keep.triage.lock().unwrap() = Some(Triage {
+        screener: ScreenerMode::Off,
+        view: InboxView::List,
+        keep_pins: false,
+        hold: None,
+        after: After::Next,
+        greet_by: GreetBy::First,
+    });
     let app = app().with_keep(Box::new(keep.clone()));
     assert_eq!(app.mailbox().screener_mode(), ScreenerMode::Before, "the sample keeps its own");
     assert_eq!(app.mailbox().inbox_view(), InboxView::List);
@@ -340,7 +373,14 @@ fn the_sample_takes_the_kept_view_but_never_keeps_its_screener_mode() {
     harness.run();
     assert_eq!(
         *keep.stored.lock().unwrap(),
-        [Triage { screener: ScreenerMode::Off, view: InboxView::Smart, keep_pins: false, hold: Some(5), after: After::Next }]
+        [Triage {
+            screener: ScreenerMode::Off,
+            view: InboxView::Smart,
+            keep_pins: false,
+            hold: Some(5),
+            after: After::Next,
+            greet_by: GreetBy::First
+        }]
     );
     let fresh = Held::default();
     let mut harness = harness_of(self::app().with_keep(Box::new(fresh.clone())));
@@ -348,7 +388,14 @@ fn the_sample_takes_the_kept_view_but_never_keeps_its_screener_mode() {
     harness.run();
     assert_eq!(
         *fresh.stored.lock().unwrap(),
-        [Triage { screener: ScreenerMode::Off, view: InboxView::Grouped, keep_pins: false, hold: Some(5), after: After::Next }]
+        [Triage {
+            screener: ScreenerMode::Off,
+            view: InboxView::Grouped,
+            keep_pins: false,
+            hold: Some(5),
+            after: After::Next,
+            greet_by: GreetBy::First
+        }]
     );
 }
 
@@ -361,6 +408,34 @@ fn a_triage_choice_that_cannot_be_kept_shows_why_once() {
     harness.run();
     assert_eq!(keep.stored.lock().unwrap().len(), 1, "tried once per change");
     assert!(harness.state().mailbox().error().is_some_and(|error| error.contains("the disk is full")));
+}
+
+#[test]
+fn the_kept_greeting_comes_back_and_a_change_of_it_is_kept() {
+    let keep = Held::default();
+    let kept =
+        Triage { screener: ScreenerMode::Off, view: InboxView::List, keep_pins: false, hold: Some(5), after: After::Next, greet_by: GreetBy::Last };
+    *keep.triage.lock().unwrap() = Some(kept);
+    let app = real_app().with_keep(Box::new(keep.clone()));
+    assert_eq!(app.mailbox().greet_by(), GreetBy::Last, "the kept greeting comes back at the start");
+    let mut harness = harness_of(app);
+    assert!(keep.stored.lock().unwrap().is_empty(), "what came back is not kept again");
+    harness.state_mut().mailbox_mut().set_greet_by(GreetBy::None);
+    harness.run();
+    assert_eq!(*keep.stored.lock().unwrap(), [Triage { greet_by: GreetBy::None, ..kept }]);
+}
+
+#[test]
+fn a_greeting_the_window_starts_with_is_not_kept_again() {
+    let keep = Held::default();
+    let mut app = real_app();
+    app.mailbox_mut().set_greet_by(GreetBy::Full);
+    let mut harness = harness_of(app.with_keep(Box::new(keep.clone())));
+    harness.run();
+    assert!(keep.stored.lock().unwrap().is_empty(), "the window's own greeting is what it starts from");
+    harness.state_mut().mailbox_mut().set_greet_by(GreetBy::Last);
+    harness.run();
+    assert_eq!(keep.stored.lock().unwrap().last().map(|triage| triage.greet_by), Some(GreetBy::Last));
 }
 
 #[test]

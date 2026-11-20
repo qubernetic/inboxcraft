@@ -7,9 +7,13 @@ InboxCraft is a clean-room mail and calendar program. It is not affiliated with,
 Mailspring or any other mail product. Product names mentioned in the documentation (to say what a feature
 corresponds to) are trademarks of their owners.
 
-The InboxCraft mark and wordmark and the Qubernetic mark are trademarks of Qubernetic, all rights reserved. They are
-not licensed under the MIT License or the Apache License; they appear in this repository, in `assets/brand/` and in
-the design files, to show the product's own identity.
+The InboxCraft mark and wordmark and the Qubernetic mark, wordmark and emblem, in `assets/brand/` and in the design
+files, are by Qubernetic and licensed under the Creative Commons Attribution-NoDerivatives 4.0 International licence
+(CC BY-ND 4.0, the legal code in `LICENSES/CC-BY-ND-4.0.txt` and at
+https://creativecommons.org/licenses/by-nd/4.0/legalcode), a Creative Commons licence that allows
+redistribution: they may be copied and shared unchanged, with credit to Qubernetic, and may not be changed. They are
+not licensed under the MIT License or the Apache License. The licence grants no trademark rights: the InboxCraft and
+Qubernetic names and marks remain trademarks of Qubernetic. `REUSE.toml` says which files this covers.
 
 Portions adapted from other projects
 ------------------------------------
@@ -47,7 +51,12 @@ Third-party material
   egui's five-glyph subset of the emoji icon font (Copyright 2014 John Slegers, MIT). egui's Noto Emoji and the whole
   emoji icon font are not compiled in (the `monochrome_emoji_fonts` feature is off). The licence texts ship in that
   crate's `fonts/` directory.
-- No font ships for the scripts these do not hold: the desktop app draws them with fonts it finds on the computer.
+- Noto Sans Hebrew (release NotoSansHebrew-v3.001), Noto Sans Arabic (NotoSansArabic-v2.013), Noto Sans Devanagari
+  (NotoSansDevanagari-v2.007) and Noto Sans Thai (NotoSansThai-v2.002), Copyright 2022 The Noto Project Authors
+  (https://github.com/notofonts), and Noto Emoji (version 3.006, from Google Fonts), Copyright 2013 Google LLC, all
+  SIL Open Font Licence 1.1: the Regular files under `assets/fonts/noto/`, compiled into the desktop app behind IBM
+  Plex. The licence texts are the `OFL.txt` files beside them.
+- For the scripts none of these hold, the desktop app draws with fonts it finds on the computer.
 - SQLite (https://sqlite.org, public domain) through the rusqlite and libsqlite3-sys crates (MIT), compiled from
   the bundled amalgamation into native builds only; the browser build keeps its in-memory store.
 - Rust dependencies keep their own licences; `cargo deny check licenses` lists them.

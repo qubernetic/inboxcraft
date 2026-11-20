@@ -3,11 +3,13 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use eframe::egui;
 use inboxcraft_ui_egui::theme::Fallback;
 
-use super::{Fallbacks, Found, LIMITS, Limits, MAX_COLLECTION, MAX_FILE, Search, search_folders};
+use super::{Fallbacks, Found, LIMITS, Limits, MAX_COLLECTION, MAX_FILE, MAX_PROBES, Search, search_folders, search_with};
 
 const PLEX_SANS: &[u8] = include_bytes!("../../../assets/fonts/plex-sans/IBMPlexSans-Regular.ttf");
 const PLEX_MONO: &[u8] = include_bytes!("../../../assets/fonts/plex-mono/IBMPlexMono-Regular.ttf");
@@ -241,7 +243,11 @@ fn the_fallbacks_go_in_after_the_app_s_first_pass_and_once() {
     };
     pass(&ctx, &mut fallbacks);
     settle(&ctx, &mut fallbacks);
-    assert_eq!(last(&ctx).as_deref(), Some("egui-icons"), "nothing found, nothing installed");
+    assert_eq!(
+        last(&ctx).as_deref(),
+        Some(inboxcraft_ui_egui::theme::SHIPPED_FALLBACKS[4]),
+        "nothing found, nothing installed: the shipped emoji face is last"
+    );
     assert!(!found.put(Vec::new()), "nothing found stays waiting");
     let dir = plex_folder();
     let plex = search_in(dir.path(), &[LATIN]);
@@ -278,4 +284,125 @@ fn the_walk_looks_at_a_limited_number_of_font_files() {
     let searched = search_folders(&[dir.path().to_owned()], None, &[LATIN], &Limits { files: 2, ..LIMITS });
     assert_eq!(searched.reads.len(), 2);
     assert_eq!(LIMITS.files, 20_000);
+}
+
+#[test]
+fn the_search_takes_every_probe_and_keeps_a_face_for_each() {
+    // Every probe the app's fonts lack is looked for; one face each fits the cap, and a face's probes fit its bits.
+    let probes = inboxcraft_ui_egui::theme::FALLBACK_PROBES;
+    assert!(MAX_PROBES >= probes.len() && MAX_PROBES <= 32, "{MAX_PROBES}");
+    assert!(LIMITS.faces >= inboxcraft_ui_egui::theme::missing_probes(&probes).len(), "{}", LIMITS.faces);
+    assert_eq!((LIMITS.faces, LIMITS.total), (24, 96 * 1024 * 1024));
+    // The last probe counts: Plex serves a Latin probe set after 31 others no font holds.
+    let dir = plex_folder();
+    let mut missing: Vec<(&str, char)> = (0..31).map(|at| ("none", char::from_u32(0xE000 + at).unwrap())).collect();
+    missing.push(LATIN);
+    assert_eq!(search_in(dir.path(), &missing).len(), 1, "the 32nd probe is looked for");
+}
+
+#[test]
+fn probes_past_the_cap_are_not_looked_for() {
+    // Forty probes: the search takes the first 32. Plex serves the first; the 40th, which Plex also holds, is not
+    // looked for, and no probe past the 32nd reaches a bit (a shift past a `u32` panics in a debug build).
+    let dir = plex_folder();
+    let mut missing: Vec<(&str, char)> = vec![LATIN];
+    missing.extend((0..38).map(|at| ("none", char::from_u32(0xE000 + at).unwrap())));
+    missing.push(("latin", 'B'));
+    assert_eq!(missing.len(), 40);
+    assert_eq!(search_in(dir.path(), &missing).len(), 1, "one face, for the first probe");
+    // Alone past the cap, the 40th finds no face.
+    missing[0] = ("none", '\u{F8FF}');
+    assert!(search_in(dir.path(), &missing).is_empty(), "a probe past the cap was looked for");
+}
+
+/// One frame of a window: the fallbacks first, as the app's `logic` does, the app's own fonts on its first pass.
+fn window_frame(ctx: &egui::Context, fallbacks: &mut Fallbacks) {
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        fallbacks.install(ui.ctx());
+        if ui.ctx().cumulative_pass_nr() == 0 {
+            inboxcraft_ui_egui::theme::install_fonts(ui.ctx());
+        }
+        ui.label("Mail");
+    })
+    .textures_delta
+    .clear();
+}
+
+/// The computer's faces installed in `ctx`.
+fn system_faces(ctx: &egui::Context) -> usize {
+    ctx.fonts(|fonts| fonts.definitions().font_data.keys().filter(|name| name.starts_with("system: ")).count())
+}
+
+#[test]
+fn the_first_frame_does_not_wait_on_the_search() {
+    let dir = plex_folder();
+    let plex = search_in(dir.path(), &[LATIN]);
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let (called, done, woken) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)), Arc::new(AtomicUsize::new(0)));
+    let (c, d, w) = (Arc::clone(&called), Arc::clone(&done), Arc::clone(&woken));
+    // The search is held until the test lets it go (or five seconds pass, so a mutation fails rather than hangs).
+    let find = move || {
+        c.store(true, Ordering::SeqCst);
+        let _ = held.recv_timeout(Duration::from_secs(5));
+        d.store(true, Ordering::SeqCst);
+        plex
+    };
+    let found = search_with(find, move || {
+        w.fetch_add(1, Ordering::SeqCst);
+    });
+    let ctx = egui::Context::default();
+    let mut fallbacks = Fallbacks::new(Arc::clone(&found));
+    window_frame(&ctx, &mut fallbacks);
+    found.join();
+    assert!(!called.load(Ordering::SeqCst), "the search started before the first frame was drawn");
+    // The frames after it draw while the search is held.
+    for _ in 0..3 {
+        window_frame(&ctx, &mut fallbacks);
+    }
+    // The worker may not have reached the finding yet: give it time.
+    for _ in 0..5000 {
+        if called.load(Ordering::SeqCst) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(called.load(Ordering::SeqCst), "the search starts once the first frame is drawn");
+    assert!(!done.load(Ordering::SeqCst), "a frame waited on the search");
+    assert_eq!(system_faces(&ctx), 0);
+    release.send(()).unwrap();
+    found.join();
+    assert_eq!(woken.load(Ordering::SeqCst), 1, "a found face wakes the window");
+    for _ in 0..4 {
+        window_frame(&ctx, &mut fallbacks);
+    }
+    assert_eq!(system_faces(&ctx), 1, "the found faces arrive after the first frame");
+}
+
+#[test]
+fn a_search_that_fails_or_panics_leaves_the_shipped_faces() {
+    for panics in [false, true] {
+        let woken = Arc::new(AtomicUsize::new(0));
+        let w = Arc::clone(&woken);
+        let find = move || {
+            assert!(!panics, "a font file broke the search");
+            Vec::new()
+        };
+        let found = search_with(find, move || {
+            w.fetch_add(1, Ordering::SeqCst);
+        });
+        let ctx = egui::Context::default();
+        let mut fallbacks = Fallbacks::new(Arc::clone(&found));
+        for _ in 0..2 {
+            window_frame(&ctx, &mut fallbacks);
+        }
+        found.join();
+        assert_eq!(found.failed(), panics, "a panic is caught and told, panics: {panics}");
+        for _ in 0..4 {
+            window_frame(&ctx, &mut fallbacks);
+        }
+        assert_eq!(system_faces(&ctx), 0, "panics: {panics}");
+        let last = ctx.fonts(|fonts| fonts.definitions().families.get(&egui::FontFamily::Proportional).and_then(|f| f.last()).cloned());
+        assert_eq!(last.as_deref(), Some(inboxcraft_ui_egui::theme::SHIPPED_FALLBACKS[4]), "the shipped faces stay, panics: {panics}");
+        assert_eq!(woken.load(Ordering::SeqCst), 0, "nothing to wake for, panics: {panics}");
+    }
 }

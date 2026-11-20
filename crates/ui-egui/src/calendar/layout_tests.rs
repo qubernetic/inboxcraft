@@ -37,6 +37,7 @@ fn event(start: Moment, end: Moment, first: Day, last: Day, all_day: bool) -> Ev
         repeat: None,
         zone: None,
         guests: Vec::new(),
+        alert: crate::calendar::Alert::Default,
         untitled: false,
     }
 }

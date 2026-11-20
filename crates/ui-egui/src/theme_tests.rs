@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    FALLBACK_PROBES, FLOAT_SHADOW, Face, Fallback, Font, Fonts, ICON, Look, Mode, ModePreference, Palette, TextScale, Theme, contrast,
-    font_definitions, font_definitions_with, install_fallbacks, install_fonts, missing_probes, mix, over, preference,
+    FALLBACK_PROBES, FLOAT_SHADOW, Face, Fallback, Font, Fonts, ICON, Look, Mode, ModePreference, Palette, SHIPPED_FALLBACKS, TextScale, Theme,
+    contrast, font_definitions, font_definitions_with, install_fallbacks, install_fonts, missing_probes, mix, over, preference,
 };
 use crate::motion::MOTION;
 
@@ -609,12 +609,122 @@ fn install_fallbacks_puts_them_into_the_context_and_asks_for_one_repaint() {
 }
 
 #[test]
-fn the_app_s_own_fonts_lack_every_probe() {
-    // Plex, Audiowide and egui's bundled faces (Ubuntu Light, Hack, the egui icons; egui's emoji faces are not
-    // compiled in) hold none of the probes, so the start searches for all eight.
-    assert_eq!(missing_probes(&FALLBACK_PROBES), FALLBACK_PROBES.to_vec());
+fn the_computer_is_searched_for_every_script_the_app_s_fonts_lack() {
+    // The shipped Noto faces hold Arabic, Hebrew, Thai, Devanagari and emoji; Plex, Audiowide and egui's bundled faces
+    // (Ubuntu Light, Hack, the egui icons; egui's emoji faces are not compiled in) hold none of the other probes, so
+    // the start searches for those, and only those.
+    let shipped = ["arabic", "hebrew", "thai", "devanagari", "emoji"];
+    let others: Vec<(&str, char)> = FALLBACK_PROBES.iter().copied().filter(|(script, _)| !shipped.contains(script)).collect();
+    assert_eq!(missing_probes(&FALLBACK_PROBES), others);
+    assert_eq!(others.len(), 21, "Chinese, Japanese, Korean and the other scripts mail carries");
     assert_eq!(missing_probes(&[("latin", 'A'), ("arrows", '⇧'), ("han", '日')]), vec![("han", '日')], "Plex and Hack hold these");
-    assert_eq!(FALLBACK_PROBES.map(|(_, sign)| sign), ['日', 'あ', '한', 'ع', 'א', 'ท', 'अ', '🙂']);
+    let mut scripts: Vec<&str> = FALLBACK_PROBES.iter().map(|(script, _)| *script).collect();
+    scripts.sort_unstable();
+    scripts.dedup();
+    assert_eq!(scripts.len(), FALLBACK_PROBES.len(), "one probe per script");
+    assert!(FALLBACK_PROBES.len() <= 32, "a found face's probes are bits of a u32");
+}
+
+/// One string of each script a shipped Noto face holds: `(script, text)`.
+const SHIPPED_SCRIPTS: [(&str, &str); 5] = [
+    ("hebrew", "שלום עולם, מה שלומך?"),
+    ("arabic", "مرحبا بالعالم، كيف حالك؟"),
+    ("devanagari", "नमस्ते दुनिया, क्षत्रिय"),
+    ("thai", "สวัสดีชาวโลก ภาษาไทย"),
+    ("emoji", "🙂 👍 🎉 ❤ ✌ 😀"),
+];
+
+#[test]
+fn the_shipped_scripts_lay_out_with_no_box_in_every_text_style() {
+    // The test harness panics on a sign no font holds, where the app draws a box: laying the strings out in it is the
+    // check that every glyph of every galley comes from a font.
+    let mut harness = egui_kittest::Harness::builder().with_context_setup(install_fonts).build_ui(|ui| {
+        for font in Fonts::of(TextScale::default()).all() {
+            for (_, text) in SHIPPED_SCRIPTS {
+                let galley = crate::component::galley(ui, text, font, Color32::BLACK);
+                assert!(galley.size().x > 0.0, "{font:?} {text}");
+                ui.label(egui::RichText::new(text).font(font.id()));
+            }
+        }
+    });
+    harness.run();
+    let ctx = fonts_ctx();
+    for font in Fonts::of(TextScale::default()).all() {
+        for (script, text) in SHIPPED_SCRIPTS {
+            let galley = laid_out(&ctx, text, font);
+            // A shaped run keeps a glyph per character, the ones a cluster took in with no picture of their own.
+            let glyphs: Vec<&egui::epaint::text::Glyph> = galley.rows.iter().flat_map(|row| row.glyphs.iter()).collect();
+            let drawn = glyphs.iter().filter(|glyph| !glyph.uv_rect.is_nothing()).count();
+            assert!(drawn >= text.split_whitespace().count() && galley.size().x > 0.0, "{script} in {font:?}: {drawn} drawn");
+            for glyph in &glyphs {
+                assert!(text.contains(glyph.chr), "{script} in {font:?}: {:?} is not the text's", glyph.chr);
+            }
+            for sign in text.chars().filter(|sign| !sign.is_whitespace()) {
+                assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&font.id(), sign)), "{script} in {font:?}: {sign:?} is a box");
+            }
+        }
+    }
+}
+
+#[test]
+fn plex_then_the_shipped_noto_faces_then_the_computer_s_in_every_text_family() {
+    let definitions = font_definitions_with(&[plex_as("system: Fake")]);
+    let icon = egui::FontFamily::Name(ICON.into());
+    let [hebrew, arabic, devanagari, thai, emoji] = SHIPPED_FALLBACKS;
+    for (family, fonts) in &definitions.families {
+        if *family == icon {
+            assert_eq!(fonts, &vec![ICON.to_owned()], "the icon family is Phosphor alone");
+            continue;
+        }
+        let first = fonts.first().map(String::as_str).unwrap_or_default();
+        assert!(Face::ALL.iter().any(|face| face.name() == first), "{family:?}: the app's face first, {fonts:?}");
+        // Hack keeps the signs it holds monospace: it stands before the script faces in the mono families.
+        let mono = Face::ALL.iter().any(|face| face.name() == first && face.is_mono());
+        let scripts = if mono { 2 } else { 1 };
+        if mono {
+            assert_eq!(fonts[1], "Hack", "{family:?}: Hack right behind Plex Mono, {fonts:?}");
+        }
+        assert_eq!(&fonts[scripts..scripts + 4], &[hebrew, arabic, devanagari, thai], "{family:?}: the script faces next, {fonts:?}");
+        let n = fonts.len();
+        assert_eq!(&fonts[n - 2..], &[emoji, "system: Fake"], "{family:?}: the emoji face, then the computer's: {fonts:?}");
+        assert!(fonts[scripts + 4..n - 2].iter().all(|font| egui::FontDefinitions::builtin_font_names().contains(&font.as_str())), "{fonts:?}");
+        for name in SHIPPED_FALLBACKS {
+            assert_eq!(fonts.iter().filter(|font| *font == name).count(), 1, "{family:?}: {name} once");
+        }
+    }
+    for name in SHIPPED_FALLBACKS {
+        assert!(definitions.font_data.contains_key(name), "{name}");
+    }
+}
+
+#[test]
+fn the_signs_hack_holds_stay_monospace_and_hebrew_still_draws() {
+    // Each mono face with Hack alone behind it, as the family stood before the script faces came: what it draws.
+    let mut definitions = font_definitions();
+    let alone = |face: Face| egui::FontFamily::Name(format!("{} and Hack", face.name()).into());
+    for face in Face::ALL.into_iter().filter(|face| face.is_mono()) {
+        definitions.families.insert(alone(face), vec![face.name().to_owned(), "Hack".to_owned()]);
+    }
+    let hebrew = egui::FontFamily::Name("Hebrew alone".into());
+    definitions.families.insert(hebrew.clone(), vec![SHIPPED_FALLBACKS[0].to_owned()]);
+    let ctx = egui::Context::default();
+    ctx.set_fonts(definitions);
+    ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+    let size = 14.0;
+    let width = |family: &egui::FontFamily, sign: char| ctx.fonts_mut(|fonts| fonts.glyph_width(&egui::FontId::new(size, family.clone()), sign));
+    for face in Face::ALL.into_iter().filter(|face| face.is_mono()) {
+        // egui draws U+2009 and U+202F as half the first face's space and U+FEFF as nothing; U+2010 and U+25CC are
+        // Hack's, which Noto Sans Hebrew and Arabic also hold at their own widths.
+        for sign in ['\u{2009}', '\u{2010}', '\u{202F}', '\u{25CC}', '\u{FEFF}'] {
+            let (drawn, by_hack) = (width(&face.family(), sign), width(&alone(face), sign));
+            assert_eq!(drawn, by_hack, "{face:?} U+{:04X}: drawn {drawn}, before the script faces {by_hack}", u32::from(sign));
+        }
+        // The script faces still serve what Hack lacks.
+        for sign in "שלום עולם".chars().filter(|sign| !sign.is_whitespace()) {
+            assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&egui::FontId::new(size, face.family()), sign)), "{face:?}: {sign:?} is a box");
+            assert_eq!(width(&face.family(), sign), width(&hebrew, sign), "{face:?}: {sign:?} from Noto Sans Hebrew");
+        }
+    }
 }
 
 /// `text` laid out in `font` the way the components do it, in a frame of `ctx`.
@@ -635,14 +745,16 @@ fn fonts_ctx() -> egui::Context {
 fn text_the_fonts_do_not_hold_falls_back() {
     let ctx = fonts_ctx();
     let f = Fonts::of(TextScale::default());
-    let text = "日本語 مرحبا 🙂";
+    // Right-to-left and shaped text is no longer one glyph per character in order now that faces hold it
+    // (`the_shipped_scripts_lay_out_with_no_box_in_every_text_style` lays it out).
+    let text = "日本語 🙂";
     for font in [f.body, f.mono] {
         let galley = laid_out(&ctx, text, font);
         let chars: String = galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
         assert_eq!(chars, text, "every character is laid out: {font:?}");
         assert!(galley.size().x > 0.0 && galley.size().y > 0.0);
-        // Signs Plex does not hold come from egui's faces behind it (Hack, Ubuntu Light). No bundled face holds
-        // Japanese, Arabic or emoji: they are boxes (`docs/gaps.md`).
+        // Signs Plex does not hold come from the faces behind it: emoji from the shipped Noto Emoji, the
+        // rest from egui's (Hack, Ubuntu Light). No shipped face holds Japanese: it is boxes (`docs/gaps.md`).
         for sign in ['●', '▶', '⇧', 'ǅ'] {
             assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&font.id(), sign)), "{font:?} {sign}");
         }

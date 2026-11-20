@@ -320,6 +320,8 @@ pub struct InboxApp {
     menu: Option<egui::Id>,
     /// The input time the draft was last kept by [`InboxApp::keep_draft`], in seconds.
     kept_at: Option<f64>,
+    /// How the end of the window and of the app went for the drafts kept.
+    keeps_end: KeepsEnd,
     /// Home as last built, built again only while it shows and something it shows changed.
     home: crate::home::Kept,
     /// Home's character field, kept across frames: its cells are built for its rect, not every frame.
@@ -327,15 +329,42 @@ pub struct InboxApp {
 }
 
 /// While the person types in the composer, its draft is kept at most once in this many seconds: keeping it runs
-/// `compose.update`, which writes the whole draft to the store on the window's thread. Leaving a field, closing,
-/// sending, a close of the window and the end of the app keep it at once, so only a crash can lose what was typed in
-/// the last second.
+/// `compose.update`, which checks the draft on the window's thread; the owner's store writes it to the disk behind,
+/// on its draft keeper's thread. Leaving a field, closing, sending, a close of the window and the end of the app keep
+/// it at once, so only a crash can lose what was typed in the last second.
 pub(crate) const KEEP_EVERY: f64 = 1.0;
 
-/// The end of the app keeps the draft being written, however little time passed since it was last kept.
+/// How long a close of the window, of the composer and the end of the app wait for the drafts kept to reach the disk.
+/// The store's own lock wait (2 s) is shorter, so a write blocked by another program fails, and is said, within it.
+pub(crate) const KEEP_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// How long after a close of the window taken back for a draft not kept the next close still counts as one "in a row"
+/// and goes through, in seconds.
+pub(crate) const CLOSE_IN_A_ROW: f64 = 10.0;
+
+/// How the end of the window and of the app went for the drafts kept.
+#[derive(Debug, Default)]
+struct KeepsEnd {
+    /// A close of the window was taken back because a draft was not on the disk: the store's count of keeps then and
+    /// the time. The next close goes through only in a row: no keep of any draft since, within [`CLOSE_IN_A_ROW`].
+    refused: Option<(u64, f64)>,
+    /// A close was taken back in this frame (for the window's owner, [`InboxApp::took_back_close`]).
+    took_back: bool,
+    /// The end of the app, or a close of the window that went through, already waited for the drafts.
+    ended: bool,
+}
+
+/// The end of the app keeps the draft being written, however little time passed since it was last kept, and waits
+/// (at most [`KEEP_WAIT`]) until it is on the disk, unless a close of the window or [`InboxApp::end_keeps`] already
+/// did.
 impl Drop for InboxApp {
     fn drop(&mut self) {
-        self.keep_draft_now();
+        if !self.keeps_end.ended
+            && let Err(error) = self.end_keeps()
+        {
+            // Nobody sees the window any more: the app's standard error.
+            eprintln!("inboxcraft: {error}");
+        }
         self.discard_waiting();
     }
 }
@@ -527,6 +556,7 @@ impl InboxApp {
             sending: None,
             later_picker: false,
             kept_at: None,
+            keeps_end: KeepsEnd::default(),
             menu: None,
             home: crate::home::Kept::default(),
             field: crate::field::Field::new(HOME_FIELD_SEED),
@@ -594,6 +624,7 @@ impl InboxApp {
                 self.mailbox.set_inbox_view(kept.view);
                 self.mailbox.restore_pins(kept.keep_pins);
                 self.mailbox.restore_after(kept.after);
+                self.mailbox.restore_greet_by(kept.greet_by);
                 if let Some(hold) = kept.hold {
                     self.mailbox.restore_hold(hold);
                 }
@@ -607,6 +638,7 @@ impl InboxApp {
                     keep_pins: self.mailbox.pins_outlast_done(),
                     hold: Some(self.mailbox.hold_seconds()),
                     after: self.mailbox.after(),
+                    greet_by: self.mailbox.greet_by(),
                 };
             }
         }
@@ -671,7 +703,7 @@ impl InboxApp {
     ) -> (index::Asked, Vec<command::Asked>) {
         // The command line first, the title bar in the own frame: its field and the window controls stand above the
         // index, and Tab walks the drawn order.
-        self.own_frame_parts(command, theme, regions.command);
+        self.own_frame_parts(command, theme, regions);
         let commanded = self.command_line(command, theme, regions, keys);
         if self.draws_frame() {
             frame::controls(command.ctx(), theme, regions.command);
@@ -815,7 +847,8 @@ impl InboxApp {
     }
 
     /// The triage and sending choices to keep: the inbox view, whether a pin outlasts done, the hold before a send
-    /// goes, and the screener's mode but on the sample, which keeps the one kept.
+    /// goes, what the window does after an act, which word of the name Home greets by, and the screener's mode but on
+    /// the sample, which keeps the one kept.
     fn triage(&self) -> Triage {
         let screener = if self.mailbox.is_sample() { self.kept_triage.screener } else { self.mailbox.screener_mode() };
         Triage {
@@ -824,6 +857,7 @@ impl InboxApp {
             keep_pins: self.mailbox.pins_outlast_done(),
             hold: Some(self.mailbox.hold_seconds()),
             after: self.mailbox.after(),
+            greet_by: self.mailbox.greet_by(),
         }
     }
 
@@ -2004,7 +2038,9 @@ impl InboxApp {
     /// not take leaves the composer open with everything in it.
     pub fn close_composer(&mut self) {
         let Some(composer) = &mut self.composer else { return };
-        match composer.close(&mut self.mailbox) {
+        // Closed only once its draft is on the disk: a write the store failed keeps the composer open, saying why.
+        let draft = composer.draft();
+        match composer.close(&mut self.mailbox).and_then(|()| self.mailbox.wait_for_keep(draft, KEEP_WAIT)) {
             Ok(()) => {
                 self.composer = None;
                 self.say(tr!("Draft saved"));
@@ -2407,22 +2443,94 @@ impl InboxApp {
     }
 
     /// Keeps the draft when something in it changed, silently: at once when no field of the composer has the keys or
-    /// the window is closing, otherwise at most once in [`KEEP_EVERY`], a frame asked for when the rest is due.
+    /// the window is closing, otherwise at most once in [`KEEP_EVERY`], a frame asked for when the rest is due. A close
+    /// of the window waits for the keeps to reach the disk; a keep that failed is said once, and the store tries it
+    /// again.
     fn keep_draft(&mut self, ctx: &egui::Context) {
-        if !self.composer.as_ref().is_some_and(Composer::changed) {
-            return;
-        }
-        let now = ctx.input(|input| input.time);
-        let typing = ctx.memory(|memory| memory.focused()).is_some_and(compose::is_field);
         let closing = ctx.input(|input| input.viewport().close_requested());
-        // A time that went back, or is no number, keeps it now.
-        let wait = self.kept_at.map_or(0.0, |at| KEEP_EVERY - (now - at));
-        if typing && !closing && wait > 0.0 && wait <= KEEP_EVERY {
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        if self.composer.as_ref().is_some_and(Composer::changed) {
+            let now = ctx.input(|input| input.time);
+            let typing = ctx.memory(|memory| memory.focused()).is_some_and(compose::is_field);
+            // A time that went back, or is no number, keeps it now.
+            let wait = self.kept_at.map_or(0.0, |at| KEEP_EVERY - (now - at));
+            if typing && !closing && wait > 0.0 && wait <= KEEP_EVERY {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+            } else {
+                self.kept_at = Some(now);
+                self.keep_draft_now();
+            }
+        }
+        // A keep's failure is said first: a close taken back says its own after it, with how many drafts are not kept.
+        self.unkept();
+        if closing {
+            self.close_with_keeps(ctx);
+        } else {
+            self.keeps_end.ended = false;
+            if self.keeps_end.refused.is_some() && self.mailbox.unkept_drafts().is_empty() {
+                self.keeps_end.refused = None;
+            }
+        }
+    }
+
+    /// A close of the window waits (at most [`KEEP_WAIT`]) for the drafts kept to reach the disk. When one does not,
+    /// the close is taken back: the window stays, the failure in the status line with how many more drafts are not
+    /// kept, the first such draft open in the composer when none is. A second close in a row (no keep of any draft
+    /// since, within [`CLOSE_IN_A_ROW`]) goes through, and the newest text of those drafts is lost: the disk holds
+    /// them as they were before. A later close, after new typing, is taken back again.
+    fn close_with_keeps(&mut self, ctx: &egui::Context) {
+        let Err(error) = self.mailbox.wait_for_keeps(KEEP_WAIT) else {
+            self.keeps_end.ended = true;
+            return;
+        };
+        let now = ctx.input(|input| input.time);
+        if self.keeps_end.refused.is_some_and(|(then, at)| then == self.mailbox.keeps_made() && (0.0..=CLOSE_IN_A_ROW).contains(&(now - at))) {
+            eprintln!("inboxcraft: closed with a draft not kept, the disk holds it as it was before: {error}");
+            self.keeps_end.ended = true;
             return;
         }
-        self.kept_at = Some(now);
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        self.keeps_end.took_back = true;
+        let unkept = self.mailbox.unkept_drafts();
+        if self.composer.is_none()
+            && let Some(draft) = unkept.first().copied()
+        {
+            self.reopen(draft);
+        }
+        // Counted after the draft opened: only a keep that comes after the take-back makes the next close another one.
+        self.keeps_end.refused = Some((self.mailbox.keeps_made(), now));
+        let error = match unkept.len().saturating_sub(1) {
+            0 => error,
+            1 => UiError::Refused(tr!("{error}; 1 more draft is not on the disk either", error = error)),
+            more => UiError::Refused(tr!("{error}; {count} more drafts are not on the disk either", error = error, count = more)),
+        };
+        // The failures the wait brought are said by this line: not again, over it, in the next frame.
+        let _ = self.mailbox.failed_keeps();
+        self.mailbox.fail(error);
+    }
+
+    /// Whether a close of the window was taken back in the last frame, because a draft was not on the disk; once.
+    pub fn took_back_close(&mut self) -> bool {
+        std::mem::take(&mut self.keeps_end.took_back)
+    }
+
+    /// Keeps the draft being written and waits (at most [`KEEP_WAIT`]) for every draft kept to reach the disk: the
+    /// end of the app without a window (a quit from the tray). The end of the app itself does not wait again.
+    ///
+    /// # Errors
+    ///
+    /// What was not kept, in words for the person: the disk holds that draft as it was before.
+    pub fn end_keeps(&mut self) -> Result<(), String> {
+        self.keeps_end.ended = true;
         self.keep_draft_now();
+        self.mailbox.wait_for_keeps(KEEP_WAIT).map_err(|error| error.to_string())
+    }
+
+    /// Says in the status line each draft the store wrote behind whose write started failing, once: the store keeps
+    /// its newest text and tries again, and a close waits for it.
+    fn unkept(&mut self) {
+        for (_, error) in self.mailbox.failed_keeps() {
+            self.mailbox.fail(error);
+        }
     }
 
     /// Keeps the draft at once if something in it changed since it was last kept: the end of a window or of the app.
@@ -2878,8 +2986,9 @@ impl InboxApp {
 
     /// The command line's mark, and the app's own frame before the panes when it draws one: the command line `line` as
     /// the title bar (its handle, before the field and the controls take their presses) and the resizing edges.
-    fn own_frame_parts(&self, ui: &Ui, theme: &Theme, line: Rect) {
-        frame::mark(ui, theme, line);
+    fn own_frame_parts(&self, ui: &Ui, theme: &Theme, regions: shell::Regions) {
+        let line = regions.command;
+        frame::mark(ui, theme, line, shell::narrow(ui.ctx()));
         if !self.draws_frame() {
             return;
         }
@@ -3112,14 +3221,14 @@ impl InboxApp {
     }
 
     /// Home in the body: the model kept ([`crate::home::Kept`], built again only when what it shows changed), the
-    /// character field kept, at the motion level the settings say, no emblem; a frame is asked for when the clock next
-    /// changes what it shows. What was pressed on it.
+    /// character field kept, at the motion level the settings say, the Qubernetic emblem and the names on it where they
+    /// fit; a frame is asked for when the clock next changes what it shows. What was pressed on it.
     fn home_place(&mut self, ui: &mut Ui, theme: &Theme) -> Option<home::Asked> {
         let rect = ui.available_rect_before_wrap();
         let level = motion::level(ui.ctx());
         let hidden = self.discarding();
         let shown = self.home.current(&mut self.mailbox, hidden);
-        let stage = home::Stage { field: &mut self.field, emblem: None, level };
+        let stage = home::Stage { field: &mut self.field, emblem: Some(crate::brand::emblem()), level };
         let drawn = home::show(ui, theme, &self.keymap, shown, rect, stage);
         if let Some(due) = self.home.due_in(&self.mailbox) {
             ui.ctx().request_repaint_after(due);
@@ -3564,6 +3673,7 @@ impl InboxApp {
             settings::Asked::Grouped(account, grouped) => self.mailbox.set_grouped(account, grouped),
             settings::Asked::KeepPins(keep) => self.mailbox.set_pins_outlast_done(keep),
             settings::Asked::After(after) => self.mailbox.set_after(after),
+            settings::Asked::GreetBy(by) => self.mailbox.set_greet_by(by),
             settings::Asked::Hold(seconds) => self.mailbox.set_hold(seconds),
             settings::Asked::Level(account, level) => self.mailbox.set_notify_level(account, level),
             settings::Asked::Returns(on) => self.mailbox.set_notify_returns(on),

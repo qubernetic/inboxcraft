@@ -9,14 +9,13 @@
 //! frame ([`mark`]).
 
 use egui::{
-    Area, ColorImage, Context, CornerRadius, CursorIcon, Id, LayerId, Order, Pos2, Rect, ResizeDirection, Response, Sense, Stroke, StrokeKind,
-    TextureHandle, TextureOptions, Ui, ViewportCommand, pos2, vec2,
+    Area, Context, CornerRadius, CursorIcon, Id, LayerId, Order, Pos2, Rect, ResizeDirection, Response, Sense, Stroke, StrokeKind, Ui,
+    ViewportCommand, pos2,
 };
 use inboxcraft_engine::appearance::WindowFrame;
 
 use crate::component::window_controls::{self, Control, Window};
-use crate::icons::{self, TrayInk};
-use crate::theme::{Mode, Theme};
+use crate::theme::Theme;
 
 /// How far from the window's edge a press resizes it, in points.
 const EDGE: f32 = 5.0;
@@ -111,36 +110,16 @@ pub(super) fn controls(ctx: &Context, theme: &Theme, line: Rect) {
     ctx.send_viewport_cmd(command);
 }
 
-/// The app's mark, 22 points a side, 16 in from the command line's left and centred in its height: the brand's
-/// compact mark with its flap in cyan, drawn light on the dark look and dark on the light one. It takes no press (in
-/// the own frame the title bar's handle under it does).
-pub(super) fn mark(ui: &Ui, theme: &Theme, line: Rect) {
-    let rect = Rect::from_min_size(pos2(line.left() + MARK_IN, (line.center().y - MARK / 2.0).round()), vec2(MARK, MARK));
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-    let Some(texture) = mark_texture(ui.ctx(), theme.mode) else { return };
-    let uv = Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0));
-    ui.painter().image(texture.id(), rect, uv, crate::theme::NO_TINT);
+/// The app's mark in a box of 22 points a side, centred in the command line's height: 16 in from its left, or centred
+/// in the narrow index's column (`narrow`, the frames `size-1100/*` and `size-800/*`). The brand's compact mark, its flap
+/// in cyan, drawn light on the dark look and dark on the light one from the brand's vector file, pixel for pixel at the
+/// window's scale (the frames' `InboxCraft mark-compact · 22`). It takes no press (in the own frame the title bar's
+/// handle under it does).
+pub(super) fn mark(ui: &Ui, theme: &Theme, line: Rect, narrow: bool) {
+    let left = if narrow { (super::shell::INDEX_NARROW + 1.0 - MARK) / 2.0 } else { MARK_IN };
+    let at = pos2(line.left() + left, line.center().y - MARK / 2.0);
+    crate::brand::paint(ui, crate::brand::Mark::Compact, theme.mode, at);
 }
-
-/// The mark's picture for `mode`, decoded once and kept in the context; none when the built-in file does not decode.
-fn mark_texture(ctx: &Context, mode: Mode) -> Option<TextureHandle> {
-    let id = Id::unique("window-mark").with(mode == Mode::Dark);
-    if let Some(kept) = ctx.data(|data| data.get_temp::<TextureHandle>(id)) {
-        return Some(kept);
-    }
-    let ink = if mode == Mode::Dark { TrayInk::Dark } else { TrayInk::Light };
-    let icon = icons::tray_icon(MARK_PIXELS, ink, true).ok()?;
-    let size = [usize::try_from(icon.width).ok()?, usize::try_from(icon.height).ok()?];
-    let image = ColorImage::from_rgba_unmultiplied(size, &icon.rgba);
-    let texture = ctx.load_texture("window-mark", image, TextureOptions::LINEAR);
-    ctx.data_mut(|data| data.insert_temp(id, texture.clone()));
-    Some(texture)
-}
-
-/// The side, in pixels, of the brand's file the mark is drawn from.
-const MARK_PIXELS: u32 = 24;
 
 /// The edges of the window resize it, its corners in both directions; the pointer shows which way. The window's rect
 /// comes from the context: on Wayland the desktop keeps the window's place to itself, and egui's `inner_rect` stays

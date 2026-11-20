@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The computer's own fonts for the scripts IBM Plex and egui's bundled faces lack (Chinese, Japanese, Korean,
-//! Arabic, Hebrew, Thai, Devanagari, emoji): found at start on a worker thread and placed behind Plex
-//! ([`inboxcraft_ui_egui::theme::install_fallbacks`]). No font ships for them; where the computer has none, the boxes
-//! stay.
+//! The computer's own fonts for the scripts neither IBM Plex, the shipped Noto faces (Hebrew, Arabic, Devanagari,
+//! Thai, emoji) nor egui's bundled faces hold (Chinese, Japanese, Korean, the other Indic scripts, Sinhala, Lao,
+//! Tibetan, Myanmar, Khmer, Ethiopic, Syriac, Thaana, Cherokee, Bopomofo: [`theme::FALLBACK_PROBES`]): found at start
+//! on a worker thread and placed behind them ([`inboxcraft_ui_egui::theme::install_fallbacks`]). Where the computer
+//! has none, the boxes stay.
 //!
 //! The search walks the system's font folders: on Linux those fontconfig's files name, `<remap-dir>` included, which
 //! is how a Flatpak names the host's folders ([`crate::fontconfig`], read by the app itself and bounded). It walks
@@ -12,9 +13,10 @@
 //! claiming billions of faces; `fontdb` only reads a face's names and style. Each font file is read at most once:
 //! while the walk goes on, it keeps for each probe still open the best face so far with its file's bytes, and drops
 //! a file's bytes as soon as it is no probe's best. Every file is hostile: one over [`MAX_FILE`] is skipped before it
-//! is read, a collection of more than [`MAX_COLLECTION`] faces is skipped, at most eight faces and 96 MiB are kept,
+//! is read, a collection of more than [`MAX_COLLECTION`] faces is skipped, at most 24 faces and 96 MiB are kept,
 //! and a file that cannot be read or parsed is passed over. A face counts for a sign only when it has an outline for
-//! it: egui draws outlines, not the colour bitmaps or layers of emoji faces.
+//! it: egui draws outlines, not the colour bitmaps or layers of emoji faces. The search starts once the first window
+//! has drawn its first frame, which is drawn with the app's own fonts ([`search`]).
 //! The headless pictures, the tests and the CLI never search.
 
 use std::collections::HashSet;
@@ -45,7 +47,7 @@ pub(crate) struct Limits {
 }
 
 /// The limits of the search at start.
-pub(crate) const LIMITS: Limits = Limits { file: MAX_FILE, total: 96 * 1024 * 1024, faces: 8, files: 20_000 };
+pub(crate) const LIMITS: Limits = Limits { file: MAX_FILE, total: 96 * 1024 * 1024, faces: 24, files: 20_000 };
 
 /// The most faces a collection file may claim: a font collection holds a few dozen at most.
 pub(crate) const MAX_COLLECTION: u32 = 256;
@@ -60,8 +62,9 @@ const MAX_ENTRIES: usize = 100_000;
 /// have (a defence beside the nesting count, which is what keeps a deep file away from the parser).
 const WORKER_STACK: usize = 16 * 1024 * 1024;
 
-/// The most probes one search takes: one face kept for each at most.
-const MAX_PROBES: usize = 8;
+/// The most probes one search takes: one face kept for each at most. A face's probes are bits of a `u32`.
+pub(crate) const MAX_PROBES: usize = 32;
+const _: () = assert!(MAX_PROBES <= u32::BITS as usize, "a face's probes are the bits of a u32");
 
 /// The longest family name kept in a fallback's name, in characters.
 const MAX_NAME: usize = 64;
@@ -414,9 +417,17 @@ fn unique_name(base: &str, kept: &[Fallback]) -> String {
     name
 }
 
-/// The fallbacks of the search, shared by the worker and the windows.
+/// What the search runs on its worker: the finding, then the wake when it found any.
+type Pending = (Box<dyn FnOnce() -> Vec<Fallback> + Send>, Box<dyn Fn() + Send>);
+
+/// The fallbacks of the search, shared by the worker and the windows, and the search itself until a window's first
+/// frame starts it.
 #[derive(Default)]
-pub struct Found(Mutex<Stage>);
+pub struct Found {
+    stage: Mutex<Stage>,
+    pending: Mutex<Option<Pending>>,
+    worker: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
 
 /// Where the fallbacks are.
 #[derive(Default)]
@@ -424,6 +435,8 @@ enum Stage {
     /// Not found (yet).
     #[default]
     Waiting,
+    /// The search failed: the app's own fonts stay.
+    Failed,
     /// Found, not installed in a window yet.
     Found(Vec<Fallback>),
     /// Installed: the definitions, whose font bytes are shared, for a later window.
@@ -436,7 +449,7 @@ impl Found {
         if fallbacks.is_empty() {
             return false;
         }
-        match self.0.lock() {
+        match self.stage.lock() {
             Ok(mut stage) if matches!(*stage, Stage::Waiting) => {
                 *stage = Stage::Found(fallbacks);
                 true
@@ -444,23 +457,80 @@ impl Found {
             _ => false,
         }
     }
+
+    /// Starts the search on its worker thread, once: what a window does when its first frame is drawn.
+    fn start(self: &Arc<Self>) {
+        let Some((find, wake)) = self.pending.lock().ok().and_then(|mut pending| pending.take()) else { return };
+        let into = Arc::clone(self);
+        let started = std::thread::Builder::new().name("inboxcraft-fonts".to_owned()).stack_size(WORKER_STACK).spawn(move || into.run(find, &*wake));
+        match started {
+            Ok(worker) => {
+                if let Ok(mut slot) = self.worker.lock() {
+                    *slot = Some(worker);
+                }
+            }
+            Err(error) => {
+                eprintln!("inboxcraft: the computer's fonts could not be searched: {error}");
+                self.fail();
+            }
+        }
+    }
+
+    /// The search, on the worker: a panic in it is caught and told, and the app's own fonts stay.
+    fn run(&self, find: Box<dyn FnOnce() -> Vec<Fallback> + Send>, wake: &dyn Fn()) {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(find)) {
+            Ok(fallbacks) => {
+                if self.put(fallbacks) {
+                    wake();
+                }
+            }
+            Err(_) => {
+                eprintln!("inboxcraft: the search of the computer's fonts failed; the app's own fonts stay");
+                self.fail();
+            }
+        }
+    }
+
+    fn fail(&self) {
+        if let Ok(mut stage) = self.stage.lock()
+            && matches!(*stage, Stage::Waiting)
+        {
+            *stage = Stage::Failed;
+        }
+    }
+
+    /// Waits for the worker, if it was started.
+    #[cfg(test)]
+    pub(crate) fn join(&self) {
+        let worker = self.worker.lock().ok().and_then(|mut worker| worker.take());
+        if let Some(worker) = worker {
+            let _ = worker.join();
+        }
+    }
+
+    /// Whether the search failed.
+    #[cfg(test)]
+    pub(crate) fn failed(&self) -> bool {
+        self.stage.lock().is_ok_and(|stage| matches!(*stage, Stage::Failed))
+    }
 }
 
-/// Starts the search on a worker thread: the probes the app's fonts lack ([`theme::missing_probes`]), then
-/// [`system_fallbacks`]. When it found any it puts them into the [`Found`] it returns and calls `wake`; when it found
-/// none, or failed, nothing happens.
+/// The search for the computer's fonts: the probes the app's fonts lack ([`theme::missing_probes`]), then
+/// [`system_fallbacks`]. It does not run yet: the first window starts it on a worker thread once its first frame is
+/// drawn, so that frame never waits on it or shares a core with it. When it finds any it puts them into the
+/// [`Found`] it returns and calls `wake`; when it finds none, nothing happens; when it fails or panics, it says so on
+/// stderr and the app's own fonts stay.
 pub fn search(wake: impl Fn() + Send + 'static) -> Arc<Found> {
-    let found = Arc::new(Found::default());
-    let into = Arc::clone(&found);
-    let started = std::thread::Builder::new().name("inboxcraft-fonts".to_owned()).stack_size(WORKER_STACK).spawn(move || {
-        if into.put(system_fallbacks(&theme::missing_probes(&theme::FALLBACK_PROBES))) {
-            wake();
-        }
-    });
-    if let Err(error) = started {
-        eprintln!("inboxcraft: the computer's fonts could not be searched: {error}");
+    search_with(|| system_fallbacks(&theme::missing_probes(&theme::FALLBACK_PROBES)), wake)
+}
+
+/// [`search`] with `find` for the finding: what the tests hold or break.
+pub(crate) fn search_with(find: impl FnOnce() -> Vec<Fallback> + Send + 'static, wake: impl Fn() + Send + 'static) -> Arc<Found> {
+    let found = Found::default();
+    if let Ok(mut pending) = found.pending.lock() {
+        *pending = Some((Box::new(find), Box::new(wake)));
     }
-    found
+    Arc::new(found)
 }
 
 /// Installs the found fallbacks in one window's context, once.
@@ -476,15 +546,23 @@ impl Fallbacks {
         Self { found, installed: false }
     }
 
-    /// Installs the fallbacks in `ctx` once they are found, not on its first pass: the app installs its own fonts
-    /// then, which would replace them. Found by then, they ask for the pass after it. The first window takes their
-    /// bytes without a copy; a later one shares them.
+    /// Starts the search once the first frame is drawn (and asks for the frame after it), and installs the fallbacks
+    /// in `ctx` once they are found, not on its first pass: the app installs its own fonts then, which would replace
+    /// them. Found by then, they ask for the pass after it. The first window takes their bytes without a copy; a later
+    /// one shares them.
     pub fn install(&mut self, ctx: &egui::Context) {
         if self.installed {
             return;
         }
-        let Ok(mut stage) = self.found.0.lock() else { return };
-        if matches!(*stage, Stage::Waiting) {
+        if ctx.cumulative_frame_nr() == 0 {
+            if self.found.pending.lock().is_ok_and(|pending| pending.is_some()) {
+                ctx.request_repaint();
+            }
+        } else {
+            self.found.start();
+        }
+        let Ok(mut stage) = self.found.stage.lock() else { return };
+        if matches!(*stage, Stage::Waiting | Stage::Failed) {
             return;
         }
         if ctx.cumulative_pass_nr() == 0 {
@@ -493,6 +571,7 @@ impl Fallbacks {
         }
         match std::mem::take(&mut *stage) {
             Stage::Waiting => {}
+            Stage::Failed => *stage = Stage::Failed,
             Stage::Found(fallbacks) => *stage = Stage::Installed(theme::install_fallbacks(ctx, fallbacks)),
             Stage::Installed(definitions) => {
                 ctx.set_fonts(definitions.clone());

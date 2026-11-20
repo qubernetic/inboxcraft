@@ -261,3 +261,31 @@ fn the_sample_states_are_the_five_frames() {
     assert!(sample("nothing-to-do").unwrap().is_quiet());
     assert_eq!(sample("everything-failing").unwrap().counts[3].what, Counted::NotSent);
 }
+
+/// The headline greets by the word of the sending name the owner chose (`greeting.set`): the first by default, the
+/// last, the whole name, or none, where it greets without a comma; Home kept between frames is built again when the
+/// choice changes.
+#[test]
+fn the_headline_greets_by_the_word_the_owner_chose() {
+    use crate::mailbox::GreetBy;
+    let mut mailbox = mailbox();
+    assert_eq!(mailbox.accounts().first().map(|account| account.name.as_str()), Some("Mira Holloway"));
+    let home = build(&mut mailbox);
+    assert_eq!(home.headline().1, Some("Mira"), "the first word by default");
+    assert!(home.headline().0.ends_with(','), "{}", home.headline().0);
+    let mut kept = super::Kept::default();
+    assert_eq!(kept.current(&mut mailbox, None).name.as_deref(), Some("Mira"));
+    for (by, name) in
+        [(GreetBy::Last, Some("Holloway")), (GreetBy::Full, Some("Mira Holloway")), (GreetBy::None, None), (GreetBy::First, Some("Mira"))]
+    {
+        mailbox.set_greet_by(by);
+        assert_eq!(mailbox.greet_by(), by);
+        assert_eq!(build(&mut mailbox).headline().1, name, "{by:?}");
+        let home = kept.current(&mut mailbox, None);
+        assert_eq!(home.name.as_deref(), name, "{by:?}: the kept Home is built again");
+        assert_eq!(home.headline().0.ends_with('.'), name.is_none(), "{by:?}: {}", home.headline().0);
+    }
+    // A choice handed back from an earlier run runs no command and changes no revision: the kept Home still follows.
+    mailbox.restore_greet_by(GreetBy::Last);
+    assert_eq!(kept.current(&mut mailbox, None).name.as_deref(), Some("Holloway"), "the kept Home follows a restored choice");
+}

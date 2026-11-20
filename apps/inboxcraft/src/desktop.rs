@@ -197,6 +197,11 @@ impl Desktop {
     pub fn frame(&mut self, ui: &mut egui::Ui) {
         let before = settings_now(&self.app);
         self.app.ui(ui);
+        // A close taken back because a draft is not on the disk: the window stays, and InboxCraft with it.
+        if self.app.took_back_close() {
+            self.window = true;
+            self.quitting = false;
+        }
         let acted = self.app.holds_agent_ask();
         self.app.act_on_agent_ask(settings_now(&self.app) != before);
         if acted {
@@ -209,13 +214,28 @@ impl Desktop {
     pub fn wait(&mut self, patience: Duration) {
         match self.heard.recv_timeout(patience) {
             Ok(Request::Show) => self.window = true,
-            Ok(Request::Quit) | Err(RecvTimeoutError::Disconnected) => self.quitting = true,
+            Ok(Request::Quit) | Err(RecvTimeoutError::Disconnected) => {
+                self.quitting = true;
+                self.end_keeps();
+            }
             Err(RecvTimeoutError::Timeout) => {}
         }
         if self.answer_clicks() {
             self.window = true;
         }
         self.keep_in_step();
+    }
+
+    /// The end of InboxCraft without a window: waits for the drafts kept to reach the disk, and says one that did not
+    /// in a notification (and on standard error), there being no window to say it in.
+    fn end_keeps(&mut self) {
+        let Err(error) = self.app.end_keeps() else { return };
+        eprintln!("inboxcraft: {error}");
+        if let Some(deliver) = self.deliver.as_mut()
+            && let Err(error) = deliver.deliver(&crate::notify::unkept(&error))
+        {
+            eprintln!("inboxcraft: {error}");
+        }
     }
 
     /// Answers the clicks on notifications; whether one asks for the window.

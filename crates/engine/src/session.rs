@@ -52,6 +52,8 @@ pub struct Outcome {
     pins_outlast_done: Option<bool>,
     /// What follows an act on the open message from now on.
     after: Option<crate::after::After>,
+    /// Which word of the sending name Home greets by from now on.
+    greet_by: Option<crate::greet::GreetBy>,
     /// How long every send is held from now on.
     hold: Option<Hold>,
     /// How weeks are counted from now on.
@@ -93,6 +95,7 @@ impl Outcome {
             notify: None,
             pins_outlast_done: None,
             after: None,
+            greet_by: None,
             hold: None,
             week: None,
             withdrawn: Vec::new(),
@@ -186,6 +189,12 @@ impl Outcome {
     /// The outcome changing what follows an act on the open message from now on.
     pub(crate) fn with_after(mut self, after: crate::after::After) -> Self {
         self.after = Some(after);
+        self
+    }
+
+    /// The outcome changing which word of the sending name Home greets by from now on.
+    pub(crate) fn with_greet_by(mut self, by: crate::greet::GreetBy) -> Self {
+        self.greet_by = Some(by);
         self
     }
 
@@ -311,6 +320,9 @@ pub(crate) struct State {
     /// What follows an act on the open message (`after.set`); the front end keeps it on disk and hands it back at the
     /// start.
     pub(crate) after: crate::after::After,
+    /// Which word of the sending name Home greets by (`greeting.set`); the front end keeps it on disk and hands it
+    /// back at the start.
+    pub(crate) greet_by: crate::greet::GreetBy,
     /// How long every send is held (`send.set`); the front end keeps it on disk and hands it back at the start.
     pub(crate) hold: Hold,
     /// How weeks are counted (`week.set`); the front end keeps it on disk and hands it back at the start.
@@ -623,6 +635,17 @@ impl Session {
         self.state.after = after;
     }
 
+    /// Which word of the sending name Home greets by, as `greeting.set` left it.
+    #[must_use]
+    pub fn greet_by(&self) -> crate::greet::GreetBy {
+        self.state.greet_by
+    }
+
+    /// Takes which word Home greets by, kept from an earlier run.
+    pub fn set_greet_by(&mut self, by: crate::greet::GreetBy) {
+        self.state.greet_by = by;
+    }
+
     /// Takes the pin setting kept from an earlier run.
     pub fn set_pins_outlast_done(&mut self, keep: bool) {
         self.state.pins_outlast_done = keep;
@@ -709,6 +732,7 @@ impl Session {
             notify,
             pins_outlast_done,
             after,
+            greet_by,
             hold,
             week,
             withdrawn,
@@ -757,6 +781,9 @@ impl Session {
         }
         if let Some(after) = after {
             self.state.after = after;
+        }
+        if let Some(by) = greet_by {
+            self.state.greet_by = by;
         }
         if let Some(hold) = hold {
             self.state.hold = hold;

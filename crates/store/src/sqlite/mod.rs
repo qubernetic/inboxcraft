@@ -3,6 +3,7 @@
 
 //! The native backend: SQLite with a full-text index, the message sources as files next to it.
 
+mod keeper;
 mod local;
 mod private;
 mod schema;
@@ -12,12 +13,18 @@ mod tests;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
+use crate::KeepWake;
 use inboxcraft_model::{
     Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId,
     FolderState, Job, Message, MessageId, MessageState, Outgoing, Scheduled, Sender,
 };
 use inboxcraft_time::Timestamp;
+use keeper::Keeper;
+#[cfg(any(test, feature = "test-hooks"))]
+pub use keeper::{KeepHold, KeeperHooks};
 use rusqlite::config::DbConfig;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
 pub use schema::SCHEMA_VERSION;
@@ -43,6 +50,26 @@ pub struct Sqlite {
     conn: Connection,
     sources: PathBuf,
     config: StoreConfig,
+    /// The database file, for the draft keeper's own connection.
+    database: PathBuf,
+    /// The draft keeper, once [`Sqlite::keep_drafts_behind`] started it.
+    keeper: Option<Keeper>,
+}
+
+/// How long a batch that is not only drafts kept waits for the drafts the keeper still writes: they come first.
+const SETTLE_WAIT: Duration = Duration::from_secs(3);
+
+/// A connection to `database` as the store keeps it: no URI names, defensive, the schema not trusted (nothing the file
+/// holds may call a function with side effects or write the schema: the file is outside data), WAL,
+/// `synchronous=FULL`, foreign keys on, removed pages zeroed.
+fn connect(database: &Path) -> Result<Connection, StoreError> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let conn = Connection::open_with_flags(database, flags)?;
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
+    conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))?;
+    conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;")?;
+    Ok(conn)
 }
 
 /// A database failure by its kind, told apart by the database's result code, never by its words; the words are kept,
@@ -97,19 +124,133 @@ impl Sqlite {
         let (wal, shm) = (dir.join(format!("{DATABASE_FILE}-wal")), dir.join(format!("{DATABASE_FILE}-shm")));
         private::tighten(&[dir, &sources], &[&database, &wal, &shm])?;
         drop(private::create_file(&database, false)?);
-        // No URI names, and nothing the file holds (triggers, views, schema) may call a function with side effects
-        // or write the schema: the file is outside data.
-        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        let mut conn = Connection::open_with_flags(database, flags)?;
-        conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
-        conn.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
-        conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))?;
-        conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;")?;
+        let mut conn = connect(&database)?;
         schema::migrate(&mut conn)?;
         scrub(&conn)?;
         let kept = conn.prepare("SELECT id FROM body")?.query_map([], |row| row.get(0))?.collect::<Result<BTreeSet<i64>, _>>()?;
         sources::sweep(&sources, &kept)?;
-        Ok(Self { conn, sources, config })
+        Ok(Self { conn, sources, config, database, keeper: None })
+    }
+
+    /// From now on a batch that only changes drafts the store holds, each still from its account, is written behind
+    /// by the draft keeper, a thread with a connection of its own, so that [`Storage::apply`] returns at once: in
+    /// order, the newest of each draft, one write at a time, each with `synchronous=FULL`. The store's reads see a
+    /// draft kept from the moment it was kept. A write that fails keeps the draft's newest text in memory, is told
+    /// once by [`Storage::failed_keep`], listed by [`Storage::unkept`] and tried again 1 s, 2 s, 4 s … at most 30 s
+    /// apart until it lands or the draft is removed; meanwhile every other batch that names the draft is refused
+    /// ([`StoreError::DraftNotKept`]), except one that removes it. Any other batch first waits (at most 3 s) for the
+    /// keeper, so it comes after every keep. The end of the store waits at most 3 s for what is still to be written,
+    /// unless [`Storage::settle`] already waited. A batch that makes a draft, moves it to another account or does
+    /// anything else is written at once, as before. If the keeper's thread ever ends, the store writes what it held
+    /// and every later draft on the caller's thread, and says so once on standard error.
+    ///
+    /// # Errors
+    ///
+    /// The keeper's connection or thread could not be made; the store then writes everything at once.
+    pub fn keep_drafts_behind(&mut self) -> Result<(), StoreError> {
+        if self.keeper.is_none() {
+            self.keeper = Some(Keeper::start(&self.database)?);
+        }
+        Ok(())
+    }
+
+    /// Holds the draft keeper until the hold is dropped: what is kept meanwhile waits (tests). `None` without a
+    /// keeper.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn hold_keeps(&self) -> Option<KeepHold> {
+        self.keeper.as_ref().map(|keeper| keeper.hooks().hold())
+    }
+
+    /// The draft keeper's test hooks, as a handle that outlives a borrow of the store (tests). `None` without a
+    /// keeper.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn keeper_hooks(&self) -> Option<KeeperHooks> {
+        self.keeper.as_ref().map(Keeper::hooks)
+    }
+
+    /// Makes every write of the draft keeper fail while `refuse` is on, as a full or failing disk would (tests).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn refuse_keeps(&self, refuse: bool) {
+        if let Some(keeper) = &self.keeper {
+            keeper.hooks().refuse(refuse);
+        }
+    }
+
+    /// How many writes the draft keeper started (tests); 0 without a keeper.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn keeper_tries(&self) -> u64 {
+        self.keeper.as_ref().map_or(0, Keeper::tries)
+    }
+
+    /// Ends the draft keeper's thread as if it had died (tests).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn stop_keeper(&self) {
+        if let Some(keeper) = &self.keeper {
+            keeper.stop();
+        }
+    }
+
+    /// A keeper whose thread ended: what it held is written on this connection, and the store writes every draft at
+    /// once from now on, said once on standard error. Until what it held is written the keeper stays, its drafts
+    /// with it.
+    fn outlive_keeper(&mut self) -> Result<(), StoreError> {
+        if !self.write_what_a_gone_keeper_held()? {
+            return Ok(());
+        }
+        eprintln!("inboxcraft: the draft keeper stopped; drafts are written on the window's thread from now on");
+        self.keeper = None;
+        Ok(())
+    }
+
+    /// When the keeper's thread ended, writes what it held on this connection and forgets it there; whether it ended.
+    ///
+    /// # Errors
+    ///
+    /// What it held could not be written: the keeper keeps it, and the disk holds those drafts as they were before.
+    fn write_what_a_gone_keeper_held(&self) -> Result<bool, StoreError> {
+        let Some(keeper) = self.keeper.as_ref().filter(|keeper| keeper.is_gone()) else { return Ok(false) };
+        let held = keeper.all_held();
+        if !held.is_empty() {
+            let tx = self.conn.unchecked_transaction()?;
+            for draft in &held {
+                local::put_draft(&tx, draft)?;
+            }
+            tx.commit()?;
+            for draft in &held {
+                keeper.forget(draft.id);
+            }
+        }
+        Ok(true)
+    }
+
+    /// The drafts of `batch` when the keeper may write it behind: only drafts, every one held by the store from the
+    /// same account.
+    fn behind(&self, batch: &Batch) -> Result<Option<Vec<Arc<Draft>>>, StoreError> {
+        if self.keeper.is_none() || batch.is_empty() {
+            return Ok(None);
+        }
+        let mut drafts = Vec::new();
+        for each in batch.changes() {
+            let Change::PutDraft(draft) = each else { return Ok(None) };
+            let Some(id) = key(draft.id.get()) else { return Ok(None) };
+            let held: Option<i64> = self.conn.query_row("SELECT account FROM draft WHERE id = ?1", [id], |row| row.get(0)).optional()?;
+            if held.is_none() || held != key(draft.account.get()) {
+                return Ok(None);
+            }
+            drafts.push(Arc::new(draft.clone()));
+        }
+        Ok(Some(drafts))
+    }
+
+    /// The draft `id` as the store holds it: the keep that waits for the disk, or the database's.
+    fn held_draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError> {
+        if let Some(draft) = self.keeper.as_ref().and_then(|keeper| keeper.held(id)) {
+            return Ok(Some(Draft::clone(&draft)));
+        }
+        self.one("SELECT record FROM draft WHERE id = ?1", [key(id.get())])
     }
 
     /// The schema version of the open database.
@@ -169,6 +310,27 @@ impl Sqlite {
 /// word, `OR`, `NEAR` and `*` too, as a word to find. No words, no query.
 fn phrase(words: &[String]) -> Option<String> {
     (!words.is_empty()).then(|| format!("\"{}\"", words.join(" ").replace('"', "\"\"")))
+}
+
+/// The draft a change names, if one.
+fn drafted(change: &Change) -> Option<DraftId> {
+    match change {
+        Change::PutDraft(draft) => Some(draft.id),
+        Change::RemoveDraft(id) | Change::RemoveOutgoing(id) => Some(*id),
+        Change::PutOutgoing(outgoing) => Some(outgoing.draft),
+        Change::PutScheduled(Scheduled { what: inboxcraft_model::Due::Send(id), .. }) => Some(*id),
+        _ => None,
+    }
+}
+
+/// Whether `batch` removes draft `id`, itself or with its account, as `keeper` holds it.
+fn removes(batch: &Batch, id: DraftId, keeper: &Keeper) -> bool {
+    let account = keeper.held(id).map(|draft| draft.account);
+    batch.changes().iter().any(|change| match change {
+        Change::RemoveDraft(removed) => *removed == id,
+        Change::RemoveAccount(removed) => Some(*removed) == account,
+        _ => false,
+    })
 }
 
 /// The newest drafts of account `?1`, at most `?2`, in the order of the `draft_newest` index.
@@ -375,6 +537,30 @@ impl Storage for Sqlite {
     }
 
     fn apply(&mut self, batch: &Batch) -> Result<(), StoreError> {
+        self.outlive_keeper()?;
+        if let Some(drafts) = self.behind(batch)?
+            && let Some(keeper) = &self.keeper
+        {
+            keeper.keep(drafts);
+            return Ok(());
+        }
+        // Every keep comes before this batch, and no new try of a failed one starts while it is written: a send or a
+        // discard after a keep finds the draft as kept, and a discarded draft is never written again.
+        let gate = match &self.keeper {
+            Some(keeper) => {
+                let named: Vec<DraftId> = batch.changes().iter().filter_map(drafted).collect();
+                // A batch on a draft whose write failed first gives that write one more try.
+                keeper.retry(&named);
+                let gate = keeper.gate(SETTLE_WAIT)?;
+                // Still not on the disk: the batch would act on the draft as it was before. A batch that removes the
+                // draft (a discard, its account removed) goes on.
+                if let Some(id) = named.iter().copied().find(|id| keeper.failing(*id).is_some() && !removes(batch, *id, keeper)) {
+                    return Err(StoreError::DraftNotKept(id));
+                }
+                Some(gate)
+            }
+            None => None,
+        };
         let mut files = Files::default();
         let sources = &self.sources;
         let applied = self.conn.transaction().map_err(StoreError::from).and_then(|tx| {
@@ -396,6 +582,16 @@ impl Storage for Sqlite {
         for id in remove {
             sources::remove(sources, id);
         }
+        if result.is_ok()
+            && let Some(keeper) = &self.keeper
+        {
+            for draft in keeper.all_held() {
+                if removes(batch, draft.id, keeper) {
+                    keeper.forget(draft.id);
+                }
+            }
+        }
+        drop(gate);
         result
     }
 
@@ -462,20 +658,66 @@ impl Storage for Sqlite {
     }
 
     fn drafts(&self, account: AccountId) -> Result<Vec<Draft>, StoreError> {
-        self.records("SELECT record FROM draft WHERE account = ?1 ORDER BY id", [key(account.get())])
+        let mut drafts: Vec<Draft> = self.records("SELECT record FROM draft WHERE account = ?1 ORDER BY id", [key(account.get())])?;
+        // A keep still on its way takes its draft's place: only a draft the store holds is kept behind.
+        if let Some(keeper) = &self.keeper {
+            for held in keeper.held_of(account) {
+                if let Some(draft) = drafts.iter_mut().find(|draft| draft.id == held.id) {
+                    *draft = Draft::clone(&held);
+                }
+            }
+        }
+        Ok(drafts)
     }
 
-    fn newest_drafts(&self, account: AccountId, limit: usize) -> Result<(u64, Vec<Draft>), StoreError> {
-        let account = key(account.get());
+    fn newest_drafts(&self, of: AccountId, limit: usize) -> Result<(u64, Vec<Draft>), StoreError> {
+        let account = key(of.get());
         let total: i64 = self.conn.query_row("SELECT count(*) FROM draft WHERE account = ?1", [account], |row| row.get(0))?;
-        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-        // `draft_newest` holds this order, so the scan stops after `limit` rows.
-        let drafts = self.records(NEWEST_DRAFTS, params![account, limit])?;
-        Ok((u64::try_from(total).unwrap_or(0), drafts))
+        let total = u64::try_from(total).unwrap_or(0);
+        let held = self.keeper.as_ref().map(|keeper| keeper.held_of(of)).unwrap_or_default();
+        // The keeps on their way are newer than the disk says: as many more rows as there are keeps hold every draft
+        // that is not one of them and is among the newest `limit`.
+        let wanted = limit.saturating_add(held.len());
+        // `draft_newest` holds this order, so the scan stops after `wanted` rows.
+        let mut drafts: Vec<Draft> = self.records(NEWEST_DRAFTS, params![account, i64::try_from(wanted).unwrap_or(i64::MAX)])?;
+        if held.is_empty() {
+            return Ok((total, drafts));
+        }
+        drafts.retain(|draft| !held.iter().any(|kept| kept.id == draft.id));
+        drafts.extend(held.iter().map(|kept| Draft::clone(kept)));
+        drafts.sort_by(|a, b| b.saved.cmp(&a.saved).then(b.id.cmp(&a.id)));
+        drafts.truncate(limit);
+        Ok((total, drafts))
     }
 
     fn draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError> {
-        self.one("SELECT record FROM draft WHERE id = ?1", [key(id.get())])
+        self.held_draft(id)
+    }
+
+    fn settle(&self, within: Duration) -> Result<(), StoreError> {
+        // A keeper whose thread ended writes nothing more: what it held is written here, or the wait says why not.
+        if self.write_what_a_gone_keeper_held()? {
+            return Ok(());
+        }
+        self.keeper.as_ref().map_or(Ok(()), |keeper| keeper.settle_all(within))
+    }
+
+    fn failed_keep(&self) -> Option<(DraftId, StoreError)> {
+        self.keeper.as_ref().and_then(Keeper::take_failed)
+    }
+
+    fn unkept(&self) -> Vec<(DraftId, StoreError)> {
+        self.keeper.as_ref().map(Keeper::unkept).unwrap_or_default()
+    }
+
+    fn keeps(&self) -> u64 {
+        self.keeper.as_ref().map_or(0, Keeper::keeps)
+    }
+
+    fn wake_on_keep(&self, wake: KeepWake) {
+        if let Some(keeper) = &self.keeper {
+            keeper.wake_on(wake);
+        }
     }
 
     fn outbox(&self) -> Result<Vec<Outgoing>, StoreError> {

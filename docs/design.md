@@ -308,7 +308,9 @@ The 64 sets of the file. A screen is built from instances of these only.
 A page of its own: at the left a 600 px brief of today (a headline, four counts, the day's agenda, the drafts to
 pick up, two buttons), at the right the Qubernetic emblem drawn in characters on the character field. It is also
 drawn with nothing to do, with overflowing counts, before the first account, and with everything failing. Where
-the window is too narrow for the emblem, it leaves whole; it is never cut or made smaller.
+the window is too narrow for the emblem, it leaves whole; it is never cut or made smaller. The headline greets the
+owner by the first word of the sending name, titles such as Dr. skipped; Settings › Sending sets the last word, the
+full name or no name instead.
 
 ### Mail lists and the screener
 - **Inbox,** in three views: Grouped (every group open), Smart (the first three rows of each group, with "show

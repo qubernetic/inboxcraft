@@ -30,6 +30,7 @@ ksni = { workspace = true }
 zbus = { workspace = true }
 
 [dev-dependencies]
+inboxcraft-store = { workspace = true, features = ["test-hooks"] }
 inboxcraft-testkit = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }

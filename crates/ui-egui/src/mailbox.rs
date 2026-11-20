@@ -338,6 +338,9 @@ impl InboxView {
 /// the engine (`after.set`).
 pub use inboxcraft_engine::after::After;
 
+/// Which word of the sending name Home greets the owner by: the owner's choice, kept by the engine (`greeting.set`).
+pub use inboxcraft_engine::greet::GreetBy;
+
 /// An account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountRow {
@@ -1114,6 +1117,24 @@ impl Mailbox {
         self.session.set_after(after);
     }
 
+    /// Which word of the sending name Home greets by, as `greeting.set` left it.
+    #[must_use]
+    pub fn greet_by(&self) -> GreetBy {
+        self.session.greet_by()
+    }
+
+    /// Sets which word of the sending name Home greets by through `greeting.set`, as the owner.
+    pub fn set_greet_by(&mut self, by: GreetBy) {
+        if let Err(error) = self.run("greeting.set", &json!({ "greeting": by.name() })) {
+            self.fail(error);
+        }
+    }
+
+    /// Takes which word Home greets by, kept from an earlier run.
+    pub(crate) fn restore_greet_by(&mut self, by: GreetBy) {
+        self.session.set_greet_by(by);
+    }
+
     /// Selects the row below the selected one (`forward`) or above it; the first row when none is selected. Stays at
     /// either end.
     pub fn step(&mut self, forward: bool) {
@@ -1797,6 +1818,58 @@ impl Mailbox {
     /// Shows `error` in the error banner until it is dismissed or the next command settles.
     pub(crate) fn fail(&mut self, error: UiError) {
         self.settle(Err(error));
+    }
+
+    /// The drafts whose keep the store wrote behind and failed since last asked, each with why, once: the disk holds
+    /// such a draft as it was before that keep. The database's own words go to the app's standard error, once.
+    pub(crate) fn failed_keeps(&mut self) -> Vec<(u64, UiError)> {
+        let mut failed = Vec::new();
+        while let Some((id, error)) = self.session.store().failed_keep() {
+            let error = EngineError::Store(error);
+            if let Some(line) = crate::store_log(&error, &mut self.logged) {
+                eprintln!("{line}");
+            }
+            failed.push((id.get(), UiError::from(error)));
+        }
+        failed
+    }
+
+    /// Waits at most `within` until every draft the store writes behind is on the disk, each whose write failed tried
+    /// once more: the end of a window or of the app.
+    ///
+    /// # Errors
+    ///
+    /// The store did not write them in that time, or a draft's write failed and none landed since.
+    pub(crate) fn wait_for_keeps(&self, within: std::time::Duration) -> Result<(), UiError> {
+        self.settle_keeps(within, None)
+    }
+
+    /// The same for draft `id` alone: the end of its composer.
+    ///
+    /// # Errors
+    ///
+    /// The store did not write the drafts in that time, or the draft's write failed and none landed since.
+    pub(crate) fn wait_for_keep(&self, id: u64, within: std::time::Duration) -> Result<(), UiError> {
+        self.settle_keeps(within, Some(id))
+    }
+
+    fn settle_keeps(&self, within: std::time::Duration, id: Option<u64>) -> Result<(), UiError> {
+        let store = self.session.store();
+        store.settle(within).map_err(|error| UiError::from(EngineError::Store(error)))?;
+        match store.unkept().into_iter().find(|(draft, _)| id.is_none_or(|id| draft.get() == id)) {
+            Some((_, error)) => Err(UiError::from(EngineError::Store(error))),
+            None => Ok(()),
+        }
+    }
+
+    /// The drafts whose write the store made behind and that failed, none landing since.
+    pub(crate) fn unkept_drafts(&self) -> Vec<u64> {
+        self.session.store().unkept().into_iter().map(|(draft, _)| draft.get()).collect()
+    }
+
+    /// A count of the drafts handed to the store to write behind: another number after a newer keep of any draft.
+    pub(crate) fn keeps_made(&self) -> u64 {
+        self.session.store().keeps()
     }
 
     /// Applies `event` as an account's sync worker tells it, checked by the engine as every worker's is: for a picture

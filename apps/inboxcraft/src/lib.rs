@@ -162,6 +162,10 @@ pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, k
         }
         Mail::Store(owned) => owned,
     };
+    // A draft the store writes behind redraws the window when it lands or fails, so a failure is said at once.
+    if let Some(wake) = &wake {
+        owned.store.wake_on_keep(Arc::clone(wake));
+    }
     let keychain = Arc::new(accounts::OsKeychain::new(&owned.id));
     let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
     let client = PictureClient::new(tls.clone(), PICTURE_TIMEOUT);
