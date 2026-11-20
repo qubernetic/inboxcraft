@@ -139,23 +139,22 @@ impl Windows {
         self.shown.iter_mut().fold(false, |any, shown| shown.reader.poll() | any)
     }
 
-    /// Reads each window's message again once the list's rows changed: its row kept fresh for the head, or, once the
-    /// store keeps it no more, the window says so and forgets what it showed.
+    /// Reads each window's message again, by its id alone, once the list's rows changed: its row kept fresh for the
+    /// head, or, once the store keeps it no more, the window says so and forgets what it showed. A store that cannot
+    /// say now leaves the window as it is, read again at the next change.
     fn check(&mut self, mailbox: &mut Mailbox) {
         let serial = mailbox.rows_serial();
         for shown in self.shown.iter_mut().filter(|shown| !shown.gone && shown.checked != serial) {
             shown.checked = serial;
             match mailbox.message_row(shown.message) {
-                Some(read) => {
-                    let row = fresher(mailbox, shown.reader.kept_row(), read);
-                    shown.reader.keep_row(Some(row));
-                }
-                None => {
+                Ok(Some(read)) => shown.reader.keep_row(Some(fresher(mailbox, read))),
+                Ok(None) => {
                     shown.gone = true;
                     shown.reader.open(mailbox, None);
                     shown.textures.clear();
                     shown.hover = None;
                 }
+                Err(_) => {}
             }
         }
     }
@@ -225,15 +224,9 @@ impl Windows {
             reader::Asked::Dismiss => reader.dismiss_notice(),
             reader::Asked::Act(id, act) => {
                 super::start(reader, mailbox, id, act);
-                // What the act changed in the triage state, which the store's row of the message does not carry.
-                if let Some(mut row) = reader.kept_row().cloned() {
-                    match act {
-                        Act::Pin(pinned) => row.pinned = pinned,
-                        Act::Park(parked) => row.parked = parked,
-                        Act::Undone => row.done = false,
-                        _ => {}
-                    }
-                    reader.keep_row(Some(row));
+                // What the act changed (a pin, a reminder, a snooze, the sender's screening), read again for the head.
+                if let Ok(Some(read)) = mailbox.message_row(id) {
+                    reader.keep_row(Some(fresher(mailbox, read)));
                 }
                 // An act that takes the message away ends the window's work.
                 if act.slides() {
@@ -255,28 +248,10 @@ impl Windows {
     }
 }
 
-/// The row of a window's message once it was `read` again from the store: the list's own when the list shows it;
-/// else what the store says (its folder, read, flagged) with the triage state (group, done, park, pin, snooze, reminder)
-/// the window `kept`, which the store's row does not carry.
-fn fresher(mailbox: &Mailbox, kept: Option<&MessageRow>, read: MessageRow) -> MessageRow {
-    if let Some(listed) = mailbox.messages().iter().find(|row| row.id == read.id) {
-        return listed.clone();
-    }
-    match kept {
-        Some(kept) => MessageRow {
-            group: kept.group,
-            new_sender: kept.new_sender,
-            done: kept.done,
-            parked: kept.parked,
-            pinned: kept.pinned,
-            snoozed_until: kept.snoozed_until,
-            returned: kept.returned,
-            follow_up: kept.follow_up,
-            bounced: kept.bounced.clone(),
-            ..read
-        },
-        None => read,
-    }
+/// The row of a window's message once it was `read` again from the store: the list's own when the list shows it, else
+/// what the store says, triage state and all.
+fn fresher(mailbox: &Mailbox, read: MessageRow) -> MessageRow {
+    mailbox.messages().iter().find(|row| row.id == read.id).cloned().unwrap_or(read)
 }
 
 /// The window's content in `ui`: the reader in its column, or the words for a message that is gone. The acts on a row

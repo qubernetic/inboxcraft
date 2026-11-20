@@ -1568,13 +1568,18 @@ impl Mailbox {
         }
     }
 
-    /// The row of message `id` as the store has it now, wherever it is (the list may show another place); `None` once
-    /// the store keeps it no more (the server took it away) or cannot say. Read quietly: the window ran nothing for the
-    /// owner.
-    pub(crate) fn message_row(&mut self, id: u64) -> Option<MessageRow> {
-        let answer = self.quietly(|mailbox| mailbox.run("mail.thread", &json!({ "id": id }))).ok()?;
-        let messages = answer.get("messages").and_then(Value::as_array)?;
-        messages.iter().map(message_row).find(|row| row.id == id)
+    /// The row of message `id` as the store has it now, wherever it is (the list may show another place), read by its id
+    /// alone (`mail.row`): `None` only once the store keeps it no more (the server took it away); an error when the
+    /// store cannot say now. Read quietly: the window ran nothing for the owner.
+    pub(crate) fn message_row(&mut self, id: u64) -> Result<Option<MessageRow>, UiError> {
+        match self.quietly(|mailbox| mailbox.run("mail.row", &json!({ "id": id }))) {
+            Ok(answer) => match answer.get("message").map(message_row).filter(|row| row.id == id) {
+                Some(row) => Ok(Some(row)),
+                None => Err(UiError::Answer { command: "mail.row", detail: "no row of the message asked for".to_owned() }),
+            },
+            Err(UiError::Engine(EngineError::NotFound { what: "message", .. })) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     /// The message the owner's own act took out of the list last, once: it is forgotten as it is read.
@@ -2937,7 +2942,7 @@ mod store_log_tests;
 /// Whether `command` only reads: a list, a draft or a message shown, the settings or the state of something. Every
 /// other command may change what the window shows and counts in [`Mailbox::writes`].
 pub(crate) fn changes_nothing(command: &str) -> bool {
-    const READS: [&str; 9] = [".list", ".show", ".settings", ".status", ".presets", ".repeats", ".why", ".thread", ".search"];
+    const READS: [&str; 10] = [".list", ".show", ".settings", ".status", ".presets", ".repeats", ".why", ".thread", ".search", ".row"];
     READS.iter().any(|end| command.ends_with(end)) || command == "mail.attachment"
 }
 

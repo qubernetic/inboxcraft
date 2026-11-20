@@ -6,16 +6,23 @@
 //! named; a context that embeds viewports (egui's default, the web app) is the fallback.
 
 use std::cell::{Cell, RefCell};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use egui::{Context, Event, Key, Modifiers, Pos2, RawInput, Rect, ViewportId, ViewportInfo, vec2};
-use inboxcraft_model::{AccountId, Event as MailEvent, EventKind, FolderId, FolderState, Uid, UidSet, UidValidity};
-use inboxcraft_time::{FakeClock, Timestamp};
+use inboxcraft_engine::Session;
+use inboxcraft_model::{
+    AccountId, Address, EmailAddress, Envelope, Event as MailEvent, EventKind, FolderId, FolderState, Message, MessageId, MessageRef, Summary, Uid,
+    UidSet, UidValidity,
+};
+use inboxcraft_store::{Batch, Change, Memory, Storage, StoreError};
+use inboxcraft_time::{Clock, FakeClock, Timestamp};
 use serde_json::json;
 
-use super::super::InboxApp;
+use super::super::{InboxApp, reader};
 use super::{COLUMN, MOST};
 use crate::keymap;
-use crate::mailbox::{Mailbox, Place};
+use crate::mailbox::{Act, Mailbox, Place};
 use crate::reader::tests::Recorder;
 use crate::sample;
 use crate::save::NoSave;
@@ -252,12 +259,12 @@ fn a_key_in_the_window_acts_on_its_message_never_on_the_list_s_row() {
     let ringed = id_of(&app, LIBRARY);
     app.mailbox_mut().select(Some(ringed));
     settle(&ctx, &mut app);
-    let (before, ringed_before) = (app.mailbox_mut().message_row(coast).unwrap(), app.mailbox_mut().message_row(ringed).unwrap());
+    let (before, ringed_before) = (app.mailbox_mut().message_row(coast).unwrap().unwrap(), app.mailbox_mut().message_row(ringed).unwrap().unwrap());
     press_in(&ctx, &mut app, window, Key::D);
-    let after = app.mailbox_mut().message_row(coast).unwrap();
+    let after = app.mailbox_mut().message_row(coast).unwrap().unwrap();
     assert!(after.done || after.folder != before.folder, "the window's message is done: {after:?}");
     assert!(app.mailbox().messages().iter().all(|row| row.id != coast), "it left the inbox");
-    assert_eq!(app.mailbox_mut().message_row(ringed).unwrap(), ringed_before, "the list's row is as it was");
+    assert_eq!(app.mailbox_mut().message_row(ringed).unwrap().unwrap(), ringed_before, "the list's row is as it was");
     assert_eq!(app.mailbox().selected(), Some(ringed), "the list stays where it was");
     assert!(app.windows.messages().is_empty(), "done, the window's work ends");
     // A press on a button in the window acts on its message too: Pin, which keeps the window.
@@ -290,7 +297,7 @@ fn a_message_the_server_takes_away_leaves_its_window_saying_so() {
     app.mailbox_mut().tell(&MailEvent::new(AccountId::new(1), None, gone)).unwrap();
     app.mailbox_mut().refresh();
     settle(&ctx, &mut app);
-    assert!(app.mailbox_mut().message_row(library).is_none(), "the store keeps it no more");
+    assert!(app.mailbox_mut().message_row(library).unwrap().is_none(), "the store keeps it no more");
     assert!(shows(window, "This message is not here any"), "{:?}", seen_in(window));
     assert!(!shows(window, LIBRARY), "nothing of it stays: {:?}", seen_in(window));
     let shown = app.windows.shown.first().unwrap();
@@ -370,4 +377,179 @@ fn a_picture_is_uploaded_again_in_a_new_context() {
     let texture = app.textures.get(url).unwrap().id();
     let named = next.tex_manager().read().meta(texture).map(|meta| meta.name.clone());
     assert_eq!(named.as_deref(), Some(url), "the texture is the new context's own");
+}
+
+/// What a [`Watched`] store is told to do and counts.
+#[derive(Debug, Clone, Default)]
+struct Watch {
+    /// Reading one message fails, as a busy or locked database would.
+    fail_reads: Arc<AtomicBool>,
+    /// Every write fails.
+    fail_writes: Arc<AtomicBool>,
+    /// How often a whole folder, every state, every sender or every draft was read.
+    whole_reads: Arc<AtomicU32>,
+}
+
+/// The memory store, but failing and counting as its [`Watch`] says.
+#[derive(Debug)]
+struct Watched(Memory, Watch);
+
+impl Watched {
+    fn whole(&self) {
+        self.1.whole_reads.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[rustfmt::skip]
+impl Storage for Watched {
+    fn config(&self) -> inboxcraft_store::StoreConfig { self.0.config() }
+    fn apply(&mut self, batch: &Batch) -> Result<(), StoreError> {
+        if self.1.fail_writes.load(Ordering::Relaxed) { Err(StoreError::Corrupt("watched")) } else { self.0.apply(batch) }
+    }
+    fn accounts(&self) -> Result<Vec<inboxcraft_model::Account>, StoreError> { self.0.accounts() }
+    fn folders(&self, a: AccountId) -> Result<Vec<inboxcraft_model::Folder>, StoreError> { self.0.folders(a) }
+    fn folder_state(&self, f: FolderId) -> Result<Option<FolderState>, StoreError> { self.0.folder_state(f) }
+    fn messages(&self, f: FolderId) -> Result<Vec<inboxcraft_store::Entry>, StoreError> { self.whole(); self.0.messages(f) }
+    fn message(&self, m: MessageId) -> Result<Option<inboxcraft_store::Entry>, StoreError> {
+        if self.1.fail_reads.load(Ordering::Relaxed) { Err(StoreError::Corrupt("watched")) } else { self.0.message(m) }
+    }
+    fn body(&self, m: MessageId) -> Result<Option<inboxcraft_store::Body>, StoreError> { self.0.body(m) }
+    fn search(&self, s: &inboxcraft_store::Search) -> Result<Vec<MessageId>, StoreError> { self.whole(); self.0.search(s) }
+    fn queued_jobs(&self) -> Result<Vec<inboxcraft_model::Job>, StoreError> { self.0.queued_jobs() }
+    fn drafts(&self, a: AccountId) -> Result<Vec<inboxcraft_model::Draft>, StoreError> { self.whole(); self.0.drafts(a) }
+    fn newest_drafts(&self, a: AccountId, n: usize) -> Result<(u64, Vec<inboxcraft_model::Draft>), StoreError> { self.whole(); self.0.newest_drafts(a, n) }
+    fn draft(&self, d: inboxcraft_model::DraftId) -> Result<Option<inboxcraft_model::Draft>, StoreError> { self.0.draft(d) }
+    fn outbox(&self) -> Result<Vec<inboxcraft_model::Outgoing>, StoreError> { self.0.outbox() }
+    fn schedule(&self) -> Result<Vec<inboxcraft_model::Scheduled>, StoreError> { self.0.schedule() }
+    fn sender(&self, e: &inboxcraft_model::EmailAddress) -> Result<Option<inboxcraft_model::Sender>, StoreError> { self.0.sender(e) }
+    fn senders(&self) -> Result<Vec<inboxcraft_model::Sender>, StoreError> { self.whole(); self.0.senders() }
+    fn message_state(&self, m: MessageId) -> Result<inboxcraft_model::MessageState, StoreError> { self.0.message_state(m) }
+    fn message_states(&self) -> Result<Vec<(MessageId, inboxcraft_model::MessageState)>, StoreError> { self.whole(); self.0.message_states() }
+    fn calendars(&self, a: AccountId) -> Result<Vec<inboxcraft_model::Calendar>, StoreError> { self.0.calendars(a) }
+    fn sync_token(&self, c: inboxcraft_model::CalendarId) -> Result<Option<String>, StoreError> { self.0.sync_token(c) }
+    fn calendar_events(&self, c: inboxcraft_model::CalendarId) -> Result<Vec<inboxcraft_model::CalendarEvent>, StoreError> { self.0.calendar_events(c) }
+    fn calendar_event(&self, e: inboxcraft_model::CalendarEventId) -> Result<Option<inboxcraft_model::CalendarEvent>, StoreError> { self.0.calendar_event(e) }
+    fn alerts(&self, e: inboxcraft_model::CalendarEventId) -> Result<Vec<inboxcraft_model::Alert>, StoreError> { self.0.alerts(e) }
+    fn alert(&self, a: inboxcraft_model::AlertId) -> Result<Option<inboxcraft_model::Alert>, StoreError> { self.0.alert(a) }
+    fn stale_bodies(&self, t: Timestamp) -> Result<Vec<MessageId>, StoreError> { self.0.stale_bodies(t) }
+    fn missing_bodies(&self, f: FolderId, t: Timestamp) -> Result<Vec<MessageId>, StoreError> { self.0.missing_bodies(f, t) }
+}
+
+/// [`app`] over `store`, watched by `watch`.
+fn watched_app(store: Memory, watch: &Watch) -> InboxApp {
+    let mut session = Session::sample(Box::new(Watched(store, watch.clone())), clock()).unwrap();
+    session.run("screener.mode", &json!({ "mode": "before" })).unwrap();
+    let mailbox = Mailbox::new(session, clock());
+    let mut app = InboxApp::with_outside_at_mail(mailbox, Box::new(Recorder::default()), Box::new(NoSave));
+    app.set_appearance("ui.layout.set", &json!({ "reader": "window" })).unwrap();
+    app
+}
+
+fn sample_store() -> Memory {
+    sample::mailbox(clock().now()).unwrap()
+}
+
+/// Every window reads its message again at the next check, as when the list's rows changed.
+fn stale(app: &mut InboxApp) {
+    for shown in &mut app.windows.shown {
+        shown.checked = u64::MAX;
+    }
+}
+
+/// A store that cannot read the message now is not a message gone: the window keeps what it shows, and reads it again
+/// at the next change.
+#[test]
+fn a_store_error_does_not_make_a_window_say_its_message_is_gone() {
+    let ctx = windowing();
+    let watch = Watch::default();
+    let mut app = watched_app(sample_store(), &watch);
+    settle(&ctx, &mut app);
+    let library = open(&ctx, &mut app, LIBRARY);
+    let window = window_of(&app, library);
+    watch.fail_reads.store(true, Ordering::Relaxed);
+    stale(&mut app);
+    app.windows.check(&mut app.mailbox);
+    assert!(!app.windows.shown.first().unwrap().gone, "an error is not a message gone");
+    assert_eq!(app.windows.messages(), vec![Some(library)]);
+    watch.fail_reads.store(false, Ordering::Relaxed);
+    stale(&mut app);
+    settle(&ctx, &mut app);
+    assert!(shows(window, LIBRARY) && !shows(window, "This message is not here any"), "{:?}", seen_in(window));
+}
+
+/// The message `id` of account 1, in `folder` with `uid`, `minutes` old, from someone at example.org.
+fn put(id: u64, folder: u64, uid: u32, minutes: i64, envelope: Envelope) -> Change {
+    let envelope = envelope
+        .with_from(vec![Address::new(Some("Rowan Hale"), EmailAddress::new("rowan@example.org").unwrap())])
+        .with_to(vec![Address::new(Some("Anna"), EmailAddress::new("anna@example.org").unwrap())]);
+    let received = Timestamp::from_unix(1_793_869_200 - minutes * 60, 0).unwrap();
+    let summary = Summary::new(Uid::new(uid).unwrap(), envelope).with_received(Some(received));
+    Change::PutMessage(Message::new(MessageId::new(id), AccountId::new(1), FolderId::new(folder), summary))
+}
+
+const PLANS: &str = "Plans for the harbour fair";
+
+/// The sample with a thread of a thousand and one: its oldest, [`PLANS`], in the inbox, and a thousand newer answers in
+/// the archive.
+fn long_thread() -> Memory {
+    let mut store = sample_store();
+    let root = MessageRef::new("<plans@example.org>").unwrap();
+    let mut batch = Batch::new().with(put(20_000, 1, 9_000, 600, Envelope::new(PLANS).with_message_id(Some(root.clone()))));
+    for n in 1..=1000u32 {
+        let answer = Envelope::new(&format!("Re: {PLANS}")).with_in_reply_to(vec![root.clone()]);
+        batch = batch.with(put(20_000 + u64::from(n), 4, 9_000 + n, 599 - i64::from(n) / 2, answer));
+    }
+    store.apply(&batch).unwrap();
+    store
+}
+
+/// A window on the oldest message of a thread longer than a list keeps it; and reading it again reads one message,
+/// not the store.
+#[test]
+fn a_window_keeps_the_oldest_of_a_long_thread_and_reads_one_message() {
+    let ctx = windowing();
+    let watch = Watch::default();
+    let mut app = watched_app(long_thread(), &watch);
+    settle(&ctx, &mut app);
+    let plans = open(&ctx, &mut app, PLANS);
+    let window = window_of(&app, plans);
+    app.mailbox_mut().refresh();
+    settle(&ctx, &mut app);
+    assert_eq!(app.windows.messages(), vec![Some(plans)], "the window keeps it");
+    assert!(!app.windows.shown.first().unwrap().gone);
+    assert!(shows(window, PLANS) && !shows(window, "This message is not here any"), "{:?}", seen_in(window));
+    // The cost of a check: no whole folder, no list of states, no drafts read, whatever the store holds.
+    stale(&mut app);
+    watch.whole_reads.store(0, Ordering::Relaxed);
+    app.windows.check(&mut app.mailbox);
+    assert_eq!(watch.whole_reads.load(Ordering::Relaxed), 0, "one message read, not the store");
+    assert_eq!(app.windows.shown.first().unwrap().checked, app.mailbox().rows_serial(), "it was read again");
+}
+
+/// What is done in the window shows in its head once the list has moved on: a reminder set and taken off again.
+#[test]
+fn an_act_in_the_window_shows_in_its_kept_row() {
+    let ctx = windowing();
+    let mut app = app(&Recorder::default());
+    settle(&ctx, &mut app);
+    // A message the owner sent, from the Sent folder: a reminder goes on one.
+    app.mailbox_mut().open(Place::Folder(3));
+    settle(&ctx, &mut app);
+    let sent = app.mailbox().messages().first().unwrap().subject.clone();
+    let mine = open(&ctx, &mut app, &sent);
+    let window = window_of(&app, mine);
+    app.mailbox_mut().open(Place::View(inboxcraft_model::Role::Inbox));
+    settle(&ctx, &mut app);
+    assert!(app.mailbox().messages().iter().all(|row| row.id != mine), "the list shows it no more");
+    let kept = |app: &InboxApp| app.windows.shown.first().unwrap().reader.kept_row().cloned().unwrap();
+    assert_eq!(kept(&app).follow_up, None);
+    let when = Timestamp::from_unix(1_793_869_200 + 86_400, 0).unwrap();
+    app.windows.apply(&ctx, &mut app.mailbox, window, reader::Asked::Act(mine, Act::FollowUp(when)));
+    assert_eq!(kept(&app).follow_up, Some(when), "the reminder shows at once");
+    settle(&ctx, &mut app);
+    assert_eq!(kept(&app).follow_up, Some(when), "and stays");
+    app.windows.apply(&ctx, &mut app.mailbox, window, reader::Asked::Act(mine, Act::CancelFollowUp));
+    assert_eq!(kept(&app).follow_up, None, "it goes again at once");
+    settle(&ctx, &mut app);
+    assert_eq!(kept(&app).follow_up, None, "and stays gone");
 }
