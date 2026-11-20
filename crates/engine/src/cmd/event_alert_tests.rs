@@ -445,3 +445,13 @@ fn an_unreadable_instance_does_not_block_the_alert_of_the_others() {
     let triggers: Vec<Trigger> = master.alarms.iter().map(|alarm| alarm.trigger).collect();
     assert_eq!(triggers, [Trigger::Start(Span::new(0, -1800).unwrap())], "{written}");
 }
+
+#[test]
+fn an_alert_alone_tells_no_guest_even_when_asked() {
+    let mut session = session();
+    synced(&mut session, "checkin", checkin());
+    let answer = session.run("event.update", &json!({ "id": 5, "alert": 30, "notify": true })).unwrap();
+    assert_eq!(answer["notified"], json!(false), "{answer}");
+    assert!(answer["guests"].as_u64().unwrap() > 0, "{answer}");
+    assert!(text(&session, 5).contains("SEQUENCE:2\r\n"), "{}", text(&session, 5));
+}
