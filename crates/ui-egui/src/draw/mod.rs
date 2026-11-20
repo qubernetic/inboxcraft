@@ -385,6 +385,42 @@ enum ListPlace {
     Whole,
 }
 
+/// What the reader's pane says with nothing open, by what the list beside it holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReaderSays {
+    /// A list of messages: pick one, it opens here (the reader's own empty state).
+    Message,
+    /// The kept drafts: pick one, it opens in the composer.
+    Draft,
+    /// A list that holds nothing: nothing to open.
+    Nothing,
+}
+
+/// The reader's empty state beside the drafts (`Draft`) or a list that holds nothing (`Nothing`): in the middle of the
+/// pane, 40 from its sides, as the frames `drafts-list/filled` and `/empty` draw it.
+fn nothing_to_open(ui: &mut Ui, theme: &Theme, keymap: &Keymap, says: ReaderSays) {
+    let words = |action: &str| keymap.shortcut(action).map(|shortcut| crate::component::key::key_words(&shortcut));
+    let (title, help) = if says == ReaderSays::Draft {
+        let help = match (words(keymap::NEXT), words(keymap::PREVIOUS), words(keymap::OPEN)) {
+            (Some(next), Some(previous), Some(open)) => tr!(
+                "{next} and {previous} move in the list, {open} opens the draft where you left it.",
+                next = next,
+                previous = previous,
+                open = open
+            ),
+            _ => tr!("A draft opens in the composer where you left it.").to_owned(),
+        };
+        (tr!("Pick a draft.\nIt opens in the composer."), help)
+    } else {
+        (tr!("Nothing to open."), tr!("A message opens here when the list holds one.").to_owned())
+    };
+    let side = margin(theme.spacing.s10).left;
+    Frame::new().inner_margin(Margin { left: side, right: side, top: 0, bottom: 0 }).show(ui, |ui| {
+        ui.set_min_size(ui.available_size());
+        crate::component::empty::empty_state(ui, theme, tr!("Reader · nothing open"), title, &help);
+    });
+}
+
 /// A pane's frame: no fill, `left` and `right` of its pane and `gap` above and below it.
 fn around(left: f32, right: f32, gap: f32) -> Frame {
     // Distances are a few points; the clamp keeps the casts inside i8.
@@ -2242,12 +2278,34 @@ impl InboxApp {
         }
     }
 
+    /// What the reader says with nothing open: the list holds nothing, the drafts, or messages.
+    fn reader_says(&self) -> ReaderSays {
+        let mailbox = &self.mailbox;
+        let drafts = mailbox.drafts_listed();
+        let none = if mailbox.place() == Place::Outbox && mailbox.query().is_empty() {
+            mailbox.outbox().is_empty()
+        } else if drafts {
+            mailbox.drafts().next().is_none()
+        } else {
+            mailbox.messages().is_empty()
+        };
+        match (none, drafts) {
+            (true, _) => ReaderSays::Nothing,
+            (false, true) => ReaderSays::Draft,
+            (false, false) => ReaderSays::Message,
+        }
+    }
+
     /// The reader on a card `left` from the list: the open message, or nothing open; what was asked in it.
     fn reader_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, left: f32) -> reader::Drawn {
         let gap = 0.0;
         if self.reader.open_id().is_none() {
+            let empty = self.reader_says();
             CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| {
-                layers.card(ui, Margin::ZERO, |ui| reader::nothing_open(ui, theme, &self.keymap));
+                layers.card(ui, Margin::ZERO, |ui| match empty {
+                    ReaderSays::Message => reader::nothing_open(ui, theme, &self.keymap),
+                    ReaderSays::Draft | ReaderSays::Nothing => nothing_to_open(ui, theme, &self.keymap, empty),
+                });
             });
             return reader::Drawn::default();
         }
@@ -2566,10 +2624,11 @@ impl InboxApp {
             add = self.welcome(&mut body, &theme, &mut layers);
         } else if !full {
             let left = 0.0;
-            // The list stands beside the reader while a message is open, and stays, with nothing open, when the open
-            // message left the list (held back); and beside the docked composer.
             let reading = self.reader.open_id().is_some() || self.held_back.is_some();
-            let place = list_place(list_shown, !single && (reading || docked));
+            // In two panes the list stands 440 wide beside the reader, with a message open or nothing open (the
+            // reader's empty state says so), and beside the docked composer.
+            // New senders' review is a place of cards across the whole body.
+            let place = list_place(list_shown, !single && (self.mailbox.place() != Place::Senders || reading || docked));
             // The list is hidden where the composer stands in its place: in one pane with the composer in front.
             // Nothing of it acts then.
             let hidden = place == ListPlace::Away && self.composer_in_front();
@@ -2619,7 +2678,12 @@ impl InboxApp {
             // The settings stand in the body alone: no composer, no reader.
         } else if docked && reader_shown {
             composed = self.composer_card(&mut body, &theme, &mut layers, composer_left);
-        } else if self.screen == Screen::Mail && (self.reader.open_id().is_some() || self.held_back.is_some()) && reader_shown && !docked {
+        } else if self.screen == Screen::Mail
+            && !self.mailbox.accounts().is_empty()
+            && (self.reader.open_id().is_some() || self.held_back.is_some() || (!single && self.mailbox.place() != Place::Senders))
+            && reader_shown
+            && !docked
+        {
             drawn = self.reader_card(&mut body, &theme, &mut layers, if full { gap } else { half });
         }
         layers.finish(&panes, &theme);
