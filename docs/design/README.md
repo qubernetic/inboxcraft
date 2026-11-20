@@ -45,7 +45,7 @@ three first; without them it falls back to another typeface.
 | Planned | Features of the roadmap, each tagged PLANNED: search in the text, bulk select, attachments on a draft, editing a series, OAuth, machine text and an agent's request, the log drawer, setting up a phone, smart folders, and one example of a plugin building in through standard places |
 | Mobile · sketch | Nine phone screens as a direction to look at, not a specification |
 | Motion | Fourteen movements, each at full, reduced and off, and two flows as sequences of whole windows |
-| Sizes | The same screens at 1100 and 800 wide and at 130 % text, with the breakpoints written as rules |
+| Sizes | The same screens at 1100 and 800 wide and at 130 % text, with the breakpoints written as rules; every page of Settings at 800, and at 1000 with 130 % text |
 | Layout · why | The reasons of the layout, each with its decision |
 | Coverage | What the file holds, its checks, and what it leaves out |
 | Event drafts | Tagged PLANNED: a half-typed event kept as a draft, shown in the calendar at its time, never sent, kept only on this computer and asked about once its time has passed |
@@ -137,7 +137,10 @@ What the app still owes this file, one line each. The finer differences, with th
   account form draws "Remove account…" at 664 where the frame has 602, so its card is at 324, not 262. A
   scheduled send's says "“…” will not go at its time, Tue 08:00." where the frame says "on Tuesday at 08:00", and an
   account's says "its drafts" where the frame counts them.
-- The settings are drawn to the 1440 frames; under about 1060 their narrow sizes are the code's own.
+- Settings in a narrow window is not built as the Sizes page draws it: the code keeps the list of sections beside
+  the page at every width and lets the page's side room (40 to 24) and the list give way, where the file keeps the
+  40 and, under 980, shows one pane with `← Settings`; no setting gives its control a line of its own (the row's
+  stacked state).
 - Privacy keeps no sender name, so a row shows the address at 16 where the frames draw a name column; About is one
   column, and "After an act" and the week's two rows on Calendar have no frame.
 - The calendar's sync line has no "sync now" link at rest; the line itself takes the press.
