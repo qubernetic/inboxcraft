@@ -342,7 +342,9 @@ fn without_an_account_there_is_no_new_message() {
     let store = inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default());
     let harness = harness_over(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()), egui::Theme::Light);
     assert!(!harness.state().can_run(keymap::COMPOSE));
-    assert!(harness.query_all_by_role_and_label(Role::Button, "New message").next().is_none());
+    // The index's New message stands, but cannot be pressed (#339).
+    let shown: Vec<bool> = harness.query_all_by_role_and_label(Role::Button, "New message").map(|node| node.accesskit_node().is_disabled()).collect();
+    assert!(!shown.is_empty() && shown.iter().all(|disabled| *disabled), "{shown:?}");
 }
 
 #[test]

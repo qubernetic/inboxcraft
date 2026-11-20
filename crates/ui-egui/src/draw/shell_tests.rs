@@ -393,9 +393,9 @@ fn tab_walks_the_command_line_before_the_index_under_it() {
         harness.run();
         walked.push(focused(&harness).unwrap_or_default());
     }
-    // Home is a place and a stop, first of the index. No window controls outside a native window (the own frame's
+    // New message is the first stop of the index, over Home (#339). No window controls outside a native window (the own frame's
     // walk is in `frame_tests`).
-    assert_eq!(walked, ["Command line", "Home"], "the drawn order, top down");
+    assert_eq!(walked, ["Command line", "New message"], "the drawn order, top down");
     harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
     harness.run();
     assert_eq!(focused(&harness).as_deref(), Some("Command line"), "Shift Tab walks it back");

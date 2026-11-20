@@ -191,6 +191,10 @@ pub struct TextButton<'a> {
     label_widest: f32,
     /// The widest the whole button gets ([`Self::within`]).
     widest: Option<f32>,
+    /// As wide as its place ([`Self::fill`]).
+    fill: Option<f32>,
+    /// The icon alone in a square ([`Self::icon_only`]).
+    icon_only: bool,
 }
 
 impl<'a> TextButton<'a> {
@@ -209,6 +213,8 @@ impl<'a> TextButton<'a> {
             shown: None,
             label_widest: LABEL_WIDEST,
             widest: None,
+            fill: None,
+            icon_only: false,
         }
     }
 
@@ -316,6 +322,28 @@ impl<'a> TextButton<'a> {
         self
     }
 
+    /// As wide as its place, `width` points (the index's New message): the icon and the label at the left, the key's
+    /// chip at the right edge, the label taking the room between them. A width that is not a number is not taken; one
+    /// too narrow for the parts leaves the label 1 point.
+    #[must_use]
+    pub fn fill(mut self, width: f32) -> Self {
+        self.fill = width.is_finite().then_some(width.min(4096.0));
+        self
+    }
+
+    /// Its icon alone in a square of a control's side (the narrow index's New message); its name is heard and its
+    /// tooltip says it, with its key. Without an icon it shows its name as usual.
+    #[must_use]
+    pub fn icon_only(mut self) -> Self {
+        self.icon_only = true;
+        self
+    }
+
+    /// Whether only its icon is drawn ([`Self::icon_only`]).
+    fn bare(&self) -> bool {
+        self.icon_only && self.icon.is_some()
+    }
+
     /// How wide it is drawn in `ui`, in points: what a row of buttons measures before it places them.
     #[must_use]
     pub fn width(&self, ui: &Ui, theme: &Theme, keymap: &Keymap) -> f32 {
@@ -342,15 +370,20 @@ impl<'a> TextButton<'a> {
         let others =
             [self.icon.map(|_| theme.icon_side()), arrow.as_ref().map(|arrow| arrow.size().x.ceil()), chip.as_ref().map(|chip| chip.size().x)];
         let beside = others.iter().flatten().map(|wide| wide + GAP).sum::<f32>();
-        let room = self
-            .widest
-            .filter(|widest| widest.is_finite())
-            .map_or(self.label_widest, |widest| self.label_widest.min(widest - beside - PAD * 2.0))
+        // As wide as its place, the label takes all the room the other parts leave.
+        let filled = self.fill.map(|fill| (fill - beside - PAD * 2.0).floor().max(1.0));
+        let room = filled
+            .unwrap_or_else(|| {
+                self.widest.filter(|widest| widest.is_finite()).map_or(self.label_widest, |widest| self.label_widest.min(widest - beside - PAD * 2.0))
+            })
             .floor()
             .max(1.0);
         let label = super::cut(ui, self.name, font, Color32::PLACEHOLDER, room);
-        // A label cut at its widest takes all of it, as the design's does.
-        let label_width = if label.elided { room } else { label.size().x.ceil() };
+        // A label cut at its widest takes all of it, as the design's does; so does a filled one.
+        let label_width = if label.elided || filled.is_some() { room } else { label.size().x.ceil() };
+        if self.bare() {
+            return Laid { label, arrow: None, chip: None, label_width: 0.0, width: control_side(theme) };
+        }
         let parts = [
             self.icon.map(|_| theme.icon_side()),
             Some(label_width),
@@ -378,7 +411,9 @@ impl<'a> TextButton<'a> {
         response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, self.name));
         let lit = lit(ui, theme, &response, enabled, self.shown, Hover::Fades);
         // M3: at full the label resolves from glyphs when the pointer comes on; the characters that read so far.
+        let bare = self.bare();
         let resolved = crate::scramble::count(&label)
+            .filter(|_| !bare)
             .and_then(|count| crate::scramble::hover(ui.ctx(), response.id, enabled && self.shown.is_none() && response.hovered(), count));
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
@@ -411,6 +446,15 @@ impl<'a> TextButton<'a> {
             // Disabled is a dashed `line` edge round a box, never a fade; a plain button has no box to dash.
             if !enabled && self.tone != Tone::Plain {
                 paint::dashed(painter, rect, p.line);
+            }
+            if bare {
+                if let Some(icon) = self.icon {
+                    crate::iconset::paint(painter, egui::Rect::from_center_size(rect.center(), vec2(icon_side, icon_side)), icon, ink);
+                }
+                if lit.focus {
+                    paint::focus_ring(painter, theme, rect, Ring::Outside);
+                }
+                return tooltip::attach_note(response, theme, keymap, self.name, action, self.note);
             }
             let mut x = rect.left() + PAD;
             if let Some(icon) = self.icon {

@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The index: the window's left column on the `panel`, 232 wide (56 narrow). From its top, 12 down: the five places
-//! `[ 00 ] HOME` … `[ 04 ] SETTINGS`, and under MAIL the mailboxes: the shared ones (Inbox, New senders, Drafts, the
-//! Outbox while anything is in it, Sent, Archive, Junk, Bin), 8 apart, then one row per account that opens to its own
-//! folders. Only the mailboxes scroll: when they do not fit, they take the room the places and the owner's row leave,
+//! The index: the window's left column on the `panel`, 232 wide (56 narrow). From its top, 12 down: New message, a
+//! secondary button as wide as the column less 12 at each side (narrow, its glyph alone in a 32 square), 8 over the
+//! places; then the five places `[ 00 ] HOME` … `[ 04 ] SETTINGS`, and under MAIL the mailboxes: the shared ones
+//! (Inbox, New senders, Drafts, the Outbox while anything is in it, Sent, Archive, Junk, Bin), 8 apart, then one row
+//! per account that opens to its own folders. Only the mailboxes scroll: when they do not fit, they take the room the places and the owner's row leave,
 //! between two hairlines, and the rest stay where they are. At the foot, over a hairline, the owner's row (avatar and
 //! address) opens the account picker, a float that narrows the mail to one account or shows them all.
 //!
@@ -19,6 +20,7 @@ use egui::{Id, Rect, Response, Role as AxRole, ScrollArea, Ui, UiBuilder, Widget
 use inboxcraft_model::Role;
 
 use crate::component::account_row::{self, AccountRow, Sync};
+use crate::component::button::TextButton;
 use crate::component::mailbox_row::{self, MailboxRow};
 use crate::component::nav_row::{self, NavRow, Standing, base};
 use crate::component::{avatar, popup, tooltip};
@@ -51,6 +53,8 @@ pub(crate) struct Asked {
     pub account: Option<Option<u64>>,
     /// An account row pressed: its folders open or close ([`toggle`]).
     pub toggle: Option<u64>,
+    /// New message pressed: a new message to write (`compose.new`, as its key).
+    pub compose: bool,
 }
 
 /// The most characters of a name a row keeps.
@@ -58,6 +62,10 @@ pub(crate) const MOST_NAME: usize = 64;
 
 /// The room above the first place, in points.
 const TOP: f32 = 12.0;
+
+/// The room beside New message, left and right, and under it, in points.
+const NEW_SIDE: f32 = 12.0;
+const NEW_UNDER: f32 = 8.0;
 
 /// The gap between the shared mailboxes and the accounts, in points.
 const GAP: f32 = 8.0;
@@ -323,8 +331,9 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let mut asked = Asked::default();
     let place_high = Theme::size(theme, nav_row::HEIGHT);
     let owner_high = Theme::size(theme, OWNER);
-    // The room the mailboxes may take: what the places, the owner's row and the hairlines leave.
-    let room = (rect.height() - TOP - place_high * 5.0 - owner_high - 3.0).max(0.0);
+    let new_high = crate::component::control_side(theme) + NEW_UNDER;
+    // The room the mailboxes may take: what New message, the places, the owner's row and the hairlines leave.
+    let room = (rect.height() - TOP - new_high - place_high * 5.0 - owner_high - 3.0).max(0.0);
     let open: BTreeSet<u64> = ui.data(|data| data.get_temp::<BTreeSet<u64>>(open_id())).unwrap_or_default();
     let lines = lines(mailbox, &open);
     let whole: f32 = lines.iter().map(|line| line.height(theme)).sum();
@@ -335,6 +344,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let column = Rect::from_min_max(pos2(rect.left(), rect.top() + TOP), rect.max);
     ui.scope_builder(UiBuilder::new().max_rect(column).id_salt("index-column"), |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        asked.compose = new_message(ui, theme, keymap, mailbox, narrow);
         if place(ui, theme, keymap, Place::Home, at, 0, narrow).clicked() {
             asked.place = Some(Place::Home);
         }
@@ -390,6 +400,27 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     asked.toggle = toggled;
     owner(ui, theme, mailbox, rect, (narrow, live), &mut asked);
     asked
+}
+
+/// New message at the top of the index, in a row of its own: the secondary button with the compose glyph, its name and
+/// its key's chip at the right edge (narrow, the glyph alone in a square, its name and key in its tooltip). It cannot be
+/// pressed without an account, its tooltip saying why. Whether it was pressed.
+fn new_message(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, narrow: bool) -> bool {
+    let side = crate::component::control_side(theme);
+    let top = ui.cursor().top();
+    let left = ui.max_rect().left() + NEW_SIDE;
+    let width = (ui.max_rect().width() - NEW_SIDE * 2.0).max(side);
+    let row = Rect::from_min_size(pos2(left, top), vec2(if narrow { side } else { width }, side));
+    let mut pressed = false;
+    ui.scope_builder(UiBuilder::new().max_rect(row).id_salt("index-new-message"), |ui| {
+        let button = TextButton::new(tr!("New message")).secondary().icon(IconId::Compose).action(keymap::COMPOSE).key(true);
+        let button = if narrow { button.icon_only() } else { button.fill(width) };
+        let button = if mailbox.accounts().is_empty() { button.unavailable(super::command::refusal(keymap::COMPOSE)) } else { button };
+        let response = button.show(ui, theme, keymap);
+        pressed = crate::component::button::owner_pressed(ui, &response);
+    });
+    ui.advance_cursor_after_rect(Rect::from_min_size(pos2(ui.max_rect().left(), top), vec2(ui.max_rect().width(), side + NEW_UNDER)));
+    pressed
 }
 
 /// The mailboxes' place without an account: "No account yet." and the link that opens the settings.
