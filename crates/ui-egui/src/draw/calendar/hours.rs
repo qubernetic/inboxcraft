@@ -114,7 +114,8 @@ pub(super) fn show_from(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &
 
     let area = Rect::from_min_max(pos2(rect.left(), hours_top), rect.max);
     ui.scope_builder(UiBuilder::new().max_rect(area).id_salt("calendar-hours-area"), |ui| {
-        let scrolled = Id::unique("inboxcraft-calendar-hours-scrolled");
+        // Each hours' own: the view's, and the day beside the full editor's, each starts at the morning once.
+        let scrolled = ui.scope_id().with("inboxcraft-calendar-hours-scrolled");
         let mut scroll = ScrollArea::vertical().id_salt("calendar-hours").auto_shrink([false, false]);
         if !ui.ctx().data(|data| data.get_temp::<bool>(scrolled).unwrap_or(false)) {
             let earliest = events.iter().filter(|event| !event.is_block()).map(|event| event.start.minute / 60).fold(MORNING, u16::min);
