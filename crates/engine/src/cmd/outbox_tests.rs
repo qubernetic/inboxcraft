@@ -110,3 +110,97 @@ fn a_refused_draft_is_sent_again_by_command() {
     assert!(bad(session.run("outbox.retry", &json!({ "id": "1" }))));
     assert!(bad(session.run("outbox.retry", &json!({ "id": id, "to": "x" }))));
 }
+
+/// The `outbox.retry` params that send the refused draft `id` as `outbox.list` shows it now.
+fn as_listed(session: &mut Session, id: u64) -> Value {
+    let listed = items(session);
+    let item = listed.iter().find(|item| item["draft"] == json!(id)).unwrap();
+    json!({ "id": id, "seen": item["seen"].clone() })
+}
+
+/// The envelope of the one send job waiting.
+fn envelope(session: &mut Session) -> Vec<String> {
+    let jobs = session.take_jobs();
+    match jobs.as_slice() {
+        [job] => match &job.kind {
+            JobKind::Send { recipients, .. } => recipients.iter().map(|address| address.as_str().to_owned()).collect(),
+            other => panic!("not a send: {other:?}"),
+        },
+        _ => panic!("{jobs:?}"),
+    }
+}
+
+#[test]
+fn the_outbox_lists_every_recipient_and_what_changed_since_the_refusal() {
+    let (mut session, clock) = session();
+    let id = sent(&mut session, &clock, "Budget");
+    failed(&mut session, id, ErrorKind::MessageRefused, Some("550 5.1.1 No such user"));
+    let listed = items(&mut session);
+    assert_eq!((&listed[0]["cc"], &listed[0]["bcc"], &listed[0]["changed"]), (&json!([]), &json!([]), &json!([])));
+    assert!(listed[0]["seen"].is_string(), "{listed:?}");
+    // An agent may change a draft, a refused one too: the outbox says what changed, Bcc as Bcc.
+    let update = json!({ "id": id, "cc": ["Ann <ann@example.org>"], "bcc": ["Mallory <mallory@example.org>"], "text": "New" });
+    session.run_as(Caller::Agent, "compose.update", &update).unwrap();
+    let listed = items(&mut session);
+    assert_eq!(listed[0]["to"], json!(["Béla <bela@example.org>"]));
+    assert_eq!(listed[0]["cc"], json!(["Ann <ann@example.org>"]));
+    assert_eq!(listed[0]["bcc"], json!(["Mallory <mallory@example.org>"]));
+    assert_eq!(listed[0]["changed"], json!(["cc", "bcc", "text"]));
+}
+
+#[test]
+fn a_refused_send_changed_since_goes_again_only_as_the_owner_saw_it() {
+    let (mut session, clock) = session();
+    let id = sent(&mut session, &clock, "Budget");
+    failed(&mut session, id, ErrorKind::MessageRefused, Some("550 5.1.1 No such user"));
+    let update = json!({ "id": id, "bcc": ["Mallory <mallory@example.org>"] });
+    session.run_as(Caller::Agent, "compose.update", &update).unwrap();
+    // Retry as before is refused: it would go to a recipient the owner was not shown.
+    assert!(bad(session.run("outbox.retry", &json!({ "id": id }))));
+    // Nor may an agent send it, shown or not.
+    let seen = as_listed(&mut session, id);
+    assert!(matches!(session.run_as(Caller::Agent, "outbox.retry", &seen), Err(EngineError::NotAllowed { .. })));
+    // What was not shown does not pass.
+    assert!(bad(session.run("outbox.retry", &json!({ "id": id, "seen": "0" }))));
+    assert!(session.take_jobs().is_empty());
+    assert!(matches!(session.store().outbox().unwrap()[0].state, OutboxState::Refused { .. }));
+    // As the owner saw it, every recipient listed, it goes.
+    let answer = session.run("outbox.retry", &seen).unwrap();
+    assert_eq!(answer["state"], json!("waiting"));
+    clock.advance(session.send_hold().duration());
+    session.tick().unwrap();
+    assert_eq!(envelope(&mut session), ["bela@example.org", "mallory@example.org"]);
+    // Sent again, it is what the owner last saw: refused again, nothing changed since.
+    failed(&mut session, id, ErrorKind::MessageRefused, Some("451 4.3.0 Try again later"));
+    assert_eq!(items(&mut session)[0]["changed"], json!([]));
+}
+
+#[test]
+fn a_change_after_the_owner_looked_is_not_sent() {
+    let (mut session, clock) = session();
+    let id = sent(&mut session, &clock, "Budget");
+    failed(&mut session, id, ErrorKind::MessageRefused, Some("550 5.1.1 No such user"));
+    session.run_as(Caller::Agent, "compose.update", &json!({ "id": id, "cc": ["Ann <ann@example.org>"] })).unwrap();
+    let seen = as_listed(&mut session, id);
+    // Between the look and the press, the recipients change again.
+    session.run_as(Caller::Agent, "compose.update", &json!({ "id": id, "bcc": ["Mallory <mallory@example.org>"] })).unwrap();
+    assert!(bad(session.run("outbox.retry", &seen)));
+    assert!(session.take_jobs().is_empty());
+    // Changed back to just what the owner sent, it goes as before, nothing to look at again.
+    session.run_as(Caller::Agent, "compose.update", &json!({ "id": id, "cc": [], "bcc": [] })).unwrap();
+    assert_eq!(items(&mut session)[0]["changed"], json!([]));
+    send_now(&mut session, &clock, "outbox.retry", id);
+    assert_eq!(envelope(&mut session), ["bela@example.org"]);
+}
+
+#[test]
+fn a_refused_send_kept_without_how_it_went_counts_as_changed() {
+    let (mut session, clock) = session();
+    let id = sent(&mut session, &clock, "Budget");
+    let refused = OutboxState::Refused { reply: "550 5.1.1 No such user".to_owned() };
+    crate::test_support::change(&mut session, inboxcraft_store::Change::PutOutgoing(inboxcraft_model::Outgoing::new(DraftId::new(id), refused)));
+    assert_eq!(items(&mut session)[0]["changed"], json!(["unknown"]));
+    assert!(bad(session.run("outbox.retry", &json!({ "id": id }))));
+    let seen = as_listed(&mut session, id);
+    session.run("outbox.retry", &seen).unwrap();
+}
