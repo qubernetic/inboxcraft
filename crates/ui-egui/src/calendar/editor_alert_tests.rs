@@ -103,6 +103,8 @@ fn a_default_or_custom_alert_is_never_sent() {
     let mut editor = Editor::edit(&row(Some(json!(30))));
     editor.form_mut().alert = Alert::Default;
     assert_eq!(editor.changes(Offset::UTC), Ok(None), "the default is no choice of the field");
+    editor.form_mut().alert = Alert::Custom;
+    assert_eq!(editor.changes(Offset::UTC), Ok(None), "nor is custom");
 }
 
 #[test]
