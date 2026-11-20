@@ -785,17 +785,23 @@ pub(crate) fn shown(text: &str) -> String {
 }
 
 /// Whether a person's `name` may be shown for them: it holds no at sign (it could be taken for another address than
-/// theirs) and something that shows (not only spaces, control, bidi or other invisible characters). Where it may
-/// not, the address is shown instead.
+/// theirs) and something that shows (not only spaces, control, bidi, blank-looking or other invisible characters).
+/// Where it may not, the address is shown instead.
 pub(crate) fn plainly_named(name: &str) -> bool {
     let at = |c: char| matches!(c, '@' | '\u{FF20}' | '\u{FE6B}');
-    let invisible = |c: char| {
-        c.is_whitespace()
-            || c.is_control()
-            || matches!(c, '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}')
-            || matches!(c, '\u{2060}'..='\u{206F}' | '\u{FEFF}')
-    };
-    !name.chars().any(at) && name.chars().any(|c| !invisible(c))
+    !name.chars().any(at) && name.chars().any(|c| !looks_blank(c))
+}
+
+/// Whether `c` draws nothing a reader could see: a space, a control character, the Braille blank, or a code point
+/// Unicode makes default-ignorable (soft hyphen, the Hangul fillers, zero-width and bidi marks, variation selectors,
+/// the musical format marks, tag characters and the rest of that property).
+fn looks_blank(c: char) -> bool {
+    c.is_whitespace()
+        || c.is_control()
+        || matches!(c, '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}' | '\u{1160}' | '\u{17B4}' | '\u{17B5}' | '\u{180B}'..='\u{180F}')
+        || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{2800}' | '\u{3164}')
+        || matches!(c, '\u{FE00}'..='\u{FE0F}' | '\u{FEFF}' | '\u{FFA0}' | '\u{FFF0}'..='\u{FFF8}')
+        || matches!(c, '\u{1BCA0}'..='\u{1BCA3}' | '\u{1D173}'..='\u{1D17A}' | '\u{E0000}'..='\u{E0FFF}')
 }
 
 /// The first sender's name, or the address when it has none.
