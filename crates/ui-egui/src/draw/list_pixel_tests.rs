@@ -121,3 +121,71 @@ fn the_screener_card_centres_review_on_its_64() {
         assert_eq!(pressed.top() - top, (card - review) / 2.0, "{scale:?}: Review {pressed:?} in the card from {top}");
     }
 }
+
+/// The texts painted in the list's head line, left to right: what each shows (an elided run ends in `…`) and where.
+fn head_texts(harness: &Harness<'static, InboxApp>, head: f32) -> Vec<(String, Rect)> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<(String, Rect)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Text(text) => {
+                let shown: String = text.galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+                found.push((shown, text.galley.rect.translate(text.pos.to_vec2())));
+            }
+            _ => {}
+        }
+    }
+    let pane = list(harness);
+    let line = Rect::from_min_size(pane.min, vec2(pane.width(), head));
+    let mut found = Vec::new();
+    for clipped in &harness.output().shapes {
+        walk(&clipped.shape, &mut found);
+    }
+    found.retain(|(text, rect)| !text.trim().is_empty() && line.contains(rect.center()));
+    found.sort_by(|a, b| a.1.left().total_cmp(&b.1.left()));
+    found
+}
+
+/// The one-line head beside the 440 list never cuts what the list holds: whose mail gives way first, with one `…`, and
+/// the count stays whole, in the List view and narrowed to the long account, at 100 and 130 % (#325, I-3).
+#[test]
+fn the_list_head_cuts_whose_mail_before_the_count() {
+    for (scale, head) in [(TextScale::default(), 48.0), (TextScale::from_percent(130).unwrap(), 62.0)] {
+        for narrowed in [false, true] {
+            let mut harness = grouped(1440.0, scale);
+            let mailbox = harness.state_mut().mailbox_mut();
+            if narrowed {
+                let long = mailbox.accounts().iter().find(|account| account.address.starts_with("holloway")).map(|account| account.id);
+                mailbox.narrow(long);
+            } else {
+                mailbox.set_inbox_view(crate::mailbox::InboxView::List);
+            }
+            harness.run();
+            harness.run();
+            let count = harness.state().mailbox().list_count();
+            let whose = harness.state().mailbox().subtitle();
+            let at = format!("{scale:?} narrowed {narrowed}");
+            assert!((list(&harness).width() - 441.0).abs() <= 1.0, "{at}: the list 440 wide");
+            let texts = head_texts(&harness, head);
+            let shown: String = texts.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" ");
+            assert!(shown.contains(&count), "{at}: the count {count:?} whole in {texts:?}");
+            assert!(shown.matches('…').count() <= 1, "{at}: one ellipsis at most: {texts:?}");
+            let whose_shown = texts.iter().find(|(text, _)| text.contains('…') || text.contains(&whose)).map(|(text, _)| text.clone());
+            let whose_shown = whose_shown.unwrap_or_default();
+            let kept = whose_shown.trim_end_matches('…');
+            assert!(!kept.is_empty() && whose.starts_with(kept), "{at}: whose mail {whose:?} cut from its end: {texts:?}");
+            // Nothing in the words runs under the view switch where it stands in the head (with too little room it
+            // stands on the filters' line).
+            if let Some(switch) =
+                harness.query_by_role_and_label(Role::RadioGroup, "the inbox").filter(|switch| switch.rect().top() < list(&harness).top() + head)
+            {
+                let right = texts
+                    .iter()
+                    .filter(|(text, _)| !["Grouped", "Smart", "List"].iter().any(|word| text.contains(word)))
+                    .map(|(_, rect)| rect.right());
+                for edge in right {
+                    assert!(edge <= switch.rect().left() + 0.5, "{at}: the words end {edge} before the switch {:?}", switch.rect());
+                }
+            }
+        }
+    }
+}

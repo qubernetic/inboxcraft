@@ -91,8 +91,8 @@ const FILTERS: f32 = 36.0;
 /// The room between the place and what it holds, and before the view switch, in points.
 const HEAD_GAP: f32 = 10.0;
 
-/// The least room the place and what it holds keep left of the view switch; with less, the switch stands at the
-/// start of the filters' line.
+/// The least room the place and what it holds keep left of the view switch (more if the place and the whole count need
+/// it); with less, the switch stands at the start of the filters' line.
 const HEAD_WORDS_LEAST: f32 = 120.0;
 
 /// The view switch of the unified inbox, as the design file words and orders it: Grouped, Smart, List ([`InboxView::ALL`]'s
@@ -215,13 +215,53 @@ fn head_line(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) 
     let inner = Rect::from_min_max(pos2(rect.left() + pad, rect.top()), pos2((rect.right() - pad).max(rect.left() + pad), rect.bottom()));
     let options = view_switch().map(|(view, text)| (view, text, theme.fonts.button));
     let switch_wide = crate::component::segmented::width(ui, theme, &options);
-    let switch = switch_shown(mailbox) && inner.width() >= switch_wide + HEAD_GAP + HEAD_WORDS_LEAST;
+    let (whose, holds) = subtitle(mailbox);
+    let wide = |ui: &Ui, font: crate::theme::Font, text: &str| {
+        egui::WidgetText::from(font.rich(text))
+            .into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::FontSelection::Default)
+            .size()
+            .x
+    };
+    // The place, the whole count and, if it says, two letters of whose mail keep their room left of the switch; with
+    // less, the switch goes down.
+    let title = mailbox.title();
+    let joined = whose.as_ref().map(|_| tr!("· {shown}", shown = holds));
+    let shortest: Option<String> = whose.as_ref().map(|whose| whose.chars().take(2).chain(['…']).collect());
+    // A space stands between whose mail and the count, as in one run of text: the joined run is that much wider.
+    let after_whose = joined.as_ref().map(|joined| {
+        let alone = wide(ui, theme.fonts.mono_s, joined);
+        (alone + (wide(ui, theme.fonts.mono_s, &format!(" {joined}")) - alone).max(0.0), alone)
+    });
+    let words_least = match (&after_whose, &shortest) {
+        (Some((spaced, _)), Some(shortest)) => wide(ui, theme.fonts.mono_s, shortest) + spaced,
+        _ => wide(ui, theme.fonts.mono_s, &holds),
+    };
+    let least = HEAD_WORDS_LEAST.max(wide(ui, theme.fonts.heading, &title) + HEAD_GAP + words_least);
+    let switch = switch_shown(mailbox) && inner.width() >= switch_wide + HEAD_GAP + least;
     let words_right = if switch { inner.right() - switch_wide - HEAD_GAP } else { inner.right() };
     let words = Rect::from_min_max(inner.min, pos2(words_right.max(inner.left()), inner.bottom()));
     let mut line = ui.new_child(UiBuilder::new().max_rect(words).layout(Layout::left_to_right(Align::Center)));
     line.spacing_mut().item_spacing.x = HEAD_GAP;
-    line.add(egui::Label::new(theme.fonts.heading.rich(&mailbox.title()).color(p.ink)).truncate());
-    line.add(egui::Label::new(theme.fonts.mono_s.rich(&subtitle(mailbox)).color(p.muted)).truncate());
+    line.add(egui::Label::new(theme.fonts.heading.rich(&title).color(p.ink)).truncate());
+    let holds = match (whose, joined, shortest, after_whose) {
+        (Some(whose), Some(joined), Some(shortest), Some((spaced, alone))) => {
+            // Whose mail gives way first, with one `…`, and goes when not two of its letters fit; what the list holds
+            // stays whole while it fits alone.
+            let room = (line.available_width() - spaced).max(0.0);
+            if room >= wide(&line, theme.fonts.mono_s, &shortest) {
+                line.spacing_mut().item_spacing.x = spaced - alone;
+                let at = Rect::from_min_size(line.cursor().min, vec2(room, line.available_height()));
+                line.scope_builder(UiBuilder::new().max_rect(at).layout(Layout::left_to_right(Align::Center)), |ui| {
+                    ui.add(egui::Label::new(theme.fonts.mono_s.rich(&whose).color(p.muted)).truncate());
+                });
+                joined
+            } else {
+                holds
+            }
+        }
+        _ => holds,
+    };
+    line.add(egui::Label::new(theme.fonts.mono_s.rich(&holds).color(p.muted)).truncate());
     if switch {
         let high = theme.boxes().button;
         let at = Rect::from_min_size(pos2(inner.right() - switch_wide, rect.center().y - high / 2.0), vec2(switch_wide, high));
@@ -233,20 +273,20 @@ fn head_line(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) 
     switch || !switch_shown(mailbox)
 }
 
-/// What the list holds, beside its place in the head: whose mail and how much, or the outbox's summary.
-fn subtitle(mailbox: &Mailbox) -> String {
+/// What the list holds, beside its place in the head: whose mail, if it says, and how much; or the outbox's summary.
+fn subtitle(mailbox: &Mailbox) -> (Option<String>, String) {
     if mailbox.drafts_listed() {
-        return mailbox.drafts_count();
+        return (None, mailbox.drafts_count());
     }
     // The unified inbox of every account, in a view with groups, holds what is left to read, as the design words it
     // (the List view still counts its messages after whose they are).
     if switch_shown(mailbox) && mailbox.narrowed().is_none() && !mailbox.groups().is_empty() {
         let count = mailbox.messages().iter().filter(|row| !row.seen).count();
-        return tr!("{count} to read", count = count);
+        return (None, tr!("{count} to read", count = count));
     }
     match mailbox.outbox_summary().filter(|_| mailbox.place() == Place::Outbox && mailbox.query().is_empty()) {
-        Some(summary) => summary,
-        None => tr!("{whose} · {shown}", whose = mailbox.subtitle(), shown = mailbox.list_count()),
+        Some(summary) => (None, summary),
+        None => (Some(mailbox.subtitle()), mailbox.list_count()),
     }
 }
 
