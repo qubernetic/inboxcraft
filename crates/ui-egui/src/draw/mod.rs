@@ -626,7 +626,7 @@ impl InboxApp {
     ) -> (index::Asked, Vec<command::Asked>) {
         // The command line first, the title bar in the own frame: its field and the window controls stand above the
         // index, and Tab walks the drawn order.
-        self.own_frame_parts(command, theme, regions.command);
+        self.own_frame_parts(command, theme, regions);
         let commanded = self.command_line(command, theme, regions, keys);
         if self.draws_frame() {
             frame::controls(command.ctx(), theme, regions.command);
@@ -2774,8 +2774,9 @@ impl InboxApp {
 
     /// The command line's mark, and the app's own frame before the panes when it draws one: the command line `line` as
     /// the title bar (its handle, before the field and the controls take their presses) and the resizing edges.
-    fn own_frame_parts(&self, ui: &Ui, theme: &Theme, line: Rect) {
-        frame::mark(ui, theme, line);
+    fn own_frame_parts(&self, ui: &Ui, theme: &Theme, regions: shell::Regions) {
+        let line = regions.command;
+        frame::mark(ui, theme, line, regions.index.width() < shell::INDEX);
         if !self.draws_frame() {
             return;
         }
