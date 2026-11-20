@@ -467,6 +467,26 @@ pub struct OutboxRow {
     pub state: SendState,
     /// It answers an invitation: sent again as it is, never edited.
     pub invite_answer: bool,
+    /// Every recipient as one line, To, Cc and Bcc each named: "To Odile · Cc Ann · Bcc Béla". Built when the outbox
+    /// is read, each line listing at most [`MAX_LISTED`] recipients and counting the rest.
+    pub addressed: String,
+    /// What changed in a refused send's draft since it was sent, in the engine's words (`to`, `bcc`, `text`, …; at
+    /// most the eight it names), so it is not sent again unseen.
+    pub changed: Vec<String>,
+    /// The engine's mark of a refused send's draft as listed: Send again passes it, so what goes is what was shown.
+    pub seen: Option<String>,
+}
+
+/// The most recipients an outbox row's line lists of each of To, Cc and Bcc; the rest are counted.
+pub const MAX_LISTED: usize = 20;
+
+/// What Send again did with a refused send.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retried {
+    /// It was sent again: the time it goes, held as every send is.
+    Sent(Option<Timestamp>),
+    /// It changed since it was refused: nothing went, and its row now asks to send it as it is now.
+    Asked,
 }
 
 /// A kept draft as the drafts place lists it, from `compose.list`. Its words are the owner's own text, read capped
@@ -688,6 +708,9 @@ pub struct Mailbox {
     presets: Vec<(String, Timestamp)>,
     /// The outbox, from `outbox.list`.
     outbox: Vec<OutboxRow>,
+    /// The refused send that changed since it was sent whose Send again was pressed once, and its mark then: the row
+    /// asks to send it as it is now, and a second press sends it while the mark is the same.
+    retry_asked: Option<(u64, String)>,
     /// The drafts the drafts place lists, from `compose.list`, read while it shows.
     drafts: Vec<DraftItem>,
     /// [`Mailbox::draft_writes`] when [`Mailbox::drafts`] was last read: a draft written since reads them again.
@@ -827,9 +850,49 @@ fn recipient(text: &str) -> (String, String) {
     }
 }
 
+/// The names of the recipients in `value`'s list `key`: at most [`MAX_LISTED`] read, and how many there are.
+fn named(value: &Value, key: &str) -> (Vec<(String, String)>, usize) {
+    let all = value.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    (all.iter().filter_map(Value::as_str).take(MAX_LISTED).map(recipient).collect(), all.len())
+}
+
+/// The outbox row's one line of recipients: To, then Cc and Bcc where they hold any, each at most [`MAX_LISTED`]
+/// names and how many more.
+fn addressed(lines: [(&[(String, String)], usize); 3]) -> String {
+    let [to, cc, bcc] = lines.map(|(names, all)| {
+        let listed = names.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ");
+        match all.saturating_sub(names.len()) {
+            0 => listed,
+            more => tr!("{listed} and {more} more", listed = listed, more = more),
+        }
+    });
+    let mut line = if to.is_empty() { tr!("To {whom}", whom = tr!("(no recipient)")) } else { tr!("To {whom}", whom = to) };
+    if !cc.is_empty() {
+        line = tr!("{line} · Cc {whom}", line = line, whom = cc);
+    }
+    if !bcc.is_empty() {
+        line = tr!("{line} · Bcc {whom}", line = line, whom = bcc);
+    }
+    line
+}
+
+/// The parts of a draft the engine names as changed (`outbox.list`'s `changed`); anything else is left out.
+const CHANGES: [&str; 9] = ["from", "to", "cc", "bcc", "subject", "text", "attachments", "invitation", "unknown"];
+
 fn outbox_row(value: &Value) -> OutboxRow {
-    let to: Vec<(String, String)> =
-        value.get("to").and_then(Value::as_array).map(|to| to.iter().filter_map(Value::as_str).map(recipient).collect()).unwrap_or_default();
+    let (to, all_to) = named(value, "to");
+    let (cc, all_cc) = named(value, "cc");
+    let (bcc, all_bcc) = named(value, "bcc");
+    let addressed = addressed([(&to, all_to), (&cc, all_cc), (&bcc, all_bcc)]);
+    let changed = value
+        .get("changed")
+        .and_then(Value::as_array)
+        .map(|changed| {
+            changed.iter().filter_map(Value::as_str).filter(|part| CHANGES.contains(part)).take(CHANGES.len()).map(str::to_owned).collect()
+        })
+        .unwrap_or_default();
+    let seen =
+        value.get("seen").and_then(Value::as_str).filter(|seen| seen.len() <= 32 && seen.bytes().all(|b| b.is_ascii_hexdigit())).map(str::to_owned);
     let state = match value.get("state").and_then(Value::as_str) {
         Some("sending") => SendState::Sending,
         Some("refused") => {
@@ -845,6 +908,9 @@ fn outbox_row(value: &Value) -> OutboxRow {
         to: to.into_iter().map(|(name, _)| name).collect(),
         state,
         invite_answer: value.get("invite_answer").and_then(Value::as_bool).unwrap_or(false),
+        addressed,
+        changed,
+        seen,
     }
 }
 
@@ -955,6 +1021,7 @@ impl Mailbox {
             piles: [0; 3],
             presets: Vec::new(),
             outbox: Vec::new(),
+            retry_asked: None,
             drafts: Vec::new(),
             drafts_read: None,
             drafts_counted: None,
@@ -2579,13 +2646,46 @@ impl Mailbox {
             SendState::Refused { reply, .. } => tr!("Not sent: {reply}", reply = reply),
             _ => self.standing(row),
         };
-        tr!("To {whom}, {subject}, {standing}", whom = self.recipients(row), subject = subject, standing = standing)
+        match self.changes_shown(row) {
+            Some(changes) => {
+                tr!("{whom}, {subject}, {standing}, {changes}", whom = row.addressed, subject = subject, standing = standing, changes = changes)
+            }
+            None => tr!("{whom}, {subject}, {standing}", whom = row.addressed, subject = subject, standing = standing),
+        }
     }
 
-    /// Whom the send `row` goes to, as its row says it.
+    /// What changed in the refused send `row` since it was sent, as its row says it: "Changed since it was refused:
+    /// Bcc, text"; `None` when nothing did.
     #[must_use]
-    pub fn recipients(&self, row: &OutboxRow) -> String {
-        if row.to.is_empty() { tr!("(no recipient)").to_owned() } else { row.to.join(", ") }
+    pub fn changes_shown(&self, row: &OutboxRow) -> Option<String> {
+        if row.changed.is_empty() {
+            return None;
+        }
+        if row.changed.iter().any(|part| part == "unknown") {
+            return Some(tr!("May have changed since it was refused").to_owned());
+        }
+        let parts: Vec<&str> = row
+            .changed
+            .iter()
+            .map(|part| match part.as_str() {
+                "from" => tr!("From"),
+                "to" => tr!("To"),
+                "cc" => tr!("Cc"),
+                "bcc" => tr!("Bcc"),
+                "subject" => tr!("subject"),
+                "text" => tr!("text"),
+                "attachments" => tr!("attachments"),
+                _ => tr!("invitation"),
+            })
+            .collect();
+        Some(tr!("Changed since it was refused: {parts}", parts = parts.join(", ")))
+    }
+
+    /// Whether Send again was pressed once on the changed refused send `row`, as it is listed now: a second press
+    /// sends it as it is now.
+    #[must_use]
+    pub fn retry_asked(&self, row: &OutboxRow) -> bool {
+        self.retry_asked.as_ref().is_some_and(|(draft, seen)| *draft == row.draft && row.seen.as_ref() == Some(seen))
     }
 
     /// Takes the waiting send of `draft` back (`mail.unsend`): out of the outbox, its draft as it was, to be opened
@@ -2600,16 +2700,32 @@ impl Mailbox {
         result
     }
 
-    /// Sends the refused draft `draft` again (`outbox.retry`), held as every send is; the time it goes. The lists are
-    /// read again.
+    /// Send again on the refused send of `draft` (`outbox.retry`). One whose draft changed since it was sent is not
+    /// sent at the first press: its row asks, with every recipient and what changed, and only a second press sends it,
+    /// as listed. Every send again passes the mark of the draft as listed, so nothing goes that the row did not show:
+    /// when the draft changed since, the engine refuses it. Held as every send is; the lists are read again.
     ///
     /// # Errors
     ///
-    /// The command's refusal: the draft cannot be sent as it is, or it was not refused.
-    pub fn retry(&mut self, draft: u64) -> Result<Option<Timestamp>, UiError> {
-        let answer = self.run("outbox.retry", &json!({ "id": draft }));
+    /// The command's refusal: the draft cannot be sent as it is, it changed since it was listed, or it was not refused.
+    pub fn retry(&mut self, draft: u64) -> Result<Retried, UiError> {
+        let row = self.outbox.iter().find(|row| row.draft == draft);
+        let seen = row.and_then(|row| row.seen.clone());
+        if let Some(row) = row
+            && !row.changed.is_empty()
+            && !self.retry_asked(row)
+        {
+            self.retry_asked = seen.map(|seen| (draft, seen));
+            return Ok(Retried::Asked);
+        }
+        self.retry_asked = None;
+        let params = match seen {
+            Some(seen) => json!({ "id": draft, "seen": seen }),
+            None => json!({ "id": draft }),
+        };
+        let answer = self.run("outbox.retry", &params);
         self.refresh();
-        Ok(answer?.get("at").and_then(Value::as_str).and_then(parse_date))
+        Ok(Retried::Sent(answer?.get("at").and_then(Value::as_str).and_then(parse_date)))
     }
 
     /// How long every send is held before it goes, in seconds.

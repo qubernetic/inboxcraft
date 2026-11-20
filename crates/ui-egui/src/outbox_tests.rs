@@ -10,7 +10,7 @@ use inboxcraft_store::{Batch, Change, Storage as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::json;
 
-use super::{Mailbox, Place, SendState};
+use super::{Mailbox, Place, Retried, SendState};
 use crate::compose::{Composer, Line};
 use crate::sample;
 use crate::workers::Scripted;
@@ -125,7 +125,7 @@ fn a_refused_send_shows_the_servers_reply_and_goes_again_on_retry() {
     assert_eq!(mailbox.standing(&row), "Not sent");
     assert_eq!(mailbox.outbox_summary().as_deref(), Some("1 not sent"));
     assert_eq!(mailbox.spoken_outbox(&row), "To Odile Brannock, Work party on Saturday, Not sent: 550 5.1.1 No such user here");
-    assert_eq!(mailbox.retry(composer.draft()).unwrap(), Some(at(11)), "held again as every send is");
+    assert_eq!(mailbox.retry(composer.draft()).unwrap(), Retried::Sent(Some(at(11))), "held again as every send is");
     assert_eq!(mailbox.outbox().first().map(|row| row.state.clone()), Some(SendState::Waiting(Some(at(11)))));
 }
 

@@ -371,8 +371,10 @@ fn a_refused_invitation_answer_offers_no_edit() {
         let server = Server::new(Host::new("smtp.example.org").unwrap(), Security::Tls.submission_port(), Security::Tls);
         let mut batch = Batch::new();
         batch.push(Change::PutAccount(account.with_submission(Some(server))));
+        // Kept as it went, as every send is: nothing changed since.
+        let outgoing = inboxcraft_model::Outgoing::of(&draft, refused);
         batch.push(Change::PutDraft(draft));
-        batch.push(Change::PutOutgoing(inboxcraft_model::Outgoing::new(inboxcraft_model::DraftId::new(90), refused)));
+        batch.push(Change::PutOutgoing(outgoing));
         store.apply(&batch).unwrap();
         let mailbox = Mailbox::new(Session::new(Box::new(store), Box::new(clock.clone())).unwrap(), Box::new(clock.clone()));
         let mut harness = Harness::builder()
@@ -485,4 +487,123 @@ fn a_countdown_toast_with_a_long_subject_keeps_clear_of_send_at_every_width_and_
         assert!(harness.state().composer().is_none(), "{width} at {percent} %: the press on Send sent the second message");
         assert_eq!(harness.state().mailbox().outbox().len(), 2, "{width} at {percent} %: the first one was not taken back");
     }
+}
+
+/// Sends "Work party on Saturday" to Odile, has the server refuse it, and opens the outbox; the draft.
+fn refused(harness: &mut Harness<'static, InboxApp>, clock: &FakeClock) -> u64 {
+    let draft = send(harness, "Work party on Saturday");
+    clock.advance(Duration::from_secs(6));
+    harness.state_mut().mailbox_mut().pump(&mut Scripted::default().refusing("550 5.1.1 No such user here"));
+    harness.state_mut().mailbox_mut().open(Place::Outbox);
+    harness.run();
+    draft
+}
+
+/// An agent (the control channel) changes the refused draft's recipients.
+fn agent_changes(harness: &mut Harness<'static, InboxApp>, draft: u64, change: &serde_json::Value) {
+    let mut params = change.clone();
+    params["id"] = serde_json::json!(draft);
+    harness.state_mut().mailbox_mut().run_for_agent("compose.update", &params).unwrap();
+    harness.run();
+}
+
+/// A refused send whose recipients an agent changed is not sent again at the first press: its row shows To, Cc and
+/// Bcc and what changed, and only the owner's second press sends it, as shown. An agent cannot send it at all.
+#[test]
+fn a_refused_send_changed_since_shows_every_recipient_and_asks_again() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let clock = clock();
+        let mut harness = sending(&clock, theme);
+        let draft = refused(&mut harness, &clock);
+        agent_changes(&mut harness, draft, &serde_json::json!({ "cc": ["Ann <ann@example.org>"], "bcc": ["Mallory <mallory@example.org>"] }));
+        let row = "To Odile Brannock · Cc Ann · Bcc Mallory, Work party on Saturday, Not sent: 550 5.1.1 No such user here, \
+                   Changed since it was refused: Cc, Bcc";
+        harness.get_by_label(row);
+        // The agent may not send it again, as shown or not.
+        let seen = harness.state().mailbox().outbox()[0].seen.clone().unwrap();
+        let retried = harness.state_mut().mailbox_mut().run_for_agent("outbox.retry", &serde_json::json!({ "id": draft, "seen": seen }));
+        assert!(matches!(retried, Err(inboxcraft_engine::EngineError::NotAllowed { .. })), "{retried:?}");
+        // The owner's first press asks.
+        harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” again").click();
+        harness.run();
+        assert_eq!(harness.state().counting(), None, "nothing went");
+        assert!(matches!(harness.state().mailbox().outbox()[0].state, SendState::Refused { .. }));
+        harness.get_by_label(row);
+        // The second sends it as it is now.
+        harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” as it is now").click();
+        harness.run();
+        assert_eq!(harness.state().counting(), Some((draft, 5)), "held again, counted down");
+        // Refused again, it is what the owner last saw: nothing to ask.
+        clock.advance(Duration::from_secs(6));
+        harness.state_mut().mailbox_mut().pump(&mut Scripted::default().refusing("451 4.3.0 Try again later"));
+        harness.run();
+        assert_eq!(harness.state().mailbox().outbox()[0].changed, Vec::<String>::new());
+        harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” again").click();
+        harness.run();
+        assert_eq!(harness.state().counting(), Some((draft, 5)), "sent at the first press");
+    }
+}
+
+/// A change after the row asked takes the question back; a change the window has not read yet is refused by the
+/// engine, so the second press never sends what the row did not show.
+#[test]
+fn a_change_after_the_row_asked_is_never_sent_unseen() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Light);
+    let draft = refused(&mut harness, &clock);
+    agent_changes(&mut harness, draft, &serde_json::json!({ "cc": ["Ann <ann@example.org>"] }));
+    harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” again").click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” as it is now");
+    // Changed again, and read: the row asks again from the start.
+    agent_changes(&mut harness, draft, &serde_json::json!({ "bcc": ["Mallory <mallory@example.org>"] }));
+    assert!(harness.query_by_label("Send “Work party on Saturday” as it is now").is_none());
+    harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” again").click();
+    harness.run();
+    assert_eq!(harness.state().counting(), None);
+    // Changed again behind the window's back: the press as it is now is refused, and nothing goes.
+    let update = serde_json::json!({ "id": draft, "bcc": ["Eve <eve@example.org>"] });
+    let mailbox = harness.state_mut().mailbox_mut();
+    mailbox.set_caller(inboxcraft_engine::Caller::Agent);
+    mailbox.run("compose.update", &update).unwrap();
+    mailbox.set_caller(inboxcraft_engine::Caller::Owner);
+    harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” as it is now").click();
+    harness.run();
+    assert_eq!(harness.state().counting(), None, "nothing went");
+    assert!(matches!(harness.state().mailbox().outbox()[0].state, SendState::Refused { .. }));
+    harness.get_by_label_contains("Bcc Eve");
+}
+
+/// Hostile recipients stay one clean line in the outbox row: no line break, no direction override.
+#[test]
+fn a_hostile_recipient_is_one_clean_line_in_the_outbox_row() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Dark);
+    let draft = refused(&mut harness, &clock);
+    agent_changes(&mut harness, draft, &serde_json::json!({ "bcc": ["Mal\u{202E}lory\r\nBcc: x <mallory@example.org>"] }));
+    let addressed = harness.state().mailbox().outbox()[0].addressed.clone();
+    assert!(!addressed.contains(['\r', '\n', '\u{202E}']), "{addressed:?}");
+    assert!(addressed.starts_with("To Odile Brannock · Bcc Mallory"), "{addressed:?}");
+}
+
+/// Enter held on Send again asks once and sends nothing: the key's repeats are not the owner's second press.
+#[test]
+fn a_held_enter_on_send_again_never_answers_its_own_question() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Light);
+    let draft = refused(&mut harness, &clock);
+    agent_changes(&mut harness, draft, &serde_json::json!({ "bcc": ["Mallory <mallory@example.org>"] }));
+    harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” again").focus();
+    harness.run();
+    harness.key_down(Key::Enter);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” as it is now");
+    for _ in 0..3 {
+        harness.event(egui::Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: true, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+    harness.key_up(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().counting(), None, "nothing went");
+    assert!(matches!(harness.state().mailbox().outbox()[0].state, SendState::Refused { .. }));
 }

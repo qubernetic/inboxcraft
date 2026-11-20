@@ -2113,10 +2113,12 @@ impl InboxApp {
         }
     }
 
-    /// Sends the refused draft `draft` again (`outbox.retry`), the countdown toast showing its hold.
+    /// Sends the refused draft `draft` again (`outbox.retry`), the countdown toast showing its hold; one that changed
+    /// since it was sent only at the second press, its row asking first ([`Mailbox::retry`]).
     pub fn retry(&mut self, draft: u64) {
         match self.mailbox.retry(draft) {
-            Ok(_) => self.sending = Some(draft),
+            Ok(crate::mailbox::Retried::Sent(_)) => self.sending = Some(draft),
+            Ok(crate::mailbox::Retried::Asked) => {}
             Err(error) => self.mailbox.fail(error),
         }
     }

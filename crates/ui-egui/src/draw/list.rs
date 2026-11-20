@@ -1306,39 +1306,51 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
         (SendState::Sending, _) => Standing::Sending,
         (SendState::Refused { .. }, _) => Standing::Refused,
     };
-    let reply = match &row.state {
-        SendState::Refused { reply, .. } => Some(reply.as_str()),
+    // A refused send whose draft changed since says what changed before the server's reply.
+    let changes = mailbox.changes_shown(row);
+    let reply = match (&row.state, &changes) {
+        (SendState::Refused { reply, .. }, Some(changes)) => Some(tr!("{changes} · {reply}", changes = changes, reply = reply)),
+        (SendState::Refused { reply, .. }, None) => Some(reply.clone()),
         _ => None,
     };
     let label = &row.subject;
     let undo = tr!("Undo the send of “{subject}”", subject = label);
     let take_back = tr!("Take “{subject}” back and edit it", subject = label);
     let again = tr!("Send “{subject}” again", subject = label);
+    let as_now = tr!("Send “{subject}” as it is now", subject = label);
     let edit = tr!("Edit “{subject}”", subject = label);
     let (buttons, asks): (Vec<SendButton<'_>>, Vec<Outbox>) = match standing {
         Standing::Countdown { .. } => (vec![SendButton { name: tr!("Undo"), spoken: &undo }], vec![Outbox::Unsend]),
         Standing::Scheduled => (vec![SendButton { name: tr!("Edit"), spoken: &take_back }], vec![Outbox::Unsend]),
         Standing::Sending => (Vec::new(), Vec::new()),
         // An answer to an invitation changes only from the invitation.
+        // Send again on a send that changed since asked once: the second press sends it as the row shows it now.
+        Standing::Refused if mailbox.retry_asked(row) && row.invite_answer => {
+            (vec![SendButton { name: tr!("Send as it is now"), spoken: &as_now }], vec![Outbox::Retry])
+        }
+        Standing::Refused if mailbox.retry_asked(row) => (
+            vec![SendButton { name: tr!("Send as it is now"), spoken: &as_now }, SendButton { name: tr!("Edit"), spoken: &edit }],
+            vec![Outbox::Retry, Outbox::Edit],
+        ),
         Standing::Refused if row.invite_answer => (vec![SendButton { name: tr!("Send again"), spoken: &again }], vec![Outbox::Retry]),
         Standing::Refused => (
             vec![SendButton { name: tr!("Send again"), spoken: &again }, SendButton { name: tr!("Edit"), spoken: &edit }],
             vec![Outbox::Retry, Outbox::Edit],
         ),
     };
-    let to = tr!("To {whom}", whom = mailbox.recipients(row));
+    let to = &row.addressed;
     let words = mailbox.standing_shown(row);
     let spoken = mailbox.spoken_outbox(row);
     let account = account_marker.then(|| mailbox.account(row.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0)));
     let shown = OutboxRowView {
         id: Id::unique("list-send-row").with(row.draft),
         spoken: &spoken,
-        to: &to,
+        to,
         account,
         subject,
         words: &words,
         standing,
-        reply,
+        reply: reply.as_deref(),
         buttons: &buttons,
         last: slot.last,
     };
