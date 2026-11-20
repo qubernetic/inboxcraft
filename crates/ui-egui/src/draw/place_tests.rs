@@ -246,7 +246,7 @@ pub(super) const OF_THE_MAIL: [&str; 29] = [
 pub(super) const OF_THE_COMPOSER: [&str; 2] = [keymap::SEND, keymap::FOLD];
 
 /// The window's own actions: they run on the settings as off them (a way to a place shows it, leaving the settings).
-pub(super) const THE_WINDOW_S: [&str; 15] = [
+pub(super) const THE_WINDOW_S: [&str; 19] = [
     keymap::FIND,
     keymap::HOME,
     keymap::MAIL,
@@ -261,6 +261,10 @@ pub(super) const THE_WINDOW_S: [&str; 15] = [
     keymap::LIGHT,
     keymap::DARK,
     keymap::SYSTEM_MODE,
+    keymap::TEXT_LARGER,
+    keymap::TEXT_LARGER_EQUALS,
+    keymap::TEXT_SMALLER,
+    keymap::TEXT_RESET,
     keymap::COMPOSE,
 ];
 
