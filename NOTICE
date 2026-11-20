@@ -47,7 +47,12 @@ Third-party material
   egui's five-glyph subset of the emoji icon font (Copyright 2014 John Slegers, MIT). egui's Noto Emoji and the whole
   emoji icon font are not compiled in (the `monochrome_emoji_fonts` feature is off). The licence texts ship in that
   crate's `fonts/` directory.
-- No font ships for the scripts these do not hold: the desktop app draws them with fonts it finds on the computer.
+- Noto Sans Hebrew (release NotoSansHebrew-v3.001), Noto Sans Arabic (NotoSansArabic-v2.013), Noto Sans Devanagari
+  (NotoSansDevanagari-v2.007) and Noto Sans Thai (NotoSansThai-v2.002), Copyright 2022 The Noto Project Authors
+  (https://github.com/notofonts), and Noto Emoji (version 3.006, from Google Fonts), Copyright 2013 Google LLC, all
+  SIL Open Font Licence 1.1: the Regular files under `assets/fonts/noto/`, compiled into the desktop app behind IBM
+  Plex. The licence texts are the `OFL.txt` files beside them.
+- For the scripts none of these hold, the desktop app draws with fonts it finds on the computer.
 - SQLite (https://sqlite.org, public domain) through the rusqlite and libsqlite3-sys crates (MIT), compiled from
   the bundled amalgamation into native builds only; the browser build keeps its in-memory store.
 - Rust dependencies keep their own licences; `cargo deny check licenses` lists them.

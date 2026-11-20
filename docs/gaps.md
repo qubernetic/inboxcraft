@@ -355,10 +355,11 @@ time from the code as it is, not measured.
 - The reader cannot be tested on a real double click in `egui_kittest`, so the list has no double-click shortcut to
   full width; the Full width button is the way (#33).
 - The window's type is IBM Plex Mono and IBM Plex Sans, Regular and SemiBold, in twelve styles, with Audiowide for
-  the product names (#83, #232). Scripts they and egui's fallback faces lack (CJK, Arabic, Hebrew, Thai, Devanagari
-  and others) and emoji are drawn with fonts found on the computer, searched at start on a worker thread and placed
-  behind Plex; where the computer has none for a script, they show as boxes (egui's emoji fonts are not built in).
-  Colour emoji fonts are not used (egui draws outlines only), so emoji need a font with outlines, such as Noto Emoji.
+  the product names (#83, #232). Noto Sans Hebrew, Arabic, Devanagari and Thai and Noto Emoji ship behind Plex in
+  Regular only, so the SemiBold styles draw those scripts in Regular, and emoji are one colour (egui draws outlines,
+  not colour emoji fonts) (#348). Chinese, Japanese and Korean are drawn with fonts found on the computer, searched
+  at start on a worker thread and placed behind the shipped faces; where the computer has none for them, and for
+  the other scripts, they show as boxes.
   Only one sign per script is looked for, so a found font may still lack rarer signs of its script. The folders
   come from fontconfig's files, read by the app with limits (`<dir>`, `<remap-dir>`, `<include>`; nothing else of
   fontconfig's rules); in the Flatpak the host's folders should arrive through the runtime's `<remap-dir>` entries,

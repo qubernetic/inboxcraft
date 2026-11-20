@@ -241,7 +241,11 @@ fn the_fallbacks_go_in_after_the_app_s_first_pass_and_once() {
     };
     pass(&ctx, &mut fallbacks);
     settle(&ctx, &mut fallbacks);
-    assert_eq!(last(&ctx).as_deref(), Some("egui-icons"), "nothing found, nothing installed");
+    assert_eq!(
+        last(&ctx).as_deref(),
+        Some(inboxcraft_ui_egui::theme::SHIPPED_FALLBACKS[4]),
+        "nothing found, nothing installed: the shipped emoji face is last"
+    );
     assert!(!found.put(Vec::new()), "nothing found stays waiting");
     let dir = plex_folder();
     let plex = search_in(dir.path(), &[LATIN]);

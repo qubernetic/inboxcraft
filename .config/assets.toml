@@ -7,7 +7,7 @@
 # `path` in the repository, its `source` (an `id` above), the path it has there (`from`) and its `sha256` (64
 # hexadecimal digits). Paths are relative to the repository root, with `/` and no `.` or `..`.
 
-roots = ["assets/brand", "assets/fonts/plex-mono", "assets/fonts/plex-sans", "assets/fonts/audiowide"]
+roots = ["assets/brand", "assets/fonts/plex-mono", "assets/fonts/plex-sans", "assets/fonts/audiowide", "assets/fonts/noto"]
 
 [[source]]
 id = "ibm-plex"
@@ -17,6 +17,33 @@ version = "@ibm/plex-sans@1.1.0"
 [[source]]
 id = "qubernetic-brand"
 version = "v0.3.0"
+
+[[source]]
+id = "noto-hebrew"
+url = "https://github.com/notofonts/hebrew"
+version = "NotoSansHebrew-v3.001"
+
+[[source]]
+id = "noto-arabic"
+url = "https://github.com/notofonts/arabic"
+version = "NotoSansArabic-v2.013"
+
+[[source]]
+id = "noto-devanagari"
+url = "https://github.com/notofonts/devanagari"
+version = "NotoSansDevanagari-v2.007"
+
+[[source]]
+id = "noto-thai"
+url = "https://github.com/notofonts/thai"
+version = "NotoSansThai-v2.002"
+
+# Google Fonts' download of the family (`https://fonts.google.com/download/list?family=Noto%20Emoji`), font version
+# 3.006, served as `https://fonts.gstatic.com/s/notoemoji/v65/…`.
+[[source]]
+id = "noto-emoji"
+url = "https://fonts.google.com/specimen/Noto+Emoji"
+version = "v65"
 
 [[file]]
 path = "assets/fonts/audiowide/Audiowide-Regular.ttf"
@@ -325,3 +352,64 @@ path = "assets/brand/qubernetic/lockup-horizontal-light-600.png"
 source = "qubernetic-brand"
 from = "logo/png/lockup-horizontal-light-600.png"
 sha256 = "c68d97d7c3495820635644346e8056509a597324c7139048b75cc83b171efe9f"
+
+[[file]]
+path = "assets/fonts/noto/hebrew/NotoSansHebrew-Regular.ttf"
+source = "noto-hebrew"
+from = "NotoSansHebrew-v3.001.zip/NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Regular.ttf"
+sha256 = "04272f5600d0ec816d31d0df73b23aa8d3501ea359ebe820da31c11ffcf00853"
+
+[[file]]
+path = "assets/fonts/noto/hebrew/OFL.txt"
+source = "noto-hebrew"
+from = "NotoSansHebrew-v3.001.zip/OFL.txt"
+sha256 = "9b9fe028b5ba74d231659a1bbaf0ed09b11e759d1ca6a070999e16d151616b47"
+
+[[file]]
+path = "assets/fonts/noto/arabic/NotoSansArabic-Regular.ttf"
+source = "noto-arabic"
+from = "NotoSansArabic-v2.013.zip/NotoSansArabic/unhinted/ttf/NotoSansArabic-Regular.ttf"
+sha256 = "bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0"
+
+[[file]]
+path = "assets/fonts/noto/arabic/OFL.txt"
+source = "noto-arabic"
+from = "NotoSansArabic-v2.013.zip/OFL.txt"
+sha256 = "a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af"
+
+[[file]]
+path = "assets/fonts/noto/devanagari/NotoSansDevanagari-Regular.ttf"
+source = "noto-devanagari"
+from = "NotoSansDevanagari-v2.007.zip/NotoSansDevanagari/unhinted/ttf/NotoSansDevanagari-Regular.ttf"
+sha256 = "9c7d935139ea6a1e6ad9dbac4f6d27ece1e04bca8123c8888d00a0f9df4724cd"
+
+[[file]]
+path = "assets/fonts/noto/devanagari/OFL.txt"
+source = "noto-devanagari"
+from = "NotoSansDevanagari-v2.007.zip/OFL.txt"
+sha256 = "a216f6f8d85c7228093e0ee5e258d9d377e6671f68acb4db1930b29583d0f331"
+
+[[file]]
+path = "assets/fonts/noto/thai/NotoSansThai-Regular.ttf"
+source = "noto-thai"
+from = "NotoSansThai-v2.002.zip/NotoSansThai/unhinted/ttf/NotoSansThai-Regular.ttf"
+sha256 = "d4303fe9c63ebb72759ca8b6d2040c8ae81689f7d08d7b91c656154382b49313"
+
+[[file]]
+path = "assets/fonts/noto/thai/OFL.txt"
+source = "noto-thai"
+from = "NotoSansThai-v2.002.zip/OFL.txt"
+sha256 = "2e98fd23a52d253db8612cd5942c8f2ff4111b21d2367050fdca91d8ccc374a0"
+
+[[file]]
+path = "assets/fonts/noto/emoji/NotoEmoji-Regular.ttf"
+source = "noto-emoji"
+from = "Noto_Emoji.zip/static/NotoEmoji-Regular.ttf"
+sha256 = "24aaa2a20c9c06ffe9bf04284bfd1f14376a329d10122f902abe2770817eb504"
+
+# Line endings converted from CRLF to LF, so this hash differs from the upstream file's.
+[[file]]
+path = "assets/fonts/noto/emoji/OFL.txt"
+source = "noto-emoji"
+from = "Noto_Emoji.zip/OFL.txt"
+sha256 = "041ef83a3c8edb985efb5ea73a0018141f076ff411f80ed8180c5dac70c37fba"
