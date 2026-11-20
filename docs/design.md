@@ -3,7 +3,7 @@
 > **Last reviewed:** <date> · **Last updated:** 2026-11-17 · **Change:** major
 
 InboxCraft's look in words: the Qubernetic design, its tokens, its rules and its screens. The source of truth is
-the FigCraft design file [`docs/design/inboxcraft.figcraft`](design/README.md): 21 pages, 64 component sets, every
+the FigCraft design file [`docs/design/inboxcraft.figcraft`](design/README.md): 23 pages, 64 component sets, every
 state drawn in dark and in light. This page puts that file into words; where the two differ, the file is right and
 this page is changed.
 
@@ -150,6 +150,8 @@ these when it is built.
 - **One focus edge for every list row:** 1 px `cyan_edge`, 2 px inside the row, clear of the pane's borders and of
   the hairlines over and under the row.
 - **A scroll thumb never covers a focus edge.** Where the thumb passes one, the edge is drawn over the thumb.
+  Neither moves when they meet: in a 440 px list the edge's right line is on column 437 and the resting thumb on
+  432 to 435, with one column of the row's ground between. This 1 px is meant.
 - **Lines stand on whole pixels.** Equal columns are cut at whole pixels, never at a fraction.
 
 ## Icons, numbers and labels
@@ -284,7 +286,7 @@ The 64 sets of the file. A screen is built from instances of these only.
 | `draft-file` | a file on a draft | default, hover, focus, too large |
 | `event-block` | a calendar event | timed, band, chip, row; picked, hover, focus |
 | `thread-row` | a message of a conversation | folded, open, unread, hover, focus |
-| `invite-card` | an invitation above a message | request, changed, out of date, answered, cancelled, reply, clash |
+| `invite-card` | an invitation above a message | request, changed, out of date, answered, changing, cancelled, reply, clash |
 | `block` | a titled box of rows, on Home | default, hover, focus, selected |
 | `block-line` | the last line of such a box | empty, more |
 | `count-tile` | a count on Home | default, accent, warn, minus, zero, overflow |
@@ -329,6 +331,9 @@ the window is too narrow for the emblem, it leaves whole; it is never cut or mad
 - **Eight kinds** are drawn: a mailing list (the thread as a tree, folded quotes, a coloured diff), marketing, a
   receipt, a notification from a code forge, pictures inside a message, a newsletter, an invitation (a card above
   the text with the answers and a clash warning) and a message that did not arrive.
+- **An invitation that asks** makes the card's Going the pane's one primary button; Reply at the foot steps down to
+  secondary. After Change answer the card offers the three answers again and Keep my answer, which goes back to
+  the answer given and sends nothing.
 - The reader can stand at full width or in a window of its own (960 × 900: the main frame without the index).
 
 ### The composer
@@ -364,6 +369,9 @@ event's details, the sync control. "+N more" in a month cell opens a list of tha
 - **Adding an account:** the address with Detect, the sign-in, the servers. What Detect asked, and where, stands
   open beside the form. The check prints its seven steps like a terminal, one by one as they run; a failure shows
   the failing line and plain words under it. No password is sent without encryption, and no setting allows it.
+  Detect and Check and add can always be pressed: a press with something missing says what, under its field, and
+  gives that field the keyboard. They wait only while Detect is asking.
+- **An account's settings:** Save is disabled until something changes, and the line beside it says so.
 - **Removing an account** is a danger button; its confirmation says first that it cannot be undone.
 
 ### Outside the window

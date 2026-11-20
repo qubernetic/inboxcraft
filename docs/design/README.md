@@ -14,7 +14,7 @@ and the screenshots in `docs/images/` show the new look. What the app still owes
 
 Every person, address and message in the file is invented (`example.org`).
 
-<img src="cover.png" width="820" alt="The cover of the design file: the InboxCraft mark and wordmark, how to read the file, and the list of its 21 pages">
+<img src="cover.png" width="820" alt="The cover of the design file: the InboxCraft mark and wordmark, how to read the file, and the list of its 23 pages">
 
 `cover.png` is the one picture of a page kept here. Rendered pages are tens of megabytes and change with every
 build, so open the file in FigCraft to see the rest.
@@ -48,6 +48,8 @@ three first; without them it falls back to another typeface.
 | Sizes | The same screens at 1100 and 800 wide and at 130 % text, with the breakpoints written as rules |
 | Layout · why | The reasons of the layout, each with its decision |
 | Coverage | What the file holds, its checks, and what it leaves out |
+| Event drafts | Tagged PLANNED: a half-typed event kept as a draft, shown in the calendar at its time, never sent, kept only on this computer and asked about once its time has passed |
+| Event editor | Tagged PLANNED: the event editor in three places, as the composer has three, and the event's description |
 
 ## How it is organised
 - **Colours are variables.** The Colour collection has a Dark and a Light mode and one variable per token; fills,
