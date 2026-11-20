@@ -2444,7 +2444,12 @@ fn a_keyed_row_scrolls_into_sight_by_this_frames_viewport_and_when_first_shown()
 #[test]
 fn the_planned_parts_of_the_lists_are_drawn_coming_soon() {
     use inboxcraft_model::Role as MailRole;
-    let mut harness = harness(true);
+    // In one pane, where the list has the room for Select (beside the reader its 440 leave it out).
+    let mut harness = Harness::builder()
+        .with_size(vec2(900.0, 900.0))
+        .with_context_setup(install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(true));
+    harness.run();
     // Several messages at once: the way in is there, disabled, with the mark.
     let select = harness.get_by_role_and_label(Role::Button, "Select");
     assert!(select.accesskit_node().is_disabled());
@@ -2731,10 +2736,6 @@ fn the_pills_line_beside_the_reader_never_wraps_and_leaves_out_what_does_not_fit
                 continue;
             }
             assert!(rect.top() < line.bottom() && rect.bottom() > line.top(), "{width} open {open}: {rect:?} wraps under {line:?}");
-        }
-        if !open {
-            // With the whole width, the planned Select shows with its mark.
-            harness.get_by_role_and_label(Role::Button, "Select");
         }
     }
 }

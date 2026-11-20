@@ -139,11 +139,30 @@
 {"out": "docs/images/status-line-synced-dark.png", "mode": "dark", "size": [1400, 860], "sync": "synced"}
 {"out": "docs/images/status-line-syncing-light.png", "mode": "light", "size": [1400, 860], "sync": "syncing", "motion": "reduced"}
 {"out": "docs/images/status-line-syncing-dark.png", "mode": "dark", "size": [1400, 860], "sync": "syncing", "motion": "reduced"}
+# The status line's other states and the window at 1100 wide, to pair with their frames (#325).
+{"out": "docs/images/status-line-offline-light.png", "mode": "light", "size": [1440, 900]}
+{"out": "docs/images/status-line-offline-dark.png", "mode": "dark", "size": [1440, 900]}
+{"out": "docs/images/status-line-outbox-waiting-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "outbox": "waiting"}
+{"out": "docs/images/status-line-outbox-waiting-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "outbox": "waiting"}
+{"out": "docs/images/status-line-send-countdown-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "outbox": "countdown"}
+{"out": "docs/images/status-line-send-countdown-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "outbox": "countdown"}
+{"out": "docs/images/status-line-undo-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "step": 1, "act": "done"}
+{"out": "docs/images/status-line-undo-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "step": 1, "act": "done"}
+{"out": "docs/images/status-line-error-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "open": {"folder": 4242}}
+{"out": "docs/images/status-line-error-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "open": {"folder": 4242}}
+{"out": "docs/images/size-1100-frame-light.png", "mode": "light", "size": [1100, 900], "sync": "synced"}
+{"out": "docs/images/size-1100-frame-dark.png", "mode": "dark", "size": [1100, 900], "sync": "synced"}
+{"out": "docs/images/size-1100-inbox-reader-light.png", "mode": "light", "size": [1100, 900], "sync": "synced", "select": "Photos from the coast walk"}
+{"out": "docs/images/size-1100-inbox-reader-dark.png", "mode": "dark", "size": [1100, 900], "sync": "synced", "select": "Photos from the coast walk"}
+{"out": "docs/images/size-1100-composer-light.png", "mode": "light", "size": [1100, 900], "sync": "synced", "compose": "new"}
+{"out": "docs/images/size-1100-composer-dark.png", "mode": "dark", "size": [1100, 900], "sync": "synced", "compose": "new"}
+{"out": "docs/images/size-1100-calendar-light.png", "mode": "light", "size": [1100, 900], "sync": "synced", "calendar": true}
+{"out": "docs/images/size-1100-calendar-dark.png", "mode": "dark", "size": [1100, 900], "sync": "synced", "calendar": true}
 # The reader on the design system (E1.17b): the mail-action toolbar, the subject with who wrote, the
 # thread as cards and the open message's attachments with Reply, Reply all and Forward, in the full-width reader.
 # The command line's commands, the Shortcuts page (one action waiting for a key) and the calendar's empty state (E3.10).
-{"out": "docs/images/command-line-light.png", "mode": "light", "size": [1200, 820], "command": ">"}
-{"out": "docs/images/command-line-dark.png", "mode": "dark", "size": [1200, 820], "command": ">"}
+{"out": "docs/images/command-line-light.png", "mode": "light", "size": [1440, 900], "command": ">sn"}
+{"out": "docs/images/command-line-dark.png", "mode": "dark", "size": [1440, 900], "command": ">sn"}
 {"out": "docs/images/command-line-mode-light.png", "mode": "light", "size": [1200, 820], "command": ">mode"}
 {"out": "docs/images/command-line-mode-dark.png", "mode": "dark", "size": [1200, 820], "command": ">mode"}
 {"out": "docs/images/shortcuts-light.png", "mode": "light", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
