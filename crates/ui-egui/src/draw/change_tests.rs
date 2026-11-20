@@ -187,7 +187,9 @@ fn a_floating_composer_is_neither_painted_over_nor_scrambled_by_a_change() {
     }
     harness.run();
     assert!(body(&harness).iter().any(|(text, _)| text == "Seedlings"), "at rest the draft's subject shows");
-    harness.event(egui::Event::Key { key: Key::Num0, pressed: true, modifiers: Modifiers::COMMAND, repeat: false, physical_key: None });
+    // Home's key (it has none at the start: Command 0 is the text size's).
+    harness.state_mut().keymap_mut().bind(crate::keymap::HOME, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::Num9));
+    harness.event(egui::Event::Key { key: Key::Num9, pressed: true, modifiers: Modifiers::COMMAND, repeat: false, physical_key: None });
     harness.step();
     for frame in 0..40 {
         let seen = body(&harness);

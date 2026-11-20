@@ -579,6 +579,18 @@ impl TextScale {
         Self::ALL.into_iter().find(|scale| scale.percent() == percent)
     }
 
+    /// The next scale up, `None` at the largest.
+    #[must_use]
+    pub fn larger(self) -> Option<Self> {
+        Self::ALL.into_iter().find(|scale| scale.0 > self.0)
+    }
+
+    /// The next scale down, `None` at the smallest.
+    #[must_use]
+    pub fn smaller(self) -> Option<Self> {
+        Self::ALL.into_iter().rev().find(|scale| scale.0 < self.0)
+    }
+
     /// What the 100 % sizes are multiplied by.
     #[must_use]
     pub fn factor(self) -> f32 {
@@ -691,7 +703,7 @@ pub fn install_fonts(ctx: &egui::Context) {
 }
 
 /// The interface's size comes from the text-size setting alone ([`TextScale`]): egui's own keyboard zoom (Ctrl+Plus,
-/// Ctrl+Minus, Ctrl+0, which is Home's key) is switched off, and a zoom factor `ctx` came with is set back to 1, so no
+/// Ctrl+Minus, Ctrl+0, which step the text size instead) is switched off, and a zoom factor `ctx` came with is set back to 1, so no
 /// start comes up zoomed with no key to undo it.
 pub fn size_from_the_setting_alone(ctx: &egui::Context) {
     ctx.options_mut(|options| options.zoom_with_keyboard = false);
