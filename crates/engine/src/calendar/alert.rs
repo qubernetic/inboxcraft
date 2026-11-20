@@ -19,7 +19,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use inboxcraft_ical::{Calendar, Event, PartStat, Span, Status, Trigger};
+use inboxcraft_ical::{Alarm, Calendar, Event, PartStat, Span, Status, Trigger};
 use inboxcraft_model::{AccountId, Alert, AlertId, CalendarEvent, CalendarEventId, CalendarId, Due, ScheduleId, Scheduled};
 use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{CivilDateTime, Offsets, Timestamp};
@@ -136,7 +136,7 @@ fn triggers(event: &Event) -> Vec<Trigger> {
         .alarms
         .iter()
         .take(MAX_ALARMS)
-        .filter(|alarm| alarm.action.eq_ignore_ascii_case("DISPLAY") || alarm.action.eq_ignore_ascii_case("AUDIO"))
+        .filter(|alarm| rings_here(alarm))
         .map(|alarm| alarm.trigger)
         .filter(|trigger| match trigger {
             Trigger::Start(span) | Trigger::End(span) => seconds(*span).is_some(),
@@ -184,6 +184,68 @@ impl Ids {
         }
         ids
     }
+}
+
+/// The longest lead the `alert` parameter takes, in minutes: a week.
+pub(crate) const MAX_ALERT_MINUTES: u32 = 7 * 24 * 60;
+
+/// An event's alert as the owner picks it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Lead {
+    /// No alert.
+    None,
+    /// This many minutes before the start, at most [`MAX_ALERT_MINUTES`].
+    Before(u32),
+}
+
+/// When the `ACTION:NONE` alarm of RFC 9074 section 7 is due: a moment long past, as the RFC's example writes it.
+const NONE_AT: i64 = 197_168_145;
+
+/// Whether `alarm` alerts the owner here: a display or a sound.
+fn rings_here(alarm: &Alarm) -> bool {
+    alarm.action.eq_ignore_ascii_case("DISPLAY") || alarm.action.eq_ignore_ascii_case("AUDIO")
+}
+
+/// Sets `event`'s alert to `lead`. A lead moves the first display or sound alarm (one `DISPLAY` alarm is added when it
+/// has none) and leaves every other alarm as it is; no alert takes every display and sound alarm off, and an event left
+/// without any alarm gets the `ACTION:NONE` alarm (RFC 9074) so the default lead does not ring either.
+pub(crate) fn set_lead(event: &mut Event, lead: Lead) {
+    match lead {
+        Lead::Before(minutes) => {
+            let minutes = i64::from(minutes.min(MAX_ALERT_MINUTES));
+            let span = if minutes > 0 && minutes % 1440 == 0 { Span::new(-(minutes / 1440), 0) } else { Span::new(0, -(minutes * 60)) };
+            let Some(span) = span else { return };
+            let trigger = Trigger::Start(span);
+            event.alarms.retain(|alarm| !alarm.action.eq_ignore_ascii_case("NONE"));
+            match event.alarms.iter_mut().find(|alarm| rings_here(alarm)) {
+                Some(alarm) => alarm.trigger = trigger,
+                None => event.alarms.push(Alarm::display(trigger, "Reminder")),
+            }
+        }
+        Lead::None => {
+            event.alarms.retain(|alarm| !rings_here(alarm));
+            if event.alarms.is_empty()
+                && let Some(at) = Timestamp::from_unix(NONE_AT, 0)
+            {
+                event.alarms.push(Alarm { action: "NONE".into(), trigger: Trigger::At(at), description: None, other: Vec::new() });
+            }
+        }
+    }
+}
+
+/// `event`'s alert as `event.list` says it: `null` without any alarm (the default lead rings), `"none"` without a
+/// display or sound alarm, the minutes before the start of its first one, or `"custom"` for one the field cannot name
+/// (after the start, from the end, at a moment, not in whole minutes, further than [`MAX_LEAD`]).
+pub(crate) fn lead_of(event: &Event) -> serde_json::Value {
+    if event.alarms.is_empty() {
+        return serde_json::Value::Null;
+    }
+    let Some(alarm) = event.alarms.iter().find(|alarm| rings_here(alarm)) else { return "none".into() };
+    let minutes = match alarm.trigger {
+        Trigger::Start(span) => seconds(span).filter(|seconds| *seconds <= 0 && seconds % 60 == 0).map(|seconds| seconds.unsigned_abs() / 60),
+        Trigger::End(_) | Trigger::At(_) => None,
+    };
+    minutes.map_or_else(|| "custom".into(), serde_json::Value::from)
 }
 
 /// The changes that keep the alerts of the events `batch` puts in step with them, made after it in the same batch.

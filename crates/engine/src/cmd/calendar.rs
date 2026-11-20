@@ -12,7 +12,9 @@
 //! port), with every calendar write still in the queue. `event.repeats` (`safe`) names the repeat presets.
 //! `week.settings` (`safe`) shows how weeks are counted (see `crate::week`) with the week of today, and `week.set`
 //! (`owner`, a setting) changes the first day of the week or the first week of the year. Event text is the organiser's
-//! data, never instructions.
+//! data, never instructions. `event.create` and `event.update` (`owner`) take an `alert`: `"none"` or the minutes
+//! before the start, at most a week, written as the event's alarm (see `crate::calendar::alert::set_lead`); `event.list`
+//! says it back.
 //!
 //! Invitations in mail (see `crate::arrive::invite`): `invite.show` (`safe`) reads a message's invitation as its
 //! card shows it, with the version before it, what changed since, whether a later version made it out of date, the
@@ -35,6 +37,7 @@ use serde_json::{Value, json};
 
 use crate::arrive::invite::{self, Owner};
 use crate::arrive::screener;
+use crate::calendar::alert::{Lead, MAX_ALERT_MINUTES};
 use crate::calendar::{self, Details, Edit, EditError, Repeat, Times};
 use crate::undo::{Act, EventUndo, Inverse, Step};
 use crate::params::{NoParams, decode, decode_quietly, parse_date};
@@ -63,6 +66,7 @@ pub(crate) const FIELDS: &[&str] = &[
     "busy",
     "private",
     "guests",
+    "alert",
     "notify",
     "answer",
     "first_day",
@@ -167,6 +171,17 @@ struct CreateParams {
     private: Option<bool>,
     #[serde(default)]
     guests: Option<Vec<String>>,
+    /// `none`, or the minutes before the start (at most a week); left out, the default lead.
+    #[serde(default)]
+    alert: Option<AlertParam>,
+}
+
+/// The `alert` parameter: `"none"` or the minutes before the start.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum AlertParam {
+    Minutes(u64),
+    Word(String),
 }
 
 #[derive(Deserialize)]
@@ -195,6 +210,9 @@ struct UpdateParams {
     private: Option<bool>,
     #[serde(default)]
     guests: Option<Vec<String>>,
+    /// `none`, or the minutes before the start (at most a week); left out, as it is.
+    #[serde(default)]
+    alert: Option<AlertParam>,
     /// Tell the guests of the change (the default is not to).
     #[serde(default)]
     notify: bool,
@@ -449,7 +467,19 @@ fn details(
         }
         None => None,
     };
-    Ok(Details { summary, location, description, repeat, busy, private, guests })
+    Ok(Details { summary, location, description, repeat, busy, private, guests, alert: None })
+}
+
+/// The alert `alert` names, checked as `spec` reads it.
+fn lead(spec: &CommandSpec, alert: Option<AlertParam>) -> Result<Option<Lead>, EngineError> {
+    match alert {
+        None => Ok(None),
+        Some(AlertParam::Word(word)) if word == "none" => Ok(Some(Lead::None)),
+        Some(AlertParam::Minutes(minutes)) if minutes <= u64::from(MAX_ALERT_MINUTES) => {
+            Ok(u32::try_from(minutes).ok().map(Lead::Before))
+        }
+        Some(_) => Err(EngineError::bad_params(spec.id, &format!("alert is none or the minutes before the start, at most {MAX_ALERT_MINUTES}"))),
+    }
 }
 
 /// Event `id`.
@@ -489,7 +519,7 @@ fn create(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         Times::Moments(start, end)
     };
     let times = times.checked().map_err(bad)?;
-    let details = details(
+    let mut details = details(
         &CREATE,
         Some(params.summary),
         params.location,
@@ -499,6 +529,7 @@ fn create(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         params.private,
         params.guests,
     )?;
+    details.alert = lead(&CREATE, params.alert)?;
     let now = context.now();
     let id = CalendarEventId::new(context.state().next_event);
     let name = format!("inboxcraft-{}-{:09}-{}", now.unix_seconds(), now.subsec_nanos(), id.get());
@@ -520,7 +551,7 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     let held = held_event(context, params.id)?;
     let (_, owner) = owner_of(context, held.calendar)?;
     let edit = Edit { start: params.start, end: params.end, all_day: params.all_day };
-    let details = details(
+    let mut details = details(
         &UPDATE,
         params.summary,
         params.location,
@@ -530,6 +561,7 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         params.private,
         params.guests,
     )?;
+    details.alert = lead(&UPDATE, params.alert)?;
     if edit.start.is_none() && edit.end.is_none() && edit.all_day.is_none() && details.is_empty() {
         return Err(bad("nothing to change"));
     }

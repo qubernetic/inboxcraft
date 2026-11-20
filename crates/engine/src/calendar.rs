@@ -362,6 +362,8 @@ pub(crate) struct Details {
     pub(crate) private: Option<bool>,
     /// The guests' addresses, each once.
     pub(crate) guests: Option<Vec<EmailAddress>>,
+    /// The alert ([`alert::set_lead`]).
+    pub(crate) alert: Option<alert::Lead>,
 }
 
 impl Details {
@@ -374,6 +376,7 @@ impl Details {
             && self.busy.is_none()
             && self.private.is_none()
             && self.guests.is_none()
+            && self.alert.is_none()
     }
 
     /// Writes them into `event`; `organizer` organises it once it has guests.
@@ -397,6 +400,9 @@ impl Details {
         }
         if let Some(private) = self.private {
             event.class = private.then_some(Class::Private);
+        }
+        if let Some(lead) = self.alert {
+            alert::set_lead(event, lead);
         }
         if let Some(guests) = self.guests {
             event.attendees = guests
@@ -631,6 +637,7 @@ pub(crate) fn row(held: &CalendarEvent, calendar: &Calendar, occurrence: &Occurr
         "recurrence_id": occurrence.recurrence_id.as_ref().map(when),
         "zone": zone(calendar, event, start, end, local),
         "guests": event.attendees.iter().map(guest).collect::<Vec<_>>(),
+        "alert": alert::lead_of(event),
     })
 }
 

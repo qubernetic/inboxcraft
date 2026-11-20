@@ -287,7 +287,11 @@ its first and last day, its repeat preset, and the event's own zone with its wal
 another time than the computer's. `event.create`, `event.update` and `event.delete` (`owner`) change the store at once
 and write to the server as kept jobs (`Put` new or over the copy seen, `Delete`); a new single event is written in UTC,
 a repeating one on the computer's wall clock (floating) so it keeps its time of day across a summer-time change, and an
-edit keeps the event's own form (its zone, the wall clock or UTC). A delete is a kept job the session holds back for
+edit keeps the event's own form (its zone, the wall clock or UTC). Their `alert` (`"none"` or the minutes before the
+start, at most a week) moves the event's first display or sound alarm, or adds one `DISPLAY` alarm, and leaves every
+other alarm as it is; `"none"` takes the display and sound alarms off and, where no alarm is left, writes the
+`ACTION:NONE` alarm of RFC 9074 so the default lead does not ring. `event.list` says the alert back: `null` without
+any alarm, `"none"`, the minutes, or `"custom"` for an alarm the field cannot name. A delete is a kept job the session holds back for
 the undo window (`Outcome::with_held_job`, six seconds, as long as the toast with Undo shows): `Session::tick` hands it
 to the worker once the window is over, `history.undo` before then withdraws it from the queue and puts the event back,
 and a restart hands it out at once. Writes to one event go out one at a time (`engine::writes`): a second write (an
