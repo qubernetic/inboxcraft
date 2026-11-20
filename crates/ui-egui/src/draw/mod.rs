@@ -997,7 +997,8 @@ impl InboxApp {
             // may take back an act on such a row, rests too.
             keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => !self.list_hidden && self.row_act(id).is_some(),
             // Under the event editor Undo rests too: it would take back the event being edited ([`Surfaces::undo_rests`]).
-            keymap::UNDO => !self.list_hidden && self.calendar.editor().is_none() && self.mailbox.can_undo(),
+            // Off the calendar, and in the main window while the editor is in its window of its own, it runs.
+            keymap::UNDO => !self.list_hidden && !self.editing_event() && self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
             // The held-back message opens as a press on its row does (it floats a docked composer); with the list
             // hidden it rests, as every command of the list does.
@@ -3659,9 +3660,10 @@ impl InboxApp {
 
     /// Takes the toast's act back, or the newest act of the history; the calendar is read again when it shows.
     fn undo(&mut self) {
-        // Every owner's way to Undo ends here: while the event editor is open it rests, whatever the frame began with,
-        // in every host (its window of its own too).
-        if self.calendar.editor().is_some() {
+        // Every owner's way to Undo ends here: while the event editor is open under the owner's hand it rests, whatever
+        // the frame began with. Off the calendar, and in the main window while the editor is in its window of its own,
+        // it runs as everywhere: the status line offers it there ([`Surfaces::undo_rests`]).
+        if self.editing_event() {
             return;
         }
         let before = self.mailbox.selected();
