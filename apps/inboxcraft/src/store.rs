@@ -66,7 +66,14 @@ pub fn store_dir() -> Option<PathBuf> {
 /// What went wrong, naming the folder: a store from a newer build, a damaged one (also one without its id), a folder
 /// that cannot be made; for a database failure, the database's own words after its sentence.
 pub fn open_store(dir: &Path) -> Result<Owned, String> {
-    let opened = Sqlite::open(dir, StoreConfig::default()).and_then(|store| Ok(Owned { id: store.id()?, store: Box::new(store) }));
+    let opened = Sqlite::open(dir, StoreConfig::default()).and_then(|mut store| {
+        // The drafts the window keeps while the owner types reach the disk on the store's keeper thread, not the
+        // window's. A keeper that cannot start leaves the store writing them at once, as it always could.
+        if let Err(error) = store.keep_drafts_behind() {
+            eprintln!("drafts are written on the window's thread: {error}");
+        }
+        Ok(Owned { id: store.id()?, store: Box::new(store) })
+    });
     opened.map_err(|error| {
         // This line is the app's own log (its standard error), so it keeps the database's own words; a caller of the
         // CLI, the control channel or MCP never reads them.
