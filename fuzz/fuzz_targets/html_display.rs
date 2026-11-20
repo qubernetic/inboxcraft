@@ -53,6 +53,22 @@ fn disguised(data: &[u8]) -> String {
     text
 }
 
+/// `text` as HTML's characters, not its markup: no tag and no way out of an attribute's quotes.
+fn escaped(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// A kept background is readable: its ink reaches the contrast the app asks of text.
 fn readable(paint: Option<Paint>) {
     assert!(paint.is_none_or(|paint| paint.fill.contrast(paint.ink) >= LEAST_CONTRAST), "{paint:?}");
@@ -108,9 +124,11 @@ fuzz_target!(|data: &[u8]| {
         check(&doc.blocks, &doc, consent);
         doc.links.iter().for_each(|link| readable(link.fill));
     }
-    // The input as a button's action and words: a button never goes anywhere but where a link of its own sends it.
-    let doc = display(&format!("<button formaction=\"javascript:{html}\" onclick=\"{html}\">{html}</button>"), &Options::default());
-    assert!(doc.links.iter().all(|link| !link.button || link.target == LinkTarget::Refused), "{:?}", doc.links);
+    // The input, escaped, as a button's action, script and words: the link the button itself makes (the first) goes
+    // nowhere. A link inside the input may be a button that goes somewhere; escaped, it cannot be made here.
+    let escaped = escaped(&html);
+    let doc = display(&format!("<button formaction=\"javascript:{escaped}\" onclick=\"{escaped}\">{escaped}</button>"), &Options::default());
+    assert!(doc.links.first().is_some_and(|link| link.button && link.target == LinkTarget::Refused), "{:?}", doc.links);
     let text = disguised(data);
     for (href, mismatch) in [("https://evil.example/", true), ("https://bank.example/", false)] {
         let doc = display(&format!("<a href=\"{href}\">{text}</a>"), &Options::default());
