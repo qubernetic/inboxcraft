@@ -11,7 +11,7 @@
 //!
 //! Disabled is never a fade: a box gets a dashed `line` edge and `muted` text, a glyph `dim`.
 
-use egui::{Color32, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, vec2};
+use egui::{Color32, Response, Role, Sense, Stroke, Ui, WidgetInfo, vec2};
 
 use crate::draw::paint::{self, Ring};
 use crate::iconset::IconId;
@@ -118,12 +118,12 @@ impl<'a> IconButton<'a> {
                 // sheet has no pressed state for a selected button).
                 painter.rect_filled(rect, 0.0, p.cyan_muted);
                 if lit.pressed {
-                    painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
+                    paint::edge(painter, rect, 0.0, 1.0, p.cyan_edge);
                 }
                 self.ink.unwrap_or(p.cyan_text)
             } else if lit.pressed {
                 painter.rect_filled(rect, 0.0, hover);
-                painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
+                paint::edge(painter, rect, 0.0, 1.0, p.muted);
                 self.ink.unwrap_or(p.ink)
             } else {
                 let rest = Face { fill: None, edge: None, ink: self.ink.unwrap_or(p.muted) };
@@ -403,10 +403,10 @@ impl<'a> TextButton<'a> {
                 between(rest, hovered, lit.fade, lit.hover)
             };
             if let Some(fill) = fill {
-                painter.rect_filled(rect, 0.0, fill);
+                painter.rect_filled(paint::on_pixels(painter, rect), 0.0, fill);
             }
             if let Some(edge) = edge {
-                painter.rect_stroke(rect, 0.0, Stroke::new(1.0, edge), StrokeKind::Inside);
+                paint::edge(painter, rect, 0.0, 1.0, edge);
             }
             // Disabled is a dashed `line` edge round a box, never a fade; a plain button has no box to dash.
             if !enabled && self.tone != Tone::Plain {

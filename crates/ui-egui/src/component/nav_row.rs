@@ -83,13 +83,14 @@ pub(crate) fn base(ui: &mut Ui, theme: &Theme, id: Id, height: f32, active: bool
     let fade = if shown.is_some() { f32::from(u8::from(lit)) } else { motion::fade(ui.ctx(), id.with("hover"), lit, theme.motion.fast) };
     let painter = ui.painter();
     if active {
-        painter.rect_filled(rect, 0.0, p.stage);
-        painter.rect_filled(Rect::from_min_size(rect.min, vec2(BAR, rect.height())), 0.0, p.cyan_edge);
+        // The ground and the bar on whole pixels at fractional scales.
+        painter.rect_filled(paint::on_pixels(painter, rect), 0.0, p.stage);
+        painter.rect_filled(paint::on_pixels(painter, Rect::from_min_size(rect.min, vec2(BAR, rect.height()))), 0.0, p.cyan_edge);
     } else if fade >= 1.0 {
-        painter.rect_filled(rect, 0.0, p.grid);
+        painter.rect_filled(paint::on_pixels(painter, rect), 0.0, p.grid);
     } else if fade > 0.0 {
         // Between the two token colours, never the hover colour faded by alpha.
-        painter.rect_filled(rect, 0.0, p.panel.lerp_to_gamma(p.grid, fade));
+        painter.rect_filled(paint::on_pixels(painter, rect), 0.0, p.panel.lerp_to_gamma(p.grid, fade));
     }
     Base { rect, response, hovered: lit, focused }
 }

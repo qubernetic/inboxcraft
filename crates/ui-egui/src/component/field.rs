@@ -17,8 +17,7 @@ use std::sync::Arc;
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextWrapping};
 use egui::text_edit::{TextEditOutput, TextEditState};
 use egui::{
-    Align2, Color32, Galley, Id, Margin, Painter, Rect, Response, ScrollArea, Sense, Stroke, StrokeKind, TextBuffer, TextEdit, Ui, UiBuilder, Vec2,
-    pos2, vec2,
+    Align2, Color32, Galley, Id, Margin, Painter, Rect, Response, ScrollArea, Sense, Stroke, TextBuffer, TextEdit, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 
 use crate::draw::paint;
@@ -51,15 +50,15 @@ pub fn search(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, hint: &str,
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let round = 0.0;
     let focused = ui.memory(|memory| memory.has_focus(id));
-    let (edge, ink) = if focused { (Stroke::new(2.0, p.cyan_edge), p.ink) } else { (Stroke::new(1.0, p.line), p.muted) };
+    let ((edge, edge_width), ink) = if focused { ((p.cyan_edge, 2.0), p.ink) } else { ((p.line, 1.0), p.muted) };
     // Coming soon, the field is disabled with its `Ui`, and its edge is dashed.
     let soon = soon::is_soon(ui);
     if ui.is_rect_visible(rect) {
-        ui.painter().rect_filled(rect, round, p.term);
+        ui.painter().rect_filled(paint::on_pixels(ui.painter(), rect), round, p.term);
         if soon {
             paint::dashed(ui.painter(), rect, p.muted);
         } else {
-            ui.painter().rect_stroke(rect, round, edge, StrokeKind::Inside);
+            paint::edge(ui.painter(), rect, round, edge_width, edge);
         }
     }
     let icon = theme.fonts.body.size * 1.15;
@@ -573,12 +572,12 @@ fn box_look(theme: &Theme, field: &Field<'_>, seen: Seen) -> (Option<Color32>, C
 /// Paints the box at `rect`: its fill and its 1 px edge inside, dashed when `dashed`.
 fn paint_box(painter: &Painter, rect: Rect, fill: Option<Color32>, edge: Color32, dashed: bool) {
     if let Some(fill) = fill {
-        painter.rect_filled(rect, 0.0, fill);
+        painter.rect_filled(paint::on_pixels(painter, rect), 0.0, fill);
     }
     if dashed {
         paint::dashed(painter, rect, edge);
     } else {
-        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, edge), StrokeKind::Inside);
+        paint::edge(painter, rect, 0.0, 1.0, edge);
     }
 }
 

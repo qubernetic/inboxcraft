@@ -429,6 +429,28 @@ fn boxed_at(rect: Rect, fill: Color32, edge: Color32, ppp: f32) -> Vec<Shape> {
     shapes
 }
 
+/// `rect` moved to whole physical pixels at the painter's scale: what a fill under an [`edge`] stands on.
+pub(crate) fn on_pixels(painter: &Painter, rect: Rect) -> Rect {
+    let (ppp, _) = line_pixels(painter.pixels_per_point());
+    snapped(rect, ppp)
+}
+
+/// An edge `points` wide inside `rect` with corners of `radius`, on whole physical pixels at the painter's scale: the
+/// box on [`on_pixels`], the width rounded to whole pixels, at least one (a 1-point edge is 1, 1, 2, 2 pixels at 1,
+/// 1.25, 1.5 and 2), as a float's edge is drawn.
+pub(crate) fn edge(painter: &Painter, rect: Rect, radius: f32, points: f32, colour: Color32) {
+    painter.add(edge_at(rect, radius, points, colour, painter.pixels_per_point()));
+}
+
+/// The shape of an [`edge`] at `ppp` (a scale that is not a positive number counts as 1, a width that is not a finite
+/// number as one point).
+pub(crate) fn edge_at(rect: Rect, radius: f32, points: f32, colour: Color32, ppp: f32) -> Shape {
+    let (ppp, _) = line_pixels(ppp);
+    let points = if points.is_finite() { points } else { 1.0 };
+    let pixels = (points * ppp).round().max(1.0);
+    Shape::rect_stroke(snapped(rect, ppp), radius, Stroke::new(pixels / ppp, colour), StrokeKind::Inside)
+}
+
 /// A 1 px `edge` inside `rect`, no fill: a pane's band on each side, on whole physical pixels at the painter's scale.
 pub(crate) fn outline(painter: &Painter, rect: Rect, edge: Color32) {
     painter.extend(outline_at(rect, edge, painter.pixels_per_point()));

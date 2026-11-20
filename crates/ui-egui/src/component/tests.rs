@@ -812,3 +812,68 @@ fn a_fitted_line_is_cut_by_the_one_rule_never_wider_than_its_room() {
     let found = harness.state();
     assert!(found.is_empty(), "{} lines past their room: {:?}", found.len(), found.iter().take(5).collect::<Vec<_>>());
 }
+
+/// Every edge and bar the shapes of `shapes` paint, as `(rect, stroke width)`: the stroked rects and the filled ones
+/// in `bar`'s colour.
+fn edges_of(shapes: &[ClippedShape], bar: Color32) -> Vec<(Rect, f32)> {
+    fn walk(shape: &Shape, bar: Color32, found: &mut Vec<(Rect, f32)>) {
+        match shape {
+            Shape::Rect(rect) if rect.stroke.width > 0.0 || rect.fill == bar => found.push((rect.rect, rect.stroke.width)),
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, bar, found)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    shapes.iter().for_each(|clipped| walk(&clipped.shape, bar, &mut found));
+    found
+}
+
+#[test]
+fn the_one_point_edges_and_the_place_bar_stand_on_whole_pixels_at_fractional_scales() {
+    // As a float's edge since #326: a 1-point stroke is a whole number of physical pixels and its box's sides fall on
+    // pixel boundaries, at 1.25 and 1.5 as at 1; the shown place row's 2-point bar too.
+    use super::gallery_index::{nav, nav_states};
+    for ppp in [1.0_f32, 1.25, 1.5] {
+        let theme = Theme::new(Mode::Dark, TextScale::default());
+        let bar = theme.palette.cyan_edge;
+        let mut harness = builder().with_pixels_per_point(ppp).with_size(vec2(480.0, 520.0)).build_ui(move |ui| {
+            motion::set_reduced(ui.ctx(), true);
+            ui.add_space(3.3);
+            ui.horizontal(|ui| {
+                ui.add_space(5.7);
+                ui.vertical(|ui| {
+                    let keymap = Keymap::default();
+                    if let Some(active) = nav_states().into_iter().find(|state| state.name == "active") {
+                        nav(ui, &theme, &active);
+                    }
+                    ui.add_space(0.3);
+                    let mut text = String::new();
+                    super::field::search(ui, &theme, Id::unique("search"), &mut text, "Search", 201.3);
+                    ui.add_space(0.3);
+                    let mut field = String::from("odile@example.org");
+                    super::field::text_field(ui, &theme, Id::unique("field"), &mut field, &super::field::Field::new("Address", ""));
+                    let mut open = false;
+                    let options = [(1_u8, "One"), (2, "Two")];
+                    let select =
+                        super::select::Select { name: "Count", shown: "One", options: &options, current: Some(1), icon: IconId::Inbox, width: 160.3 };
+                    let _ = select.show(ui, &theme, &mut open);
+                    ui.add_space(0.3);
+                    super::checkbox::checkbox(ui, &theme, "Remember", false);
+                    ui.add_space(0.3);
+                    super::button::TextButton::new("Save").secondary().show(ui, &theme, &keymap);
+                    ui.add_space(0.3);
+                    let choices = [(1_u8, "Day", theme.fonts.body), (2, "Week", theme.fonts.body)];
+                    let _ = super::segmented::segmented(ui, &theme, &choices, 1);
+                });
+            });
+        });
+        harness.run();
+        let edges = edges_of(&harness.output().shapes, bar);
+        assert!(edges.len() >= 6, "{ppp}: {edges:?}");
+        let whole = |at: f32| ((at * ppp) - (at * ppp).round()).abs() < 0.01;
+        for (rect, width) in &edges {
+            let sides = [rect.left(), rect.top(), rect.right(), rect.bottom()];
+            assert!(sides.iter().all(|side| whole(*side)) && whole(*width), "{ppp}: {rect:?} edge {width} off whole pixels: {edges:?}");
+        }
+    }
+}
