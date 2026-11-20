@@ -279,6 +279,8 @@ fn a_lead_with_other_changes_reaches_the_changed_instances_too() {
     assert!(alerts(&session, 5).is_empty(), "{:?}", alerts(&session, 5));
 }
 
+/// Byte-identical here because `checkin` is text in canonical form; for other text only the line form (the case of
+/// names, CRLF, folding) and parameter quoting change outside the alarms.
 #[test]
 fn an_alert_alone_changes_nothing_outside_the_alarms() {
     let mut session = session();
