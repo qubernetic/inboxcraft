@@ -64,8 +64,8 @@ impl eframe::App for Window<'_> {
 type Shown = Arc<Mutex<Option<egui::Context>>>;
 
 /// Opens windows on `desktop` until InboxCraft ends: while the desktop has no window it keeps the mail in step and
-/// waits for a request for one. The computer's fonts for the scripts IBM Plex lacks are searched for meanwhile, on a
-/// worker thread; the window opens with the app's own fonts and takes those once they are found.
+/// waits for a request for one. The computer's fonts for the scripts the app's fonts lack are searched for on a worker
+/// thread once the first window has drawn its first frame with the app's own fonts; it takes them once they are found.
 fn windows(mut desktop: Desktop, shown: &Shown) -> ExitCode {
     let wake = wake_of(shown);
     let found = inboxcraft::fonts::search(move || wake());

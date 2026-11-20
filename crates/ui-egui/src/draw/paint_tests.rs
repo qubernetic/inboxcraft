@@ -1203,10 +1203,11 @@ fn a_tracked_label_is_never_measured_narrower_than_drawn_whatever_zero_width_sig
         let font = Theme::new(Mode::Dark, TextScale::from_percent(percent).unwrap_or_default()).fonts.label;
         for ppp in [1.0, 1.5] {
             // A joiner or a selector after a letter is counted as a gap egui may not draw (the over-count of
-            // `advances`, one spacing each at most): such a line may be cut a letter before it would have to be.
+            // `advances`, one spacing each at most): such a line may be cut a letter before it would have to be. The
+            // Arabic letter mark is one too since a shipped face (Noto Sans Arabic) holds it as a sign of no advance.
             let over_counted = |fault: &String| {
                 fault.contains("cut although")
-                    && ['\u{200D}', '\u{FE0F}', '\u{FE00}'].iter().any(|sign| fault.contains(&sign.escape_unicode().to_string()))
+                    && ['\u{200D}', '\u{FE0F}', '\u{FE00}', '\u{061C}'].iter().any(|sign| fault.contains(&sign.escape_unicode().to_string()))
             };
             let found: Vec<String> =
                 faults(font, ppp, &texts, &[60.0, 100.0, 150.0, 240.0]).into_iter().filter(|fault| !over_counted(fault)).collect();

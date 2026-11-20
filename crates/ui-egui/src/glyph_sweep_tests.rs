@@ -109,18 +109,18 @@ fn the_app_draws_a_box_where_the_test_harness_would_panic() {
     let ctx = app_ctx();
     let fonts = Fonts::of(TextScale::default());
     for font in [fonts.body, fonts.mono] {
-        assert!(!ctx.fonts_mut(|f| f.has_glyph(&font.id(), 'ש')), "a font for Hebrew came in: the sweep's premise moved");
+        assert!(!ctx.fonts_mut(|f| f.has_glyph(&font.id(), '日')), "a font for Chinese came in: the sweep's premise moved");
         let mut galley = None;
-        ctx.run_ui(egui::RawInput::default(), |ui| galley = Some(crate::component::galley(ui, "aשb", font, Color32::BLACK))).textures_delta.clear();
+        ctx.run_ui(egui::RawInput::default(), |ui| galley = Some(crate::component::galley(ui, "a日b", font, Color32::BLACK))).textures_delta.clear();
         let galley = galley.unwrap();
         let glyphs: Vec<_> = galley.rows.iter().flat_map(|row| row.glyphs.iter()).collect();
-        assert_eq!(glyphs.iter().map(|glyph| glyph.chr).collect::<String>(), "aשb", "{font:?}: nothing is dropped");
+        assert_eq!(glyphs.iter().map(|glyph| glyph.chr).collect::<String>(), "a日b", "{font:?}: nothing is dropped");
         assert!(glyphs.iter().all(|glyph| !glyph.uv_rect.is_nothing() && glyph.advance_width > 0.0), "{font:?}: the box shows");
     }
     // The test harness: egui_kittest's default policy panics on the same text.
     let harness = std::panic::catch_unwind(|| {
         let mut harness = Harness::builder().with_context_setup(install_fonts).build_ui(|ui| {
-            ui.label("שלום");
+            ui.label("日本語");
         });
         harness.run();
     });
@@ -128,7 +128,7 @@ fn the_app_draws_a_box_where_the_test_harness_would_panic() {
     assert!(message.starts_with("No glyph for"), "{message:?}");
     // With the app's policy, it draws.
     let mut harness = Harness::builder().with_context_setup(install_fonts).allow_missing_glyphs().build_ui(|ui| {
-        ui.label("שלום");
+        ui.label("日本語");
     });
     harness.run();
 }
