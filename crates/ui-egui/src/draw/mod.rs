@@ -671,7 +671,7 @@ impl InboxApp {
     ) -> (index::Asked, Vec<command::Asked>) {
         // The command line first, the title bar in the own frame: its field and the window controls stand above the
         // index, and Tab walks the drawn order.
-        self.own_frame_parts(command, theme, regions.command);
+        self.own_frame_parts(command, theme, regions);
         let commanded = self.command_line(command, theme, regions, keys);
         if self.draws_frame() {
             frame::controls(command.ctx(), theme, regions.command);
@@ -2878,8 +2878,9 @@ impl InboxApp {
 
     /// The command line's mark, and the app's own frame before the panes when it draws one: the command line `line` as
     /// the title bar (its handle, before the field and the controls take their presses) and the resizing edges.
-    fn own_frame_parts(&self, ui: &Ui, theme: &Theme, line: Rect) {
-        frame::mark(ui, theme, line);
+    fn own_frame_parts(&self, ui: &Ui, theme: &Theme, regions: shell::Regions) {
+        let line = regions.command;
+        frame::mark(ui, theme, line, shell::narrow(ui.ctx()));
         if !self.draws_frame() {
             return;
         }
@@ -3112,14 +3113,14 @@ impl InboxApp {
     }
 
     /// Home in the body: the model kept ([`crate::home::Kept`], built again only when what it shows changed), the
-    /// character field kept, at the motion level the settings say, no emblem; a frame is asked for when the clock next
-    /// changes what it shows. What was pressed on it.
+    /// character field kept, at the motion level the settings say, the Qubernetic emblem and the names on it where they
+    /// fit; a frame is asked for when the clock next changes what it shows. What was pressed on it.
     fn home_place(&mut self, ui: &mut Ui, theme: &Theme) -> Option<home::Asked> {
         let rect = ui.available_rect_before_wrap();
         let level = motion::level(ui.ctx());
         let hidden = self.discarding();
         let shown = self.home.current(&mut self.mailbox, hidden);
-        let stage = home::Stage { field: &mut self.field, emblem: None, level };
+        let stage = home::Stage { field: &mut self.field, emblem: Some(crate::brand::emblem()), level };
         let drawn = home::show(ui, theme, &self.keymap, shown, rect, stage);
         if let Some(due) = self.home.due_in(&self.mailbox) {
             ui.ctx().request_repaint_after(due);
