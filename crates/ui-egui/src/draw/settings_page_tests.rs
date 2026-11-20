@@ -134,12 +134,13 @@ fn inbox_view_is_set_on_appearance_and_not_on_triage() {
 #[test]
 fn a_coming_soon_row_takes_no_focus_and_no_press() {
     let mut harness = opened();
-    let soon: Vec<_> =
-        harness.query_all_by_label_contains("for Write a message").map(|node| (node.accesskit_node().is_disabled(), node.rect())).collect();
-    assert_eq!(soon.len(), 2, "Pane and Window");
-    assert!(soon.iter().all(|(disabled, _)| *disabled));
+    // Accounts' "Set up a phone" is coming soon: its link is drawn but takes nothing.
+    harness.get_by_label("Accounts, settings page").click();
+    harness.run();
+    let link = harness.get_by_label_contains("show the code");
+    assert!(link.accesskit_node().is_disabled());
+    let window = link.rect();
     let before = harness.state().mailbox().last_run().map(str::to_owned);
-    let (_, window) = soon[1];
     harness.hover_at(window.center());
     harness.run();
     for pressed in [true, false] {
@@ -162,7 +163,7 @@ fn a_coming_soon_row_takes_no_focus_and_no_press() {
         }
     }
     assert!(!seen.is_empty());
-    // Both layout rows are live now (#379, #380): neither is a coming-soon control.
+    assert!(seen.iter().all(|label| !label.contains("show the code")), "{seen:?}");
     // A planned section: every control on it is unavailable.
     harness.get_by_label("AI, settings page").click();
     harness.run();
