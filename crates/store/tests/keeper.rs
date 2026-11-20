@@ -157,10 +157,11 @@ fn a_keep_that_keeps_failing_is_tried_again_with_a_growing_wait_and_told_once() 
     let mut store = keeping(tmp.path());
     store.refuse_keeps(true);
     keep(&mut store, "newest");
+    store.settle(Duration::from_secs(5)).unwrap();
+    assert!(store.failed_keep().is_some());
     // Tries at 0 s, 1 s and 3 s: two by 2.5 s, not one a frame.
     std::thread::sleep(Duration::from_millis(2500));
     assert_eq!(store.keeper_tries(), 2);
-    assert!(store.failed_keep().is_some());
     assert!(store.failed_keep().is_none(), "one failure said for the whole run of failures");
 }
 

@@ -54,10 +54,10 @@ use inboxcraft_model::{
 use inboxcraft_time::Timestamp;
 pub use memory::Memory;
 pub use search::{MAX_QUERY_CHARS, MAX_QUERY_WORDS, MAX_RESULTS, Search};
-#[cfg(all(feature = "sqlite", feature = "test-hooks", not(target_arch = "wasm32")))]
-pub use sqlite::KeepHold;
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
 pub use sqlite::{DATABASE_FILE, SCHEMA_VERSION, SOURCES_DIR, Sqlite};
+#[cfg(all(feature = "sqlite", feature = "test-hooks", not(target_arch = "wasm32")))]
+pub use sqlite::{KeepHold, KeeperHooks};
 
 /// What a store that writes drafts behind calls after each such write, landed or failed: a window's redraw, so that a
 /// failure is said without waiting for the person to touch the window.

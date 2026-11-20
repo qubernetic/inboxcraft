@@ -22,9 +22,9 @@ use inboxcraft_model::{
     FolderState, Job, Message, MessageId, MessageState, Outgoing, Scheduled, Sender,
 };
 use inboxcraft_time::Timestamp;
-#[cfg(any(test, feature = "test-hooks"))]
-pub use keeper::KeepHold;
 use keeper::Keeper;
+#[cfg(any(test, feature = "test-hooks"))]
+pub use keeper::{KeepHold, KeeperHooks};
 use rusqlite::config::DbConfig;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
 pub use schema::SCHEMA_VERSION;
@@ -159,14 +159,22 @@ impl Sqlite {
     #[cfg(any(test, feature = "test-hooks"))]
     #[must_use]
     pub fn hold_keeps(&self) -> Option<KeepHold> {
-        self.keeper.as_ref().map(Keeper::hold)
+        self.keeper.as_ref().map(|keeper| keeper.hooks().hold())
+    }
+
+    /// The draft keeper's test hooks, as a handle that outlives a borrow of the store (tests). `None` without a
+    /// keeper.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn keeper_hooks(&self) -> Option<KeeperHooks> {
+        self.keeper.as_ref().map(Keeper::hooks)
     }
 
     /// Makes every write of the draft keeper fail while `refuse` is on, as a full or failing disk would (tests).
     #[cfg(any(test, feature = "test-hooks"))]
     pub fn refuse_keeps(&self, refuse: bool) {
         if let Some(keeper) = &self.keeper {
-            keeper.refuse(refuse);
+            keeper.hooks().refuse(refuse);
         }
     }
 

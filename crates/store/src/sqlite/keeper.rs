@@ -275,19 +275,10 @@ impl Keeper {
         Ok(queue)
     }
 
-    /// Holds the keeper until the hold is dropped (tests).
+    /// The keeper's test hooks, as a handle of their own (tests).
     #[cfg(any(test, feature = "test-hooks"))]
-    pub(super) fn hold(&self) -> KeepHold {
-        let mut queue = self.shared.lock();
-        queue.paused = queue.paused.saturating_add(1);
-        KeepHold { shared: Arc::clone(&self.shared) }
-    }
-
-    /// Makes every write fail while `refuse` is on (tests).
-    #[cfg(any(test, feature = "test-hooks"))]
-    pub(super) fn refuse(&self, refuse: bool) {
-        self.shared.lock().refuse = refuse;
-        self.shared.changed.notify_all();
+    pub(super) fn hooks(&self) -> KeeperHooks {
+        KeeperHooks { shared: Arc::clone(&self.shared) }
     }
 
     /// How many writes the keeper started (tests).
@@ -307,6 +298,30 @@ impl Keeper {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+}
+
+/// A handle on the keeper of a store for tests: hold it, make its writes fail.
+#[cfg(any(test, feature = "test-hooks"))]
+#[derive(Debug, Clone)]
+pub struct KeeperHooks {
+    shared: Arc<Shared>,
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+impl KeeperHooks {
+    /// Holds the keeper until the hold is dropped: what is kept meanwhile waits.
+    #[must_use]
+    pub fn hold(&self) -> KeepHold {
+        let mut queue = self.shared.lock();
+        queue.paused = queue.paused.saturating_add(1);
+        KeepHold { shared: Arc::clone(&self.shared) }
+    }
+
+    /// Makes every write fail while `refuse` is on, as a full or failing disk would.
+    pub fn refuse(&self, refuse: bool) {
+        self.shared.lock().refuse = refuse;
+        self.shared.changed.notify_all();
     }
 }
 
@@ -380,7 +395,6 @@ fn run(shared: &Shared, mut conn: Connection) {
         };
         let now = shared.clock.monotonic();
         let mut queue = shared.lock();
-        queue.writing = false;
         for (id, (number, _)) in &keeps {
             match &written {
                 Ok(()) => {
@@ -403,10 +417,12 @@ fn run(shared: &Shared, mut conn: Connection) {
         }
         let wake = queue.wake.clone();
         drop(queue);
-        shared.changed.notify_all();
+        // The window is woken before a wait for the keeper ends: what it reads then is how the write went.
         if let Some(wake) = wake {
             wake();
         }
+        shared.lock().writing = false;
+        shared.changed.notify_all();
     }
 }
 
