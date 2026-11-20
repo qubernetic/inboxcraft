@@ -8,7 +8,7 @@ use egui::accesskit::Role;
 use egui::{Key, Rect, Shape, UiBuilder, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
-use inboxcraft_html::{Block, Cell, Document, Span, TextKind};
+use inboxcraft_html::{Block, Cell, Document, Look, Span, TextKind};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
@@ -198,19 +198,22 @@ fn table_columns_stand_on_whole_pixels() {
 
 /// A text block of `words`, `quote` deep.
 fn words(words: &str) -> Block {
-    Block::Text { kind: TextKind::Paragraph, quote: 0, spans: vec![Span { text: words.to_owned(), ..Span::default() }] }
+    Block::Text { kind: TextKind::Paragraph, quote: 0, look: Look::default(), spans: vec![Span { text: words.to_owned(), ..Span::default() }] }
 }
 
 #[test]
 fn a_table_of_500_columns_and_depth_beyond_the_limit_never_panics() {
     // 500 columns, and tables in tables 40 deep: more than the cleaner gives, built by hand.
-    let row: Vec<Cell> = (0..500).map(|index| Cell { header: index % 7 == 0, blocks: vec![words(&format!("c{index}"))] }).collect();
-    let wide = Block::Table { quote: 0, rows: vec![row.clone(), row.clone(), row] };
+    let row: Vec<Cell> =
+        (0..500).map(|index| Cell { header: index % 7 == 0, blocks: vec![words(&format!("c{index}"))], ..Cell::default() }).collect();
+    let wide = Block::Table { quote: 0, look: Look::default(), width: None, rows: vec![row.clone(), row.clone(), row] };
     let mut deep = words("at the bottom");
     for depth in 0..40 {
         deep = Block::Table {
             quote: u8::try_from(depth % 3).unwrap_or(0),
-            rows: vec![vec![Cell { header: false, blocks: vec![deep] }, Cell::default()]],
+            look: Look::default(),
+            width: None,
+            rows: vec![vec![Cell { blocks: vec![deep], ..Cell::default() }, Cell::default()]],
         };
     }
     let document = Document { blocks: vec![words("Before"), wide, deep, words("After")], ..Document::default() };
@@ -223,10 +226,20 @@ fn a_table_of_500_columns_and_depth_beyond_the_limit_never_panics() {
     // The wide table scrolls sideways inside itself: its words are drawn inside its room, as far as it reaches.
     let first = harness.query_all_by_label("c1").next().map(|node| node.rect()).unwrap_or_else(|| panic!("no c1"));
     assert!(first.right() < 640.0, "{first:?}");
-    let shallow = Block::Table { quote: 0, rows: vec![vec![Cell { header: false, blocks: vec![words("five deep")] }, Cell::default()]] };
+    let shallow = Block::Table {
+        quote: 0,
+        look: Look::default(),
+        width: None,
+        rows: vec![vec![Cell { blocks: vec![words("five deep")], ..Cell::default() }, Cell::default()]],
+    };
     let mut nested = shallow;
     for _ in 0..5 {
-        nested = Block::Table { quote: 0, rows: vec![vec![Cell { header: false, blocks: vec![nested] }, Cell::default()]] };
+        nested = Block::Table {
+            quote: 0,
+            look: Look::default(),
+            width: None,
+            rows: vec![vec![Cell { blocks: vec![nested], ..Cell::default() }, Cell::default()]],
+        };
     }
     let harness = fitted(Document { blocks: vec![nested], ..Document::default() }, false, 640.0, 600.0);
     harness.get_by_label("five deep");

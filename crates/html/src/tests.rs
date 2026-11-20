@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use super::{
-    Block, Cell, Document, Image, ImageSource, LinkTarget, MAX_BLOCKS, MAX_DEPTH, MAX_IMAGES, MAX_INPUT, MAX_LINKS, MAX_SIDE, MAX_TABLE_COLUMNS,
-    MAX_TABLE_DEPTH, MAX_TABLE_ROWS, MAX_URL, Marker, Options, RemoteContent, Span, TextKind, display, truncate,
+    Block, Cell, Document, Image, ImageSource, Link, LinkTarget, MAX_BLOCKS, MAX_DEPTH, MAX_IMAGES, MAX_INPUT, MAX_LINKS, MAX_SIDE,
+    MAX_TABLE_COLUMNS, MAX_TABLE_DEPTH, MAX_TABLE_ROWS, MAX_URL, Marker, Options, RemoteContent, Span, TextKind, display, truncate,
 };
 
 fn doc(html: &str) -> Document {
@@ -119,7 +119,12 @@ fn inline_looks_become_span_flags() {
     // Runs of one look are merged.
     assert_eq!(
         doc("<b>a</b><strong>b</strong>").blocks[0],
-        Block::Text { kind: TextKind::Paragraph, quote: 0, spans: vec![Span { text: "ab".into(), bold: true, ..Span::default() }] }
+        Block::Text {
+            kind: TextKind::Paragraph,
+            quote: 0,
+            look: crate::Look::default(),
+            spans: vec![Span { text: "ab".into(), bold: true, ..Span::default() }]
+        }
     );
 }
 
@@ -262,7 +267,9 @@ fn forms_keep_their_text_and_lose_what_submits() {
     for bad in ["evil.example", "prefilled", "submit", "post"] {
         assert!(!all.contains(bad), "{bad} leaked");
     }
-    assert_eq!(texts(&d.blocks), ["Name OneTwotyped <b>here</b>Send", "after"]);
+    // The button stands alone, a button-link that goes nowhere: its form's action is not kept.
+    assert_eq!(texts(&d.blocks), ["Name OneTwotyped <b>here</b>", "Send", "after"]);
+    assert!(matches!(d.links.as_slice(), [Link { target: LinkTarget::Refused, button: true, .. }]), "{:?}", d.links);
 }
 
 #[test]
