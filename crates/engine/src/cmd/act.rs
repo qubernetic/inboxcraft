@@ -13,7 +13,7 @@ use serde_json::{Map, Value, json};
 use crate::act::{self as acts, Effects};
 use crate::params::{NoParams, decode};
 use crate::undo::{Act, Inverse, Step};
-use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
+use crate::{AgentClass, Caller, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
 pub(crate) const COMMANDS: &[CommandSpec] = &[ARCHIVE, DELETE, FLAG, MOVE, OPEN, SEEN, UNDO];
@@ -50,7 +50,8 @@ pub(crate) const DELETE: CommandSpec = CommandSpec {
     run: delete,
 };
 
-/// `history.undo`: take the newest act back. An agent takes back only an act an agent may make.
+/// `history.undo`: take the newest act back. An agent takes back only an act an agent may make, and nothing while
+/// the owner has an event open in the editor.
 pub(crate) const UNDO: CommandSpec =
     CommandSpec { id: "history.undo", class: Some(AgentClass::Safe), summary: "Take the newest act on a message back", run: undo };
 
@@ -214,6 +215,9 @@ fn delete(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
 
 fn undo(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let _: NoParams = decode(UNDO.id, params)?;
+    if context.caller() == Caller::Agent && context.state().editing {
+        return Err(EngineError::Editing);
+    }
     let act = context.state().history.last().ok_or(EngineError::NothingToUndo)?;
     if !act.class.allows(context.caller()) {
         return Err(EngineError::NotAllowed { command: act.command, class: act.class });

@@ -270,6 +270,8 @@ impl Desktop {
     /// notifications.
     fn keep_in_step(&mut self) {
         let calls: Vec<Call> = self.calls.as_ref().map(|calls| calls.try_iter().collect()).unwrap_or_default();
+        // An agent's undo waits while the owner edits an event in a window; a closed window edits nothing.
+        self.app.tell_editing(self.window);
         for call in calls {
             let answer = self.app.mailbox_mut().run_for_agent(call.command(), call.params());
             if let Err(error) = &answer

@@ -418,3 +418,19 @@ fn every_act_is_kept_for_a_restart_with_the_account_it_belongs_to() {
     assert_eq!(jobs.iter().map(|job| job.account).collect::<Vec<_>>(), [AccountId::new(1)]);
     assert_eq!(session.store().queued_jobs().unwrap(), jobs);
 }
+
+#[test]
+fn an_agent_s_undo_is_refused_while_an_event_is_edited_and_the_owner_s_is_not() {
+    let mut session = session();
+    session.run_as(Caller::Agent, "mail.flag", &json!({ "id": 1, "flagged": true })).unwrap();
+    session.run("mail.seen", &json!({ "id": 2, "seen": true })).unwrap();
+    session.set_editing(true);
+    let refused = session.run_as(Caller::Agent, "history.undo", &json!({})).unwrap_err();
+    assert_eq!(refused.code(), "editing");
+    assert_eq!(refused.to_string(), "an event is being edited");
+    assert!(held(&session, 2).summary().flags().is_seen(), "nothing was undone");
+    // The owner's own Undo runs as before.
+    assert_eq!(undo(&mut session)["command"], json!("mail.seen"));
+    session.set_editing(false);
+    assert_eq!(session.run_as(Caller::Agent, "history.undo", &json!({})).unwrap()["command"], json!("mail.flag"));
+}

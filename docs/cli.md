@@ -81,7 +81,7 @@ one object on one line:
 | Exit code | Meaning | Codes |
 |---|---|---|
 | 0 | done | |
-| 1 | the command, the store or the app failed | `not_allowed`, `bad_params`, `not_found`, `unknown_command`, `sample_only`, `store`, `panicked`, `output`, `io` (`mcp`); from the app also `not_running`, `no_token`, `unauthorized`, `busy`, `closing`, `bad_line`, `bad_answer`, `closed` ([control-protocol.md](control-protocol.md)) |
+| 1 | the command, the store or the app failed | `not_allowed`, `bad_params`, `not_found`, `unknown_command`, `sample_only`, `store`, `panicked`, `editing` (`history.undo` while the owner edits an event in the app), `output`, `io` (`mcp`); from the app also `not_running`, `no_token`, `unauthorized`, `busy`, `closing`, `bad_line`, `bad_answer`, `closed` ([control-protocol.md](control-protocol.md)) |
 | 2 | wrong arguments, or no store in the directory | `usage`, `no_store` |
 
 The codes are stable snake_case; new ones may be added.

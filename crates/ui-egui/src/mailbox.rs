@@ -1933,6 +1933,12 @@ impl Mailbox {
         self.caller = caller;
     }
 
+    /// Tells the session whether the owner has an event open in the editor: while it is, an agent's `history.undo` is
+    /// refused ([`Session::set_editing`]).
+    pub fn set_editing(&mut self, editing: bool) {
+        self.session.set_editing(editing);
+    }
+
     /// The first command refused because it was not for the window's caller ([`Mailbox::set_caller`]).
     #[must_use]
     pub(crate) fn refused(&self) -> Option<&'static str> {

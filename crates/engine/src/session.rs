@@ -331,6 +331,8 @@ pub(crate) struct State {
     pub(crate) notices: VecDeque<Notice>,
     /// Whether a window takes what commands ask it to show ([`Session::set_window`]); `false` headless.
     pub(crate) window: bool,
+    /// Whether the owner has an event open in the editor ([`Session::set_editing`]): an agent's `history.undo` waits.
+    pub(crate) editing: bool,
     /// What the window is asked to show, for the front end to take ([`Session::take_settings_asked`]); the newest
     /// [`crate::shown::MAX_ASKED`].
     pub(crate) settings_asked: VecDeque<SettingsAsked>,
@@ -682,6 +684,13 @@ impl Session {
     /// Says that a window takes what commands ask it to show (`ui.settings.open`): its answer's `window` is then `true`.
     pub fn set_window(&mut self, window: bool) {
         self.state.window = window;
+    }
+
+    /// Says whether the owner has an event open in the editor: while it is, an agent's `history.undo` is refused
+    /// ([`EngineError::Editing`]), so the agent cannot take an act back under the owner's typing. The owner's own undo
+    /// runs as before. The front end says it again each time the editor may have opened or ended; `false` at the start.
+    pub fn set_editing(&mut self, editing: bool) {
+        self.state.editing = editing;
     }
 
     /// What commands asked the window to show since the last call, oldest first: at most
