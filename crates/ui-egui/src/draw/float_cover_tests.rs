@@ -191,7 +191,7 @@ const KINDS: [Kind; 8] = [
         name: "the account picker",
         ready: settle,
         open: |harness| press_button(harness, OWNER),
-        choose: |harness| harness.get_by_role_and_label(Role::MenuItemRadio, "Studio").click(),
+        choose: |harness| harness.get_by_role_and_label(Role::MenuItemRadio, "Studio, holloway.studio@example.org").click(),
         shown: |harness| harness.query_by_role_and_label(Role::MenuItemRadio, "All accounts").is_some(),
         away: COVERS,
     },

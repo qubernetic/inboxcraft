@@ -68,12 +68,17 @@ struct State {
 
 /// The index alone in a `width` × `height` column, motion reduced, every account open when `open`.
 fn harness(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, height: f32, open: bool) -> Harness<'static, State> {
+    harness_in(mailbox, at, narrow, scale, height, open, 0.0)
+}
+
+/// [`harness`] with `beside` points of window on the index's right, where its floats may reach.
+fn harness_in(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, height: f32, open: bool, beside: f32) -> Harness<'static, State> {
     let theme = Theme::new(Mode::Dark, scale);
     let width = if narrow { 56.0 } else { 232.0 };
     let ids: BTreeSet<u64> = mailbox.accounts().iter().map(|account| account.id).collect();
     let state = State { mailbox, at, narrow, asked: Asked::default(), keymap: Keymap::default(), theme };
     let mut harness = Harness::builder()
-        .with_size(vec2(width, height))
+        .with_size(vec2(width + beside, height))
         .with_context_setup(move |ctx| {
             install_fonts(ctx);
             crate::motion::set_reduced(ctx, true);
@@ -82,8 +87,9 @@ fn harness(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, height: 
             }
         })
         .build_ui_state(
-            |ui, state: &mut State| {
-                let whole = ui.ctx().content_rect();
+            move |ui, state: &mut State| {
+                let window = ui.ctx().content_rect();
+                let whole = Rect::from_min_size(window.min, vec2(width, window.height()));
                 let asked = ui
                     .scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| {
                         show(ui, &state.theme, &state.keymap, &state.mailbox, state.at, state.narrow, (true, false))
@@ -267,6 +273,42 @@ fn every_row_and_the_account_picker_are_reached_by_the_keyboard() {
     all.click();
     harness.run();
     assert_eq!(harness.state().asked.account, Some(None), "the picker's All accounts");
+}
+
+#[test]
+fn the_account_picker_stands_on_the_owner_s_row_as_its_frame_draws_it() {
+    // popup/account-picker/open: 230 wide, 3 in from the index's left, its foot on the owner's row (over the hairline);
+    // a SHOW MAIL OF head 28 high, then All accounts and each account with its bar and address, 32 high (#325, 3.6).
+    let mut harness = harness_in(two(), Place::Mail, false, TextScale::default(), 826.0, false, 400.0);
+    harness.query_all_by_role(Role::Button).find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("Show mail of"))).unwrap().click();
+    harness.run();
+    harness.run();
+    let head = harness.get_by_label("Show mail of").rect();
+    let all = harness.get_by_role_and_label(Role::MenuItemRadio, "All accounts").rect();
+    let personal = harness.get_by_role_and_label(Role::MenuItemRadio, "Personal, mira@example.org").rect();
+    let studio = harness.get_by_role_and_label(Role::MenuItemRadio, "Studio, holloway.studio@example.org").rect();
+    assert_eq!(head.height(), 28.0, "{head:?}");
+    assert_eq!([all.top() - head.bottom(), personal.top() - all.bottom(), studio.top() - personal.bottom()], [0.0; 3]);
+    assert_eq!([all.height(), personal.height(), studio.height()], [32.0; 3]);
+    // The float's own 1 px edge lies around its rows.
+    assert_eq!((head.left() - 1.0, head.right() + 1.0), (3.0, 233.0), "{head:?}");
+    assert_eq!(studio.bottom() + 1.0, 786.0, "the picker's foot on the owner's row: {studio:?}");
+}
+
+#[test]
+fn with_one_account_the_picker_ticks_it_and_says_where_another_is_added() {
+    // popup/account-picker/one-account: no All accounts; the account ticked, a hairline and the note under it.
+    let mut store = sample::mailbox(now()).unwrap();
+    store.apply(&Batch::new().with(Change::RemoveAccount(AccountId::new(2)))).unwrap();
+    let one = Mailbox::new(sample::session_over(store, clock()).unwrap(), clock());
+    let mut harness = harness_in(one, Place::Mail, false, TextScale::default(), 826.0, false, 400.0);
+    harness.query_all_by_role(Role::Button).find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("Show mail of"))).unwrap().click();
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "All accounts").is_none(), "nothing to narrow");
+    let personal = harness.get_by_role_and_label(Role::MenuItemRadio, "Personal, mira@example.org");
+    assert_eq!(personal.accesskit_node().toggled(), Some(egui::accesskit::Toggled::True), "the only account is the one shown");
+    assert!(harness.query_by_label("The only account. Another is added in Settings.").is_some());
 }
 
 #[test]
