@@ -435,6 +435,52 @@ fn best(ends: &[usize], fits: impl Fn(usize) -> bool) -> Option<usize> {
     low.checked_sub(1).and_then(|index| ends.get(index).copied())
 }
 
+/// The left-to-right mark (U+200E): a strong letter of no width, never drawn ([`unseen`]).
+pub(crate) const LEFT_TO_RIGHT_MARK: char = '\u{200E}';
+
+/// An e-mail address or a domain as it is drawn: left to right, its parts in the written order, as a browser shows an
+/// address. The bidi algorithm would take `שלום.קום` in `x@שלום.קום.example.org` as one right-to-left run and turn it
+/// round, so that `קום` stood left of `שלום`: the labels would seem to be in another order next to `example.org`.
+/// Here each run of right-to-left letters stands between two left-to-right marks, and one leads the address, so every
+/// run keeps its place and only its own letters are read right to left. The marks, overrides and isolates it held are
+/// left out: they would move its parts again. An address of no right-to-left letter is given back as it is (without
+/// those signs). A line that holds an address and words in a right-to-left script (a name before it) starts with
+/// [`LEFT_TO_RIGHT_MARK`] too, so the address is laid out in a left-to-right line.
+pub(crate) fn address(text: &str) -> std::borrow::Cow<'_, str> {
+    let clean: std::borrow::Cow<'_, str> = if text.chars().any(unseen) {
+        std::borrow::Cow::Owned(text.chars().filter(|c| !unseen(*c)).collect())
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    };
+    if !needs(&clean) {
+        return clean;
+    }
+    let turned = |c: char| matches!(unicode_bidi::bidi_class(c), BidiClass::R | BidiClass::AL);
+    let mut out = String::with_capacity(clean.len().saturating_add(16));
+    out.push(LEFT_TO_RIGHT_MARK);
+    let mut inside = false;
+    for grapheme in clean.graphemes(true) {
+        let right_to_left = grapheme.chars().any(turned);
+        if right_to_left != inside {
+            if !out.ends_with(LEFT_TO_RIGHT_MARK) {
+                out.push(LEFT_TO_RIGHT_MARK);
+            }
+            inside = right_to_left;
+        }
+        out.push_str(grapheme);
+    }
+    if inside {
+        out.push(LEFT_TO_RIGHT_MARK);
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// `line` (a name and its address) led by [`LEFT_TO_RIGHT_MARK`] when it holds right-to-left text, so the address in it
+/// stands in a left-to-right line ([`address`]); as it is otherwise.
+pub(crate) fn left_to_right(line: String) -> String {
+    if needs(&line) { format!("{LEFT_TO_RIGHT_MARK}{line}") } else { line }
+}
+
 /// `text` as one section of a job is laid out: its characters in visual order ([`visual`]).
 #[cfg(test)]
 pub(crate) fn seen_text(text: &str) -> String {

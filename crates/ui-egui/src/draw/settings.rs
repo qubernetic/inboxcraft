@@ -1114,7 +1114,7 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
             let ends = index == 0 || index.saturating_add(1) == count;
             culled(ui, theme, Id::unique("settings-grouped").with(account.id), ends, |ui| {
                 let name = tr!("Group the inbox of {account}", account = account.label);
-                settings_row(ui, theme, &name, Some(&account.address), |ui| {
+                settings_row(ui, theme, &name, Some(&crate::bidi::address(&account.address)), |ui| {
                     let pressed = switch(ui, theme, &name, account.grouped);
                     if owner_pressed(ui, &pressed) {
                         asked = Some(Asked::Grouped(account.id, !account.grouped));
@@ -1151,7 +1151,7 @@ fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Setti
         for (index, account) in mailbox.accounts().iter().enumerate() {
             let ends = index == 0 || index.saturating_add(1) == count;
             culled(ui, theme, Id::unique("settings-level").with(account.id), ends, |ui| {
-                let title = tr!("{account} · {address}", account = account.label, address = account.address);
+                let title = tr!("{account} · {address}", account = account.label, address = crate::bidi::address(&account.address));
                 settings_row(ui, theme, &title, None, |ui| {
                     if let Some(level) = segmented_for(ui, theme, &levels, mailbox.notify_level(account.id), Some(&account.label)) {
                         asked = Some(Asked::Level(account.id, level));

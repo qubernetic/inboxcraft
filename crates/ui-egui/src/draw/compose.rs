@@ -424,7 +424,7 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, valu
     let p = &theme.palette;
     let s = &theme.spacing;
     let Some(account) = mailbox.account(composer.account()) else { return };
-    let sender = if account.name.is_empty() { account.address.clone() } else { account.name.clone() };
+    let sender = if account.name.is_empty() { crate::bidi::address(&account.address).into_owned() } else { account.name.clone() };
     let spoken = if account.name.is_empty() {
         tr!("From {sender}", sender = account.address)
     } else {
@@ -464,7 +464,7 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, valu
     paint::run_at(painter, pos2(x, mid - name_text.size().y / 2.0), name_text, p.ink);
     x += paint::run_box(name_width) + s.s1 + 2.0;
     if !account.name.is_empty() {
-        let address = tr!("<{address}>", address = account.address);
+        let address = tr!("<{address}>", address = crate::bidi::address(&account.address));
         let most = end - s.s2 - FROM_CARET - s.s1 - 2.0 - x;
         let address = cut(ui, &address, theme.fonts.body, p.ink, most.max(1.0));
         // Not even its ellipsis fits: the address is left to the line's name for the screen reader.

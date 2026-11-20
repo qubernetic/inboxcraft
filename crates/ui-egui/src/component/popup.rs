@@ -728,7 +728,7 @@ pub(crate) fn account_choice_with(ui: &mut Ui, theme: &Theme, name: &str, addres
     let start = left + name_box + s.s2;
     if right - start > 1.0 && !address.is_empty() {
         let muted = arriving(theme, p.muted, shown);
-        let address = cut(ui, address, theme.fonts.mono_s, muted, right - start);
+        let address = cut(ui, &crate::bidi::address(address), theme.fonts.mono_s, muted, right - start);
         paint::run_at(&painter, pos2(start, mid - address.size().y / 2.0), address, muted);
     }
     response
@@ -812,7 +812,7 @@ pub(crate) fn suggestion_row_with(ui: &mut Ui, theme: &Theme, name: &str, addres
     let start = left + name_box + s.s2;
     if right - start > 1.0 && !address.is_empty() {
         let muted = arriving(theme, p.muted, shown);
-        let address = cut(ui, address, theme.fonts.mono_s, muted, right - start);
+        let address = cut(ui, &crate::bidi::address(address), theme.fonts.mono_s, muted, right - start);
         paint::run_at(&painter, pos2(start, mid - address.size().y / 2.0), address, muted);
     }
     response

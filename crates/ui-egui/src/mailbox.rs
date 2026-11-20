@@ -875,7 +875,8 @@ fn named(value: &Value, key: &str) -> (Vec<(String, String)>, usize) {
 /// One recipient as the outbox row lists it: always its address, after its name where it has one that differs, so
 /// the row says where it goes and not only what it is called ("Odile Brannock <odile@example.org>").
 fn with_address((name, address): &(String, String)) -> String {
-    if name == address { address.clone() } else { tr!("{name} <{address}>", name = name, address = address) }
+    let shown = crate::bidi::address(address);
+    if name == address { shown.into_owned() } else { crate::bidi::left_to_right(tr!("{name} <{address}>", name = name, address = shown)) }
 }
 
 /// The outbox row's one line of recipients: To, then Cc and Bcc where they hold any, each at most [`MAX_LISTED`]

@@ -75,7 +75,7 @@ fn account(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &AccountRow) -> boo
     let ends = link.rect.left() - ROW_GAP;
     let address_at = (words + Theme::size(theme, NAME) + ROW_GAP).min(ends - 1.0).max(words + 1.0);
     let name = crate::component::cut(ui, &row.label, f.strong, p.ink, (address_at - words - ROW_GAP).max(1.0));
-    let address = crate::component::cut(ui, &row.address, f.mono, p.muted, (ends - address_at).max(1.0));
+    let address = crate::component::cut(ui, &crate::bidi::address(&row.address), f.mono, p.muted, (ends - address_at).max(1.0));
     painter.galley(pos2(words, (mid - name.size().y / 2.0).round()), name, p.ink);
     painter.galley(pos2(address_at, (mid - address.size().y / 2.0).round()), address, p.muted);
     let y = rect.bottom() - 1.0;

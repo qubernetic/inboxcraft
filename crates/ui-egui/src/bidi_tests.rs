@@ -216,3 +216,27 @@ fn a_cut_keeps_the_direction_of_the_whole_label() {
     let shown: Vec<String> = found.iter().map(|galley| line(galley)).collect();
     assert_eq!(shown, ["םולש 34 12", "…34 12", "…34 12", "…34 12"]);
 }
+
+#[test]
+fn an_address_keeps_its_labels_in_the_written_order() {
+    // Labels in a right-to-left script stay where they are written, each read right to left: never swapped.
+    let address = super::address("x@שלום.קום.example.org");
+    let found = laid(|ui| {
+        vec![
+            crate::component::galley(ui, &address, body(), Color32::WHITE),
+            crate::component::cut(ui, &address, body(), Color32::WHITE, 600.0),
+            crate::component::fitted(ui, &address, body(), Color32::WHITE, 600.0),
+            crate::component::galley(ui, &super::left_to_right(format!("שלום כהן  <{address}>")), body(), Color32::WHITE),
+        ]
+    });
+    let [first, cut, fitted, named] = found.as_slice() else { panic!("four lines") };
+    for galley in [first, cut, fitted] {
+        assert_eq!(line(galley), "x@םולש.םוק.example.org");
+    }
+    // After a right-to-left name, the line is left to right: the name reads right to left, the address as alone.
+    assert_eq!(line(named), "ןהכ םולש  <x@םולש.םוק.example.org>");
+    // A plain address is given back as it is.
+    assert_eq!(super::address("kiln@example.org"), "kiln@example.org");
+    // A mark or an override in it is left out: it would move the labels again.
+    assert_eq!(super::address("x@\u{200F}\u{202E}example.org"), "x@example.org");
+}
