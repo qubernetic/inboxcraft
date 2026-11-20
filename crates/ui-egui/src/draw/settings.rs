@@ -37,7 +37,7 @@ use crate::component::switch::switch;
 use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::{Action, Keymap};
-use crate::mailbox::{After, InboxView, Mailbox};
+use crate::mailbox::{After, GreetBy, InboxView, Mailbox};
 use crate::onboard::Onboarding;
 use crate::settings::{Section, Settings};
 use crate::theme::{Font, TextScale, Theme};
@@ -147,6 +147,8 @@ pub(super) enum Asked {
     KeepPins(bool),
     /// What follows an act on the open message (`after.set`).
     After(After),
+    /// Which word of the sending name Home greets by (`greeting.set`).
+    GreetBy(GreetBy),
     /// How long every send is held before it goes, in seconds.
     Hold(u8),
     /// Which new mail of the account notifies.
@@ -818,7 +820,28 @@ fn signature(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
     asked
 }
 
-/// The Sending page: Undo send, the signatures two by two, then the templates and the scheduled list.
+/// A choice of the word Home greets by, as its segment names it.
+fn greet_name(by: GreetBy) -> &'static str {
+    match by {
+        GreetBy::First => tr!("First word"),
+        GreetBy::Last => tr!("Last word"),
+        GreetBy::Full => tr!("Full name"),
+        GreetBy::None => tr!("No name"),
+    }
+}
+
+/// What the choice of the word Home greets by does, under its row.
+fn greet_help(by: GreetBy) -> &'static str {
+    match by {
+        GreetBy::First => tr!("Home greets you by the first word of your sending name; titles such as Dr. are skipped."),
+        GreetBy::Last => tr!("Home greets you by the last word of your sending name; titles such as Dr. are skipped."),
+        GreetBy::Full => tr!("Home greets you by your whole sending name, as you wrote it."),
+        GreetBy::None => tr!("Home greets you without a name."),
+    }
+}
+
+/// The Sending page: Undo send, the signatures two by two, the templates and the scheduled list, then how Home greets
+/// you.
 fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, mailbox: &Mailbox) -> Option<Asked> {
     let mut asked = None;
     head(ui, theme, Section::Sending, &[], |_| {});
@@ -897,6 +920,16 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
             let own = UiBuilder::new().scope_id(Id::unique("settings-open-scheduled"));
             if ui.scope_builder(own, |ui| link_sized(ui, theme, keymap, tr!("open the list →"), LinkSize::Small)).inner.clicked() {
                 asked = Some(Asked::Scheduled);
+            }
+        });
+        group(ui, theme, "D", tr!("Your name"), None);
+        let by = mailbox.greet_by();
+        let choices = GreetBy::ALL.map(|by| (by, greet_name(by), theme.fonts.button));
+        settings_row(ui, theme, tr!("Home greets you by"), Some(greet_help(by)), |ui| {
+            // Its own id, as the links above: the culled signatures, laid out as the page scrolls, never move it.
+            let own = UiBuilder::new().scope_id(Id::unique("settings-greet-by"));
+            if let Some(by) = ui.scope_builder(own, |ui| segmented_for(ui, theme, &choices, by, Some(tr!("how Home greets you")))).inner {
+                asked = Some(Asked::GreetBy(by));
             }
         });
     });
@@ -1210,3 +1243,7 @@ impl super::InboxApp {
 #[cfg(test)]
 #[path = "settings_page_tests.rs"]
 mod page_tests;
+
+#[cfg(test)]
+#[path = "settings_greeting_tests.rs"]
+mod greeting_tests;

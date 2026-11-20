@@ -219,6 +219,9 @@
 {"out": "docs/images/compose-template-dark.png", "mode": "dark", "size": [1400, 860], "compose": "template"}
 {"out": "docs/images/settings-sending-light.png", "mode": "light", "size": [1200, 820], "sending": true}
 {"out": "docs/images/settings-sending-dark.png", "mode": "dark", "size": [1200, 820], "sending": true}
+# Sending scrolled to "Your name" (#349): how Home greets you, the keyboard on the first word.
+{"out": "docs/images/settings-sending-greeting-light.png", "mode": "light", "size": [1200, 820], "sending": true, "steps": [{"shift_tab": 1}]}
+{"out": "docs/images/settings-sending-greeting-dark.png", "mode": "dark", "size": [1200, 820], "sending": true, "steps": [{"shift_tab": 1}]}
 # The Templates page under Sending (#317): the list, a delete asked in place, the form on a template.
 {"out": "docs/images/settings-templates-list-light.png", "mode": "light", "size": [1440, 900], "section": "templates"}
 {"out": "docs/images/settings-templates-list-dark.png", "mode": "dark", "size": [1440, 900], "section": "templates"}

@@ -624,6 +624,7 @@ impl InboxApp {
                 self.mailbox.set_inbox_view(kept.view);
                 self.mailbox.restore_pins(kept.keep_pins);
                 self.mailbox.restore_after(kept.after);
+                self.mailbox.restore_greet_by(kept.greet_by);
                 if let Some(hold) = kept.hold {
                     self.mailbox.restore_hold(hold);
                 }
@@ -637,6 +638,7 @@ impl InboxApp {
                     keep_pins: self.mailbox.pins_outlast_done(),
                     hold: Some(self.mailbox.hold_seconds()),
                     after: self.mailbox.after(),
+                    greet_by: self.mailbox.greet_by(),
                 };
             }
         }
@@ -845,7 +847,8 @@ impl InboxApp {
     }
 
     /// The triage and sending choices to keep: the inbox view, whether a pin outlasts done, the hold before a send
-    /// goes, and the screener's mode but on the sample, which keeps the one kept.
+    /// goes, what the window does after an act, which word of the name Home greets by, and the screener's mode but on
+    /// the sample, which keeps the one kept.
     fn triage(&self) -> Triage {
         let screener = if self.mailbox.is_sample() { self.kept_triage.screener } else { self.mailbox.screener_mode() };
         Triage {
@@ -854,6 +857,7 @@ impl InboxApp {
             keep_pins: self.mailbox.pins_outlast_done(),
             hold: Some(self.mailbox.hold_seconds()),
             after: self.mailbox.after(),
+            greet_by: self.mailbox.greet_by(),
         }
     }
 
@@ -3669,6 +3673,7 @@ impl InboxApp {
             settings::Asked::Grouped(account, grouped) => self.mailbox.set_grouped(account, grouped),
             settings::Asked::KeepPins(keep) => self.mailbox.set_pins_outlast_done(keep),
             settings::Asked::After(after) => self.mailbox.set_after(after),
+            settings::Asked::GreetBy(by) => self.mailbox.set_greet_by(by),
             settings::Asked::Hold(seconds) => self.mailbox.set_hold(seconds),
             settings::Asked::Level(account, level) => self.mailbox.set_notify_level(account, level),
             settings::Asked::Returns(on) => self.mailbox.set_notify_returns(on),

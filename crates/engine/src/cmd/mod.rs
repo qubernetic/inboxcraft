@@ -41,7 +41,7 @@ macro_rules! modules {
     };
 }
 
-modules!(account, act, calendar, compose, folder, mail, notify, outbox, remote, sample, schedule, send, sync, template, triage, ui);
+modules!(account, act, calendar, compose, folder, home, mail, notify, outbox, remote, sample, schedule, send, sync, template, triage, ui);
 
 /// Every built-in command.
 pub(crate) fn all() -> Vec<CommandSpec> {
@@ -90,6 +90,9 @@ mod follow_up_tests;
 #[cfg(test)]
 #[path = "group_tests.rs"]
 mod group_tests;
+#[cfg(test)]
+#[path = "home_tests.rs"]
+mod home_tests;
 #[cfg(test)]
 #[path = "hostile_tests.rs"]
 mod hostile_tests;

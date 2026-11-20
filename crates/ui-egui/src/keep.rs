@@ -8,7 +8,7 @@
 //! ([`Appearance::from_value`]): a choice that cannot be read is the default, and a file larger than any appearance is
 //! not read at all. It is written to a temporary file first and moved over the old one, so a crash mid-write leaves
 //! the old choices. The keys go into [`KEYS_FILE`] beside it, read the same way ([`Keymap::from_value`]), and the
-//! triage choices (the screener's mode, the inbox view, whether a pin outlasts done, how long a send is held, and what follows an act) into [`TRIAGE_FILE`] ([`Triage::from_value`]), and the
+//! triage choices (the screener's mode, the inbox view, whether a pin outlasts done, how long a send is held, what follows an act, and which word of the sending name Home greets by) into [`TRIAGE_FILE`] ([`Triage::from_value`]), and the
 //! notification choices (each account's level, returned snoozes and reminders) into [`NOTIFY_FILE`]
 //! ([`NotifySettings::from_value`]); that file names accounts by their number only. The week rule (`week.set`) goes into
 //! [`WEEK_FILE`], read as outside data by the session ([`inboxcraft_engine::week::from_value`]). A window without a
@@ -23,7 +23,7 @@ use inboxcraft_engine::{Hold, ScreenerMode};
 use serde_json::{Value, json};
 
 use crate::keymap::Keymap;
-use crate::mailbox::{After, InboxView};
+use crate::mailbox::{After, GreetBy, InboxView};
 
 /// The file's name.
 pub const FILE: &str = "appearance.json";
@@ -42,7 +42,7 @@ pub const WEEK_FILE: &str = "week.json";
 
 /// The triage choices kept between runs: what the screener does with a new sender's first mail, how the unified
 /// inbox shows its groups, whether a pin stays on a message when it is done, how long a send is held before it goes,
-/// and what follows an act on the open message.
+/// what follows an act on the open message, and which word of the sending name Home greets by.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Triage {
     /// The screener's mode.
@@ -55,6 +55,8 @@ pub struct Triage {
     pub hold: Option<u8>,
     /// What follows an act on the open message.
     pub after: After,
+    /// Which word of the sending name Home greets by.
+    pub greet_by: GreetBy,
 }
 
 impl Triage {
@@ -73,6 +75,7 @@ impl Triage {
             keep_pins: value.get("keep_pins").and_then(Value::as_bool).unwrap_or(false),
             hold: value.get("hold_seconds").and_then(Value::as_u64).and_then(Hold::new).map(Hold::seconds),
             after: named("after").and_then(After::named).unwrap_or_default(),
+            greet_by: named("greeting").and_then(GreetBy::named).unwrap_or_default(),
         }
     }
 
@@ -87,6 +90,7 @@ impl Triage {
             "keep_pins": self.keep_pins,
             "hold_seconds": self.hold,
             "after": self.after.name(),
+            "greeting": self.greet_by.name(),
         })
     }
 }

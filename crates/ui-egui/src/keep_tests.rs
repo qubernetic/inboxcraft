@@ -169,13 +169,20 @@ fn the_triage_choices_are_kept_beside_the_appearance_and_come_back() {
     use inboxcraft_engine::ScreenerMode;
 
     use super::{TRIAGE_FILE, Triage};
-    use crate::mailbox::{After, InboxView};
+    use crate::mailbox::{After, GreetBy, InboxView};
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("nested").join(FILE);
     let mut keep = KeepFile::new(path.clone());
     assert_eq!(keep.load_triage(), None, "nothing kept yet");
-    let chosen = Triage { screener: ScreenerMode::Inside, view: InboxView::Grouped, keep_pins: true, hold: Some(30), after: After::Stay };
+    let chosen = Triage {
+        screener: ScreenerMode::Inside,
+        view: InboxView::Grouped,
+        keep_pins: true,
+        hold: Some(30),
+        after: After::Stay,
+        greet_by: GreetBy::Last,
+    };
     keep.store_triage(&chosen).unwrap();
     assert_eq!(KeepFile::new(path.clone()).load_triage(), Some(chosen));
     let kept = dir.path().join("nested").join(TRIAGE_FILE);
@@ -188,11 +195,18 @@ fn the_triage_choices_are_kept_beside_the_appearance_and_come_back() {
         "{text}"
     );
     assert!(text.contains("\"hold_seconds\": 30") && text.contains("\"after\": \"stay\""), "{text}");
+    assert!(text.contains("\"greeting\": \"last\""), "{text}");
     // Damaged, huge and wrong: the defaults or nothing.
-    std::fs::write(&kept, b"{ \"screener\": 3, \"view\": \"tiles\", \"keep_pins\": \"yes\", \"hold_seconds\": 600, \"after\": \"sideways\" }")
-        .unwrap();
+    std::fs::write(
+        &kept,
+        b"{ \"screener\": 3, \"view\": \"tiles\", \"keep_pins\": \"yes\", \"hold_seconds\": 600, \"after\": \"sideways\", \"greeting\": \"middle\" }",
+    )
+    .unwrap();
     assert_eq!(keep.load_triage(), Some(Triage::default()));
-    assert_eq!(Triage::default(), Triage { screener: ScreenerMode::Off, view: InboxView::Smart, keep_pins: false, hold: None, after: After::Next });
+    assert_eq!(
+        Triage::default(),
+        Triage { screener: ScreenerMode::Off, view: InboxView::Smart, keep_pins: false, hold: None, after: After::Next, greet_by: GreetBy::First }
+    );
     std::fs::write(&kept, b"\xff not json").unwrap();
     assert_eq!(keep.load_triage(), None);
     std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();
@@ -267,4 +281,20 @@ fn the_week_rule_is_kept_beside_the_appearance_and_comes_back() {
     std::fs::write(&blocker, b"a file where the folder should be").unwrap();
     assert!(KeepFile::new(blocker.join(FILE)).store_week(&chosen).is_err());
     assert!(KeepFile::new(std::path::PathBuf::from("/")).store_week(&chosen).is_err());
+}
+
+/// The kept greeting: each choice read back by its name; a junk value, another type or none is the first word.
+#[test]
+fn the_kept_greeting_reads_back_and_junk_is_the_first_word() {
+    use super::Triage;
+    use crate::mailbox::GreetBy;
+    use serde_json::json;
+
+    for by in GreetBy::ALL {
+        assert_eq!(Triage::from_value(&Triage { greet_by: by, ..Triage::default() }.to_value()).greet_by, by, "{by:?}");
+    }
+    for junk in [json!({ "greeting": "LAST" }), json!({ "greeting": "last\u{0}" }), json!({ "greeting": 2 }), json!({ "greeting": null }), json!({})]
+    {
+        assert_eq!(Triage::from_value(&junk).greet_by, GreetBy::First, "{junk}");
+    }
 }

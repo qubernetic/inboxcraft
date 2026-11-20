@@ -153,7 +153,8 @@ pub struct Home {
     pub date: String,
     /// The headline's greeting.
     pub greeting: Greeting,
-    /// The owner's first name, the headline's second line; `None` when no account says one.
+    /// The word of the owner's sending name the headline greets by (the first word by default, `greeting.set`), its
+    /// second line; `None` when no account's name gives one or the owner chose no name.
     pub name: Option<String>,
     /// The sentence under the headline.
     pub lede: String,
@@ -311,7 +312,8 @@ pub fn build_hiding(mailbox: &mut Mailbox, hidden: Option<u64>) -> Home {
         Some(Moment { day, minute: u16::from(civil.hour()).saturating_mul(60).saturating_add(u16::from(civil.minute())) })
     });
     let Agenda { lines: agenda, total: agenda_total, tomorrow, until } = now_moment.map(|now| agenda(mailbox, now)).unwrap_or_default();
-    let name = mailbox.accounts().iter().find_map(|account| account.name.split_whitespace().next().map(kept));
+    let by = mailbox.greet_by();
+    let name = mailbox.accounts().iter().find_map(|account| by.word(&account.name).map(|word| kept(&word)));
     let date = civil.map_or_else(
         || tr!("Today").to_owned(),
         |civil| {
@@ -479,14 +481,15 @@ fn account_places(mailbox: &mut Mailbox) -> Vec<(u64, u64)> {
         .collect()
 }
 
-/// What a built Home was built from: the mailbox's [`Mailbox::revision`] and [`Mailbox::writes`], and the day and the
-/// hour on the owner's clock (the greeting, the date, the rest of today).
+/// What a built Home was built from: the mailbox's [`Mailbox::revision`] and [`Mailbox::writes`], the day and the
+/// hour on the owner's clock (the greeting, the date, the rest of today), and the word of the name it greets by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Stamp {
     revision: u64,
     writes: u64,
     hour: Option<(Day, u8)>,
     hidden: Option<u64>,
+    greet_by: crate::mailbox::GreetBy,
 }
 
 /// Home as the window keeps it between frames: built while Home shows, and again only when the mailbox changed (a load,
@@ -506,7 +509,7 @@ impl Kept {
         let (now, offset) = (mailbox.now(), mailbox.offset());
         let civil = now.to_civil(offset);
         let hour = civil.and_then(|civil| Some((Day::new(civil.year(), civil.month(), civil.day())?, civil.hour())));
-        let stamp = Stamp { revision: mailbox.revision(), writes: mailbox.writes(), hour, hidden };
+        let stamp = Stamp { revision: mailbox.revision(), writes: mailbox.writes(), hour, hidden, greet_by: mailbox.greet_by() };
         let moment = hour
             .zip(civil)
             .map(|((day, _), civil)| Moment { day, minute: u16::from(civil.hour()).saturating_mul(60).saturating_add(u16::from(civil.minute())) });
@@ -516,7 +519,7 @@ impl Kept {
             let home = build_hiding(mailbox, hidden);
             self.builds = self.builds.saturating_add(1);
             // The build read the mailbox: the stamp is taken after it, so its own reads count as seen.
-            self.stamp = Some(Stamp { revision: mailbox.revision(), writes: mailbox.writes(), hour, hidden });
+            self.stamp = Some(Stamp { revision: mailbox.revision(), writes: mailbox.writes(), hour, hidden, greet_by: mailbox.greet_by() });
             self.home = Some(home);
         }
         self.home.get_or_insert_with(Home::first_run)

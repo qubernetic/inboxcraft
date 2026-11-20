@@ -137,6 +137,7 @@ What the app still owes this file, one line each. The finer differences, with th
 - Privacy keeps no sender name, so a row shows the address at 16 where the frames draw a name column; About is one
   column, and "After an act" and the week's two rows on Calendar have no frame.
 - The calendar's sync line has no "sync now" link at rest; the line itself takes the press.
+- Sending's "Your name", the choice of the word Home greets you by, has no frame.
 
 ## Limits
 - The Planned page shows direction: where a feature stands and how it looks. Numbers and steps in it are invented,
