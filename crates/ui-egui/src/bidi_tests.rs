@@ -240,3 +240,45 @@ fn an_address_keeps_its_labels_in_the_written_order() {
     // A mark or an override in it is left out: it would move the labels again.
     assert_eq!(super::address("x@\u{200F}\u{202E}example.org"), "x@example.org");
 }
+
+/// One frame's time for `draw`, laid out headlessly with the app's fonts: the median and the 95th percentile of `frames`
+/// frames after two to warm up, in milliseconds.
+fn timed(frames: usize, draw: impl Fn(&Ui)) -> (f64, f64) {
+    let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx);
+    let mut took = Vec::new();
+    for frame in 0..frames + 2 {
+        let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1200.0, 900.0))), ..egui::RawInput::default() };
+        #[allow(clippy::disallowed_methods, reason = "a measurement of the wall time")]
+        let start = std::time::Instant::now();
+        let mut output = ctx.run_ui(input, |ui| draw(ui));
+        let spent = start.elapsed().as_secs_f64() * 1000.0;
+        output.textures_delta.clear();
+        if frame >= 2 {
+            took.push(spent);
+        }
+    }
+    took.sort_by(f64::total_cmp);
+    let at = |share: f64| took.get(((took.len() as f64 - 1.0) * share).round() as usize).copied().unwrap_or_default();
+    (at(0.5), at(0.95))
+}
+
+/// Not a check: the per-frame time of a long hostile right-to-left subject and of 200 right-to-left rows, printed for the
+/// report (`cargo test -p inboxcraft-ui-egui --lib bidi::tests::time_ -- --ignored --nocapture`).
+#[test]
+#[ignore = "a timing, run by hand"]
+fn time_right_to_left_labels() {
+    let subject: String = "\u{202E}שלום עולם \u{2067}مرحبا يا عالم\u{200F} 12 (34) ".chars().cycle().take(10_000).collect();
+    let (median, p95) = timed(40, |ui| {
+        let _ = crate::component::wrapped(ui, &crate::component::plain(&subject), fonts().title, Color32::WHITE, 520.0, 2, egui::Align::LEFT);
+    });
+    println!("one 10 000-character subject, wrapped on 2 rows: median {median:.3} ms, p95 {p95:.3} ms");
+    let rows: Vec<String> = (0..200).map(|index| format!("שלום עולם {index} רב מאוד מאוד, مرحبا يا عالم")).collect();
+    let (median, p95) = timed(40, |ui| {
+        for row in &rows {
+            let _ = crate::component::cut(ui, row, body(), Color32::WHITE, 240.0);
+            let _ = crate::component::fitted(ui, row, fonts().caption, Color32::WHITE, 160.0);
+        }
+    });
+    println!("200 right-to-left rows, cut and fitted: median {median:.3} ms, p95 {p95:.3} ms");
+}
