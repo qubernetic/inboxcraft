@@ -195,9 +195,14 @@ Everything is designed at 1440 × 900. Four fixed regions:
 - **Command line.** Plain text searches, `>` runs a command, `@` finds a person, `#` goes to a mailbox. `Ctrl K`
   and `/` open it empty; `Ctrl F` opens the same field narrowed to searching mail in the current mailbox. Results
   hang under the field as a float and the window behind is dimmed. `Esc` returns to the list.
-- **Index.** Five places: `[ 00 ] HOME`, `[ 01 ] MAIL`, `[ 02 ] CALENDAR`, `[ 03 ] LATER`, `[ 04 ] SETTINGS`. Under
-  MAIL stand the mailboxes every account shares, then one row for each account, which opens to its folders. In a
-  short window only the mailboxes scroll. The account picker opens from the owner's row at the index's foot.
+- **Index.** At the top stands New message, above the places and as wide as the column: a secondary button with
+  the compose glyph, its words and its key, `C`, 32 high with 12 px at its sides and 8 px under it. It is the same
+  on every place, and disabled while there is no account to write from. Then five places: `[ 00 ] HOME`,
+  `[ 01 ] MAIL`, `[ 02 ] CALENDAR`, `[ 03 ] LATER`, `[ 04 ] SETTINGS`. Under MAIL stand the mailboxes every account
+  shares, then one row for each account, which opens to its folders. In a short window only the mailboxes scroll.
+  The account picker opens from the owner's row at the index's foot. The narrow index shows New message as its
+  glyph alone, in a 32 px square. Drafts, in Mail and under Calendar, has a glyph of its own, a page with a dashed
+  edge (`file-dashed`), so it is not taken for New message's pencil.
 - **Panes.** Every list is 440 wide; the pane beside it takes the rest (766 for the reader at 1440). Rows are
   lines, not cards. A pane with nothing in it says so in its centre.
 - **Status line.** At rest: the sync state, the accounts, the outbox, the next event. A notice is a stretch of
@@ -236,7 +241,7 @@ The 64 sets of the file. A screen is built from instances of these only.
 | Set | For | States in brief |
 |---|---|---|
 | `icon-button` | an act shown as an icon, 32 × 32 | default, hover, focus, pressed, selected, disabled, unavailable |
-| `text-button` | an act in words; primary, secondary, danger, plain | default, hover, focus, pressed, disabled, unavailable; with key, arrow or icon |
+| `text-button` | an act in words; primary, secondary, danger, plain | default, hover, focus, pressed, disabled, unavailable; with key, arrow or icon; secondary with icon and key, and icon only, each with hover, focus, pressed and disabled (the index's New message) |
 | `link-button` | a text link, also the small link of a row | default, hover, focus, pressed, disabled |
 | `key-chip` | a key | default, on cyan, capture, none, disabled |
 | `key-hint` | a key with what it does, in the status line | default, hover |
