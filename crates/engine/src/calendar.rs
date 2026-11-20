@@ -468,8 +468,9 @@ pub(crate) enum EditError {
 }
 
 /// `held` edited by `change` and `details` at `now`: its times kept in their own form (its zone, the computer's wall
-/// clock, or UTC; a single moment in UTC that starts repeating moves to the wall clock), and `SEQUENCE` counted on
-/// when the guests are told (`notify`). The new text and the number of guests.
+/// clock, or UTC, a series too; a single moment in UTC that starts repeating moves to the wall clock), a time `change`
+/// does not give written as it came, and `SEQUENCE` counted on when the guests are told (`notify`). The new text and
+/// the number of guests.
 pub(crate) fn edit(
     held: &CalendarEvent,
     change: &Edit,
@@ -483,23 +484,35 @@ pub(crate) fn edit(
     let index = calendar.events.iter().position(|event| event.recurrence_id.is_none()).ok_or(EditError::Unreadable)?;
     let event = calendar.events.get(index).ok_or(EditError::Unreadable)?;
     let times = times(&calendar, event, change, local)?;
+    let repeated = !event.rules.is_empty() || !event.dates.is_empty();
     let repeating = match details.repeat {
         Some(repeat) => repeat != Repeat::None,
-        None => !event.rules.is_empty() || !event.dates.is_empty(),
+        None => repeated,
     };
     let form = match &event.start {
         When::Zoned(_, tzid) => Form::Zoned(tzid.clone()),
         When::Floating(_) => Form::Floating,
-        When::Utc(_) | When::Date(_) if repeating => Form::Floating,
-        When::Utc(_) | When::Date(_) => Form::Utc,
+        // A series keeps UTC; a single moment that starts repeating moves to the wall clock.
+        When::Utc(_) if repeating && !repeated => Form::Floating,
+        When::Utc(_) => Form::Utc,
+        When::Date(_) if repeating => Form::Floating,
+        When::Date(_) => Form::Utc,
     };
+    // Times the owner did not change are written as they came, unless the event moves to another form (a switch to
+    // or from whole days always gives a start).
+    let keep_start = change.start.is_none() && form.holds(&event.start);
+    let keep_end = keep_start && change.end.is_none();
     let zone = calendar.zones.offsets(&event.start, local);
     let (start, end) = placed(times, &form, zone, local).ok_or(EditError::Bad("the times cannot be written"))?;
     let alert = details.alert;
     let event = calendar.events.get_mut(index).ok_or(EditError::Unreadable)?;
-    event.start = start;
-    event.end = Some(end);
-    event.duration = None;
+    if !keep_start {
+        event.start = start;
+    }
+    if !keep_end {
+        event.end = Some(end);
+        event.duration = None;
+    }
     event.stamp = Some(now);
     details.apply(event, organizer);
     unscheduled(event);
@@ -574,6 +587,17 @@ enum Form {
     Floating,
     /// The wall clock of a zone.
     Zoned(String),
+}
+
+impl Form {
+    /// Whether `when` is already written in this form; a whole day is in every form.
+    fn holds(&self, when: &When) -> bool {
+        match (self, when) {
+            (_, When::Date(_)) | (Self::Utc, When::Utc(_)) | (Self::Floating, When::Floating(_)) => true,
+            (Self::Zoned(zone), When::Zoned(_, tzid)) => zone == tzid,
+            _ => false,
+        }
+    }
 }
 
 /// `times` as an event's start and its end (whole days: the day after the last), in `form`; a zone's times on the

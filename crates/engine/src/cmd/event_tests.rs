@@ -438,11 +438,17 @@ fn an_event_without_an_end_keeps_its_length() {
     let put = |id, ical: &str| inboxcraft_store::Change::PutCalendarEvent(super::calendar_tests::event(id, 2, &format!("e{id}"), None, ical));
     crate::test_support::change(&mut session, put(9, &instant));
     crate::test_support::change(&mut session, put(10, &day));
+    // Times the edit does not give are written as they came: still no end.
     session.run("event.update", &json!({ "id": 9, "summary": "Call Dora back" })).unwrap();
+    let event = &object(&session, 9).events[0];
+    assert_eq!((event.end.clone(), event.duration), (None, None));
+    session.run("event.update", &json!({ "id": 9, "start": "2026-11-12T09:00:00Z" })).unwrap();
     let event = &object(&session, 9).events[0];
     assert_eq!(event.end, Some(event.start.clone()));
     session.run("event.update", &json!({ "id": 10, "summary": "Bins out" })).unwrap();
-    assert_eq!(object(&session, 10).events[0].end, Some(When::Date(inboxcraft_ical::Date::new(2026, 11, 14).unwrap())));
+    assert_eq!(object(&session, 10).events[0].end, None);
+    session.run("event.update", &json!({ "id": 10, "start": "2026-11-20" })).unwrap();
+    assert_eq!(object(&session, 10).events[0].end, Some(When::Date(inboxcraft_ical::Date::new(2026, 11, 21).unwrap())));
 }
 
 #[test]
