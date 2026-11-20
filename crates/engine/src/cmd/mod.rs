@@ -76,6 +76,9 @@ mod done_tests;
 #[path = "dsn_tests.rs"]
 mod dsn_tests;
 #[cfg(test)]
+#[path = "event_alert_tests.rs"]
+mod event_alert_tests;
+#[cfg(test)]
 #[path = "event_chain_tests.rs"]
 mod event_chain_tests;
 #[cfg(test)]

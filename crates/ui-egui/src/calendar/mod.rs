@@ -27,7 +27,7 @@ use inboxcraft_time::{Offset, Timestamp, WeekRule};
 use serde_json::{Value, json};
 
 pub use self::day::Day;
-pub use self::editor::Editor;
+pub use self::editor::{Alert, Editor};
 
 use crate::mailbox::{Mailbox, shown};
 use crate::tr;
@@ -183,6 +183,8 @@ pub struct EventRow {
     pub zone: Option<Zone>,
     /// The guests.
     pub guests: Vec<Guest>,
+    /// Its alert.
+    pub alert: Alert,
     /// Whether the event has no title of its own (`summary` then says `(No title)`).
     pub untitled: bool,
 }
@@ -288,6 +290,7 @@ impl EventRow {
             repeat: value.get("repeat").and_then(Value::as_str).map(shown),
             zone,
             guests,
+            alert: Alert::read(value.get("alert")),
         })
     }
 }
