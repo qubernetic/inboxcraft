@@ -386,7 +386,7 @@ fn delete_in_the_toolbar_moves_the_open_message_to_trash() {
         harness.run();
     }
     assert!(harness.state().mailbox().messages().iter().all(|row| row.id != id));
-    harness.get_by_label("Moved to Trash");
+    harness.get_by_label("Moved to Bin");
 }
 
 #[test]

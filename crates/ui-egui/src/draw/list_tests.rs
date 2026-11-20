@@ -156,7 +156,7 @@ fn done_and_delete_and_their_undo_act_on_the_sample() {
     assert_eq!(rows(&harness), 11);
     press(&mut harness, TEODOR, "Delete");
     assert!(harness.query_by_label(TEODOR).is_none());
-    harness.get_by_label("Moved to Trash");
+    harness.get_by_label("Moved to Bin");
     harness.state_mut().mailbox_mut().open(Place::View(inboxcraft_model::Role::Trash));
     harness.run();
     assert!(harness.query_all_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").count() == 1, "in the Trash");
@@ -200,7 +200,7 @@ fn the_keys_act_on_the_keyboard_selected_row_and_the_undo_key_undoes() {
     harness.key_press(Key::Delete);
     harness.run();
     assert!(harness.query_by_label(ODILE_READ).is_none());
-    harness.get_by_label("Moved to Trash");
+    harness.get_by_label("Moved to Bin");
 }
 
 #[test]

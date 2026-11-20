@@ -541,7 +541,7 @@ fn delete_moves_the_row_to_the_trash_and_undo_brings_it_back() {
     let logo = id_of(&mailbox, LOGO);
     mailbox.act(logo, Act::Delete);
     assert_eq!(listed(&mailbox, logo), None);
-    assert_eq!(toast(&mailbox).map(|toast| (toast.3, toast.4)), Some(("Moved to Trash", true)));
+    assert_eq!(toast(&mailbox).map(|toast| (toast.3, toast.4)), Some(("Moved to Bin", true)));
     mailbox.narrow(Some(2));
     mailbox.open(Place::View(Role::Trash));
     assert_eq!(listed(&mailbox, logo), Some(false), "in the Studio Trash, still unread");

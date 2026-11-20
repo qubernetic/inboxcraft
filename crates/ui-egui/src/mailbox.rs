@@ -1327,7 +1327,7 @@ impl Mailbox {
             }
             Act::Delete => {
                 let answer = self.write("mail.delete", &one)?;
-                if answer.get("permanent").and_then(Value::as_bool) == Some(true) { tr!("Deleted for good") } else { tr!("Moved to Trash") }
+                if answer.get("permanent").and_then(Value::as_bool) == Some(true) { tr!("Deleted for good") } else { tr!("Moved to Bin") }
             }
             Act::Event => return Err(UiError::Answer { command: "event", detail: "an event changes on the calendar screen".to_owned() }),
             Act::Move(folder) => {
