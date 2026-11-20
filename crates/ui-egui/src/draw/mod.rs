@@ -817,7 +817,8 @@ impl InboxApp {
     }
 
     /// The triage and sending choices to keep: the inbox view, whether a pin outlasts done, the hold before a send
-    /// goes, and the screener's mode but on the sample, which keeps the one kept.
+    /// goes, what the window does after an act, which word of the name Home greets by, and the screener's mode but on
+    /// the sample, which keeps the one kept.
     fn triage(&self) -> Triage {
         let screener = if self.mailbox.is_sample() { self.kept_triage.screener } else { self.mailbox.screener_mode() };
         Triage {
