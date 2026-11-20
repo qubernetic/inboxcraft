@@ -97,6 +97,19 @@ pub(in crate::draw) fn here(ctx: &egui::Context, id: Id) -> Id {
     if viewport == egui::ViewportId::ROOT { id } else { id.with(viewport) }
 }
 
+/// Forgets what the reader of the window of its own `viewport` kept in egui's memory (its laid-out letters, its
+/// picker, its wipe, where its answers and its first tool stood, its unclipped room): the window has closed.
+pub(in crate::draw) fn forget(ctx: &egui::Context, viewport: egui::ViewportId) {
+    ctx.data_mut(|data| {
+        data.remove::<(egui::Rect, u64)>(answers_id().with(viewport));
+        data.remove::<egui::Id>(back_kept_id().with(viewport));
+        data.remove::<(u64, f64)>(wipe_id().with(viewport));
+    });
+    fitted::forget(ctx, viewport);
+    head::forget(ctx, viewport);
+    body::forget(ctx, viewport);
+}
+
 /// What the person asked for in the reader this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Asked {
@@ -443,11 +456,16 @@ pub(crate) const WIPE: f64 = 0.3;
 /// How far into the wipe's time the scan line starts to fade, as the presentation fades it over the last tenth.
 const SCAN_GONE: f32 = 0.9;
 
+/// Where the open message's wipe keeps which message it wipes in and since when.
+fn wipe_id() -> Id {
+    Id::unique("reader-wipe")
+}
+
 /// How far into its time the wipe of the open message `open` is, and how far it has wiped in on the design's curve,
 /// each 0 to 1; a repaint is asked for until it has. With reduced motion it is there at once, and a key or a press
 /// during the wipe takes it to its end.
 pub(super) fn wiped(ctx: &egui::Context, open: u64) -> (f32, f32) {
-    let key = here(ctx, Id::unique("reader-wipe"));
+    let key = here(ctx, wipe_id());
     let now = ctx.input(|input| input.time);
     let acted = ctx.input(|input| {
         input.events.iter().any(|event| matches!(event, egui::Event::Key { pressed: true, .. } | egui::Event::PointerButton { pressed: true, .. }))

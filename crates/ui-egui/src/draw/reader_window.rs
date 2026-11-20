@@ -30,6 +30,10 @@ use crate::{fetch, save, tr};
 /// The most windows of their own open at once.
 pub(super) const MOST: usize = 8;
 
+/// The viewports the windows take turns at: twice [`MOST`], so that a window always finds one no window showed in the
+/// frame before (a viewport shown again at once would be the closed window's, not a new one).
+const SLOTS: usize = MOST * 2;
+
 /// The window's inner size when it opens, in points (the frames' 960 by 900).
 const SIZE: Vec2 = vec2(960.0, 900.0);
 
@@ -38,6 +42,8 @@ pub(super) const COLUMN: f32 = 760.0;
 
 /// One message in a window of its own.
 struct Shown {
+    /// Which of the [`SLOTS`] viewports it takes.
+    slot: usize,
     viewport: ViewportId,
     /// The message, also once it is gone.
     message: u64,
@@ -60,8 +66,12 @@ pub(super) struct Windows {
     shown: Vec<Shown>,
     fetch: fetch::Shared,
     save: save::Shared,
-    /// How many windows were opened since the app began: each gets a viewport of its own.
-    made: u64,
+    /// How many frames the windows followed ([`Windows::follow`]).
+    frames: u64,
+    /// The slots of the windows that closed, each with the frame it closed in: taken again two frames on at the soonest.
+    freed: Vec<(usize, u64)>,
+    /// The viewports of the windows that closed, whose reader's state in egui's memory is forgotten at the next draw.
+    closing: Vec<ViewportId>,
     /// The context opens windows of their own (it does not embed them), as the last frame found.
     real: bool,
     /// The status line has said that no window of its own can open.
@@ -85,7 +95,7 @@ pub(super) struct Drawn {
 impl Windows {
     /// No window open yet; the readers they open fetch through `fetch` and save through `save`.
     pub(super) fn new(fetch: fetch::Shared, save: save::Shared) -> Self {
-        Self { shown: Vec::new(), fetch, save, made: 0, real: false, told: false }
+        Self { shown: Vec::new(), fetch, save, frames: 0, freed: Vec::new(), closing: Vec::new(), real: false, told: false }
     }
 
     /// The messages open in windows of their own, oldest window first; a window whose message is gone has none.
@@ -96,6 +106,7 @@ impl Windows {
 
     /// Whether `ctx` opens windows of their own, read once a frame before anything opens.
     pub(super) fn follow(&mut self, ctx: &Context) {
+        self.frames = self.frames.wrapping_add(1);
         self.real = Host::Window(ViewportId::ROOT).usable(ctx) != Host::Docked;
     }
 
@@ -107,7 +118,7 @@ impl Windows {
             return true;
         }
         if self.shown.len() >= MOST {
-            self.shown.remove(0);
+            self.close(0);
         }
         let row = mailbox.messages().iter().find(|row| row.id == id).cloned();
         let mut reader = Reader::new(Box::new(self.fetch.another()), Box::new(self.save.clone()));
@@ -116,11 +127,12 @@ impl Windows {
         let row = mailbox.messages().iter().find(|row| row.id == id).cloned().or(row);
         let subject = reader.opened(id).map(|opened| opened.header.subject.clone()).or_else(|| row.as_ref().map(|row| row.subject.clone()));
         reader.keep_row(row);
-        self.made = self.made.wrapping_add(1);
-        let viewport = ViewportId::from_hash_of(("inboxcraft-reader-window", self.made));
+        let slot = self.free_slot();
+        let viewport = viewport_of(slot);
         let subject = subject.unwrap_or_default();
         let checked = mailbox.rows_serial();
         self.shown.push(Shown {
+            slot,
             viewport,
             message: id,
             reader,
@@ -132,6 +144,32 @@ impl Windows {
             front: true,
         });
         true
+    }
+
+    /// A slot no window takes, and none closed in this frame or the one before; else (a burst of closes) any no window
+    /// takes. At most [`MOST`] of the [`SLOTS`] are taken, so there is always one.
+    fn free_slot(&self) -> usize {
+        let taken = |slot: usize| self.shown.iter().any(|shown| shown.slot == slot);
+        let fresh = |slot: usize| !self.freed.iter().any(|(freed, at)| *freed == slot && at.saturating_add(1) >= self.frames);
+        (0..SLOTS).find(|slot| !taken(*slot) && fresh(*slot)).or_else(|| (0..SLOTS).find(|slot| !taken(*slot))).unwrap_or(0)
+    }
+
+    /// Closes the window at `at`: its slot rests, and its reader's state in egui's memory is forgotten at the next draw.
+    fn close(&mut self, at: usize) {
+        if at < self.shown.len() {
+            let shown = self.shown.remove(at);
+            self.freed.retain(|(slot, _)| *slot != shown.slot);
+            self.freed.push((shown.slot, self.frames));
+            self.closing.push(shown.viewport);
+        }
+    }
+
+    /// Forgets what the readers of the windows that closed kept in egui's memory.
+    fn forget(&mut self, ctx: &Context) {
+        for viewport in self.closing.drain(..) {
+            reader::forget(ctx, viewport);
+            crate::component::popup::forget_viewport(ctx, viewport);
+        }
     }
 
     /// Takes the pictures the windows' readers fetched; whether any came.
@@ -168,6 +206,7 @@ impl Windows {
 
     /// Draws every window of its own; what was asked in each.
     fn show(&mut self, ctx: &Context, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, frame: WindowFrame) -> Drawn {
+        self.forget(ctx);
         let mut drawn = Drawn::default();
         let mut closed = Vec::new();
         for shown in &mut self.shown {
@@ -193,7 +232,11 @@ impl Windows {
                 }
             }
         }
-        self.shown.retain(|shown| !closed.contains(&shown.viewport));
+        for viewport in closed {
+            if let Some(at) = self.shown.iter().position(|shown| shown.viewport == viewport) {
+                self.close(at);
+            }
+        }
         drawn
     }
 
@@ -232,22 +275,25 @@ impl Windows {
                 }
                 // An act that took the message away ends the window's work; one that failed leaves it where it was.
                 if act.slides() && done {
-                    self.shown.remove(at);
+                    self.close(at);
                 }
             }
             reader::Asked::Presets => mailbox.load_presets(),
             reader::Asked::Invite(id, invite::Ask::Answer(answer)) => reader.answer_invite(mailbox, id, answer),
             reader::Asked::Invite(id, invite::Ask::Change) => reader.change_answer(id),
             reader::Asked::Invite(id, invite::Ask::Remove) => reader.remove_invite(mailbox, id),
-            reader::Asked::Close => {
-                self.shown.remove(at);
-            }
+            reader::Asked::Close => self.close(at),
             // A window has no width to fill and no list to go back to.
             reader::Asked::FullWidth(_) | reader::Asked::Back => {}
             reader::Asked::Answer(..) => return Some(asked),
         }
         None
     }
+}
+
+/// The viewport of slot `slot`.
+fn viewport_of(slot: usize) -> ViewportId {
+    ViewportId::from_hash_of(("inboxcraft-reader-window", slot))
 }
 
 /// The row of a window's message once it was `read` again from the store: the list's own when the list shows it, else

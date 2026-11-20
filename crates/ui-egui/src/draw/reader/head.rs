@@ -154,6 +154,11 @@ pub(in crate::draw) fn more_menu() -> Id {
     Id::unique("reader-more-menu")
 }
 
+/// Forgets the picker of the window of its own `viewport`: it has closed.
+pub(super) fn forget(ctx: &egui::Context, viewport: egui::ViewportId) {
+    ctx.data_mut(|data| data.remove::<TimePicker>(picker_id().with(viewport)));
+}
+
 /// The id the time picker's state is kept under between frames and openings.
 pub(in crate::draw) fn picker_id() -> Id {
     Id::unique("reader-time-picker")

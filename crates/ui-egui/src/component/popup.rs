@@ -1040,6 +1040,11 @@ fn shown_id(ctx: &Context) -> Id {
     if viewport == egui::ViewportId::ROOT { id } else { id.with(viewport) }
 }
 
+/// Forgets the note of the window of its own `viewport`: it has closed.
+pub(crate) fn forget_viewport(ctx: &Context, viewport: egui::ViewportId) {
+    ctx.data_mut(|data| data.remove::<u64>(Id::unique("inboxcraft-float-shown").with(viewport)));
+}
+
 /// Whether a float (an open list or menu) showed in this pass or the one before: the surface on top, which takes Esc
 /// and a press beside it. Only a float says so; a sheet that is a modal layer itself is not one.
 #[must_use]

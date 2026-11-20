@@ -365,6 +365,11 @@ fn kept_slot() -> Id {
     Id::unique("fitted-kept")
 }
 
+/// Forgets the layouts the window of its own `viewport` kept: it has closed.
+pub(super) fn forget(ctx: &egui::Context, viewport: egui::ViewportId) {
+    ctx.data_mut(|data| data.remove::<Kept>(kept_slot().with(viewport)));
+}
+
 /// The layout kept for `who` under `key`, or the one `make` lays out, kept in its place. Only what is drawn is kept:
 /// before a layout is made, every layout this pass has not drawn is dropped (a message left, an old width). The letters
 /// kept together never pass [`KEPT_GLYPHS`]: a layout that does not fit beside the others is not kept, and its message

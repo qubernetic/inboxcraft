@@ -571,3 +571,29 @@ fn a_failed_act_leaves_the_window_open() {
     press_in(&ctx, &mut app, window, Key::D);
     assert!(app.windows.messages().is_empty(), "done, the window closes");
 }
+
+/// Windows opened and closed one after another leave egui's memory no larger: they take turns at a few viewports, and
+/// what a closed window's reader kept is forgotten.
+#[test]
+fn windows_opened_and_closed_leave_egui_s_memory_bounded() {
+    let ctx = windowing();
+    let mut app = app(&Recorder::default());
+    settle(&ctx, &mut app);
+    let subjects: Vec<String> = app.mailbox().messages().iter().take(3).map(|row| row.subject.clone()).collect();
+    let mut sizes = Vec::new();
+    for round in 0..30 {
+        let subject = subjects.get(round % subjects.len()).unwrap();
+        let id = open(&ctx, &mut app, subject);
+        let window = window_of(&app, id);
+        press_in(&ctx, &mut app, window, Key::Escape);
+        assert!(app.windows.messages().is_empty());
+        sizes.push(ctx.data(|data| data.len()));
+    }
+    let (early, late) = (sizes.get(5).copied().unwrap(), sizes.last().copied().unwrap());
+    assert!(late <= early, "egui's memory grew from {early} to {late}: {sizes:?}");
+    // What the readers kept is gone with their windows.
+    for slot in 0..super::SLOTS {
+        let wipe = egui::Id::unique("reader-wipe").with(super::viewport_of(slot));
+        assert_eq!(ctx.data(|data| data.get_temp::<(u64, f64)>(wipe)), None, "slot {slot}'s wipe is forgotten");
+    }
+}

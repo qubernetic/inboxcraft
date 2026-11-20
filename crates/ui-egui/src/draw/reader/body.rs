@@ -20,6 +20,11 @@ use crate::tr;
 use super::{Asked, Drawn, Textures};
 
 /// The id under which the reader keeps the room its warnings are clipped to.
+/// Forgets the unclipped room of the window of its own `viewport`: it has closed.
+pub(super) fn forget(ctx: &egui::Context, viewport: egui::ViewportId) {
+    ctx.data_mut(|data| data.remove::<Rect>(unwiped_id().with(viewport)));
+}
+
 fn unwiped_id() -> egui::Id {
     egui::Id::unique("reader-unwiped")
 }
