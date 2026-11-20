@@ -72,7 +72,7 @@ fn a_send_waits_in_the_outbox_counting_down_its_hold() {
     assert_eq!(mailbox.standing(&row), "Sending in 3 s", "a second begun counts as one");
     assert_eq!(mailbox.seconds_left(composer.draft()), Some(3));
     assert_eq!(mailbox.outbox_summary().as_deref(), Some("1 waiting"));
-    assert_eq!(mailbox.spoken_outbox(&row), "To Odile Brannock, Work party on Saturday, Sending in 3 s");
+    assert_eq!(mailbox.spoken_outbox(&row), "To Odile Brannock <odile@example.org>, Work party on Saturday, Sending in 3 s");
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn a_refused_send_shows_the_servers_reply_and_goes_again_on_retry() {
     assert_eq!(row.state, SendState::Refused { reply: "550 5.1.1 No such user here".to_owned(), permanent: true });
     assert_eq!(mailbox.standing(&row), "Not sent");
     assert_eq!(mailbox.outbox_summary().as_deref(), Some("1 not sent"));
-    assert_eq!(mailbox.spoken_outbox(&row), "To Odile Brannock, Work party on Saturday, Not sent: 550 5.1.1 No such user here");
+    assert_eq!(mailbox.spoken_outbox(&row), "To Odile Brannock <odile@example.org>, Work party on Saturday, Not sent: 550 5.1.1 No such user here");
     assert_eq!(mailbox.retry(composer.draft()).unwrap(), Some(at(11)), "held again as every send is");
     assert_eq!(mailbox.outbox().first().map(|row| row.state.clone()), Some(SendState::Waiting(Some(at(11)))));
 }

@@ -261,10 +261,13 @@
 {"out": "docs/images/invite-outdated-light.png", "mode": "light", "size": [1400, 860], "invitations": true, "select": "Invitation: Lunch with Odile"}
 {"out": "docs/images/invite-outdated-dark.png", "mode": "dark", "size": [1400, 860], "invitations": true, "select": "Invitation: Lunch with Odile"}
 # The outbox (E2.6, E3.6): a send counting down its hold with its toast, one scheduled and one the server refused;
+# a refused send changed since (#245), offering only Edit;
 # the toast of a message just sent; the composer with a time picked, Send become Schedule, and its send-later picker;
 # a sent message a delivery report says did not get through.
 {"out": "docs/images/outbox-light.png", "mode": "light", "size": [1400, 860], "outbox": "waiting"}
 {"out": "docs/images/outbox-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "waiting"}
+{"out": "docs/images/outbox-changed-light.png", "mode": "light", "size": [1400, 860], "outbox": "changed"}
+{"out": "docs/images/outbox-changed-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "changed"}
 {"out": "docs/images/undo-send-light.png", "mode": "light", "size": [1400, 860], "outbox": "countdown"}
 {"out": "docs/images/undo-send-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "countdown"}
 {"out": "docs/images/send-later-light.png", "mode": "light", "size": [1400, 860], "outbox": "schedule"}

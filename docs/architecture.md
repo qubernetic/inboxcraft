@@ -397,7 +397,14 @@ item holds the reply (`Refused`), and `mail.send` can send it again, held again.
 where it stands (`waiting`, `sending`, `refused`), a refusal with the server's reply, its enhanced status code
 (RFC 3463) and whether it is permanent (a `5.x.x` code, or a `5xx` reply without one); `outbox.retry` (`owner`)
 sends a refused draft again as `mail.send` does, and refuses an item that is not refused; a waiting item shows the
-time it goes (`at`).
+time it goes (`at`). Send again never sends a draft that changed since the owner sent it: an outbox item keeps the draft as it was
+sent (`SentAs`: the account, To, Cc, Bcc, subject, text, the forwarded message and an invitation's answer), and
+`outbox.list` gives each item's `to`, `cc` and `bcc`, and for a refused one what `changed` since it was sent. A
+refused draft can still be changed, by an agent too (`compose.update` is `safe`); `outbox.retry` sends again only one
+that did not change, so it goes to exactly what the owner already sent, and refuses one that changed or keeps no
+record of how it went (an item an older build kept). Such a draft goes from the composer's own Send (`mail.send`),
+once the owner has opened it there. The window's outbox row lists To, Cc and Bcc, each recipient with its address; for a
+refused send that changed it says what changed and offers only Edit, which opens the draft in the composer.
 
 Bounces (`engine::arrive::bounce`): a message whose header is a delivery report (`Signs::report`: `multipart/report`
 with `report-type=delivery-status` or `global-delivery-status`) from a sender of reports (local part `MAILER-DAEMON`

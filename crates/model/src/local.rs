@@ -153,19 +153,121 @@ pub struct Outgoing {
     /// The message as it goes, with its own `Message-ID` and `Date`, for the copy in the Sent folder.
     #[serde(default)]
     pub message: Vec<u8>,
+    /// The draft as the owner sent it, so a refused send that changed since is not sent again unseen; `None` in a
+    /// record from a build that did not keep it, which counts as changed.
+    #[serde(default)]
+    pub sent_as: Option<SentAs>,
 }
 
 impl Outgoing {
-    /// `draft` in the outbox at `state`, its message not made yet.
+    /// `draft` in the outbox at `state`, its message not made yet, nothing kept of how it was sent.
     #[must_use]
     pub fn new(draft: DraftId, state: OutboxState) -> Self {
-        Self { draft, state, message: Vec::new() }
+        Self { draft, state, message: Vec::new(), sent_as: None }
+    }
+
+    /// `draft` in the outbox at `state`, kept as it is now.
+    #[must_use]
+    pub fn of(draft: &Draft, state: OutboxState) -> Self {
+        Self { sent_as: Some(SentAs::of(draft)), ..Self::new(draft.id, state) }
+    }
+
+    /// What of `draft` differs from the draft as it was sent, in [`SentAs::changes`]' words; `["unknown"]` when the
+    /// record kept nothing of it.
+    #[must_use]
+    pub fn changes(&self, draft: &Draft) -> Vec<&'static str> {
+        self.sent_as.as_ref().map_or_else(|| vec!["unknown"], |sent| sent.changes(draft))
     }
 }
 
 impl fmt::Debug for Outgoing {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Outgoing").field("draft", &self.draft).field("state", &self.state).field("message_bytes", &self.message.len()).finish()
+        f.debug_struct("Outgoing")
+            .field("draft", &self.draft)
+            .field("state", &self.state)
+            .field("message_bytes", &self.message.len())
+            .field("sent_as", &self.sent_as)
+            .finish()
+    }
+}
+
+/// The parts of a draft that make what is sent and to whom, as they were when the owner sent it: the account it goes
+/// from, To, Cc, Bcc, the subject, the text, the message whose attachments go with it and an invitation's answer.
+///
+/// `Debug` shows the counts and lengths, never the words.
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SentAs {
+    /// The account it goes from.
+    pub account: AccountId,
+    /// `To`.
+    #[serde(default)]
+    pub to: Vec<String>,
+    /// `Cc`.
+    #[serde(default)]
+    pub cc: Vec<String>,
+    /// `Bcc`.
+    #[serde(default)]
+    pub bcc: Vec<String>,
+    /// The subject.
+    #[serde(default)]
+    pub subject: String,
+    /// The text.
+    #[serde(default)]
+    pub text: String,
+    /// The message it forwards, whose attachments go with it.
+    #[serde(default)]
+    pub forwards: Option<MessageId>,
+    /// The answer to an invitation that goes with it.
+    #[serde(default)]
+    pub calendar: Option<String>,
+}
+
+impl SentAs {
+    /// The parts of `draft` that are sent.
+    #[must_use]
+    pub fn of(draft: &Draft) -> Self {
+        Self {
+            account: draft.account,
+            to: draft.to.clone(),
+            cc: draft.cc.clone(),
+            bcc: draft.bcc.clone(),
+            subject: draft.subject.clone(),
+            text: draft.text.clone(),
+            forwards: draft.forwards,
+            calendar: draft.calendar.clone(),
+        }
+    }
+
+    /// What of `draft` differs from these parts, in order: `from`, `to`, `cc`, `bcc`, `subject`, `text`,
+    /// `attachments`, `invitation`; empty when it would be sent as it was.
+    #[must_use]
+    pub fn changes(&self, draft: &Draft) -> Vec<&'static str> {
+        [
+            ("from", self.account != draft.account),
+            ("to", self.to != draft.to),
+            ("cc", self.cc != draft.cc),
+            ("bcc", self.bcc != draft.bcc),
+            ("subject", self.subject != draft.subject),
+            ("text", self.text != draft.text),
+            ("attachments", self.forwards != draft.forwards),
+            ("invitation", self.calendar != draft.calendar),
+        ]
+        .into_iter()
+        .filter_map(|(part, changed)| changed.then_some(part))
+        .collect()
+    }
+}
+
+impl fmt::Debug for SentAs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SentAs")
+            .field("account", &self.account)
+            .field("recipients", &(self.to.len(), self.cc.len(), self.bcc.len()))
+            .field("subject_chars", &self.subject.chars().count())
+            .field("text_bytes", &self.text.len())
+            .field("forwards", &self.forwards)
+            .field("calendar_bytes", &self.calendar.as_ref().map(String::len))
+            .finish()
     }
 }
 

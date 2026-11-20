@@ -123,10 +123,16 @@ fn a_refusal_shows_on_the_outbox_item_with_the_reply_and_its_code_and_the_draft_
     );
     let draft = session.store().draft(DraftId::new(id)).unwrap().unwrap();
     assert_eq!((draft.to.as_slice(), draft.text.as_str()), ([NOBODY.to_owned()].as_slice(), "The numbers."));
-    // Sent again by command, to a server that takes it now.
+    // Changed, it is not sent again from the outbox, but from the composer's own Send, to a server that takes it.
     session.run("compose.update", &json!({ "id": id, "to": ["bela@example.org"] })).unwrap();
     session.take_jobs();
-    assert_eq!(send_now(&mut session, &clock, "outbox.retry", id)["state"], json!("waiting"));
+    let err = session.run("outbox.retry", &json!({ "id": id })).unwrap_err().to_string();
+    assert!(err.contains("changed since it was refused (to)"), "{err}");
+    let listed = session.run("outbox.list", &json!({})).unwrap();
+    assert_eq!((&listed["items"][0]["to"], &listed["items"][0]["changed"]), (&json!(["bela@example.org"]), &json!(["to"])));
+    assert_eq!(session.run("mail.send", &json!({ "id": id })).unwrap()["state"], json!("waiting"));
+    clock.advance(session.send_hold().duration());
+    session.tick().unwrap();
     let jobs = session.take_jobs();
     let [job] = jobs.as_slice() else { panic!("{jobs:?}") };
     let JobKind::Send { recipients, raw, .. } = &job.kind else { panic!("{job:?}") };

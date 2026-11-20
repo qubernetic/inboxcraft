@@ -79,7 +79,7 @@ pub use id::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, FolderId,
 pub use job::{FolderState, Job, JobKind};
 pub use local::{
     Alert, Bounce, Calendar, CalendarEvent, Draft, DraftCopy, Due, Group, Invitation, ItipMethod, MAX_TYPED_CHARS, MessageState, OutboxState,
-    Outgoing, Rsvp, Scheduled, Screening, Sender,
+    Outgoing, Rsvp, Scheduled, Screening, Sender, SentAs,
 };
 pub use message::{
     Envelope, MAX_ADDRESSES, MAX_PREVIEW_CHARS, MAX_REFERENCES, MAX_SUBJECT_CHARS, Message, MessageRef, Moving, SNOOZED_UNTIL, Summary,

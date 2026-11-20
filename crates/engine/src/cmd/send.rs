@@ -121,7 +121,7 @@ fn waiting(context: &Context<'_>, command: &'static str, id: u64, at: Timestamp)
     }
     ready(context, &draft)?.map_err(bad)?;
     let answer = json!({ "id": id, "state": "waiting", "at": json::date(at) });
-    let mut outcome = Outcome::new(answer).with_change(Change::PutOutgoing(Outgoing::new(draft.id, OutboxState::Waiting)));
+    let mut outcome = Outcome::new(answer).with_change(Change::PutOutgoing(Outgoing::of(&draft, OutboxState::Waiting)));
     for change in reschedule(context.store(), Due::Send(draft.id), Some(at), context.next_schedule_id())? {
         outcome = outcome.with_change(change);
     }

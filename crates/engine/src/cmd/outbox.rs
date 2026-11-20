@@ -11,8 +11,16 @@
 //! (`owner`: mail leaves the computer) sends it again as `mail.send` does, held as every send is, but an answer to an
 //! invitation at once, as it first went. A message that went but bounced later is marked on its Sent copy
 //! (`crate::arrive::bounce`), not here.
+//!
+//! Nothing goes to a recipient the owner was not shown. A refused draft can still be changed, by an agent too
+//! (`compose.update` is `safe`), so the outbox keeps the draft as the owner sent it ([`inboxcraft_model::SentAs`]) and `outbox.list`
+//! gives each item's To, Cc and Bcc and what `changed` since it was sent (`from`, `to`, `cc`, `bcc`, `subject`, `text`,
+//! `attachments`, `invitation`; `unknown` for an item an older build kept). `outbox.retry` sends again only a draft
+//! that did not change, so it goes to exactly what the owner already sent; one that changed, or keeps no record of how
+//! it went, is refused, and goes from the composer's own Send (`mail.send`), where the owner sees it whole.
 
 use inboxcraft_mime::Status;
+
 use inboxcraft_model::{DraftId, Due, OutboxState};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -54,11 +62,17 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
             OutboxState::Refused { reply } => ("refused", Some(reply.as_str())),
         };
         let code = reply.and_then(enhanced_code);
+        // What changed matters only while it can be sent again.
+        let refused = reply.is_some();
+        let changed = draft.as_ref().filter(|_| refused).map(|draft| item.changes(draft)).unwrap_or_default();
         items.push(json!({
             "draft": item.draft.get(),
             "account": draft.as_ref().map(|draft| draft.account.get()),
             "subject": draft.as_ref().map(|draft| draft.subject.as_str()),
             "to": draft.as_ref().map(|draft| draft.to.as_slice()),
+            "cc": draft.as_ref().map(|draft| draft.cc.as_slice()),
+            "bcc": draft.as_ref().map(|draft| draft.bcc.as_slice()),
+            "changed": changed,
             "state": state,
             "at": at,
             "reply": reply,
@@ -87,6 +101,14 @@ fn retry(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> 
         .ok_or(EngineError::NotFound { what: "outbox item", id: params.id })?;
     if !matches!(item.state, OutboxState::Refused { .. }) {
         return Err(EngineError::bad_params(RETRY.id, "only a refused draft is sent again"));
+    }
+    // Only what the owner already sent goes again from here: a changed draft goes from the composer.
+    if let Some(draft) = context.store().draft(item.draft)? {
+        let changed = item.changes(&draft);
+        if !changed.is_empty() {
+            let reason = format!("the draft changed since it was refused ({}): send it from the composer", changed.join(", "));
+            return Err(EngineError::bad_params(RETRY.id, &reason));
+        }
     }
     // An answer to an invitation goes at once, as `invite.answer` sent it.
     if let Some(answer) = context.store().draft(item.draft)?.filter(|draft| draft.calendar.is_some()) {

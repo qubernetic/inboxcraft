@@ -144,7 +144,7 @@ fn people(names: &[&str]) -> Vec<Recipient> {
         .iter()
         .map(|name| {
             let state = if name.ends_with('@') { RecipientState::Invalid } else { RecipientState::Valid };
-            Recipient { shown: (*name).to_owned(), spoken: (*name).to_owned(), state }
+            Recipient { shown: (*name).to_owned(), spoken: (*name).to_owned(), tip: None, state }
         })
         .collect()
 }
@@ -176,6 +176,9 @@ fn line_in(mode: Mode, state: Line) -> (Rect, Own, crate::component::tests::Pain
                 copies: true,
                 error: (state == Line::Invalid).then_some("teodor@ is not an address"),
                 enabled: state != Line::Disabled,
+                grown: false,
+                room: None,
+                bring: None,
             };
             ui.vertical(|ui| {
                 ui.set_width(560.0);
@@ -280,7 +283,17 @@ fn a_recipient_line_takes_typing_removes_a_chip_and_opens_cc_bcc() {
     let mut harness = crate::component::tests::builder().with_size(vec2(640.0, 200.0)).build_ui_state(
         move |ui, (typing, removed, copies): &mut (String, Option<usize>, bool)| {
             let chips = people(&["Teodor Vasquez"]);
-            let line = Recipients { name: "To", chips: &chips, hint: "Name or address", copies: true, error: None, enabled: true };
+            let line = Recipients {
+                name: "To",
+                chips: &chips,
+                hint: "Name or address",
+                copies: true,
+                error: None,
+                enabled: true,
+                grown: false,
+                room: None,
+                bring: None,
+            };
             let out = recipient_field(ui, &theme, egui::Id::unique("to"), typing, &line);
             *removed = removed.or(out.removed);
             *copies |= out.copies;
@@ -309,7 +322,17 @@ fn line_of(chips: Vec<Recipient>) -> Harness<'static> {
         move |ui, theme| {
             ui.spacing_mut().scroll = crate::component::scroll::style(theme);
             let mut typing = String::new();
-            let line = Recipients { name: "To", chips: &chips, hint: "Name or address", copies: true, error: None, enabled: true };
+            let line = Recipients {
+                name: "To",
+                chips: &chips,
+                hint: "Name or address",
+                copies: true,
+                error: None,
+                enabled: true,
+                grown: false,
+                room: None,
+                bring: None,
+            };
             ui.vertical(|ui| {
                 ui.set_width(560.0);
                 recipient_field(ui, theme, egui::Id::unique("to"), &mut typing, &line);
@@ -320,8 +343,12 @@ fn line_of(chips: Vec<Recipient>) -> Harness<'static> {
 
 #[test]
 fn two_chips_of_one_address_are_two_controls() {
-    let same =
-        Recipient { shown: "Teodor Vasquez".to_owned(), spoken: "Teodor Vasquez, teodor@example.org".to_owned(), state: RecipientState::Valid };
+    let same = Recipient {
+        shown: "Teodor Vasquez".to_owned(),
+        spoken: "Teodor Vasquez, teodor@example.org".to_owned(),
+        tip: None,
+        state: RecipientState::Valid,
+    };
     let harness = line_of(vec![same.clone(), same]);
     let crosses: Vec<_> = harness.query_all_by_label("Remove Teodor Vasquez").map(|node| node.accesskit_node().locate().0).collect();
     assert_eq!(crosses.len(), 2);
@@ -331,7 +358,12 @@ fn two_chips_of_one_address_are_two_controls() {
 #[test]
 fn five_hundred_recipients_stay_in_a_box_of_four_rows_that_scrolls() {
     let many: Vec<Recipient> = (0..500)
-        .map(|n| Recipient { shown: format!("person{n}@example.org"), spoken: format!("person{n}@example.org"), state: RecipientState::Valid })
+        .map(|n| Recipient {
+            shown: format!("person{n}@example.org"),
+            spoken: format!("person{n}@example.org"),
+            tip: None,
+            state: RecipientState::Valid,
+        })
         .collect();
     let clock = inboxcraft_time::SystemClock::new();
     let started = inboxcraft_time::Clock::monotonic(&clock);
@@ -375,7 +407,12 @@ fn drawn_fills(harness: &Harness<'static>) -> Vec<(Rect, egui::Color32)> {
 /// `n` recipients `person<k>@example.org`, all addresses.
 fn persons(n: usize) -> Vec<Recipient> {
     (0..n)
-        .map(|k| Recipient { shown: format!("person{k}@example.org"), spoken: format!("person{k}@example.org"), state: RecipientState::Valid })
+        .map(|k| Recipient {
+            shown: format!("person{k}@example.org"),
+            spoken: format!("person{k}@example.org"),
+            tip: None,
+            state: RecipientState::Valid,
+        })
         .collect()
 }
 
@@ -430,7 +467,17 @@ fn composer_line(chips: Vec<Recipient>, focus: bool) -> Harness<'static> {
         move |ui, theme| {
             ui.spacing_mut().scroll = crate::component::scroll::style(theme);
             let mut typing = String::new();
-            let line = Recipients { name: "To", chips: &chips, hint: "Name or address", copies: true, error: None, enabled: true };
+            let line = Recipients {
+                name: "To",
+                chips: &chips,
+                hint: "Name or address",
+                copies: true,
+                error: None,
+                enabled: true,
+                grown: false,
+                room: None,
+                bring: None,
+            };
             ui.vertical(|ui| {
                 ui.set_width(684.0);
                 recipient_line(ui, theme, egui::Id::unique("to"), &mut typing, &line);
@@ -471,4 +518,71 @@ fn a_composer_line_wraps_its_chips_four_apart_and_grows() {
     let rows: Vec<i32> = rows.into_iter().collect();
     assert!(rows.len() > 1, "wrapped: {rows:?}");
     assert_eq!(rows[1] - rows[0], 28, "24 high, 4 apart: {rows:?}");
+}
+
+/// The text each chip of the last frame shows, as painted: its glyphs, an ellipsis where it was cut.
+fn chip_texts(harness: &Harness<'static>) -> Vec<String> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+            egui::Shape::Text(text) => out.push(text.galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect()),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut out));
+    out
+}
+
+/// A chip of `address` shown as itself, in a composer's line.
+fn address_line(address: &str) -> Harness<'static> {
+    let chip = Recipient { shown: address.to_owned(), spoken: address.to_owned(), tip: None, state: RecipientState::Valid };
+    composer_line(vec![chip], false)
+}
+
+/// Whether a tooltip of `address` shows over the chip of it once the pointer has rested on it.
+fn tip_shows(harness: &mut Harness<'static>, address: &str) -> bool {
+    let before = harness.query_all_by_label(address).count();
+    harness.get_by_role_and_label(Role::ListItem, address).hover();
+    harness.run_steps(40);
+    harness.query_all_by_label(address).count() > before
+}
+
+/// A chip that shows an address never cuts its domain: a domain wider than a chip grows the chip to the line, where it
+/// shows whole (the re-look's probe: the domain is the part that says where the mail goes).
+#[test]
+fn a_chip_never_cuts_the_domain_of_its_address() {
+    let probe = "odile@example.org.relay.mail.attacker.example.net";
+    let harness = address_line(probe);
+    let shown = chip_texts(&harness);
+    assert!(shown.iter().any(|text| text == probe), "the whole address on the chip: {shown:?}");
+    let chip = harness.get_by_role_and_label(Role::ListItem, probe).rect();
+    assert!(chip.width() > 176.0 && chip.right() <= 684.0, "grown, within the line: {chip:?}");
+}
+
+/// A long local part is cut, the domain whole after the ellipsis; the chip keeps its 176 and its tooltip and what a
+/// screen reader hears hold the whole address.
+#[test]
+fn a_long_address_is_cut_in_its_local_part_with_the_whole_address_in_its_tip() {
+    let long = "odile.brannock.and.the.rest.of.a.very.long.local.part@example.net";
+    let mut harness = address_line(long);
+    let shown = chip_texts(&harness);
+    let cut = shown.iter().find(|text| text.ends_with("…@example.net")).unwrap_or_else(|| panic!("cut before the domain: {shown:?}"));
+    assert!(cut.starts_with("odile."), "{cut:?}");
+    assert_eq!(harness.get_by_role_and_label(Role::ListItem, long).rect().width(), 176.0);
+    assert!(tip_shows(&mut harness, long), "the whole address in its tooltip");
+}
+
+/// A domain too wide even for the line is cut from its left only: what shows ends with its registrable end.
+#[test]
+fn a_domain_wider_than_the_line_is_cut_from_its_left() {
+    let domain = format!("{}attacker.example.net", "relay.".repeat(40));
+    let address = format!("odile@{domain}");
+    let mut harness = address_line(&address);
+    let shown = chip_texts(&harness);
+    let cut = shown.iter().find(|text| text.starts_with('…')).unwrap_or_else(|| panic!("cut from its left: {shown:?}"));
+    assert!(cut.ends_with(".attacker.example.net") && domain.ends_with(cut.trim_start_matches('…')), "{cut:?}");
+    let chip = harness.get_by_role_and_label(Role::ListItem, &address).rect();
+    assert!(chip.right() <= 684.0, "within the line: {chip:?}");
+    assert!(tip_shows(&mut harness, &address));
 }

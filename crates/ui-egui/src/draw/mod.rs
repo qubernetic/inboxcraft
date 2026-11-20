@@ -2125,7 +2125,19 @@ impl InboxApp {
     fn outbox(&mut self, draft: u64, asked: list::Outbox) {
         match asked {
             list::Outbox::Unsend => self.unsend(draft),
-            list::Outbox::Edit => self.reopen(draft),
+            list::Outbox::Edit => {
+                // A send that changed since it was refused, or keeps no record of how it went: its chips show where
+                // each recipient goes until the composer closes.
+                let changed = self
+                    .mailbox
+                    .outbox()
+                    .iter()
+                    .any(|row| row.draft == draft && matches!(row.state, crate::mailbox::SendState::Refused { .. }) && !row.changed.is_empty());
+                self.reopen(draft);
+                if let Some(composer) = self.composer.as_mut().filter(|composer| changed && composer.draft() == draft) {
+                    composer.show_addresses();
+                }
+            }
             list::Outbox::Retry => self.retry(draft),
         }
     }

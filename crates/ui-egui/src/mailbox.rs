@@ -467,7 +467,18 @@ pub struct OutboxRow {
     pub state: SendState,
     /// It answers an invitation: sent again as it is, never edited.
     pub invite_answer: bool,
+    /// Every recipient as one line, To, Cc and Bcc each named, each recipient with its address: "To Odile
+    /// <odile@example.org> · Bcc Béla <bela@example.org>". Built when the outbox is read, each line listing at most
+    /// [`MAX_LISTED`] recipients and counting the rest.
+    pub addressed: String,
+    /// What changed in a refused send's draft since it was sent, in the engine's words (`to`, `bcc`, `text`, …;
+    /// `unknown` when no record of how it went is kept): such a send is not sent again from its row, only from the
+    /// composer.
+    pub changed: Vec<String>,
 }
+
+/// The most recipients an outbox row's line lists of each of To, Cc and Bcc; the rest are counted.
+pub const MAX_LISTED: usize = 20;
 
 /// A kept draft as the drafts place lists it, from `compose.list`. Its words are the owner's own text, read capped
 /// and plain ([`crate::home::kept`]) when the list is built, never run.
@@ -503,7 +514,12 @@ fn draft_item(mailbox: &Mailbox, row: &Value) -> Option<DraftItem> {
     let account = row.get("account").and_then(Value::as_u64).unwrap_or(0);
     let subject = row.get("subject").and_then(Value::as_str).map(crate::home::kept).filter(|subject| !subject.trim().is_empty());
     let first = row.get("to").and_then(Value::as_array).and_then(|to| to.first()).and_then(|to| to.get("text")).and_then(Value::as_str);
-    let to = match first.map(|to| crate::home::kept(&recipient(to).0)).filter(|to| !to.trim().is_empty()) {
+    // By name only where the name could not be taken for another address: else by the address.
+    let whom = |to: &str| {
+        let (name, address) = recipient(to);
+        if plainly_named(&name) { name } else { address }
+    };
+    let to = match first.map(|to| crate::home::kept(&whom(to))).filter(|to| !to.trim().is_empty()) {
         Some(to) => tr!("to {who}", who = to),
         None => tr!("no recipient yet").to_owned(),
     };
@@ -768,6 +784,26 @@ pub(crate) fn shown(text: &str) -> String {
         .collect()
 }
 
+/// Whether a person's `name` may be shown for them: it holds no at sign (it could be taken for another address than
+/// theirs) and something that shows (not only spaces, control, bidi, blank-looking or other invisible characters).
+/// Where it may not, the address is shown instead.
+pub(crate) fn plainly_named(name: &str) -> bool {
+    let at = |c: char| matches!(c, '@' | '\u{FF20}' | '\u{FE6B}');
+    !name.chars().any(at) && name.chars().any(|c| !looks_blank(c))
+}
+
+/// Whether `c` draws nothing a reader could see: a space, a control character, the Braille blank, or a code point
+/// Unicode makes default-ignorable (soft hyphen, the Hangul fillers, zero-width and bidi marks, variation selectors,
+/// the musical format marks, tag characters and the rest of that property).
+fn looks_blank(c: char) -> bool {
+    c.is_whitespace()
+        || c.is_control()
+        || matches!(c, '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}' | '\u{1160}' | '\u{17B4}' | '\u{17B5}' | '\u{180B}'..='\u{180F}')
+        || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{2800}' | '\u{3164}')
+        || matches!(c, '\u{FE00}'..='\u{FE0F}' | '\u{FEFF}' | '\u{FFA0}' | '\u{FFF0}'..='\u{FFF8}')
+        || matches!(c, '\u{1BCA0}'..='\u{1BCA3}' | '\u{1D173}'..='\u{1D17A}' | '\u{E0000}'..='\u{E0FFF}')
+}
+
 /// The first sender's name, or the address when it has none.
 pub(crate) fn sender(from: &Value) -> String {
     let Some(first) = from.as_array().and_then(|from| from.first()) else { return tr!("(no sender)").to_owned() };
@@ -827,9 +863,53 @@ fn recipient(text: &str) -> (String, String) {
     }
 }
 
+/// The names of the recipients in `value`'s list `key`: at most [`MAX_LISTED`] read, and how many there are.
+fn named(value: &Value, key: &str) -> (Vec<(String, String)>, usize) {
+    let all = value.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    (all.iter().filter_map(Value::as_str).take(MAX_LISTED).map(recipient).collect(), all.len())
+}
+
+/// One recipient as the outbox row lists it: always its address, after its name where it has one that differs, so
+/// the row says where it goes and not only what it is called ("Odile Brannock <odile@example.org>").
+fn with_address((name, address): &(String, String)) -> String {
+    if name == address { address.clone() } else { tr!("{name} <{address}>", name = name, address = address) }
+}
+
+/// The outbox row's one line of recipients: To, then Cc and Bcc where they hold any, each at most [`MAX_LISTED`]
+/// recipients, each with its address, and how many more.
+fn addressed(lines: [(&[(String, String)], usize); 3]) -> String {
+    let [to, cc, bcc] = lines.map(|(names, all)| {
+        let listed = names.iter().map(with_address).collect::<Vec<_>>().join(", ");
+        match all.saturating_sub(names.len()) {
+            0 => listed,
+            more => tr!("{listed} and {more} more", listed = listed, more = more),
+        }
+    });
+    let mut line = if to.is_empty() { tr!("To {whom}", whom = tr!("(no recipient)")) } else { tr!("To {whom}", whom = to) };
+    if !cc.is_empty() {
+        line = tr!("{line} · Cc {whom}", line = line, whom = cc);
+    }
+    if !bcc.is_empty() {
+        line = tr!("{line} · Bcc {whom}", line = line, whom = bcc);
+    }
+    line
+}
+
+/// The parts of a draft the engine names as changed (`outbox.list`'s `changed`); anything else is left out.
+const CHANGES: [&str; 9] = ["from", "to", "cc", "bcc", "subject", "text", "attachments", "invitation", "unknown"];
+
 fn outbox_row(value: &Value) -> OutboxRow {
-    let to: Vec<(String, String)> =
-        value.get("to").and_then(Value::as_array).map(|to| to.iter().filter_map(Value::as_str).map(recipient).collect()).unwrap_or_default();
+    let (to, all_to) = named(value, "to");
+    let (cc, all_cc) = named(value, "cc");
+    let (bcc, all_bcc) = named(value, "bcc");
+    let addressed = addressed([(&to, all_to), (&cc, all_cc), (&bcc, all_bcc)]);
+    let changed = value
+        .get("changed")
+        .and_then(Value::as_array)
+        .map(|changed| {
+            changed.iter().filter_map(Value::as_str).filter(|part| CHANGES.contains(part)).take(CHANGES.len()).map(str::to_owned).collect()
+        })
+        .unwrap_or_default();
     let state = match value.get("state").and_then(Value::as_str) {
         Some("sending") => SendState::Sending,
         Some("refused") => {
@@ -845,6 +925,8 @@ fn outbox_row(value: &Value) -> OutboxRow {
         to: to.into_iter().map(|(name, _)| name).collect(),
         state,
         invite_answer: value.get("invite_answer").and_then(Value::as_bool).unwrap_or(false),
+        addressed,
+        changed,
     }
 }
 
@@ -2579,13 +2661,39 @@ impl Mailbox {
             SendState::Refused { reply, .. } => tr!("Not sent: {reply}", reply = reply),
             _ => self.standing(row),
         };
-        tr!("To {whom}, {subject}, {standing}", whom = self.recipients(row), subject = subject, standing = standing)
+        match self.changes_shown(row) {
+            Some(changes) => {
+                tr!("{whom}, {subject}, {standing}, {changes}", whom = row.addressed, subject = subject, standing = standing, changes = changes)
+            }
+            None => tr!("{whom}, {subject}, {standing}", whom = row.addressed, subject = subject, standing = standing),
+        }
     }
 
-    /// Whom the send `row` goes to, as its row says it.
+    /// What changed in the refused send `row` since it was sent, as its row says it: "Changed since it was refused:
+    /// Bcc, text"; `None` when nothing did.
     #[must_use]
-    pub fn recipients(&self, row: &OutboxRow) -> String {
-        if row.to.is_empty() { tr!("(no recipient)").to_owned() } else { row.to.join(", ") }
+    pub fn changes_shown(&self, row: &OutboxRow) -> Option<String> {
+        if row.changed.is_empty() {
+            return None;
+        }
+        if row.changed.iter().any(|part| part == "unknown") {
+            return Some(tr!("May have changed since it was refused; Edit to send it").to_owned());
+        }
+        let parts: Vec<&str> = row
+            .changed
+            .iter()
+            .map(|part| match part.as_str() {
+                "from" => tr!("From"),
+                "to" => tr!("To"),
+                "cc" => tr!("Cc"),
+                "bcc" => tr!("Bcc"),
+                "subject" => tr!("subject"),
+                "text" => tr!("text"),
+                "attachments" => tr!("attachments"),
+                _ => tr!("invitation"),
+            })
+            .collect();
+        Some(tr!("Changed since it was refused: {parts}; Edit to send it", parts = parts.join(", ")))
     }
 
     /// Takes the waiting send of `draft` back (`mail.unsend`): out of the outbox, its draft as it was, to be opened
@@ -2600,12 +2708,14 @@ impl Mailbox {
         result
     }
 
-    /// Sends the refused draft `draft` again (`outbox.retry`), held as every send is; the time it goes. The lists are
-    /// read again.
+    /// Send again on the refused send of `draft` (`outbox.retry`), held as every send is; the lists are read again.
+    /// Only a send that did not change since it was refused goes: one that changed is sent from the composer
+    /// (its row offers Edit), and the engine refuses it here.
     ///
     /// # Errors
     ///
-    /// The command's refusal: the draft cannot be sent as it is, or it was not refused.
+    /// The command's refusal: the draft cannot be sent as it is, it changed since it was refused, or it was not
+    /// refused.
     pub fn retry(&mut self, draft: u64) -> Result<Option<Timestamp>, UiError> {
         let answer = self.run("outbox.retry", &json!({ "id": draft }));
         self.refresh();
