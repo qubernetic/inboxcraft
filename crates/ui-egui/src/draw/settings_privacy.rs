@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The Privacy page: what a remote picture tells its server, then the senders whose remote pictures load without
-//! asking (`[ A ] PICTURES ALWAYS LOAD · 3`), a row per sender with "ask again". "ask again" takes the sender off the
+//! asking (`[ A ] PICTURES ALWAYS LOAD · 3`), a row per sender with "ask again"; the address stands at 16 while no
+//! name is kept, after the frame's name column when one is. "ask again" takes the sender off the
 //! list on the owner's press (`remote.forget`), at once, as the frames draw it, and the status line says so; a focus or
 //! a hover runs nothing. The list is read once each time the page is shown.
 
@@ -19,10 +20,11 @@ use crate::tr;
 /// A sender's row, in points at 100 %.
 const ROW: f32 = 44.0;
 
-/// The column the frame gives a sender's name, and the gap after it, in points: `remote.list` keeps no name, so the
-/// column stands empty and the address keeps the frame's place; on a page too narrow for the whole address there, the
-/// column gives way first.
-const NAME: f32 = 180.0 + 12.0;
+/// The column the frame gives a sender's name, and the gap after it, in points. `remote.list` keeps no name today: a row
+/// without one starts its address at 16 and gives it the name's column too.
+const NAME: f32 = 180.0;
+/// The gap after a name, in points.
+const NAME_GAP: f32 = 12.0;
 
 /// The Privacy page.
 pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings) -> Option<Asked> {
@@ -95,11 +97,13 @@ fn sender_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &SenderRow, ends
         ui.spacing_mut().item_spacing.x = 0.0;
         let word = tr!("ask again");
         let link = crate::component::galley(ui, word, theme.fonts.mono_s, p.ink).size().x.ceil() + 16.0;
-        // The empty name column gives way to what the whole address lacks beside it, never under nothing; the address
-        // is cut only when it alone does not fit.
-        let whole = crate::component::galley(ui, &row.shown, theme.fonts.mono, p.muted).size().x.ceil();
-        let lacks = (whole - (ui.available_width() - 16.0 - NAME - link - 12.0)).max(0.0);
-        ui.add_space(16.0 + (NAME - lacks).max(0.0));
+        ui.add_space(16.0);
+        if let Some(name) = row.name.as_deref() {
+            let name = crate::component::cut(ui, name, theme.fonts.strong, p.ink, NAME);
+            let (place, _) = ui.allocate_exact_size(vec2(NAME, high), egui::Sense::hover());
+            ui.painter().galley(pos2(place.left(), place.center().y - name.size().y / 2.0), name, p.ink);
+            ui.add_space(NAME_GAP);
+        }
         let room = (ui.available_width() - link - 12.0).max(1.0);
         let shown = crate::component::cut(ui, &row.shown, theme.fonts.mono, p.muted, room);
         let (place, _) = ui.allocate_exact_size(vec2(room, high), egui::Sense::hover());
