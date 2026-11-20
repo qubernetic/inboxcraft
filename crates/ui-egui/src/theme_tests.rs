@@ -678,16 +678,52 @@ fn plex_then_the_shipped_noto_faces_then_the_computer_s_in_every_text_family() {
         }
         let first = fonts.first().map(String::as_str).unwrap_or_default();
         assert!(Face::ALL.iter().any(|face| face.name() == first), "{family:?}: the app's face first, {fonts:?}");
-        assert_eq!(&fonts[1..5], &[hebrew, arabic, devanagari, thai], "{family:?}: the script faces right behind it");
+        // Hack keeps the signs it holds monospace: it stands before the script faces in the mono families.
+        let mono = Face::ALL.iter().any(|face| face.name() == first && face.is_mono());
+        let scripts = if mono { 2 } else { 1 };
+        if mono {
+            assert_eq!(fonts[1], "Hack", "{family:?}: Hack right behind Plex Mono, {fonts:?}");
+        }
+        assert_eq!(&fonts[scripts..scripts + 4], &[hebrew, arabic, devanagari, thai], "{family:?}: the script faces next, {fonts:?}");
         let n = fonts.len();
         assert_eq!(&fonts[n - 2..], &[emoji, "system: Fake"], "{family:?}: the emoji face, then the computer's: {fonts:?}");
-        assert!(fonts[5..n - 2].iter().all(|font| egui::FontDefinitions::builtin_font_names().contains(&font.as_str())), "{fonts:?}");
+        assert!(fonts[scripts + 4..n - 2].iter().all(|font| egui::FontDefinitions::builtin_font_names().contains(&font.as_str())), "{fonts:?}");
         for name in SHIPPED_FALLBACKS {
             assert_eq!(fonts.iter().filter(|font| *font == name).count(), 1, "{family:?}: {name} once");
         }
     }
     for name in SHIPPED_FALLBACKS {
         assert!(definitions.font_data.contains_key(name), "{name}");
+    }
+}
+
+#[test]
+fn the_signs_hack_holds_stay_monospace_and_hebrew_still_draws() {
+    // Each mono face with Hack alone behind it, as the family stood before the script faces came: what it draws.
+    let mut definitions = font_definitions();
+    let alone = |face: Face| egui::FontFamily::Name(format!("{} and Hack", face.name()).into());
+    for face in Face::ALL.into_iter().filter(|face| face.is_mono()) {
+        definitions.families.insert(alone(face), vec![face.name().to_owned(), "Hack".to_owned()]);
+    }
+    let hebrew = egui::FontFamily::Name("Hebrew alone".into());
+    definitions.families.insert(hebrew.clone(), vec![SHIPPED_FALLBACKS[0].to_owned()]);
+    let ctx = egui::Context::default();
+    ctx.set_fonts(definitions);
+    ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+    let size = 14.0;
+    let width = |family: &egui::FontFamily, sign: char| ctx.fonts_mut(|fonts| fonts.glyph_width(&egui::FontId::new(size, family.clone()), sign));
+    for face in Face::ALL.into_iter().filter(|face| face.is_mono()) {
+        // egui draws U+2009 and U+202F as half the first face's space and U+FEFF as nothing; U+2010 and U+25CC are
+        // Hack's, which Noto Sans Hebrew and Arabic also hold at their own widths.
+        for sign in ['\u{2009}', '\u{2010}', '\u{202F}', '\u{25CC}', '\u{FEFF}'] {
+            let (drawn, by_hack) = (width(&face.family(), sign), width(&alone(face), sign));
+            assert_eq!(drawn, by_hack, "{face:?} U+{:04X}: drawn {drawn}, before the script faces {by_hack}", u32::from(sign));
+        }
+        // The script faces still serve what Hack lacks.
+        for sign in "שלום עולם".chars().filter(|sign| !sign.is_whitespace()) {
+            assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&egui::FontId::new(size, face.family()), sign)), "{face:?}: {sign:?} is a box");
+            assert_eq!(width(&face.family(), sign), width(&hebrew, sign), "{face:?}: {sign:?} from Noto Sans Hebrew");
+        }
     }
 }
 

@@ -675,11 +675,11 @@ const EMOJI_FACE: (&str, &[u8]) = ("NotoEmoji-Regular", include_bytes!("../../..
 /// emoji.
 pub const SHIPPED_FALLBACKS: [&str; 5] = [SCRIPT_FACES[0].0, SCRIPT_FACES[1].0, SCRIPT_FACES[2].0, SCRIPT_FACES[3].0, EMOJI_FACE.0];
 
-/// egui's fonts with IBM Plex in front: each face is first in its family, then the shipped Noto faces for Hebrew,
-/// Arabic, Devanagari and Thai, then egui's bundled faces for the signs Plex does not hold (Hack, then Ubuntu Light
-/// behind Plex Mono; Ubuntu Light, then Hack behind Plex Sans and Audiowide; egui's icon font behind all), then Noto
-/// Emoji, behind the bundled faces so the arrows, shapes and keys they draw stay theirs. The icon family is Phosphor
-/// alone. The computer's fonts come behind all of these ([`font_definitions_from`]).
+/// egui's fonts with IBM Plex in front: each face is first in its family (behind Plex Mono, Hack next, so the signs it
+/// holds stay monospace), then the shipped Noto faces for Hebrew, Arabic, Devanagari and Thai, then egui's bundled
+/// faces for the signs Plex does not hold (Ubuntu Light behind Plex Mono; Ubuntu Light, then Hack behind Plex Sans and
+/// Audiowide; egui's icon font behind all), then Noto Emoji, behind the bundled faces so the arrows, shapes and keys
+/// they draw stay theirs. The icon family is Phosphor alone. The computer's fonts come behind all of these ([`font_definitions_from`]).
 #[must_use]
 pub fn font_definitions() -> egui::FontDefinitions {
     let mut definitions = egui::FontDefinitions::default();
@@ -702,9 +702,12 @@ pub fn font_definitions() -> egui::FontDefinitions {
     for (face, data) in TYPEFACES {
         definitions.font_data.insert(face.name().to_owned(), std::sync::Arc::new(egui::FontData::from_static(data)));
         let behind = if face.is_mono() { &monospace } else { &proportional };
+        // Hack stands before the script faces behind Plex Mono, so the signs it holds keep its cell width.
+        let (cells, rest): (Vec<String>, Vec<String>) = behind.iter().cloned().partition(|name| face.is_mono() && name == "Hack");
         let fonts = std::iter::once(face.name().to_owned())
+            .chain(cells)
             .chain(scripts.iter().cloned())
-            .chain(behind.iter().cloned())
+            .chain(rest)
             .chain(std::iter::once(EMOJI_FACE.0.to_owned()))
             .collect();
         definitions.families.insert(face.family(), fonts);
