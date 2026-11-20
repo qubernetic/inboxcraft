@@ -25,6 +25,7 @@ zune-jpeg = { workspace = true }
 
 [dev-dependencies]
 egui_kittest = { workspace = true }
+inboxcraft-store = { workspace = true, features = ["test-hooks"] }
 rusqlite = { workspace = true }
 tempfile = { workspace = true }
 

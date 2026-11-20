@@ -16,11 +16,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::KeepWake;
 use inboxcraft_model::{
     Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId,
     FolderState, Job, Message, MessageId, MessageState, Outgoing, Scheduled, Sender,
 };
 use inboxcraft_time::Timestamp;
+#[cfg(any(test, feature = "test-hooks"))]
 pub use keeper::KeepHold;
 use keeper::Keeper;
 use rusqlite::config::DbConfig;
@@ -133,10 +135,14 @@ impl Sqlite {
     /// From now on a batch that only changes drafts the store holds, each still from its account, is written behind
     /// by the draft keeper, a thread with a connection of its own, so that [`Storage::apply`] returns at once: in
     /// order, the newest of each draft, one write at a time, each with `synchronous=FULL`. The store's reads see a
-    /// draft kept from the moment it was kept; any other batch first waits (at most 3 s) for the keeper, so it
-    /// comes after every keep. A keep that fails is told by [`Storage::failed_keep`]; the end of the store waits at
-    /// most 3 s for what is still to be written. A batch that makes a draft, moves it to another account or does
-    /// anything else is written at once, as before.
+    /// draft kept from the moment it was kept. A write that fails keeps the draft's newest text in memory, is told
+    /// once by [`Storage::failed_keep`], listed by [`Storage::unkept`] and tried again 1 s, 2 s, 4 s … at most 30 s
+    /// apart until it lands or the draft is removed; meanwhile every other batch that names the draft is refused
+    /// ([`StoreError::DraftNotKept`]), except one that removes it. Any other batch first waits (at most 3 s) for the
+    /// keeper, so it comes after every keep. The end of the store waits at most 3 s for what is still to be written,
+    /// unless [`Storage::settle`] already waited. A batch that makes a draft, moves it to another account or does
+    /// anything else is written at once, as before. If the keeper's thread ever ends, the store writes what it held
+    /// and every later draft on the caller's thread, and says so once on standard error.
     ///
     /// # Errors
     ///
@@ -150,10 +156,54 @@ impl Sqlite {
 
     /// Holds the draft keeper until the hold is dropped: what is kept meanwhile waits (tests). `None` without a
     /// keeper.
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[must_use]
     pub fn hold_keeps(&self) -> Option<KeepHold> {
         self.keeper.as_ref().map(Keeper::hold)
+    }
+
+    /// Makes every write of the draft keeper fail while `refuse` is on, as a full or failing disk would (tests).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn refuse_keeps(&self, refuse: bool) {
+        if let Some(keeper) = &self.keeper {
+            keeper.refuse(refuse);
+        }
+    }
+
+    /// How many writes the draft keeper started (tests); 0 without a keeper.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn keeper_tries(&self) -> u64 {
+        self.keeper.as_ref().map_or(0, Keeper::tries)
+    }
+
+    /// Ends the draft keeper's thread as if it had died (tests).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn stop_keeper(&self) {
+        if let Some(keeper) = &self.keeper {
+            keeper.stop();
+        }
+    }
+
+    /// A keeper whose thread ended: what it held is written on this connection, and the store writes every draft at
+    /// once from now on, said once on standard error. Until what it held is written the keeper stays, its drafts
+    /// with it.
+    fn outlive_keeper(&mut self) -> Result<(), StoreError> {
+        let Some(keeper) = self.keeper.as_ref().filter(|keeper| keeper.is_gone()) else { return Ok(()) };
+        let held = keeper.all_held();
+        if !held.is_empty() {
+            let tx = self.conn.transaction()?;
+            for draft in &held {
+                local::put_draft(&tx, draft)?;
+            }
+            tx.commit()?;
+            for draft in &held {
+                keeper.forget(draft.id);
+            }
+        }
+        eprintln!("inboxcraft: the draft keeper stopped; drafts are written on the window's thread from now on");
+        self.keeper = None;
+        Ok(())
     }
 
     /// The drafts of `batch` when the keeper may write it behind: only drafts, every one held by the store from the
@@ -251,6 +301,16 @@ fn drafted(change: &Change) -> Option<DraftId> {
         Change::PutScheduled(Scheduled { what: inboxcraft_model::Due::Send(id), .. }) => Some(*id),
         _ => None,
     }
+}
+
+/// Whether `batch` removes draft `id`, itself or with its account, as `keeper` holds it.
+fn removes(batch: &Batch, id: DraftId, keeper: &Keeper) -> bool {
+    let account = keeper.held(id).map(|draft| draft.account);
+    batch.changes().iter().any(|change| match change {
+        Change::RemoveDraft(removed) => *removed == id,
+        Change::RemoveAccount(removed) => Some(*removed) == account,
+        _ => false,
+    })
 }
 
 /// The newest drafts of account `?1`, at most `?2`, in the order of the `draft_newest` index.
@@ -457,24 +517,30 @@ impl Storage for Sqlite {
     }
 
     fn apply(&mut self, batch: &Batch) -> Result<(), StoreError> {
+        self.outlive_keeper()?;
         if let Some(drafts) = self.behind(batch)?
             && let Some(keeper) = &self.keeper
         {
             keeper.keep(drafts);
             return Ok(());
         }
-        if let Some(keeper) = self.keeper.as_ref().filter(|keeper| !keeper.is_idle()) {
-            // Every keep comes before this batch: a send or a discard after a keep finds the draft as kept.
-            let failures = keeper.failures();
-            keeper.settle(SETTLE_WAIT)?;
-            // A keep that failed meanwhile of a draft this batch names: the batch would act on what the disk holds,
-            // not on what was kept, so it waits for the draft to be kept again.
-            if keeper.failures() != failures
-                && let Some(error) = batch.changes().iter().filter_map(drafted).find_map(|id| keeper.failed(id))
-            {
-                return Err(error);
+        // Every keep comes before this batch, and no new try of a failed one starts while it is written: a send or a
+        // discard after a keep finds the draft as kept, and a discarded draft is never written again.
+        let gate = match &self.keeper {
+            Some(keeper) => {
+                let named: Vec<DraftId> = batch.changes().iter().filter_map(drafted).collect();
+                // A batch on a draft whose write failed first gives that write one more try.
+                keeper.retry(&named);
+                let gate = keeper.gate(SETTLE_WAIT)?;
+                // Still not on the disk: the batch would act on the draft as it was before. A batch that removes the
+                // draft (a discard, its account removed) goes on.
+                if let Some(id) = named.iter().copied().find(|id| keeper.failing(*id).is_some() && !removes(batch, *id, keeper)) {
+                    return Err(StoreError::DraftNotKept(id));
+                }
+                Some(gate)
             }
-        }
+            None => None,
+        };
         let mut files = Files::default();
         let sources = &self.sources;
         let applied = self.conn.transaction().map_err(StoreError::from).and_then(|tx| {
@@ -496,6 +562,16 @@ impl Storage for Sqlite {
         for id in remove {
             sources::remove(sources, id);
         }
+        if result.is_ok()
+            && let Some(keeper) = &self.keeper
+        {
+            for draft in keeper.all_held() {
+                if removes(batch, draft.id, keeper) {
+                    keeper.forget(draft.id);
+                }
+            }
+        }
+        drop(gate);
         result
     }
 
@@ -599,11 +675,21 @@ impl Storage for Sqlite {
     }
 
     fn settle(&self, within: Duration) -> Result<(), StoreError> {
-        self.keeper.as_ref().map_or(Ok(()), |keeper| keeper.settle(within))
+        self.keeper.as_ref().map_or(Ok(()), |keeper| keeper.settle_all(within))
     }
 
     fn failed_keep(&self) -> Option<(DraftId, StoreError)> {
         self.keeper.as_ref().and_then(Keeper::take_failed)
+    }
+
+    fn unkept(&self) -> Vec<(DraftId, StoreError)> {
+        self.keeper.as_ref().map(Keeper::unkept).unwrap_or_default()
+    }
+
+    fn wake_on_keep(&self, wake: KeepWake) {
+        if let Some(keeper) = &self.keeper {
+            keeper.wake_on(wake);
+        }
     }
 
     fn outbox(&self) -> Result<Vec<Outgoing>, StoreError> {

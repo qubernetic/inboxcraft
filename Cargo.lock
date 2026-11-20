@@ -1995,6 +1995,7 @@ name = "inboxcraft-store"
 version = "0.1.0"
 dependencies = [
  "inboxcraft-model",
+ "inboxcraft-store",
  "inboxcraft-time",
  "rusqlite",
  "serde",

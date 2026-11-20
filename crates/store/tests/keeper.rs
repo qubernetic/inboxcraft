@@ -9,6 +9,8 @@
 mod contract;
 
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use contract::{draft, outgoing, two_accounts};
@@ -123,37 +125,148 @@ fn a_send_after_a_keep_finds_the_newest() {
 }
 
 #[test]
-fn a_keep_that_fails_is_told_once_and_the_disk_keeps_the_draft_as_it_was() {
+fn a_keep_that_fails_is_told_once_keeps_the_newest_text_and_lands_when_tried_again() {
     let tmp = dir();
     let mut store = keeping(tmp.path());
-    rusqlite::Connection::open(tmp.path().join(DATABASE_FILE))
-        .unwrap()
-        .execute_batch("CREATE TRIGGER refuse BEFORE UPDATE ON draft BEGIN SELECT RAISE(ABORT, 'refused'); END;")
-        .unwrap();
-    keep(&mut store, "lost");
+    store.refuse_keeps(true);
+    keep(&mut store, "newest");
     store.settle(Duration::from_secs(5)).unwrap();
     let (id, error) = store.failed_keep().unwrap();
     assert_eq!(id, DraftId::new(1));
     assert!(matches!(error, StoreError::DatabaseRefused(_)), "{error:?}");
     assert!(store.failed_keep().is_none(), "told once");
-    assert_eq!(store.draft(DraftId::new(1)).unwrap().unwrap().subject, "first", "the reads say what the disk holds");
+    assert_eq!(store.unkept().len(), 1, "listed until it lands");
+    assert_eq!(on_disk(tmp.path()).as_deref(), Some("first"), "the disk holds the draft as it was");
+    assert_eq!(store.draft(DraftId::new(1)).unwrap().unwrap().subject, "newest", "the newest text is not dropped");
+    assert_eq!(store.drafts(AccountId::new(1)).unwrap()[0].subject, "newest");
+    // The keeper tries it again by itself, after a second.
+    store.refuse_keeps(false);
+    let mut waited = 0;
+    while on_disk(tmp.path()).as_deref() != Some("newest") && waited < 50 {
+        std::thread::sleep(Duration::from_millis(100));
+        waited += 1;
+    }
+    assert_eq!(on_disk(tmp.path()).as_deref(), Some("newest"), "the newest text lands when tried again");
+    assert!(store.unkept().is_empty());
+    assert!(store.failed_keep().is_none());
 }
 
 #[test]
-fn a_send_whose_keep_failed_meanwhile_is_refused() {
+fn a_keep_that_keeps_failing_is_tried_again_with_a_growing_wait_and_told_once() {
     let tmp = dir();
     let mut store = keeping(tmp.path());
-    rusqlite::Connection::open(tmp.path().join(DATABASE_FILE))
-        .unwrap()
-        .execute_batch("CREATE TRIGGER refuse BEFORE UPDATE ON draft BEGIN SELECT RAISE(ABORT, 'refused'); END;")
-        .unwrap();
-    let hold = store.hold_keeps().unwrap();
-    keep(&mut store, "lost");
-    let released = release_after(hold, 50);
-    let sent = store.apply(&Batch::new().with(Change::PutOutgoing(outgoing(1, OutboxState::Waiting))));
-    released.join().unwrap();
-    assert!(matches!(sent, Err(StoreError::DatabaseRefused(_))), "{sent:?}");
+    store.refuse_keeps(true);
+    keep(&mut store, "newest");
+    // Tries at 0 s, 1 s and 3 s: two by 2.5 s, not one a frame.
+    std::thread::sleep(Duration::from_millis(2500));
+    assert_eq!(store.keeper_tries(), 2);
+    assert!(store.failed_keep().is_some());
+    assert!(store.failed_keep().is_none(), "one failure said for the whole run of failures");
+}
+
+#[test]
+fn a_batch_on_a_draft_whose_keep_failed_is_refused_every_time_and_a_discard_goes_through() {
+    let tmp = dir();
+    let mut store = keeping(tmp.path());
+    store.refuse_keeps(true);
+    keep(&mut store, "newest");
+    store.settle(Duration::from_secs(5)).unwrap();
+    // The keeper is idle: the failure is old, and the batch is refused all the same, each time.
+    for _ in 0..2 {
+        let sent = store.apply(&Batch::new().with(Change::PutOutgoing(outgoing(1, OutboxState::Waiting))));
+        assert_eq!(sent, Err(StoreError::DraftNotKept(DraftId::new(1))));
+    }
+    let moved = store.apply(&Batch::new().with(Change::PutDraft(draft(1, 2, "moved"))));
+    assert_eq!(moved, Err(StoreError::DraftNotKept(DraftId::new(1))));
     assert!(store.outbox().unwrap().is_empty(), "nothing goes with the draft as it was before");
+    // A batch that does not name the draft goes on.
+    store.apply(&Batch::new().with(Change::PutDraft(draft(2, 1, "other")))).unwrap();
+    // A discard ends it: the keep is never written after it.
+    store.apply(&Batch::new().with(Change::RemoveDraft(DraftId::new(1)))).unwrap();
+    assert!(store.unkept().is_empty());
+    store.refuse_keeps(false);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(on_disk(tmp.path()), None);
+    assert_eq!(store.draft(DraftId::new(1)).unwrap(), None);
+}
+
+#[test]
+fn a_send_after_a_failed_keep_tries_it_again_first() {
+    let tmp = dir();
+    let mut store = keeping(tmp.path());
+    store.refuse_keeps(true);
+    keep(&mut store, "newest");
+    store.settle(Duration::from_secs(5)).unwrap();
+    store.refuse_keeps(false);
+    // Long before the keeper's own next try: the send's batch tries the keep again and goes.
+    store.apply(&Batch::new().with(Change::PutOutgoing(outgoing(1, OutboxState::Waiting)))).unwrap();
+    assert_eq!(on_disk(tmp.path()).as_deref(), Some("newest"));
+    assert_eq!(store.outbox().unwrap().len(), 1);
+}
+
+#[test]
+fn an_account_move_after_a_keep_on_its_way_comes_after_it() {
+    let tmp = dir();
+    let mut store = keeping(tmp.path());
+    let hold = store.hold_keeps().unwrap();
+    keep(&mut store, "kept");
+    let released = release_after(hold, 100);
+    store.apply(&Batch::new().with(Change::PutDraft(draft(1, 2, "moved")))).unwrap();
+    released.join().unwrap();
+    store.settle(Duration::from_secs(5)).unwrap();
+    let other = Sqlite::open(tmp.path(), StoreConfig::default()).unwrap();
+    let moved = other.draft(DraftId::new(1)).unwrap().unwrap();
+    assert_eq!((moved.subject.as_str(), moved.account), ("moved", AccountId::new(2)), "the older keep never lands after the move");
+}
+
+#[test]
+fn the_keeper_wakes_the_window_after_each_write() {
+    let tmp = dir();
+    let mut store = keeping(tmp.path());
+    let woken = Arc::new(AtomicUsize::new(0));
+    let theirs = Arc::clone(&woken);
+    store.wake_on_keep(Arc::new(move || {
+        theirs.fetch_add(1, Ordering::SeqCst);
+    }));
+    keep(&mut store, "landed");
+    store.settle(Duration::from_secs(5)).unwrap();
+    assert_eq!(woken.load(Ordering::SeqCst), 1, "after a write that landed");
+    store.refuse_keeps(true);
+    keep(&mut store, "failed");
+    store.settle(Duration::from_secs(5)).unwrap();
+    assert_eq!(woken.load(Ordering::SeqCst), 2, "after a write that failed");
+}
+
+#[test]
+fn a_keeper_gone_leaves_the_store_writing_at_once_with_what_it_held() {
+    let tmp = dir();
+    let mut store = keeping(tmp.path());
+    let _hold = store.hold_keeps().unwrap();
+    keep(&mut store, "held");
+    store.stop_keeper();
+    // The next batch finds the keeper gone: what it held is written first, and this batch at once.
+    store.apply(&Batch::new().with(Change::PutDraft(draft(2, 1, "next")))).unwrap();
+    assert_eq!(on_disk(tmp.path()).as_deref(), Some("held"));
+    keep(&mut store, "at once");
+    assert_eq!(on_disk(tmp.path()).as_deref(), Some("at once"));
+    assert!(store.hold_keeps().is_none(), "no keeper any more");
+}
+
+#[test]
+fn a_write_blocked_by_a_lock_fails_within_the_wait_and_the_end_does_not_wait_again() {
+    let tmp = dir();
+    let mut store = keeping(tmp.path());
+    let other = rusqlite::Connection::open(tmp.path().join(DATABASE_FILE)).unwrap();
+    other.execute_batch("BEGIN IMMEDIATE;").unwrap();
+    keep(&mut store, "blocked");
+    // The keeper's lock wait (2 s) is shorter than the window's (3 s): the write fails, and is said, within it.
+    store.settle(Duration::from_secs(3)).unwrap();
+    assert!(matches!(store.unkept().first(), Some((_, StoreError::DatabaseBusy(_)))), "{:?}", store.unkept());
+    #[allow(clippy::disallowed_methods, reason = "a test of the wall time")]
+    let start = std::time::Instant::now();
+    drop(store);
+    assert!(start.elapsed() < Duration::from_millis(1500), "the window waited already: {:?}", start.elapsed());
+    other.execute_batch("ROLLBACK;").unwrap();
 }
 
 #[test]
