@@ -19,7 +19,10 @@
 //!
 //! With `--compose` it runs the composer's scenes instead: the composer open with a message text of 16 KiB, 64 KiB,
 //! 256 KiB and 1 MiB (just under the composer's cap, so typing fits), its text focused, at rest and typing one
-//! character a frame at its start, each without AccessKit and with it (`-ak`, as while a screen reader listens).
+//! character a frame at its start, each without AccessKit and with it (`-ak`, as while a screen reader listens). Every
+//! scene also prints its slowest frame (`max_ms`); a typing scene keeps its draft once a second, one frame in sixty that
+//! the p95 does not see, so its verdict holds the slowest frame to the budget as well. The sample's store is in memory:
+//! a keep on the SQLite store also waits for the disk, which no scene measures.
 //!
 //! With `--calendar` it runs the calendar's scenes instead: `calendar-week-200`, the week view holding 200 invented
 //! events (overlapping, over whole days), left alone; and `calendar-week-5000`, `calendar-month-5000` and
@@ -247,6 +250,8 @@ impl Scene {
 struct Measured {
     median_ms: f64,
     p95_ms: f64,
+    /// The slowest frame: in a typing scene, one that keeps the draft.
+    max_ms: f64,
     shapes: usize,
     rows_built: Option<usize>,
 }
@@ -516,7 +521,7 @@ fn measure(scene: Scene) -> Result<Measured, UiError> {
         }
     }
     times.sort_by(f64::total_cmp);
-    Ok(Measured { median_ms: percentile(&times, 0.5), p95_ms: percentile(&times, 0.95), shapes, rows_built: rows })
+    Ok(Measured { median_ms: percentile(&times, 0.5), p95_ms: percentile(&times, 0.95), max_ms: percentile(&times, 1.0), shapes, rows_built: rows })
 }
 
 /// Runs a field of `size` for the warm-up and [`FRAMES`] frames, the pointer sweeping across it.
@@ -550,7 +555,7 @@ fn measure_field(size: Vec2) -> Measured {
         drop(primitives);
     }
     times.sort_by(f64::total_cmp);
-    Measured { median_ms: percentile(&times, 0.5), p95_ms: percentile(&times, 0.95), shapes, rows_built: None }
+    Measured { median_ms: percentile(&times, 0.5), p95_ms: percentile(&times, 0.95), max_ms: percentile(&times, 1.0), shapes, rows_built: None }
 }
 
 /// The CPU's model name and the count of cores the system shows, from `/proc/cpuinfo`.
@@ -599,8 +604,8 @@ fn main() -> ExitCode {
             let measured = measure_field(size);
             let verdict = if measured.p95_ms <= budget { "PASS" } else { "MISS" };
             println!(
-                "{name:<24} median_ms {:>8.3}  p95_ms {:>8.3}  shapes {:>6}  rows_built {:>6}  p95 <= {budget} ms: {verdict}",
-                measured.median_ms, measured.p95_ms, measured.shapes, "n/a"
+                "{name:<24} median_ms {:>8.3}  p95_ms {:>8.3}  max_ms {:>8.3}  shapes {:>6}  rows_built {:>6}  p95 <= {budget} ms: {verdict}",
+                measured.median_ms, measured.p95_ms, measured.max_ms, measured.shapes, "n/a"
             );
         }
         println!("took {:.1} s", clock.monotonic().as_secs_f64());
@@ -623,12 +628,18 @@ fn main() -> ExitCode {
         match measure(scene) {
             Ok(measured) => {
                 let rows = measured.rows_built.map_or_else(|| "n/a".to_owned(), |rows| rows.to_string());
-                let verdict = if measured.p95_ms <= budget { "PASS" } else { "MISS" };
+                // Typing keeps the draft once a second, one frame in sixty that the p95 never sees: there the slowest
+                // frame is held to the budget too.
+                let keeps = matches!(scene, Scene::Compose { typing: true, .. });
+                let within = measured.p95_ms <= budget && (!keeps || measured.max_ms <= budget);
+                let verdict = if within { "PASS" } else { "MISS" };
+                let rule = if keeps { "p95, max" } else { "p95" };
                 println!(
-                    "{:<24} median_ms {:>8.3}  p95_ms {:>8.3}  shapes {:>6}  rows_built {:>6}  p95 <= {budget} ms: {verdict}",
+                    "{:<24} median_ms {:>8.3}  p95_ms {:>8.3}  max_ms {:>8.3}  shapes {:>6}  rows_built {:>6}  {rule} <= {budget} ms: {verdict}",
                     scene.name(),
                     measured.median_ms,
                     measured.p95_ms,
+                    measured.max_ms,
                     measured.shapes,
                     rows
                 );
