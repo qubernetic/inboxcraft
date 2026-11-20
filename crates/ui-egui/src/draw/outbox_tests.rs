@@ -686,3 +686,30 @@ fn a_changed_refused_send_shows_addresses_until_the_composer_closes() {
     let runs = painted_runs(&harness);
     assert!(runs.iter().any(|run| run == "Béla Kis"), "the name again: {runs:?}");
 }
+/// The re-look's N2: an agent adds twenty Bcc and a twenty-first to a refused send. Edited, the chips show their
+/// addresses; the composer's Send first brings every recipient into sight and says so, and only a second press sends.
+#[test]
+fn the_composer_sends_only_once_every_recipient_was_in_sight() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Dark);
+    let draft = refused(&mut harness, &clock);
+    let mut bcc: Vec<String> = (0..20).map(|n| format!("Friend {n} <friend{n}@example.org>")).collect();
+    bcc.push("Friend 20 <mallory@example.net>".to_owned());
+    agent_changes(&mut harness, draft, &serde_json::json!({ "bcc": bcc }));
+    only_edit_sends(&mut harness, draft);
+    harness.run();
+    let runs = painted_runs(&harness);
+    assert!(runs.iter().any(|run| run == "friend0@example.org"), "the address, not the name: {runs:?}");
+    assert!(!runs.iter().any(|run| run.starts_with("Friend ")), "{runs:?}");
+    assert!(!runs.iter().any(|run| run.contains("mallory")), "the twenty-first is out of sight: {runs:?}");
+    harness.get_by_role_and_label(Role::Button, "Send").click();
+    harness.run();
+    assert_eq!(harness.state().counting(), None, "nothing went while a recipient was out of sight");
+    let said = harness.state().mailbox().error().unwrap_or_default().to_owned();
+    assert_eq!(said, "Check every recipient, then send");
+    assert!(harness.query_all_by_label_contains(&said).next().is_some(), "said in view");
+    assert!(painted_runs(&harness).iter().any(|run| run == "mallory@example.net"), "brought into sight");
+    harness.get_by_role_and_label(Role::Button, "Send").click();
+    harness.run();
+    assert_eq!(harness.state().counting(), Some((draft, 5)), "the second press sends");
+}

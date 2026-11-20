@@ -176,6 +176,8 @@ fn line_in(mode: Mode, state: Line) -> (Rect, Own, crate::component::tests::Pain
                 copies: true,
                 error: (state == Line::Invalid).then_some("teodor@ is not an address"),
                 enabled: state != Line::Disabled,
+                grown: false,
+                bring: None,
             };
             ui.vertical(|ui| {
                 ui.set_width(560.0);
@@ -280,7 +282,16 @@ fn a_recipient_line_takes_typing_removes_a_chip_and_opens_cc_bcc() {
     let mut harness = crate::component::tests::builder().with_size(vec2(640.0, 200.0)).build_ui_state(
         move |ui, (typing, removed, copies): &mut (String, Option<usize>, bool)| {
             let chips = people(&["Teodor Vasquez"]);
-            let line = Recipients { name: "To", chips: &chips, hint: "Name or address", copies: true, error: None, enabled: true };
+            let line = Recipients {
+                name: "To",
+                chips: &chips,
+                hint: "Name or address",
+                copies: true,
+                error: None,
+                enabled: true,
+                grown: false,
+                bring: None,
+            };
             let out = recipient_field(ui, &theme, egui::Id::unique("to"), typing, &line);
             *removed = removed.or(out.removed);
             *copies |= out.copies;
@@ -309,7 +320,16 @@ fn line_of(chips: Vec<Recipient>) -> Harness<'static> {
         move |ui, theme| {
             ui.spacing_mut().scroll = crate::component::scroll::style(theme);
             let mut typing = String::new();
-            let line = Recipients { name: "To", chips: &chips, hint: "Name or address", copies: true, error: None, enabled: true };
+            let line = Recipients {
+                name: "To",
+                chips: &chips,
+                hint: "Name or address",
+                copies: true,
+                error: None,
+                enabled: true,
+                grown: false,
+                bring: None,
+            };
             ui.vertical(|ui| {
                 ui.set_width(560.0);
                 recipient_field(ui, theme, egui::Id::unique("to"), &mut typing, &line);
@@ -444,7 +464,16 @@ fn composer_line(chips: Vec<Recipient>, focus: bool) -> Harness<'static> {
         move |ui, theme| {
             ui.spacing_mut().scroll = crate::component::scroll::style(theme);
             let mut typing = String::new();
-            let line = Recipients { name: "To", chips: &chips, hint: "Name or address", copies: true, error: None, enabled: true };
+            let line = Recipients {
+                name: "To",
+                chips: &chips,
+                hint: "Name or address",
+                copies: true,
+                error: None,
+                enabled: true,
+                grown: false,
+                bring: None,
+            };
             ui.vertical(|ui| {
                 ui.set_width(684.0);
                 recipient_line(ui, theme, egui::Id::unique("to"), &mut typing, &line);

@@ -251,6 +251,15 @@ pub struct Composer {
     /// Every chip shows its address, not the name: the draft was opened from a send refused and changed since (or one
     /// that keeps no record of how it went), so what goes is shown as where it goes. Until the composer closes.
     addresses: bool,
+    /// The chips of each line drawn whole in sight in a frame that painted the whole composer, by what they hold: Send
+    /// waits while any chip has not been ([`Composer::send`]).
+    checked: [BTreeSet<String>; 3],
+    /// The chips drawn whole in sight in this frame, not checked yet: checked once the frame paints the whole composer.
+    sighted: Vec<(Line, String)>,
+    /// Its lines show more rows before they scroll: Send grew them to bring every recipient into sight.
+    grown: bool,
+    /// The chip each line scrolls into view in the next frame, by its place.
+    bring: [Option<usize>; 3],
 }
 
 /// What a line refused of what was typed in it, which stays in its typed text as it was written.
@@ -342,6 +351,10 @@ impl Composer {
             folded: false,
             saved: None,
             addresses: false,
+            checked: [BTreeSet::new(), BTreeSet::new(), BTreeSet::new()],
+            sighted: Vec::new(),
+            grown: false,
+            bring: [None; 3],
         };
         composer.take_answer(answer);
         Ok(composer)
@@ -466,6 +479,47 @@ impl Composer {
     /// changed since, opened to be sent from here.
     pub fn show_addresses(&mut self) {
         self.addresses = true;
+    }
+
+    /// Whether the lines show more rows before they scroll: Send grew them to bring every recipient into sight.
+    #[must_use]
+    pub fn grown(&self) -> bool {
+        self.grown
+    }
+
+    /// The chip of `line`, by its place, to scroll into view in this frame; asked once.
+    pub(crate) fn take_bring(&mut self, line: Line) -> Option<usize> {
+        self.bring.get_mut(line.index()).and_then(Option::take)
+    }
+
+    /// The chips of `line` at the places `in_sight` were drawn whole in sight in this frame.
+    pub(crate) fn saw(&mut self, line: Line, in_sight: &[usize]) {
+        let (Some(chips), Some(checked)) = (self.lines.get(line.index()), self.checked.get(line.index())) else { return };
+        for chip in in_sight.iter().filter_map(|at| chips.get(*at)) {
+            if !checked.contains(&chip.text) {
+                self.sighted.push((line, chip.text.clone()));
+            }
+        }
+    }
+
+    /// A frame begins drawing the lines: what an earlier frame saw and did not paint whole does not count.
+    pub(crate) fn unsight(&mut self) {
+        self.sighted.clear();
+    }
+
+    /// The frame painted the whole composer: the chips it drew in sight have been seen.
+    pub(crate) fn sighted(&mut self) {
+        for (line, text) in std::mem::take(&mut self.sighted) {
+            if let Some(checked) = self.checked.get_mut(line.index()) {
+                checked.insert(text);
+            }
+        }
+    }
+
+    /// The last chip of `line`, by its place, never drawn whole in sight in a frame that painted the whole composer.
+    fn unchecked(&self, line: Line) -> Option<usize> {
+        let checked = self.checked.get(line.index())?;
+        self.chips(line).iter().rposition(|chip| !checked.contains(&chip.text))
     }
 
     /// Whether the Cc and Bcc lines show.
@@ -998,6 +1052,17 @@ impl Composer {
             self.show_copies();
             let said = tr!("{line} holds text that was not shown: look at it, then send.", line = hidden.name());
             return Err(UiError::Refused(said));
+        }
+        // Nor does one whose chip was never whole in sight (scrolled out of its line, or in a line not shown): the
+        // lines grow, Cc and Bcc show, each line scrolls to the last such chip of it (those before it have mostly been
+        // in sight on the way), and Send waits for the next press. A composer no frame drew (a script's scene) has no
+        // sight to go by.
+        let unchecked = Line::ALL.map(|line| self.unchecked(line));
+        if self.drawn_docked.is_some() && !self.scripted && unchecked.iter().any(Option::is_some) {
+            self.grown = true;
+            self.show_copies();
+            self.bring = unchecked;
+            return Err(UiError::Refused(tr!("Check every recipient, then send").to_owned()));
         }
         self.close(mailbox)?;
         if !self.sendable() {

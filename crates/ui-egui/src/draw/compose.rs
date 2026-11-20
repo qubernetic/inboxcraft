@@ -340,9 +340,12 @@ fn recipients(ui: &mut Ui, theme: &Theme, composer: &mut Composer, line: Line, a
         .collect();
     let wrong = composer.refusal(line);
     let copies = line == Line::To && !composer.copies();
+    let (grown, bring) = (composer.grown(), composer.take_bring(line));
     let Some(typing) = composer.typing_mut(line) else { return };
-    let fields = Recipients { name: line.name(), chips: &chips, hint: tr!("Name or address"), copies, error: wrong.as_deref(), enabled: true };
+    let fields =
+        Recipients { name: line.name(), chips: &chips, hint: tr!("Name or address"), copies, error: wrong.as_deref(), enabled: true, grown, bring };
     let out = recipient::recipient_line(ui, theme, id, typing, &fields);
+    composer.saw(line, &out.in_sight);
     if let Some(at) = out.removed {
         asked.push(Asked::Remove(line, at));
     }
@@ -814,6 +817,7 @@ fn lines(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &mut Composer,
     let s = &theme.spacing;
     let height = line_height(theme);
     let value_left = recipient::LINE_NAMES + s.s3;
+    composer.unsight();
     paint::rule(ui, p.panel_line);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     name(ui, theme, rect, tr!("From"));
@@ -958,6 +962,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         let asked = body(ui, theme, keymap, mailbox, composer, area, Place::Docked);
         // Painted with nothing over it: from the next frame on, what Send would send has been seen.
         composer.mark_painted(ui.ctx().cumulative_frame_nr());
+        composer.sighted();
         return asked;
     }
     let edge = whole.top() + whole.height() * crate::motion::ease(shown);
@@ -1031,6 +1036,7 @@ pub(super) fn floating(
             // Folded, its lines are not drawn: nothing of it has been seen.
             if !composer.folded() {
                 composer.mark_painted(ui.ctx().cumulative_frame_nr());
+                composer.sighted();
             }
             asked
         })

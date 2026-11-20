@@ -402,6 +402,8 @@ pub(super) fn field_built(kind: Kind, text: &str, theme: Theme) -> Harness<'stat
                         copies: false,
                         error: None,
                         enabled: true,
+                        grown: false,
+                        bring: None,
                     };
                     crate::component::recipient::recipient_field(ui, &theme, egui::Id::unique("to"), text, &line);
                 }

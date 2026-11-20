@@ -214,7 +214,16 @@ fn recipient_fields(ui: &mut Ui, theme: &Theme) {
     for (state, chips, typed, error, enabled, shown) in states {
         cells(ui, theme, |ui| {
             field_cell(ui, theme, state, 560.0, |ui| {
-                let line = Recipients { name: tr!("To"), chips: &chips, hint: tr!("Name or address"), copies: true, error, enabled };
+                let line = Recipients {
+                    name: tr!("To"),
+                    chips: &chips,
+                    hint: tr!("Name or address"),
+                    copies: true,
+                    error,
+                    enabled,
+                    grown: false,
+                    bring: None,
+                };
                 let mut typing = typed.to_owned();
                 let id = ui.make_persistent_id("to");
                 recipient::recipient_field_with(ui, theme, id, &mut typing, &line, shown);

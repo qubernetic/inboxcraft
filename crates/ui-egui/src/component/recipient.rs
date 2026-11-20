@@ -183,6 +183,11 @@ pub struct Recipients<'a> {
     pub error: Option<&'a str>,
     /// Whether it can be used.
     pub enabled: bool,
+    /// Whether the line shows more rows of chips before it scrolls ([`GROWN_ROWS`], not [`MOST_ROWS`]): the composer
+    /// grows its lines to bring every recipient into sight before it sends.
+    pub grown: bool,
+    /// The chip, by its place, to scroll into view in this frame.
+    pub bring: Option<usize>,
 }
 
 /// What a person did to a recipient line in this frame.
@@ -194,6 +199,8 @@ pub struct RecipientsOutput {
     pub removed: Option<usize>,
     /// "Cc Bcc" was pressed.
     pub copies: bool,
+    /// The chips, by their places, drawn whole in sight in this frame (not cut off by a scroll or an edge).
+    pub in_sight: Vec<usize>,
 }
 
 /// The least room the text being typed keeps beside the last chip before it goes to a row of its own, in points.
@@ -259,11 +266,12 @@ fn recipients_drawn(
         line.chips.iter().zip(&inks).map(|(recipient, ink)| chip_width(ui, theme, recipient, *ink, room - theme.sizes.scrollbar - s.s1)).collect();
     let (mut places, mut typing_at, mut rows) = flow(&widths, room, s.s1);
     // Past its most rows the line scrolls: the bar's room comes off the chips' row.
-    let scrolls = rows > MOST_ROWS;
+    let most_rows = if line.grown { GROWN_ROWS } else { MOST_ROWS };
+    let scrolls = rows > most_rows;
     if scrolls {
         (places, typing_at, rows) = flow(&widths, (room - theme.sizes.scrollbar - s.s1).max(1.0), s.s1);
     }
-    let shown_rows = rows.min(MOST_ROWS) as f32;
+    let shown_rows = rows.min(most_rows) as f32;
     let wrapped = rows > 1;
     let inner = |rows: f32| rows * chip + (rows - 1.0).max(0.0) * row_gap;
     let height = match (wrapped, boxed) {
@@ -272,7 +280,7 @@ fn recipients_drawn(
         (true, false) => inner(shown_rows) + (field_height - chip),
     };
     ui.vertical(|ui| {
-        let (mut removed, mut copies_pressed) = (None, false);
+        let (mut removed, mut copies_pressed, mut in_sight) = (None, false, Vec::new());
         ui.spacing_mut().item_spacing.y = s.s2;
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         let focused = shown == Some(Shown::Focus) || (enabled && ui.memory(|memory| memory.has_focus(id)));
@@ -309,6 +317,13 @@ fn recipients_drawn(
                 let mut child = ui.new_child(UiBuilder::new().max_rect(place).id_salt(("chip", index)));
                 if !enabled {
                     child.disable();
+                }
+                if line.bring == Some(index) {
+                    child.scroll_to_rect(place, None);
+                }
+                // Whole in sight: inside every clip over it (the line's scroll, the composer's edges, the window).
+                if child.clip_rect().expand(0.5).contains_rect(place) {
+                    in_sight.push(index);
                 }
                 let chip_shown = if enabled { None } else { Some(Shown::Rest) };
                 if chip_with(&mut child, theme, &recipient.shown, &recipient.spoken, recipient.tip.as_deref(), recipient.state, chip_shown).clicked()
@@ -379,13 +394,16 @@ fn recipients_drawn(
             }
             paint::rows_at(&painter, place.min, width, text, p.minus);
         }
-        RecipientsOutput { field: typed, removed, copies: copies_pressed }
+        RecipientsOutput { field: typed, removed, copies: copies_pressed, in_sight }
     })
     .inner
 }
 
 /// The most rows of chips a line shows before it scrolls.
 const MOST_ROWS: usize = 4;
+
+/// The most rows of chips a grown line shows before it scrolls ([`Recipients::grown`]).
+const GROWN_ROWS: usize = 8;
 
 /// Where chips `widths` wide go in rows `room` wide, `gap` apart: each chip's `(x, row)`, the typing's, and the rows.
 fn flow(widths: &[f32], room: f32, gap: f32) -> (Vec<(f32, usize)>, (f32, usize), usize) {
