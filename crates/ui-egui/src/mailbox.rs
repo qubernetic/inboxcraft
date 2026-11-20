@@ -467,8 +467,9 @@ pub struct OutboxRow {
     pub state: SendState,
     /// It answers an invitation: sent again as it is, never edited.
     pub invite_answer: bool,
-    /// Every recipient as one line, To, Cc and Bcc each named: "To Odile · Cc Ann · Bcc Béla". Built when the outbox
-    /// is read, each line listing at most [`MAX_LISTED`] recipients and counting the rest.
+    /// Every recipient as one line, To, Cc and Bcc each named, each recipient with its address: "To Odile
+    /// <odile@example.org> · Bcc Béla <bela@example.org>". Built when the outbox is read, each line listing at most
+    /// [`MAX_LISTED`] recipients and counting the rest.
     pub addressed: String,
     /// What changed in a refused send's draft since it was sent, in the engine's words (`to`, `bcc`, `text`, …;
     /// `unknown` when no record of how it went is kept): such a send is not sent again from its row, only from the
@@ -843,11 +844,17 @@ fn named(value: &Value, key: &str) -> (Vec<(String, String)>, usize) {
     (all.iter().filter_map(Value::as_str).take(MAX_LISTED).map(recipient).collect(), all.len())
 }
 
+/// One recipient as the outbox row lists it: always its address, after its name where it has one that differs, so
+/// the row says where it goes and not only what it is called ("Odile Brannock <odile@example.org>").
+fn with_address((name, address): &(String, String)) -> String {
+    if name == address { address.clone() } else { tr!("{name} <{address}>", name = name, address = address) }
+}
+
 /// The outbox row's one line of recipients: To, then Cc and Bcc where they hold any, each at most [`MAX_LISTED`]
-/// names and how many more.
+/// recipients, each with its address, and how many more.
 fn addressed(lines: [(&[(String, String)], usize); 3]) -> String {
     let [to, cc, bcc] = lines.map(|(names, all)| {
-        let listed = names.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ");
+        let listed = names.iter().map(with_address).collect::<Vec<_>>().join(", ");
         match all.saturating_sub(names.len()) {
             0 => listed,
             more => tr!("{listed} and {more} more", listed = listed, more = more),

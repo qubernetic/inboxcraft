@@ -190,7 +190,7 @@ fn the_outbox_shows_in_the_pane_while_anything_waits_and_lists_it() {
         harness.run();
         assert_eq!(harness.state().mailbox().place(), Place::Outbox);
         harness.get_by_label("1 waiting");
-        harness.get_by_label("To Odile Brannock, Work party on Saturday, Sending in 5 s");
+        harness.get_by_label("To Odile Brannock <odile@example.org>, Work party on Saturday, Sending in 5 s");
         harness.get_by_role_and_label(Role::Button, "Undo the send of “Work party on Saturday”").click();
         harness.run();
         assert_eq!(harness.state().composer().map(crate::compose::Composer::draft), Some(draft));
@@ -234,7 +234,7 @@ fn a_time_picked_makes_send_a_schedule_and_the_outbox_says_when() {
     assert_eq!(harness.state().counting(), None, "no countdown for a send later");
     harness.get_by_label("Outbox, 1 send").click();
     harness.run();
-    harness.get_by_label("To Odile Brannock, Re: Draft logo for the bakery, Scheduled · Fri 08:00");
+    harness.get_by_label("To Odile Brannock <odile@example.org>, Re: Draft logo for the bakery, Scheduled · Fri 08:00");
     harness.get_by_role_and_label(Role::Button, "Take “Re: Draft logo for the bakery” back and edit it").click();
     harness.run();
     assert!(harness.state().mailbox().outbox().is_empty());
@@ -283,7 +283,7 @@ fn a_refused_send_shows_the_reply_and_can_be_edited_or_sent_again() {
         harness.state_mut().mailbox_mut().open(Place::Outbox);
         harness.run();
         harness.get_by_label("1 not sent");
-        harness.get_by_label("To Odile Brannock, Work party on Saturday, Not sent: 550 5.1.1 No such user here");
+        harness.get_by_label("To Odile Brannock <odile@example.org>, Work party on Saturday, Not sent: 550 5.1.1 No such user here");
         harness.get_by_role_and_label(Role::Button, "Send “Work party on Saturday” again").click();
         harness.run();
         assert_eq!(harness.state().counting(), Some((draft, 5)), "held again, counted down");
@@ -422,12 +422,12 @@ fn a_refused_send_is_the_outbox_rows_72_high_and_a_held_one_56() {
     send(&mut harness, "Work party on Saturday");
     harness.state_mut().mailbox_mut().open(Place::Outbox);
     harness.run();
-    let held = harness.get_by_label("To Odile Brannock, Work party on Saturday, Sending in 5 s").rect();
+    let held = harness.get_by_label("To Odile Brannock <odile@example.org>, Work party on Saturday, Sending in 5 s").rect();
     assert_eq!(held.height(), 56.0, "{held:?}");
     clock.advance(Duration::from_secs(6));
     harness.state_mut().mailbox_mut().pump(&mut Scripted::default().refusing("550 5.1.1 No such user here"));
     harness.run();
-    let refused = harness.get_by_label("To Odile Brannock, Work party on Saturday, Not sent: 550 5.1.1 No such user here").rect();
+    let refused = harness.get_by_label("To Odile Brannock <odile@example.org>, Work party on Saturday, Not sent: 550 5.1.1 No such user here").rect();
     assert_eq!(refused.height(), 72.0, "{refused:?}");
 }
 
@@ -539,6 +539,8 @@ fn a_recipient_named_as_another_address_is_shown_by_its_address_and_only_edited(
         let mut harness = sending(&clock, theme);
         let draft = refused(&mut harness, &clock);
         agent_changes(&mut harness, draft, &serde_json::json!({ "to": ["\"odile@example.org\" <eve@example.net>"] }));
+        // Where it goes, not only the name it shows.
+        harness.get_by_label_contains("To odile@example.org <eve@example.net>, Work party on Saturday");
         harness.get_by_label_contains("Changed since it was refused: To; Edit to send it");
         only_edit_sends(&mut harness, draft);
     }
@@ -593,7 +595,7 @@ fn an_unchanged_refused_send_goes_again_and_a_change_not_yet_read_is_refused() {
     harness.run();
     assert_eq!(harness.state().counting(), None, "nothing went");
     assert!(matches!(harness.state().mailbox().outbox()[0].state, SendState::Refused { .. }));
-    harness.get_by_label_contains("Bcc Eve");
+    harness.get_by_label_contains("Bcc Eve <eve@example.org>");
     assert!(!offers_send_again(&harness), "read again, the row offers only Edit");
 }
 
@@ -606,5 +608,6 @@ fn a_hostile_recipient_is_one_clean_line_in_the_outbox_row() {
     agent_changes(&mut harness, draft, &serde_json::json!({ "bcc": ["Mal\u{202E}lory\r\nBcc: x <mallory@example.org>"] }));
     let addressed = harness.state().mailbox().outbox()[0].addressed.clone();
     assert!(!addressed.contains(['\r', '\n', '\u{202E}']), "{addressed:?}");
-    assert!(addressed.starts_with("To Odile Brannock · Bcc Mallory"), "{addressed:?}");
+    assert!(addressed.starts_with("To Odile Brannock <odile@example.org> · Bcc Mallory"), "{addressed:?}");
+    assert!(addressed.ends_with("<mallory@example.org>"), "{addressed:?}");
 }
