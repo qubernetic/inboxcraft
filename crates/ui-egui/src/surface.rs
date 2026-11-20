@@ -47,6 +47,10 @@ pub(crate) enum Surface {
     FullWidth,
     /// In one pane, the open message in the list's place.
     OnePaneReader,
+    /// A window of its own (`crate::draw::host`): its content, with its own `Esc` and keys. A window's surfaces
+    /// ([`Surfaces::window`]) are its own, built in its pass from its input; the main window's never hold it.
+    #[cfg_attr(not(test), expect(dead_code, reason = "built only by the window host, which nothing uses yet"))]
+    Window,
     /// The place itself (Home, the mail, the calendar, the settings): always the last.
     Place,
 }
@@ -92,6 +96,8 @@ pub(crate) struct Surfaces {
     apart: bool,
     /// A composer is drawn ([`of_the_composer`] rests without one).
     composer_drawn: bool,
+    /// These are a window of its own's ([`Surfaces::window`]): only [`WINDOW_KEYS`] and the composer's run there.
+    window: bool,
 }
 
 impl Surfaces {
@@ -120,7 +126,32 @@ impl Surfaces {
                 len += 1;
             }
         }
-        Self { stack, len: len + 1, mail, settings: facts.settings, apart: facts.settings || facts.home, composer_drawn: facts.composer_drawn }
+        Self {
+            stack,
+            len: len + 1,
+            mail,
+            settings: facts.settings,
+            apart: facts.settings || facts.home,
+            composer_drawn: facts.composer_drawn,
+            window: false,
+        }
+    }
+
+    /// The surfaces of a window of its own, built in its pass: a `float` of its own over its content
+    /// ([`Surface::Window`]), which one `Esc` closes. No mail, no list and no place of the main window stands in it, so
+    /// a key pressed there never acts on the main window's ringed row: only the look of the app ([`WINDOW_KEYS`]) and,
+    /// where it holds a `composer`, the composer's own run from it ([`Surfaces::allows`]).
+    #[cfg_attr(not(test), expect(dead_code, reason = "built only by the window host, which nothing uses yet"))]
+    pub(crate) fn window(float: bool, composer: bool) -> Self {
+        let mut stack = [Surface::Place; MOST];
+        let mut len = 0;
+        for (on, surface) in [(float, Surface::Float), (true, Surface::Window)] {
+            if on && let Some(slot) = stack.get_mut(len) {
+                *slot = surface;
+                len += 1;
+            }
+        }
+        Self { stack, len: len + 1, mail: false, settings: false, apart: true, composer_drawn: composer, window: true }
     }
 
     /// The surfaces, top first, the place last.
@@ -185,6 +216,9 @@ impl Surfaces {
     pub(crate) fn allows(&self, action: &str, keymap: &Keymap) -> bool {
         if self.held() || ROW_ACTS.contains(&action) || keymap::CALENDAR_KEYS.contains(&action) {
             return false;
+        }
+        if self.window {
+            return WINDOW_KEYS.contains(&action) || (of_the_composer(action) && self.composer_drawn);
         }
         if self.apart && mail_only(action) {
             return false;
@@ -265,6 +299,11 @@ pub(crate) const EDITOR_KEYS: [&str; 10] = [
     keymap::TEXT_SMALLER,
     keymap::TEXT_RESET,
 ];
+
+/// The main window's keys that also run from a window of its own: the look of the app, which every window shows. What
+/// opens, shows or acts on something (the palette, the settings, a place, the list's row, Undo) is the main window's.
+pub(crate) const WINDOW_KEYS: [&str; 7] =
+    [keymap::LIGHT, keymap::DARK, keymap::SYSTEM_MODE, keymap::TEXT_LARGER, keymap::TEXT_LARGER_EQUALS, keymap::TEXT_SMALLER, keymap::TEXT_RESET];
 
 #[cfg(test)]
 #[path = "surface_tests.rs"]
