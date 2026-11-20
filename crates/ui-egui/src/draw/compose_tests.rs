@@ -2162,6 +2162,107 @@ fn a_close_taken_back_for_an_agents_draft_opens_it() {
     assert!(took_back(&harness));
     assert_eq!(harness.state().composer().map(|composer| composer.draft()), Some(id), "the draft not kept is open");
     assert!(text_of(&harness).starts_with("Plot 14"));
+    // Opening it is no new keep: the next close, in a row, goes through.
+    close_window(&mut harness);
+    harness.step();
+    assert!(!took_back(&harness), "a second close in a row goes through");
+}
+
+/// A close of the window taken back, then new typing, then a close: taken back again and said again, the newest text
+/// not lost without a word; the close in a row after that goes through (#338).
+#[test]
+fn a_close_after_new_typing_is_taken_back_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    hooks.refuse(true);
+    typed_by_frames(&mut harness, "Plot 14");
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness));
+    harness.state_mut().mailbox_mut().dismiss_error();
+    typed_by_frames(&mut harness, " and more");
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness), "a close after new typing is not one in a row");
+    assert!(harness.state().mailbox().error().is_some(), "the failure is said again");
+    close_window(&mut harness);
+    harness.step();
+    assert!(!took_back(&harness), "the close in a row goes through");
+}
+
+/// A close of the window taken back long ago is no close in a row: the next one is taken back again (#338).
+#[test]
+fn a_close_long_after_one_taken_back_is_taken_back_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    hooks.refuse(true);
+    typed_by_frames(&mut harness, "Plot 14");
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness));
+    // More than ten seconds of frames at 60 a second.
+    for _ in 0..(11 * 60) {
+        harness.step();
+    }
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness), "taken back again");
+}
+
+/// The close's own failure is said, not only the keep's earlier one (#338).
+#[test]
+fn a_close_taken_back_says_why_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    hooks.refuse(true);
+    typed_by_frames(&mut harness, "Plot 14");
+    harness.state_mut().composer_mut().0.unwrap().edited();
+    harness.state_mut().keep_draft_now();
+    assert!(harness.state().mailbox().wait_for_keeps(std::time::Duration::from_secs(5)).is_err());
+    harness.step();
+    assert!(harness.state().mailbox().error().is_some(), "the failed keep is said");
+    harness.state_mut().mailbox_mut().dismiss_error();
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness));
+    assert!(harness.state().mailbox().error().is_some(), "the close says why it was taken back");
+}
+
+/// A close taken back with more than one draft not kept says how many more there are (#338).
+#[test]
+fn a_close_taken_back_says_how_many_more_drafts_are_not_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    let id = planted(&mut harness, ["", "", ""]);
+    hooks.refuse(true);
+    harness.state_mut().mailbox_mut().run_for_agent("compose.update", &json!({ "id": id, "text": "Plot 14" })).unwrap();
+    typed_by_frames(&mut harness, "Hello");
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness));
+    harness.step();
+    let said = harness.state().mailbox().error().unwrap_or_default().to_owned();
+    assert!(said.contains("1 more draft is not on the disk"), "{said}");
+}
+
+/// The composer's close waits for its own draft only: an agent's draft the disk refuses does not keep it open (#338).
+#[test]
+fn closing_the_composer_counts_only_its_own_draft() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    let id = planted(&mut harness, ["", "", ""]);
+    hooks.refuse_draft(inboxcraft_model::DraftId::new(id), true);
+    harness.state_mut().mailbox_mut().run_for_agent("compose.update", &json!({ "id": id, "text": "Plot 14" })).unwrap();
+    assert!(harness.state().mailbox().wait_for_keeps(std::time::Duration::from_secs(5)).is_err(), "the agent's draft is not kept");
+    typed_by_frames(&mut harness, "Hello");
+    harness.state_mut().close_composer();
+    assert!(harness.state().composer().is_none(), "its own draft is on the disk: the composer closes");
+    assert_eq!(harness.state().notice(), Some("Draft saved"));
 }
 
 /// An agent's send or partial change of a draft whose keep failed: the send is refused, saying why, and a change

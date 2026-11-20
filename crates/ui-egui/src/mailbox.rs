@@ -1846,6 +1846,11 @@ impl Mailbox {
         self.session.store().unkept().into_iter().map(|(draft, _)| draft.get()).collect()
     }
 
+    /// A count of the drafts handed to the store to write behind: another number after a newer keep of any draft.
+    pub(crate) fn keeps_made(&self) -> u64 {
+        self.session.store().keeps()
+    }
+
     /// Applies `event` as an account's sync worker tells it, checked by the engine as every worker's is: for a picture
     /// of the status line synced or syncing, which no sample account reaches without a server. Whether it changed
     /// anything.

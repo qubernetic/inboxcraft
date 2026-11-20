@@ -338,12 +338,16 @@ pub(crate) const KEEP_EVERY: f64 = 1.0;
 /// The store's own lock wait (2 s) is shorter, so a write blocked by another program fails, and is said, within it.
 pub(crate) const KEEP_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
+/// How long after a close of the window taken back for a draft not kept the next close still counts as one "in a row"
+/// and goes through, in seconds.
+pub(crate) const CLOSE_IN_A_ROW: f64 = 10.0;
+
 /// How the end of the window and of the app went for the drafts kept.
 #[derive(Debug, Default)]
 struct KeepsEnd {
-    /// A close of the window was taken back because a draft was not on the disk, and none landed since: the next
-    /// close goes through.
-    refused: bool,
+    /// A close of the window was taken back because a draft was not on the disk: the store's count of keeps then and
+    /// the time. The next close goes through only in a row: no keep of any draft since, within [`CLOSE_IN_A_ROW`].
+    refused: Option<(u64, f64)>,
     /// A close was taken back in this frame (for the window's owner, [`InboxApp::took_back_close`]).
     took_back: bool,
     /// The end of the app, or a close of the window that went through, already waited for the drafts.
@@ -2441,39 +2445,51 @@ impl InboxApp {
                 self.keep_draft_now();
             }
         }
+        // A keep's failure is said first: a close taken back says its own after it, with how many drafts are not kept.
+        self.unkept();
         if closing {
             self.close_with_keeps(ctx);
         } else {
             self.keeps_end.ended = false;
-            if self.keeps_end.refused && self.mailbox.unkept_drafts().is_empty() {
-                self.keeps_end.refused = false;
+            if self.keeps_end.refused.is_some() && self.mailbox.unkept_drafts().is_empty() {
+                self.keeps_end.refused = None;
             }
         }
-        self.unkept();
     }
 
     /// A close of the window waits (at most [`KEEP_WAIT`]) for the drafts kept to reach the disk. When one does not,
-    /// the close is taken back once: the window stays, the failure in the status line, the draft open in the
-    /// composer. A second close in a row goes through, and the newest text of that draft is lost: the disk holds it
-    /// as it was before.
+    /// the close is taken back: the window stays, the failure in the status line with how many more drafts are not
+    /// kept, the first such draft open in the composer when none is. A second close in a row (no keep of any draft
+    /// since, within [`CLOSE_IN_A_ROW`]) goes through, and the newest text of those drafts is lost: the disk holds
+    /// them as they were before. A later close, after new typing, is taken back again.
     fn close_with_keeps(&mut self, ctx: &egui::Context) {
         let Err(error) = self.mailbox.wait_for_keeps(KEEP_WAIT) else {
             self.keeps_end.ended = true;
             return;
         };
-        if self.keeps_end.refused {
+        let now = ctx.input(|input| input.time);
+        if self.keeps_end.refused.is_some_and(|(then, at)| then == self.mailbox.keeps_made() && (0.0..=CLOSE_IN_A_ROW).contains(&(now - at))) {
             eprintln!("inboxcraft: closed with a draft not kept, the disk holds it as it was before: {error}");
             self.keeps_end.ended = true;
             return;
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-        self.keeps_end.refused = true;
         self.keeps_end.took_back = true;
+        let unkept = self.mailbox.unkept_drafts();
         if self.composer.is_none()
-            && let Some(draft) = self.mailbox.unkept_drafts().first().copied()
+            && let Some(draft) = unkept.first().copied()
         {
             self.reopen(draft);
         }
+        // Counted after the draft opened: only a keep that comes after the take-back makes the next close another one.
+        self.keeps_end.refused = Some((self.mailbox.keeps_made(), now));
+        let error = match unkept.len().saturating_sub(1) {
+            0 => error,
+            1 => UiError::Refused(tr!("{error}; 1 more draft is not on the disk either", error = error)),
+            more => UiError::Refused(tr!("{error}; {count} more drafts are not on the disk either", error = error, count = more)),
+        };
+        // The failures the wait brought are said by this line: not again, over it, in the next frame.
+        let _ = self.mailbox.failed_keeps();
         self.mailbox.fail(error);
     }
 
