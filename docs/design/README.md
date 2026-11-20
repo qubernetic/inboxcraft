@@ -134,8 +134,8 @@ What the app still owes this file, one line each. The finer differences, with th
 
 **Settings and the calendar**
 - The settings are drawn to the 1440 frames; under about 1060 their narrow sizes are the code's own.
-- Privacy leaves the name column empty (only the address is kept), About is one column, and "After an act" and the
-  week's two rows on Calendar have no frame.
+- Privacy keeps no sender name, so a row shows the address at 16 where the frames draw a name column; About is one
+  column, and "After an act" and the week's two rows on Calendar have no frame.
 - The calendar's sync line has no "sync now" link at rest; the line itself takes the press.
 
 ## Limits

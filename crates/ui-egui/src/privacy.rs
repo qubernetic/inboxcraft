@@ -14,6 +14,9 @@ use crate::component::{capped, plain};
 /// The most characters of an address a row shows: an address holds no more (RFC 5321).
 const ADDRESS: usize = 254;
 
+/// The most characters of a sender's name a row shows.
+const NAME: usize = 254;
+
 /// The most senders the page keeps.
 pub const MOST: usize = 5_000;
 
@@ -24,6 +27,9 @@ pub struct SenderRow {
     pub address: String,
     /// The address as the row shows it: plain, on one line, capped.
     pub shown: String,
+    /// The sender's name as the row shows it (plain, on one line, capped), when one is kept: `remote.list` keeps none
+    /// today, so the address takes the name's column.
+    pub name: Option<String>,
 }
 
 impl SenderRow {
@@ -32,8 +38,22 @@ impl SenderRow {
     pub fn read(value: &Value) -> Option<Self> {
         let address = value.as_str().filter(|address| !address.trim().is_empty())?;
         let (kept, _) = capped(address, ADDRESS);
-        Some(Self { address: address.to_owned(), shown: plain(kept).split_whitespace().collect::<Vec<_>>().join(" ") })
+        Some(Self { address: address.to_owned(), shown: one_line(kept), name: None })
     }
+
+    /// This row with the sender's `name`, plain, on one line and capped; a blank name keeps none.
+    #[must_use]
+    pub fn named(mut self, name: &str) -> Self {
+        let (kept, _) = capped(name, NAME);
+        let shown = one_line(kept);
+        self.name = (!shown.is_empty()).then_some(shown);
+        self
+    }
+}
+
+/// `text` plain, its runs of white space one space, on one line.
+fn one_line(text: &str) -> String {
+    plain(text).split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Where the keyboard goes when the page is drawn next.
@@ -65,6 +85,12 @@ impl Privacy {
     pub fn read(&mut self, answer: &Value) {
         let listed = answer.get("senders").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
         self.rows = Some(listed.iter().filter_map(SenderRow::read).take(MOST).collect());
+    }
+
+    /// Shows `rows` as if `remote.list` had answered them, for a test of what `remote.list` does not give yet.
+    #[cfg(test)]
+    pub(crate) fn show(&mut self, rows: Vec<SenderRow>) {
+        self.rows = Some(rows);
     }
 
     /// Why the last read or "ask again" was not done.
