@@ -53,13 +53,14 @@ impl GreetBy {
         Self::ALL.into_iter().find(|by| by.name() == name)
     }
 
-    /// The word of `name` the greeting uses, on one line, with no control or bidi character; `None` for no word.
+    /// The word of `name` the greeting uses, on one line, with no control or invisible format character; `None` for no
+    /// word.
     #[must_use]
     pub fn word(self, name: &str) -> Option<String> {
         if self == Self::None {
             return None;
         }
-        let plain: String = name.chars().take(MOST).map(|c| if c.is_control() { ' ' } else { c }).filter(|c| !bidi(*c)).collect();
+        let plain: String = name.chars().take(MOST).map(|c| if c.is_control() { ' ' } else { c }).filter(|c| !invisible(*c)).collect();
         if plain.contains('@') {
             return None;
         }
@@ -85,7 +86,31 @@ fn title(word: &str) -> bool {
     TITLES.contains(&bare.as_str())
 }
 
-/// Whether `c` steers the direction of text: the marks, embeddings, overrides and isolates.
-const fn bidi(c: char) -> bool {
-    matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+/// Whether `c` is an invisible format character (Unicode's general category Cf): the soft hyphen, the zero-width space
+/// and joiners, the direction marks, embeddings, overrides and isolates, the BOM, the tag characters and the rest of
+/// the category, as of Unicode 16.
+const fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00ad}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061c}'
+            | '\u{06dd}'
+            | '\u{070f}'
+            | '\u{0890}'..='\u{0891}'
+            | '\u{08e2}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{206f}'
+            | '\u{feff}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{110bd}'
+            | '\u{110cd}'
+            | '\u{13430}'..='\u{1343f}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0001}'
+            | '\u{e0020}'..='\u{e007f}'
+    )
 }

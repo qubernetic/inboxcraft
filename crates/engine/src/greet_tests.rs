@@ -104,3 +104,48 @@ fn hostile_names_give_one_clean_line_or_none() {
     assert_eq!(word(GreetBy::Last, ", Anna"), "Anna");
     assert_eq!(word(GreetBy::Last, &format!("{long} Kovács")).chars().count(), MOST, "read up to the cap, the rest unread");
 }
+
+/// Every invisible format character (Unicode's Cf) the reading drops, one of each range.
+const INVISIBLE: [char; 24] = [
+    '\u{00ad}',
+    '\u{0600}',
+    '\u{061c}',
+    '\u{06dd}',
+    '\u{070f}',
+    '\u{0890}',
+    '\u{08e2}',
+    '\u{180e}',
+    '\u{200b}',
+    '\u{200d}',
+    '\u{200f}',
+    '\u{202e}',
+    '\u{2060}',
+    '\u{2064}',
+    '\u{206a}',
+    '\u{206f}',
+    '\u{feff}',
+    '\u{fffb}',
+    '\u{110bd}',
+    '\u{13430}',
+    '\u{1bca0}',
+    '\u{1d173}',
+    '\u{e0001}',
+    '\u{e007f}',
+];
+
+#[test]
+fn invisible_format_characters_are_dropped_before_the_name_is_read() {
+    assert_eq!(word(GreetBy::First, "\u{feff}Dr. Anna"), "Anna", "a title behind a BOM is still a title");
+    assert_eq!(word(GreetBy::First, "Dr.\u{200b} Anna"), "Anna");
+    assert_eq!(word(GreetBy::First, "Dr.\u{00ad} Anna"), "Anna");
+    assert_eq!(word(GreetBy::Last, "Anna Ko\u{200d}vács\u{e0041}\u{e007f}"), "Kovács");
+    assert_eq!(word(GreetBy::Full, "\u{206a}Anna\u{2060} Kovács\u{206f}"), "Anna Kovács");
+    for c in INVISIBLE {
+        let name = format!("{c}Dr.{c} An{c}na{c} Kovács{c}");
+        for by in GreetBy::ALL {
+            let got = by.word(&name).unwrap_or_default();
+            assert!(!got.contains(c), "{by:?} of U+{:04X} kept it: {got:?}", u32::from(c));
+        }
+        assert_eq!(word(GreetBy::First, &name), "Anna", "U+{:04X}", u32::from(c));
+    }
+}
