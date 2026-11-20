@@ -486,3 +486,70 @@ fn a_composer_line_wraps_its_chips_four_apart_and_grows() {
     assert!(rows.len() > 1, "wrapped: {rows:?}");
     assert_eq!(rows[1] - rows[0], 28, "24 high, 4 apart: {rows:?}");
 }
+
+/// The text each chip of the last frame shows, as painted: its glyphs, an ellipsis where it was cut.
+fn chip_texts(harness: &Harness<'static>) -> Vec<String> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+            egui::Shape::Text(text) => out.push(text.galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect()),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut out));
+    out
+}
+
+/// A chip of `address` shown as itself, in a composer's line.
+fn address_line(address: &str) -> Harness<'static> {
+    let chip = Recipient { shown: address.to_owned(), spoken: address.to_owned(), tip: None, state: RecipientState::Valid };
+    composer_line(vec![chip], false)
+}
+
+/// Whether a tooltip of `address` shows over the chip of it once the pointer has rested on it.
+fn tip_shows(harness: &mut Harness<'static>, address: &str) -> bool {
+    let before = harness.query_all_by_label(address).count();
+    harness.get_by_role_and_label(Role::ListItem, address).hover();
+    harness.run_steps(40);
+    harness.query_all_by_label(address).count() > before
+}
+
+/// A chip that shows an address never cuts its domain: a domain wider than a chip grows the chip to the line, where it
+/// shows whole (the re-look's probe: the domain is the part that says where the mail goes).
+#[test]
+fn a_chip_never_cuts_the_domain_of_its_address() {
+    let probe = "odile@example.org.relay.mail.attacker.example.net";
+    let harness = address_line(probe);
+    let shown = chip_texts(&harness);
+    assert!(shown.iter().any(|text| text == probe), "the whole address on the chip: {shown:?}");
+    let chip = harness.get_by_role_and_label(Role::ListItem, probe).rect();
+    assert!(chip.width() > 176.0 && chip.right() <= 684.0, "grown, within the line: {chip:?}");
+}
+
+/// A long local part is cut, the domain whole after the ellipsis; the chip keeps its 176 and its tooltip and what a
+/// screen reader hears hold the whole address.
+#[test]
+fn a_long_address_is_cut_in_its_local_part_with_the_whole_address_in_its_tip() {
+    let long = "odile.brannock.and.the.rest.of.a.very.long.local.part@example.net";
+    let mut harness = address_line(long);
+    let shown = chip_texts(&harness);
+    let cut = shown.iter().find(|text| text.ends_with("…@example.net")).unwrap_or_else(|| panic!("cut before the domain: {shown:?}"));
+    assert!(cut.starts_with("odile."), "{cut:?}");
+    assert_eq!(harness.get_by_role_and_label(Role::ListItem, long).rect().width(), 176.0);
+    assert!(tip_shows(&mut harness, long), "the whole address in its tooltip");
+}
+
+/// A domain too wide even for the line is cut from its left only: what shows ends with its registrable end.
+#[test]
+fn a_domain_wider_than_the_line_is_cut_from_its_left() {
+    let domain = format!("{}attacker.example.net", "relay.".repeat(40));
+    let address = format!("odile@{domain}");
+    let mut harness = address_line(&address);
+    let shown = chip_texts(&harness);
+    let cut = shown.iter().find(|text| text.starts_with('…')).unwrap_or_else(|| panic!("cut from its left: {shown:?}"));
+    assert!(cut.ends_with(".attacker.example.net") && domain.ends_with(cut.trim_start_matches('…')), "{cut:?}");
+    let chip = harness.get_by_role_and_label(Role::ListItem, &address).rect();
+    assert!(chip.right() <= 684.0, "within the line: {chip:?}");
+    assert!(tip_shows(&mut harness, &address));
+}

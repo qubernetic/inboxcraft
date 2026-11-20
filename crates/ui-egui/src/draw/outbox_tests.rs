@@ -633,3 +633,35 @@ fn a_hostile_recipient_is_one_clean_line_in_the_outbox_row() {
     assert!(addressed.starts_with("To Odile Brannock <odile@example.org> · Bcc Mallory"), "{addressed:?}");
     assert!(addressed.ends_with("<mallory@example.org>"), "{addressed:?}");
 }
+
+/// The text each painted run of the last frame shows, glyph by glyph: an ellipsis where it was cut.
+fn painted_runs(harness: &Harness<'static, InboxApp>) -> Vec<String> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+            egui::Shape::Text(text) => out.push(text.galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect()),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut out));
+    out
+}
+
+/// The re-look's N1: an agent puts a long address with a misleading start on a refused send. Edited, its chip shows
+/// the whole domain, and the composer's Send sends it only then.
+#[test]
+fn a_long_address_shows_its_whole_domain_on_its_chip_before_it_is_sent() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Light);
+    let draft = refused(&mut harness, &clock);
+    let probe = "odile@example.org.relay.mail.attacker.example.net";
+    agent_changes(&mut harness, draft, &serde_json::json!({ "to": [probe] }));
+    only_edit_sends(&mut harness, draft);
+    harness.run();
+    let runs = painted_runs(&harness);
+    assert!(runs.iter().any(|run| run == probe), "the whole address on its chip: {runs:?}");
+    harness.get_by_role_and_label(Role::Button, "Send").click();
+    harness.run();
+    assert_eq!(harness.state().counting(), Some((draft, 5)), "sent once its address was in sight");
+}

@@ -19,7 +19,9 @@
 //! the chips 12 after it, 4 apart and wrapping 4 apart, 6 above and below them, and "Cc  Bcc" as a small link at the
 //! right end; the composer rules a hairline under it. The caret says that it has the keys.
 
-use egui::{Color32, Id, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
+use std::sync::Arc;
+
+use egui::{Color32, Galley, Id, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint;
 use crate::iconset::IconId;
@@ -97,13 +99,12 @@ pub(crate) fn chip_with(
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
     let tail = s.s1 + glyph + s.s1 + 1.0;
     // In a line narrower than a chip's 176, the chip is cut to the line's room ([`chip_width`]).
-    let widest = WIDEST.min(ui.available_width()).max(1.0);
-    let most = (widest - lead - tail).max(1.0);
-    let words = cut(ui, name, theme.fonts.body, ink, most);
-    let width = (lead + words_box(ui, theme, name, ink, &words, most) + tail).ceil();
+    let laid = chip_words(ui, theme, name, ink, lead + tail, ui.available_width());
+    let (words, width) = (laid.words, (lead + laid.width + tail).ceil());
     let (rect, chip) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     chip.widget_info(|| WidgetInfo::labeled(Role::ListItem, enabled, spoken));
-    let chip = match tip {
+    // A cut chip that shows its address has the whole of it under the pointer.
+    let chip = match tip.or_else(|| laid.cut.then_some(name)) {
         Some(tip) => chip.on_hover_text(tip),
         None => chip,
     };
@@ -425,15 +426,79 @@ fn chip_width(ui: &Ui, theme: &Theme, recipient: &Recipient, ink: Color32, room:
     let invalid = recipient.state == RecipientState::Invalid;
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
     let tail = s.s1 + glyph + s.s1 + 1.0;
-    let most = (WIDEST.min(room).max(1.0) - lead - tail).max(1.0);
-    let words = cut(ui, &recipient.shown, theme.fonts.body, ink, most);
-    (lead + words_box(ui, theme, &recipient.shown, ink, &words, most) + tail).ceil()
+    (lead + chip_words(ui, theme, &recipient.shown, ink, lead + tail, room).width + tail).ceil()
 }
 
-/// The box a chip gives its `name` laid out as `words` within `most`: the words' width, or all of `most` when the name
-/// is cut there, as the design's long chip keeps its 144.
-fn words_box(ui: &Ui, theme: &Theme, name: &str, ink: Color32, words: &egui::Galley, most: f32) -> f32 {
-    if galley(ui, name, theme.fonts.body, ink).size().x > most { most } else { words.size().x }
+/// A chip's words as [`chip_words`] lays them out.
+struct ChipWords {
+    /// What the chip shows: the name whole, or cut with an ellipsis.
+    words: Arc<Galley>,
+    /// The box the words take: their width, or all the room they were cut to, as the design's long chip keeps its 144.
+    width: f32,
+    /// Whether something of the name does not show.
+    cut: bool,
+}
+
+/// The words of a chip showing `name`, its edges and cross taking `sides`, in a line `room` wide: cut at the chip's
+/// 176 with an ellipsis. An address is cut in its local part, never in its domain (everything after its last at sign,
+/// which says where the mail goes); a domain wider than a chip grows the chip to `room`, and one wider than that is
+/// cut only from its left, so its registrable end shows.
+fn chip_words(ui: &Ui, theme: &Theme, name: &str, ink: Color32, sides: f32, room: f32) -> ChipWords {
+    let font = theme.fonts.body;
+    let room = if room.is_finite() { room.max(1.0) } else { WIDEST };
+    let most = (WIDEST.min(room) - sides).max(1.0);
+    let whole = galley(ui, name, font, ink);
+    if whole.size().x <= most {
+        let width = whole.size().x;
+        return ChipWords { words: whole, width, cut: false };
+    }
+    let Some(domain) = name.rfind('@').and_then(|at| name.get(at..)).filter(|domain| domain.len() > 1) else {
+        return ChipWords { words: cut(ui, name, font, ink, most), width: most, cut: true };
+    };
+    let local = name.get(..name.len().saturating_sub(domain.len())).unwrap_or_default();
+    let grown = (room - sides).max(1.0);
+    for most in [most, grown] {
+        if whole.size().x <= most {
+            let width = whole.size().x;
+            return ChipWords { words: whole, width, cut: false };
+        }
+        // The most letters of the local part that fit before the ellipsis and the whole domain.
+        let fits = |kept: usize| {
+            let end = local.char_indices().nth(kept).map_or(local.len(), |(at, _)| at);
+            let words = galley(ui, &format!("{}…{domain}", local.get(..end).unwrap_or_default()), font, ink);
+            (words.size().x <= most).then_some(words)
+        };
+        if let Some(words) = most_that_fit(local.chars().count(), fits) {
+            return ChipWords { words, width: most, cut: true };
+        }
+    }
+    // The domain alone is wider than the line: its right end, after an ellipsis.
+    let count = domain.chars().count();
+    let fits = |kept: usize| {
+        let start = domain.char_indices().nth(count.saturating_sub(kept)).map_or(domain.len(), |(at, _)| at);
+        let words = galley(ui, &format!("…{}", domain.get(start..).unwrap_or_default()), font, ink);
+        (words.size().x <= grown).then_some(words)
+    };
+    let words = most_that_fit(count, fits).unwrap_or_else(|| cut(ui, name, font, ink, grown));
+    ChipWords { words, width: grown, cut: true }
+}
+
+/// What `fits` gives for the most of `0..=most` that it gives something for (it gives something for every count up to
+/// that one), by halving; `None` when it gives nothing even for none.
+fn most_that_fit(most: usize, fits: impl Fn(usize) -> Option<Arc<Galley>>) -> Option<Arc<Galley>> {
+    let mut best = fits(0)?;
+    let (mut low, mut high) = (0_usize, most);
+    while low < high {
+        let mid = low + (high - low).div_ceil(2);
+        match fits(mid) {
+            Some(words) => {
+                best = words;
+                low = mid;
+            }
+            None => high = mid.saturating_sub(1),
+        }
+    }
+    Some(best)
 }
 
 #[cfg(test)]
