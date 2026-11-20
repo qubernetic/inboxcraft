@@ -130,10 +130,12 @@ What the app still owes this file, one line each. The finer differences, with th
 - At 130 % text the list's view switch stands on the pills' line, not in the head.
 
 **Settings and the calendar**
-- The confirmation dialogs (a template's delete, a scheduled entry's cancel, an account's removal) stand in the
-  middle of the dimmed window; the frames put the first two lower (y 423 and 441 of 900). A scheduled send's says
-  "“…” will not go at its time, Tue 08:00." where the frame says "on Tuesday at 08:00", and an account's says "its
-  drafts" where the frame counts them.
+- The confirmation dialogs stand by what they ask about as the file's rule says, but what they ask about stands
+  elsewhere: the Templates page lists Personal before Studio and the Scheduled page the sample's four entries, so
+  the row asked about is not where the frames have it and the cards stand off the frames' y 423 and 441 of 900; the
+  account form draws "Remove account…" at 664 where the frame has 602, so its card is at 324, not 262. A
+  scheduled send's says "“…” will not go at its time, Tue 08:00." where the frame says "on Tuesday at 08:00", and an
+  account's says "its drafts" where the frame counts them.
 - The settings are drawn to the 1440 frames; under about 1060 their narrow sizes are the code's own.
 - Privacy leaves the name column empty (only the address is kept), About is one column, and "After an act" and the
   week's two rows on Calendar have no frame.
