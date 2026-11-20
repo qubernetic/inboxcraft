@@ -29,7 +29,7 @@ fn an_appearance_comes_back_whole_from_its_json() {
         motion: Motion::Reduce,
         motion_reduced: false,
         frame: WindowFrame::System,
-        layout: Layout { reader: ReaderHost::Window, composer: ComposerHost::Floating },
+        layout: Layout { reader: ReaderHost::Window, composer: ComposerHost::Floating, event_editor: EventEditorHost::Window },
     };
     let value = appearance.to_value();
     assert_eq!(
@@ -41,7 +41,7 @@ fn an_appearance_comes_back_whole_from_its_json() {
             "motion_level": "off",
             "motion_chosen": true,
             "frame": "system",
-            "layout": { "reader": "window", "composer": "floating" },
+            "layout": { "reader": "window", "composer": "floating", "event_editor": "window" },
         })
     );
     assert_eq!(Appearance::from_value(&value), appearance);
@@ -227,8 +227,9 @@ fn the_system_s_wish_decides_only_while_the_owner_has_not_chosen() {
     }
 }
 
-/// Both docked, spelled out: the tests of a kept file must not lean on `Layout::default`, which they guard.
-const DOCKED: Layout = Layout { reader: ReaderHost::Docked, composer: ComposerHost::Docked };
+/// Both docked and the event editor full, spelled out: the tests of a kept file must not lean on `Layout::default`,
+/// which they guard.
+const DOCKED: Layout = Layout { reader: ReaderHost::Docked, composer: ComposerHost::Docked, event_editor: EventEditorHost::Full };
 
 /// A kept file of the choices beside the layout, as a version before the layout wrote it.
 fn kept_without_layout() -> serde_json::Value {
@@ -247,18 +248,34 @@ fn the_reader_and_the_composer_are_docked_on_a_fresh_install() {
     assert_eq!(ComposerHost::ALL.map(ComposerHost::id), ["docked", "floating", "window"]);
     assert_eq!(Layout::default(), DOCKED);
     assert_eq!(Appearance::default().layout, Layout::default());
-    assert_eq!(Appearance::default().to_value()["layout"], json!({ "reader": "docked", "composer": "docked" }));
+    assert_eq!(Appearance::default().to_value()["layout"], json!({ "reader": "docked", "composer": "docked", "event_editor": "full" }));
+}
+
+#[test]
+fn a_new_event_opens_full_on_a_fresh_install_and_in_a_kept_file_without_the_choice() {
+    assert_eq!(EventEditorHost::ALL.map(EventEditorHost::id), ["small", "full", "window"]);
+    assert_eq!(EventEditorHost::default(), EventEditorHost::Full);
+    let mut kept = kept_without_layout();
+    kept["layout"] = json!({ "reader": "window", "composer": "floating" });
+    let layout = Layout { reader: ReaderHost::Window, composer: ComposerHost::Floating, event_editor: EventEditorHost::Full };
+    assert_eq!(Appearance::from_value(&kept), read_with(layout), "a layout kept before the choice opens full");
+    for junk in [json!(null), json!(3), json!("Small"), json!("float"), json!(["window"]), json!("x".repeat(100_000))] {
+        kept["layout"] = json!({ "reader": "window", "composer": "floating", "event_editor": junk });
+        assert_eq!(Appearance::from_value(&kept), read_with(layout), "{junk}");
+    }
 }
 
 #[test]
 fn every_layout_comes_back_whole_from_its_json() {
     for reader in ReaderHost::ALL {
         for composer in ComposerHost::ALL {
-            let appearance = read_with(Layout { reader, composer });
-            let value = appearance.to_value();
-            assert_eq!(value["layout"], json!({ "reader": reader.id(), "composer": composer.id() }));
-            assert_eq!(Appearance::from_value(&value), appearance, "{value}");
-            assert_eq!(appearance.normalised().layout, appearance.layout, "normalising keeps the layout");
+            for event_editor in EventEditorHost::ALL {
+                let appearance = read_with(Layout { reader, composer, event_editor });
+                let value = appearance.to_value();
+                assert_eq!(value["layout"], json!({ "reader": reader.id(), "composer": composer.id(), "event_editor": event_editor.id() }));
+                assert_eq!(Appearance::from_value(&value), appearance, "{value}");
+                assert_eq!(appearance.normalised().layout, appearance.layout, "normalising keeps the layout");
+            }
         }
     }
 }
@@ -293,9 +310,9 @@ fn a_junk_layout_starts_docked_and_keeps_the_other_choices() {
 fn a_layout_part_that_cannot_be_read_is_docked_and_the_other_part_is_kept() {
     let mut kept = kept_without_layout();
     kept["layout"] = json!({ "reader": "window", "composer": 7 });
-    assert_eq!(Appearance::from_value(&kept), read_with(Layout { reader: ReaderHost::Window, composer: ComposerHost::Docked }));
+    assert_eq!(Appearance::from_value(&kept), read_with(Layout { reader: ReaderHost::Window, ..DOCKED }));
     kept["layout"] = json!({ "reader": "junk", "composer": "floating" });
-    assert_eq!(Appearance::from_value(&kept), read_with(Layout { reader: ReaderHost::Docked, composer: ComposerHost::Floating }));
+    assert_eq!(Appearance::from_value(&kept), read_with(Layout { composer: ComposerHost::Floating, ..DOCKED }));
 }
 
 #[test]
@@ -306,7 +323,7 @@ fn a_layout_a_newer_build_kept_starts_docked_where_it_names_a_host_this_build_la
     kept["layout"] = json!({ "reader": "window", "composer": "window", "calendar": "window", "split": { "side": "right" } });
     assert_eq!(
         Appearance::from_value(&kept),
-        read_with(Layout { reader: ReaderHost::Window, composer: ComposerHost::Window }),
+        read_with(Layout { reader: ReaderHost::Window, composer: ComposerHost::Window, ..DOCKED }),
         "a newer key beside the known ones does not cost them"
     );
 }

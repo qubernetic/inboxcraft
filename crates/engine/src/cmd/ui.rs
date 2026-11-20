@@ -5,9 +5,9 @@
 //! and nothing that leaves the computer. Each answers the whole [`Appearance`] after the change; the front end draws
 //! with it and keeps it on disk.
 //!
-//! `ui.layout.set` (`owner`) says where the reader and the composer show: `reader` (`docked` or `window`) and
-//! `composer` (`docked`, `floating` or `window`), one of them or both. It is the owner's, as `after.set` is: it moves
-//! the owner's work about the screen.
+//! `ui.layout.set` (`owner`) says where the reader, the composer and the event editor show: `reader` (`docked` or
+//! `window`), `composer` (`docked`, `floating` or `window`) and `event_editor` (`small`, `full` or `window`), any of
+//! them. It is the owner's, as `after.set` is: it moves the owner's work about the screen.
 //!
 //! `ui.settings.open` (`safe`) asks the window to show the settings, on the page its optional `page` names (one of
 //! [`crate::shown::SETTINGS_PAGES`]); a `page` that names none is no page, never an error. It changes nothing; its
@@ -19,7 +19,7 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::appearance::{Appearance, ComposerHost, Layout, MotionLevel, ReaderHost, TEXT_SCALES, ThemeMode, WindowFrame};
+use crate::appearance::{Appearance, ComposerHost, EventEditorHost, Layout, MotionLevel, ReaderHost, TEXT_SCALES, ThemeMode, WindowFrame};
 use crate::params::decode;
 use crate::shown::{self, SettingsAsked};
 use crate::{AgentClass, Caller, CommandSpec, Context, EngineError, Outcome};
@@ -29,7 +29,7 @@ pub(crate) const COMMANDS: &[CommandSpec] = &[FRAME, LAYOUT, MOTION, SETTINGS, T
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["mode", "percent", "level", "reduce", "frame", "page", "reader", "composer"];
+pub(crate) const FIELDS: &[&str] = &["mode", "percent", "level", "reduce", "frame", "page", "reader", "composer", "event_editor"];
 
 /// `ui.theme.set`: light, dark or the system's.
 pub(crate) const THEME: CommandSpec =
@@ -55,7 +55,7 @@ pub(crate) const FRAME: CommandSpec = CommandSpec {
 pub(crate) const LAYOUT: CommandSpec = CommandSpec {
     id: "ui.layout.set",
     class: Some(AgentClass::Owner),
-    summary: "Show the reader and the composer docked, the composer floating, or each in a window of its own",
+    summary: "Show the reader and the composer docked, the composer floating, or each in a window of its own; open the event editor small, full or in a window",
     run: layout,
 };
 
@@ -153,12 +153,14 @@ struct LayoutParams {
     reader: Option<String>,
     /// `docked`, `floating` or `window`.
     composer: Option<String>,
+    /// `small`, `full` or `window`.
+    event_editor: Option<String>,
 }
 
 fn layout(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: LayoutParams = decode(LAYOUT.id, params)?;
-    if params.reader.is_none() && params.composer.is_none() {
-        return Err(EngineError::bad_params(LAYOUT.id, "give reader, composer or both"));
+    if params.reader.is_none() && params.composer.is_none() && params.event_editor.is_none() {
+        return Err(EngineError::bad_params(LAYOUT.id, "give reader, composer, event_editor or more of them"));
     }
     let appearance = context.state().appearance;
     let reader = match params.reader.as_deref() {
@@ -169,7 +171,11 @@ fn layout(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         None => appearance.layout.composer,
         Some(id) => ComposerHost::named(id).ok_or_else(|| EngineError::bad_params(LAYOUT.id, "composer is docked, floating or window"))?,
     };
-    Ok(changed(Appearance { layout: Layout { reader, composer }, ..appearance }))
+    let event_editor = match params.event_editor.as_deref() {
+        None => appearance.layout.event_editor,
+        Some(id) => EventEditorHost::named(id).ok_or_else(|| EngineError::bad_params(LAYOUT.id, "event_editor is small, full or window"))?,
+    };
+    Ok(changed(Appearance { layout: Layout { reader, composer, event_editor }, ..appearance }))
 }
 
 /// Reads `page` alone, by hand: a `page` that is no page's id is no page, and a refusal repeats nothing it was sent. The

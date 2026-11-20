@@ -13,13 +13,19 @@
 //! Esc or a press outside comes back as [`Asked::Leave`]: the editor closes when nothing was typed; else it stays and
 //! says how to keep or throw away the typing (Save; Cancel or a second Esc), and a press outside never closes it. A
 //! press outside reaches nothing under the editor.
+//!
+//! The same form shows in three hosts ([`Room`]): the small float; the full editor in the calendar's place
+//! ([`full`]), 40 in from its sides, Starts, Ends and the two ticks on one row, Repeat, Show as and Alert on one row,
+//! the calendar half wide; and a window of its own ([`window`]), 24 in from its sides, the same rows, its title and
+//! Close the window's. Alert shows in the full editor and the window only. The full editor and the window give the
+//! keyboard to the title when they open.
 
 use egui::{Context, Id, Rect, Response, Ui, pos2, vec2};
 
 use super::Asked;
 use crate::calendar::Editor;
 use crate::calendar::MAX_DESCRIPTION;
-use crate::calendar::editor::{MAX_FIELD, MAX_GUESTS_TEXT, Menu, REPEATS, repeat_text};
+use crate::calendar::editor::{ALERTS, MAX_FIELD, MAX_GUESTS_TEXT, Menu, REPEATS, alert_text, repeat_text};
 use crate::component::button::TextButton;
 use crate::component::checkbox::{checkbox, radio};
 use crate::component::field::{self, Field};
@@ -34,7 +40,37 @@ use crate::theme::Theme;
 use crate::tr;
 
 /// The editor's width, in points, its edge included, as the design draws it.
-const WIDTH: f32 = 432.0;
+pub(super) const WIDTH: f32 = 432.0;
+
+/// The full editor's room from its sides and its top, in points.
+const FULL_PAD: (i8, i8) = (40, 20);
+
+/// The window's room from its sides and its top, in points.
+const WINDOW_PAD: (i8, i8) = (24, 20);
+
+/// Starts' and Ends' width in the full editor and the window, in points.
+const TIME_FIELD: f32 = 200.0;
+
+/// The size of the editor's window of its own, in points: the composer's window, 80 taller.
+pub(in crate::draw) const WINDOW: egui::Vec2 = egui::Vec2::new(704.0, 800.0);
+
+/// Where the editor shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(in crate::draw) enum Room {
+    /// The float over the calendar.
+    Small,
+    /// In the calendar's place.
+    Full,
+    /// In a window of its own.
+    Window,
+}
+
+impl Room {
+    /// Whether the form has the room of the full editor: the rows side by side, and Alert.
+    fn wide(self) -> bool {
+        self != Self::Small
+    }
+}
 
 /// From the editor of an existing event to the calendar card's right edge, in points, as the edit frames draw it.
 const EDIT_RIGHT: f32 = 3.0;
@@ -89,13 +125,70 @@ pub(in crate::draw) fn show(
     let shown = popup::held(ctx, theme, &float, quiet, |ui| {
         egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 16, top: 12, bottom: 16 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, ROWS);
-            form(ui, theme, keymap, editor, &mut asked);
+            form(ui, theme, keymap, editor, &mut asked, Room::Small);
         });
     });
     if let Some((_, Some(leave))) = shown {
         asked.push(Asked::Leave(leave));
     }
     asked
+}
+
+/// The full editor in `rect`, the calendar's place: what was pressed in it. Its `Esc` comes back as [`Asked::Leave`]
+/// when no list of its own is open over it and no other surface (`quiet`) has the keys; nothing is outside it.
+pub(in crate::draw) fn full(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, rect: Rect, quiet: bool) -> Vec<Asked> {
+    let mut asked = Vec::new();
+    let ctx = ui.ctx().clone();
+    if !quiet && !popup::any_open(&ctx) && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        asked.push(Asked::Leave(popup::Leave::Escape));
+    }
+    let mut inside = ui.new_child(egui::UiBuilder::new().max_rect(rect).id_salt("event-editor-full"));
+    inside.set_clip_rect(rect.intersect(ui.clip_rect()));
+    inside.painter().rect_filled(rect, 0.0, theme.palette.surface);
+    hosted(&mut inside, theme, keymap, editor, &mut asked, (Room::Full, FULL_PAD));
+    asked
+}
+
+/// The editor in its window of its own, `ui` its content: what was pressed in it. Its `Esc` and its close are the
+/// window's ([`super::super::host`]).
+pub(in crate::draw) fn window(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor) -> Vec<Asked> {
+    let mut asked = Vec::new();
+    ui.painter().rect_filled(ui.max_rect(), 0.0, theme.palette.surface);
+    hosted(ui, theme, keymap, editor, &mut asked, (Room::Window, WINDOW_PAD));
+    asked
+}
+
+/// The form in the full editor or the window, `pad` in from the sides and the top, scrolling where it does not fit.
+fn hosted(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked: &mut Vec<Asked>, (room, pad): (Room, (i8, i8))) {
+    let fresh = Id::unique(("event-editor-opened", room));
+    let opened = ui.ctx().data(|data| data.get_temp::<bool>(fresh)).unwrap_or(false);
+    let area = egui::ScrollArea::vertical().id_salt(("event-editor-scroll", room)).auto_shrink([false, false]);
+    crate::component::scroll::show(ui, theme, area, |ui| {
+        let margin = egui::Margin { left: pad.0, right: pad.0, top: pad.1, bottom: pad.1 };
+        egui::Frame::new().inner_margin(margin).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, ROWS);
+            form(ui, theme, keymap, editor, asked, room);
+        });
+    });
+    if !opened {
+        // Opened in this host: the keyboard goes to the title, never left on a control no longer drawn.
+        ui.ctx().data_mut(|data| data.insert_temp(fresh, true));
+        let title = ui.ctx().data(|data| data.get_temp::<Id>(title_id())).unwrap_or(Id::NULL);
+        ui.ctx().memory_mut(|memory| memory.request_focus(title));
+    }
+}
+
+/// Where the id of the title's field is kept, for the full editor and the window to give it the keyboard.
+fn title_id() -> Id {
+    Id::unique("event-editor-title-field")
+}
+
+/// Forgets that the full editor and the window were open, so that each gives the keyboard to the title when it opens
+/// next: the editor closed, or moved to another host.
+pub(in crate::draw) fn forget_opened(ctx: &Context, but: Option<Room>) {
+    for room in [Room::Full, Room::Window].into_iter().filter(|room| Some(*room) != but) {
+        ctx.data_mut(|data| data.remove_temp::<bool>(Id::unique(("event-editor-opened", room))));
+    }
 }
 
 /// A one-line field `width` points wide with its `label`, holding `text` (at most `limit` characters), `hint` while
@@ -111,6 +204,9 @@ fn line(
     ui.vertical(|ui| {
         ui.set_width(width);
         let id = ui.make_persistent_id(("event-editor", salt));
+        if salt == "title" {
+            ui.ctx().data_mut(|data| data.insert_temp(title_id(), id));
+        }
         field::text_field_limited(ui, theme, id, text, &Field { read_only, ..Field::new(label, hint) }, limit)
     })
     .inner
@@ -136,46 +232,53 @@ fn keep_menu(editor: &mut Editor, menu: Menu, open: bool) {
     }
 }
 
-fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked: &mut Vec<Asked>) {
+fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked: &mut Vec<Asked>, room: Room) {
     let p = &theme.palette;
     let width = ui.available_width();
     let head = theme.boxes().button;
-    ui.allocate_ui_with_layout(vec2(width, head), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        ui.set_min_height(head);
-        key_chip(ui, theme, tr!("Esc"), ChipState::Default);
-        ui.add_space(8.0);
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            crate::component::label(ui, theme.fonts.heading, editor.title(), p.ink);
+    if room != Room::Window {
+        // The window's title bar names it, and its Esc is the window's.
+        ui.allocate_ui_with_layout(vec2(width, head), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.set_min_height(head);
+            key_chip(ui, theme, tr!("Esc"), ChipState::Default);
+            ui.add_space(8.0);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                crate::component::label(ui, theme.fonts.heading, editor.title(), p.ink);
+            });
         });
-    });
+    }
     let hint = if editor.form().all_day { "2026-11-06" } else { "2026-11-06 13:00" };
     // Someone else's event: every field read-only, every control disabled, the note saying why, and Close alone.
     let read_only = editor.read_only();
     {
         let form = editor.form_mut();
         line(ui, theme, ("title", tr!("Title")), &mut form.summary, tr!("(No title)"), (width, MAX_FIELD, read_only));
+    }
+    if room.wide() {
+        // Starts, Ends and the two ticks on one row, the ticks under a label's room.
+        let time = TIME_FIELD.min(((width - SIDE_GAP * 2.0) / 3.0).max(1.0));
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = SIDE_GAP;
+            let form = editor.form_mut();
+            line(ui, theme, ("starts", tr!("Starts")), &mut form.start, hint, (time, MAX_FIELD, read_only));
+            line(ui, theme, ("ends", tr!("Ends")), &mut form.end, hint, (time, MAX_FIELD, read_only));
+            let rest = (width - (time + SIDE_GAP) * 2.0).max(1.0);
+            labelled(ui, theme, " ", rest, |ui| {
+                ui.add_space(8.0);
+                ticks(ui, theme, editor, read_only);
+            });
+        });
+    } else {
+        let form = editor.form_mut();
         let half = ((width - SIDE_GAP) / 2.0).max(1.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = SIDE_GAP;
             line(ui, theme, ("starts", tr!("Starts")), &mut form.start, hint, (half, MAX_FIELD, read_only));
             line(ui, theme, ("ends", tr!("Ends")), &mut form.end, hint, (half, MAX_FIELD, read_only));
         });
+        ticks(ui, theme, editor, read_only);
     }
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 24.0;
-        if read_only {
-            ui.disable();
-        }
-        let all_day = editor.form().all_day;
-        if checkbox(ui, theme, tr!("All day"), all_day).clicked() {
-            editor.set_all_day(!all_day);
-        }
-        let form = editor.form_mut();
-        if checkbox(ui, theme, tr!("Private"), form.private).clicked() {
-            form.private = !form.private;
-        }
-    });
-    repeat_and_show_as(ui, theme, editor, width);
+    repeat_and_show_as(ui, theme, editor, width, room.wide());
     if editor.id().is_some() && !read_only && editor.form().repeat != REPEATS[0] {
         // Changing one occurrence of a series is not built yet: the whole series changes.
         ui.horizontal(|ui| {
@@ -186,7 +289,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
             });
         });
     }
-    calendar_choice(ui, theme, editor, width);
+    calendar_choice(ui, theme, editor, if room.wide() { ((width - SIDE_GAP) / 2.0).max(1.0) } else { width });
     line(ui, theme, ("guests", tr!("Guests")), &mut editor.form_mut().guests, "name@example.org, …", (width, MAX_GUESTS_TEXT, read_only));
     description(ui, theme, editor, asked);
     if editor.asks_notify() {
@@ -221,6 +324,24 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
     });
 }
 
+/// All day and Private, side by side; disabled in someone else's event.
+fn ticks(ui: &mut Ui, theme: &Theme, editor: &mut Editor, read_only: bool) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 24.0;
+        if read_only {
+            ui.disable();
+        }
+        let all_day = editor.form().all_day;
+        if checkbox(ui, theme, tr!("All day"), all_day).clicked() {
+            editor.set_all_day(!all_day);
+        }
+        let form = editor.form_mut();
+        if checkbox(ui, theme, tr!("Private"), form.private).clicked() {
+            form.private = !form.private;
+        }
+    });
+}
+
 /// The description, its lines kept: read-only in someone else's event and in one read cut short. A press on a link in
 /// it with Ctrl (Cmd on a Mac) held, or any press on one in someone else's event, copies the link, as the reader does.
 fn description(ui: &mut Ui, theme: &Theme, editor: &mut Editor, asked: &mut Vec<Asked>) {
@@ -237,12 +358,15 @@ fn description(ui: &mut Ui, theme: &Theme, editor: &mut Editor, asked: &mut Vec<
     }
 }
 
-/// Repeat as a select, filling what Show as, the segmented control beside it, leaves.
-fn repeat_and_show_as(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f32) {
+/// Repeat as a select, filling what Show as, the segmented control beside it, leaves; with `alert` (the full editor
+/// and the window) Alert after them, Repeat and Alert sharing what is left.
+fn repeat_and_show_as(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f32, alert: bool) {
     let font = theme.fonts.button;
     let shows = [(true, tr!("Busy"), font), (false, tr!("Free"), font)];
     let show_as = segmented::width(ui, theme, &shows).min(width);
-    let repeat = (width - show_as - SIDE_GAP).max(1.0);
+    let rest = (width - show_as - SIDE_GAP).max(1.0);
+    let repeat = if alert { ((rest - SIDE_GAP) / 2.0).floor().max(1.0) } else { rest };
+    let alert_width = (rest - repeat - SIDE_GAP).max(1.0);
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = SIDE_GAP;
         let mut open = editor.menu() == Some(Menu::Repeat);
@@ -271,7 +395,31 @@ fn repeat_and_show_as(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f3
                 form.busy = busy;
             }
         });
+        if alert {
+            alert_choice(ui, theme, editor, alert_width);
+        }
     });
+}
+
+/// Alert as a select of [`ALERTS`], the event's own shown as it is (the default lead, or one the list does not name);
+/// unavailable in someone else's event.
+fn alert_choice(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f32) {
+    let all_day = editor.form().all_day;
+    let names = ALERTS.map(|alert| alert_text(alert, all_day));
+    let options: Vec<(usize, &str)> = names.iter().map(String::as_str).enumerate().collect();
+    let now = editor.form().alert;
+    let current = ALERTS.iter().position(|alert| *alert == now);
+    let shown = alert_text(now, all_day);
+    let mut open = editor.menu() == Some(Menu::Alert);
+    let note = editor.read_only().then(|| tr!("Only the organiser can change this event."));
+    let chosen = labelled(ui, theme, tr!("Alert"), width, |ui| {
+        let select = Select { name: tr!("Alert"), shown: &shown, options: &options, current, icon: IconId::Notify, width };
+        select.show_noted(ui, theme, &mut open, note).1
+    });
+    keep_menu(editor, Menu::Alert, open);
+    if let Some(alert) = chosen.and_then(|index| ALERTS.get(index)) {
+        editor.form_mut().alert = *alert;
+    }
 }
 
 /// The calendar of a new event, as a select.

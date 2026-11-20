@@ -30,6 +30,8 @@ fn window() -> Harness<'static, InboxApp> {
 /// [`window`] at `size`.
 fn window_sized(size: egui::Vec2) -> Harness<'static, InboxApp> {
     let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    // These are the small editor's rules: the full editor's and the window's are in `hosts_tests.rs`.
+    app.set_event_editor_host(inboxcraft_engine::appearance::EventEditorHost::Small);
     app.show_calendar();
     let (calendar, mailbox) = app.calendar_mut();
     calendar.set_view(mailbox, View::Week);

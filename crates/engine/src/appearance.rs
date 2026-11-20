@@ -17,8 +17,9 @@
 //! by an older version that names an accent, a typeface or an icon set loads, and those fields are dropped.
 //!
 //! The layout ([`Layout`]) says where the reader and the composer show: docked in the main window, the composer
-//! floating over it, or each in a window of its own. A kept file without a layout, or with one that cannot be read
-//! (junk, or a host a newer build knows), reads as docked, part by part, and the other choices are read as ever.
+//! floating over it, or each in a window of its own; and where the event editor opens: small, full or in a window of
+//! its own. A kept file without a layout, or with one that cannot be read (junk, or a host a newer build knows), reads
+//! as docked and the event editor full, part by part, and the other choices are read as ever.
 
 use serde_json::{Map, Value, json};
 
@@ -151,31 +152,48 @@ choice! {
     } default Docked
 }
 
-/// Where the reader and the composer show. A front end that cannot open a second window shows them docked, whatever
-/// is kept here.
+choice! {
+    /// Where the event editor opens, for a new event and for an edit alike: the small float over the calendar, the full
+    /// editor in the calendar's place with the event's day beside it, or a window of its own.
+    EventEditorHost {
+        /// The small float over the calendar.
+        Small = "small",
+        /// In the calendar's place, the event's day beside it.
+        Full = "full",
+        /// In a window of its own.
+        Window = "window",
+    } default Full
+}
+
+/// Where the reader, the composer and the event editor show. A front end that cannot open a second window shows the
+/// reader and the composer docked and the event editor full, whatever is kept here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Layout {
     /// Where the reader shows.
     pub reader: ReaderHost,
     /// Where the composer shows.
     pub composer: ComposerHost,
+    /// Where the event editor opens.
+    pub event_editor: EventEditorHost,
 }
 
 impl Layout {
-    /// The layout as JSON: `{"reader": …, "composer": …}`.
+    /// The layout as JSON: `{"reader": …, "composer": …, "event_editor": …}`.
     #[must_use]
     pub fn to_value(self) -> Value {
-        json!({ "reader": self.reader.id(), "composer": self.composer.id() })
+        json!({ "reader": self.reader.id(), "composer": self.composer.id(), "event_editor": self.event_editor.id() })
     }
 
     /// The layout kept as [`Layout::to_value`] wrote it, part by part: a part that is missing, not a string or not a
-    /// host this build knows (junk, or one a newer build kept) is docked; other keys are ignored.
+    /// host this build knows (junk, or one a newer build kept) is its default (docked; the event editor full); other
+    /// keys are ignored.
     #[must_use]
     pub fn from_value(value: &Value) -> Self {
         let part = |key: &str| value.get(key).and_then(Value::as_str);
         Self {
             reader: part("reader").and_then(ReaderHost::named).unwrap_or_default(),
             composer: part("composer").and_then(ComposerHost::named).unwrap_or_default(),
+            event_editor: part("event_editor").and_then(EventEditorHost::named).unwrap_or_default(),
         }
     }
 }

@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use crate::appearance::{Appearance, ComposerHost, Layout, Motion, MotionLevel, ReaderHost, ThemeMode, WindowFrame};
+use crate::appearance::{Appearance, ComposerHost, EventEditorHost, Layout, Motion, MotionLevel, ReaderHost, ThemeMode, WindowFrame};
 use crate::test_support::session;
 use crate::{AgentClass, Caller, EngineError};
 
@@ -257,14 +257,35 @@ fn layout_set_is_the_owners_and_an_agent_is_refused_without_a_change() {
 fn layout_set_changes_the_part_named_and_answers_the_whole_appearance() {
     let mut session = session();
     let answer = session.run("ui.layout.set", &json!({ "composer": "floating" })).unwrap();
-    assert_eq!(answer["appearance"]["layout"], json!({ "reader": "docked", "composer": "floating" }));
+    assert_eq!(answer["appearance"]["layout"], json!({ "reader": "docked", "composer": "floating", "event_editor": "full" }));
     assert_eq!(answer["appearance"]["theme"], "system", "the answer is the whole appearance");
     let answer = session.run("ui.layout.set", &json!({ "reader": "window" })).unwrap();
-    assert_eq!(answer["appearance"]["layout"], json!({ "reader": "window", "composer": "floating" }), "the composer stays");
-    assert_eq!(session.appearance().layout, Layout { reader: ReaderHost::Window, composer: ComposerHost::Floating });
+    assert_eq!(answer["appearance"]["layout"], json!({ "reader": "window", "composer": "floating", "event_editor": "full" }), "the composer stays");
+    assert_eq!(
+        session.appearance().layout,
+        Layout { reader: ReaderHost::Window, composer: ComposerHost::Floating, event_editor: EventEditorHost::Full }
+    );
     session.run("ui.layout.set", &json!({ "reader": "docked", "composer": "window" })).unwrap();
-    assert_eq!(session.appearance().layout, Layout { reader: ReaderHost::Docked, composer: ComposerHost::Window });
+    assert_eq!(
+        session.appearance().layout,
+        Layout { reader: ReaderHost::Docked, composer: ComposerHost::Window, event_editor: EventEditorHost::Full }
+    );
     assert_eq!(session.appearance().theme, ThemeMode::System, "the other choices stay");
+}
+
+#[test]
+fn layout_set_opens_the_event_editor_small_full_or_in_a_window_and_leaves_the_rest() {
+    let mut session = session();
+    assert_eq!(session.appearance().layout.event_editor, EventEditorHost::Full, "a new event opens full by default");
+    session.run("ui.layout.set", &json!({ "composer": "floating" })).unwrap();
+    for (id, host) in [("small", EventEditorHost::Small), ("window", EventEditorHost::Window), ("full", EventEditorHost::Full)] {
+        let answer = session.run("ui.layout.set", &json!({ "event_editor": id })).unwrap();
+        assert_eq!(answer["appearance"]["layout"]["event_editor"], id);
+        assert_eq!(session.appearance().layout, Layout { reader: ReaderHost::Docked, composer: ComposerHost::Floating, event_editor: host });
+    }
+    let refused = session.run_as(Caller::Agent, "ui.layout.set", &json!({ "event_editor": "window" })).unwrap_err();
+    assert_eq!(refused.code(), "not_allowed");
+    assert_eq!(session.appearance().layout.event_editor, EventEditorHost::Full, "an agent's set changes nothing");
 }
 
 #[test]
@@ -282,6 +303,11 @@ fn layout_set_refuses_anything_but_a_host_of_its_part() {
         json!({ "composer": 1 }),
         json!({ "composer": "window", "reader": "tab" }),
         json!({ "composer": "window", "more": true }),
+        json!({ "event_editor": "float" }),
+        json!({ "event_editor": "Full" }),
+        json!({ "event_editor": 2 }),
+        json!({ "event_editor": null }),
+        json!({ "event_editor": "small", "reader": "tab" }),
         json!({ "layout": { "composer": "window" } }),
         json!("window"),
     ] {

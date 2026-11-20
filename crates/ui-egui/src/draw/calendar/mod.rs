@@ -23,6 +23,7 @@ mod glide;
 mod grid;
 mod hours;
 pub(super) mod keys;
+pub(super) use self::editor::{Room, WINDOW as EDITOR_WINDOW, forget_opened as forget_editor_opened, window as editor_window};
 mod laid;
 pub(super) use self::side::mini_id;
 pub(crate) use self::side::mini_month_board;
@@ -46,6 +47,9 @@ use crate::tr;
 
 /// The side panel's width, in points, as the design draws it (H7: at the right).
 const SIDE: f32 = 252.0;
+
+/// The width of the event's day beside the full event editor, in points, where the side panel was.
+const DAY_BESIDE: f32 = 320.0;
 
 /// The narrowest the view gets with the side panel beside it, in points: below, the panel gives the view its room.
 const VIEW_LEAST: f32 = 600.0;
@@ -170,8 +174,10 @@ pub(super) fn empty(ui: &mut Ui, theme: &Theme, keymap: &Keymap, layers: &mut Pa
 }
 
 /// The calendar screen with its calendars: the view and the side panel; what was pressed. While `over` the palette or
-/// the settings sheet lies over the screen's floats and has the keys.
-pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, layers: &mut Panes, over: bool) -> Vec<Asked> {
+/// the settings sheet lies over the screen's floats and has the keys. With the event editor open `full`, the editor
+/// takes the view's place ([`editor`] draws it there) and the event's day stands beside it, 320 wide, where the side
+/// panel was, while the editor keeps its least width.
+pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, layers: &mut Panes, (over, full): (bool, bool)) -> Vec<Asked> {
     let mut asked = Vec::new();
     CentralPanel::no_frame().frame(Frame::NONE).show(ui, |ui| {
         layers.card(ui, Margin::ZERO, |ui| {
@@ -179,6 +185,22 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
             ui.ctx().data_mut(|data| data.insert_temp(card_id(), all));
             let ppp = ui.pixels_per_point();
             let line = line_width(ppp);
+            if full {
+                let beside = !super::one_pane(ui.ctx()) && all.width() - DAY_BESIDE - line >= editor::WIDTH;
+                let day_left = if beside { snap(all.right() - DAY_BESIDE, ppp) } else { all.right() + line };
+                let place = Rect::from_min_max(all.min, pos2((day_left - line).max(all.left()), all.bottom()));
+                ui.ctx().data_mut(|data| data.insert_temp(full_id(), place));
+                if beside {
+                    let edge = Rect::from_min_max(pos2(day_left - line, all.top()), pos2(day_left, all.bottom()));
+                    ui.painter().rect_filled(edge, 0.0, theme.palette.line);
+                    let day = Rect::from_min_max(pos2(day_left, all.top()), all.max);
+                    ui.scope_builder(UiBuilder::new().max_rect(day).id_salt("event-editor-day"), |ui| {
+                        ui.set_clip_rect(day.intersect(ui.clip_rect()));
+                        day_beside(ui, theme, keymap, calendar);
+                    });
+                }
+                return;
+            }
             // The side panel gives way before the toolbar's title would be cut past its short form: the toolbar keeps
             // the least view it needs from the frame before (its controls, its pads, the short title whole).
             let least = ui.ctx().data(|data| data.get_temp::<f32>(least_view_id())).filter(|least| least.is_finite()).unwrap_or(0.0);
@@ -255,6 +277,36 @@ fn note_details_keys(ui: &Ui, all: Rect) {
 /// Whether the keyboard was on the details in the frame they last stood in the pane.
 fn details_had_keys(ctx: &egui::Context) -> bool {
     ctx.data(|data| data.get_temp::<bool>(details_keys_id())).unwrap_or(false)
+}
+
+/// The event's day beside the full editor: its head ("The day", and that it follows Starts), a `line` hairline, and
+/// the hours of the day Starts names (the view's day while Starts names none). It is there to be looked at: what is
+/// pressed in it asks nothing.
+fn day_beside(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar) {
+    let p = &theme.palette;
+    let z = Sizes::of(theme);
+    let ppp = ui.pixels_per_point();
+    let line = line_width(ppp);
+    let rect = ui.max_rect();
+    let head = Rect::from_min_size(rect.min, vec2(rect.width(), z.toolbar));
+    let follows = crate::component::galley(ui, tr!("follows Starts"), theme.fonts.mono_s, p.muted);
+    let follows_x = head.right() - 16.0 - follows.size().x;
+    let title = crate::component::cut(ui, tr!("The day"), theme.fonts.heading, p.ink, (follows_x - 8.0 - head.left() - 16.0).max(1.0));
+    run_at(ui.painter(), pos2(head.left() + 16.0, snap(head.center().y - theme.fonts.heading.line / 2.0, ppp)), title, p.ink);
+    run_at(ui.painter(), pos2(follows_x, snap(head.center().y - theme.fonts.mono_s.line / 2.0, ppp)), follows, p.muted);
+    let under = snap(head.bottom(), ppp);
+    ui.painter().rect_filled(Rect::from_min_max(pos2(rect.left(), under), pos2(rect.right(), under + line)), 0.0, p.line);
+    let hours = Rect::from_min_max(pos2(rect.left(), under + line), rect.max);
+    let day = calendar.editor().and_then(crate::calendar::Editor::day).unwrap_or_else(|| calendar.focus());
+    let mut ignored = Vec::new();
+    ui.scope_builder(UiBuilder::new().max_rect(hours).id_salt("event-editor-day-hours"), |ui| {
+        hours::show_from(ui, theme, keymap, calendar, (day, 1), &mut ignored);
+    });
+}
+
+/// The rect the full event editor takes this frame, which the screen leaves for it.
+fn full_id() -> Id {
+    Id::unique("event-editor-full-place")
 }
 
 /// The view: its toolbar, a `line` hairline, and the days.
@@ -639,7 +691,10 @@ fn stroke(painter: &egui::Painter, rect: Rect, line: f32, colour: Color32) {
 /// The frame after it closed, the keyboard goes back to the control that opened it; when that is gone (Edit hidden by
 /// a narrow window, or with its event deleted), to the grid's picked day (the month's number, the week's head), and
 /// where the view draws no day's button (the day, the agenda), to New event. It is never left nowhere.
-pub(super) fn editor(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, calendar: &mut Calendar, quiet: bool) -> Vec<Asked> {
+/// In the full `room` it stands in the place the screen left for it; in the window `room` the window draws it and
+/// nothing shows here.
+pub(super) fn editor(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &mut Calendar, (quiet, room): (bool, Room)) -> Vec<Asked> {
+    let ctx = &ui.ctx().clone();
     let anchor = ctx.data(|data| data.get_temp::<Rect>(new_event_id()));
     let open = calendar.editor().is_some();
     if let Some((opener, was_open)) = ctx.data(|data| data.get_temp::<(Id, bool)>(opener_id())) {
@@ -658,7 +713,15 @@ pub(super) fn editor(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, calend
         ctx.data_mut(|data| data.insert_temp(opener_id(), (opener, open)));
     }
     let card = ctx.data(|data| data.get_temp::<Rect>(card_id()));
-    calendar.editor_mut().map(|editor| editor::show(ctx, theme, keymap, editor, (anchor, card), quiet)).unwrap_or_default()
+    // The place the screen left this frame, taken once: a place of an earlier frame is never drawn in.
+    let place = ctx.data(|data| data.get_temp::<Rect>(full_id()));
+    ctx.data_mut(|data| data.remove::<Rect>(full_id()));
+    let Some(editor) = calendar.editor_mut() else { return Vec::new() };
+    match (room, place) {
+        (Room::Window, _) => Vec::new(),
+        (Room::Full, Some(place)) => editor::full(ui, theme, keymap, editor, place, quiet),
+        _ => editor::show(ctx, theme, keymap, editor, (anchor, card), quiet),
+    }
 }
 
 #[cfg(test)]
@@ -691,3 +754,7 @@ mod compose_tests;
 #[cfg(test)]
 #[path = "sheet_tests.rs"]
 mod sheet_tests;
+
+#[cfg(test)]
+#[path = "hosts_tests.rs"]
+mod hosts_tests;

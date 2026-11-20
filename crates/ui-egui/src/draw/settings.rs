@@ -21,7 +21,7 @@
 
 use egui::{Align, Id, Layout, Rect, Response, Role, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use inboxcraft_engine::ScreenerMode;
-use inboxcraft_engine::appearance::{Appearance, ComposerHost, ReaderHost, ThemeMode, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, ComposerHost, EventEditorHost, ReaderHost, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
 use inboxcraft_engine::shown::SettingsAsked;
 
@@ -120,6 +120,8 @@ pub(super) enum Asked {
     Composer(ComposerHost),
     /// Where a message opens: in the pane or in a window of its own (`ui.layout.set`, the owner's).
     ReaderHost(ReaderHost),
+    /// Where the event editor opens: small, full or in a window of its own (`ui.layout.set`, the owner's).
+    EventEditor(EventEditorHost),
     /// Another page of the settings.
     Section(Section),
     /// Add account on the Accounts page: the form opens on it.
