@@ -12,7 +12,6 @@
 //! ([`Surfaces::window`]), one `Esc` there closes only that window (or a float in it first), and the OS close asks
 //! the same. Nothing here runs a command of the engine or keeps what the surface holds: the caller keeps its text
 //! and decides what closing means.
-#![cfg_attr(not(test), expect(dead_code, reason = "the composer and the reader move into the host in their own tasks"))]
 
 use egui::{Context, CornerRadius, Rect, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportId, pos2};
 use inboxcraft_engine::appearance::WindowFrame;
@@ -27,6 +26,7 @@ pub(crate) enum Host {
     /// In its place in the main window (the composer in the reader's place, the reader in its pane).
     Docked,
     /// Over the main window, in a float of its own.
+    #[cfg_attr(not(test), allow(dead_code, reason = "the floating composer moves into the host in its own task"))]
     Floating,
     /// In a window of its own, the viewport `0`.
     Window(ViewportId),

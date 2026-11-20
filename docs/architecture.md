@@ -91,6 +91,10 @@ fetches a remote picture: the front end asks its fetch for the pictures the owne
 fetch is `net::picture` on threads of its own (HTTPS only, a fixed user agent, no cookies or referrer, public
 addresses only), so the engine stays free of network I/O.
 
+`mail.row` (`safe`, `id`) reads one message as a list shows it (`new_sender`, `group` and its triage state with it)
+by its id alone, wherever it is, and changes nothing. A reader in a window of its own reads it to keep its head
+fresh once the list has moved on, and learns from `not_found`, and only from that, that the message is gone.
+
 `mail.why` (`safe`, `id`) says why a message stands where it does, from what the triage already decided and keeps:
 at most four reasons, most specific first, each a `kind` (`snooze`, `rule`, `sender`, `screener`, `thread`,
 `default`), a `text_id` from a fixed set (`why.snooze.returned`, `why.snooze.until`, `why.rule.group`,

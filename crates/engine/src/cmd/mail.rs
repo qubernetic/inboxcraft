@@ -21,7 +21,7 @@ use crate::view::{self, View};
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, json};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[ATTACHMENT, LIST, READ, SEARCH, THREAD, WHY];
+pub(crate) const COMMANDS: &[CommandSpec] = &[ATTACHMENT, LIST, READ, ROW, SEARCH, THREAD, WHY];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
@@ -308,6 +308,30 @@ fn thread_of(store: &dyn Storage, id: MessageId) -> Result<(Vec<MessageId>, BTre
     let messages: Vec<Message> = entries.values().map(|entry| entry.message().clone()).collect();
     let thread = group_threads(&messages).into_iter().find(|thread| thread.contains(&id)).unwrap_or_else(|| vec![id]);
     Ok((thread, entries))
+}
+
+/// `mail.row`: one message as a list shows it (its `new_sender`, `group` and triage state with it), wherever it is,
+/// read by its id alone: what a reader in a window of its own reads to keep its head fresh and to learn the message is
+/// gone, at the cost of one message whatever the store's size. Nothing changes.
+pub(crate) const ROW: CommandSpec =
+    CommandSpec { id: "mail.row", class: Some(AgentClass::Safe), summary: "Read one message as a list shows it, by its id", run: row_by_id };
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RowParams {
+    /// The message.
+    id: u64,
+}
+
+fn row_by_id(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: RowParams = decode(ROW.id, params)?;
+    let id = MessageId::new(params.id);
+    let store = context.store();
+    let entry = store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let state = store.message_state(id)?;
+    let mut grouping = Grouping::new(store)?;
+    let accounts = store.accounts()?;
+    Ok(Outcome::new(json!({ "message": row(context, &mut grouping, &accounts, &entry, Some(&state))? })))
 }
 
 /// `mail.attachment`: one attachment of a kept body (by its `index` in `mail.read`'s list) or one inline part (by
@@ -620,3 +644,6 @@ fn settle(mut reasons: Vec<Value>) -> Vec<Value> {
 #[cfg(test)]
 #[path = "mail_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "mail_row_tests.rs"]
+mod row_tests;

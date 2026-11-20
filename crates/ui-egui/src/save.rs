@@ -180,6 +180,29 @@ fn reserved_on_windows(stem: &str) -> bool {
     matches!((chars.next(), chars.next()), (Some('0'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None))
 }
 
+/// One [`Save`] shared by several readers (the pane's and a window of its own's), one save at a time.
+#[derive(Clone)]
+pub(crate) struct Shared(std::sync::Arc<std::sync::Mutex<Box<dyn Save>>>);
+
+impl std::fmt::Debug for Shared {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Shared")
+    }
+}
+
+impl Shared {
+    /// `save`, to be shared.
+    pub(crate) fn new(save: Box<dyn Save>) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(save)))
+    }
+}
+
+impl Save for Shared {
+    fn save(&mut self, name: &str, bytes: &[u8]) -> Result<String, String> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).save(name, bytes)
+    }
+}
+
 #[cfg(test)]
 #[path = "save_tests.rs"]
 mod tests;

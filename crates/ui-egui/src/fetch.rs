@@ -111,6 +111,88 @@ impl Fetch for Threaded {
     }
 }
 
+/// The most addresses a [`Shared`] fetch remembers who asked for, across its readers: the oldest ask is forgotten
+/// past it (its answer then goes to nobody, as an answer for a picture no reader keeps any more).
+const MOST_ASKED: usize = 4096;
+
+/// What the readers of a [`Shared`] fetch hold together: the one fetch, who asked for which address, and the answers
+/// waiting for each reader.
+struct Hub {
+    fetch: Box<dyn Fetch>,
+    asked: VecDeque<(u64, String)>,
+    waiting: Vec<(u64, Fetched)>,
+    next: u64,
+}
+
+/// One fetch shared by several readers (the pane's and a window of its own's): each gets the answers to what it asked
+/// for, and only those. An address two readers asked for answers both.
+pub(crate) struct Shared {
+    hub: Arc<std::sync::Mutex<Hub>>,
+    me: u64,
+}
+
+impl fmt::Debug for Shared {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Shared").field("me", &self.me).finish_non_exhaustive()
+    }
+}
+
+impl Shared {
+    /// The first reader of `fetch`.
+    pub(crate) fn new(fetch: Box<dyn Fetch>) -> Self {
+        let hub = Hub { fetch, asked: VecDeque::new(), waiting: Vec::new(), next: 1 };
+        Self { hub: Arc::new(std::sync::Mutex::new(hub)), me: 0 }
+    }
+
+    /// Another reader of the same fetch.
+    pub(crate) fn another(&self) -> Self {
+        let mut hub = lock(&self.hub);
+        let me = hub.next;
+        hub.next = hub.next.wrapping_add(1);
+        Self { hub: Arc::clone(&self.hub), me }
+    }
+}
+
+/// The hub, also after a reader panicked while holding it: what it holds stays usable.
+fn lock(hub: &std::sync::Mutex<Hub>) -> std::sync::MutexGuard<'_, Hub> {
+    hub.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl Fetch for Shared {
+    fn start(&mut self, url: &str) {
+        let mut hub = lock(&self.hub);
+        if hub.asked.len() >= MOST_ASKED {
+            hub.asked.pop_front();
+        }
+        hub.asked.push_back((self.me, url.to_owned()));
+        hub.fetch.start(url);
+    }
+
+    fn finished(&mut self) -> Vec<Fetched> {
+        let mut hub = lock(&self.hub);
+        let Hub { fetch, asked, waiting, .. } = &mut *hub;
+        for (url, answer) in fetch.finished() {
+            // Every reader that asked for this address gets the answer, once.
+            let askers: Vec<u64> = asked.iter().filter(|(_, asked)| *asked == url).map(|(who, _)| *who).collect();
+            asked.retain(|(_, asked)| *asked != url);
+            waiting.extend(askers.into_iter().map(|who| (who, (url.clone(), answer.clone()))));
+        }
+        let (mine, others): (Vec<_>, Vec<_>) = std::mem::take(waiting).into_iter().partition(|(who, _)| *who == self.me);
+        *waiting = others;
+        mine.into_iter().map(|(_, fetched)| fetched).collect()
+    }
+}
+
+impl Drop for Shared {
+    fn drop(&mut self) {
+        // What a reader that is gone asked for goes to nobody.
+        let mut hub = lock(&self.hub);
+        let me = self.me;
+        hub.asked.retain(|(who, _)| *who != me);
+        hub.waiting.retain(|(who, _)| *who != me);
+    }
+}
+
 #[cfg(test)]
 #[path = "fetch_tests.rs"]
 mod tests;

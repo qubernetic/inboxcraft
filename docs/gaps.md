@@ -648,11 +648,8 @@ time from the code as it is, not measured.
   yet. A desktop without a StatusNotifierWatcher (GNOME without the AppIndicator extension) shows no tray icon:
   InboxCraft then runs on without a window all the same, and a start from the menu brings it back (#137).
 - Without a window InboxCraft looks for the workers' events every half second rather than at once. A window opened
-  again starts with egui's state fresh (scroll positions, open popups); the reader keeps the textures of the
-  pictures it showed in the window before, whose ids mean nothing (or another picture) in the new one, so such a
-  picture may be drawn wrong or not at all until `ui-egui` forgets them when a new window opens (#165). On Wayland
-  a later start may only mark the running window as wanting attention rather than raise it, since no activation
-  token is passed on (#137).
+  again starts with egui's state fresh (scroll positions, open popups). On Wayland a later start may only mark the
+  running window as wanting attention rather than raise it, since no activation token is passed on (#137).
 - The tray's tooltip counts the unread mail of every account's inbox; the icon only shows that mail is unread (its
   flap turns cyan), not how much, and its menu has no entries per account (#137, #232). The icon is always the
   light drawing meant for a dark panel: the app does not know the panel's colour, and the symbolic icons the brand
