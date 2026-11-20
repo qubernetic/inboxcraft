@@ -286,6 +286,20 @@ impl Field {
         self
     }
 
+    /// The emblem on it.
+    #[must_use]
+    pub const fn emblem(&self) -> Option<&Emblem> {
+        self.emblem.as_ref()
+    }
+
+    /// Puts `emblem` on it (`None` takes it off), where [`Opts::emblem`] puts it; the cells are built again at the next
+    /// [`show`].
+    pub fn set_emblem(&mut self, emblem: Option<&Emblem>) {
+        self.emblem = emblem.cloned();
+        self.cells = None;
+        self.look = None;
+    }
+
     /// How many times the cells were built (what the page tests of a screen with a field count).
     #[cfg(test)]
     pub(crate) const fn builds(&self) -> u32 {

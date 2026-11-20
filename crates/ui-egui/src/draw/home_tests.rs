@@ -267,7 +267,88 @@ fn the_emblem_leaves_whole_at_a_1381_window_and_under_and_stays_from_1382() {
         }
     }
     let stage = Rect::from_min_size(pos2(600.0, 0.0), vec2(547.0, 499.0));
-    assert_eq!(emblem_place(stage, &emblem), None, "a stage one point too low leaves no emblem");
+    assert_eq!(emblem_place(stage, &emblem, 0.0), None, "a stage one point too low leaves no emblem");
+}
+
+/// The rects of the pictures (meshes with a texture of their own) painted this frame.
+fn pictures(harness: &Harness<'_, State>) -> Vec<Rect> {
+    harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => Some(mesh.calc_bounds()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `home/*` at 1440 × 900, in dark and light: the Qubernetic emblem (76 × 40 cells, 547 × 500) centred across the
+/// emblem's place, at 629 of the body as the frames draw it; the names' box (394 × 96, `bg`) 12 out from its left and
+/// 16 under it; in it, 12 in, the Qubernetic wordmark (88 × 14), the dot and the InboxCraft wordmark (102.17 × 13)
+/// centred on a line of 20, the InboxCraft wordmark at 120 of the box's content. Down, the emblem and the names stand
+/// centred together in the place: at 107 where the frames draw the emblem at 95.
+#[test]
+fn the_emblem_and_the_names_stand_where_the_frames_draw_them_in_dark_and_light() {
+    for mode in [Mode::Dark, Mode::Light] {
+        for state in ["today", "first-run"] {
+            let body = Rect::from_min_size(pos2(0.0, 0.0), BODY);
+            let harness = harness_with(sample(state).unwrap(), mode, 100, BODY, body, Some(crate::brand::emblem().clone()), Level::Off, false);
+            let what = format!("{state}, {mode:?}");
+            let p = harness.state().drawn.parts;
+            assert_eq!(at(p.emblem), (629.0, 107.0, 547.0, 500.0), "{what}: the emblem");
+            assert_eq!(at(p.names), (617.0, 623.0, 394.0, 96.0), "{what}: the names' box");
+            let (qubernetic, inboxcraft) = p.wordmarks.unwrap();
+            assert_eq!(qubernetic, Rect::from_min_size(pos2(629.0, 638.0), vec2(88.0, 14.0)), "{what}: the Qubernetic wordmark");
+            assert_eq!(inboxcraft, Rect::from_min_size(pos2(749.0, 638.5), vec2(102.17, 13.0)), "{what}: the InboxCraft wordmark");
+            // Each is painted as a picture from the whole pixel its box starts in.
+            let painted = pictures(&harness);
+            for (name, wordmark) in [("Qubernetic", qubernetic), ("InboxCraft", inboxcraft)] {
+                assert!(
+                    painted.iter().any(|rect| wordmark.expand(1.0).contains_rect(*rect) && rect.width() >= wordmark.width().floor()),
+                    "{what}: {name} painted: {painted:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The names come with the emblem: where the emblem and the names do not fit whole together, neither stands, at a
+/// window of 1381 across and in a place too low for both; at 130 % text the names' lines grow and both still stand.
+#[test]
+fn the_names_leave_with_the_emblem() {
+    let emblem = crate::brand::emblem().clone();
+    for (width, high, percent, whole) in
+        [(1146.0, 826.0, 100, false), (1147.0, 826.0, 100, true), (1205.0, 611.0, 100, false), (1205.0, 612.0, 100, true), (1205.0, 826.0, 130, true)]
+    {
+        let body = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, high));
+        let harness = harness_with(sample("today").unwrap(), Mode::Dark, percent, body.size(), body, Some(emblem.clone()), Level::Off, false);
+        let p = harness.state().drawn.parts;
+        let what = format!("{width} × {high} at {percent} %");
+        assert_eq!(p.emblem.is_some(), whole, "{what}: the emblem");
+        assert_eq!(p.names.is_some(), whole, "{what}: the names");
+        if let (Some(emblem), Some(names)) = (p.emblem, p.names) {
+            let stage = p.stage.unwrap();
+            assert!(stage.contains_rect(emblem), "{what}: the emblem never cut");
+            assert!(names.bottom() <= stage.bottom() && names.top() == emblem.bottom() + 16.0, "{what}: the names 16 under it, inside");
+        }
+    }
+}
+
+/// Home puts the stage's emblem on its field, and takes it off when the stage has none.
+#[test]
+fn home_puts_the_stage_s_emblem_on_its_field() {
+    let body = Rect::from_min_size(pos2(0.0, 0.0), BODY);
+    let mut harness = harness_with(sample("today").unwrap(), Mode::Dark, 100, BODY, body, None, Level::Off, false);
+    assert_eq!(harness.state().field.emblem(), None);
+    harness.state_mut().emblem = Some(crate::brand::emblem().clone());
+    harness.run_ok();
+    assert_eq!(harness.state().field.emblem(), Some(crate::brand::emblem()), "the emblem on the field");
+    assert!(harness.state().drawn.parts.emblem.is_some());
+    harness.state_mut().emblem = None;
+    harness.run_ok();
+    assert_eq!(harness.state().field.emblem(), None, "taken off");
+    assert_eq!(harness.state().drawn.parts.names, None, "no names without the emblem");
 }
 
 /// A text from outside at its worst: 10 000 characters with CR, LF, NUL, bidi controls, Hebrew and Arabic.

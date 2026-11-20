@@ -3102,14 +3102,14 @@ impl InboxApp {
     }
 
     /// Home in the body: the model kept ([`crate::home::Kept`], built again only when what it shows changed), the
-    /// character field kept, at the motion level the settings say, no emblem; a frame is asked for when the clock next
-    /// changes what it shows. What was pressed on it.
+    /// character field kept, at the motion level the settings say, the Qubernetic emblem and the names on it where they
+    /// fit; a frame is asked for when the clock next changes what it shows. What was pressed on it.
     fn home_place(&mut self, ui: &mut Ui, theme: &Theme) -> Option<home::Asked> {
         let rect = ui.available_rect_before_wrap();
         let level = motion::level(ui.ctx());
         let hidden = self.discarding();
         let shown = self.home.current(&mut self.mailbox, hidden);
-        let stage = home::Stage { field: &mut self.field, emblem: None, level };
+        let stage = home::Stage { field: &mut self.field, emblem: Some(crate::brand::emblem()), level };
         let drawn = home::show(ui, theme, &self.keymap, shown, rect, stage);
         if let Some(due) = self.home.due_in(&self.mailbox) {
             ui.ctx().request_repaint_after(due);

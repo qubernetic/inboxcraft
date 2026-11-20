@@ -119,6 +119,30 @@ fn picture_in(harness: &Harness<'_, InboxApp>, within: Rect) -> bool {
     })
 }
 
+/// The rect of the picture painted in the command line's left 60 points: the mark.
+fn mark_rect(harness: &Harness<'_, InboxApp>) -> Option<Rect> {
+    let corner = Rect::from_min_size(pos2(0.0, 0.0), vec2(60.0, 46.0));
+    harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+        egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() && corner.contains_rect(mesh.calc_bounds()) => {
+            Some(mesh.calc_bounds())
+        }
+        _ => None,
+    })
+}
+
+/// The brand's compact mark, 22 points a side: 16 in from the command line's left beside the full index (the frames
+/// at 1440), centred in the narrow index's column beside the narrow one (`size-1100/*`): at 1 + (57 − 22) / 2 = 18.5,
+/// so its picture starts at pixel 18 and takes 23 pixels, the half pixel drawn into the picture. In either frame.
+#[test]
+fn the_mark_stands_16_in_and_centred_in_the_narrow_index_s_column() {
+    for own in [false, true] {
+        let wide = harness_sized(own, WindowFrame::Own, vec2(1440.0, 900.0), |_| {});
+        assert_eq!(mark_rect(&wide), Some(Rect::from_min_size(pos2(17.0, 12.0), vec2(22.0, 22.0))), "{own}: 16 in, at 1440");
+        let narrow = harness(own, WindowFrame::Own);
+        assert_eq!(mark_rect(&narrow), Some(Rect::from_min_size(pos2(18.0, 12.0), vec2(23.0, 22.0))), "{own}: centred, at 1100");
+    }
+}
+
 /// Sets what the window says of itself: maximised, in front.
 fn window_state(harness: &mut Harness<'static, InboxApp>, maximised: bool, focused: bool) {
     let viewport = harness.input_mut().viewports.entry(ViewportId::ROOT).or_default();
