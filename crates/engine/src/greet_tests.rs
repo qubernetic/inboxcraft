@@ -149,3 +149,27 @@ fn invisible_format_characters_are_dropped_before_the_name_is_read() {
         assert_eq!(word(GreetBy::First, &name), "Anna", "U+{:04X}", u32::from(c));
     }
 }
+
+#[test]
+fn quotes_and_brackets_around_a_name_are_not_part_of_the_word() {
+    // name, first, last, full
+    let names = [
+        ("\"Anna Kovács\"", "Anna", "Kovács", "Anna Kovács"),
+        ("'Anna Kovács'", "Anna", "Kovács", "Anna Kovács"),
+        ("(Anna)", "Anna", "Anna", "Anna"),
+        ("[Anna] {Kovács}", "Anna", "Kovács", "Anna] {Kovács"),
+        ("“Dr. Anna Kovács”", "Anna", "Kovács", "Dr. Anna Kovács"),
+        ("„Anna Kovács”", "Anna", "Kovács", "Anna Kovács"),
+        ("«Anna» ‹Kovács›", "Anna", "Kovács", "Anna» ‹Kovács"),
+        ("‘Anna’ <Kovács>", "Anna", "Kovács", "Anna’ <Kovács"),
+        ("「Anna Kovács」", "Anna", "Kovács", "Anna Kovács"),
+        // Inside a name a quote stays.
+        ("Anna O'Brien", "Anna", "O'Brien", "Anna O'Brien"),
+    ];
+    for (name, first, last, full) in names {
+        assert_eq!(word(GreetBy::First, name), first, "first of {name:?}");
+        assert_eq!(word(GreetBy::Last, name), last, "last of {name:?}");
+        assert_eq!(word(GreetBy::Full, name), full, "full of {name:?}");
+    }
+    assert_eq!(word(GreetBy::First, "\" \" ()"), "", "nothing but quotes and brackets: no name");
+}

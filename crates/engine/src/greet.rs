@@ -8,8 +8,9 @@
 //! [`GreetBy::word`] reads a name the way it is written, with no guess at its order: "Kovács Anna" is greeted by
 //! "Kovács" with the first word, as a family-name-first name is written. Only a comma turns it round: "Kovács, Anna"
 //! reads as last name, then first. The titles of [`TITLES`] are skipped for the first and the last word, never for
-//! the full name. A name that is an address (it holds `@`), is empty, or has nothing but titles gives no word, and
-//! the headline greets without a name.
+//! the full name. Quotes and brackets around a word, or around the whole name, are not read; invisible format
+//! characters are dropped first. A name that is an address (it holds `@`), is empty, or has nothing but titles gives
+//! no word, and the headline greets without a name.
 
 /// The titles the first and the last word skip, compared without case and without one dot at the end: "Dr", "Dr.",
 /// "dr." (the Hungarian), "Mr", "Mrs", "Ms", "Prof", "Sir", "Dame".
@@ -64,11 +65,10 @@ impl GreetBy {
         if plain.contains('@') {
             return None;
         }
-        let words =
-            |text: &str| text.split_whitespace().filter(|word| word.chars().any(char::is_alphanumeric)).map(str::to_owned).collect::<Vec<_>>();
         if self == Self::Full {
             let full = plain.split_whitespace().collect::<Vec<_>>().join(" ");
-            return (!words(&full).is_empty()).then_some(full);
+            let full = full.trim_matches(|c: char| wrapping(c) || c.is_whitespace());
+            return (!words(full).is_empty()).then(|| full.to_owned());
         }
         // "Last, First …": the words after the comma come first.
         let ordered = match plain.split_once(',') {
@@ -78,6 +78,24 @@ impl GreetBy {
         let mut names = ordered.into_iter().filter(|word| !title(word));
         if self == Self::Last { names.next_back() } else { names.next() }
     }
+}
+
+/// The words of `text` that hold a letter or a digit, each without the quotes and brackets around it.
+fn words(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .map(|word| word.trim_matches(wrapping))
+        .filter(|word| word.chars().any(char::is_alphanumeric))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Whether `c` is a quote or a bracket that can stand around a name: the ASCII ones and the common typographic ones.
+const fn wrapping(c: char) -> bool {
+    matches!(
+        c,
+        '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | '\u{2018}'..='\u{201f}' | '\u{00ab}' | '\u{00bb}' | '\u{2039}' | '\u{203a}'
+            | '\u{300c}'..='\u{300f}' | '\u{ff02}' | '\u{ff07}' | '\u{ff08}' | '\u{ff09}' | '\u{ff3b}' | '\u{ff3d}'
+    )
 }
 
 /// Whether `word` is one of [`TITLES`], without case and one dot at the end.
