@@ -18,7 +18,7 @@ use crate::component::why_line::why_line;
 use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, After, Mailbox};
+use crate::mailbox::{Act, After, Mailbox, MessageRow};
 use crate::reader::{Content, Header, Opened, Person, Reader};
 use crate::theme::Theme;
 use crate::tr;
@@ -56,7 +56,7 @@ const SUBJECT_LINES: usize = 2;
 /// the next-message rule.
 fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
-    let open = reader.open_id().and_then(|id| mailbox.messages().iter().find(|row| row.id == id));
+    let open = reader.open_id().and_then(|id| super::row(mailbox, reader, id));
     if let Some(row) = open {
         if popup::item(ui, theme, keymap, IconId::Archive, tr!("Archive"), Some(keymap::ARCHIVE)).clicked() {
             drawn.asked.push(Asked::Act(row.id, Act::Archive));
@@ -112,7 +112,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
 }
 
 /// Move to a folder: a menu of the folders of the open message's account but its own; the one chosen moves it there.
-fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: Option<u64>, drawn: &mut Drawn) {
+fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, (mailbox, reader): (&Mailbox, &Reader), open: Option<u64>, drawn: &mut Drawn) {
     let button = IconButton::new(IconId::Move, tr!("Move to a folder"));
     // The folders, read once a frame.
     let targets = open.map(|id| mailbox.move_targets(id)).unwrap_or_default();
@@ -122,10 +122,9 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
     };
     let response = button.show(ui, theme, keymap);
     // The title's caption: the account and how many folders it offers.
-    let account =
-        mailbox.messages().iter().find(|row| row.id == id).and_then(|row| mailbox.accounts().iter().find(|account| account.id == row.account));
+    let account = super::row(mailbox, reader, id).and_then(|row| mailbox.accounts().iter().find(|account| account.id == row.account));
     let caption = account.map(|account| tr!("{account} · {count}", account = crate::component::spoken(&account.label), count = targets.len()));
-    popup::menu_right(ui.ctx(), theme, &response, move_menu(), MOVE_WIDTH, |ui| {
+    popup::menu_right(ui.ctx(), theme, &response, super::here(ui.ctx(), move_menu()), MOVE_WIDTH, |ui| {
         popup::title(ui, theme, tr!("Move to"), caption.as_deref());
         let mut chosen = false;
         for folder in targets {
@@ -181,45 +180,47 @@ fn picker(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: 
     };
     let response = button.show(ui, theme, keymap);
     let ctx = ui.ctx().clone();
-    if popup::clicked(&ctx, &response, picker_popup()) {
-        let open = !popup::is_open(&ctx, picker_popup());
-        popup::set_open(&ctx, picker_popup(), open);
+    // A window of its own keeps its picker apart from the pane's.
+    let (popup_id, state_id) = (super::here(&ctx, picker_popup()), super::here(&ctx, picker_id()));
+    if popup::clicked(&ctx, &response, popup_id) {
+        let open = !popup::is_open(&ctx, popup_id);
+        popup::set_open(&ctx, popup_id, open);
         if open {
             // A new opening: the presets read again, the text typed before gone.
             drawn.asked.push(Asked::Presets);
-            ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(picker_id()).open());
+            ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(state_id).open());
         }
     }
-    if !popup::is_open(&ctx, picker_popup()) {
+    if !popup::is_open(&ctx, popup_id) {
         return;
     }
-    let float = popup::Float { id: picker_popup(), anchor: response.rect, width: time_picker::WIDTH, returns_to: response.id };
+    let float = popup::Float { id: popup_id, anchor: response.rect, width: time_picker::WIDTH, returns_to: response.id };
     let shown = popup::float(&ctx, theme, &float, |ui| {
         let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
         let ask = Ask { title, confirm, alert: None, presets: &presets, extra: None, note: None };
-        let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(picker_id())).unwrap_or_default();
+        let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(state_id)).unwrap_or_default();
         let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
-        ui.data_mut(|data| data.insert_temp(picker_id(), state));
+        ui.data_mut(|data| data.insert_temp(state_id, state));
         picked
     });
     match shown {
         Some(Picked::At { at, .. }) => {
             drawn.asked.push(Asked::Act(id, if sent { Act::FollowUp(at) } else { Act::Snooze(at) }));
-            popup::set_open(&ctx, picker_popup(), false);
+            popup::set_open(&ctx, popup_id, false);
             response.request_focus();
         }
         Some(Picked::Cancelled | Picked::Extra) => {
-            popup::set_open(&ctx, picker_popup(), false);
+            popup::set_open(&ctx, popup_id, false);
             response.request_focus();
         }
         Some(Picked::Open) => {}
-        None => popup::set_open(&ctx, picker_popup(), false),
+        None => popup::set_open(&ctx, popup_id, false),
     }
 }
 
 /// Pin, or "Take the pin off" (shown active) for a pinned message.
-fn pin(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: Option<u64>, drawn: &mut Drawn) {
-    let Some(row) = open.and_then(|id| mailbox.messages().iter().find(|row| row.id == id)) else {
+fn pin(ui: &mut Ui, theme: &Theme, keymap: &Keymap, open: Option<&MessageRow>, drawn: &mut Drawn) {
+    let Some(row) = open else {
         IconButton::new(IconId::Pin, tr!("Pin")).unavailable(tr!("Open a message first")).show(ui, theme, keymap);
         return;
     };
@@ -230,8 +231,7 @@ fn pin(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: Opt
 }
 
 /// The chips of the open message's state: until when it is snoozed, when its reminder is due, that it came back.
-fn states(mailbox: &Mailbox, id: u64) -> Vec<(String, String)> {
-    let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return Vec::new() };
+fn states(mailbox: &Mailbox, row: &MessageRow) -> Vec<(String, String)> {
     let (now, offset) = (mailbox.now(), mailbox.offset());
     let mut chips = Vec::new();
     if let Some(until) = row.snoozed_until {
@@ -301,9 +301,9 @@ pub(super) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
 /// The tags of the open message: its group in the accent, its state (until when it is snoozed, when its reminder is due,
 /// that it came back) and its account, each with what a screen reader hears and its place in the queue for room: the
 /// state first, then the group, then the account.
-fn tags(mailbox: &Mailbox, id: u64) -> Vec<(String, String, TagKind, u8)> {
+fn tags(mailbox: &Mailbox, row: &MessageRow) -> Vec<(String, String, TagKind, u8)> {
     let mut tags = Vec::new();
-    let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return tags };
+    let id = row.id;
     // Held mail is in no group until its sender is let in: it is a new sender's.
     if mailbox.held(id) {
         tags.push((tr!("New sender").to_owned(), tr!("New sender").to_owned(), TagKind::Accent, 1));
@@ -316,7 +316,7 @@ fn tags(mailbox: &Mailbox, id: u64) -> Vec<(String, String, TagKind, u8)> {
             .or_else(|| row.group.map(|kind| kind.text().to_owned()));
         tags.extend(group.map(|group| (group.clone(), group, TagKind::Accent, 1)));
     }
-    for (shown, spoken) in states(mailbox, id) {
+    for (shown, spoken) in states(mailbox, row) {
         let kind = if shown == tr!("Returned") { TagKind::Warn } else { TagKind::Default };
         tags.push((shown, spoken, kind, 0));
     }
@@ -400,7 +400,7 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
         let mut child = ui.new_child(UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)));
         child.set_clip_rect(place.intersect(ui.clip_rect()));
         child.spacing_mut().item_spacing.x = TOOL_GAP;
-        let tags = open.map(|id| tags(mailbox, id)).unwrap_or_default();
+        let tags = open.and_then(|id| super::row(mailbox, reader, id)).map(|row| tags(mailbox, row)).unwrap_or_default();
         let measured: Vec<(String, f32)> = tags
             .iter()
             .map(|(text, ..)| {
@@ -457,7 +457,7 @@ fn act(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &
     match index {
         0 => {
             // A done message, open under "Show done", is brought back by the same button.
-            let done = open.is_some_and(|id| mailbox.messages().iter().any(|row| row.id == id && row.done));
+            let done = open.and_then(|id| super::row(mailbox, reader, id)).is_some_and(|row| row.done);
             let (name, act) = if done { (tr!("Not done"), Act::Undone) } else { (tr!("Done"), Act::Done) };
             let response = act_button(ui, theme, keymap, open, (IconId::Done, name, keymap::DONE), act, drawn);
             // Beside the list, Done is the reader's first tool: where the keyboard goes when it would be on nothing.
@@ -466,14 +466,14 @@ fn act(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &
             }
         }
         1 => picker(ui, theme, keymap, mailbox, open, drawn),
-        2 => pin(ui, theme, keymap, mailbox, open, drawn),
-        3 => move_to(ui, theme, keymap, mailbox, open, drawn),
+        2 => pin(ui, theme, keymap, open.and_then(|id| super::row(mailbox, reader, id)), drawn),
+        3 => move_to(ui, theme, keymap, (mailbox, reader), open, drawn),
         4 => {
             act_button(ui, theme, keymap, open, (IconId::Delete, tr!("Delete"), keymap::DELETE), Act::Delete, drawn);
         }
         _ => {
             let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
-            popup::menu_right(ui.ctx(), theme, &response, more_menu(), MORE_WIDTH, |ui| {
+            popup::menu_right(ui.ctx(), theme, &response, super::here(ui.ctx(), more_menu()), MORE_WIDTH, |ui| {
                 // Any row chosen closes it: each asks for something.
                 let before = drawn.asked.len();
                 more(ui, theme, keymap, mailbox, reader, drawn);
@@ -529,11 +529,12 @@ fn subject(ui: &mut Ui, theme: &Theme, keymap: &Keymap, opened: Option<&Opened>,
         }
     }
     // Enter opens the menu a secondary press opens (the lists' menu key does too), so the copy is the keyboard's.
-    let keyed = super::menu_keyed(ui.ctx(), keymap, &response, subject_menu());
+    let menu = super::here(ui.ctx(), subject_menu());
+    let keyed = super::menu_keyed(ui.ctx(), keymap, &response, menu);
     if keyed || (response.clicked() && !response.clicked_by(egui::PointerButton::Primary)) {
-        popup::open_under(ui.ctx(), subject_menu());
+        popup::open_under(ui.ctx(), menu);
     }
-    let copied = popup::context_menu(ui.ctx(), theme, &response, subject_menu(), MOVE_WIDTH, |ui| {
+    let copied = popup::context_menu(ui.ctx(), theme, &response, menu, MOVE_WIDTH, |ui| {
         let copy = popup::entry(ui, theme, keymap, tr!("Copy the subject"), None).clicked();
         (copy, copy)
     });

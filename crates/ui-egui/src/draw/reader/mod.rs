@@ -54,7 +54,7 @@ use crate::compose::Answer;
 use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, After, Mailbox};
+use crate::mailbox::{Act, After, Mailbox, MessageRow};
 use crate::reader::Reader;
 use crate::theme::Theme;
 use crate::tr;
@@ -84,6 +84,18 @@ const FOOT_PAD: f32 = 12.0;
 const MESSAGE_TOP: f32 = 16.0;
 const THREAD_TOP: f32 = 4.0;
 const MESSAGE_FOOT: f32 = 24.0;
+
+/// The list's row of message `id`; for a reader in a window of its own whose list has moved on, the row it keeps.
+fn row<'a>(mailbox: &'a Mailbox, reader: &'a Reader, id: u64) -> Option<&'a MessageRow> {
+    mailbox.messages().iter().find(|row| row.id == id).or_else(|| reader.kept_row().filter(|row| row.id == id))
+}
+
+/// `id` as the viewport being drawn has it: the main window's as it is, a window of its own's salted with its viewport,
+/// so that a reader in a window keeps its menus, its picker and its wipe apart from the pane's reader.
+pub(in crate::draw) fn here(ctx: &egui::Context, id: Id) -> Id {
+    let viewport = ctx.viewport_id();
+    if viewport == egui::ViewportId::ROOT { id } else { id.with(viewport) }
+}
 
 /// What the person asked for in the reader this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,7 +268,8 @@ pub(super) fn back_to_list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, drawn: &
         return false;
     }
     let response = IconButton::new(IconId::Back, tr!("Back to the list")).action(keymap::BACK).show(ui, theme, keymap);
-    ui.data_mut(|data| data.insert_temp(back_kept_id(), response.id));
+    let kept = here(ui.ctx(), back_kept_id());
+    ui.data_mut(|data| data.insert_temp(kept, response.id));
     if response.clicked() {
         drawn.asked.push(Asked::Back);
     }
@@ -273,14 +286,16 @@ fn answers_id() -> egui::Id {
 /// Keeps `rect` as the answers' row drawn in this pass.
 pub(super) fn keep_answers(ctx: &egui::Context, rect: egui::Rect) {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data_mut(|data| data.insert_temp(answers_id(), (rect, pass)));
+    let kept = here(ctx, answers_id());
+    ctx.data_mut(|data| data.insert_temp(kept, (rect, pass)));
 }
 
 /// The rect of the reader's answers (Reply, Reply all, Forward) when the reader drew them in this pass: what the
 /// floating composer stands above.
 pub(in crate::draw) fn answers_rect(ctx: &egui::Context) -> Option<egui::Rect> {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data(|data| data.get_temp::<(egui::Rect, u64)>(answers_id())).filter(|(_, kept)| *kept == pass).map(|(rect, _)| rect)
+    let kept = here(ctx, answers_id());
+    ctx.data(|data| data.get_temp::<(egui::Rect, u64)>(kept)).filter(|(_, kept)| *kept == pass).map(|(rect, _)| rect)
 }
 
 fn back_kept_id() -> egui::Id {
@@ -289,15 +304,17 @@ fn back_kept_id() -> egui::Id {
 
 /// Keeps `id` as the reader's first tool drawn in this pass ([`take_back_id`]).
 pub(super) fn keep_first_tool(ctx: &egui::Context, id: egui::Id) {
-    ctx.data_mut(|data| data.insert_temp(back_kept_id(), id));
+    let kept = here(ctx, back_kept_id());
+    ctx.data_mut(|data| data.insert_temp(kept, id));
 }
 
 /// Takes the id of the reader's first tool drawn since the last take ("Back to the list" in one pane, Done beside the
 /// list): where the focus goes when a message is opened into the one pane, or when an act from the reader walked on
 /// with the keyboard on nothing.
 pub(super) fn take_back_id(ctx: &egui::Context) -> Option<egui::Id> {
-    let id = ctx.data(|data| data.get_temp::<egui::Id>(back_kept_id()));
-    ctx.data_mut(|data| data.remove::<egui::Id>(back_kept_id()));
+    let kept = here(ctx, back_kept_id());
+    let id = ctx.data(|data| data.get_temp::<egui::Id>(kept));
+    ctx.data_mut(|data| data.remove::<egui::Id>(kept));
     id
 }
 
@@ -387,9 +404,7 @@ pub(super) fn show(
             ui.spacing_mut().item_spacing.y = 0.0;
             Frame::new().inner_margin(Margin { left: side, right: side, top: margin(top).top, bottom: margin(MESSAGE_FOOT).bottom }).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                if let Some(reason) =
-                    reader.open_id().and_then(|id| mailbox.messages().iter().find(|row| row.id == id)).and_then(|row| row.bounced.as_deref())
-                {
+                if let Some(reason) = reader.open_id().and_then(|id| row(mailbox, reader, id)).and_then(|row| row.bounced.as_deref()) {
                     bounced(ui, theme, reason);
                 }
                 for row in reader.thread() {
@@ -414,7 +429,7 @@ pub(super) fn show(
         // The scan line at the wipe's edge, over everything in the pane: whole until nine tenths of the time, then
         // fading out over the last tenth, as the presentation's keyframes have it.
         let edge = whole.top() + (whole.height() * wipe).round();
-        let painter = ui.ctx().layer_painter(egui::LayerId::new(Order::Foreground, Id::unique("reader-scan"))).with_clip_rect(whole);
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(Order::Foreground, here(ui.ctx(), Id::unique("reader-scan")))).with_clip_rect(whole);
         // Faded as the design fades a colour: mixed toward the pane's `surface`, never by alpha.
         let ink = p.surface.lerp_to_gamma(p.cyan, shows);
         paint::hairline(&painter, egui::pos2(whole.left(), edge), egui::pos2(whole.right() - 1.0, edge), ink);
@@ -432,7 +447,7 @@ const SCAN_GONE: f32 = 0.9;
 /// each 0 to 1; a repaint is asked for until it has. With reduced motion it is there at once, and a key or a press
 /// during the wipe takes it to its end.
 pub(super) fn wiped(ctx: &egui::Context, open: u64) -> (f32, f32) {
-    let key = Id::unique("reader-wipe");
+    let key = here(ctx, Id::unique("reader-wipe"));
     let now = ctx.input(|input| input.time);
     let acted = ctx.input(|input| {
         input.events.iter().any(|event| matches!(event, egui::Event::Key { pressed: true, .. } | egui::Event::PointerButton { pressed: true, .. }))

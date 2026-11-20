@@ -26,12 +26,14 @@ fn unwiped_id() -> egui::Id {
 
 /// Keeps `room`, the message's room unclipped by the wipe, for this frame's warnings.
 pub(super) fn keep_unwiped(ctx: &egui::Context, room: Rect) {
-    ctx.data_mut(|data| data.insert_temp(unwiped_id(), room));
+    let kept = super::here(ctx, unwiped_id());
+    ctx.data_mut(|data| data.insert_temp(kept, room));
 }
 
 /// Draws `add` clipped to the message's room only, not to the wipe: a warning shows whole while a message wipes in.
 fn unwiped<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    let room = ui.ctx().data(|data| data.get_temp::<Rect>(unwiped_id()));
+    let kept = super::here(ui.ctx(), unwiped_id());
+    let room = ui.ctx().data(|data| data.get_temp::<Rect>(kept));
     ui.scope(|ui| {
         if let Some(room) = room {
             ui.set_clip_rect(room);

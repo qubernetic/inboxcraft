@@ -377,7 +377,9 @@ fn kept_slot() -> Id {
 /// copied or hashed again per frame.
 fn kept(ui: &Ui, probe: Arc<Galley>, who: u64, key: u64, make: impl FnOnce() -> Arc<Laid>) -> Option<Arc<Laid>> {
     let pass = ui.ctx().cumulative_pass_nr();
-    let store: Kept = ui.data_mut(|data| data.get_temp_mut_or_default::<Kept>(kept_slot()).clone());
+    // Out of the lock: the viewport is read from the context.
+    let slot = super::here(ui.ctx(), kept_slot());
+    let store: Kept = ui.data_mut(|data| data.get_temp_mut_or_default::<Kept>(slot).clone());
     let mut store = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if !store.probe.as_ref().is_some_and(|kept| Arc::ptr_eq(kept, &probe)) {
         store.keeps.clear();

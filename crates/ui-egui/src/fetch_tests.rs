@@ -81,3 +81,43 @@ fn threaded_runs_at_most_four_at_once_and_the_rest_in_turn() {
     assert_eq!(done.len(), 10);
     assert!(*most.lock().unwrap() <= Threaded::MAX_RUNNING);
 }
+
+/// A fetch that answers every address at once with its own bytes.
+#[derive(Default)]
+struct Echo(Vec<Fetched>);
+
+impl Fetch for Echo {
+    fn start(&mut self, url: &str) {
+        self.0.push((url.to_owned(), Ok(url.as_bytes().to_vec())));
+    }
+
+    fn finished(&mut self) -> Vec<Fetched> {
+        std::mem::take(&mut self.0)
+    }
+}
+
+fn urls(done: &[Fetched]) -> Vec<&str> {
+    done.iter().map(|(url, _)| url.as_str()).collect()
+}
+
+/// The pane's reader and a window's share one fetch: each gets the answers to what it asked, whoever polls first.
+#[test]
+fn a_shared_fetch_answers_each_reader_what_it_asked() {
+    let first = super::Shared::new(Box::new(Echo::default()));
+    let (mut pane, mut window) = (first.another(), first.another());
+    pane.start("https://pictures.example.org/pane.png");
+    window.start("https://pictures.example.org/window.png");
+    // The window polls first: the pane's answer waits for the pane.
+    assert_eq!(urls(&window.finished()), ["https://pictures.example.org/window.png"]);
+    assert_eq!(urls(&pane.finished()), ["https://pictures.example.org/pane.png"]);
+    assert!(pane.finished().is_empty() && window.finished().is_empty(), "each answer once");
+    // An address both asked for answers both.
+    pane.start("https://pictures.example.org/both.png");
+    window.start("https://pictures.example.org/both.png");
+    assert_eq!(urls(&pane.finished()), ["https://pictures.example.org/both.png"]);
+    assert_eq!(urls(&window.finished()), ["https://pictures.example.org/both.png"]);
+    // A reader that is gone leaves nothing waiting.
+    window.start("https://pictures.example.org/gone.png");
+    drop(window);
+    assert!(pane.finished().is_empty());
+}

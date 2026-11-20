@@ -1568,6 +1568,15 @@ impl Mailbox {
         }
     }
 
+    /// The row of message `id` as the store has it now, wherever it is (the list may show another place); `None` once
+    /// the store keeps it no more (the server took it away) or cannot say. Read quietly: the window ran nothing for the
+    /// owner.
+    pub(crate) fn message_row(&mut self, id: u64) -> Option<MessageRow> {
+        let answer = self.quietly(|mailbox| mailbox.run("mail.thread", &json!({ "id": id }))).ok()?;
+        let messages = answer.get("messages").and_then(Value::as_array)?;
+        messages.iter().map(message_row).find(|row| row.id == id)
+    }
+
     /// The message the owner's own act took out of the list last, once: it is forgotten as it is read.
     pub fn take_taken(&mut self) -> Option<u64> {
         self.taken.take()

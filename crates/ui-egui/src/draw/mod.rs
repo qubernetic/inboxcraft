@@ -50,6 +50,7 @@ mod list;
 mod onboard;
 pub(crate) mod paint;
 mod reader;
+mod reader_window;
 pub(crate) use reader::fitted_board;
 mod index;
 mod settings;
@@ -184,6 +185,8 @@ pub struct InboxApp {
     mailbox: Mailbox,
     reader: Reader,
     textures: reader::Textures,
+    /// Messages in windows of their own.
+    windows: reader_window::Windows,
     hover: Option<String>,
     /// The row the next-message rule names when the open message left the list, and which side of the gap it stands
     /// on: the reader shows nothing open and the list selects no row until the owner opens a message; an arrow opens
@@ -494,10 +497,13 @@ impl InboxApp {
     pub fn with_outside(mailbox: Mailbox, fetch: Box<dyn Fetch>, save: Box<dyn Save>) -> Self {
         // Home is the start place once there is an account; with none the window offers to add one, as before.
         let screen = if mailbox.accounts().is_empty() { Screen::Mail } else { Screen::Home };
+        // The pane's reader and the windows' share the fetch and the saving.
+        let (fetch, save) = (crate::fetch::Shared::new(fetch), crate::save::Shared::new(save));
         Self {
             mailbox,
-            reader: Reader::new(fetch, save),
+            reader: Reader::new(Box::new(fetch.another()), Box::new(save.clone())),
             textures: reader::Textures::new(),
+            windows: reader_window::Windows::new(fetch, save),
             hover: None,
             held_back: None,
             land_held: None,
@@ -1189,6 +1195,9 @@ impl InboxApp {
             return;
         }
         let Some(id) = self.list_row.or_else(|| self.mailbox.selected()) else { return };
+        if self.open_in_window(id) {
+            return;
+        }
         self.mailbox.read_preview(id);
         self.mailbox.select_keyed(id);
         ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(id)));
@@ -1233,9 +1242,14 @@ impl InboxApp {
     /// (`Tab` onto it, or assistive technology) is keyed and shown as a preview, not marked read. Focus and selection
     /// move together: a row pressed while another row has the focus takes it away from that row.
     fn follow_list(&mut self, ctx: &egui::Context, clicked: Option<u64>, gained: Option<u64>) {
-        if let Some(id) = clicked {
+        // A row pressed where messages open in a window of their own opens there; the row keeps the keyboard.
+        let windowed = clicked.filter(|id| self.open_in_window(*id));
+        if windowed.is_some() {
+            self.list_keys = true;
+        }
+        if let Some(id) = clicked.filter(|_| windowed.is_none()) {
             self.mailbox.read_preview(id);
-            self.mailbox.select(clicked);
+            self.mailbox.select(Some(id));
             self.list_keys = true;
             self.reading = true;
             self.focus_reader = one_pane(ctx);
@@ -2728,8 +2742,9 @@ impl InboxApp {
         let s = theme.spacing;
         // The list's order as last drawn, before the engine's events: a cheap handle on the kept one.
         self.drawn = list::order(ui.ctx());
+        self.follow_context(ui.ctx());
         self.sync();
-        if self.reader.poll() | self.pump() | self.onboarding.poll() {
+        if self.reader.poll() | self.windows.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
         }
         // What the engine's events changed is settled before this frame's keys: when the open message left with them,
@@ -3015,6 +3030,7 @@ impl InboxApp {
         self.keep_triage();
         self.keep_notify();
         self.keep_week();
+        self.reader_windows(ui.ctx(), &theme);
         self.hear_desk();
         self.sync();
         // What runs after this pass, before the next frame, comes after everything this frame painted.
@@ -3733,6 +3749,7 @@ impl InboxApp {
             settings::Asked::Scale(scale) => self.set_text_scale(scale),
             settings::Asked::Motion(level) => self.set_motion_level(level),
             settings::Asked::Frame(frame) => self.set_frame(frame),
+            settings::Asked::ReaderHost(host) => self.appear("ui.layout.set", &json!({ "reader": host.id() })),
             settings::Asked::Section(section) => self.settings.show(section),
             settings::Asked::Sections => self.settings.to_list(false),
             settings::Asked::Add => self.onboarding.open(),
