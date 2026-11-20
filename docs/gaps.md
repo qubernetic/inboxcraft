@@ -357,9 +357,9 @@ time from the code as it is, not measured.
 - The window's type is IBM Plex Mono and IBM Plex Sans, Regular and SemiBold, in twelve styles, with Audiowide for
   the product names (#83, #232). Noto Sans Hebrew, Arabic, Devanagari and Thai and Noto Emoji ship behind Plex in
   Regular only, so the SemiBold styles draw those scripts in Regular, and emoji are one colour (egui draws outlines,
-  not colour emoji fonts) (#348). Chinese, Japanese and Korean are drawn with fonts found on the computer, searched
-  at start on a worker thread and placed behind the shipped faces; where the computer has none for them, and for
-  the other scripts, they show as boxes.
+  not colour emoji fonts) (#348). Other scripts (CJK and 18 more: Bengali, Tamil, Khmer, Ethiopic and others) are
+  drawn with fonts found on the computer, searched at start on a worker thread and placed behind the shipped faces;
+  where the computer has none for a script, or a script is not among those looked for, they show as boxes.
   Only one sign per script is looked for, so a found font may still lack rarer signs of its script. The folders
   come from fontconfig's files, read by the app with limits (`<dir>`, `<remap-dir>`, `<include>`; nothing else of
   fontconfig's rules); in the Flatpak the host's folders should arrive through the runtime's `<remap-dir>` entries,

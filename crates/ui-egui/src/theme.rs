@@ -744,8 +744,34 @@ pub struct Fallback {
 
 /// One sign of each script the app's fonts may lack: what the start looks for on the computer, of these the ones
 /// [`missing_probes`] gives (the shipped Noto faces hold Arabic, Hebrew, Thai, Devanagari and emoji).
-pub const FALLBACK_PROBES: [(&str, char); 8] =
-    [("han", '日'), ("kana", 'あ'), ("hangul", '한'), ("arabic", 'ع'), ("hebrew", 'א'), ("thai", 'ท'), ("devanagari", 'अ'), ("emoji", '🙂')];
+pub const FALLBACK_PROBES: [(&str, char); 26] = [
+    ("han", '日'),
+    ("kana", 'あ'),
+    ("hangul", '한'),
+    ("arabic", 'ع'),
+    ("hebrew", 'א'),
+    ("thai", 'ท'),
+    ("devanagari", 'अ'),
+    ("emoji", '🙂'),
+    ("bengali", 'অ'),
+    ("gurmukhi", 'ਅ'),
+    ("gujarati", 'અ'),
+    ("oriya", 'ଅ'),
+    ("tamil", 'அ'),
+    ("telugu", 'అ'),
+    ("kannada", 'ಅ'),
+    ("malayalam", 'അ'),
+    ("sinhala", 'අ'),
+    ("lao", 'ກ'),
+    ("tibetan", 'ཀ'),
+    ("myanmar", 'က'),
+    ("khmer", 'ក'),
+    ("ethiopic", 'አ'),
+    ("syriac", 'ܐ'),
+    ("thaana", 'ހ'),
+    ("cherokee", 'Ꭰ'),
+    ("bopomofo", 'ㄅ'),
+];
 
 /// [`font_definitions`] with `fallbacks` behind every text family: IBM Plex first, then egui's bundled faces, then
 /// these, in their order. The icon family keeps Phosphor alone. A fallback egui could not read as a font at its index

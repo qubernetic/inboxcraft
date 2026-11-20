@@ -7,7 +7,7 @@ use std::sync::Arc;
 use eframe::egui;
 use inboxcraft_ui_egui::theme::Fallback;
 
-use super::{Fallbacks, Found, LIMITS, Limits, MAX_COLLECTION, MAX_FILE, Search, search_folders};
+use super::{Fallbacks, Found, LIMITS, Limits, MAX_COLLECTION, MAX_FILE, MAX_PROBES, Search, search_folders};
 
 const PLEX_SANS: &[u8] = include_bytes!("../../../assets/fonts/plex-sans/IBMPlexSans-Regular.ttf");
 const PLEX_MONO: &[u8] = include_bytes!("../../../assets/fonts/plex-mono/IBMPlexMono-Regular.ttf");
@@ -282,4 +282,18 @@ fn the_walk_looks_at_a_limited_number_of_font_files() {
     let searched = search_folders(&[dir.path().to_owned()], None, &[LATIN], &Limits { files: 2, ..LIMITS });
     assert_eq!(searched.reads.len(), 2);
     assert_eq!(LIMITS.files, 20_000);
+}
+
+#[test]
+fn the_search_takes_every_probe_and_keeps_a_face_for_each() {
+    // Every probe the app's fonts lack is looked for; one face each fits the cap, and a face's probes fit its bits.
+    let probes = inboxcraft_ui_egui::theme::FALLBACK_PROBES;
+    assert!(MAX_PROBES >= probes.len() && MAX_PROBES <= 32, "{MAX_PROBES}");
+    assert!(LIMITS.faces >= inboxcraft_ui_egui::theme::missing_probes(&probes).len(), "{}", LIMITS.faces);
+    assert_eq!((LIMITS.faces, LIMITS.total), (24, 96 * 1024 * 1024));
+    // The last probe counts: Plex serves a Latin probe set after 31 others no font holds.
+    let dir = plex_folder();
+    let mut missing: Vec<(&str, char)> = (0..31).map(|at| ("none", char::from_u32(0xE000 + at).unwrap())).collect();
+    missing.push(LATIN);
+    assert_eq!(search_in(dir.path(), &missing).len(), 1, "the 32nd probe is looked for");
 }

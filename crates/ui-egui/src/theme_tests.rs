@@ -616,7 +616,7 @@ fn the_computer_is_searched_for_every_script_the_app_s_fonts_lack() {
     let shipped = ["arabic", "hebrew", "thai", "devanagari", "emoji"];
     let others: Vec<(&str, char)> = FALLBACK_PROBES.iter().copied().filter(|(script, _)| !shipped.contains(script)).collect();
     assert_eq!(missing_probes(&FALLBACK_PROBES), others);
-    assert_eq!(others.len(), 3, "Chinese, Japanese, Korean");
+    assert_eq!(others.len(), 21, "Chinese, Japanese, Korean and the other scripts mail carries");
     assert_eq!(missing_probes(&[("latin", 'A'), ("arrows", '⇧'), ("han", '日')]), vec![("han", '日')], "Plex and Hack hold these");
     let mut scripts: Vec<&str> = FALLBACK_PROBES.iter().map(|(script, _)| *script).collect();
     scripts.sort_unstable();
