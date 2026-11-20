@@ -125,12 +125,13 @@ fn open_id() -> Id {
     Id::unique("index-open-accounts")
 }
 
-/// The mailboxes' rows, in order: the shared ones, the gap, each account and, open, its folders. Our own hidden folders
-/// (the screener's, snoozed and blocked mail) have no row: New senders, Later and the settings show what is in them.
+/// The mailboxes' rows, in order: the shared ones, the gap, each account and, open, its folders. The screener's and the
+/// snoozed mail have no row of their own: New senders and Later show what is in them. Blocked mail has no other place,
+/// so its folder keeps its row.
 fn lines<'a>(mailbox: &'a Mailbox, open: &BTreeSet<u64>) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
     let sends = u64::try_from(mailbox.outbox().len()).unwrap_or(u64::MAX);
-    for view in mailbox.views().iter().filter(|view| !view.role.is_hidden()) {
+    for view in mailbox.views().iter().filter(|view| !matches!(view.role, Role::Screener | Role::Snoozed)) {
         lines.push(Line::Shared(mailbox::Place::View(view.role), role_text(view.role), icon(Some(view.role)), view.unread));
         if view.role == Role::Inbox {
             // New senders counts the senders the screener holds back, as Home's TO SCREEN does.

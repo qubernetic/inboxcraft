@@ -157,6 +157,31 @@ fn the_shared_mailboxes_are_the_frames_and_no_hidden_folder_of_our_own() {
     assert!(!rows.iter().any(|label| label.starts_with("Screener")), "{rows:?}");
 }
 
+/// The sample with `InboxCraft/Snoozed` and `InboxCraft/Blocked` in Personal, beside its `InboxCraft/Screener`.
+fn with_own_folders() -> Mailbox {
+    let mut store = sample::mailbox(now()).unwrap();
+    let mut batch = Batch::new();
+    for (id, name) in [(901_u64, "InboxCraft/Snoozed"), (902, "InboxCraft/Blocked")] {
+        let path = FolderPath::new(name, Some('/')).unwrap();
+        batch.push(Change::PutFolder(Folder::new(FolderId::new(id), AccountId::new(1), FolderListing::new(path, vec![], true))));
+    }
+    store.apply(&batch).unwrap();
+    Mailbox::new(sample::session_over(store, clock()).unwrap(), clock())
+}
+
+#[test]
+fn blocked_keeps_its_row_and_opens_where_screener_and_snoozed_have_places_of_their_own() {
+    // Screener's mail is in New senders and Snoozed's in Later; Blocked has no other place, so its row stays (#325, I-1).
+    let mut harness = harness(with_own_folders(), Place::Mail, false, TextScale::default(), 826.0, false);
+    let rows = rows_down(&harness);
+    assert!(rows.iter().any(|label| label.starts_with("Blocked")), "{rows:?}");
+    assert!(!rows.iter().any(|label| label.starts_with("Screener") || label.starts_with("Snoozed")), "{rows:?}");
+    let blocked = harness.query_all_by_role(Role::Button).find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("Blocked"))).unwrap();
+    blocked.click();
+    harness.run();
+    assert_eq!(harness.state().asked.mailbox, Some(crate::mailbox::Place::View(inboxcraft_model::Role::Blocked)));
+}
+
 #[test]
 fn new_senders_counts_the_senders_held_back() {
     // screen/index/with-counts: New senders carries a count, as Home's TO SCREEN (#325, 3.8).
