@@ -228,6 +228,15 @@ The command line and the status line keep their heights and never leave. The lis
 pane stands beside it. A control is never cut: text cuts on one line with `…`, and a part that does not fit is
 left out whole. In one pane the composer and the calendar's side panel swap in the same way as the reader.
 
+Settings follows the same two breakpoints (drawn at 800, and at 1000 with the text at 130 %). From 980 up the list of
+sections stays beside the page at 232 px and the page's column narrows (630 px at 1000). Under 980 the body holds
+one pane: the list of sections or a section's page, swapping as the list and the reader do; the page's head starts
+with `← Settings` where it says where it is, and `Esc` goes back too. A setting whose control needs more than half
+its row gives the control a line of its own under the name and its help, at the left (the attachment's rule);
+Sending's two signatures stand one under the other; About's emblem leaves whole, as on Home. At 130 % the text
+columns of a list row (a name, a time) grow with their type, and the scheduled list puts the person under the
+subject.
+
 ### Text at 130 %
 Every type size and line height is × 1.3, and with them the height of every row and control (status line 26 → 34,
 button 32 → 42, field 36 → 46, index place 34 → 44) and every icon's box (16 → 20). Region widths, breakpoints,
@@ -370,6 +379,7 @@ event's details, the sync control. "+N more" in a month cell opens a list of tha
 ### Settings and accounts
 - Settings is a place of the window: a second 232 px column with nine sections (Appearance, Accounts,
   Notifications, Triage, Sending, Calendar, Shortcuts, Privacy, About) and the section's page beside it, 720 wide.
+  In a narrow window it gives way as "Widths" says: one pane under 980, settings whose control takes a line.
 - **Appearance** has two groups. Look: mode (Auto, Dark, Light), motion (full, reduced, off), text size. Layout:
   inbox view, open a message (pane or window), write a message (pane or window), window frame (own or system).
   There are no accent presets, custom colours or typeface and icon choices.
@@ -465,7 +475,7 @@ each feature's behaviour is decided when it is designed. Two things on it are id
 - The desktop draws the tray, its menu and the notifications; the file shows them on a grey wireframe that copies
   no desktop, so their final look is not decided here.
 - Motion is drawn as still frames; durations are tokens, and the file plays nothing.
-- Only 1440, 1100 and 800 px widths and 100 % and 130 % text are drawn. Hover, focus and pressed states are not
+- Only 1440, 1100 and 800 px widths (and Settings at 1000) and 100 % and 130 % text are drawn. Hover, focus and pressed states are not
   drawn again at 130 %. A row's height in the file at 130 % is 1.3 × its height; the app may come out a few px
   less.
 - The interface is drawn in English only. The picture of the phone code is a placeholder and decodes to nothing.
