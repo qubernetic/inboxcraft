@@ -1813,14 +1813,37 @@ impl Mailbox {
         failed
     }
 
-    /// Waits at most `within` until every draft the store writes behind is on the disk: the end of a window or of
-    /// the app.
+    /// Waits at most `within` until every draft the store writes behind is on the disk, each whose write failed tried
+    /// once more: the end of a window or of the app.
     ///
     /// # Errors
     ///
-    /// The store did not write them in that time.
+    /// The store did not write them in that time, or a draft's write failed and none landed since.
     pub(crate) fn wait_for_keeps(&self, within: std::time::Duration) -> Result<(), UiError> {
-        self.session.store().settle(within).map_err(|error| UiError::from(EngineError::Store(error)))
+        self.settle_keeps(within, None)
+    }
+
+    /// The same for draft `id` alone: the end of its composer.
+    ///
+    /// # Errors
+    ///
+    /// The store did not write the drafts in that time, or the draft's write failed and none landed since.
+    pub(crate) fn wait_for_keep(&self, id: u64, within: std::time::Duration) -> Result<(), UiError> {
+        self.settle_keeps(within, Some(id))
+    }
+
+    fn settle_keeps(&self, within: std::time::Duration, id: Option<u64>) -> Result<(), UiError> {
+        let store = self.session.store();
+        store.settle(within).map_err(|error| UiError::from(EngineError::Store(error)))?;
+        match store.unkept().into_iter().find(|(draft, _)| id.is_none_or(|id| draft.get() == id)) {
+            Some((_, error)) => Err(UiError::from(EngineError::Store(error))),
+            None => Ok(()),
+        }
+    }
+
+    /// The drafts whose write the store made behind and that failed, none landing since.
+    pub(crate) fn unkept_drafts(&self) -> Vec<u64> {
+        self.session.store().unkept().into_iter().map(|(draft, _)| draft.get()).collect()
     }
 
     /// Applies `event` as an account's sync worker tells it, checked by the engine as every worker's is: for a picture

@@ -2041,7 +2041,6 @@ dependencies = [
  "inboxcraft-store",
  "inboxcraft-time",
  "png",
- "rusqlite",
  "serde",
  "serde_json",
  "skrifa",
