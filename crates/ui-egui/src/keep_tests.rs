@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use inboxcraft_engine::appearance::{Appearance, ComposerHost, Layout, Motion, ReaderHost, ThemeMode, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, ComposerHost, EventEditorHost, Layout, Motion, ReaderHost, ThemeMode, WindowFrame};
 
 use super::{FILE, KEYS_FILE, Keep, KeepFile, MAX_FILE, NoKeep};
 
@@ -12,7 +12,7 @@ fn chosen() -> Appearance {
         motion: Motion::Reduce,
         motion_reduced: false,
         frame: WindowFrame::System,
-        layout: Layout { reader: ReaderHost::Window, composer: ComposerHost::Floating },
+        layout: Layout { reader: ReaderHost::Window, composer: ComposerHost::Floating, event_editor: EventEditorHost::Small },
     }
 }
 

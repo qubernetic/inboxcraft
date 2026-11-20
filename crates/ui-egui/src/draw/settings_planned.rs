@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The settings pages that are designed and not built whole yet: Calendar (the calendar alerts switch works; each
-//! account's calendars with "read again" are coming soon; the week's first day and first week are the owner's), and the three sections that
+//! account's calendars with "read again" are coming soon; the week's first day and first week and where a new event
+//! opens are the owner's), and the three sections that
 //! are planned whole, with the coming-soon mark on their head: About (the program, its licences, its makers and
 //! contributors), AI (where a model runs, and the consent to send mail to one elsewhere) and Plugins. Nothing coming
 //! soon on them can be pressed or focused.
@@ -22,6 +23,7 @@ use crate::mailbox::{AccountRow, Mailbox};
 use crate::settings::Section;
 use crate::theme::Theme;
 use crate::tr;
+use inboxcraft_engine::appearance::EventEditorHost;
 use inboxcraft_time::{FirstWeek, Weekday};
 
 /// The Calendar page: alerts, each account's calendars, the week. The alerts switch changes `notify.set`'s `alerts` on
@@ -71,8 +73,31 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
                 asked = Some(Asked::FirstWeek(first));
             }
         });
+        group(ui, theme, "D", tr!("Editor"), None);
+        if let Some(host) = event_editor(ui, theme, mailbox.appearance().layout.event_editor) {
+            asked = Some(Asked::EventEditor(host));
+        }
     });
     asked
+}
+
+/// "New event opens": the small editor, the full one or a window of its own, its help saying where the one chosen
+/// opens; another host on the owner's press, never on a held key's repeat (Edit follows it too).
+fn event_editor(ui: &mut Ui, theme: &Theme, now: EventEditorHost) -> Option<EventEditorHost> {
+    let font = theme.fonts.button;
+    let hosts =
+        [(EventEditorHost::Small, tr!("Small"), font), (EventEditorHost::Full, tr!("Full"), font), (EventEditorHost::Window, tr!("Window"), font)];
+    let help = match now {
+        EventEditorHost::Small => tr!("Small: a panel over the calendar, for a title and a time. Edit opens the same way."),
+        EventEditorHost::Full => tr!("Full: in the calendar's place, with the event's day beside it. Edit opens the same way."),
+        EventEditorHost::Window => tr!("Window: in a window of its own. Edit opens the same way."),
+    };
+    let mut chosen = None;
+    settings_row(ui, theme, tr!("New event opens"), Some(help), |ui| {
+        let pressed = segmented_for(ui, theme, &hosts, now, Some(tr!("New event opens")));
+        chosen = pressed.filter(|host| *host != now && !crate::component::button::key_repeated(ui));
+    });
+    chosen
 }
 
 /// The width of the first day's choice, in points.

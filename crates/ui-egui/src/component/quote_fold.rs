@@ -73,7 +73,7 @@ pub(crate) fn quote_fold_with(
     let total = if open { (high + below + FOOT).ceil() } else { high };
     let (id, whole) = ui.allocate_space(vec2(width, total));
     let head = Rect::from_min_size(whole.min, vec2(width, high));
-    let response = fold_line(ui, theme, head, whole.bottom(), id.with("head"), lines, open, shown);
+    let response = fold_line(ui, theme, head, whole.bottom(), id.with("head"), lines, open, shown, None);
     if ui.is_rect_visible(whole) {
         let painter = ui.painter();
         let left = whole.left() + PAD;
@@ -101,7 +101,8 @@ pub(crate) fn quote_fold_with(
 }
 
 /// The fold's line over `head` (28 high), `id` its widget: the `stage` fill under the pointer, the 2 px `line` edge at
-/// its left down to `edge_foot` (the foot of what an open fold shows), the caret and the words 12 in, the focus ring inside; one Tab stop, a click or Enter opens or folds. What
+/// its left down to `edge_foot` (the foot of what an open fold shows), the caret and the words 12 in (at rest in `rest`, the
+/// ink of a kept background it stands on, else `muted`), the focus ring inside; one Tab stop, a click or Enter opens or folds. What
 /// stands under an open fold is the caller's (a fitted message draws its quoted blocks there).
 #[expect(clippy::too_many_arguments, reason = "a fold line's place, its edge, its words and the state a board forces")]
 pub(crate) fn fold_line(
@@ -113,6 +114,7 @@ pub(crate) fn fold_line(
     lines: usize,
     open: bool,
     shown: Option<Shown>,
+    rest: Option<egui::Color32>,
 ) -> Response {
     let p = &theme.palette;
     let f = &theme.fonts;
@@ -132,7 +134,9 @@ pub(crate) fn fold_line(
     }
     if ui.is_rect_visible(head) {
         let painter = ui.painter();
-        let ink = if lit.hover { p.ink } else { p.muted };
+        // Lit, on its own `stage`, the words take the app's ink; at rest, the ink of the kept background the fold stands
+        // on (`rest`), else `muted`.
+        let ink = if lit.hover { p.ink } else { rest.unwrap_or(p.muted) };
         let left = head.left() + PAD;
         let middle = head.center().y;
         let caret = if open { Caret::Down } else { Caret::Right };

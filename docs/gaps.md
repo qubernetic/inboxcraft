@@ -305,9 +305,11 @@ time from the code as it is, not measured.
   domain whose provider publishes no autoconfig and no SRV records is found only through its own common host names and
   its MX hosts' provider, when one of them answers the probe (#28, #260).
 
-- `html` reads no CSS beyond whether an element is hidden: colours, fonts, sizes, alignment and the message's
-  `<style>` blocks are ignored, so a message keeps its words and structure but not its look. Text hidden by other
-  tricks (a zero font size, white on white, off-screen positions) is shown (#29).
+- `html` reads no CSS beyond whether an element is hidden and the few inline declarations and attributes of a
+  block's look (alignment, a coloured background, a table's and a cell's width, a link styled as a button): fonts,
+  sizes, text colours, background pictures, gradients, `rgba()` and `hsl()` colours and the message's `<style>`
+  blocks are ignored, so a message keeps its words and structure but little of its look. Text hidden by other tricks
+  (a zero font size, white on white, off-screen positions) is shown (#29, #383).
 - `html` keeps no `data:` pictures (shown as unsupported, with their text) and no CSS background pictures, even
   with consent. `srcset`, `width` and `height` are not read, so a tracking pixel the owner allowed is a picture
   like any other (#29).
