@@ -82,6 +82,9 @@ mod event_alert_tests;
 #[path = "event_chain_tests.rs"]
 mod event_chain_tests;
 #[cfg(test)]
+#[path = "event_form_tests.rs"]
+mod event_form_tests;
+#[cfg(test)]
 #[path = "event_owner_tests.rs"]
 mod event_owner_tests;
 #[cfg(test)]
