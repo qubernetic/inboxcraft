@@ -2444,7 +2444,12 @@ fn a_keyed_row_scrolls_into_sight_by_this_frames_viewport_and_when_first_shown()
 #[test]
 fn the_planned_parts_of_the_lists_are_drawn_coming_soon() {
     use inboxcraft_model::Role as MailRole;
-    let mut harness = harness(true);
+    // In one pane, where the list has the room for Select (beside the reader its 440 leave it out).
+    let mut harness = Harness::builder()
+        .with_size(vec2(900.0, 900.0))
+        .with_context_setup(install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(true));
+    harness.run();
     // Several messages at once: the way in is there, disabled, with the mark.
     let select = harness.get_by_role_and_label(Role::Button, "Select");
     assert!(select.accesskit_node().is_disabled());
@@ -2731,10 +2736,6 @@ fn the_pills_line_beside_the_reader_never_wraps_and_leaves_out_what_does_not_fit
                 continue;
             }
             assert!(rect.top() < line.bottom() && rect.bottom() > line.top(), "{width} open {open}: {rect:?} wraps under {line:?}");
-        }
-        if !open {
-            // With the whole width, the planned Select shows with its mark.
-            harness.get_by_role_and_label(Role::Button, "Select");
         }
     }
 }
@@ -3234,10 +3235,13 @@ fn in_one_pane_a_held_messages_head_starts_with_back_to_the_list_and_the_focus_o
     assert_eq!(rows(&harness), 0, "the held message stands in the list's place");
     let back = harness.get_by_role_and_label(Role::Button, "Back to the list").rect();
     assert_eq!(focused_rect(&harness), Some(back), "a press put the focus on the head's first tool");
-    // It stands on the middle of the head's first line, 8 before its next tool: the reader's head has no avatar.
+    // It leads the head's first line, on its middle, 8 before the New sender tag: the reader's head has no avatar.
+    // More stands at the line's right end.
     let more = harness.get_by_role_and_label(Role::Button, "More").rect();
     assert!((back.center().y - more.center().y).abs() < 0.5, "{back:?} on the middle of the head's line {more:?}");
-    assert_eq!(more.left() - back.right(), 8.0, "{back:?} 8 before {more:?}");
+    let tag = harness.get_by_role_and_label(Role::Label, "New sender").rect();
+    assert_eq!(tag.left() - back.right(), 8.0, "{back:?} 8 before {tag:?}");
+    assert!(more.left() > tag.right(), "More at the right: {tag:?} {more:?}");
     harness.get_by_role_and_label(Role::Button, "Back to the list").click();
     harness.run();
     harness.run();
@@ -3277,8 +3281,10 @@ fn back_to_the_list_stands_8_before_the_next_tool_with_no_divider_and_runs_only_
     harness.run();
     harness.run();
     let back = harness.get_by_role_and_label(Role::Button, "Back to the list").rect();
+    // The next on the head's line is the first tag (the frame `size-800/inbox-reader`), or a tool where none is shown.
     let next = harness
         .query_all_by_role(Role::Button)
+        .chain(harness.query_all_by_role(Role::Label))
         .map(|node| node.rect())
         .filter(|rect| (rect.center().y - back.center().y).abs() < 1.0 && rect.left() > back.right())
         .min_by(|a, b| a.left().total_cmp(&b.left()))

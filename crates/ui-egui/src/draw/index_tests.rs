@@ -68,12 +68,17 @@ struct State {
 
 /// The index alone in a `width` × `height` column, motion reduced, every account open when `open`.
 fn harness(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, height: f32, open: bool) -> Harness<'static, State> {
+    harness_in(mailbox, at, narrow, scale, height, open, 0.0)
+}
+
+/// [`harness`] with `beside` points of window on the index's right, where its floats may reach.
+fn harness_in(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, height: f32, open: bool, beside: f32) -> Harness<'static, State> {
     let theme = Theme::new(Mode::Dark, scale);
     let width = if narrow { 56.0 } else { 232.0 };
     let ids: BTreeSet<u64> = mailbox.accounts().iter().map(|account| account.id).collect();
     let state = State { mailbox, at, narrow, asked: Asked::default(), keymap: Keymap::default(), theme };
     let mut harness = Harness::builder()
-        .with_size(vec2(width, height))
+        .with_size(vec2(width + beside, height))
         .with_context_setup(move |ctx| {
             install_fonts(ctx);
             crate::motion::set_reduced(ctx, true);
@@ -82,8 +87,9 @@ fn harness(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, height: 
             }
         })
         .build_ui_state(
-            |ui, state: &mut State| {
-                let whole = ui.ctx().content_rect();
+            move |ui, state: &mut State| {
+                let window = ui.ctx().content_rect();
+                let whole = Rect::from_min_size(window.min, vec2(width, window.height()));
                 let asked = ui
                     .scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| {
                         show(ui, &state.theme, &state.keymap, &state.mailbox, state.at, state.narrow, (true, false))
@@ -128,6 +134,62 @@ fn the_index_stands_as_its_frame_draws_with_mail_open() {
     assert_eq!((owner.rect().top(), owner.rect().height()), (786.0, 40.0), "the owner's row at the foot");
     assert!(!harness.get_by_role_and_label(Role::Button, "Home").accesskit_node().is_disabled(), "HOME is a place");
     assert_eq!(harness.query_all_by_label("coming soon").count(), 0, "a row inside soon carries no tag of its own");
+}
+
+/// The labels of the index's buttons from top to bottom, each cut at its first comma (a count or "open" after it).
+fn rows_down(harness: &Harness<'_, State>) -> Vec<String> {
+    let mut rows: Vec<(f32, String)> = harness
+        .query_all_by_role(Role::Button)
+        .map(|node| (node.rect().top(), node.accesskit_node().label().unwrap_or_default().split(',').next().unwrap_or_default().to_owned()))
+        .collect();
+    rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+    rows.into_iter().map(|(_, label)| label).collect()
+}
+
+#[test]
+fn the_shared_mailboxes_are_the_frames_and_no_hidden_folder_of_our_own() {
+    // The sample's Personal holds `InboxCraft/Screener`, whose mail New senders shows: no row of its own (#325, 3.1).
+    let harness = harness(two(), Place::Mail, false, TextScale::default(), 826.0, false);
+    let rows = rows_down(&harness);
+    let from = rows.iter().position(|label| label == "Mail").unwrap() + 1;
+    let to = rows.iter().position(|label| label == "Personal").unwrap();
+    assert_eq!(rows[from..to], ["Inbox", "New senders", "Drafts", "Sent", "Archive", "Junk", "Trash"], "{rows:?}");
+    assert!(!rows.iter().any(|label| label.starts_with("Screener")), "{rows:?}");
+}
+
+/// The sample with `InboxCraft/Snoozed` and `InboxCraft/Blocked` in Personal, beside its `InboxCraft/Screener`.
+fn with_own_folders() -> Mailbox {
+    let mut store = sample::mailbox(now()).unwrap();
+    let mut batch = Batch::new();
+    for (id, name) in [(901_u64, "InboxCraft/Snoozed"), (902, "InboxCraft/Blocked")] {
+        let path = FolderPath::new(name, Some('/')).unwrap();
+        batch.push(Change::PutFolder(Folder::new(FolderId::new(id), AccountId::new(1), FolderListing::new(path, vec![], true))));
+    }
+    store.apply(&batch).unwrap();
+    Mailbox::new(sample::session_over(store, clock()).unwrap(), clock())
+}
+
+#[test]
+fn blocked_keeps_its_row_and_opens_where_screener_and_snoozed_have_places_of_their_own() {
+    // Screener's mail is in New senders and Snoozed's in Later; Blocked has no other place, so its row stays (#325, I-1).
+    let mut harness = harness(with_own_folders(), Place::Mail, false, TextScale::default(), 826.0, false);
+    let rows = rows_down(&harness);
+    assert!(rows.iter().any(|label| label.starts_with("Blocked")), "{rows:?}");
+    assert!(!rows.iter().any(|label| label.starts_with("Screener") || label.starts_with("Snoozed")), "{rows:?}");
+    let blocked = harness.query_all_by_role(Role::Button).find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("Blocked"))).unwrap();
+    blocked.click();
+    harness.run();
+    assert_eq!(harness.state().asked.mailbox, Some(crate::mailbox::Place::View(inboxcraft_model::Role::Blocked)));
+}
+
+#[test]
+fn new_senders_counts_the_senders_held_back() {
+    // screen/index/with-counts: New senders carries a count, as Home's TO SCREEN (#325, 3.8).
+    let mailbox = two();
+    let waiting = mailbox.waiting().len();
+    assert!(waiting > 0, "the sample holds senders back");
+    let harness = harness(mailbox, Place::Mail, false, TextScale::default(), 826.0, false);
+    harness.get_by_role_and_label(Role::Button, &format!("New senders, {waiting} waiting"));
 }
 
 #[test]
@@ -246,6 +308,42 @@ fn every_row_and_the_account_picker_are_reached_by_the_keyboard() {
     all.click();
     harness.run();
     assert_eq!(harness.state().asked.account, Some(None), "the picker's All accounts");
+}
+
+#[test]
+fn the_account_picker_stands_on_the_owner_s_row_as_its_frame_draws_it() {
+    // popup/account-picker/open: 230 wide, 3 in from the index's left, its foot on the owner's row (over the hairline);
+    // a SHOW MAIL OF head 28 high, then All accounts and each account with its bar and address, 32 high (#325, 3.6).
+    let mut harness = harness_in(two(), Place::Mail, false, TextScale::default(), 826.0, false, 400.0);
+    harness.query_all_by_role(Role::Button).find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("Show mail of"))).unwrap().click();
+    harness.run();
+    harness.run();
+    let head = harness.get_by_label("Show mail of").rect();
+    let all = harness.get_by_role_and_label(Role::MenuItemRadio, "All accounts").rect();
+    let personal = harness.get_by_role_and_label(Role::MenuItemRadio, "Personal, mira@example.org").rect();
+    let studio = harness.get_by_role_and_label(Role::MenuItemRadio, "Studio, holloway.studio@example.org").rect();
+    assert_eq!(head.height(), 28.0, "{head:?}");
+    assert_eq!([all.top() - head.bottom(), personal.top() - all.bottom(), studio.top() - personal.bottom()], [0.0; 3]);
+    assert_eq!([all.height(), personal.height(), studio.height()], [32.0; 3]);
+    // The float's own 1 px edge lies around its rows.
+    assert_eq!((head.left() - 1.0, head.right() + 1.0), (3.0, 233.0), "{head:?}");
+    assert_eq!(studio.bottom() + 1.0, 786.0, "the picker's foot on the owner's row: {studio:?}");
+}
+
+#[test]
+fn with_one_account_the_picker_ticks_it_and_says_where_another_is_added() {
+    // popup/account-picker/one-account: no All accounts; the account ticked, a hairline and the note under it.
+    let mut store = sample::mailbox(now()).unwrap();
+    store.apply(&Batch::new().with(Change::RemoveAccount(AccountId::new(2)))).unwrap();
+    let one = Mailbox::new(sample::session_over(store, clock()).unwrap(), clock());
+    let mut harness = harness_in(one, Place::Mail, false, TextScale::default(), 826.0, false, 400.0);
+    harness.query_all_by_role(Role::Button).find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("Show mail of"))).unwrap().click();
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "All accounts").is_none(), "nothing to narrow");
+    let personal = harness.get_by_role_and_label(Role::MenuItemRadio, "Personal, mira@example.org");
+    assert_eq!(personal.accesskit_node().toggled(), Some(egui::accesskit::Toggled::True), "the only account is the one shown");
+    assert!(harness.query_by_label("The only account. Another is added in Settings.").is_some());
 }
 
 #[test]

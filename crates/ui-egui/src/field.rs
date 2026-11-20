@@ -286,6 +286,12 @@ impl Field {
         self
     }
 
+    /// How many times the cells were built (what the page tests of a screen with a field count).
+    #[cfg(test)]
+    pub(crate) const fn builds(&self) -> u32 {
+        self.builds
+    }
+
     /// Builds the cells again if their columns or rows, the text scale, the pixels per point or where the emblem
     /// stands on them changed. A rect that only moved moves the cells, and the warm ones keep their glyph and their
     /// time; when the cells are built again, the warm ones that are still there keep theirs.
@@ -532,7 +538,7 @@ fn place_cells(rect: Rect, scale: TextScale, area: Option<Rect>, ppp: f32, emble
     placed.columns = ((rect.max.x - origin.x) / CELL_WIDTH).floor().clamp(0.0, MAX_COLUMNS as f32) as usize;
     placed.rows = ((rect.max.y - origin.y) / height).floor().clamp(0.0, MAX_ROWS as f32) as usize;
     placed.origin = origin;
-    placed.emblem_at = emblem.zip(area).and_then(|(emblem, area)| place(emblem, area, rect, ppp));
+    placed.emblem_at = emblem.zip(area).and_then(|(emblem, area)| place(emblem, area, rect, origin, ppp));
     placed
 }
 
@@ -581,13 +587,18 @@ fn still_there(spot: Spot, columns: usize, built: &Cells) -> Option<Spot> {
 }
 
 /// Where `emblem`'s top left corner stands centred in `area`, on a whole pixel, if it fits there whole and inside the
-/// field's `rect`.
-fn place(emblem: &Emblem, area: Rect, rect: Rect, ppp: f32) -> Option<Pos2> {
+/// field's `rect` whose first cell stands at `origin`. Its offset from the first cell is the centred corner's offset
+/// from the rect's corner, rounded to whole pixels: a field and an area that move together by parts of a pixel keep
+/// the emblem on the same cells, so a move alone builds nothing again.
+fn place(emblem: &Emblem, area: Rect, rect: Rect, origin: Pos2, ppp: f32) -> Option<Pos2> {
     let size = emblem.size();
     if !area.is_finite() || size.x <= 0.0 || size.y <= 0.0 {
         return None;
     }
-    let corner = pos2(ceil_px(area.min.x + (area.width() - size.x) / 2.0, ppp), ceil_px(area.min.y + (area.height() - size.y) / 2.0, ppp));
+    let centred = area.min + (area.size() - size) / 2.0 - rect.min;
+    // Rounded at a thousandth of a pixel first: the same offset reached by two sums must not round two ways.
+    let whole = |points: f32| ((points * ppp * 1000.0).round() / 1000.0).round() / ppp;
+    let corner = origin + vec2(whole(centred.x), whole(centred.y));
     let placed = Rect::from_min_size(corner, size);
     // An area narrower or lower than the emblem puts its corner outside the area. Within a thousandth of a point:
     // the corner was rounded up by less than a pixel inside the room left over.

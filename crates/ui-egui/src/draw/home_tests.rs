@@ -271,6 +271,22 @@ fn the_emblem_leaves_whole_at_a_1381_window_and_under_and_stays_from_1382() {
 }
 
 /// A text from outside at its worst: 10 000 characters with CR, LF, NUL, bidi controls, Hebrew and Arabic.
+/// Home's rect moving by parts of a point (as a sliding place does) keeps the emblem on the same cells of its field:
+/// the cells are built once.
+#[test]
+fn home_moving_by_parts_of_a_point_builds_its_fields_cells_once() {
+    let body = Rect::from_min_size(pos2(0.0, 0.0), BODY);
+    let mut harness =
+        harness_with(sample("today").unwrap(), Mode::Dark, 100, BODY + vec2(4.0, 4.0), body, Some(placeholder(76, 40)), Level::Off, false);
+    assert!(harness.state().drawn.parts.emblem.is_some(), "no emblem at 1440");
+    for step in 1..=40_u8 {
+        let left = f32::from(step) * 0.07;
+        harness.state_mut().rect = body.translate(vec2(left, left / 2.0));
+        harness.run_ok();
+    }
+    assert_eq!(harness.state().field.builds(), 1, "a move alone built the field's cells again");
+}
+
 fn hostile(word: &str) -> String {
     let piece = format!("{word}\r\n\0\u{202e}\u{2067}שלום مرحبا\u{2069}\u{202c} ");
     piece.repeat(10_000 / piece.chars().count() + 1).chars().take(10_000).collect()

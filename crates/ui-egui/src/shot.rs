@@ -53,7 +53,7 @@
 //! status line's sets ([`crate::component::gallery_status`]),
 //! `home_sets` set to `true` the page of Home's sets ([`crate::component::gallery_home`]), `home_place` set to `true`
 //! shows Home, the start place, in the window (every other scene starts on the mail, as it was taken before Home was
-//! the start place),
+//! the start place; synced, as its frames are, unless `sync` says otherwise),
 //! `command_sets` set to `true` the page of the command line's sets ([`crate::component::gallery_commands`]).
 //! The typeface and the icons are fixed, so a script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`own`; the older `strip` and `top_row` read as it); `pointer` rests the pointer
@@ -204,7 +204,7 @@ pub struct Shot {
     /// Whether the calendar screen shows.
     #[serde(default)]
     pub calendar: Option<bool>,
-    /// Whether Home, the start place, shows in the window; the mail when left out.
+    /// Whether Home, the start place, shows in the window, synced unless `sync` says otherwise; the mail when left out.
     #[serde(default)]
     pub home_place: Option<bool>,
     /// The calendar's view (`day`, `week`, `month` or `agenda`), which shows the calendar screen.
@@ -237,7 +237,8 @@ pub struct Shot {
     #[serde(default)]
     pub act: Option<String>,
     /// How the sample's accounts sync, as their workers would tell it: `synced` (signed in, the last round two minutes
-    /// ago) or `syncing` (signed in, 27 of 50 folders done); the sample is offline without it.
+    /// ago) or `syncing` (signed in, 27 of 50 folders done); the sample is offline without it (Home in the window:
+    /// synced).
     #[serde(default)]
     pub sync: Option<String>,
     /// Whether `act` (`done` or `delete`) is caught with its row sliding out, before the toast.
@@ -568,10 +569,12 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
 }
 
 /// With `shot.sync`, every account of `app` signed in, and synced two minutes ago or `syncing` 27 of 50 folders, as
-/// their workers would tell it.
+/// their workers would tell it. Home in the window (`home_place`) is synced unless the shot names a sync: its frames
+/// carry the synced status line.
 fn sync(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     use inboxcraft_model::{ConnectionState, Event, EventKind};
-    let Some(state) = shot.sync.as_deref() else { return Ok(()) };
+    let home = (shot.home_place == Some(true)).then_some("synced");
+    let Some(state) = shot.sync.as_deref().or(home) else { return Ok(()) };
     let out = &shot.out;
     let ago = app.mailbox().now().checked_sub(std::time::Duration::from_secs(120)).ok_or_else(|| bad(format!("{out}: no time two minutes ago")))?;
     let told = match state {

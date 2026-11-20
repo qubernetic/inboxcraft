@@ -91,6 +91,8 @@ pub(super) struct Lists {
     pub(super) commands: Vec<Listed>,
     pub(super) people: Vec<Suggestion>,
     pub(super) mailboxes: Vec<Mailbox>,
+    /// How many commands the line lists with nothing typed: the head's "of".
+    pub(super) all_commands: usize,
 }
 
 impl Lists {
@@ -334,7 +336,9 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
         Mode::Search => {}
         Mode::Command => {
             if lines.next() {
-                popup::head(ui, theme, tr!("Commands"), Some(&counted));
+                // The frame `command-line/commands`: how many of all the commands show, and what Enter does.
+                let of = tr!("{shown} of {all} · Enter runs the marked one", shown = count, all = lists.all_commands.max(count));
+                popup::head(ui, theme, tr!("Commands"), Some(&of));
             }
             // The head, the line of prefixes and the plugin's row keep their room; the commands scroll in the rest.
             let most = (room - theme.boxes().menu_row * 3.0).max(theme.boxes().menu_row);

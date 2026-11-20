@@ -2984,3 +2984,47 @@ fn a_sender_let_in_from_the_lists_card_leaves_no_reason_stale() {
         fresh(&mut harness);
     }
 }
+
+#[test]
+fn in_one_pane_back_to_the_list_leads_the_head_8_before_the_tags() {
+    // The frame `size-800/inbox-reader`: the way back at the tool line's left (40 in, as the subject), the group's tag
+    // 8 after it, the acts at the right from Done to More.
+    let fetch = Recorder::default();
+    let harness = opened_at(&fetch, "Photos from the coast walk", 800.0, crate::theme::TextScale::default());
+    let back = harness.get_by_role_and_label(Role::Button, "Back to the list").rect();
+    let subject = harness.get_by_label("Photos from the coast walk").rect();
+    assert!((back.left() - subject.left()).abs() < 0.5, "the arrow at the head's left: {back:?} {subject:?}");
+    let tag = harness
+        .query_all_by_role(Role::Label)
+        .map(|node| node.rect())
+        .filter(|rect| (rect.center().y - back.center().y).abs() < 1.0 && rect.left() > back.right())
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .unwrap();
+    assert_eq!(tag.left() - back.right(), 8.0, "the first tag 8 after the arrow: {back:?} {tag:?}");
+    let done = harness.get_by_role_and_label(Role::Button, "Done").rect();
+    let more =
+        harness.query_all_by_role_and_label(Role::Button, "More").map(|node| node.rect()).max_by(|a, b| a.left().total_cmp(&b.left())).unwrap();
+    assert!(done.left() > tag.right() && more.right() <= subject.right() + 0.5, "the acts at the right: {done:?} {more:?} {subject:?}");
+}
+
+#[test]
+fn at_1024_and_130_percent_the_acts_keep_one_line_and_a_long_subject_wraps_under_them() {
+    // The reader beside the list at 1024 and 130 % text is about 524 wide: the six acts and More keep the tags' line, a
+    // subject longer than the head takes its second line under them.
+    const SUBJECT: &str = "Your bike is due for a service";
+    let fetch = Recorder::default();
+    let harness = opened_at(&fetch, SUBJECT, 1024.0, crate::theme::TextScale::ALL[4]);
+    let line = |name: &str| {
+        harness.query_all_by_role_and_label(Role::Button, name).map(|node| node.rect()).max_by(|a, b| a.left().total_cmp(&b.left())).unwrap()
+    };
+    let done = line("Done");
+    for name in ["Snooze", "Pin", "Move to a folder", "Delete", "More"] {
+        let rect = line(name);
+        assert!((rect.center().y - done.center().y).abs() < 0.5 && rect.left() > done.left(), "{name} on Done's line: {rect:?} {done:?}");
+    }
+    let subject = harness.get_by_label(SUBJECT).rect();
+    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    assert!(subject.top() >= done.bottom(), "the subject under the acts: {subject:?} {done:?}");
+    assert!((line("More").right() - subject.right()).abs() < 0.5, "More ends at the head's right edge: {subject:?}");
+    assert!((subject.height() - 2.0 * theme.fonts.title.line).abs() < 0.5, "the subject on two lines: {subject:?}");
+}

@@ -364,3 +364,45 @@ fn entries_that_could_not_be_read_are_counted_in_the_page_s_note() {
     harness.get_by_label("2 waiting entries could not be read and are not listed.");
     harness.get_by_label(ALERT);
 }
+
+/// The text painted in the last frame that starts with `wanted`: where its galley stands and its colour.
+fn painted(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<(egui::Rect, egui::Color32)> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<(egui::Rect, egui::Color32)> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text().starts_with(wanted) => {
+                let colour = text.galley.job.sections.first().map_or(text.fallback_color, |section| section.format.color);
+                Some((egui::Rect::from_min_size(text.pos, text.galley.size()), colour))
+            }
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn the_intro_is_the_frame_s_two_paragraphs_six_apart() {
+    let harness = four();
+    let first = "Everything that waits for its time, the next first: a send, a snooze that comes back, a reminder when no reply \
+                 came, a calendar alert.";
+    let second = "Cancelling a send puts the message back in Drafts. Cancelling a snooze brings the message back to the inbox now. \
+                  Cancelling a reminder or an alert removes only that entry: the message and the event stay as they are.";
+    let (first, _) = painted(&harness, first).expect("the frame's first paragraph");
+    let (second, _) = painted(&harness, second).expect("the frame's second paragraph");
+    assert!((second.top() - first.bottom() - 6.0).abs() <= 0.5, "6 between the paragraphs: {}", second.top() - first.bottom());
+}
+
+#[test]
+fn a_row_s_parts_stand_where_the_frame_puts_them() {
+    // The frame's row: the time at 16 (96), the kind at 124 (72), the bar at 208, the subject at 223 (268), the note
+    // at 503 (149), cancel at 664 to 704.
+    let harness = four();
+    let (time, _) = painted(&harness, "Today 14:50").expect("the time is drawn");
+    let (subject, _) = painted(&harness, "Design review").expect("the subject is drawn");
+    let (note, _) = painted(&harness, "10 min before").expect("the note is drawn");
+    let cancel = harness.get_by_label(ALERT).rect();
+    let column = time.left() - 16.0;
+    assert!((subject.left() - column - 223.0).abs() <= 0.5, "the subject at 223: {}", subject.left() - column);
+    assert!((note.left() - column - 503.0).abs() <= 0.5, "the note at 503: {}", note.left() - column);
+    assert!((cancel.left() - column - 664.0).abs() <= 1.0, "cancel at 664: {}", cancel.left() - column);
+}

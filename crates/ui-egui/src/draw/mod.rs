@@ -385,6 +385,51 @@ enum ListPlace {
     Whole,
 }
 
+/// What the reader's pane says with nothing open, by what the list beside it holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReaderSays {
+    /// A list of messages: pick one, it opens here (the reader's own empty state).
+    Message,
+    /// The kept drafts: pick one, it opens in the composer.
+    Draft,
+    /// A list that holds nothing: nothing to open.
+    Nothing,
+    /// The outbox with sends in it: a send is not a message to read, nothing opens from it.
+    Outbox,
+}
+
+/// The reader's empty state beside the drafts (`Draft`), the outbox (`Outbox`) or a list that holds nothing
+/// (`Nothing`): in the middle of the pane, 40 from its sides, as the frames `drafts-list/filled`, `/empty` and
+/// `outbox/mixed` draw it.
+fn nothing_to_open(ui: &mut Ui, theme: &Theme, keymap: &Keymap, says: ReaderSays) {
+    let words = |action: &str| keymap.shortcut(action).map(|shortcut| crate::component::key::key_words(&shortcut));
+    let (title, help) = if says == ReaderSays::Outbox {
+        (
+            tr!("Nothing opens from here."),
+            tr!("A row of the outbox is a send, not a message to read. Undo or Edit takes it back into the composer, where it can be read and changed.")
+                .to_owned(),
+        )
+    } else if says == ReaderSays::Draft {
+        let help = match (words(keymap::NEXT), words(keymap::PREVIOUS), words(keymap::OPEN)) {
+            (Some(next), Some(previous), Some(open)) => tr!(
+                "{next} and {previous} move in the list, {open} opens the draft where you left it.",
+                next = next,
+                previous = previous,
+                open = open
+            ),
+            _ => tr!("A draft opens in the composer where you left it.").to_owned(),
+        };
+        (tr!("Pick a draft.\nIt opens in the composer."), help)
+    } else {
+        (tr!("Nothing to open."), tr!("A message opens here when the list holds one.").to_owned())
+    };
+    let side = margin(theme.spacing.s10).left;
+    Frame::new().inner_margin(Margin { left: side, right: side, top: 0, bottom: 0 }).show(ui, |ui| {
+        ui.set_min_size(ui.available_size());
+        crate::component::empty::empty_state(ui, theme, tr!("Reader · nothing open"), title, &help);
+    });
+}
+
 /// A pane's frame: no fill, `left` and `right` of its pane and `gap` above and below it.
 fn around(left: f32, right: f32, gap: f32) -> Frame {
     // Distances are a few points; the clamp keeps the casts inside i8.
@@ -2242,12 +2287,36 @@ impl InboxApp {
         }
     }
 
+    /// What the reader says with nothing open: the list holds nothing, the drafts, or messages.
+    fn reader_says(&self) -> ReaderSays {
+        let mailbox = &self.mailbox;
+        let drafts = mailbox.drafts_listed();
+        let outbox = mailbox.place() == Place::Outbox && mailbox.query().is_empty();
+        let none = if outbox {
+            mailbox.outbox().is_empty()
+        } else if drafts {
+            mailbox.drafts().next().is_none()
+        } else {
+            mailbox.messages().is_empty()
+        };
+        match (none, outbox, drafts) {
+            (true, _, _) => ReaderSays::Nothing,
+            (false, true, _) => ReaderSays::Outbox,
+            (false, false, true) => ReaderSays::Draft,
+            (false, false, false) => ReaderSays::Message,
+        }
+    }
+
     /// The reader on a card `left` from the list: the open message, or nothing open; what was asked in it.
     fn reader_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, left: f32) -> reader::Drawn {
         let gap = 0.0;
         if self.reader.open_id().is_none() {
+            let empty = self.reader_says();
             CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| {
-                layers.card(ui, Margin::ZERO, |ui| reader::nothing_open(ui, theme, &self.keymap));
+                layers.card(ui, Margin::ZERO, |ui| match empty {
+                    ReaderSays::Message => reader::nothing_open(ui, theme, &self.keymap),
+                    ReaderSays::Draft | ReaderSays::Nothing | ReaderSays::Outbox => nothing_to_open(ui, theme, &self.keymap, empty),
+                });
             });
             return reader::Drawn::default();
         }
@@ -2277,10 +2346,14 @@ impl InboxApp {
     fn composer_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, left: f32) -> Vec<compose::Asked> {
         let (keymap, mailbox) = (&self.keymap, &self.mailbox);
         let Some(composer) = self.composer.as_mut() else { return Vec::new() };
-        let shown = CentralPanel::no_frame()
-            .frame(around(left, theme.spacing.s2, theme.spacing.s2))
-            .show(ui, |ui| layers.card(ui, Margin::ZERO, |ui| compose::show(ui, theme, keymap, mailbox, composer)));
-        self.reader_place = Some(shown.response.rect);
+        // Flush with the body like the list: no band of the ground above, beside or under it.
+        let mut card = Rect::NOTHING;
+        let shown = CentralPanel::no_frame().frame(around(left, 0.0, 0.0)).show(ui, |ui| {
+            card = ui.max_rect();
+            layers.card(ui, Margin::ZERO, |ui| compose::show(ui, theme, keymap, mailbox, composer))
+        });
+        // The card's own rect, inside its pane's margins.
+        self.reader_place = Some(card);
         shown.inner
     }
 
@@ -2562,10 +2635,11 @@ impl InboxApp {
             add = self.welcome(&mut body, &theme, &mut layers);
         } else if !full {
             let left = 0.0;
-            // The list stands beside the reader while a message is open, and stays, with nothing open, when the open
-            // message left the list (held back); and beside the docked composer.
             let reading = self.reader.open_id().is_some() || self.held_back.is_some();
-            let place = list_place(list_shown, !single && (reading || docked));
+            // In two panes the list stands 440 wide beside the reader, with a message open or nothing open (the
+            // reader's empty state says so), and beside the docked composer.
+            // New senders' review is a place of cards across the whole body.
+            let place = list_place(list_shown, !single && (self.mailbox.place() != Place::Senders || reading || docked));
             // The list is hidden where the composer stands in its place: in one pane with the composer in front.
             // Nothing of it acts then.
             let hidden = place == ListPlace::Away && self.composer_in_front();
@@ -2615,7 +2689,12 @@ impl InboxApp {
             // The settings stand in the body alone: no composer, no reader.
         } else if docked && reader_shown {
             composed = self.composer_card(&mut body, &theme, &mut layers, composer_left);
-        } else if self.screen == Screen::Mail && (self.reader.open_id().is_some() || self.held_back.is_some()) && reader_shown && !docked {
+        } else if self.screen == Screen::Mail
+            && !self.mailbox.accounts().is_empty()
+            && (self.reader.open_id().is_some() || self.held_back.is_some() || (!single && self.mailbox.place() != Place::Senders))
+            && reader_shown
+            && !docked
+        {
             drawn = self.reader_card(&mut body, &theme, &mut layers, if full { gap } else { half });
         }
         layers.finish(&panes, &theme);
@@ -2816,15 +2895,23 @@ impl InboxApp {
                     // Over the event editor only what comes over it and the window's look: nothing of the mail or the
                     // calendar under it (until a half-typed event can be kept as a draft).
                     let editing = self.editing_event();
+                    let listed = |row: &crate::palette::Row| {
+                        keymap::scope(row.id).meets(screen) && (!editing || crate::surface::EDITOR_KEYS.contains(&row.id))
+                    };
                     lists.commands = crate::palette::rows(self.command.text())
                         .into_iter()
-                        .filter(|row| keymap::scope(row.id).meets(screen))
-                        .filter(|row| !editing || crate::surface::EDITOR_KEYS.contains(&row.id))
+                        .filter(|row| listed(row))
                         .map(|row| {
                             let refused = self.refused_on_the_line(&ctx, row.id);
                             command::Listed { row, refused }
                         })
                         .collect();
+                    // How many the line lists with nothing typed: the head says "2 of 82".
+                    lists.all_commands = if self.command.text().trim().is_empty() {
+                        lists.commands.len()
+                    } else {
+                        crate::palette::rows("").iter().filter(|row| listed(row)).count()
+                    };
                 }
                 crate::command::Mode::Mailbox => lists.mailboxes = command::mailboxes(&self.mailbox, self.command.text()),
                 // At most six, looked up only when the text changed.
@@ -3207,9 +3294,10 @@ impl InboxApp {
             }
             _ => {}
         }
-        let hints: Vec<(&'static str, String, &'static str)> = status::HINTS
+        // Done's key is the list's (an act on the selected row): its hint shows while the list has the keys.
+        let hints: Vec<(&'static str, String, &'static str)> = status::hints(self.status_keys(surfaces))
             .iter()
-            .filter(|(action, _)| surfaces.allows(action, &self.keymap))
+            .filter(|(action, _)| surfaces.allows(action, &self.keymap) || (*action == keymap::DONE && surfaces.list_has_keyboard()))
             .filter_map(|(action, word)| Some((*action, self.keymap.chip(ui.ctx(), action)?, *word)))
             .collect();
         let countdown_shown = matches!(shown, Some(crate::status::Message::Countdown { .. }));
@@ -3230,6 +3318,24 @@ impl InboxApp {
         };
         let pressed = status::line(ui, theme, &self.keymap, rect, &drawn);
         (pressed, which)
+    }
+
+    /// Which key hints the status line shows: the docked composer's, the open message's, or the list's with nothing
+    /// open (none in it: write); away from the mail's lists the open message's set.
+    fn status_keys(&self, surfaces: &Surfaces) -> status::Keys {
+        if self.screen != Screen::Mail || surfaces.on_settings() || self.mailbox.accounts().is_empty() {
+            status::Keys::Message
+        } else if self.composer.is_some() && self.docked() {
+            status::Keys::Composer
+        } else if self.reader.open_id().is_some() {
+            status::Keys::Message
+        } else {
+            match self.reader_says() {
+                ReaderSays::Nothing => status::Keys::Empty,
+                ReaderSays::Outbox => status::Keys::Outbox,
+                ReaderSays::Message | ReaderSays::Draft => status::Keys::List,
+            }
+        }
     }
 
     /// Applies what was pressed in the status line on the message `undid` names: a send taken back, a discard dropped.
@@ -3642,6 +3748,8 @@ mod settings_tests;
 #[path = "shortcuts_tests.rs"]
 mod shortcuts_tests;
 
+#[cfg(test)]
+mod round_tests;
 #[cfg(test)]
 #[path = "status_tests.rs"]
 mod status_tests;

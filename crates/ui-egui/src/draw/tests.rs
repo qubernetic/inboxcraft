@@ -151,7 +151,8 @@ fn the_unified_inbox_lists_its_rows_by_sender_subject_and_date() {
     harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, unread");
     harness.get_by_label("Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged");
     harness.get_by_label("Inbox");
-    harness.get_by_label("All accounts · 11 messages");
+    harness.get_by_label("All accounts");
+    harness.get_by_label("· 11 messages");
     assert_eq!(harness.get_all_by_role(Role::ListBoxOption).count(), 11);
 }
 
@@ -298,10 +299,10 @@ fn the_account_picker_narrows_to_one_account_with_its_address_in_the_header() {
     let mut harness = harness();
     harness.get_by_role_and_label(Role::Button, OWNER).click();
     harness.run();
-    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio").click();
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio, holloway.studio@example.org").click();
     harness.run();
     assert_eq!(harness.state().mailbox().narrowed(), Some(2));
-    harness.get_by_label_contains("holloway.studio@example.org · ");
+    harness.get_by_label("holloway.studio@example.org");
     assert!(harness.query_by_label("Inbox in Personal, 2 unread").is_none());
     harness.get_by_role_and_label(Role::Button, OWNER).click();
     harness.run();
@@ -318,7 +319,8 @@ fn typing_in_the_command_line_searches_and_emptying_it_ends_the_search() {
     harness.get_by_role_and_label(Role::TextInput, "Command line").type_text("logo");
     harness.run();
     assert_eq!(harness.state().mailbox().query(), "logo");
-    harness.get_by_label("All accounts · 2 messages");
+    harness.get_by_label("All accounts");
+    harness.get_by_label("· 2 messages");
     for _ in 0..4 {
         harness.key_press(Key::Backspace);
         harness.run();
@@ -414,7 +416,8 @@ fn a_search_without_results_and_an_empty_folder_say_so() {
     harness.state_mut().mailbox_mut().open(Place::Folder(8));
     harness.run();
     harness.get_by_label("This folder holds no messages.");
-    harness.get_by_label("All accounts · 0 messages");
+    harness.get_by_label("All accounts");
+    harness.get_by_label("· 0 messages");
 }
 
 #[test]
@@ -739,7 +742,7 @@ fn the_account_picker_opens_by_enter_and_takes_an_account_by_enter() {
     harness.run();
     let all = harness.get_by_role_and_label(Role::MenuItemRadio, "All accounts");
     assert_eq!(all.accesskit_node().toggled(), Some(Toggled::True), "the picker shows All accounts chosen");
-    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio").focus();
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio, holloway.studio@example.org").focus();
     harness.run();
     harness.key_down(Key::Enter);
     harness.run();
@@ -749,7 +752,7 @@ fn the_account_picker_opens_by_enter_and_takes_an_account_by_enter() {
     assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "All accounts").is_none(), "the list closed");
     harness.get_by_role_and_label(Role::Button, OWNER).click();
     harness.run();
-    let studio = harness.get_by_role_and_label(Role::MenuItemRadio, "Studio");
+    let studio = harness.get_by_role_and_label(Role::MenuItemRadio, "Studio, holloway.studio@example.org");
     assert_eq!(studio.accesskit_node().toggled(), Some(Toggled::True), "opened again, it shows Studio chosen");
 }
 

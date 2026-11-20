@@ -381,7 +381,7 @@ pub fn panel<R>(ui: &mut Ui, theme: &Theme, width: f32, add: impl FnOnce(&mut Ui
         })
         .inner
     });
-    let shapes = paint::float_shapes(theme, inner.response.rect, FloatEdge::Keyboard);
+    let shapes = paint::float_shapes(theme, inner.response.rect, FloatEdge::Keyboard, ui.ctx().pixels_per_point());
     ui.painter().set(slot, Shape::Vec(shapes));
     inner.inner
 }

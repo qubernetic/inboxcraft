@@ -71,6 +71,9 @@ const ADDRESS_LEFT: f32 = 50.0;
 /// The account picker's width, in points.
 const PICKER: f32 = 230.0;
 
+/// How far a menu over its button stands over it (`popup::menu_up`), in points: the picker stands on the owner's row.
+const MENU_DROP: f32 = 4.0;
+
 /// The phosphor glyph of the Outbox (tray-arrow-up).
 const OUTBOX: char = '\u{ee52}';
 
@@ -122,14 +125,18 @@ fn open_id() -> Id {
     Id::unique("index-open-accounts")
 }
 
-/// The mailboxes' rows, in order: the shared ones, the gap, each account and, open, its folders.
+/// The mailboxes' rows, in order: the shared ones, the gap, each account and, open, its folders. The screener's and the
+/// snoozed mail have no row of their own: New senders and Later show what is in them. Blocked mail has no other place,
+/// so its folder keeps its row.
 fn lines<'a>(mailbox: &'a Mailbox, open: &BTreeSet<u64>) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
     let sends = u64::try_from(mailbox.outbox().len()).unwrap_or(u64::MAX);
-    for view in mailbox.views() {
+    for view in mailbox.views().iter().filter(|view| !matches!(view.role, Role::Screener | Role::Snoozed)) {
         lines.push(Line::Shared(mailbox::Place::View(view.role), role_text(view.role), icon(Some(view.role)), view.unread));
         if view.role == Role::Inbox {
-            lines.push(Line::Shared(mailbox::Place::Senders, tr!("New senders"), iconset::glyph(IconId::People), 0));
+            // New senders counts the senders the screener holds back, as Home's TO SCREEN does.
+            let waiting = u64::try_from(mailbox.waiting().len()).unwrap_or(u64::MAX);
+            lines.push(Line::Shared(mailbox::Place::Senders, tr!("New senders"), iconset::glyph(IconId::People), waiting));
         }
         if view.role == Role::Drafts && sends > 0 {
             lines.push(Line::Shared(mailbox::Place::Outbox, tr!("Outbox"), OUTBOX, sends));
@@ -160,10 +167,12 @@ fn shown(mailbox: &Mailbox, at: Place) -> Option<mailbox::Place> {
 fn line(ui: &mut Ui, theme: &Theme, line: &Line<'_>, active: Option<mailbox::Place>, narrow: bool, asked: &mut Asked, toggled: &mut Option<u64>) {
     let response = match *line {
         Line::Shared(place, name, glyph, count) => {
-            // The Outbox counts sends waiting, not unread mail.
+            // The Outbox counts sends waiting and New senders the senders held back, not unread mail.
             let spoken = match (place, count) {
                 (mailbox::Place::Outbox, 1) => tr!("Outbox, 1 send").to_owned(),
                 (mailbox::Place::Outbox, _) => tr!("Outbox, {count} sends", count = count),
+                (mailbox::Place::Senders, 0) => name.to_owned(),
+                (mailbox::Place::Senders, _) => tr!("{name}, {count} waiting", name = name, count = count),
                 _ => spoken(name, None, count),
             };
             let row = MailboxRow {
@@ -430,18 +439,35 @@ fn owner(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, rect: Rect, (narrow, liv
     });
 }
 
-/// The account picker over the owner's row: All accounts and each account, the one shown chosen.
+/// The account picker over the owner's row, as its frame draws it: a SHOW MAIL OF head, All accounts, then each
+/// account with its bar and address; the one shown chosen. Its foot stands on the owner's row (over the hairline above
+/// it) and its right edge 1 past the index's, on the hairline beside it: 3 in from the index's left.
 fn picker(ui: &Ui, theme: &Theme, mailbox: &Mailbox, opener: &Response) -> Option<Option<u64>> {
     let narrowed = mailbox.narrowed().filter(|id| mailbox.account(*id).is_some());
-    let names: Vec<(Option<u64>, String)> = std::iter::once((None, tr!("All accounts").to_owned()))
-        .chain(mailbox.accounts().iter().map(|account| (Some(account.id), clean(&account.label))))
+    let accounts: Vec<(u64, String, String, u64)> = mailbox
+        .accounts()
+        .iter()
+        .map(|account| (account.id, clean(&account.label), clean(&account.address), u64::try_from(account.index).unwrap_or(0)))
         .collect();
-    popup::menu_up(ui.ctx(), theme, opener, Id::unique("index-account-picker"), PICKER, |ui| {
+    // `menu_up` stands a menu `MENU_DROP` over its opener, right edges together: the place it is given is the owner's
+    // row moved that much down and 1 to the right.
+    let mut on_row = opener.clone();
+    on_row.rect = opener.rect.translate(vec2(1.0, MENU_DROP));
+    // With one account there is nothing to narrow: its row is the one shown, and a note says where another is added.
+    let only = accounts.len() == 1;
+    popup::menu_up(ui.ctx(), theme, &on_row, Id::unique("index-account-picker"), PICKER, |ui| {
+        popup::head(ui, theme, tr!("Show mail of"), None);
         let mut chosen = None;
-        for (id, name) in &names {
-            if popup::choice(ui, theme, name, *id == narrowed).clicked() {
-                chosen = Some(*id);
+        if !only && popup::choice(ui, theme, tr!("All accounts"), narrowed.is_none()).clicked() {
+            chosen = Some(None);
+        }
+        for (id, name, address, index) in &accounts {
+            if popup::account_choice(ui, theme, name, address, *index, only || narrowed == Some(*id)).clicked() {
+                chosen = Some(Some(*id));
             }
+        }
+        if only {
+            popup::note(ui, theme, tr!("The only account. Another is added in Settings."));
         }
         (chosen, chosen.is_some())
     })
