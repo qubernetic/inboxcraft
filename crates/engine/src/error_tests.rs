@@ -27,6 +27,7 @@ fn every_error_has_a_code_and_a_sentence() {
         (EngineError::Panicked("mail.list"), "panicked", "the command mail.list failed inside; nothing was changed"),
         (EngineError::SampleOnly("sample.mail.set"), "sample_only", "the command sample.mail.set runs only on the sample mailbox (--sample)"),
         (EngineError::NothingToUndo, "nothing_to_undo", "there is nothing to undo"),
+        (EngineError::Editing, "editing", "an event is being edited"),
         (
             EngineError::StillMoving { id: 7 },
             "still_moving",

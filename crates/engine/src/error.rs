@@ -55,6 +55,8 @@ pub enum EngineError {
     SampleOnly(&'static str),
     /// The undo history is empty.
     NothingToUndo,
+    /// An agent's `history.undo` while the owner has an event open in the editor ([`crate::Session::set_editing`]).
+    Editing,
     /// The message's move is on its way, so the server's copy cannot be named yet.
     StillMoving {
         /// The message.
@@ -84,6 +86,7 @@ impl EngineError {
             Self::Panicked(_) => "panicked",
             Self::SampleOnly(_) => "sample_only",
             Self::NothingToUndo => "nothing_to_undo",
+            Self::Editing => "editing",
             Self::StillMoving { .. } => "still_moving",
         }
     }
@@ -113,6 +116,7 @@ impl fmt::Display for EngineError {
             Self::Panicked(id) => write!(f, "the command {id} failed inside; nothing was changed"),
             Self::SampleOnly(id) => write!(f, "the command {id} runs only on the sample mailbox (--sample)"),
             Self::NothingToUndo => f.write_str("there is nothing to undo"),
+            Self::Editing => f.write_str("an event is being edited"),
             Self::StillMoving { id } => {
                 write!(f, "the message {id} is still on its way to its folder; it can be deleted for good once the server has it there")
             }
