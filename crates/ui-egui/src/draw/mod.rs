@@ -2178,7 +2178,7 @@ impl InboxApp {
     }
 
     /// Says `text` in the status line, for the `notice` token's time once it shows.
-    fn say(&mut self, text: &str) {
+    pub(crate) fn say(&mut self, text: &str) {
         self.status.push(crate::status::Message::Notice { text: text.to_owned(), until: crate::status::NOTICE_SECONDS });
     }
 
