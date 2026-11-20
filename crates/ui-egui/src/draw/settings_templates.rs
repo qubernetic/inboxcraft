@@ -30,7 +30,10 @@ const ROW: f32 = 48.0;
 const NAME: f32 = 200.0;
 
 /// Between the row's parts, in points.
-const GAP: f32 = 16.0;
+const GAP: f32 = 12.0;
+
+/// Between the form's account choice and its name, in points.
+const FORM_GAP: f32 = 16.0;
 
 /// Between a row's two links, in points.
 const LINK_GAP: f32 = 12.0;
@@ -67,7 +70,9 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, back: &str, title: &str, ac
         words(
             ui,
             theme.fonts.body,
-            tr!("A template is a subject and a text kept on an account; the composer's Templates menu puts one in front of a new message's text."),
+            tr!(
+                "A template is a subject and a text kept on an account; the composer's Templates menu puts one into a draft. {name}, {first_name} and {my_name} are filled in; {?prompt} leaves a blank the draft asks for."
+            ),
             p.muted,
         );
     });
@@ -313,7 +318,7 @@ fn form(
         inset(ui, |ui| {
             let width = ui.available_width();
             ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = GAP;
+                ui.spacing_mut().item_spacing.x = FORM_GAP;
                 ui.allocate_ui_with_layout(vec2(ACCOUNT, 0.0), Layout::top_down(Align::Min), |ui| {
                     ui.spacing_mut().item_spacing.y = 8.0;
                     crate::component::label(ui, theme.fonts.label, tr!("Account"), theme.palette.muted);
@@ -327,7 +332,7 @@ fn form(
                         form.account = chosen;
                     }
                 });
-                let rest = (width - ACCOUNT - GAP).max(1.0);
+                let rest = (width - ACCOUNT - FORM_GAP).max(1.0);
                 ui.allocate_ui_with_layout(vec2(rest, 0.0), Layout::top_down(Align::Min), |ui| {
                     ui.set_width(rest);
                     let field = field::Field::new(tr!("Name"), tr!("What the Templates menu shows"));
