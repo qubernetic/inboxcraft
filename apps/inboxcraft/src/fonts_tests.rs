@@ -297,3 +297,18 @@ fn the_search_takes_every_probe_and_keeps_a_face_for_each() {
     missing.push(LATIN);
     assert_eq!(search_in(dir.path(), &missing).len(), 1, "the 32nd probe is looked for");
 }
+
+#[test]
+fn probes_past_the_cap_are_not_looked_for() {
+    // Forty probes: the search takes the first 32. Plex serves the first; the 40th, which Plex also holds, is not
+    // looked for, and no probe past the 32nd reaches a bit (a shift past a `u32` panics in a debug build).
+    let dir = plex_folder();
+    let mut missing: Vec<(&str, char)> = vec![LATIN];
+    missing.extend((0..38).map(|at| ("none", char::from_u32(0xE000 + at).unwrap())));
+    missing.push(("latin", 'B'));
+    assert_eq!(missing.len(), 40);
+    assert_eq!(search_in(dir.path(), &missing).len(), 1, "one face, for the first probe");
+    // Alone past the cap, the 40th finds no face.
+    missing[0] = ("none", '\u{F8FF}');
+    assert!(search_in(dir.path(), &missing).is_empty(), "a probe past the cap was looked for");
+}

@@ -63,6 +63,7 @@ const WORKER_STACK: usize = 16 * 1024 * 1024;
 
 /// The most probes one search takes: one face kept for each at most. A face's probes are bits of a `u32`.
 pub(crate) const MAX_PROBES: usize = 32;
+const _: () = assert!(MAX_PROBES <= u32::BITS as usize, "a face's probes are the bits of a u32");
 
 /// The longest family name kept in a fallback's name, in characters.
 const MAX_NAME: usize = 64;
