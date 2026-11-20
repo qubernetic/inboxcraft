@@ -253,9 +253,11 @@ computer was asleep). `Session::next_due` tells the front end when to tick next.
 `Context::next_schedule_id`.
 
 Event alerts (`engine::calendar::alert`): an event's `DISPLAY` and `AUDIO` alarms, or without any alarm the defaults
-(ten minutes before a timed event, a day before an all-day one), go off at times the store holds as `Alert`s, each
-with a schedule entry. A trigger's days follow the wall clock of the event's zone (the computer's for a floating
-time or a whole day) and its hours do not, so a day before noon is noon the day before across a change of the clock.
+(ten minutes before a timed event; for an all-day one the hour the owner chose, `engine::all_day_alert`), go off at
+times the store holds as `Alert`s, each with a schedule entry. A trigger's days follow the wall clock of the event's
+zone (the computer's for a floating time or a whole day) and its hours do not, so a day before noon is noon the day
+before across a change of the clock. An all-day event's triggers follow the computer's wall clock whole, hours too:
+`-PT15H` is 09:00 the day before, and `PT9H` 09:00 on the day, also on the days the clock is put forward or back.
 A cancelled event, one the owner declined and an alarm further than a year from its event alert nothing. The store
 holds the alerts of the next two weeks, at most 64 an event: `Session::commit` works them out for every event a
 batch puts, in the same batch (an alert at its old time keeps its id and entry), `Session::start` and then a sweep a
@@ -307,7 +309,13 @@ alarm with a `UID` and the event's summary (control characters as spaces), and l
 location alarm (`PROXIMITY` or `X-APPLE-PROXIMITY`, or a trigger at a moment long past) is not the alert and stays.
 `"none"` takes the timed display and sound alarms off and, where no alarm is left, writes the `ACTION:NONE` alarm of
 RFC 9074 so the default lead does not ring. A new event without an `alert` gets the default lead as its alarm (ten
-minutes, a day before an all-day event), so other devices ring too. An `event.update` that changes only the alert
+minutes; for an all-day event a trigger from its midnight at the hour `event.all_day_alert.set` (`owner`) chose:
+`-PT15H`, `-PT12H` or `-PT6H` for 09:00, 12:00 or 18:00 the day before, the default being 09:00, or `PT9H` for 09:00
+on the day), so other devices ring too. The front end keeps that choice beside the week rule, under
+`all_day_alert`, and hands it back at the start (`Session::set_all_day_alert`); a file without it, or with anything
+else there, is the default. Events already written keep their alarms when it changes, and the alerts of all-day
+events without alarms are worked out again at the next tick. An `event.update` that makes a timed event all-day,
+without an `alert`, moves an alarm still at the timed default (`-PT10M`) to the chosen hour; any other alarm stays. An `event.update` that changes only the alert
 rewrites only the moved or new `VALARM`: times, `DTSTAMP`, `SEQUENCE`, the scheduling parameters and the other alarms
 stay, and the guests are not told. What stays is byte-identical for text in canonical form; otherwise only its line
 form (the case of names, CRLF, folding) and parameter quoting change. A changed instance that cannot be read is kept

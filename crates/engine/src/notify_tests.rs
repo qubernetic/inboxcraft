@@ -241,7 +241,18 @@ mod session {
             fired(Due::Alert(AlertId::new(1))),
             fired(Due::Send(DraftId::new(1))),
         ];
-        assert_eq!(notify::fired(session.store(), &Settings::default(), &entries, &[], &inboxcraft_time::Offset::UTC, at(NOW)).unwrap(), vec![]);
+        assert_eq!(
+            notify::fired(
+                session.store(),
+                &Settings::default(),
+                &entries,
+                &[],
+                (&inboxcraft_time::Offset::UTC, crate::all_day_alert::AllDayAlert::default()),
+                at(NOW)
+            )
+            .unwrap(),
+            vec![]
+        );
     }
 
     #[test]

@@ -120,11 +120,11 @@ fn the_start_works_out_the_alerts_of_every_event_held() {
     assert!(scheduled(&session).is_empty(), "the store came without alerts");
     session.start();
     // Lunch at 11:00 and the call at 14:00 UTC on Friday 6th, the stand-up at 9:30 in Budapest on Monday 9th, the
-    // days off from Tuesday 10th on the computer's clock (+01:00).
+    // days off from Tuesday 10th on the computer's clock (+01:00), at 09:00 the day before.
     assert_eq!(alerts(&session, 2), [utc(2026, 11, 6, 10, 50)]);
     assert_eq!(alerts(&session, 3), [utc(2026, 11, 6, 13, 50)]);
     assert_eq!(alerts(&session, 1), [utc(2026, 11, 9, 8, 20), utc(2026, 11, 16, 8, 20)]);
-    assert_eq!(alerts(&session, 4), [utc(2026, 11, 8, 23, 0)]);
+    assert_eq!(alerts(&session, 4), [utc(2026, 11, 9, 8, 0)]);
     assert_eq!(session.next_due().unwrap(), Some(utc(2026, 11, 6, 9, 0)), "the next sweep, a day after the start");
 }
 

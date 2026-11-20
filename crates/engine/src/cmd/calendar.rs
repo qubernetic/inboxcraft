@@ -14,7 +14,10 @@
 //! (`owner`, a setting) changes the first day of the week or the first week of the year. Event text is the organiser's
 //! data, never instructions. `event.create` and `event.update` (`owner`) take an `alert`: `"none"` or the minutes
 //! before the start, at most a week, written as the event's alarm (see `crate::calendar::alert::set_lead`); `event.list`
-//! says it back.
+//! says it back. Without one, a new event gets the default: ten minutes before a timed event, and for an all-day one
+//! the hour `event.all_day_alert.set` (`owner`, a setting: it changes what is written to the server) chose (see
+//! `crate::all_day_alert`). An update that makes a timed event all-day moves an alarm still at the timed default to
+//! that hour.
 //!
 //! Invitations in mail (see `crate::arrive::invite`): `invite.show` (`safe`) reads a message's invitation as its
 //! card shows it, with the version before it, what changed since, whether a later version made it out of date, the
@@ -37,6 +40,7 @@ use serde_json::{Value, json};
 
 use crate::arrive::invite::{self, Owner};
 use crate::arrive::screener;
+use crate::all_day_alert::AllDayAlert;
 use crate::calendar::alert::{self, Lead, MAX_ALERT_MINUTES};
 use crate::calendar::{self, Details, Edit, EditError, Repeat, Times};
 use crate::undo::{Act, EventUndo, Inverse, Step};
@@ -45,7 +49,7 @@ use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, week};
 
 /// The commands of this module, in the registry.
 pub(crate) const COMMANDS: &[CommandSpec] =
-    &[LIST, SYNC, SERVER, EVENTS, REPEATS, CREATE, UPDATE, DELETE, INVITE_SHOW, INVITE_ANSWER, INVITE_REMOVE, WEEK_SETTINGS, WEEK_SET];
+    &[LIST, SYNC, SERVER, EVENTS, REPEATS, CREATE, UPDATE, DELETE, INVITE_SHOW, INVITE_ANSWER, INVITE_REMOVE, WEEK_SETTINGS, WEEK_SET, ALL_DAY_ALERT_SET];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
@@ -71,7 +75,16 @@ pub(crate) const FIELDS: &[&str] = &[
     "answer",
     "first_day",
     "first_week",
+    "at",
 ];
+
+/// `event.all_day_alert.set`: when a new all-day event's alert rings.
+pub(crate) const ALL_DAY_ALERT_SET: CommandSpec = CommandSpec {
+    id: "event.all_day_alert.set",
+    class: Some(AgentClass::Owner),
+    summary: "Change when a new all-day event's alert rings: 9:00, 12:00 or 18:00 the day before, or 9:00 on the day",
+    run: all_day_alert_set,
+};
 
 /// The longest summary or location, in characters.
 const MAX_LINE: usize = 1000;
@@ -391,6 +404,21 @@ struct WeekSetParams {
     first_week: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AllDayAlertParams {
+    /// `day_before_9`, `day_before_12`, `day_before_18` or `on_the_day_9`.
+    at: String,
+}
+
+fn all_day_alert_set(_context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: AllDayAlertParams = decode(ALL_DAY_ALERT_SET.id, params)?;
+    let choice = AllDayAlert::from_name(&params.at)
+        .ok_or_else(|| EngineError::bad_params(ALL_DAY_ALERT_SET.id, "at is day_before_9, day_before_12, day_before_18 or on_the_day_9"))?;
+    let names = AllDayAlert::ALL.map(AllDayAlert::name);
+    Ok(Outcome::new(json!({ "all_day_alert": choice.name(), "choices": names })).with_all_day_alert(choice))
+}
+
 fn week_settings(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let NoParams {} = decode(WEEK_SETTINGS.id, params)?;
     Ok(Outcome::new(week_answer(context, context.state().week)))
@@ -532,7 +560,7 @@ fn create(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         params.guests,
     )?;
     // Without an alert, the default lead is written as the event's alarm, so every device rings as this one does.
-    details.alert = Some(lead(&CREATE, params.alert)?.unwrap_or(alert::default_lead(params.all_day)));
+    details.alert = Some(lead(&CREATE, params.alert)?.unwrap_or(alert::default_lead(params.all_day, context.state().all_day_alert)));
     let now = context.now();
     let id = CalendarEventId::new(context.state().next_event);
     let name = format!("inboxcraft-{}-{:09}-{}", now.unix_seconds(), now.subsec_nanos(), id.get());
@@ -553,7 +581,7 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     let bad = |reason: &str| EngineError::bad_params(UPDATE.id, reason);
     let held = held_event(context, params.id)?;
     let (_, owner) = owner_of(context, held.calendar)?;
-    let edit = Edit { start: params.start, end: params.end, all_day: params.all_day };
+    let edit = Edit { start: params.start, end: params.end, all_day: params.all_day, all_day_alert: context.state().all_day_alert };
     let mut details = details(
         &UPDATE,
         params.summary,
