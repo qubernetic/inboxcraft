@@ -21,7 +21,7 @@
 
 use egui::{Align, Id, Layout, Rect, Response, Role, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use inboxcraft_engine::ScreenerMode;
-use inboxcraft_engine::appearance::{Appearance, ReaderHost, ThemeMode, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, ComposerHost, ReaderHost, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
 use inboxcraft_engine::shown::SettingsAsked;
 
@@ -116,6 +116,8 @@ pub(super) enum Asked {
     /// The motion level, chosen by the owner.
     Motion(crate::motion::Level),
     Frame(WindowFrame),
+    /// Where a message is written (`ui.layout.set`), chosen by the owner.
+    Composer(ComposerHost),
     /// Where a message opens: in the pane or in a window of its own (`ui.layout.set`, the owner's).
     ReaderHost(ReaderHost),
     /// Another page of the settings.
@@ -607,9 +609,18 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, level: crate::mo
                 asked = Some(Asked::ReaderHost(host));
             }
         });
-        let places = [(0_u8, tr!("Pane"), f.button), (1, tr!("Window"), f.button)];
-        settings_row_soon_with(ui, theme, tr!("Write a message"), tr!("Docked in the reader's place, or in a window of its own."), |ui| {
-            segmented_for(ui, theme, &places, 0, Some(tr!("Write a message")));
+        // The owner's three hosts; a choice of the one shown asks nothing, and a held key's repeat chooses nothing.
+        let hosts = [
+            (ComposerHost::Docked, tr!("Pane"), f.button),
+            (ComposerHost::Floating, tr!("Floating"), f.button),
+            (ComposerHost::Window, tr!("Window"), f.button),
+        ];
+        let host_help = tr!("Docked in the reader's place, floating over it, or in a window of its own.");
+        settings_row(ui, theme, tr!("Write a message"), Some(host_help), |ui| {
+            let chosen = segmented_for(ui, theme, &hosts, current.layout.composer, Some(tr!("Write a message")));
+            if let Some(host) = chosen.filter(|host| *host != current.layout.composer && !crate::component::button::key_repeated(ui)) {
+                asked = Some(Asked::Composer(host));
+            }
         });
         // The design's two frames: InboxCraft's own (the command line is the title bar) and the desktop's title bar.
         let frames = [(WindowFrame::Own, tr!("Own"), f.button), (WindowFrame::System, tr!("System"), f.button)];

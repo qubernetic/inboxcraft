@@ -62,7 +62,7 @@ pub use list::rows_built;
 use std::sync::Arc;
 
 use egui::{CentralPanel, Frame, Key, Margin, Panel, Rect, Ui, pos2};
-use inboxcraft_engine::appearance::{Appearance, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, ComposerHost, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
@@ -85,6 +85,7 @@ use crate::surface::{Facts, Surface, Surfaces};
 use crate::theme::{self, Look, ModePreference, TextScale, Theme};
 use crate::workers::{NoWorkers, Workers};
 use crate::{UiError, tr};
+use host::Host;
 use paint::Panes;
 
 /// The width of the list's rows beside the reader, in points: the design's 440, whatever the text size. The list's
@@ -221,6 +222,14 @@ pub struct InboxApp {
     /// In one pane, the list stands in the docked composer's place (`Esc` in the composer); "New message" brings the
     /// composer back.
     list_over_composer: bool,
+    /// The composer is shown in a window of its own this frame (the layout asks for it and a window can open).
+    composer_window: bool,
+    /// A field of the composer in its window of its own had the keyboard in the window's last pass.
+    window_typing: bool,
+    /// Why the composer shows docked though the layout asks for a window of its own has been said.
+    window_refused_said: bool,
+    /// The composer's field that takes the keyboard in its window of its own at the window's next pass.
+    window_focus: Option<egui::Id>,
     /// In one pane, the reader takes the focus once it is drawn: `Enter` or a press opened a message into it.
     focus_reader: bool,
     /// An act from the reader walked on to the next message: the keyboard stays in the reader, on the reader's first
@@ -517,6 +526,10 @@ impl InboxApp {
             list_keys: true,
             reading: false,
             list_over_composer: false,
+            composer_window: false,
+            window_typing: false,
+            window_refused_said: false,
+            window_focus: None,
             focus_reader: false,
             focus_walked: false,
             restored: false,
@@ -1086,7 +1099,8 @@ impl InboxApp {
                 // The settings draw no composer: New message shows the place the owner came from.
                 self.leave_settings();
                 self.compose();
-                ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
+                let windowed = self.windowed(ctx);
+                focus_composer(ctx, windowed, &mut self.window_focus, compose::field_id(crate::compose::Line::To));
             }
             keymap::SEND => self.send_composer(),
             keymap::FOLD => {
@@ -1435,9 +1449,10 @@ impl InboxApp {
         })
     }
 
-    /// Whether a composer is drawn this frame: one is open, on any place but the settings, which draw none.
+    /// Whether a composer is drawn in the main window this frame: one is open, on any place but the settings, which
+    /// draw none, and not in a window of its own, whose keys are its own.
     fn composer_drawn(&self) -> bool {
-        self.composer.is_some() && !self.settings.is_open()
+        self.composer.is_some() && !self.settings.is_open() && !self.composer_window
     }
 
     /// Whether the list has the keyboard: it may have the keys ([`Surfaces::list_has_keyboard`]: on the mail, shown,
@@ -2024,7 +2039,7 @@ impl InboxApp {
 
     /// Whether the composer has the reader's place.
     fn docked(&self) -> bool {
-        self.screen == Screen::Mail && self.composer.as_ref().is_some_and(|composer| !composer.floating())
+        self.screen == Screen::Mail && !self.composer_window && self.composer.as_ref().is_some_and(|composer| !composer.floating())
     }
 
     /// Writes a new message in the reader's place (`compose.new`), or brings back the one being written: there is one
@@ -2041,6 +2056,7 @@ impl InboxApp {
             Ok(composer) => {
                 self.composer = Some(composer);
                 self.list_over_composer = false;
+                self.float_new_composer();
             }
             Err(error) => self.mailbox.fail(error),
         }
@@ -2062,6 +2078,7 @@ impl InboxApp {
             Ok(composer) => {
                 self.composer = Some(composer);
                 self.list_over_composer = false;
+                self.float_new_composer();
                 true
             }
             Err(error) => {
@@ -2160,6 +2177,7 @@ impl InboxApp {
             Ok(composer) => {
                 self.composer = Some(composer);
                 self.list_over_composer = false;
+                self.float_new_composer();
             }
             Err(error) => self.mailbox.fail(error),
         }
@@ -2171,7 +2189,8 @@ impl InboxApp {
     fn open_draft(&mut self, ctx: &egui::Context, draft: u64) {
         self.reopen(draft);
         if self.composer.as_ref().is_some_and(|composer| composer.draft() == draft) {
-            ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
+            let windowed = self.windowed(ctx);
+            focus_composer(ctx, windowed, &mut self.window_focus, compose::field_id(crate::compose::Line::To));
         }
     }
 
@@ -2336,6 +2355,7 @@ impl InboxApp {
             Asked::Fold => return self.run_action(ctx, keymap::FOLD),
             _ => {}
         }
+        let windowed = self.windowed(ctx);
         let Some(composer) = &mut self.composer else { return };
         let mailbox = &mut self.mailbox;
         let result = match asked {
@@ -2343,7 +2363,7 @@ impl InboxApp {
             Asked::Take(line) => composer.take(mailbox, line),
             Asked::Pick(at) => {
                 if let Some(line) = composer.suggestions().0 {
-                    ctx.memory_mut(|memory| memory.request_focus(compose::field_id(line)));
+                    focus_composer(ctx, windowed, &mut self.window_focus, compose::field_id(line));
                 }
                 composer.pick(mailbox, at)
             }
@@ -2379,7 +2399,7 @@ impl InboxApp {
             }
             Asked::Fill => {
                 composer.unsee();
-                ctx.memory_mut(|memory| memory.request_focus(compose::blank_id()));
+                focus_composer(ctx, windowed, &mut self.window_focus, compose::blank_id());
                 composer.fill(mailbox)
             }
             Asked::Later(at) => {
@@ -2419,7 +2439,8 @@ impl InboxApp {
         if self.keys_to_text > 0 {
             self.keys_to_text = self.keys_to_text.saturating_sub(1);
             if ctx.memory(|memory| memory.focused()) != Some(compose::text_id()) {
-                ctx.memory_mut(|memory| memory.request_focus(compose::text_id()));
+                let windowed = self.windowed(ctx);
+                focus_composer(ctx, windowed, &mut self.window_focus, compose::text_id());
                 // Drawn again with the keys where they are now.
                 ctx.request_repaint();
             }
@@ -2496,16 +2517,128 @@ impl InboxApp {
         shown.inner
     }
 
-    /// The composer's floating panel while it is not `docked`; what was asked in it.
+    /// The composer's floating panel while it is not `docked` nor in its window of its own; what was asked in it.
     fn floating_composer(&mut self, ui: &Ui, theme: &Theme, docked: bool, body: Rect) -> Vec<compose::Asked> {
         match self.composer.as_mut() {
-            Some(composer) if !docked => {
+            Some(composer) if !docked && !self.composer_window => {
                 // Over the reader's answers when it drew them in this pass: the panel never covers them.
                 let above = reader::answers_rect(ui.ctx()).map(|answers| answers.top());
                 compose::floating(ui.ctx(), theme, &self.keymap, &self.mailbox, composer, body, above)
             }
             _ => Vec::new(),
         }
+    }
+
+    /// A composer just opened is the floating panel when the layout asks for the floating host; its own Dock still
+    /// puts it in the reader's place.
+    fn float_new_composer(&mut self) {
+        if self.composer_host() == Host::Floating
+            && let Some(composer) = &mut self.composer
+        {
+            composer.set_floating(true);
+        }
+    }
+
+    /// Where the layout asks the composer to show.
+    fn composer_host(&self) -> Host {
+        match self.mailbox.appearance().layout.composer {
+            ComposerHost::Docked => Host::Docked,
+            ComposerHost::Floating => Host::Floating,
+            ComposerHost::Window => Host::Window(composer_window()),
+        }
+    }
+
+    /// Whether the layout asks for the composer in a window of its own and one can open here.
+    fn windowed(&self, ctx: &egui::Context) -> bool {
+        matches!(self.composer_host().usable(ctx), Host::Window(_))
+    }
+
+    /// Where the composer shows this frame, as the layout says: in a window of its own where one can open; where none
+    /// can (the web app, a headless context), docked, and the status line says why, once.
+    fn place_composer(&mut self, ctx: &egui::Context) {
+        let windowed = self.windowed(ctx);
+        let was = self.composer_window;
+        self.composer_window = windowed && self.composer.is_some();
+        if self.composer_window
+            && !was
+            && let Some(composer) = &mut self.composer
+        {
+            // In its window it is never the floating panel, folded or not.
+            composer.set_floating(false);
+        }
+        if was
+            && !self.composer_window
+            && self.composer_host() == Host::Floating
+            && let Some(composer) = &mut self.composer
+        {
+            // Out of its window into the floating host: the open composer floats at once, as a new one opens.
+            composer.set_floating(true);
+        }
+        if !self.composer_window {
+            self.window_typing = false;
+            self.window_focus = None;
+        }
+        let refused = matches!(self.composer_host(), Host::Window(_)) && !windowed;
+        if refused && self.composer.is_some() && !self.window_refused_said {
+            self.window_refused_said = true;
+            self.say(tr!("No window of its own can open here: the message is written in the reader's place"));
+        }
+    }
+
+    /// The composer in its window of its own while it shows there ([`InboxApp::place_composer`]); what was asked in it.
+    /// The window's `Esc`, the desktop's close and its frame's Close close the composer as its Close does: the draft is
+    /// on the disk first, and a draft the store does not keep leaves the window open with everything in it. Send's key
+    /// in the window sends; the countdown and its Undo are the main window's status line's. The keyboard is never on
+    /// nothing in the window: with none of its own, it goes to the To line.
+    fn composer_in_window(&mut self, ctx: &egui::Context, theme: &Theme) -> Vec<compose::Asked> {
+        if !self.composer_window {
+            return Vec::new();
+        }
+        let (keymap, mailbox, frame) = (&self.keymap, &self.mailbox, self.frame);
+        let Some(composer) = self.composer.as_mut() else { return Vec::new() };
+        let title = composer.title();
+        let look = host::Look { theme, frame: mailbox.appearance().frame, size: compose::WINDOW };
+        let focus = &mut self.window_focus;
+        let (mut typing, mut ran) = (false, Vec::new());
+        let hosted = host::show_with(ctx, Host::Window(composer_window()), &title, look, true, |ui, surfaces| {
+            let wanted =
+                focus.take().or_else(|| ui.ctx().memory(|memory| memory.focused()).is_none().then(|| compose::field_id(crate::compose::Line::To)));
+            if let Some(id) = wanted {
+                ui.ctx().memory_mut(|memory| memory.request_focus(id));
+            }
+            let mut asked = compose::window(ui, theme, keymap, mailbox, composer, frame);
+            // The window's own keys: Send, and the look of the app.
+            if surfaces.allows(keymap::SEND, keymap) && keymap.pressed(ui.ctx(), keymap::SEND) && !soon::blocked(ui.ctx(), keymap::SEND) {
+                asked.push(compose::Asked::Send);
+            }
+            ran.extend(crate::surface::WINDOW_KEYS.into_iter().filter(|id| surfaces.allows(id, keymap) && keymap.pressed(ui.ctx(), id)));
+            let focused = ui.ctx().memory(|memory| memory.focused());
+            typing = focused.is_some_and(compose::is_field);
+            if focused.is_none() {
+                // Tab walked off the last control: the next pass puts the keys back in To.
+                ui.ctx().request_repaint();
+            }
+            asked
+        });
+        let host::Hosted::Window(host::Windowed { inner, closed }) = hosted else { return Vec::new() };
+        self.window_typing = typing;
+        for id in ran {
+            self.run_action(ctx, id);
+        }
+        if !closed {
+            return inner;
+        }
+        // What was asked before the close goes in first, then the close keeps the draft.
+        for asked in inner {
+            self.apply_compose(ctx, asked);
+        }
+        self.close_composer();
+        if self.composer.is_some() {
+            ctx.send_viewport_cmd_to(composer_window(), egui::ViewportCommand::CancelClose);
+        } else {
+            self.composer_window = false;
+        }
+        Vec::new()
     }
 
     /// Applies what was asked in the composer this frame and keeps its draft; a message `clicked` in the list takes
@@ -2528,7 +2661,7 @@ impl InboxApp {
         let closing = ctx.input(|input| input.viewport().close_requested());
         if self.composer.as_ref().is_some_and(Composer::changed) {
             let now = ctx.input(|input| input.time);
-            let typing = ctx.memory(|memory| memory.focused()).is_some_and(compose::is_field);
+            let typing = ctx.memory(|memory| memory.focused()).is_some_and(compose::is_field) || (self.composer_window && self.window_typing);
             // A time that went back, or is no number, keeps it now.
             let wait = self.kept_at.map_or(0.0, |at| KEEP_EVERY - (now - at));
             if typing && !closing && wait > 0.0 && wait <= KEEP_EVERY {
@@ -2671,6 +2804,11 @@ impl InboxApp {
         self.appear("ui.frame.set", &json!({ "frame": frame.id() }));
     }
 
+    /// Where a message is written, from the next frame (`ui.layout.set`): docked, floating or in a window of its own.
+    pub fn set_composer_host(&mut self, host: ComposerHost) {
+        self.appear("ui.layout.set", &json!({ "composer": host.id() }));
+    }
+
     /// Lets the app draw the window's frame: the native window calls it, so the title bar, the window controls and the
     /// resizing edges show when the appearance asks for the app's own frame. Pictures and the web build leave it off.
     pub fn set_own_frame(&mut self, own: bool) {
@@ -2753,6 +2891,7 @@ impl InboxApp {
         self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
         self.frame = ui.ctx().cumulative_frame_nr();
+        self.place_composer(ui.ctx());
         // The list's rows as this frame draws them: a command of the frame that changes them draws the frame again.
         let rows_drawn = self.mailbox.rows_serial();
         // And the reader's place and the mode: a command of the frame that changes them draws it again (M7, M10, M14).
@@ -2922,12 +3061,14 @@ impl InboxApp {
         if !setting {
             composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
         }
+        // The composer's window lies under no modal surface of the main window: what is asked in it passes the gate.
+        let windowed = self.composer_in_window(ui.ctx(), &theme);
         // The status line, a strip of its own at the window's foot: it covers nothing of the panes.
         let (mut line, mut undid) = self.status_line(ui, &theme, &surfaces, (quiet, undo_taken), regions.status);
         // The one gate for the place under a modal surface ([`Surfaces::modal`]): whatever pressed it (the pointer, a key,
-        // a screen reader's activate, which egui's layers do not stop), nothing the list, the reader, the composer, Home,
-        // the calendar, the settings' page or the status line asked for in this frame is applied. The index has its own
-        // gate ([`InboxApp::index_allowed`]). Its one exception is the Undo of a loss whose time runs out
+        // a screen reader's activate, which egui's layers do not stop), nothing the list, the reader, the composer in this
+        // window, Home, the calendar, the settings' page or the status line asked for in this frame is applied. The index
+        // has its own gate ([`InboxApp::index_allowed`]). Its one exception is the Undo of a loss whose time runs out
         // ([`Undone::outlasts_the_gate`]).
         if surfaces.modal() {
             undid = undid.filter(|undone| undone.outlasts_the_gate());
@@ -2943,6 +3084,7 @@ impl InboxApp {
             add = false;
             dismiss = false;
         }
+        composed.extend(windowed);
         let (undone, dismissed) = self.apply_line(&line, undid);
         dismiss |= dismissed;
         ran.extend(line.hint);
@@ -3749,6 +3891,7 @@ impl InboxApp {
             settings::Asked::Scale(scale) => self.set_text_scale(scale),
             settings::Asked::Motion(level) => self.set_motion_level(level),
             settings::Asked::Frame(frame) => self.set_frame(frame),
+            settings::Asked::Composer(host) => self.set_composer_host(host),
             settings::Asked::ReaderHost(host) => self.appear("ui.layout.set", &json!({ "reader": host.id() })),
             settings::Asked::Section(section) => self.settings.show(section),
             settings::Asked::Sections => self.settings.to_list(false),
@@ -3852,7 +3995,8 @@ impl InboxApp {
             if self.answer(id, answer) {
                 // The text has the focus, or To for a forward.
                 let field = if answer == crate::compose::Answer::Forward { compose::field_id(crate::compose::Line::To) } else { compose::text_id() };
-                ui.ctx().memory_mut(|memory| memory.request_focus(field));
+                let windowed = self.windowed(ui.ctx());
+                focus_composer(ui.ctx(), windowed, &mut self.window_focus, field);
             }
             return;
         }
@@ -3902,6 +4046,22 @@ fn start(reader: &mut Reader, mailbox: &mut Mailbox, id: u64, act: Act) {
     }
 }
 
+/// The composer's window of its own.
+fn composer_window() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("inboxcraft-composer-window")
+}
+
+/// Gives the keyboard to the composer's field `id`: at the next pass of its window of its own when it shows there
+/// (`windowed`), never to a field the main window does not draw; in the main window otherwise.
+fn focus_composer(ctx: &egui::Context, windowed: bool, pending: &mut Option<egui::Id>, id: egui::Id) {
+    if windowed {
+        *pending = Some(id);
+        ctx.request_repaint();
+    } else {
+        ctx.memory_mut(|memory| memory.request_focus(id));
+    }
+}
+
 #[cfg(test)]
 #[path = "account_remove_tests.rs"]
 mod account_remove_tests;
@@ -3923,6 +4083,9 @@ mod compose_discard_tests;
 #[cfg(test)]
 #[path = "compose_tests.rs"]
 mod compose_tests;
+#[cfg(test)]
+#[path = "compose_window_tests.rs"]
+mod compose_window_tests;
 #[cfg(test)]
 #[path = "cover_tests.rs"]
 mod cover_tests;

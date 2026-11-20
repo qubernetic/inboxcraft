@@ -134,12 +134,13 @@ fn inbox_view_is_set_on_appearance_and_not_on_triage() {
 #[test]
 fn a_coming_soon_row_takes_no_focus_and_no_press() {
     let mut harness = opened();
-    let soon: Vec<_> =
-        harness.query_all_by_label_contains("for Write a message").map(|node| (node.accesskit_node().is_disabled(), node.rect())).collect();
-    assert_eq!(soon.len(), 2, "Pane and Window");
-    assert!(soon.iter().all(|(disabled, _)| *disabled));
+    // Accounts' "Set up a phone" is coming soon: its link is drawn but takes nothing.
+    harness.get_by_label("Accounts, settings page").click();
+    harness.run();
+    let link = harness.get_by_label_contains("show the code");
+    assert!(link.accesskit_node().is_disabled());
+    let window = link.rect();
     let before = harness.state().mailbox().last_run().map(str::to_owned);
-    let (_, window) = soon[1];
     harness.hover_at(window.center());
     harness.run();
     for pressed in [true, false] {
@@ -162,7 +163,7 @@ fn a_coming_soon_row_takes_no_focus_and_no_press() {
         }
     }
     assert!(!seen.is_empty());
-    assert!(seen.iter().all(|label| !label.contains("Write a message")), "{seen:?}");
+    assert!(seen.iter().all(|label| !label.contains("show the code")), "{seen:?}");
     // A planned section: every control on it is unavailable.
     harness.get_by_label("AI, settings page").click();
     harness.run();
@@ -531,7 +532,7 @@ fn appearance_is_look_then_layout_as_the_default_frame_draws_it() {
         assert!(!harness.get_by_label(level).accesskit_node().is_disabled(), "{level}");
     }
     assert!(!harness.get_by_label("Window for Open a message").accesskit_node().is_disabled());
-    assert!(harness.get_by_label("Window for Write a message").accesskit_node().is_disabled());
+    assert!(!harness.get_by_label("Window for Write a message").accesskit_node().is_disabled());
     let motion = harness.get_by_label("Full for Motion").rect();
     assert!(
         harness.query_all_by_label("coming soon").all(|tag| (tag.rect().center().y - motion.center().y).abs() > 1.0),
@@ -650,8 +651,8 @@ fn text_130_and_the_system_frame_stand_as_their_frames() {
     assert_eq!(harness.state().mailbox().last_run(), Some("ui.frame.set"));
     assert_eq!(harness.state().appearance().frame, inboxcraft_engine::appearance::WindowFrame::System);
     assert!(harness.query_all_by_label("System").any(|node| node.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)));
-    // `settings-appearance/layout-window`: a message opens in a window of its own (`ui.layout.set`, the owner's);
-    // writing in one comes later, its pane stays.
+    // `settings-appearance/layout-window`: a message opens in a window of its own and one is written in a window of its
+    // own, each through `ui.layout.set` (the owner's).
     harness.get_by_label("Window for Open a message").click();
     harness.run();
     assert_eq!(harness.state().mailbox().last_run(), Some("ui.layout.set"));
@@ -661,9 +662,10 @@ fn text_130_and_the_system_frame_stand_as_their_frames() {
     harness.get_by_label("Window for Open a message").click();
     harness.run();
     assert_eq!(harness.state().mailbox().runs(), runs, "the host shown is not set again");
-    harness.get_by_label("Window for Write a message").click();
+    harness.get_by_label("Window for Write a message").click_accesskit();
     harness.run();
-    assert!(chosen(&harness, "Window for Open a message") && chosen(&harness, "Pane for Write a message"));
+    assert_eq!(harness.state().mailbox().last_run(), Some("ui.layout.set"));
+    assert!(chosen(&harness, "Window for Open a message") && chosen(&harness, "Window for Write a message"));
 }
 
 #[test]
@@ -684,20 +686,27 @@ fn the_keyboard_walks_the_appearance_page_in_the_drawn_order() {
     let labels: Vec<&str> = walk.iter().map(|(label, _)| label.as_str()).collect();
     let at = |part: &str| labels.iter().position(|label| label.contains(part)).unwrap_or_else(|| panic!("{part} not reached: {labels:?}"));
     // Look, then Layout, as drawn; the coming-soon rows take no stop.
-    let order = [at("Auto / Dark / Light"), at("Motion"), at("Text size"), at("Grouped / Smart / List"), at("Open a message"), at("Own / System")];
+    let order = [
+        at("Auto / Dark / Light"),
+        at("Motion"),
+        at("Text size"),
+        at("Grouped / Smart / List"),
+        at("Open a message"),
+        at("Write a message"),
+        at("Own / System"),
+    ];
     assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "{labels:?}");
-    assert!(labels.iter().all(|label| !label.contains("Write a message")), "{labels:?}");
     // Shift Tab walks it back.
-    let last = walk[order[5]].0.clone();
+    let last = walk[order[6]].0.clone();
     harness.get_by_label(&last).focus();
     harness.run();
     let mut back = Vec::new();
-    for _ in 0..order[5] {
+    for _ in 0..order[6] {
         harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
         harness.run();
         back.push(focused(&harness).map(|(label, _)| label).unwrap_or_default());
     }
-    let mut forth: Vec<String> = labels[..order[5]].iter().map(|label| (*label).to_owned()).collect();
+    let mut forth: Vec<String> = labels[..order[6]].iter().map(|label| (*label).to_owned()).collect();
     forth.reverse();
     assert_eq!(back, forth);
 }

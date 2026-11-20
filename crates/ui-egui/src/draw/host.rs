@@ -82,7 +82,19 @@ const TITLE_IN: f32 = 50.0;
 /// Shows a surface on `host`: in a window of its own titled `title`, looking as `look` says, where one can open; then
 /// `add` draws its content and is given the window's [`Surfaces`] for its keys. Elsewhere `add` is not called and the
 /// caller draws the surface in its place ([`Hosted::Here`]).
-pub(crate) fn show<R>(ctx: &Context, host: Host, title: &str, look: Look<'_>, mut add: impl FnMut(&mut Ui, &Surfaces) -> R) -> Hosted<R> {
+pub(crate) fn show<R>(ctx: &Context, host: Host, title: &str, look: Look<'_>, add: impl FnMut(&mut Ui, &Surfaces) -> R) -> Hosted<R> {
+    show_with(ctx, host, title, look, false, add)
+}
+
+/// [`show`] for a surface that holds the composer (`composer`): the window's keys then include the composer's own.
+pub(crate) fn show_with<R>(
+    ctx: &Context,
+    host: Host,
+    title: &str,
+    look: Look<'_>,
+    composer: bool,
+    mut add: impl FnMut(&mut Ui, &Surfaces) -> R,
+) -> Hosted<R> {
     let Host::Window(id) = host.usable(ctx) else { return Hosted::Here(host.usable(ctx)) };
     let title = clean_title(title);
     let own = frame::drawn(true, look.frame);
@@ -95,7 +107,7 @@ pub(crate) fn show<R>(ctx: &Context, host: Host, title: &str, look: Look<'_>, mu
     ctx.show_viewport_immediate(id, builder, |ui, _class| {
         let ctx = ui.ctx().clone();
         // Built from this window's input, before its content reads a key: its own float first, then the window.
-        let surfaces = Surfaces::window(crate::component::popup::any_open(&ctx), false);
+        let surfaces = Surfaces::window(crate::component::popup::any_open(&ctx), composer);
         let escaped = surfaces.escape(&ctx) == Some(Surface::Window);
         let asked = ctx.input(|input| input.viewport().close_requested());
         let content = window_frame(ui, look, own, &title);

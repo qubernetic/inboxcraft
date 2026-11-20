@@ -138,6 +138,8 @@ enum Place {
     Docked,
     /// The floating panel.
     Floating,
+    /// In a window of its own: the window's title bar holds the title and its close.
+    Window,
 }
 
 /// The id of the field of `line`, to give it the focus.
@@ -884,14 +886,15 @@ fn body(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     let s = &theme.spacing;
     let side = control_side(theme);
     let mut asked = Vec::new();
-    let head_rect = Rect::from_min_size(area.min, vec2(area.width(), side));
+    // In a window of its own the title bar is the window's: the lines start at the top.
+    let head_rect = Rect::from_min_size(area.min, vec2(area.width(), if place == Place::Window { 0.0 } else { side }));
     if composer.folded() && place == Place::Floating {
         head(ui, theme, keymap, mailbox, composer, head_rect, place, &mut asked);
         return asked;
     }
     let foot_rect = Rect::from_min_max(pos2(area.left(), area.bottom() - side), area.max);
     let blank_room = if composer.blank().is_some() { blank_height(theme) + s.s3 } else { 0.0 };
-    let lines_top = head_rect.bottom() + s.s3;
+    let lines_top = if place == Place::Window { area.top() } else { head_rect.bottom() + s.s3 };
     let mut column = ui.new_child(UiBuilder::new().max_rect(Rect::from_min_max(pos2(area.left(), lines_top), pos2(area.right(), foot_rect.top()))));
     // Nothing of it is painted over the foot (or counts as seen there), however short the composer.
     column.set_clip_rect(Rect::from_min_max(area.min, pos2(area.right(), foot_rect.top())).intersect(ui.clip_rect()));
@@ -909,7 +912,9 @@ fn body(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     }
     foot(ui, theme, keymap, mailbox, composer, foot_rect, &mut asked);
     // The head last: Tab comes into the composer at From and leaves it from Close.
-    if place == Place::Docked {
+    if place == Place::Window {
+        // No head: Close is the window's.
+    } else if place == Place::Docked {
         let mut child = ui.new_child(UiBuilder::new().max_rect(head_rect));
         let rect = child.max_rect();
         child.allocate_rect(rect, Sense::hover());
@@ -971,7 +976,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     ui.allocate_rect(whole, Sense::hover());
     mark_drawn(ui, whole);
     let area = Rect::from_min_max(whole.min + vec2(s.s10, s.s6), whole.max - vec2(s.s10, s.s6));
-    composer.drawn_in(true);
+    composer.drawn_in(crate::compose::Drawn::Docked);
     let shown = wiped(ui.ctx(), Id::unique("compose-wipe").with(composer.draft()));
     if shown >= 1.0 {
         let asked = body(ui, theme, keymap, mailbox, composer, area, Place::Docked);
@@ -1046,7 +1051,7 @@ pub(super) fn floating(
             // 12 above the head, 20 beside and under the rest.
             let pad = s.s4 + s.s1;
             let area = Rect::from_min_max(rect.min + vec2(pad, s.s3), rect.max - vec2(pad, if composer.folded() { s.s3 } else { pad }));
-            composer.drawn_in(false);
+            composer.drawn_in(crate::compose::Drawn::Floating);
             let asked = body(ui, theme, keymap, mailbox, composer, area, Place::Floating);
             // Folded, its lines are not drawn: nothing of it has been seen.
             if !composer.folded() {
@@ -1056,4 +1061,65 @@ pub(super) fn floating(
             asked
         })
         .inner
+}
+
+/// The room around the composer in a window of its own: 20 above and under it, 24 beside.
+const WINDOW_PAD: Vec2 = vec2(24.0, 20.0);
+
+/// The composer's window of its own as it opens, in points: the Composer page's window frames.
+pub(super) const WINDOW: Vec2 = vec2(704.0, 720.0);
+
+/// Draws the composer into `ui`, the content of its window of its own (under the window's title bar): the composer on
+/// the surface, then the window's status line at its foot, with when the draft was kept, the account it goes from and
+/// Send's key. It is painted whole in the main window's `frame` (Send counts frames there). What was asked for.
+pub(super) fn window(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &mut Composer, frame: u64) -> Vec<Asked> {
+    let p = &theme.palette;
+    let whole = ui.max_rect();
+    ui.allocate_rect(whole, Sense::hover());
+    let high = theme.boxes().status;
+    let status = Rect::from_min_max(pos2(whole.left(), (whole.bottom() - high).max(whole.top())), whole.max);
+    let surface = Rect::from_min_max(whole.min, pos2(whole.right(), (status.top() - 1.0).max(whole.top())));
+    ui.painter().rect_filled(surface, 0.0, p.surface);
+    let area = Rect::from_min_max(surface.min + WINDOW_PAD, (surface.max - WINDOW_PAD).max(surface.min + WINDOW_PAD));
+    composer.drawn_in(crate::compose::Drawn::Window);
+    let asked = {
+        let mut inside = ui.new_child(UiBuilder::new().id_salt("compose-window").max_rect(surface));
+        inside.set_clip_rect(surface.intersect(ui.clip_rect()));
+        body(&mut inside, theme, keymap, mailbox, composer, area, Place::Window)
+    };
+    composer.mark_painted(frame);
+    composer.sighted();
+    paint::hairline(ui.painter(), pos2(whole.left(), status.top() - 0.5), pos2(whole.right(), status.top() - 0.5), p.line);
+    window_status(ui, theme, keymap, mailbox, composer, status);
+    asked
+}
+
+/// The window's status line: when the draft was kept and the account it goes from at the left, Send's key at the right.
+fn window_status(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &Composer, rect: Rect) {
+    use crate::component::status_item::{Kind, StatusItem, status_item};
+    let p = &theme.palette;
+    ui.painter().rect_filled(rect, 0.0, p.panel);
+    let mut keys = ui.new_child(
+        UiBuilder::new().id_salt("compose-window-keys").max_rect(rect.shrink2(vec2(12.0, 0.0))).layout(Layout::right_to_left(Align::Center)),
+    );
+    keys.set_clip_rect(rect.intersect(ui.clip_rect()));
+    let word = if composer.later().is_some() { tr!("schedule") } else { tr!("send") };
+    if let Some(chip) = keymap.chip(ui.ctx(), keymap::SEND) {
+        crate::component::key_hint::key_hint(&mut keys, theme, &chip, word, None);
+    }
+    let room = Rect::from_min_max(pos2(rect.left() + 6.0, rect.top()), pos2((keys.min_rect().left() - 4.0).max(rect.left() + 6.0), rect.bottom()));
+    let mut left = ui.new_child(UiBuilder::new().id_salt("compose-window-facts").max_rect(room).layout(Layout::left_to_right(Align::Center)));
+    left.set_clip_rect(room.intersect(ui.clip_rect()));
+    left.spacing_mut().item_spacing.x = 4.0;
+    let kept = composer.saved().map(|at| tr!("draft kept {time}", time = typed_time::short(at, mailbox.now(), mailbox.offset())));
+    let from = mailbox.account(composer.account()).map(|account| tr!("from {account}", account = account.label));
+    if let Some(kept) = &kept {
+        status_item(&mut left, theme, StatusItem::new(kept, Kind::Ok));
+    }
+    if let Some(from) = &from {
+        if kept.is_some() {
+            left.label(galley(&left, "·", theme.fonts.mono_s, p.dim));
+        }
+        status_item(&mut left, theme, StatusItem::new(from, Kind::Plain));
+    }
 }

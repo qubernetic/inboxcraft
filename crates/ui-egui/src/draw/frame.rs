@@ -10,7 +10,7 @@
 
 use egui::{
     Area, Context, CornerRadius, CursorIcon, Id, LayerId, Order, Pos2, Rect, ResizeDirection, Response, Sense, Stroke, StrokeKind, Ui,
-    ViewportCommand, pos2,
+    ViewportCommand, ViewportId, pos2,
 };
 use inboxcraft_engine::appearance::WindowFrame;
 
@@ -155,33 +155,49 @@ pub(super) fn edges(ctx: &Context) {
     }
 }
 
-/// Marks that the desktop has the pointer: a move or a resize of the window it does itself.
-fn grabbed_id() -> Id {
-    Id::unique("window-grabbed")
+/// Marks that the desktop has the pointer of the window `viewport`: a move or a resize of that window it does itself.
+fn grabbed_id(viewport: ViewportId) -> Id {
+    Id::unique("window-grabbed").with(viewport)
 }
 
-/// Sends `command`, which hands the pointer to the desktop until the button comes up, and marks it so the next
-/// frame's input gets the release the desktop keeps ([`release_after_grab`]).
+/// Sends `command`, which hands the pointer to the desktop until the button comes up, and marks it so the next input
+/// of the same window gets the release the desktop keeps ([`release_after_grab`]): the main window's through its input
+/// hook, a window of its own's through [`GrabRelease`], which egui runs before every pass of every window.
 fn hand_over(ctx: &Context, command: ViewportCommand) {
-    ctx.data_mut(|data| data.insert_temp(grabbed_id(), true));
+    let id = grabbed_id(ctx.viewport_id());
+    ctx.data_mut(|data| data.insert_temp(id, true));
+    ctx.add_plugin(GrabRelease);
     ctx.send_viewport_cmd(command);
 }
 
-/// Adds to `raw` the release of the primary button when the desktop took the pointer since the last frame: while it
-/// moves or resizes the window it keeps the release to itself, and egui would think the button still down, showing
-/// no hover anywhere until the next click.
+/// Adds to `raw` the release of the primary button when the desktop took the pointer of `raw`'s window since that
+/// window's last pass: while it moves or resizes the window it keeps the release to itself, and egui would think the
+/// button still down, showing no hover anywhere until the next click. Only that window's input gets it.
 pub(super) fn release_after_grab(ctx: &Context, raw: &mut egui::RawInput) {
-    let grabbed = ctx.data_mut(|data| data.remove_temp::<bool>(grabbed_id())).unwrap_or(false);
+    let viewport = raw.viewport_id;
+    let grabbed = ctx.data_mut(|data| data.remove_temp::<bool>(grabbed_id(viewport))).unwrap_or(false);
     if !grabbed {
         return;
     }
-    let pos = ctx.input(|input| input.pointer.latest_pos()).unwrap_or(Pos2::ZERO);
-    raw.events.push(egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers: ctx.input(|input| input.modifiers),
-    });
+    let (pos, modifiers) = ctx.input_for(viewport, |input| (input.pointer.latest_pos().unwrap_or(Pos2::ZERO), input.modifiers));
+    raw.events.push(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers });
+}
+
+/// Gives a window of its own's input the release the desktop kept ([`release_after_grab`]): eframe's input hook reaches
+/// the main window only; egui runs its plugins before every window's pass.
+struct GrabRelease;
+
+impl egui::Plugin for GrabRelease {
+    fn debug_name(&self) -> &'static str {
+        "inboxcraft-grab-release"
+    }
+
+    fn input_hook(&mut self, ctx: &Context, input: &mut egui::RawInput) {
+        // The main window's is its input hook's ([`release_after_grab`] there).
+        if input.viewport_id != ViewportId::ROOT {
+            release_after_grab(ctx, input);
+        }
+    }
 }
 
 /// Whether the window fills the screen now.
