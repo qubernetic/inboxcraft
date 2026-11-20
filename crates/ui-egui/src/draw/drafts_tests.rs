@@ -558,3 +558,24 @@ fn the_index_counts_the_drafts_outside_the_drafts_place_and_keeps_the_count_fres
     harness.run();
     harness.get_by_role_and_label(egui::accesskit::Role::Button, &format!("Drafts, {} drafts", total + 1));
 }
+
+#[test]
+fn a_draft_whose_discard_waits_is_not_counted_in_the_index_after_the_drafts_place() {
+    // Discard one of the drafts, then go to the inbox while its Undo still shows: the index counts the drafts left.
+    let mut app = sample_app();
+    let older = draft(&mut app, "", "Kiln rota", "");
+    draft(&mut app, "", "Glaze order", "");
+    let mut harness = drafts_place(app, egui::Theme::Dark);
+    let kept = total(harness.state_mut());
+    harness.state_mut().discard_draft(older);
+    harness.run();
+    harness.state_mut().mailbox_mut().open(Place::View(Folder::Inbox));
+    harness.run();
+    assert_eq!(harness.state().discarding(), Some(older), "the Undo still shows");
+    assert_eq!(harness.state().mailbox().place(), Place::View(Folder::Inbox));
+    let label = match kept - 1 {
+        1 => "Drafts, 1 draft".to_owned(),
+        left => format!("Drafts, {left} drafts"),
+    };
+    harness.get_by_role_and_label(Role::Button, &label);
+}

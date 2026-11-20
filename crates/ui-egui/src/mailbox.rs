@@ -1948,7 +1948,9 @@ impl Mailbox {
     /// Drafts count, kept fresh by [`Mailbox::keep_drafts_fresh`] in every place.
     #[must_use]
     pub fn drafts_total(&self) -> u64 {
-        let hidden = self.hidden_draft.is_some_and(|hidden| self.drafts.iter().any(|draft| draft.id == hidden));
+        // Listed, the draft counts only when it is among those read; outside the drafts place the list is not read,
+        // and a discard still waiting is one of the drafts counted.
+        let hidden = self.hidden_draft.is_some_and(|hidden| !self.drafts_listed() || self.drafts.iter().any(|draft| draft.id == hidden));
         self.drafts_total.saturating_sub(u64::from(hidden))
     }
 
@@ -1972,8 +1974,7 @@ impl Mailbox {
     /// [`MAX_LIST`] it lists), the one whose discard waits left out.
     #[must_use]
     pub fn drafts_count(&self) -> String {
-        let hidden = self.hidden_draft.is_some_and(|hidden| self.drafts.iter().any(|draft| draft.id == hidden));
-        match self.drafts_total.saturating_sub(u64::from(hidden)) {
+        match self.drafts_total() {
             0 => tr!("no drafts").to_owned(),
             1 => tr!("1 draft").to_owned(),
             count => tr!("{count} drafts", count = count),
