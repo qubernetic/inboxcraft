@@ -337,7 +337,7 @@ fn hostile_account_names_never_break_a_page() {
 
 /// Where a page's words end in the settings `place`: 16 in from the page column's right end.
 fn words_end(place: egui::Rect) -> f32 {
-    super::Columns::of(place, Section::Appearance).page.right() - 16.0
+    super::Columns::of(place, Section::Appearance, false).page.right() - 16.0
 }
 
 #[test]

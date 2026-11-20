@@ -580,7 +580,12 @@ fn dragging_across_both_breakpoints_keeps_a_half_filled_account_form() {
     for width in DRAG {
         harness.set_size(vec2(width, 800.0));
         harness.run();
-        assert_eq!(harness.ctx.memory(|memory| memory.focused()), on, "{width}: the settings keep the keyboard");
+        // In one pane the page stands alone: the keyboard goes to its way back to the list, and back to the row.
+        if width < 980.0 {
+            assert!(harness.get_by_role_and_label(Role::Button, "← Settings").accesskit_node().is_focused(), "{width}: on ← Settings");
+        } else {
+            assert_eq!(harness.ctx.memory(|memory| memory.focused()), on, "{width}: the settings keep the keyboard");
+        }
     }
 }
 

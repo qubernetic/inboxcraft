@@ -2764,8 +2764,9 @@ impl InboxApp {
         self.act_by_key |= keyed.is_some();
         // One Esc closes one surface ([`Surfaces::escape`]): an open float (a menu, a picker, a select), the palette, a
         // capture and the event editor take theirs before anything under them. On the settings, a place, an Esc with
-        // nothing in front closes nothing.
+        // nothing in front closes nothing; in one pane, on a page alone, it goes back to the list of sections.
         let setting = self.settings.is_open();
+        self.esc_to_sections(ui.ctx(), to_place && setting);
         let to_place = to_place && !setting;
         // The settings shown in the place of what was, and the palette coming over the window, close the lists, menus and
         // pickers open.
@@ -3732,6 +3733,7 @@ impl InboxApp {
             settings::Asked::Motion(level) => self.set_motion_level(level),
             settings::Asked::Frame(frame) => self.set_frame(frame),
             settings::Asked::Section(section) => self.settings.show(section),
+            settings::Asked::Sections => self.settings.to_list(false),
             settings::Asked::Add => self.onboarding.open(),
             settings::Asked::Edit(account) => self.onboarding.edit(&mut self.mailbox, account),
             settings::Asked::Back => self.onboarding.close(),

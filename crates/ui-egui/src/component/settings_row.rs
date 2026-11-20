@@ -9,6 +9,9 @@
 //!
 //! [`settings_row_soon`] is a setting that is not built yet: its title `muted` with the coming-soon tag, its reason as
 //! the help, and an unavailable switch.
+//!
+//! A control that needs more than half its row (a narrow window, large text) stands under the title and the help, at
+//! the left, 8 under them: the design's `stacked` and `stacked-with-help` states.
 
 use egui::{Align, Layout, Rect, Role, Sense, Shape, Ui, UiBuilder, Vec2, WidgetInfo, pos2, vec2};
 
@@ -104,9 +107,10 @@ pub(crate) fn settings_row_with<R>(
     let size_id = id.with("control");
     let control_size: Vec2 = ui.data(|data| data.get_temp(size_id)).unwrap_or(Vec2::ZERO);
     let control_room = if control_size.x > 0.0 { GAP + control_size.x } else { 0.0 };
-    // In a page too narrow for the words beside the control (a narrow window, large text), the control stands under
-    // the words, at the row's right end, and the words take the row's width.
-    let stacked = control_size.x > 0.0 && width - PAD_X * 2.0 - control_room < WORDS_LEAST;
+    // A control that needs more than half the row inside its 16 either side (a narrow window, large text), or one that
+    // leaves the words too little room, stands under the words, at the left, and the words take the row's width.
+    let inside = width - PAD_X * 2.0;
+    let stacked = control_size.x > 0.0 && (control_size.x > inside / 2.0 || inside - control_room < WORDS_LEAST);
     let words_width = if stacked { width - PAD_X * 2.0 } else { width - PAD_X * 2.0 - control_room }.max(1.0);
     let ink = super::soon::ink(ui, theme, p.ink);
     let tag_width = if tagged { TAG_GAP + super::galley(ui, crate::tr!("coming soon"), f.mono_s, p.muted).size().x.ceil() + 12.0 } else { 0.0 };
@@ -137,11 +141,13 @@ pub(crate) fn settings_row_with<R>(
         let mut child = ui.new_child(UiBuilder::new().max_rect(at).layout(Layout::left_to_right(Align::Min)));
         soon_tag(&mut child, theme);
     }
-    // The control at the right end, centred on the row, in a room as high as it was the frame before (a horizontal
-    // layout gives each widget the room's whole height, so a room as high as the row would measure the row).
+    // The control at the right end, centred on the row (stacked: at the left, under the words), in a room as high as it
+    // was the frame before (a horizontal layout gives each widget the room's whole height, so a room as high as the row
+    // would measure the row).
     let room_top = if stacked { top + words_high + STACKED_GAP } else { (rect.center().y - control_size.y / 2.0).round() };
     let room = Rect::from_min_max(pos2(left, room_top), pos2(rect.right() - PAD_X, room_top + control_size.y));
-    let mut child = ui.new_child(UiBuilder::new().id_salt(id.with("control-ui")).max_rect(room).layout(Layout::right_to_left(Align::Center)));
+    let layout = if stacked { Layout::left_to_right(Align::Center) } else { Layout::right_to_left(Align::Center) };
+    let mut child = ui.new_child(UiBuilder::new().id_salt(id.with("control-ui")).max_rect(room).layout(layout));
     let given = control(&mut child);
     let drawn = child.min_rect().size();
     if (drawn - control_size).length() > 0.01 {

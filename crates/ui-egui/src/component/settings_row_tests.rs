@@ -170,3 +170,29 @@ fn a_settings_row_is_at_least_the_scaled_height_at_130_percent() {
     assert!(rect.height() >= theme.boxes().settings_row, "{rect:?}");
     assert_eq!(rect.height(), rect.height().round(), "whole points: {rect:?}");
 }
+
+/// A row 640 wide whose control is `wide` × 28, a box the screen reader calls "control"; the control's and the title's
+/// rects.
+fn with_control(wide: f32) -> (Rect, Rect) {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let mut harness = Harness::builder().with_size(vec2(700.0, 240.0)).with_context_setup(crate::theme::install_fonts).build_ui(move |ui| {
+        settings_row(ui, &theme, TITLE, Some(HELP), |ui| {
+            let (_, response) = ui.allocate_exact_size(vec2(wide, 28.0), egui::Sense::click());
+            response.widget_info(|| egui::WidgetInfo::labeled(Role::Button, true, "control"));
+        });
+    });
+    harness.run();
+    let row = harness.get_by_role(Role::Group).rect();
+    (harness.get_by_label("control").rect(), row)
+}
+
+#[test]
+fn a_control_that_needs_more_than_half_the_row_inside_stands_under_the_words_at_the_left() {
+    // The row 640, 16 in either side: half of the 608 inside is 304.
+    let (beside, row) = with_control(304.0);
+    assert!((beside.right() - (row.right() - 16.0)).abs() <= 0.5, "304 stays at the right end: {beside:?} in {row:?}");
+    assert!((beside.center().y - row.center().y).abs() <= 1.0, "centred on the row: {beside:?} in {row:?}");
+    let (under, row) = with_control(305.0);
+    assert!((under.left() - (row.left() + 16.0)).abs() <= 0.5, "305 goes to the left: {under:?} in {row:?}");
+    assert!((row.bottom() - 1.0 - 12.0 - under.bottom()).abs() <= 1.0, "under the words, 12 over the row's foot: {under:?} in {row:?}");
+}

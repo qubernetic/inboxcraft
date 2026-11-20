@@ -25,14 +25,18 @@ use crate::tr;
 /// An entry's row, in points at 100 %.
 const ROW: f32 = 40.0;
 
-/// The time's column, in points.
+/// The time's column, in points at 100 % (it grows with the type, as the kind's does).
 const WHEN: f32 = 96.0;
 
-/// The kind's column, in points.
+/// The kind's column, in points at 100 %.
 const KIND: f32 = 72.0;
 
-/// The second text's column (whom it names, how long before), in points.
+/// The second text's column (whom it names, how long before), in points. Where the subject would keep less
+/// than this beside it (1000 at 130 %), the second text stands under the subject.
 const NOTE: f32 = 149.0;
+
+/// The account's bar, in points.
+const ACCOUNT_BAR: f32 = 3.0;
 
 /// Between the row's parts, in points.
 const GAP: f32 = 12.0;
@@ -153,13 +157,14 @@ fn list(
         inset(ui, |ui| section_label(ui, theme, "[ A ]", &tr!("Waiting · {n}", n = total), false));
         ui.add_space(super::GROUP_UNDER);
         rule(ui, theme);
+        let fit = Fit::of(ui, theme, ui.available_width());
         for (at, row) in scheduled.rows().iter().enumerate() {
             let ends = at == 0 || at.saturating_add(1) == total;
             let account = row.account.and_then(|id| accounts.iter().find(|account| account.id == id));
             // The time is formatted only for a row that is drawn: a row out of sight only takes its room.
             let when = || crate::scheduled::when(row.due, now, offset);
             let (top, left, right) = (ui.cursor().top(), ui.max_rect().left(), ui.max_rect().right());
-            let pressed = entry_row(ui, theme, keymap, row, when, account, ends, hand);
+            let pressed = entry_row(ui, theme, keymap, row, when, account, (ends, fit), hand);
             if pressed.is_some() {
                 *asked = pressed;
             }
@@ -172,7 +177,30 @@ fn list(
     near
 }
 
-/// An entry's row; drawn only near the view unless it `ends` the list.
+/// How every entry's row of the page is laid out, measured once a frame, not per row.
+#[derive(Debug, Clone, Copy)]
+struct Fit {
+    /// The room cancel takes: the link's words and its 16, in points.
+    link: f32,
+    /// Whether the second text stands under the subject: beside it the subject would keep less than the second text.
+    two_lines: bool,
+    /// The row's height, in points.
+    high: f32,
+}
+
+impl Fit {
+    /// The fit of a row `width` wide.
+    fn of(ui: &Ui, theme: &Theme, width: f32) -> Self {
+        let f = &theme.fonts;
+        let link = crate::component::galley(ui, tr!("cancel"), f.mono_s, theme.palette.ink).size().x.ceil() + 16.0;
+        let fixed = 16.0 + Theme::size(theme, WHEN) + GAP + Theme::size(theme, KIND) + GAP + ACCOUNT_BAR + GAP;
+        let two_lines = width - fixed - link - NOTE - 2.0 * GAP < NOTE;
+        let high = if two_lines { ROW.max(f.body.line + f.caption.line) } else { ROW.max(f.body.line + 18.0) }.round();
+        Self { link, two_lines, high }
+    }
+}
+
+/// An entry's row, laid out as `fit` says; drawn only near the view unless it `ends` the list.
 #[allow(clippy::too_many_arguments, reason = "the row's parts and the page's hand, each its own")]
 fn entry_row(
     ui: &mut Ui,
@@ -181,11 +209,13 @@ fn entry_row(
     row: &ScheduledRow,
     when: impl FnOnce() -> String,
     account: Option<&AccountRow>,
-    ends: bool,
+    (ends, fit): (bool, Fit),
     hand: &mut Option<Hand>,
 ) -> Option<Asked> {
     let width = ui.available_width();
-    let high = ROW.max(theme.fonts.body.line + 18.0).round();
+    let (when_w, kind_w, note_w) = (Theme::size(theme, WHEN), Theme::size(theme, KIND), NOTE);
+    let f = &theme.fonts;
+    let Fit { link, two_lines, high } = fit;
     let top = ui.cursor().top();
     let rect = Rect::from_min_size(pos2(ui.max_rect().left(), top), vec2(width, high));
     let clip = ui.clip_rect();
@@ -204,28 +234,38 @@ fn entry_row(
         ui.set_min_height(high);
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(16.0);
-        let shown = crate::component::cut(ui, when, theme.fonts.mono, p.ink, WHEN);
-        let (place, _) = ui.allocate_exact_size(vec2(WHEN, high), egui::Sense::hover());
+        let shown = crate::component::cut(ui, when, theme.fonts.mono, p.ink, when_w);
+        let (place, _) = ui.allocate_exact_size(vec2(when_w, high), egui::Sense::hover());
         ui.painter().galley(pos2(place.left(), place.center().y - shown.size().y / 2.0), shown, p.ink);
         ui.add_space(GAP);
-        ui.allocate_ui_with_layout(vec2(KIND, high), Layout::left_to_right(Align::Center), |ui| {
-            ui.set_min_width(KIND);
+        ui.allocate_ui_with_layout(vec2(kind_w, high), Layout::left_to_right(Align::Center), |ui| {
+            ui.set_min_width(kind_w);
             tag(ui, theme, row.kind.word(), TagKind::Default);
         });
         ui.add_space(GAP);
         let _ = crate::component::account_bar(ui, theme, account.map_or(0, |row| u64::try_from(row.index).unwrap_or(0)));
         ui.add_space(GAP);
         let word = tr!("cancel");
-        let link = crate::component::galley(ui, word, theme.fonts.mono_s, p.ink).size().x.ceil() + 16.0;
-        let room = (ui.available_width() - link - NOTE - 2.0 * GAP).max(1.0);
         let title = row.title();
-        let subject = crate::component::cut(ui, &title, theme.fonts.body, p.ink, room);
-        let (place, _) = ui.allocate_exact_size(vec2(room, high), egui::Sense::hover());
-        ui.painter().galley(pos2(place.left(), place.center().y - subject.size().y / 2.0), subject, p.ink);
-        ui.add_space(GAP);
-        let note = crate::component::cut(ui, &row.note(), theme.fonts.caption, p.muted, NOTE);
-        let (place, _) = ui.allocate_exact_size(vec2(NOTE, high), egui::Sense::hover());
-        ui.painter().galley(pos2(place.left(), place.center().y - note.size().y / 2.0), note, p.muted);
+        if two_lines {
+            // The subject over the second text, the two lines filling the row, both as wide as the row leaves.
+            let room = (ui.available_width() - link - GAP).max(1.0);
+            let (place, _) = ui.allocate_exact_size(vec2(room, high), egui::Sense::hover());
+            let subject = crate::component::cut(ui, &title, f.body, p.ink, room);
+            let top = place.top() + ((high - f.body.line - f.caption.line) / 2.0).round();
+            ui.painter().galley(pos2(place.left(), top + (f.body.line - subject.size().y) / 2.0), subject, p.ink);
+            let note = crate::component::cut(ui, &row.note(), f.caption, p.muted, room);
+            ui.painter().galley(pos2(place.left(), top + f.body.line + (f.caption.line - note.size().y) / 2.0), note, p.muted);
+        } else {
+            let room = (ui.available_width() - link - note_w - 2.0 * GAP).max(1.0);
+            let subject = crate::component::cut(ui, &title, f.body, p.ink, room);
+            let (place, _) = ui.allocate_exact_size(vec2(room, high), egui::Sense::hover());
+            ui.painter().galley(pos2(place.left(), place.center().y - subject.size().y / 2.0), subject, p.ink);
+            ui.add_space(GAP);
+            let note = crate::component::cut(ui, &row.note(), f.caption, p.muted, note_w);
+            let (place, _) = ui.allocate_exact_size(vec2(note_w, high), egui::Sense::hover());
+            ui.painter().galley(pos2(place.left(), place.center().y - note.size().y / 2.0), note, p.muted);
+        }
         ui.add_space(GAP);
         let cancel = link_sized(ui, theme, keymap, word, LinkSize::Small);
         take(hand, &Hand::Cancel(row.id), &cancel);

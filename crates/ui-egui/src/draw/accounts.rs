@@ -29,7 +29,7 @@ use crate::tr;
 /// The height of an account's row, in points (at 100 %).
 const ROW: f32 = 48.0;
 
-/// The width of an account's name, in points; its address follows 12 after it.
+/// The width of an account's name, in points at 100 % (it grows with the type); its address follows 12 after it.
 const NAME: f32 = 148.0;
 
 /// The room between an account row's parts, in points.
@@ -73,7 +73,7 @@ fn account(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &AccountRow) -> boo
     painter.rect_filled(bar, 0.0, theme.account_colour(u64::try_from(row.index).unwrap_or(0)));
     let words = bar.right() + ROW_GAP;
     let ends = link.rect.left() - ROW_GAP;
-    let address_at = (words + NAME + ROW_GAP).min(ends - 1.0).max(words + 1.0);
+    let address_at = (words + Theme::size(theme, NAME) + ROW_GAP).min(ends - 1.0).max(words + 1.0);
     let name = crate::component::cut(ui, &row.label, f.strong, p.ink, (address_at - words - ROW_GAP).max(1.0));
     let address = crate::component::cut(ui, &row.address, f.mono, p.muted, (ends - address_at).max(1.0));
     painter.galley(pos2(words, (mid - name.size().y / 2.0).round()), name, p.ink);

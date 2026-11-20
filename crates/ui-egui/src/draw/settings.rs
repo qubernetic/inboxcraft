@@ -71,12 +71,9 @@ const PAGE_TOP: f32 = 24.0;
 /// The room left and right of a page, in points.
 const PAGE_X: f32 = 40.0;
 
-/// The least room left and right of a page, where the body has no room for the page's 720 and 40 either side (a narrow
-/// window): the page keeps the width, the room gives way first, in points.
-const PAGE_X_LEAST: f32 = 24.0;
-
-/// The page's width the sections' column gives way for in a narrow body, in points.
-const PAGE_LEAST: f32 = 520.0;
+/// The least room right of a page, where the body is too narrow for the page's 720 (the design's narrow frames: 800,
+/// and 1000 at 130 %), in points.
+const PAGE_RIGHT: f32 = 38.0;
 
 /// The room under a page, in points.
 const PAGE_BOTTOM: f32 = 16.0;
@@ -193,6 +190,8 @@ pub(super) enum Asked {
     KeepScheduled,
     /// Read the senders whose pictures always load, for the Privacy page.
     ReadPrivacy,
+    /// In one pane, back from a section's page to the list of sections (`← Settings`).
+    Sections,
     /// The sender of this address: its pictures ask again.
     AskAgain(String),
 }
@@ -378,14 +377,72 @@ fn title_high(theme: &Theme) -> f32 {
     32.0_f32.max(theme.fonts.title.line).ceil()
 }
 
-/// A page's head: where it is (`[ 04 ] SETTINGS · <SECTION>`), its title with `action` at its right end and, on a
-/// planned section, the coming-soon mark there; then `intro`, a sentence a line.
+/// The tag on the [`Ui`] of a page that stands alone in the body (one pane): its head leads back to the list.
+const ALONE: &str = "inboxcraft-settings-page-alone";
+
+/// Whether `ui` draws a page that stands alone in the body, in one pane.
+fn alone(ui: &Ui) -> bool {
+    ui.stack().iter().any(|frame| frame.tags().contains(ALONE))
+}
+
+/// Where the frame notes that the page's way back to the list was pressed.
+fn back_pressed_id() -> Id {
+    Id::unique("settings-back-pressed")
+}
+
+/// Where the frame notes that the keyboard goes to the page's way back to the list.
+fn back_focus_id() -> Id {
+    Id::unique("settings-back-focus")
+}
+
+/// Where the last frame noted that a page's head showed the way back to the list.
+fn back_drawn_id() -> Id {
+    Id::unique("settings-back-drawn")
+}
+
+/// Where the frame notes which of the two ways between the list and the page had the keyboard: a section's row (1) or
+/// the page's `← Settings` (2). Crossing Mail's breakpoint the one shown takes the keyboard the other had.
+fn keyboard_id() -> Id {
+    Id::unique("settings-keyboard-on")
+}
+
+/// Notes that the keyboard is on a section's row (1) or on `← Settings` (2) this frame.
+fn note_keyboard(ctx: &egui::Context, on: u8) {
+    ctx.data_mut(|data| data.insert_temp(keyboard_id(), on));
+}
+
+/// Whether the last frame's settings showed a section's page alone, with `← Settings` in its head, and no field of it
+/// had the keyboard: `Esc` goes back to the list of sections then (a field's Esc is the field's).
+pub(super) fn back_shown(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(back_drawn_id())).unwrap_or(false)
+}
+
+/// A page's head: where it is (`[ 04 ] SETTINGS · <SECTION>`; alone in one pane, `← Settings`, the way back to the list
+/// of sections), its title with `action` at its right end and, on a planned section, the coming-soon mark there; then
+/// `intro`, a sentence a line.
 pub(super) fn head(ui: &mut Ui, theme: &Theme, section: Section, intro: &[&str], action: impl FnOnce(&mut Ui)) {
     let p = &theme.palette;
+    let alone = alone(ui);
     inset(ui, |ui| {
         let width = ui.available_width();
         ui.allocate_ui_with_layout(vec2(width, where_high(theme)), Layout::left_to_right(Align::Center), |ui| {
-            section_label(ui, theme, "[ 04 ]", &tr!("Settings · {section}", section = section.name()), false);
+            if !alone {
+                section_label(ui, theme, "[ 04 ]", &tr!("Settings · {section}", section = section.name()), false);
+                return;
+            }
+            // No action of the window: the link's tooltip names it with no key.
+            let back = link_sized(ui, theme, &Keymap::empty(), tr!("← Settings"), LinkSize::Small);
+            let ctx = ui.ctx().clone();
+            ctx.data_mut(|data| data.insert_temp(back_drawn_id(), true));
+            if ctx.data_mut(|data| data.remove_temp::<bool>(back_focus_id())).unwrap_or(false) {
+                back.request_focus();
+            }
+            if back.clicked() {
+                ctx.data_mut(|data| data.insert_temp(back_pressed_id(), true));
+            }
+            if back.has_focus() {
+                note_keyboard(&ctx, 2);
+            }
         });
         ui.add_space(HEAD_GAP);
         let tall = title_high(theme);
@@ -425,9 +482,22 @@ pub(super) fn group(ui: &mut Ui, theme: &Theme, index: &str, word: &str, note: O
 /// The page's body under its head, scrolling when it is taller than the sheet. Its rows keep the column's whole width:
 /// the scroll bar stands beside the column, in the page's room, never over a row or its focus edge.
 pub(super) fn body<R>(ui: &mut Ui, theme: &Theme, salt: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    scrolled(ui, theme, salt, true, add)
+}
+
+/// Where the frame notes the right edge of the window's body, for the scroll bar of a page taller than it.
+fn edge_id() -> Id {
+    Id::unique("settings-body-edge")
+}
+
+/// [`body`]: with `to_edge`, the scroll bar stands at the right edge of the window's body (a page taller than the body,
+/// as the design's narrow and 130 % frames draw it); without, beside the column (the Shortcuts page's list).
+fn scrolled<R>(ui: &mut Ui, theme: &Theme, salt: &str, to_edge: bool, add: impl FnOnce(&mut Ui) -> R) -> R {
     let width = ui.available_width().floor().max(1.0);
     let mut room = ui.available_rect_before_wrap();
-    room.max.x += theme.sizes.scrollbar * 2.0;
+    let beside = room.max.x + theme.sizes.scrollbar * 2.0;
+    let edge = if to_edge { ui.ctx().data(|data| data.get_temp::<f32>(edge_id())) } else { None };
+    room.max.x = edge.filter(|edge| edge.is_finite()).map_or(beside, |edge| edge.max(room.max.x));
     let mut child = ui.new_child(UiBuilder::new().max_rect(room).layout(Layout::top_down(Align::Min)));
     let area = ScrollArea::vertical().id_salt(("settings-page", salt)).auto_shrink([false, false]);
     let given = crate::component::scroll::show(&mut child, theme, area, |ui| {
@@ -598,8 +668,9 @@ fn section_count() -> String {
 }
 
 /// The list of sections: its head ("Settings" and how many sections there are), a `line` hairline, then a row per
-/// section, the one shown selected. The section pressed.
-fn nav(ui: &mut Ui, theme: &Theme, shown: Section, to_shown: bool) -> Option<Asked> {
+/// section, the one shown selected. The section pressed. Alone in one pane (`alone`) no row is selected and a press on
+/// any row, the one shown too, opens its page.
+fn nav(ui: &mut Ui, theme: &Theme, shown: Section, to_shown: bool, alone: bool) -> Option<Asked> {
     let p = &theme.palette;
     let f = &theme.fonts;
     let width = ui.available_width();
@@ -622,12 +693,15 @@ fn nav(ui: &mut Ui, theme: &Theme, shown: Section, to_shown: bool) -> Option<Ask
     rule_in(ui, p.line);
     ui.add_space(NAV_GAP);
     for section in Section::ALL {
-        let row = section_row(ui, theme, section, section == shown);
+        let row = section_row(ui, theme, section, !alone && section == shown);
         if to_shown && section == shown {
             row.request_focus();
         }
-        if row.clicked() && section != shown {
+        if row.clicked() && (alone || section != shown) {
             asked = Some(Asked::Section(section));
+        }
+        if row.has_focus() {
+            note_keyboard(ui.ctx(), 1);
         }
     }
     asked
@@ -776,7 +850,7 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
     rule(ui, theme);
     let waiting = settings.capturing();
     let list = crate::palette::matching(settings.find());
-    body(ui, theme, "shortcuts", |ui| {
+    scrolled(ui, theme, "shortcuts", false, |ui| {
         if list.is_empty() {
             ui.add_space(12.0);
             inset(ui, |ui| words(ui, theme.fonts.body, &tr!("No command matches “{text}”.", text = settings.find()), p.muted));
@@ -796,9 +870,13 @@ const HOLDS: [u8; 4] = [5, 10, 30, 60];
 /// The room between two signatures side by side, in points.
 const SIGNATURE_GAP: f32 = 24.0;
 
-/// The least width of a signature's column beside another, in points: its label, its field and its Save with "nothing
-/// changed" beside it, at 130 %. Narrower, the signatures stand one under the other.
-const SIGNATURE_LEAST: f32 = 240.0;
+/// The least width of a signature's column beside another, in points: the design draws them side by side only in the
+/// whole 720 column (332 each); in a narrow window, or at 130 % in one, each would keep about 300 and they stand one
+/// under the other.
+const SIGNATURE_LEAST: f32 = 320.0;
+
+/// The room between two signatures one under the other, in points.
+const SIGNATURE_UNDER: f32 = 16.0;
 
 /// One account's signature: its label, the field, and Save with "nothing changed" beside it while it is as kept.
 fn signature(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, account: &crate::mailbox::AccountRow) -> Option<Asked> {
@@ -897,7 +975,7 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
                             ui.spacing_mut().item_spacing.y = 0.0;
                             for (index, account) in pair.iter().enumerate() {
                                 if index > 0 {
-                                    ui.add_space(SIGNATURE_GAP);
+                                    ui.add_space(SIGNATURE_UNDER);
                                 }
                                 if let Some(pressed) = signature(ui, theme, keymap, settings, account) {
                                     asked = Some(pressed);
@@ -1129,37 +1207,37 @@ fn in_the_background(ui: &mut Ui, theme: &Theme, settings: &Settings, desk: Desk
 }
 
 /// Where the settings stand in `body`: the sections' column (232 wide, as the index) with the `line` hairline after it,
-/// and the page's column, 720 wide at most, 40 in from either side (down to 24 where the body is narrow), 24 under the
-/// top and 16 over the foot (the Shortcuts page's list runs to the foot, About keeps 24). On whole points; never inverted, however small the body.
+/// and the page's column, 720 wide at most, 40 in from its left and at least 38 from the body's right edge, 24 under the
+/// top and 16 over the foot (the Shortcuts page's list runs to the foot, About keeps 24). In one pane (`single`) the
+/// list and the page each take the whole body, one at a time, the page 40 in from the body's left. On whole points;
+/// never inverted, however small the body.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Columns {
     /// The sections' column.
     pub(super) nav: Rect,
-    /// The hairline's x, right of the sections' column.
+    /// The hairline's x, right of the sections' column (in one pane, the body's left edge: no hairline is drawn).
     pub(super) divider: f32,
     /// The page's column.
     pub(super) page: Rect,
 }
 
 impl Columns {
-    /// The columns in `body` with the page `shown`.
-    pub(super) fn of(body: Rect, shown: Section) -> Self {
+    /// The columns in `body` with the page `shown`, in one pane when `single`.
+    pub(super) fn of(body: Rect, shown: Section, single: bool) -> Self {
         let body = Rect::from_min_max(body.min.round(), body.max.round().max(body.min.round()));
-        // The sections' column gives way only where the page would keep less than its least width beside it, and then
-        // down to a quarter of the body.
-        let nav_width = NAV.min((body.width() * 0.25).floor().max(body.width() - 1.0 - 2.0 * PAGE_X_LEAST - PAGE_LEAST)).max(0.0);
+        let nav_width = if single { body.width() } else { NAV.min(body.width()) };
         let nav = Rect::from_min_size(body.min, vec2(nav_width, body.height()));
-        let divider = nav.right();
+        let divider = if single { body.left() } else { nav.right() };
+        let start = if single { body.left() } else { divider + 1.0 };
         let bottom = match shown {
             Section::Shortcuts => 0.0,
             Section::About => ABOUT_BOTTOM,
             _ => PAGE_BOTTOM,
         };
-        let side = ((body.right() - divider - 1.0 - COLUMN) / 2.0).clamp(PAGE_X_LEAST, PAGE_X).floor();
-        let left = divider + 1.0 + side;
+        let left = start + PAGE_X;
         let room = Rect::from_min_max(
             pos2(left, body.top() + PAGE_TOP),
-            pos2((body.right() - side).max(left), (body.bottom() - bottom).max(body.top() + PAGE_TOP)),
+            pos2((body.right() - PAGE_RIGHT).max(left), (body.bottom() - bottom).max(body.top() + PAGE_TOP)),
         );
         let width = room.width().clamp(1.0, COLUMN).floor();
         let page = Rect::from_min_size(room.min, vec2(width, room.height().max(1.0)));
@@ -1167,8 +1245,9 @@ impl Columns {
     }
 }
 
-/// Draws the settings in `ui`'s whole rect, the window's body: the sections' column and the page shown; returns what
-/// was asked for, applied by the caller after the frame's drawing.
+/// Draws the settings in `ui`'s whole rect, the window's body: the sections' column and the page shown; in one pane
+/// ([`super::one_pane`], Mail's breakpoint) the list of sections or the page, the page's head leading back to the list.
+/// Returns what was asked for, applied by the caller after the frame's drawing.
 pub(super) fn place(ui: &mut Ui, theme: &Theme, mut view: Sheet<'_>) -> Option<Asked> {
     let p = &theme.palette;
     let body = ui.max_rect();
@@ -1177,20 +1256,59 @@ pub(super) fn place(ui: &mut Ui, theme: &Theme, mut view: Sheet<'_>) -> Option<A
     place.widget_info(|| WidgetInfo::labeled(Role::Pane, true, tr!("Settings")));
     ui.painter().rect_filled(body, 0.0, p.surface);
     let shown = view.settings.section();
-    let to_shown = view.settings.take_nav_hand();
-    let columns = Columns::of(body, shown);
-    paint::hairline(ui.painter(), pos2(columns.divider, body.top()), pos2(columns.divider, body.bottom() - 1.0), p.line);
-    let mut asked = ui
-        .scope_builder(UiBuilder::new().id_salt("settings-sections").max_rect(columns.nav).layout(Layout::top_down(Align::Min)), |ui| {
-            nav(ui, theme, shown, to_shown)
-        })
-        .inner;
-    ui.scope_builder(UiBuilder::new().id_salt("settings-page").max_rect(columns.page).layout(Layout::top_down(Align::Min)), |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        if let Some(on_page) = page(ui, theme, &mut view) {
-            asked = Some(on_page);
-        }
+    let single = super::one_pane(ui.ctx());
+    let listed = single && view.settings.listed();
+    let ctx = ui.ctx().clone();
+    // The keyboard on the way the window no longer shows (crossing Mail's breakpoint, or a row pressed in the list
+    // alone) goes to the one it shows: from a section's row to the page's `← Settings`, and back to the shown
+    // section's row.
+    let had = ctx.data_mut(|data| data.remove_temp::<u8>(keyboard_id())).unwrap_or(0);
+    let to_shown = view.settings.take_nav_hand() || (had == 2 && (!single || listed));
+    if had == 1 && single && !listed {
+        view.settings.hand_to_back();
+    }
+    let columns = Columns::of(body, shown, single);
+    ctx.data_mut(|data| {
+        data.insert_temp(back_drawn_id(), false);
+        data.remove_temp::<bool>(back_pressed_id());
+        data.insert_temp(edge_id(), body.right());
     });
+    if !single {
+        paint::hairline(ui.painter(), pos2(columns.divider, body.top()), pos2(columns.divider, body.bottom() - 1.0), p.line);
+    }
+    let mut asked = None;
+    if !single || listed {
+        asked = ui
+            .scope_builder(UiBuilder::new().id_salt("settings-sections").max_rect(columns.nav).layout(Layout::top_down(Align::Min)), |ui| {
+                nav(ui, theme, shown, to_shown, single)
+            })
+            .inner;
+    }
+    if !listed {
+        if single && view.settings.take_back_hand() {
+            ctx.data_mut(|data| data.insert_temp(back_focus_id(), true));
+        }
+        let mut info = egui::UiStackInfo::default();
+        if single {
+            info = info.with_tag(ALONE);
+        }
+        let builder = UiBuilder::new().id_salt("settings-page").max_rect(columns.page).layout(Layout::top_down(Align::Min)).ui_stack_info(info);
+        ui.scope_builder(builder, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            if let Some(on_page) = page(ui, theme, &mut view) {
+                asked = Some(on_page);
+            }
+        });
+        ctx.data_mut(|data| data.remove_temp::<bool>(back_focus_id()));
+    }
+    if ctx.data_mut(|data| data.remove_temp::<bool>(back_pressed_id())).unwrap_or(false) {
+        asked = Some(Asked::Sections);
+    }
+    // A field with the keyboard keeps its Esc: the next frame's Esc does not go back to the list.
+    let typing = ctx.memory(|memory| memory.focused()).is_some_and(|focused| egui::text_edit::TextEditState::load(&ctx, focused).is_some());
+    if typing {
+        ctx.data_mut(|data| data.insert_temp(back_drawn_id(), false));
+    }
     asked
 }
 
@@ -1202,6 +1320,14 @@ impl super::InboxApp {
         // The command checks the page and answers every page: there is nothing for the banner.
         let _answered = self.mailbox.run(crate::keymap::SETTINGS, &serde_json::json!({ "page": page }));
         self.follow_settings_asked();
+    }
+
+    /// In one pane, an Esc with nothing in front (`esc`) on a section's page alone (`← Settings` in its head) goes back
+    /// to the list of sections; a field with the keyboard takes its own Esc first ([`back_shown`]).
+    pub(super) fn esc_to_sections(&mut self, ctx: &egui::Context, esc: bool) {
+        if esc && super::one_pane(ctx) && back_shown(ctx) {
+            self.settings.to_list(true);
+        }
     }
 
     /// A page's row of the palette: the palette closes and the settings show that page.
@@ -1263,3 +1389,7 @@ mod page_tests;
 #[cfg(test)]
 #[path = "settings_greeting_tests.rs"]
 mod greeting_tests;
+
+#[cfg(test)]
+#[path = "settings_narrow_tests.rs"]
+mod narrow_tests;
