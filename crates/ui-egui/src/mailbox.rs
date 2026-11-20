@@ -688,6 +688,8 @@ pub struct Mailbox {
     drafts_read: Option<u64>,
     /// How many drafts the engine keeps over the accounts shown (`compose.list`'s `total`), listed or not.
     drafts_total: u64,
+    /// [`Mailbox::draft_writes`] when [`Mailbox::drafts_total`] was last read, in the drafts place or outside it.
+    drafts_counted: Option<u64>,
     /// The draft whose discard waits behind its toast: the drafts place leaves it out until Undo or the discard.
     hidden_draft: Option<u64>,
     /// The subjects of the sends that went late since [`Mailbox::take_late`] was last called.
@@ -949,6 +951,7 @@ impl Mailbox {
             outbox: Vec::new(),
             drafts: Vec::new(),
             drafts_read: None,
+            drafts_counted: None,
             drafts_total: 0,
             hidden_draft: None,
             late: Vec::new(),
@@ -1901,6 +1904,22 @@ impl Mailbox {
             self.revision = self.revision.wrapping_add(1);
         }
         self.drafts_read = Some(self.draft_writes);
+        self.drafts_counted = Some(self.draft_writes);
+        Ok(())
+    }
+
+    /// Reads how many drafts the engine keeps over the accounts shown (`compose.list`'s `total`, one draft asked for):
+    /// the index's Drafts count outside the drafts place.
+    fn count_drafts(&mut self) -> Result<(), UiError> {
+        // A read for the index, in none of the window's tallies (as the status line's reads).
+        let account = self.narrowed;
+        let answer = self.quietly(|mailbox| mailbox.run("compose.list", &json!({ "account": account, "limit": 1 })))?;
+        let total = answer.get("total").and_then(Value::as_u64).unwrap_or(0);
+        if total != self.drafts_total {
+            self.drafts_total = total;
+            self.revision = self.revision.wrapping_add(1);
+        }
+        self.drafts_counted = Some(self.draft_writes);
         Ok(())
     }
 
@@ -1913,9 +1932,24 @@ impl Mailbox {
             if let Err(error) = read {
                 // Not read again until the next such write: a refused read is not asked for every frame.
                 self.drafts_read = Some(self.draft_writes);
+                self.drafts_counted = Some(self.draft_writes);
+                self.error = Some(error.to_string());
+            }
+        } else if !self.drafts_listed() && self.drafts_counted != Some(self.draft_writes) {
+            // Outside the drafts place only the total is read, for the index's Drafts count (#328).
+            if let Err(error) = self.count_drafts() {
+                self.drafts_counted = Some(self.draft_writes);
                 self.error = Some(error.to_string());
             }
         }
+    }
+
+    /// How many drafts the engine keeps over the accounts shown, the one whose discard waits left out: the index's
+    /// Drafts count, kept fresh by [`Mailbox::keep_drafts_fresh`] in every place.
+    #[must_use]
+    pub fn drafts_total(&self) -> u64 {
+        let hidden = self.hidden_draft.is_some_and(|hidden| self.drafts.iter().any(|draft| draft.id == hidden));
+        self.drafts_total.saturating_sub(u64::from(hidden))
     }
 
     /// Whether the drafts place shows its drafts: Drafts open, nothing searched.
@@ -1974,8 +2008,9 @@ impl Mailbox {
             self.load_drafts()?;
         } else {
             self.drafts = Vec::new();
-            self.drafts_total = 0;
             self.drafts_read = None;
+            // The total stays for the index; it is read again on the next frame that keeps it fresh.
+            self.drafts_counted = None;
         }
         self.place = place;
         self.messages = rows;

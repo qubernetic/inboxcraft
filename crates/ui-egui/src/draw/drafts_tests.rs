@@ -529,3 +529,32 @@ fn over_an_account_without_a_drafts_folder_j_past_the_last_draft_keeps_it_keyed(
     }
     assert_eq!(keyed(&harness), drafted.first().copied(), "the oldest draft, the last row, stays keyed at the end");
 }
+
+#[test]
+fn the_index_counts_the_drafts_outside_the_drafts_place_and_keeps_the_count_fresh() {
+    // index/with-counts: Drafts 2 with its dot, read in the inbox too; a new draft counts at once (#328).
+    let mut app = sample_app();
+    let before = {
+        let mailbox = app.mailbox_mut();
+        mailbox.run("compose.list", &json!({ "limit": 1 })).unwrap().get("total").and_then(Value::as_u64).unwrap()
+    };
+    draft(&mut app, "ana@example.org", "Kiln dates", "Saturday?");
+    draft(&mut app, "", "Notes", "");
+    app.show_mail();
+    app.set_reduce_motion(true);
+    let mut harness =
+        Harness::builder().with_size(vec2(1440.0, 900.0)).allow_missing_glyphs().build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    let total = before + 2;
+    assert_eq!(harness.state().mailbox().place(), Place::View(Folder::Inbox));
+    let labels: Vec<String> = harness
+        .query_all_by_role(egui::accesskit::Role::Button)
+        .filter_map(|node| node.accesskit_node().label())
+        .filter(|label| label.starts_with("Drafts"))
+        .collect();
+    assert!(labels.contains(&format!("Drafts, {total} drafts")), "{labels:?} {total}");
+    harness.get_by_role_and_label(egui::accesskit::Role::Button, &format!("Drafts, {total} drafts"));
+    draft(harness.state_mut(), "", "Third", "");
+    harness.run();
+    harness.get_by_role_and_label(egui::accesskit::Role::Button, &format!("Drafts, {} drafts", total + 1));
+}
