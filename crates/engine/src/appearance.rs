@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The owner's appearance choices: mode, text scale, motion and window frame.
+//! The owner's appearance choices: mode, text scale, motion, window frame and layout.
 //!
 //! Motion has three levels ([`MotionLevel`]: full, reduced, off) and a flag saying whether the owner chose one; while
 //! the owner has not, the computer's wish for less motion turns it off ([`effective`]). The front end reads the level
@@ -15,6 +15,10 @@
 //! next start. The kept form is [`Appearance::to_value`]; [`Appearance::from_value`] reads it back choice by choice,
 //! so a damaged file loses only what cannot be read. The colours, the typeface and the icons are fixed: a file kept
 //! by an older version that names an accent, a typeface or an icon set loads, and those fields are dropped.
+//!
+//! The layout ([`Layout`]) says where the reader and the composer show: docked in the main window, the composer
+//! floating over it, or each in a window of its own. A kept file without a layout, or with one that cannot be read
+//! (junk, or a host a newer build knows), reads as docked, part by part, and the other choices are read as ever.
 
 use serde_json::{Map, Value, json};
 
@@ -125,6 +129,57 @@ impl WindowFrame {
     }
 }
 
+choice! {
+    /// Where the reader shows a message: docked in the main window, or in a window of its own.
+    ReaderHost {
+        /// In the main window, beside the list.
+        Docked = "docked",
+        /// In a window of its own.
+        Window = "window",
+    } default Docked
+}
+
+choice! {
+    /// Where the composer shows: docked in the main window, floating over it, or in a window of its own.
+    ComposerHost {
+        /// In the main window.
+        Docked = "docked",
+        /// Floating over the main window.
+        Floating = "floating",
+        /// In a window of its own.
+        Window = "window",
+    } default Docked
+}
+
+/// Where the reader and the composer show. A front end that cannot open a second window shows them docked, whatever
+/// is kept here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Layout {
+    /// Where the reader shows.
+    pub reader: ReaderHost,
+    /// Where the composer shows.
+    pub composer: ComposerHost,
+}
+
+impl Layout {
+    /// The layout as JSON: `{"reader": …, "composer": …}`.
+    #[must_use]
+    pub fn to_value(self) -> Value {
+        json!({ "reader": self.reader.id(), "composer": self.composer.id() })
+    }
+
+    /// The layout kept as [`Layout::to_value`] wrote it, part by part: a part that is missing, not a string or not a
+    /// host this build knows (junk, or one a newer build kept) is docked; other keys are ignored.
+    #[must_use]
+    pub fn from_value(value: &Value) -> Self {
+        let part = |key: &str| value.get(key).and_then(Value::as_str);
+        Self {
+            reader: part("reader").and_then(ReaderHost::named).unwrap_or_default(),
+            composer: part("composer").and_then(ComposerHost::named).unwrap_or_default(),
+        }
+    }
+}
+
 /// Every appearance choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Appearance {
@@ -144,11 +199,20 @@ pub struct Appearance {
     pub motion_reduced: bool,
     /// Who draws the window's frame.
     pub frame: WindowFrame,
+    /// Where the reader and the composer show.
+    pub layout: Layout,
 }
 
 impl Default for Appearance {
     fn default() -> Self {
-        Self { theme: ThemeMode::default(), text_scale: 100, motion: Motion::default(), motion_reduced: false, frame: WindowFrame::default() }
+        Self {
+            theme: ThemeMode::default(),
+            text_scale: 100,
+            motion: Motion::default(),
+            motion_reduced: false,
+            frame: WindowFrame::default(),
+            layout: Layout::default(),
+        }
     }
 }
 
@@ -163,6 +227,7 @@ impl Appearance {
             "motion_level": self.motion_level().id(),
             "motion_chosen": self.motion_chosen(),
             "frame": self.frame.id(),
+            "layout": self.layout.to_value(),
         })
     }
 
@@ -173,7 +238,8 @@ impl Appearance {
     /// Motion is `motion_level` with `motion_chosen` (missing or not a boolean: chosen; not chosen: the default
     /// level). Without a level that can be read, the field `motion` of older versions maps: `system` to the default
     /// level not chosen, `reduce` to off, `full` to full; a level's own name there reads as that level, chosen. The
-    /// frame `top_row` or `strip` of older versions reads as the own frame ([`WindowFrame::read`]).
+    /// frame `top_row` or `strip` of older versions reads as the own frame ([`WindowFrame::read`]). The layout is read
+    /// by [`Layout::from_value`]: without one, the reader and the composer are docked.
     #[must_use]
     pub fn from_value(value: &Value) -> Self {
         let empty = Map::new();
@@ -199,6 +265,7 @@ impl Appearance {
                 .filter(|percent| TEXT_SCALES.contains(percent))
                 .unwrap_or(default.text_scale),
             frame: text("frame").and_then(WindowFrame::read).unwrap_or(default.frame),
+            layout: object.get("layout").map(Layout::from_value).unwrap_or_default(),
             ..default
         }
         .with_motion(level, chosen)

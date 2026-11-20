@@ -127,6 +127,7 @@ a message asks for it, and every tool is `safe`.
 - It has no resources, prompts, sampling or `outputSchema`; the results are text only, not the CLI's JSON.
 - `mail_list` has no group column yet: the grouped inbox is a later slice.
 - An HTML-only message gives no text yet.
+- It has no tool for the appearance; `ui.layout.set`, where the reader and the composer show, is the owner's alone.
 
 ## Revision history
 | Date | Change | Summary |

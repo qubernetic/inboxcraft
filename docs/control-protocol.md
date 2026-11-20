@@ -99,9 +99,11 @@ that is:
 - drafts: `compose.new`, `compose.update`, `compose.reply`, `compose.reply_all`, `compose.forward`,
   `compose.template` and `compose.discard`, which deletes a draft here and on the server;
 - `account.check`, which connects to the account's servers and signs in to them;
-- the appearance (`ui.*.set`) and, in the sample mailbox, `sample.mail.set`; `ui.motion.set` takes `level`
-  (`full`, `reduced` or `off`), and for one release still the older `reduce` (`on`, `off` or `system`, which hands
-  the choice back to the computer); its answer has `motion_level` and `motion_chosen` beside the older `motion`;
+- the appearance (`ui.*.set`, but not `ui.layout.set`, which is the owner's and refused with `not_allowed`) and, in
+  the sample mailbox, `sample.mail.set`; `ui.motion.set` takes `level` (`full`, `reduced` or `off`), and for one
+  release still the older `reduce` (`on`, `off` or `system`, which hands the choice back to the computer); its answer
+  has `motion_level` and `motion_chosen` beside the older `motion`. Every answer's appearance has `layout`, where the
+  reader (`docked` or `window`) and the composer (`docked`, `floating` or `window`) show;
 - `ui.settings.open`, which shows the settings in the window: on the page its optional `page` names (`appearance`,
   `accounts`, `notifications`, `triage`, `sending`, `calendar`, `shortcuts`, `privacy` or `about`), also while they
   show; without `page`, or with one that names none (another case, a planned page, junk), on the page last shown.
