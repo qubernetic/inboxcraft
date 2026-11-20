@@ -371,6 +371,8 @@ pub struct Calendar {
     unreadable: u64,
     /// The event editor, while it is open.
     editor: Option<Editor>,
+    /// Changes whenever New event or Edit opens an editor, one in the place of another too ([`Calendar::editor_opened`]).
+    opened: u64,
     /// The accounts the calendars belong to, as of the last read: id, place in the account list, name.
     accounts: Vec<(u64, usize, String)>,
     /// The day the arrows picked in the month or the mini month, if they did.
@@ -852,6 +854,13 @@ impl Calendar {
         self.editor.as_ref()
     }
 
+    /// Which opening of the editor is open: it changes whenever New event or Edit opens one, also in the place of an
+    /// editor with nothing typed, so that the new one is met as new (its title takes the keyboard).
+    #[must_use]
+    pub fn editor_opened(&self) -> u64 {
+        self.opened
+    }
+
     /// The event editor, to type into.
     pub fn editor_mut(&mut self) -> Option<&mut Editor> {
         self.editor.as_mut()
@@ -866,6 +875,7 @@ impl Calendar {
         let Some(first) = self.calendars.iter().find(|row| self.is_shown(row.id)).or_else(|| self.calendars.first()) else { return };
         let choices = self.calendars.iter().map(|row| (row.id, row.name.clone())).collect();
         self.editor = Some(Editor::new_event(first.id, self.focus(), choices));
+        self.opened = next_serial();
     }
 
     /// Opens the editor on the picked event; nothing opens without one.
@@ -875,6 +885,7 @@ impl Calendar {
         }
         if let Some(event) = self.picked() {
             self.editor = Some(Editor::edit(event));
+            self.opened = next_serial();
         }
     }
 

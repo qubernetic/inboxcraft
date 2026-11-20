@@ -234,6 +234,12 @@ pub struct InboxApp {
     editor_window_refused_said: bool,
     /// The event editor's window of its own was asked to close this frame: it stays when the editor stays.
     editor_window_closed: bool,
+    /// The opening of the event editor the last frame placed ([`Calendar::editor_opened`]).
+    editor_opened: u64,
+    /// The event editor's window is to come forward at the end of the frame: the main window asked for what it holds.
+    editor_window_forward: bool,
+    /// When a close of the main window was last taken back for an event's typing, in input seconds.
+    editor_close_taken: Option<f64>,
     /// The composer's field that takes the keyboard in its window of its own at the window's next pass.
     window_focus: Option<egui::Id>,
     /// In one pane, the reader takes the focus once it is drawn: `Enter` or a press opened a message into it.
@@ -538,6 +544,9 @@ impl InboxApp {
             editor_room: calendar::Room::Full,
             editor_window_refused_said: false,
             editor_window_closed: false,
+            editor_opened: 0,
+            editor_window_forward: false,
+            editor_close_taken: None,
             window_focus: None,
             focus_reader: false,
             focus_walked: false,
@@ -1457,6 +1466,11 @@ impl InboxApp {
                 calendar::Room::Full
             }
         };
+        // An editor opened in the place of another (one with nothing typed) is met as new: its title takes the keyboard.
+        let opened = self.calendar.editor_opened();
+        if std::mem::replace(&mut self.editor_opened, opened) != opened {
+            calendar::forget_editor_opened(ctx, None);
+        }
         calendar::forget_editor_opened(ctx, open.then_some(self.editor_room));
     }
 
@@ -1477,7 +1491,9 @@ impl InboxApp {
         let look = host::Look { theme, frame, size: calendar::EDITOR_WINDOW };
         let (mut escaped, mut ran) = (false, Vec::new());
         let hosted = host::show(ctx, Host::Window(event_editor_window()), &title, look, |ui, surfaces| {
-            escaped = surfaces.escape(ui.ctx()) == Some(Surface::Window);
+            // The desktop's close in the same pass wins: it never counts as a second Esc that throws the typing away.
+            let asked = ui.input(|input| input.viewport().close_requested());
+            escaped = surfaces.escape(ui.ctx()) == Some(Surface::Window) && !asked;
             ran.extend(crate::surface::WINDOW_KEYS.into_iter().filter(|id| surfaces.allows(id, keymap) && keymap.pressed(ui.ctx(), id)));
             calendar::editor_window(ui, theme, keymap, editor)
         });
@@ -1499,6 +1515,36 @@ impl InboxApp {
         if std::mem::take(&mut self.editor_window_closed) && self.calendar.editor().is_some() {
             ctx.send_viewport_cmd_to(event_editor_window(), egui::ViewportCommand::CancelClose);
         }
+        if std::mem::take(&mut self.editor_window_forward) && self.editor_room == calendar::Room::Window {
+            ctx.send_viewport_cmd_to(event_editor_window(), egui::ViewportCommand::Focus);
+        }
+    }
+
+    /// A close of the main window (the app's end, or its way to the tray) while the event editor holds typing, in any
+    /// host: the close is taken back once, as for a draft not kept ([`InboxApp::close_with_keeps`]), and the editor
+    /// says the event is not saved, in sight (the calendar shown, or its window brought forward). A second close in a
+    /// row, with nothing typed since, within [`CLOSE_IN_A_ROW`], goes through and the typing is lost.
+    fn close_with_event(&mut self, ctx: &egui::Context) {
+        if !ctx.input(|input| input.viewport().close_requested()) {
+            return;
+        }
+        let now = ctx.input(|input| input.time);
+        let in_a_row = self.editor_close_taken.is_some_and(|at| (0.0..=CLOSE_IN_A_ROW).contains(&(now - at)));
+        let Some(editor) = self.calendar.editor_mut().filter(|editor| editor.edited()) else { return };
+        if in_a_row && editor.warned() {
+            return;
+        }
+        editor.warn(false);
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        self.keeps_end.took_back = true;
+        self.editor_close_taken = Some(now);
+        if self.editor_room == calendar::Room::Window {
+            ctx.send_viewport_cmd_to(event_editor_window(), egui::ViewportCommand::Focus);
+        } else if self.screen != Screen::Calendar || self.settings.is_open() {
+            self.leave_settings();
+            self.show_calendar();
+        }
+        self.say(tr!("The event being edited is not saved: save it, or close again to quit without it"));
     }
 
     /// What stands in front this frame, read before its keys ([`Surfaces`]).
@@ -1621,8 +1667,14 @@ impl InboxApp {
     fn apply_calendar(&mut self, asked: Vec<calendar::Asked>) {
         let accounts = asked.contains(&calendar::Asked::Accounts);
         let mut copied = None;
+        let (mut kept_apart, mut delete_refused) = (false, false);
+        let windowed = self.editor_room == calendar::Room::Window;
         let (calendar, mailbox) = (&mut self.calendar, &mut self.mailbox);
         for asked in asked {
+            // The event editor's window holds typing that New event or Edit in the main window would replace: it stays,
+            // and comes forward to say so.
+            let typed = calendar.editor().is_some_and(crate::calendar::Editor::edited);
+            kept_apart |= windowed && typed && matches!(asked, calendar::Asked::New | calendar::Asked::Edit);
             match asked {
                 calendar::Asked::Accounts => {}
                 calendar::Asked::View(view) => calendar.set_view(mailbox, view),
@@ -1635,6 +1687,12 @@ impl InboxApp {
                 calendar::Asked::Pick(picked) => calendar.pick(picked),
                 calendar::Asked::New => calendar.new_event(),
                 calendar::Asked::Edit => calendar.edit_picked(),
+                // The event the editor holds typing for is not deleted under it (the window's, beside the main one).
+                calendar::Asked::Delete
+                    if typed && calendar.picked().map(|event| event.id) == calendar.editor().and_then(crate::calendar::Editor::id) =>
+                {
+                    delete_refused = true;
+                }
                 calendar::Asked::Delete => calendar.delete_picked(mailbox),
                 calendar::Asked::Save => calendar.save(mailbox),
                 calendar::Asked::Cancel => calendar.close_editor(),
@@ -1649,6 +1707,13 @@ impl InboxApp {
         }
         if let Some(url) = copied {
             self.say(&tr!("Link copied: {url}", url = crate::mailbox::shown(&url)));
+        }
+        if delete_refused {
+            self.say(tr!("Not deleted: the event is being edited in its window. Save or throw away the typing there first"));
+        }
+        if kept_apart {
+            self.editor_window_forward = true;
+            self.say(tr!("The event editor's window holds typing: save or throw it away there first"));
         }
         // Every press that opens or ends the editor (New event, Edit, Save, Cancel, Esc, Delete) comes through here.
         self.tell_editing(true);
@@ -3220,6 +3285,7 @@ impl InboxApp {
         }
         self.apply_calendar(on_calendar);
         self.keep_editor_window(ui.ctx());
+        self.close_with_event(ui.ctx());
         ran.extend(self.settle_home(ui.ctx(), on_home));
         for asked in drawn.asked {
             self.apply(ui, asked);
