@@ -294,19 +294,32 @@ its first and last day, its repeat preset, and the event's own zone with its wal
 another time than the computer's. `event.create`, `event.update` and `event.delete` (`owner`) change the store at once
 and write to the server as kept jobs (`Put` new or over the copy seen, `Delete`); a new single event is written in UTC,
 a repeating one on the computer's wall clock (floating) so it keeps its time of day across a summer-time change, and an
-edit keeps the event's own form (its zone, the wall clock or UTC). A delete is a kept job the session holds back for
-the undo window (`Outcome::with_held_job`, six seconds, as long as the toast with Undo shows): `Session::tick` hands it
-to the worker once the window is over, `history.undo` before then withdraws it from the queue and puts the event back,
-and a restart hands it out at once. Writes to one event go out one at a time (`engine::writes`): a second write (an
-edit, an undo, a delete whose window is over) waits until the server has taken the first, then goes with the entity
-tag that one got, or, when the server sent none, the tag the next sync of its calendar brings; a sync meanwhile keeps
-the owner's copy. So the owner's changes never conflict with each other. Editing an event with guests counts its
-`SEQUENCE` on only when the owner asks to tell them (`notify`); every organiser and guest InboxCraft writes carries
-`SCHEDULE-AGENT=CLIENT` (RFC 6638) so a server does not mail them on its own, and the attendee parameters `ical` does
-not read go back as they came. Clearing an account's CalDAV address, or moving it to another origin (host or port),
-drops the account's calendars and every calendar write of it in the queue; a discovery carries the address it is for,
-the app starts a worker afresh when an account's servers change, and a `Found` from another origin, a `Found` for an
-account without an address and an event URL outside its calendar's collection are dropped.
+edit keeps the event's own form (its zone, the wall clock or UTC). Their `alert` (`"none"` or the minutes before the
+start, at most a week) is set on every `VEVENT` of the object, the series and each changed instance: it moves the
+event's first timed display or sound alarm, dropping `X-APPLE-DEFAULT-ALARM` and `ACKNOWLEDGED`, or adds one `DISPLAY`
+alarm with a `UID` and the event's summary (control characters as spaces), and leaves every other alarm as it is; a
+location alarm (`PROXIMITY` or `X-APPLE-PROXIMITY`, or a trigger at a moment long past) is not the alert and stays.
+`"none"` takes the timed display and sound alarms off and, where no alarm is left, writes the `ACTION:NONE` alarm of
+RFC 9074 so the default lead does not ring. A new event without an `alert` gets the default lead as its alarm (ten
+minutes, a day before an all-day event), so other devices ring too. An `event.update` that changes only the alert
+rewrites only the moved or new `VALARM`: times, `DTSTAMP`, `SEQUENCE`, the scheduling parameters and the other alarms
+stay, and the guests are not told. What stays is byte-identical for text in canonical form; otherwise only its line
+form (the case of names, CRLF, folding) and parameter quoting change. A changed instance that cannot be read is kept
+as it came while the others take the alert. `event.list` says the alert back: `null` without any alarm, `"none"`, the
+minutes, or `"custom"` for what the field cannot show (a trigger it cannot name, or more than one timed display or
+sound alarm). A delete is a kept job the session holds back for the undo window
+(`Outcome::with_held_job`, six seconds, as long as the toast with Undo shows): `Session::tick` hands it to the worker
+once the window is over, `history.undo` before then withdraws it from the queue and puts the event back, and a restart
+hands it out at once. Writes to one event go out one at a time (`engine::writes`): a second write (an edit, an undo, a
+delete whose window is over) waits until the server has taken the first, then goes with the entity tag that one got,
+or, when the server sent none, the tag the next sync of its calendar brings; a sync meanwhile keeps the owner's copy.
+So the owner's changes never conflict with each other. Editing an event with guests counts its `SEQUENCE` on only when
+the owner asks to tell them (`notify`); every organiser and guest InboxCraft writes carries `SCHEDULE-AGENT=CLIENT`
+(RFC 6638) so a server does not mail them on its own, and the attendee parameters `ical` does not read go back as they
+came. Clearing an account's CalDAV address, or moving it to another origin (host or port), drops the account's
+calendars and every calendar write of it in the queue; a discovery carries the address it is for, the app starts a
+worker afresh when an account's servers change, and a `Found` from another origin, a `Found` for an account without an
+address and an event URL outside its calendar's collection are dropped.
 
 Invitations in mail (iTIP, RFC 5546, in mail, iMIP, RFC 6047) are read once a message's body is kept: the sync hands
 the body to `arrive::invite`, which reads its first `text/calendar` part of its own with `ical` and marks the message

@@ -263,12 +263,28 @@ fn the_manifest_installs_files_that_exist_under_the_app_id() {
     let manifest = repo_file(MANIFEST);
     assert!(manifest.starts_with("# ") && manifest.contains(&format!("\napp-id: {APP_ID}\n")), "{manifest}");
     assert!(manifest.contains("\n      - cargo-sources.json\n"), "the crates come from {SOURCES}");
-    let installs: Vec<(&str, &str)> =
-        manifest.lines().filter_map(|line| line.trim_start().strip_prefix("- install -Dm644 ")).filter_map(|rest| rest.split_once(' ')).collect();
+    let installs: Vec<(&str, &str)> = manifest
+        .lines()
+        .filter_map(|line| line.trim_start().strip_prefix("- install -Dm644 "))
+        .filter(|rest| !rest.starts_with("-t "))
+        .filter_map(|rest| rest.split_once(' '))
+        .collect();
     assert_eq!(installs.len(), 2, "{manifest}");
     for (from, to) in installs {
         assert!(crate::default_root().join(from).is_file(), "{from} is missing");
         assert!(to.rsplit('/').next().is_some_and(|name| name.starts_with(APP_ID)), "{to} is not named after the app id");
+    }
+}
+
+#[test]
+fn the_manifest_installs_the_notice_and_every_licence_text_under_the_app_id() {
+    let manifest = repo_file(MANIFEST);
+    let prefix = format!("- install -Dm644 -t /app/share/licenses/{APP_ID} ");
+    let files: Vec<&str> =
+        manifest.lines().filter_map(|line| line.trim_start().strip_prefix(prefix.as_str())).flat_map(str::split_whitespace).collect();
+    assert_eq!(files, ["NOTICE", "LICENSE-MIT", "LICENSE-APACHE", "LICENSES/CC-BY-ND-4.0.txt"], "{manifest}");
+    for file in files {
+        assert!(crate::default_root().join(file).is_file(), "{file} is missing");
     }
 }
 

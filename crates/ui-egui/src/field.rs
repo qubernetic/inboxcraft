@@ -286,6 +286,26 @@ impl Field {
         self
     }
 
+    /// The emblem on it.
+    #[must_use]
+    pub const fn emblem(&self) -> Option<&Emblem> {
+        self.emblem.as_ref()
+    }
+
+    /// Puts `emblem` on it (`None` takes it off), where [`Opts::emblem`] puts it; the cells are built again at the next
+    /// [`show`].
+    pub fn set_emblem(&mut self, emblem: Option<&Emblem>) {
+        self.emblem = emblem.cloned();
+        self.cells = None;
+        self.look = None;
+    }
+
+    /// Where the emblem's top left corner was drawn at the last build, if it was.
+    #[cfg(test)]
+    pub(crate) fn emblem_at(&self) -> Option<Pos2> {
+        self.cells.as_ref().and_then(|cells| cells.emblem_at)
+    }
+
     /// How many times the cells were built (what the page tests of a screen with a field count).
     #[cfg(test)]
     pub(crate) const fn builds(&self) -> u32 {
@@ -531,15 +551,27 @@ fn place_cells(rect: Rect, scale: TextScale, area: Option<Rect>, ppp: f32, emble
     }
     // Clamped before any arithmetic, so no corner or origin overflows to an infinity.
     let rect = within_reach(rect);
-    let area = area.map(within_reach);
     placed.rect = rect;
     let origin = pos2(ceil_px(rect.min.x, ppp), ceil_px(rect.min.y, ppp));
     // Clamped to the caps first, so the casts lose nothing.
     placed.columns = ((rect.max.x - origin.x) / CELL_WIDTH).floor().clamp(0.0, MAX_COLUMNS as f32) as usize;
     placed.rows = ((rect.max.y - origin.y) / height).floor().clamp(0.0, MAX_ROWS as f32) as usize;
     placed.origin = origin;
-    placed.emblem_at = emblem.zip(area).and_then(|(emblem, area)| place(emblem, area, rect, origin, ppp));
+    placed.emblem_at = emblem.zip(area).and_then(|(emblem, area)| emblem_corner(emblem, area, rect, ppp));
     placed
+}
+
+/// Where a field over `rect` at `ppp` draws `emblem` centred in `area` ([`Opts::emblem`]): its top left corner, on
+/// the whole pixel the field puts it on, if it fits there whole. What stands by the emblem is placed from this, so
+/// it sits on the emblem's pixel grid.
+pub(crate) fn emblem_corner(emblem: &Emblem, area: Rect, rect: Rect, ppp: f32) -> Option<Pos2> {
+    let ppp_ok = ppp.is_finite() && ppp > 0.0 && ppp <= MAX_PPP;
+    if !(ppp_ok && rect.is_finite() && rect.width() > 0.0 && rect.height() > 0.0) {
+        return None;
+    }
+    let rect = within_reach(rect);
+    let origin = pos2(ceil_px(rect.min.x, ppp), ceil_px(rect.min.y, ppp));
+    place(emblem, within_reach(area), rect, origin, ppp)
 }
 
 /// `rect` with its corners clamped to [`MAX_COORDINATE`] either way: far off any screen, and far from overflowing
