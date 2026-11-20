@@ -74,7 +74,7 @@ pub(crate) const NEW: CommandSpec = CommandSpec {
 
 /// `compose.update`: changes a draft; the fields left out stay as they are.
 pub(crate) const UPDATE: CommandSpec =
-    CommandSpec { id: "compose.update", class: Some(AgentClass::Safe), summary: "Change a draft and keep it at once", run: update };
+    CommandSpec { id: "compose.update", class: Some(AgentClass::Safe), summary: "Change a draft and keep it", run: update };
 
 /// `compose.show`: one draft with its recipients checked.
 pub(crate) const SHOW: CommandSpec =
