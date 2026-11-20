@@ -64,6 +64,9 @@
 //!   ([`Session::pins_outlast_done`]). `history.undo` takes each back. What follows an act on the open message is the
 //!   owner's choice, `after.set` (`owner`): the next, the previous, the list, or stay on the next row unopened
 //!   ([`Session::after`]).
+//! - Home's greeting: which word of the sending name the headline greets the owner by is the owner's choice,
+//!   `greeting.set` (`owner`): the first word, the last, the full name or none ([`Session::greet_by`],
+//!   [`greet::GreetBy`]).
 //! - Snooze: `mail.snooze` (`safe`) puts a message in `InboxCraft/Snoozed` until a time, in a new copy that carries
 //!   the time in InboxCraft's own header field so another InboxCraft sees it; [`Session::tick`] brings it back to the
 //!   inbox unread and marked as returned, and `mail.unsnooze` (`safe`) at once; a message moved on from the snoozed
@@ -108,6 +111,7 @@ mod class;
 mod cmd;
 mod draft;
 mod error;
+pub mod greet;
 mod json;
 pub mod notify;
 mod params;
@@ -144,6 +148,8 @@ pub fn name() -> &'static str {
     env!("CARGO_PKG_NAME")
 }
 
+#[cfg(test)]
+mod greet_tests;
 #[cfg(test)]
 mod store_failure_tests;
 #[cfg(test)]
