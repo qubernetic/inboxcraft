@@ -74,6 +74,11 @@ fn kiln() -> String {
     )
 }
 
+/// The kiln firing without its sound alarm: one display alarm the field can show.
+fn kiln_quiet() -> String {
+    kiln().replace("BEGIN:VALARM\r\nACTION:AUDIO\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\n", "")
+}
+
 #[test]
 fn a_new_event_with_an_alert_carries_one_display_alarm_before_its_start() {
     let mut session = session();
@@ -127,11 +132,11 @@ fn no_alert_is_written_so_the_default_does_not_ring() {
 }
 
 #[test]
-fn an_event_from_the_server_shows_its_first_display_or_sound_alarm() {
+fn an_event_from_the_server_shows_its_display_or_sound_alarm() {
     let mut session = session();
-    synced(&mut session, "kiln", kiln());
+    synced(&mut session, "kiln", kiln_quiet());
     assert_eq!(shown(&mut session, 5), json!(15), "the mail alarm is the server's, the junk one is left alone");
-    assert_eq!(alerts(&session, 5), [utc(2026, 11, 6, 13, 45), utc(2026, 11, 6, 13, 55)]);
+    assert_eq!(alerts(&session, 5), [utc(2026, 11, 6, 13, 45)]);
 }
 
 #[test]
@@ -149,7 +154,7 @@ fn an_update_moves_the_shown_alarm_and_keeps_every_other_one() {
     assert_eq!(alarms[2], before[2], "the sound alarm untouched");
     let written = text(&session, 5);
     assert!(written.contains("TRIGGER:soon\r\n") && written.contains("X-EXAMPLE-KEEP:yes\r\n"), "{written}");
-    assert_eq!(shown(&mut session, 5), json!(60));
+    assert_eq!(shown(&mut session, 5), json!("custom"), "the sound alarm still rings beside the moved one");
     assert_eq!(alerts(&session, 5), [utc(2026, 11, 6, 13, 0), utc(2026, 11, 6, 13, 55)]);
 }
 
@@ -169,15 +174,21 @@ fn no_alert_on_an_event_from_the_server_takes_its_display_and_sound_alarms_only(
 #[test]
 fn an_alarm_the_field_cannot_name_is_custom_until_a_lead_is_picked() {
     let mut session = session();
-    let after_end = kiln().replace("TRIGGER:-PT15M", "TRIGGER;RELATED=END:-PT15M");
-    synced(&mut session, "kiln", after_end);
-    assert_eq!(shown(&mut session, 5), json!("custom"));
-    let odd = kiln().replace("TRIGGER:-PT15M", "TRIGGER:-PT90S");
+    let odd = kiln_quiet().replace("TRIGGER:-PT15M", "TRIGGER:-PT90S");
     synced(&mut session, "kiln", odd);
     assert_eq!(shown(&mut session, 5), json!("custom"), "not whole minutes");
-    let after = kiln().replace("TRIGGER:-PT15M", "TRIGGER:PT15M");
+    let after = kiln_quiet().replace("TRIGGER:-PT15M", "TRIGGER:PT15M");
     synced(&mut session, "kiln", after);
     assert_eq!(shown(&mut session, 5), json!("custom"), "after the start");
+    let after_end = kiln_quiet().replace("TRIGGER:-PT15M", "TRIGGER;RELATED=END:-PT15M");
+    synced(&mut session, "kiln", after_end);
+    assert_eq!(shown(&mut session, 5), json!("custom"), "from the end");
+    assert_eq!(alerts(&session, 5), [utc(2026, 11, 6, 14, 45)]);
+    session.run("event.update", &json!({ "id": 5, "alert": 30 })).unwrap();
+    let written = text(&session, 5);
+    assert!(written.contains("TRIGGER:-PT30M\r\n") && !written.contains("RELATED=END"), "{written}");
+    assert_eq!(shown(&mut session, 5), json!(30));
+    assert_eq!(alerts(&session, 5), [utc(2026, 11, 6, 13, 30)]);
 }
 
 #[test]
@@ -198,4 +209,161 @@ fn an_alert_outside_the_choices_is_refused() {
         assert!(matches!(error, EngineError::BadParams { .. }), "{alert}: {error:?}");
     }
     assert!(create(&mut session, json!({ "alert": 10_080 })).is_ok(), "a week is the most");
+}
+
+/// A daily check-in from Friday 6 November 2026 at 9:00 UTC, three times, as another program wrote it: a display
+/// alarm a quarter of an hour before, Saturday's moved to 10:00 with an alarm of its own, Sunday's changed without one.
+fn checkin() -> String {
+    object(
+        "BEGIN:VEVENT\r\nUID:checkin@example.org\r\nDTSTAMP:20261101T080000Z\r\nDTSTART:20261106T090000Z\r\nDURATION:PT15M\r\n\
+         SUMMARY:Check-in\r\nRRULE:FREQ=DAILY;COUNT=3\r\nSEQUENCE:2\r\n\
+         ORGANIZER;CN=Dora:mailto:dora@example.com\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:anna@example.org\r\n\
+         ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:dora@example.com\r\n\
+         BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nDESCRIPTION:Check-in\r\nEND:VALARM\r\nEND:VEVENT\r\n\
+         BEGIN:VEVENT\r\nUID:checkin@example.org\r\nRECURRENCE-ID:20261107T090000Z\r\nDTSTAMP:20261101T080000Z\r\n\
+         DTSTART:20261107T100000Z\r\nDURATION:PT15M\r\nSUMMARY:Check-in\r\nSEQUENCE:2\r\n\
+         BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nDESCRIPTION:Check-in\r\nEND:VALARM\r\nEND:VEVENT\r\n\
+         BEGIN:VEVENT\r\nUID:checkin@example.org\r\nRECURRENCE-ID:20261108T090000Z\r\nDTSTAMP:20261101T080000Z\r\n\
+         DTSTART:20261108T093000Z\r\nDURATION:PT15M\r\nSUMMARY:Check-in\r\nSEQUENCE:2\r\nEND:VEVENT\r\n",
+    )
+}
+
+/// The `alert` of every row event `id` shows in the week from Thursday 5 November 2026.
+fn every_shown(session: &mut Session, id: u64) -> Vec<Value> {
+    let list = session.run("event.list", &json!({ "from": "2026-11-05", "to": "2026-11-12" })).unwrap();
+    list["events"].as_array().unwrap().iter().filter(|row| row["id"] == json!(id)).map(|row| row["alert"].clone()).collect()
+}
+
+/// `text` without its `VALARM` blocks.
+fn outside_alarms(text: &str) -> String {
+    let mut out = String::new();
+    let mut inside = false;
+    for line in text.split_inclusive("\r\n") {
+        if line == "BEGIN:VALARM\r\n" {
+            inside = true;
+        } else if line == "END:VALARM\r\n" {
+            inside = false;
+        } else if !inside {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+#[test]
+fn no_alert_reaches_the_changed_instances_of_a_series_too() {
+    let mut session = session();
+    synced(&mut session, "checkin", checkin());
+    assert_eq!(every_shown(&mut session, 5), [json!(15), json!(15), Value::Null]);
+    session.run("event.update", &json!({ "id": 5, "alert": "none" })).unwrap();
+    let calendar = held(&session, 5);
+    for event in &calendar.events {
+        let actions: Vec<&str> = event.alarms.iter().map(|alarm| alarm.action.as_str()).collect();
+        assert_eq!(actions, ["NONE"], "{:?}", event.recurrence_id);
+    }
+    assert_eq!(every_shown(&mut session, 5), [json!("none"), json!("none"), json!("none")]);
+    assert!(alerts(&session, 5).is_empty(), "{:?}", alerts(&session, 5));
+}
+
+#[test]
+fn a_lead_reaches_the_changed_instances_of_a_series_too() {
+    let mut session = session();
+    synced(&mut session, "checkin", checkin());
+    session.run("event.update", &json!({ "id": 5, "alert": 30 })).unwrap();
+    let calendar = held(&session, 5);
+    for event in &calendar.events {
+        let triggers: Vec<Trigger> = event.alarms.iter().map(|alarm| alarm.trigger).collect();
+        assert_eq!(triggers, [Trigger::Start(Span::new(0, -1800).unwrap())], "{:?}", event.recurrence_id);
+    }
+    assert_eq!(every_shown(&mut session, 5), [json!(30), json!(30), json!(30)]);
+    assert_eq!(alerts(&session, 5), [utc(2026, 11, 6, 8, 30), utc(2026, 11, 7, 9, 30), utc(2026, 11, 8, 9, 0)]);
+}
+
+#[test]
+fn a_lead_with_other_changes_reaches_the_changed_instances_too() {
+    let mut session = session();
+    synced(&mut session, "checkin", checkin());
+    session.run("event.update", &json!({ "id": 5, "alert": "none", "location": "Room 2" })).unwrap();
+    assert_eq!(every_shown(&mut session, 5), [json!("none"), json!("none"), json!("none")]);
+    assert!(alerts(&session, 5).is_empty(), "{:?}", alerts(&session, 5));
+}
+
+#[test]
+fn an_alert_alone_changes_nothing_outside_the_alarms() {
+    let mut session = session();
+    let stored = checkin();
+    synced(&mut session, "checkin", stored.clone());
+    for alert in [json!(30), json!("none"), json!(1440)] {
+        session.run("event.update", &json!({ "id": 5, "alert": alert })).unwrap();
+        let written = text(&session, 5);
+        assert_eq!(outside_alarms(&written), outside_alarms(&stored), "{alert}: {written}");
+        assert!(written.contains("SEQUENCE:2\r\n") && written.contains("DTSTAMP:20261101T080000Z\r\n"), "{written}");
+        assert!(!written.contains("SCHEDULE-AGENT"), "{written}");
+    }
+}
+
+#[test]
+fn more_than_one_display_or_sound_alarm_is_custom() {
+    let mut session = session();
+    let two = kiln().replace("BEGIN:VALARM\r\nACTION:AUDIO\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\n", "");
+    synced(&mut session, "kiln", two);
+    assert_eq!(shown(&mut session, 5), json!(15), "one display alarm, a mail one and a junk one");
+    synced(&mut session, "kiln", kiln());
+    assert_eq!(shown(&mut session, 5), json!("custom"), "a display and a sound alarm: the field cannot show both");
+}
+
+#[test]
+fn a_moved_alarm_drops_the_default_marker_and_the_acknowledgement() {
+    let mut session = session();
+    let marked = kiln().replace(
+        "X-EXAMPLE-KEEP:yes\r\n",
+        "X-EXAMPLE-KEEP:yes\r\nX-APPLE-DEFAULT-ALARM:TRUE\r\nACKNOWLEDGED:20261105T080000Z\r\nUID:alarm-1@example.org\r\n",
+    );
+    synced(&mut session, "kiln", marked);
+    session.run("event.update", &json!({ "id": 5, "alert": 60 })).unwrap();
+    let written = text(&session, 5);
+    assert!(!written.contains("X-APPLE-DEFAULT-ALARM") && !written.contains("ACKNOWLEDGED"), "{written}");
+    assert!(written.contains("X-EXAMPLE-KEEP:yes\r\n") && written.contains("UID:alarm-1@example.org\r\n"), "{written}");
+}
+
+#[test]
+fn a_new_alarm_has_a_uid_and_the_event_summary() {
+    let mut session = session();
+    let id = create(&mut session, json!({ "alert": 30, "summary": "Dentist\r\nat\0 noon" })).unwrap();
+    let calendar = held(&session, id);
+    let alarm = &calendar.events[0].alarms[0];
+    assert_eq!(alarm.description.as_deref(), Some("Dentist at noon"));
+    assert!(alarm.other.iter().any(|property| property.name() == "UID" && !property.value().is_empty()), "{alarm:?}");
+    let long = "x".repeat(500);
+    let id = create(&mut session, json!({ "alert": 30, "summary": long })).unwrap();
+    let description = held(&session, id).events[0].alarms[0].description.clone().unwrap();
+    assert!(description.chars().count() <= 200 && description.starts_with("xxx"), "{description}");
+    let id = create(&mut session, json!({ "alert": 30, "summary": " \r\n " })).unwrap();
+    assert_eq!(held(&session, id).events[0].alarms[0].description.as_deref(), Some("Reminder"));
+}
+
+#[test]
+fn no_alert_twice_writes_one_marker() {
+    let mut session = session();
+    let id = create(&mut session, json!({ "alert": "none" })).unwrap();
+    session.run("event.update", &json!({ "id": id, "alert": "none" })).unwrap();
+    let actions: Vec<String> = held(&session, id).events[0].alarms.iter().map(|alarm| alarm.action.clone()).collect();
+    assert_eq!(actions, ["NONE"]);
+    assert!(alerts(&session, id).is_empty());
+}
+
+#[test]
+fn no_alert_on_an_event_with_only_a_mail_alarm_adds_no_marker() {
+    let mut session = session();
+    let mail_only = object(
+        "BEGIN:VEVENT\r\nUID:post@example.org\r\nDTSTART:20261106T140000Z\r\nDTEND:20261106T150000Z\r\nSUMMARY:Post\r\n\
+         BEGIN:VALARM\r\nACTION:EMAIL\r\nTRIGGER:-PT1H\r\nDESCRIPTION:Mail me\r\nSUMMARY:Post\r\nATTENDEE:mailto:anna@example.org\r\nEND:VALARM\r\n\
+         END:VEVENT\r\n",
+    );
+    synced(&mut session, "post", mail_only);
+    session.run("event.update", &json!({ "id": 5, "alert": "none" })).unwrap();
+    let actions: Vec<String> = held(&session, 5).events[0].alarms.iter().map(|alarm| alarm.action.clone()).collect();
+    assert_eq!(actions, ["EMAIL"]);
+    assert_eq!(shown(&mut session, 5), json!("none"));
+    assert!(alerts(&session, 5).is_empty());
 }

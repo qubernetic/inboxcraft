@@ -369,6 +369,16 @@ pub(crate) struct Details {
 impl Details {
     /// Whether it changes nothing.
     pub(crate) fn is_empty(&self) -> bool {
+        self.alert.is_none() && self.only_alert_if_any()
+    }
+
+    /// Whether the alert is all they change.
+    pub(crate) fn only_alert(&self) -> bool {
+        self.alert.is_some() && self.only_alert_if_any()
+    }
+
+    /// Whether they change nothing but, maybe, the alert.
+    fn only_alert_if_any(&self) -> bool {
         self.summary.is_none()
             && self.location.is_none()
             && self.description.is_none()
@@ -376,7 +386,6 @@ impl Details {
             && self.busy.is_none()
             && self.private.is_none()
             && self.guests.is_none()
-            && self.alert.is_none()
     }
 
     /// Writes them into `event`; `organizer` organises it once it has guests.
@@ -485,6 +494,7 @@ pub(crate) fn edit(
     };
     let zone = calendar.zones.offsets(&event.start, local);
     let (start, end) = placed(times, &form, zone, local).ok_or(EditError::Bad("the times cannot be written"))?;
+    let alert = details.alert;
     let event = calendar.events.get_mut(index).ok_or(EditError::Unreadable)?;
     event.start = start;
     event.end = Some(end);
@@ -495,6 +505,9 @@ pub(crate) fn edit(
     let guests = event.attendees.len();
     if notify && guests > 0 {
         event.sequence = event.sequence.saturating_add(1);
+    }
+    if let Some(lead) = alert {
+        alert::set_every_lead(&mut calendar, lead);
     }
     let text = calendar.write().map_err(|_| EditError::Bad("the event cannot be written"))?;
     Ok((text, guests))

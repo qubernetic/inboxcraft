@@ -37,7 +37,7 @@ use serde_json::{Value, json};
 
 use crate::arrive::invite::{self, Owner};
 use crate::arrive::screener;
-use crate::calendar::alert::{Lead, MAX_ALERT_MINUTES};
+use crate::calendar::alert::{self, Lead, MAX_ALERT_MINUTES};
 use crate::calendar::{self, Details, Edit, EditError, Repeat, Times};
 use crate::undo::{Act, EventUndo, Inverse, Step};
 use crate::params::{NoParams, decode, decode_quietly, parse_date};
@@ -565,12 +565,20 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     if edit.start.is_none() && edit.end.is_none() && edit.all_day.is_none() && details.is_empty() {
         return Err(bad("nothing to change"));
     }
-    let (ical, guests) = calendar::edit(&held, &edit, details, params.notify, owner.address(), context.now(), context.offsets()).map_err(|error| match error {
-        EditError::Unreadable => bad("the event cannot be read"),
-        EditError::Bad(reason) => bad(reason),
-    })?;
+    let only_alert = edit.start.is_none() && edit.end.is_none() && edit.all_day.is_none() && details.only_alert();
+    let (ical, guests) = match details.alert {
+        // An alert alone touches the alarms and nothing else, so the guests are not told either.
+        Some(lead) if only_alert => {
+            let ical = alert::relead(&held.ical, lead).ok_or_else(|| bad("the event cannot be read"))?;
+            (ical, calendar::read(&held).and_then(|object| calendar::master(&object).map(|event| event.attendees.len())).unwrap_or_default())
+        }
+        _ => calendar::edit(&held, &edit, details, params.notify, owner.address(), context.now(), context.offsets()).map_err(|error| match error {
+            EditError::Unreadable => bad("the event cannot be read"),
+            EditError::Bad(reason) => bad(reason),
+        })?,
+    };
     let job = CalendarJob::Put { calendar: held.calendar, event: held.id, url: held.href.clone(), etag: held.etag.clone(), ical: ical.clone() };
-    let answer = json!({ "id": params.id, "guests": guests, "notified": params.notify && guests > 0 });
+    let answer = json!({ "id": params.id, "guests": guests, "notified": params.notify && guests > 0 && !only_alert });
     Ok(Outcome::new(answer)
         .with_change(Change::PutCalendarEvent(CalendarEvent { ical, ..held.clone() }))
         .with_kept_job(owner.id(), JobKind::Calendar(job))
