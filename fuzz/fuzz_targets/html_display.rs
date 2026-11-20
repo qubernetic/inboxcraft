@@ -14,7 +14,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use inboxcraft_html::{
-    Block, Document, ImageSource, LEAST_CONTRAST, LinkTarget, Look, MAX_BLOCKS, MAX_LINKS, MAX_SIDE, Options, Paint, RemoteContent, Width, display,
+    Block, Document, ImageSource, LEAST_CONTRAST, LinkTarget, Look, MAX_BLOCKS, MAX_LINKS, MAX_SIDE, Options, Paint, RemoteContent, Width, display, page,
 };
 use libfuzzer_sys::fuzz_target;
 
@@ -115,6 +115,12 @@ fn check(blocks: &[Block], doc: &Document, consent: bool) {
     }
 }
 
+/// The elements [`page`] writes.
+const PAGE_TAGS: [&str; 27] = [
+    "!DOCTYPE", "html", "head", "meta", "style", "title", "body", "p", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "hr", "br", "b", "i", "u",
+    "s", "code", "span", "table", "tr", "td", "th",
+];
+
 fuzz_target!(|data: &[u8]| {
     let html = String::from_utf8_lossy(data);
     for consent in [false, true] {
@@ -123,6 +129,12 @@ fuzz_target!(|data: &[u8]| {
         assert!(doc.blocks.len() <= MAX_BLOCKS && doc.links.len() <= MAX_LINKS);
         check(&doc.blocks, &doc, consent);
         doc.links.iter().for_each(|link| readable(link.fill));
+        // The page written for the browser: every element in it is one the page writes itself, none that runs or loads.
+        let written = page(&doc, &html);
+        for tag in written.split('<').skip(1) {
+            let name: String = tag.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '!' || *c == '/').collect();
+            assert!(PAGE_TAGS.contains(&name.trim_start_matches('/')), "<{name}");
+        }
     }
     // The input, escaped, as a button's action, script and words: the link the button itself makes (the first) goes
     // nowhere. A link inside the input may be a button that goes somewhere; escaped, it cannot be made here.
