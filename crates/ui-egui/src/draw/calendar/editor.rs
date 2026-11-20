@@ -225,7 +225,9 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
 /// it with Ctrl (Cmd on a Mac) held, or any press on one in someone else's event, copies the link, as the reader does.
 fn description(ui: &mut Ui, theme: &Theme, editor: &mut Editor, asked: &mut Vec<Asked>) {
     let id = ui.make_persistent_id(("event-editor", "description"));
-    let field = Field { read_only: !editor.description_editable(), ..Field::new(tr!("Description"), tr!("optional")) };
+    // A description that cannot be changed asks for nothing while it is empty.
+    let read_only = !editor.description_editable();
+    let field = Field { read_only, ..Field::new(tr!("Description"), if read_only { "" } else { tr!("optional") }) };
     field::multiline_field_holding(ui, theme, id, &mut editor.form_mut().description, &field, field::Cap::Chars(MAX_DESCRIPTION));
     if let Some((at, command)) = field::take_press(ui.ctx(), id)
         && let Some(link) = editor.press_description(at, command)
