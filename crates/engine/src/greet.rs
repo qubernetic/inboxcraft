@@ -7,14 +7,19 @@
 //!
 //! [`GreetBy::word`] reads a name the way it is written, with no guess at its order: "Kovács Anna" is greeted by
 //! "Kovács" with the first word, as a family-name-first name is written. Only a comma turns it round: "Kovács, Anna"
-//! reads as last name, then first. The titles of [`TITLES`] are skipped for the first and the last word, never for
-//! the full name. Quotes and brackets around a word, or around the whole name, are not read; invisible format
-//! characters are dropped first. A name that is an address (it holds `@`), is empty, or has nothing but titles gives
-//! no word, and the headline greets without a name.
+//! reads as last name, then first; the given name ends at the next comma, and a part made of [`SUFFIXES`] ("Smith,
+//! John, Jr.", "Anna Kovács, PhD") is not one. The titles of [`TITLES`] are skipped for the first and the last word,
+//! never for the full name. Quotes and brackets around a word, or around the whole name, are not read; invisible format
+//! characters are dropped first. A name that is an address (it holds `@`), is empty, or has nothing but titles gives no
+//! word, and the headline greets without a name.
 
 /// The titles the first and the last word skip, compared without case and without one dot at the end: "Dr", "Dr.",
 /// "dr." (the Hungarian), "Mr", "Mrs", "Ms", "Prof", "Sir", "Dame".
 pub const TITLES: [&str; 7] = ["dr", "mr", "mrs", "ms", "prof", "sir", "dame"];
+
+/// The suffixes that, after a comma, are not a given name, compared without case and without dots: "Jr.", "Sr",
+/// "II", "III", "PhD", "Ph.D.", "MD", "M.D.", "Esq.".
+pub const SUFFIXES: [&str; 7] = ["jr", "sr", "ii", "iii", "phd", "md", "esq"];
 
 /// The most characters of a name read: a longer one is read up to here.
 pub const MOST: usize = 256;
@@ -70,11 +75,12 @@ impl GreetBy {
             let full = full.trim_matches(|c: char| wrapping(c) || c.is_whitespace());
             return (!words(full).is_empty()).then(|| full.to_owned());
         }
-        // "Last, First …": the words after the comma come first.
-        let ordered = match plain.split_once(',') {
-            Some((last, first)) => [words(first), words(last)].concat(),
-            None => words(&plain),
-        };
+        // "Last, First …, Suffix": the first comma ends the family name; the given name is the next part, up to the
+        // next comma, that is not a suffix ("Anna Kovács, PhD" has none). It comes first.
+        let mut parts = plain.split(',');
+        let family = words(parts.next().unwrap_or_default());
+        let given = parts.map(words).find(|part| part.iter().any(|word| !suffix(word))).unwrap_or_default();
+        let ordered = [given, family].concat();
         let mut names = ordered.into_iter().filter(|word| !title(word));
         if self == Self::Last { names.next_back() } else { names.next() }
     }
@@ -96,6 +102,12 @@ const fn wrapping(c: char) -> bool {
         '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | '\u{2018}'..='\u{201f}' | '\u{00ab}' | '\u{00bb}' | '\u{2039}' | '\u{203a}'
             | '\u{300c}'..='\u{300f}' | '\u{ff02}' | '\u{ff07}' | '\u{ff08}' | '\u{ff09}' | '\u{ff3b}' | '\u{ff3d}'
     )
+}
+
+/// Whether `word` is one of [`SUFFIXES`], without case and without its dots.
+fn suffix(word: &str) -> bool {
+    let bare: String = word.chars().filter(|c| *c != '.').flat_map(char::to_lowercase).collect();
+    SUFFIXES.contains(&bare.as_str())
 }
 
 /// Whether `word` is one of [`TITLES`], without case and one dot at the end.

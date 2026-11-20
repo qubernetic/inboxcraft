@@ -173,3 +173,30 @@ fn quotes_and_brackets_around_a_name_are_not_part_of_the_word() {
     }
     assert_eq!(word(GreetBy::First, "\" \" ()"), "", "nothing but quotes and brackets: no name");
 }
+
+#[test]
+fn only_the_first_comma_turns_a_name_round_and_a_suffix_is_not_a_given_name() {
+    // name, first, last
+    let names = [
+        ("Smith, John, Jr.", "John", "Smith"),
+        ("Kovács, Anna, Mária", "Anna", "Kovács"),
+        ("Smith, Jr., John", "John", "Smith"),
+        ("Anna Kovács, PhD", "Anna", "Kovács"),
+        ("Anna Kovács, Ph.D.", "Anna", "Kovács"),
+        ("Anna Kovács, phd, MD", "Anna", "Kovács"),
+        ("John Smith, jr", "John", "Smith"),
+        ("John Smith, SR.", "John", "Smith"),
+        ("John Smith, II", "John", "Smith"),
+        ("John Smith, iii", "John", "Smith"),
+        ("John Smith, M.D.", "John", "Smith"),
+        ("John Smith, Esq.", "John", "Smith"),
+        ("Smith, John, PhD", "John", "Smith"),
+        // A word that only starts like a suffix is a name.
+        ("Smith, Esquire", "Esquire", "Smith"),
+    ];
+    for (name, first, last) in names {
+        assert_eq!(word(GreetBy::First, name), first, "first of {name:?}");
+        assert_eq!(word(GreetBy::Last, name), last, "last of {name:?}");
+        assert_eq!(word(GreetBy::Full, name), name, "the full name stays as written: {name:?}");
+    }
+}
