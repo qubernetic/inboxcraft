@@ -411,6 +411,34 @@ fn a_triage_choice_that_cannot_be_kept_shows_why_once() {
 }
 
 #[test]
+fn the_kept_greeting_comes_back_and_a_change_of_it_is_kept() {
+    let keep = Held::default();
+    let kept =
+        Triage { screener: ScreenerMode::Off, view: InboxView::List, keep_pins: false, hold: Some(5), after: After::Next, greet_by: GreetBy::Last };
+    *keep.triage.lock().unwrap() = Some(kept);
+    let app = real_app().with_keep(Box::new(keep.clone()));
+    assert_eq!(app.mailbox().greet_by(), GreetBy::Last, "the kept greeting comes back at the start");
+    let mut harness = harness_of(app);
+    assert!(keep.stored.lock().unwrap().is_empty(), "what came back is not kept again");
+    harness.state_mut().mailbox_mut().set_greet_by(GreetBy::None);
+    harness.run();
+    assert_eq!(*keep.stored.lock().unwrap(), [Triage { greet_by: GreetBy::None, ..kept }]);
+}
+
+#[test]
+fn a_greeting_the_window_starts_with_is_not_kept_again() {
+    let keep = Held::default();
+    let mut app = real_app();
+    app.mailbox_mut().set_greet_by(GreetBy::Full);
+    let mut harness = harness_of(app.with_keep(Box::new(keep.clone())));
+    harness.run();
+    assert!(keep.stored.lock().unwrap().is_empty(), "the window's own greeting is what it starts from");
+    harness.state_mut().mailbox_mut().set_greet_by(GreetBy::Last);
+    harness.run();
+    assert_eq!(keep.stored.lock().unwrap().last().map(|triage| triage.greet_by), Some(GreetBy::Last));
+}
+
+#[test]
 fn new_senders_offers_the_screener_mode_over_the_queue() {
     let mut harness = previewing();
     assert_eq!(harness.get_by_role_and_label(Role::RadioButton, "Before the inbox for the screener").accesskit_node().toggled(), Some(Toggled::True));
