@@ -227,7 +227,7 @@ pub(crate) fn galley(ui: &Ui, text: &str, font: Font, colour: egui::Color32) -> 
     let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap.max_width = f32::INFINITY;
     job.break_on_newline = false;
-    crate::draw::paint::on_baseline(ui.painter().layout_job(crate::bidi::visual(job)))
+    crate::draw::paint::on_baseline(ui.painter().layout_job(crate::bidi::visual_kept(ui.ctx(), job)))
 }
 
 /// [`galley`], cut with an ellipsis at `width`. As the design cuts a line, the ellipsis follows the last letter kept:

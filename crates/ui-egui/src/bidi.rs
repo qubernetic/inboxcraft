@@ -12,7 +12,8 @@
 //! in visual order, each piece a section of its own so the shaper never joins two of them, and a piece the shaper
 //! turns round itself (a word in a right-to-left script) is handed to it in the written order. The explicit
 //! embeddings, overrides, isolates and direction marks are left out of what is drawn: they have no width, and they
-//! settle the order only.
+//! settle the order only. The work for a line is kept between frames (at most [`STORE`] lines), so a frame of lines
+//! in sight does it once.
 //!
 //! Limits: brackets in a right-to-left run are mirrored for the common pairs only; a run of more than one
 //! right-to-left script with no space between them is shaped by egui face by face.
@@ -81,6 +82,8 @@ fn shaped_backwards(buffer: &mut harfrust::UnicodeBuffer, grapheme: &str) -> Opt
 /// The pieces of `line` (a byte range of `info`'s text inside `para`) in visual order, left to right: each to be laid
 /// out alone, written so that the shaper's own turn of a right-to-left word gives the visual order.
 fn line_pieces(info: &BidiInfo<'_>, para: &unicode_bidi::ParagraphInfo, line: Range<usize>, out: &mut Vec<String>) {
+    #[cfg(test)]
+    WORK.with(|work| work.set(work.get().saturating_add(1)));
     let text = info.text;
     let mut buffer = harfrust::UnicodeBuffer::new();
     let (levels, runs) = info.visual_runs(para, line);
@@ -277,6 +280,11 @@ pub(crate) fn marked_cut(galley: Arc<Galley>) -> Arc<Galley> {
 /// at a grapheme boundary, then one ellipsis (`job`'s overflow character). A right-to-left label so keeps its first
 /// words, wherever they stand. At most [`MOST`] characters are laid out; each step of the search is one layout.
 pub(crate) fn cut_line(painter: &Painter, job: LayoutJob, width: f32) -> Arc<Galley> {
+    kept_galley(painter, Work::Cut, &job, width, |job| cut_line_uncached(painter, job, width))
+}
+
+/// [`cut_line`] without the store.
+fn cut_line_uncached(painter: &Painter, job: LayoutJob, width: f32) -> Arc<Galley> {
     let ellipsis = job.wrap.overflow_character.unwrap_or('…');
     let mut job = job;
     job.wrap.max_width = f32::INFINITY;
@@ -324,10 +332,16 @@ pub(crate) fn wrapped(painter: &Painter, job: &LayoutJob) -> Option<Arc<Galley>>
     if !needs(&job.text) || rows > MOST_ROWS || !width.is_finite() || job.sections.len() != 1 {
         return None;
     }
-    let section = job.sections.first()?;
+    Some(kept_galley(painter, Work::Wrapped, job, width, |job| wrapped_uncached(painter, &job, width, rows)))
+}
+
+/// [`wrapped`] without the store, for a job it breaks itself.
+fn wrapped_uncached(painter: &Painter, job: &LayoutJob, width: f32, rows: usize) -> Arc<Galley> {
+    let Some(section) = job.sections.first() else { return painter.layout_job(job.clone()) };
     let format = section.format.clone();
     let ellipsis = job.wrap.overflow_character.unwrap_or('…');
-    let (text, was_capped) = capped(job.text.get(section.byte_range.start.0..section.byte_range.end.0)?, MOST.saturating_mul(rows));
+    let (text, was_capped) =
+        capped(job.text.get(section.byte_range.start.0..section.byte_range.end.0).unwrap_or_default(), MOST.saturating_mul(rows));
     // The paragraphs and their directions, from the whole text: a row and a cut keep them.
     let info = BidiInfo::new(text, None);
     let base_at = |at: usize| info.paragraphs.iter().find(|para| para.range.contains(&at)).map(|para| para.level);
@@ -408,7 +422,180 @@ pub(crate) fn wrapped(painter: &Painter, job: &LayoutJob) -> Option<Arc<Galley>>
         put(pieces(&row, base_at(start)), &mut out);
     }
     let galley = painter.layout_job(out);
-    Some(if cut { marked_cut(galley) } else { galley })
+    if cut { marked_cut(galley) } else { galley }
+}
+
+/// [`visual`] of `job`, kept between frames: what [`crate::component::galley`] lays out.
+pub(crate) fn visual_kept(ctx: &egui::Context, job: LayoutJob) -> LayoutJob {
+    if !needs(&job.text) {
+        return job;
+    }
+    let (out, _) = kept(ctx, Work::Visual, &job, f32::INFINITY, |job| (Arc::new(visual(job)), false));
+    Arc::unwrap_or_clone(out)
+}
+
+/// What the store keeps the bidi work of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Work {
+    Visual,
+    Cut,
+    Wrapped,
+}
+
+/// The most lines whose bidi work the store keeps: a few frames of the lines in sight. Lines not used in the last frame
+/// go once the store is half full; a full store keeps no more until then.
+pub(crate) const STORE: usize = 512;
+
+/// The most bytes of text the store keeps, asked and laid out: a bound however long the lines are.
+const STORE_BYTES: usize = 4 << 20;
+
+/// What a line's bidi work is told apart by: the work, the job (its text, styles and wrap), the width and the scale.
+#[derive(Debug, Clone, PartialEq)]
+struct Asked {
+    work: Work,
+    job: LayoutJob,
+    width: u32,
+    ppp: u32,
+}
+
+/// A line's bidi work kept: the job laid out for it, whether it was cut, and the pass it was last used in.
+#[derive(Debug, Clone)]
+struct Kept {
+    asked: Asked,
+    out: Arc<LayoutJob>,
+    cut: bool,
+    used: u64,
+}
+
+/// The lines' bidi work kept between frames, by the hash of their [`Asked`]. The fonts it was done with are known by a
+/// hash of their names: other fonts (the app's own coming in) empty the store.
+#[derive(Debug, Clone, Default)]
+struct Store {
+    pass: u64,
+    fonts: u64,
+    bytes: usize,
+    entries: std::collections::HashMap<u64, Kept>,
+}
+
+impl Store {
+    /// At the first use in a new pass: other fonts empty the store; once it is half full, the lines not used in the last
+    /// pass go.
+    fn prune(&mut self, pass: u64, fonts: u64) {
+        if self.pass == pass {
+            return;
+        }
+        self.pass = pass;
+        if self.fonts != fonts {
+            self.fonts = fonts;
+            self.entries.clear();
+        } else if self.entries.len() > STORE / 2 || self.bytes > STORE_BYTES / 2 {
+            self.entries.retain(|_, kept| kept.used.saturating_add(1) >= pass);
+        }
+        self.bytes = self.entries.values().map(Kept::bytes).fold(0_usize, usize::saturating_add);
+    }
+}
+
+impl Kept {
+    /// The text it holds, in bytes.
+    fn bytes(&self) -> usize {
+        self.asked.job.text.len().saturating_add(self.out.text.len())
+    }
+}
+
+/// Where [`Store`] lives in the context's memory, and where the pass and the fonts it last saw are noted.
+fn store_id() -> egui::Id {
+    egui::Id::unique("bidi-store")
+}
+
+/// A hash of the names of the fonts `ctx` lays text out with now.
+fn fonts_now(ctx: &egui::Context) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    ctx.fonts(|fonts| {
+        let definitions = fonts.definitions();
+        definitions.font_data.keys().for_each(|name| name.hash(&mut hasher));
+        definitions.families.hash(&mut hasher);
+    });
+    hasher.finish()
+}
+
+/// `make`'s result for `job` at `width`, from the store when it holds it, else made and kept while there is room.
+fn kept(
+    ctx: &egui::Context,
+    work: Work,
+    job: &LayoutJob,
+    width: f32,
+    make: impl FnOnce(LayoutJob) -> (Arc<LayoutJob>, bool),
+) -> (Arc<LayoutJob>, bool) {
+    use std::hash::{Hash as _, Hasher as _};
+    let pass = ctx.cumulative_pass_nr();
+    // The fonts are read once a pass, outside the memory's lock.
+    let noted = store_id().with("noted");
+    let fonts = match ctx.data(|data| data.get_temp::<(u64, u64)>(noted)) {
+        Some((seen, fonts)) if seen == pass => fonts,
+        _ => {
+            let fonts = fonts_now(ctx);
+            ctx.data_mut(|data| data.insert_temp(noted, (pass, fonts)));
+            fonts
+        }
+    };
+    let asked = Asked { work, job: job.clone(), width: width.to_bits(), ppp: ctx.pixels_per_point().to_bits() };
+    let hash = {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (asked.work, &asked.job, asked.width, asked.ppp).hash(&mut hasher);
+        hasher.finish()
+    };
+    let found = ctx.data_mut(|data| {
+        let store = data.get_temp_mut_or_default::<Store>(store_id());
+        store.prune(pass, fonts);
+        store.entries.get_mut(&hash).filter(|kept| kept.asked == asked).map(|kept| {
+            kept.used = pass;
+            (Arc::clone(&kept.out), kept.cut)
+        })
+    });
+    if let Some(found) = found {
+        return found;
+    }
+    let (out, cut) = make(asked.job.clone());
+    let kept = Kept { asked, out: Arc::clone(&out), cut, used: pass };
+    ctx.data_mut(|data| {
+        let store = data.get_temp_mut_or_default::<Store>(store_id());
+        let bytes = store.bytes.saturating_add(kept.bytes());
+        if store.entries.len() < STORE && bytes <= STORE_BYTES {
+            store.bytes = bytes;
+            store.entries.insert(hash, kept);
+        }
+    });
+    (out, cut)
+}
+
+/// [`kept`] for work that ends in a galley: the galley laid out again from the job kept (egui keeps the galleys it laid
+/// out), marked as cut when it was.
+fn kept_galley(painter: &Painter, work: Work, job: &LayoutJob, width: f32, make: impl FnOnce(LayoutJob) -> Arc<Galley>) -> Arc<Galley> {
+    let mut made = None;
+    let (out, cut) = kept(painter.ctx(), work, job, width, |job| {
+        let galley = make(job);
+        let kept = (Arc::clone(&galley.job), galley.elided);
+        made = Some(galley);
+        kept
+    });
+    if let Some(galley) = made {
+        return galley;
+    }
+    let galley = painter.layout_job(Arc::unwrap_or_clone(out));
+    if cut { marked_cut(galley) } else { galley }
+}
+
+/// How many lines the store keeps now.
+#[cfg(test)]
+pub(crate) fn store_len(ctx: &egui::Context) -> usize {
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<Store>(store_id()).entries.len())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many lines were put in visual order: the test of the store counts them.
+    pub(crate) static WORK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// `text` cut at its logical end with `ellipsis` so it `fits`: its longest beginning between clusters, the spaces

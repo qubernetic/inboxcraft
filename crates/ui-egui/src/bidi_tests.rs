@@ -241,6 +241,27 @@ fn an_address_keeps_its_labels_in_the_written_order() {
     assert_eq!(super::address("x@\u{200F}\u{202E}example.org"), "x@example.org");
 }
 
+#[test]
+fn the_bidi_work_of_a_label_is_done_once_for_frames_alike() {
+    let text = "שלום עולם רב מאוד ".repeat(20);
+    let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx);
+    let mut done = Vec::new();
+    for _ in 0..4 {
+        let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1200.0, 400.0))), ..egui::RawInput::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            let _ = crate::component::galley(ui, &text, body(), Color32::WHITE);
+            let _ = crate::component::cut(ui, &text, body(), Color32::WHITE, 300.0);
+            let _ = crate::component::wrapped(ui, &text, body(), Color32::WHITE, 300.0, 3, egui::Align::LEFT);
+        });
+        output.textures_delta.clear();
+        done.push(super::WORK.with(std::cell::Cell::get));
+    }
+    // The fonts come in with the first pass; from the third on, nothing is ordered again.
+    assert_eq!(done.get(2), done.get(3), "bidi passes after each frame: {done:?}");
+    assert!(super::store_len(&ctx) <= super::STORE, "the store stays bounded");
+}
+
 /// One frame's time for `draw`, laid out headlessly with the app's fonts: the median and the 95th percentile of `frames`
 /// frames after two to warm up, in milliseconds.
 fn timed(frames: usize, draw: impl Fn(&Ui)) -> (f64, f64) {
