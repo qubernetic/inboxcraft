@@ -95,3 +95,15 @@ fn a_notice_with_line_breaks_is_said_on_one_line() {
     let said = app.notice().unwrap_or_default().to_owned();
     assert!(!said.contains(['\r', '\n', '\0']), "{said:?}");
 }
+
+#[test]
+fn the_status_line_says_a_failing_account_s_reason_in_the_frames_few_words() {
+    // `status-line/account-refused`: "Studio: sign-in refused", not the engine's sentence for logs and agents.
+    let shot = shot(r#"{"out": "x.png", "mode": "dark", "sync": "synced", "fail": "everything"}"#);
+    let mut app = app();
+    sync(&mut app, &shot).unwrap();
+    fail(&mut app, &shot).unwrap();
+    let facts = crate::draw::status::read(app.mailbox_mut());
+    assert_eq!(facts.failures, ["Personal: no connection", "Studio: sign-in refused"]);
+    assert_eq!(facts.failing, 2);
+}

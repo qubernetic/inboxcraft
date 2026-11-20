@@ -156,7 +156,7 @@ pub(crate) fn read(mailbox: &mut Mailbox) -> Facts {
             facts.failing = facts.failing.saturating_add(1);
             if facts.failures.len() < QUEUE {
                 let name = account.get("label").and_then(Value::as_str).unwrap_or_default();
-                let what = failure.get("message").and_then(Value::as_str).unwrap_or_default();
+                let what = reason(failure);
                 facts.failures.push(clean(&tr!("{name}: {what}", name = name, what = what)));
             }
         }
@@ -174,6 +174,28 @@ pub(crate) fn read(mailbox: &mut Mailbox) -> Facts {
     facts.outbox_goes = later.map(|at| mailbox.short_date(at));
     facts.next = crate::home::next_event(mailbox).map(|(time, title, minutes)| (time, clean(&title), minutes));
     facts
+}
+
+/// A failing account's reason in the window's few words, by the `kind` of `failure` as `account.list` gives it
+/// ("sign-in refused"); the engine's sentence where the kind is one the window does not know.
+fn reason(failure: &Value) -> String {
+    let kind = failure.get("kind").and_then(Value::as_str).and_then(error_kind);
+    match kind {
+        Some(kind) => crate::calendar::sync::Why::of(kind).words().to_owned(),
+        None => failure.get("message").and_then(Value::as_str).unwrap_or_default().to_owned(),
+    }
+}
+
+/// The error kind named in snake case (`login_refused`), as the engine names it.
+fn error_kind(name: &str) -> Option<inboxcraft_model::ErrorKind> {
+    let pascal: String = name
+        .split('_')
+        .map(|word| {
+            let mut letters = word.chars();
+            letters.next().map(|first| first.to_uppercase().chain(letters).collect::<String>()).unwrap_or_default()
+        })
+        .collect();
+    serde_json::from_value(Value::String(pascal)).ok()
 }
 
 /// One fact of the line: its text, its kind, and what a press of it asks for.
