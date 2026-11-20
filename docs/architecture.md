@@ -291,7 +291,8 @@ kept beside its calendar, an event without an entity tag is not named as known s
 conflict (412) starts the calendar afresh so the server's copy replaces ours. `event.list` (`safe`) expands every event
 in a span of at most 400 days on the computer's clock: each occurrence with its moments in UTC and on the wall clock,
 its first and last day, its repeat preset, and the event's own zone with its wall-clock times when that clock shows
-another time than the computer's. `event.create`, `event.update` and `event.delete` (`owner`) change the store at once
+another time than the computer's, its organiser, and whether it is the owner's own (it names no organiser, or the
+organiser is the account's own address; else it is someone else's, which the editor opens read-only). `event.create`, `event.update` and `event.delete` (`owner`) change the store at once
 and write to the server as kept jobs (`Put` new or over the copy seen, `Delete`); a new single event is written in UTC,
 a repeating one on the computer's wall clock (floating) so it keeps its time of day across a summer-time change, and an
 edit keeps the event's own form (its zone, the wall clock or UTC). Their `alert` (`"none"` or the minutes before the
