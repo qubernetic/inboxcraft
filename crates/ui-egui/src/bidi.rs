@@ -284,7 +284,8 @@ pub(crate) fn cut_line(painter: &Painter, job: LayoutJob, width: f32) -> Arc<Gal
 /// when it needs no bidi or asks for more than [`MOST_ROWS`] rows or no finite width (egui lays it out as before).
 /// A row breaks after the last space that lets it fit, or between clusters in a word longer than the row; a line break
 /// ends a row when the job breaks on them. Each row of a paragraph is ordered with the paragraph's levels (UAX #9 L1
-/// to L4 per line).
+/// to L4 per line); a row that holds the end of one paragraph and the start of the next (a paragraph separator, U+2029,
+/// and the other signs of bidi class B) is ordered a paragraph at a time.
 pub(crate) fn wrapped(painter: &Painter, job: &LayoutJob) -> Option<Arc<Galley>> {
     let width = job.wrap.max_width;
     let rows = job.wrap.max_rows.max(1);
@@ -354,9 +355,14 @@ pub(crate) fn wrapped(painter: &Painter, job: &LayoutJob) -> Option<Arc<Galley>>
         }
     };
     for row in &found {
+        // A row may hold a paragraph's end (a paragraph separator, which breaks no row): each part in the order of its own
+        // paragraph.
         let mut pieces_of_row = Vec::new();
-        if let Some(para) = info.paragraphs.iter().find(|para| para.range.start <= row.start && row.end <= para.range.end) {
-            line_pieces(&info, para, row.clone(), &mut pieces_of_row);
+        for para in &info.paragraphs {
+            let part = row.start.max(para.range.start)..row.end.min(para.range.end);
+            if !part.is_empty() {
+                line_pieces(&info, para, part, &mut pieces_of_row);
+            }
         }
         put(pieces_of_row, &mut out);
     }

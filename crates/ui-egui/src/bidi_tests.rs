@@ -178,3 +178,24 @@ fn ten_thousand_characters_of_right_to_left_text_stay_bounded() {
         assert!(letters <= 2 * super::MOST * 2, "{letters} glyphs");
     }
 }
+
+/// What [`super::wrapped`] draws of `text` through [`crate::component::plain`], 600 points wide on two rows: every sign
+/// with an advance, row after row.
+fn wrapped_signs(text: &str) -> String {
+    let found = laid(|ui| vec![crate::component::wrapped(ui, &crate::component::plain(text), body(), Color32::WHITE, 600.0, 2, egui::Align::LEFT)]);
+    found.iter().flat_map(|galley| seen(galley)).collect()
+}
+
+#[test]
+fn a_paragraph_separator_between_right_to_left_words_never_blanks_their_row() {
+    let shown = wrapped_signs("שלום\u{2029}עולם");
+    for letter in "שלוםעולם".chars() {
+        assert!(shown.contains(letter), "{letter} is drawn: {shown:?}");
+    }
+}
+
+#[test]
+fn a_paragraph_separator_and_a_mark_after_latin_words_never_blank_their_row() {
+    let shown = wrapped_signs("Wire the deposit today\u{2029}\u{200F}");
+    assert!(shown.contains("Wirethedeposittoday") || shown.contains("Wire the deposit today"), "the words are drawn: {shown:?}");
+}
