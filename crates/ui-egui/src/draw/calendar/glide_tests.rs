@@ -28,6 +28,8 @@ fn event(repeat: Option<&str>) -> EventRow {
         zone: None,
         guests: Vec::new(),
         alert: crate::calendar::Alert::Default,
+        organizer: None,
+        own: true,
         untitled: false,
     }
 }

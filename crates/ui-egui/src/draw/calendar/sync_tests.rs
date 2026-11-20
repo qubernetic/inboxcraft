@@ -411,7 +411,7 @@ fn an_edit_of_an_event_stays_whole_while_a_sync_changes_that_event_and_fails() {
     feed.answer_all(&mut done);
     frames(&mut harness);
     // The existing event in the editor, its title edited, the caret three letters from the end.
-    harness.query_all(by().role(Role::Button).label_contains("Allotment work party")).next().unwrap().click();
+    harness.query_all(by().role(Role::Button).label_contains("Dentist")).next().unwrap().click();
     harness.run();
     harness.get_by_role_and_label(Role::Button, "Edit").click();
     harness.run();
@@ -438,10 +438,9 @@ fn an_edit_of_an_event_stays_whole_while_a_sync_changes_that_event_and_fails() {
         done.push(id);
         let CalendarJob::Sync { calendar, url, .. } = job else { continue };
         let report = if url.ends_with("/personal/") {
-            let ical = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:allotment@example.org\r\nDTSTAMP:20261105T000000Z\r\n\
-                        DTSTART:20261105T150000Z\r\nDTEND:20261105T160000Z\r\nSUMMARY:Allotment moved by the server\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
-            let fetched =
-                inboxcraft_model::FetchedEvent { url: format!("{url}allotment.ics"), etag: Some("\"9\"".to_owned()), ical: ical.to_owned() };
+            let ical = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:dentist@example.org\r\nDTSTAMP:20261105T000000Z\r\n\
+                        DTSTART:20261105T150000Z\r\nDTEND:20261105T160000Z\r\nSUMMARY:Dentist moved by the server\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+            let fetched = inboxcraft_model::FetchedEvent { url: format!("{url}dentist.ics"), etag: Some("\"9\"".to_owned()), ical: ical.to_owned() };
             CalendarReport::Synced { calendar, changed: vec![fetched], removed: Vec::new(), token: None, full: false }
         } else {
             CalendarReport::Failed { calendar: Some(calendar), kind: ErrorKind::LoginRefused }
@@ -450,17 +449,13 @@ fn an_edit_of_an_event_stays_whole_while_a_sync_changes_that_event_and_fails() {
     }
     frames(&mut harness);
     assert!(matches!(state(&harness), SyncState::Failed { .. }), "{:?}", state(&harness));
-    assert!(harness.query_by_label_contains("Allotment moved by the server").is_some(), "the server's change came in under the editor");
+    assert!(harness.query_by_label_contains("Dentist moved by the server").is_some(), "the server's change came in under the editor");
     assert!(harness.state().calendar().editor().is_some(), "the editor is still open");
     let title = harness.get_by_role_and_label(Role::TextInput, "Title");
     assert!(title.accesskit_node().is_focused(), "the keyboard is still in the title");
     title.type_text("X");
     harness.run();
-    assert_eq!(
-        harness.get_by_role_and_label(Role::TextInput, "Title").value().as_deref(),
-        Some("Allotment work party Xday"),
-        "the text and its caret are whole"
-    );
+    assert_eq!(harness.get_by_role_and_label(Role::TextInput, "Title").value().as_deref(), Some("Dentist Xday"), "the text and its caret are whole");
 }
 
 #[test]

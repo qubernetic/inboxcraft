@@ -23,6 +23,7 @@ use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp, Weekday};
 use serde_json::{Value, json};
 
 use crate::EngineError;
+use crate::arrive::invite::Owner;
 use crate::sync::Plan;
 
 pub(crate) mod alert;
@@ -618,8 +619,9 @@ pub(crate) fn master(calendar: &Calendar) -> Option<&Event> {
     calendar.events.iter().find(|event| event.recurrence_id.is_none())
 }
 
-/// One occurrence of `held` (read into `calendar`) as `event.list` shows it, on the computer's clock `local`.
-pub(crate) fn row(held: &CalendarEvent, calendar: &Calendar, occurrence: &Occurrence, local: &dyn Offsets) -> Value {
+/// One occurrence of `held` (read into `calendar`) as `event.list` shows it, on the computer's clock `local`, for the
+/// account's `owner` (`None` when the account is not known).
+pub(crate) fn row(held: &CalendarEvent, calendar: &Calendar, occurrence: &Occurrence, local: &dyn Offsets, owner: Option<&Owner>) -> Value {
     let Some(event) = calendar.events.get(occurrence.event) else { return Value::Null };
     let series = master(calendar).filter(|master| master.uid == event.uid).unwrap_or(event);
     let repeat = match Repeat::of(series) {
@@ -651,7 +653,20 @@ pub(crate) fn row(held: &CalendarEvent, calendar: &Calendar, occurrence: &Occurr
         "zone": zone(calendar, event, start, end, local),
         "guests": event.attendees.iter().map(guest).collect::<Vec<_>>(),
         "alert": alert::lead_of(event),
+        "organizer": series.organizer.as_ref().map(organizer),
+        "own": own(series, owner),
     })
+}
+
+/// The organiser named by an event: the address without its `mailto:`, and the name.
+fn organizer(organizer: &Attendee) -> Value {
+    json!({ "address": address_of(organizer), "name": organizer.name })
+}
+
+/// Whether `event` is the owner's own: it names no organiser, or the organiser is the account's `owner`. Someone
+/// else's event is theirs to change; an organiser named while the account is not known is someone else.
+pub(crate) fn own(event: &Event, owner: Option<&Owner>) -> bool {
+    event.organizer.as_ref().is_none_or(|organizer| owner.is_some_and(|owner| owner.is(organizer)))
 }
 
 /// The event's own zone with its wall-clock times, when its clock shows another time than the computer's at the

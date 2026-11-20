@@ -357,7 +357,9 @@ fn events(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     }
     let local = context.offsets();
     let (mut rows, mut unreadable, mut truncated) = (Vec::new(), 0_usize, false);
+    let accounts = context.store().accounts()?;
     for calendar in held {
+        let owner = accounts.iter().find(|account| account.id() == calendar.account).map(Owner::of);
         for event in context.store().calendar_events(calendar.id)? {
             let Some(object) = calendar::read(&event) else {
                 unreadable = unreadable.saturating_add(1);
@@ -365,7 +367,7 @@ fn events(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
             };
             let expansion = object.occurrences(from, to, local);
             truncated |= expansion.truncated;
-            rows.extend(expansion.occurrences.iter().map(|occurrence| (occurrence.start, calendar::row(&event, &object, occurrence, local))));
+            rows.extend(expansion.occurrences.iter().map(|occurrence| (occurrence.start, calendar::row(&event, &object, occurrence, local, owner.as_ref()))));
         }
     }
     rows.sort_by_key(|(start, _)| *start);

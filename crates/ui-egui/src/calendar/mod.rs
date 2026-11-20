@@ -185,6 +185,11 @@ pub struct EventRow {
     pub guests: Vec<Guest>,
     /// Its alert.
     pub alert: Alert,
+    /// Who organises it, by name or else address, when it names someone.
+    pub organizer: Option<String>,
+    /// Whether it is the owner's own: it names no organiser, or the owner organises it. Someone else's event opens
+    /// read-only in the editor.
+    pub own: bool,
     /// Whether the event has no title of its own (`summary` then says `(No title)`).
     pub untitled: bool,
 }
@@ -291,6 +296,12 @@ impl EventRow {
             zone,
             guests,
             alert: Alert::read(value.get("alert")),
+            organizer: value.get("organizer").and_then(|organizer| {
+                let name = organizer.get("name").and_then(Value::as_str).filter(|name| !name.trim().is_empty());
+                name.or_else(|| organizer.get("address").and_then(Value::as_str)).filter(|name| !name.trim().is_empty()).map(shown)
+            }),
+            // A row that does not say is the owner's, as before the engine said it.
+            own: value.get("own").and_then(Value::as_bool).unwrap_or(true),
         })
     }
 }

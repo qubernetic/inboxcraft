@@ -885,6 +885,12 @@ pub fn multiline_field_holding(ui: &mut Ui, theme: &Theme, id: Id, text: &mut St
     multiline_inner(ui, theme, id, text, field, cap, None)
 }
 
+/// The last press in the [`multiline_field`] `id`, once: the character it fell on and whether Ctrl (Cmd on a Mac)
+/// was held.
+pub(crate) fn take_press(ctx: &egui::Context, id: Id) -> Option<(usize, bool)> {
+    ctx.data_mut(|data| data.remove_temp::<(usize, bool)>(id.with("pressed")))
+}
+
 /// [`multiline_field`] drawn in `shown`: a board of the gallery.
 pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, shown: Option<Shown>) -> Response {
     multiline_inner(ui, theme, id, text, field, Cap::Bytes(MAX_TEXT), shown)
@@ -957,6 +963,13 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
                         .min_size(vec2(0.0, if scrolls { 0.0 } else { inside.height() }))
                         .layouter(&mut layouter)
                         .show(ui);
+                    // A press on the text (not its release, which a text edit takes for the end of a selection).
+                    let pressed = ui.input(|input| input.pointer.primary_pressed().then(|| input.pointer.press_origin()).flatten());
+                    if let Some(pos) = pressed.filter(|_| output.response.response.contains_pointer()) {
+                        let at = output.galley.cursor_from_pos(pos - output.galley_pos).index.0;
+                        let command = ui.input(|input| input.modifiers.command);
+                        ui.data_mut(|data| data.insert_temp(id.with("pressed"), (at, command)));
+                    }
                     if empty {
                         paint_hint(ui, theme, field.hint, font, output.galley_pos, view, seen.focus);
                     }
