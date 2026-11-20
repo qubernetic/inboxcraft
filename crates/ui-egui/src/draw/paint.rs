@@ -309,18 +309,22 @@ pub(crate) enum FloatEdge {
     Quiet,
 }
 
-/// The shapes of a float, for a place kept before the float's content was drawn: the one shadow, the `surface` fill
-/// and a 1 px edge inside, all square.
-pub(crate) fn float_shapes(theme: &Theme, rect: Rect, edge: FloatEdge) -> Vec<Shape> {
+/// The shapes of a float at `ppp` physical pixels per point, for a place kept before the float's content was drawn:
+/// the one shadow first, then the `surface` fill and a 1 px edge inside it, all square. The fill and the edge stand on
+/// whole physical pixels and the edge is one point rounded to whole pixels, as a [`focus_ring`]'s (2 px at 1.5, where a
+/// 1 point line would be a solid pixel and a half-tone one). At 1.0 a float on whole points keeps the edge it had.
+pub(crate) fn float_shapes(theme: &Theme, rect: Rect, edge: FloatEdge, ppp: f32) -> Vec<Shape> {
     let p = theme.palette;
     let colour = match edge {
         FloatEdge::Keyboard => p.cyan_edge,
         FloatEdge::Quiet => p.line,
     };
+    let (ppp, pixels) = line_pixels(ppp);
+    let whole = snapped(rect, ppp);
     vec![
         Shape::mesh(shadow_mesh(rect)),
-        Shape::rect_filled(rect, 0.0, p.surface),
-        Shape::rect_stroke(rect, 0.0, Stroke::new(1.0, colour), StrokeKind::Inside),
+        Shape::rect_filled(whole, 0.0, p.surface),
+        Shape::rect_stroke(whole, 0.0, Stroke::new(pixels / ppp, colour), StrokeKind::Inside),
     ]
 }
 

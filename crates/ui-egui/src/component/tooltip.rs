@@ -83,7 +83,7 @@ fn bubble_in(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Op
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Tooltip, true, name));
     let painter = ui.painter();
-    let mut float = paint::float_shapes(theme, rect, FloatEdge::Quiet).into_iter();
+    let mut float = paint::float_shapes(theme, rect, FloatEdge::Quiet, ui.ctx().pixels_per_point()).into_iter();
     // The shadow comes first; on a board it goes into the place kept under the control.
     if let Some(under) = under
         && let Some(shadow) = float.next()

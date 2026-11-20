@@ -18,7 +18,7 @@ fn a_keyboard_float_has_the_cyan_edge_and_the_one_shadow() {
         let theme = Theme::new(mode, TextScale::default());
         let p = theme.palette;
         for (edge, colour) in [(FloatEdge::Keyboard, p.cyan_edge), (FloatEdge::Quiet, p.line)] {
-            let shapes = float_shapes(&theme, rect, edge);
+            let shapes = float_shapes(&theme, rect, edge, 1.0);
             let rects = rects(&shapes);
             assert!(rects.iter().all(|shape| shape.blur_width == 0.0), "{mode:?} {edge:?}: no egui shadow");
             let meshes: Vec<_> = shapes.iter().filter_map(|shape| if let Shape::Mesh(mesh) = shape { Some(mesh) } else { None }).collect();
@@ -1211,6 +1211,29 @@ fn a_tracked_label_is_never_measured_narrower_than_drawn_whatever_zero_width_sig
             let found: Vec<String> =
                 faults(font, ppp, &texts, &[60.0, 100.0, 150.0, 240.0]).into_iter().filter(|fault| !over_counted(fault)).collect();
             assert!(found.is_empty(), "{percent} % at ppp {ppp}: {} faults: {:#?}", found.len(), found.iter().take(8).collect::<Vec<_>>());
+        }
+    }
+}
+
+#[test]
+fn a_float_s_edge_stands_on_whole_pixels_at_every_scale() {
+    // At 1.25, 1.5 and 1.75 a 1 point edge fell between pixels: a solid line and a half-tone fringe beside it. The
+    // float's fill and edge are on whole pixels and the edge is whole pixels thick, also for a float at a fraction.
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    for rect in [egui::Rect::from_min_size(pos2(40.0, 30.0), vec2(200.0, 120.0)), egui::Rect::from_min_size(pos2(40.3, 30.6), vec2(199.5, 120.25))] {
+        for ppp in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
+            let at = format!("{ppp} {rect:?}");
+            let shapes = float_shapes(&theme, rect, FloatEdge::Keyboard, ppp);
+            let rects = rects(&shapes);
+            let edge = rects.iter().find(|shape| shape.stroke.width > 0.0).unwrap();
+            let fill = rects.iter().find(|shape| shape.fill == theme.palette.surface).unwrap();
+            assert_eq!((edge.stroke.color, edge.stroke_kind), (theme.palette.cyan_edge, egui::StrokeKind::Inside), "{at}");
+            assert_eq!(edge.rect, fill.rect, "{at}: the edge inside the fill");
+            assert_eq!(edge.stroke.width * ppp, ppp.round().max(1.0), "{at}: one point rounded to whole pixels");
+            for side in [edge.rect.left(), edge.rect.top(), edge.rect.right(), edge.rect.bottom()] {
+                assert!((side * ppp - (side * ppp).round()).abs() < 1e-3, "{at}: {:?} off the pixel grid", edge.rect);
+            }
+            assert!((edge.rect.min - rect.min).length() <= 0.75 / ppp && (edge.rect.max - rect.max).length() <= 0.75 / ppp, "{at}: {:?}", edge.rect);
         }
     }
 }
