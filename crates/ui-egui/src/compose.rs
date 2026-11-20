@@ -75,6 +75,17 @@ impl Answer {
     }
 }
 
+/// Where the composer was drawn: what the owner saw in one place is not seen in another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Drawn {
+    /// In the reader's place.
+    Docked,
+    /// The floating panel.
+    Floating,
+    /// In a window of its own.
+    Window,
+}
+
 /// A recipient line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Line {
@@ -239,8 +250,8 @@ pub struct Composer {
     painted_in: Option<u64>,
     /// A script set the scene without a frame and counts it as seen.
     scripted: bool,
-    /// The place it was last drawn in: in the reader's place (`true`) or floating.
-    drawn_docked: Option<bool>,
+    /// The place it was last drawn in.
+    drawn_docked: Option<Drawn>,
     /// Whether the floating panel is folded to its head.
     folded: bool,
     /// When the engine last kept the draft.
@@ -610,12 +621,12 @@ impl Composer {
         self.scripted = true;
     }
 
-    /// It is drawn in the reader's place (`docked`) or floating: a place other than the last one has not been seen.
-    pub(crate) fn drawn_in(&mut self, docked: bool) {
-        if self.drawn_docked != Some(docked) {
+    /// It is drawn in `place`: a place other than the last one has not been seen.
+    pub(crate) fn drawn_in(&mut self, place: Drawn) {
+        if self.drawn_docked != Some(place) {
             self.unsee();
         }
-        self.drawn_docked = Some(docked);
+        self.drawn_docked = Some(place);
     }
 
     /// What it shows changed in a way the person has not seen yet (it moved, a template or a fill went in, the

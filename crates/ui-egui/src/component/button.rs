@@ -695,7 +695,7 @@ pub fn owner_pressed(ui: &Ui, response: &Response) -> bool {
 }
 
 /// Whether Enter or Space came this frame as a held key's repeat.
-fn key_repeated(ui: &Ui) -> bool {
+pub(crate) fn key_repeated(ui: &Ui) -> bool {
     ui.input(|input| {
         input
             .events

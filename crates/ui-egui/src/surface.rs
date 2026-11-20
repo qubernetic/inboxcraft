@@ -49,7 +49,6 @@ pub(crate) enum Surface {
     OnePaneReader,
     /// A window of its own (`crate::draw::host`): its content, with its own `Esc` and keys. A window's surfaces
     /// ([`Surfaces::window`]) are its own, built in its pass from its input; the main window's never hold it.
-    #[cfg_attr(not(test), expect(dead_code, reason = "built only by the window host, which nothing uses yet"))]
     Window,
     /// The place itself (Home, the mail, the calendar, the settings): always the last.
     Place,
@@ -141,7 +140,6 @@ impl Surfaces {
     /// ([`Surface::Window`]), which one `Esc` closes. No mail, no list and no place of the main window stands in it, so
     /// a key pressed there never acts on the main window's ringed row: only the look of the app ([`WINDOW_KEYS`]) and,
     /// where it holds a `composer`, the composer's own run from it ([`Surfaces::allows`]).
-    #[cfg_attr(not(test), expect(dead_code, reason = "built only by the window host, which nothing uses yet"))]
     pub(crate) fn window(float: bool, composer: bool) -> Self {
         let mut stack = [Surface::Place; MOST];
         let mut len = 0;
