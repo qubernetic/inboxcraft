@@ -95,7 +95,7 @@ pub fn role_text(role: Role) -> &'static str {
         Role::Sent => tr!("Sent"),
         Role::Archive => tr!("Archive"),
         Role::Junk => tr!("Junk"),
-        Role::Trash => tr!("Trash"),
+        Role::Trash => tr!("Bin"),
         Role::All => tr!("All mail"),
         Role::Flagged => tr!("Flagged"),
         Role::Screener => tr!("Screener"),

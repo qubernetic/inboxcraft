@@ -153,7 +153,7 @@ fn the_shared_mailboxes_are_the_frames_and_no_hidden_folder_of_our_own() {
     let rows = rows_down(&harness);
     let from = rows.iter().position(|label| label == "Mail").unwrap() + 1;
     let to = rows.iter().position(|label| label == "Personal").unwrap();
-    assert_eq!(rows[from..to], ["Inbox", "New senders", "Drafts", "Sent", "Archive", "Junk", "Trash"], "{rows:?}");
+    assert_eq!(rows[from..to], ["Inbox", "New senders", "Drafts", "Sent", "Archive", "Junk", "Bin"], "{rows:?}");
     assert!(!rows.iter().any(|label| label.starts_with("Screener")), "{rows:?}");
 }
 
