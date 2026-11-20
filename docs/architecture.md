@@ -320,9 +320,16 @@ cancellation is about as `event.delete` does, with its undo window. Nothing in a
 its own.
 
 Drafts (`engine::draft`) are kept in the store as they change: the composer runs `compose.update` at once for a chip,
-a template or a field left, and at most once a second while a field of it has the keys (each keep writes the whole
-draft on the window's thread), so a kill loses at most the last second typed in its recipient lines, subject and
-text; closing, sending, the window's close and the end of the app keep it at once. What is typed in the field that
+a template or a field left, and at most once a second while a field of it has the keys, so a kill loses at most the
+last second typed in its recipient lines, subject and text; closing, sending, the window's close and the end of the
+app keep it at once. The engine checks each keep on the window's thread; the owner's store
+(`Sqlite::keep_drafts_behind`) then writes a draft it already holds on its draft keeper, one thread with its own
+connection: in order, the newest of each draft, one write at a time, with the same `synchronous=FULL`. Its reads
+see a keep before it is on the disk, and every other batch (a send, a discard, a sync) waits for the keeper first,
+refused when the keep of a draft it names failed meanwhile. The window's close and the end of the app wait at most
+3 s for the keeper; a keep that fails is said in the status line and the composer keeps its draft to be kept again. A
+new draft, one moved to another account, and every store without a keeper (the sample, the browser, the CLI) are
+written at once. What is typed in the field that
 fills a template's blank is not part of the draft: it lives in the composer only, and closing it, answering, opening
 another draft or quitting drops it. `compose.new` starts
 one from the account that last sent (the newest message in a Sent folder, else the first account) with that
