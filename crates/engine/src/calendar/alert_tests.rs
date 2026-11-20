@@ -7,7 +7,7 @@
 use inboxcraft_ical::Calendar;
 use inboxcraft_time::{CivilDateTime, Offset, OffsetTable, Timestamp};
 
-use super::{HORIZON, MAX_ALERTS, rings, upcoming};
+use super::{HORIZON, Lead, MAX_ALERTS, relead, rings, upcoming};
 use crate::cmd::calendar_tests::{BUDAPEST, object};
 
 fn utc(year: i32, month: u8, day: u8, hour: u8, minute: u8) -> Timestamp {
@@ -154,4 +154,12 @@ fn rings_name_the_occurrence_each_alert_is_for() {
 fn an_alarm_further_than_a_year_from_its_event_is_left_out() {
     let lines = format!("DTSTART:20261112T080000Z\r\n{}{}", alarm("TRIGGER:-P400D", "DISPLAY"), alarm("TRIGGER:-PT9999999999S", "DISPLAY"));
     assert!(times(&event(&lines), utc(2025, 1, 1, 0, 0)).is_empty());
+}
+
+#[test]
+fn an_object_with_no_event_that_can_be_read_takes_no_alert() {
+    let unreadable = object("BEGIN:VEVENT\r\nUID:e@example.org\r\nDTSTART:20261106T140000Z\r\nSEQUENCE:x\r\nEND:VEVENT\r\n");
+    assert_eq!(relead(&unreadable, Lead::Before(30)), None);
+    let todo = object("BEGIN:VTODO\r\nUID:t@example.org\r\nSUMMARY:Pots\r\nEND:VTODO\r\n");
+    assert_eq!(relead(&todo, Lead::None), None);
 }

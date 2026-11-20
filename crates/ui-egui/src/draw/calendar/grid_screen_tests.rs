@@ -364,6 +364,7 @@ fn event(id: u64, summary: &str, (first, start): (Day, u16), (last, end): (Day, 
         repeat: None,
         zone: None,
         guests: Vec::new(),
+        alert: crate::calendar::Alert::Default,
         untitled: false,
     }
 }

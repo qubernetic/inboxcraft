@@ -119,6 +119,58 @@ fn picture_in(harness: &Harness<'_, InboxApp>, within: Rect) -> bool {
     })
 }
 
+/// The rect of the picture painted in the command line's left 60 points: the mark.
+fn mark_rect(harness: &Harness<'_, InboxApp>) -> Option<Rect> {
+    let corner = Rect::from_min_size(pos2(0.0, 0.0), vec2(60.0, 46.0));
+    harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+        egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() && corner.contains_rect(mesh.calc_bounds()) => {
+            Some(mesh.calc_bounds())
+        }
+        _ => None,
+    })
+}
+
+/// The brand's compact mark, 22 points a side: 16 in from the command line's left beside the full index (the frames
+/// at 1440), centred in the narrow index's column beside the narrow one (`size-1100/*`): at 1 + (57 − 22) / 2 = 18.5,
+/// so its picture starts at pixel 18 and takes 23 pixels, the half pixel drawn into the picture. In either frame.
+#[test]
+fn the_mark_stands_16_in_and_centred_in_the_narrow_index_s_column() {
+    for own in [false, true] {
+        let wide = harness_sized(own, WindowFrame::Own, vec2(1440.0, 900.0), |_| {});
+        assert_eq!(mark_rect(&wide), Some(Rect::from_min_size(pos2(17.0, 12.0), vec2(22.0, 22.0))), "{own}: 16 in, at 1440");
+        let narrow = harness(own, WindowFrame::Own);
+        assert_eq!(mark_rect(&narrow), Some(Rect::from_min_size(pos2(18.0, 12.0), vec2(23.0, 22.0))), "{own}: centred, at 1100");
+    }
+}
+
+/// At 110 %, 120 %, 125 % and 150 % the mark stands 16 in beside the full index (at 1440) and centred beside the
+/// narrow one (at 1100), painted from the whole pixel its box starts in and as wide as its box and that part of a
+/// pixel: the full index, rounded to whole pixels, never reads as the narrow one.
+#[test]
+fn the_mark_stands_on_whole_pixels_at_fractional_scales() {
+    for ppp in [1.1_f32, 1.2, 1.25, 1.5] {
+        for (width, left) in [(1440.0, 16.0), (1100.0, 17.5)] {
+            let app = InboxApp::at_mail(Mailbox::new(sample::sending(clock()).unwrap(), clock()));
+            let mut harness =
+                Harness::builder().with_size(vec2(width, 900.0)).with_pixels_per_point(ppp).with_context_setup(install_fonts).build_ui_state(
+                    |ui, app: &mut InboxApp| {
+                        let whole = ui.ctx().content_rect();
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| app.ui(ui));
+                    },
+                    app,
+                );
+            harness.run();
+            let line = line(&harness);
+            let (pixel, shift) = crate::brand::placed(pos2(line.left() + left, line.center().y - 11.0), ppp);
+            let wide = (22.0 * ppp + shift.x).ceil();
+            let rect = mark_rect(&harness).unwrap();
+            let what = format!("{width} at {ppp}");
+            assert!((rect.left() * ppp - pixel.x).abs() < 1e-3 && (rect.top() * ppp - pixel.y).abs() < 1e-3, "{what}: {rect:?} from {pixel:?}");
+            assert!((rect.width() * ppp - wide).abs() < 1e-3, "{what}: {rect:?} {wide} pixels wide");
+        }
+    }
+}
+
 /// Sets what the window says of itself: maximised, in front.
 fn window_state(harness: &mut Harness<'static, InboxApp>, maximised: bool, focused: bool) {
     let viewport = harness.input_mut().viewports.entry(ViewportId::ROOT).or_default();

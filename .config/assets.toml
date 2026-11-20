@@ -18,6 +18,10 @@ version = "@ibm/plex-sans@1.1.0"
 id = "qubernetic-brand"
 version = "v0.3.0"
 
+[[source]]
+# The design file in this repository, docs/design/inboxcraft.figcraft.
+id = "inboxcraft-design"
+
 [[file]]
 path = "assets/fonts/audiowide/Audiowide-Regular.ttf"
 source = "qubernetic-brand"
@@ -325,3 +329,21 @@ path = "assets/brand/qubernetic/lockup-horizontal-light-600.png"
 source = "qubernetic-brand"
 from = "logo/png/lockup-horizontal-light-600.png"
 sha256 = "c68d97d7c3495820635644346e8056509a597324c7139048b75cc83b171efe9f"
+
+[[file]]
+path = "assets/brand/qubernetic/wordmark-dark.svg"
+source = "qubernetic-brand"
+from = "logo/svg/wordmark-dark.svg"
+sha256 = "e3d64e35001b3de8d0de3b5064abbc507ed9861b47a4f7d83ee1740887d1551e"
+
+[[file]]
+path = "assets/brand/qubernetic/wordmark-light.svg"
+source = "qubernetic-brand"
+from = "logo/svg/wordmark-light.svg"
+sha256 = "05b441ee435b00a69b0b439d15be03d966894599440206b18651799176cdb49b"
+
+[[file]]
+path = "assets/brand/qubernetic/emblem.txt"
+source = "inboxcraft-design"
+from = "the emblem of the frames screen/home/*"
+sha256 = "4064f2fa55204287d4ffc4dfb5a925d66e98d502c0867b66f9aac6e2afa10097"

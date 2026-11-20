@@ -286,7 +286,7 @@ The 64 sets of the file. A screen is built from instances of these only.
 | `draft-file` | a file on a draft | default, hover, focus, too large |
 | `event-block` | a calendar event | timed, band, chip, row; picked, hover, focus |
 | `thread-row` | a message of a conversation | folded, open, unread, hover, focus |
-| `invite-card` | an invitation above a message | request, changed, out of date, answered, changing, cancelled, reply, clash |
+| `invite-card` | an invitation above a message | request, described (the event's description inside the card), changed, out of date, answered, changing, cancelled, reply, clash |
 | `block` | a titled box of rows, on Home | default, hover, focus, selected |
 | `block-line` | the last line of such a box | empty, more |
 | `count-tile` | a count on Home | default, accent, warn, minus, zero, overflow |
