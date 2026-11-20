@@ -18,7 +18,12 @@ use crate::theme::{Mode, Palette, TextScale, Theme};
 
 /// The line's place on the test's page: the side panel's foot, 222 wide.
 fn place(view: &SyncView) -> Rect {
-    Rect::from_min_size(pos2(20.0, 20.0), vec2(222.0, super::height(view)))
+    place_at(&Theme::new(Mode::Dark, TextScale::default()), view)
+}
+
+/// [`place`] at `theme`'s text size.
+fn place_at(theme: &Theme, view: &SyncView) -> Rect {
+    Rect::from_min_size(pos2(20.0, 20.0), vec2(222.0, super::height(theme, view)))
 }
 
 fn read() -> Option<Moment> {
@@ -27,13 +32,18 @@ fn read() -> Option<Moment> {
 
 /// A page with the line in `view`, `resting` or not; what the last frame's press returned is the harness's state.
 fn harness(mode: Mode, view: SyncView, resting: bool) -> Harness<'static, bool> {
-    let theme = Theme::new(mode, TextScale::default());
+    harness_at(mode, TextScale::default(), view, resting)
+}
+
+/// [`harness`] at the text size `scale`.
+fn harness_at(mode: Mode, scale: TextScale, view: SyncView, resting: bool) -> Harness<'static, bool> {
+    let theme = Theme::new(mode, scale);
     let keymap = keymap();
     let mut harness = builder().with_size(vec2(300.0, 120.0)).build_ui_state(
         move |ui, pressed: &mut bool| {
             ui.painter().rect_filled(ui.max_rect(), 0.0, theme.palette.panel);
             let drawn = Drawn { id: Id::unique("sync-test"), resting, still: true };
-            let rect = place(&view);
+            let rect = place_at(&theme, &view);
             *pressed |= ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| calendar_sync(ui, &theme, &keymap, &view, drawn)).inner;
         },
         false,
@@ -171,4 +181,23 @@ fn click_at<State>(harness: &mut Harness<'_, State>, at: egui::Pos2) {
     for pressed in [true, false] {
         harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
     }
+}
+
+#[test]
+fn at_130_percent_the_line_s_heights_grow_its_paddings_stay() {
+    // text-130/calendar: the idle line 52 high, its status item 34 high 9 down, "sync now" 20 high 16 down; the
+    // failed line's paddings (6 over, 10 under) stay round its item and links, 34 and 20 high (70 in all).
+    let theme = Theme::new(Mode::Dark, TextScale::ALL[4]);
+    let idle = SyncView { state: SyncState::Idle, read: read() };
+    let failed = SyncView { state: SyncState::Failed { account: None, why: Why::Failed }, read: None };
+    assert_eq!(place_at(&theme, &idle).height(), 52.0);
+    assert_eq!(place_at(&theme, &failed).height(), 70.0);
+    let line = place_at(&theme, &idle);
+    let harness = harness_at(Mode::Dark, TextScale::ALL[4], idle, false);
+    let link = control(&harness).rect();
+    assert_eq!((link.top() - line.top(), link.height()), (16.0, 20.0), "{link:?}");
+    let line = place_at(&theme, &failed);
+    let harness = harness_at(Mode::Dark, TextScale::ALL[4], failed, false);
+    let link = control(&harness).rect();
+    assert_eq!((link.top() - line.top(), link.height(), line.bottom() - link.bottom()), (40.0, 20.0, 10.0), "{link:?}");
 }
