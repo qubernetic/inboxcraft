@@ -151,18 +151,64 @@ fn a_keep_that_fails_is_told_once_keeps_the_newest_text_and_lands_when_tried_aga
     assert!(store.failed_keep().is_none());
 }
 
+/// Waits (at most 5 s, every 10 ms) until `done` holds for the store; whether it did.
+fn until(store: &Sqlite, done: impl Fn(&Sqlite) -> bool) -> bool {
+    for _ in 0..500 {
+        if done(store) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    done(store)
+}
+
 #[test]
 fn a_keep_that_keeps_failing_is_tried_again_with_a_growing_wait_and_told_once() {
     let tmp = dir();
     let mut store = keeping(tmp.path());
     store.refuse_keeps(true);
     keep(&mut store, "newest");
-    store.settle(Duration::from_secs(5)).unwrap();
-    assert!(store.failed_keep().is_some());
-    // Tries at 0 s, 1 s and 3 s: two by 2.5 s, not one a frame.
-    std::thread::sleep(Duration::from_millis(2500));
+    // No `settle` here: it would give the failed write a try of its own, and the count would depend on which thread
+    // ran first. Tries at 0 s, 1 s and 3 s: the second a second after the first, the third two seconds after that.
+    assert!(until(&store, |store| store.keeper_tries() >= 2), "tried again within a second or so");
     assert_eq!(store.keeper_tries(), 2);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(store.keeper_tries(), 2, "the wait grew past a second, not one try a frame");
+    assert!(until(&store, |store| store.keeper_tries() >= 3), "and the third try comes");
+    assert!(store.failed_keep().is_some());
     assert!(store.failed_keep().is_none(), "one failure said for the whole run of failures");
+}
+
+#[test]
+fn the_end_of_the_store_tries_a_failed_keep_again_when_the_disk_came_back() {
+    let tmp = dir();
+    let mut store = keeping(tmp.path());
+    store.refuse_keeps(true);
+    keep(&mut store, "newest");
+    assert!(until(&store, |store| !store.unkept().is_empty()));
+    store.refuse_keeps(false);
+    // Long before the keeper's own next try (1 s), and nobody waited for it: the end of the store tries it now.
+    drop(store);
+    assert_eq!(on_disk(tmp.path()).as_deref(), Some("newest"));
+}
+
+#[test]
+fn removing_the_account_of_a_draft_whose_keep_failed_ends_the_draft() {
+    let tmp = dir();
+    let mut store = keeping(tmp.path());
+    store.refuse_keeps(true);
+    keep(&mut store, "newest");
+    store.settle(Duration::from_secs(5)).unwrap();
+    assert_eq!(store.unkept().len(), 1);
+    store.apply(&Batch::new().with(Change::RemoveAccount(AccountId::new(1)))).unwrap();
+    assert!(store.unkept().is_empty(), "nothing of it is to be written");
+    assert_eq!(store.draft(DraftId::new(1)).unwrap(), None, "and the reads do not see it");
+    store.refuse_keeps(false);
+    store.settle(Duration::from_secs(5)).unwrap();
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(store.draft(DraftId::new(1)).unwrap(), None);
+    drop(store);
+    assert_eq!(on_disk(tmp.path()), None, "the held copy is never written after the account went");
 }
 
 #[test]
