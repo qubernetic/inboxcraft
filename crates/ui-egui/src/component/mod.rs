@@ -57,6 +57,7 @@ pub mod checkbox;
 pub mod command_field;
 pub mod content_bar;
 pub mod count_tile;
+pub mod dialog;
 pub mod draft_file;
 pub mod draft_row;
 pub mod empty;

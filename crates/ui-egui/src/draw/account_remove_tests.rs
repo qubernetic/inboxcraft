@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Removing an account from its form: "Remove account…" at the form's right end asks in place, the question says first
+//! Removing an account from its form: "Remove account…" at the form's right end asks in a dialog over the dimmed
+//! window, the question says first
 //! that it cannot be undone, and `account.remove` runs only on the owner's press of the question's "Remove account" —
 //! never from a hover, a focus, Enter on "Remove account…" alone, or Esc. The removal takes the account's password out
 //! of the system's credential store, says so in the status line and goes back to the list.
@@ -82,7 +83,7 @@ fn key(harness: &mut Harness<'static, InboxApp>, key: Key) {
 const QUESTION: &str = "Remove Studio from this computer?";
 
 #[test]
-fn removing_asks_in_place_says_first_it_cannot_be_undone_and_runs_only_on_the_owner_s_press() {
+fn removing_asks_in_a_dialog_says_first_it_cannot_be_undone_and_runs_only_on_the_owner_s_press() {
     let kept = Kept::default();
     let mut harness = on_studio(&kept);
     assert_eq!(harness.state().onboarding().stage(), Stage::Edit(2));
@@ -99,6 +100,7 @@ fn removing_asks_in_place_says_first_it_cannot_be_undone_and_runs_only_on_the_ow
     let goes = harness.get_by_label_contains("From this computer go:").rect();
     let stays = harness.get_by_label_contains("Everything on the server stays:").rect();
     assert!(heading.bottom() <= first.top() && first.bottom() <= goes.top() && goes.bottom() <= stays.top(), "{first:?} {goes:?} {stays:?}");
+    assert!(harness.state().surfaces(&harness.ctx).modal(), "the dialog is a modal surface");
     assert_eq!(focused(&harness).as_deref(), Some("Cancel"), "the question takes the keyboard on Cancel");
     // A hover and the keyboard on the question's "Remove account" run nothing.
     harness.get_by_label("Remove account").hover();
@@ -131,7 +133,10 @@ fn cancel_keeps_the_account_and_hands_the_keyboard_back() {
     let kept = Kept::default();
     let mut harness = on_studio(&kept);
     press(&mut harness, "Remove account…");
-    press(&mut harness, "Cancel");
+    // Two Cancels: the form's, under the dimmed window, and the dialog's, which has the keyboard.
+    assert_eq!(focused(&harness).as_deref(), Some("Cancel"));
+    let dialogs = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).unwrap().rect().center();
+    press_at(&mut harness, dialogs);
     assert_eq!(accounts(&harness), [1, 2]);
     assert!(kept.forgotten.lock().unwrap().is_empty());
     assert!(harness.query_by_label("This cannot be undone.").is_none());
@@ -140,13 +145,19 @@ fn cancel_keeps_the_account_and_hands_the_keyboard_back() {
 }
 
 #[test]
-fn the_question_stands_in_the_buttons_place_and_does_not_outlast_the_page() {
+fn the_form_under_the_question_saves_nothing_and_the_question_does_not_outlast_the_page() {
     let kept = Kept::default();
     let mut harness = on_studio(&kept);
+    let save = harness.get_by_label("Save").rect().center();
     press(&mut harness, "Remove account…");
     harness.get_by_role_and_label(Role::Heading, QUESTION);
-    assert!(harness.query_by_label("Save").is_none(), "nothing to save half-way through the question");
-    assert_eq!(harness.get_all_by_label("Cancel").count(), 1, "one Cancel on the page: the question's");
+    // Save lies under the dimmed window: a press there closes the question and saves nothing.
+    press_at(&mut harness, save);
+    assert!(harness.query_by_label("This cannot be undone.").is_none(), "the press on the scrim closes the question");
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(2), "Save under the scrim is not pressed");
+    assert_eq!(accounts(&harness), [1, 2]);
+    press(&mut harness, "Remove account…");
+    harness.get_by_role_and_label(Role::Heading, QUESTION);
     // Another page of the settings and back: the form asks nothing.
     harness.state_mut().leave_settings();
     harness.run();
@@ -255,4 +266,87 @@ fn a_message_written_from_another_account_stays_with_its_text() {
         harness.run();
     }
     assert_eq!(harness.state().mailbox().error(), None);
+}
+
+/// A press of the pointer at `at`, down in one frame and up in the next.
+fn press_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
+    harness.hover_at(at);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+}
+
+/// Where the text starting with `wanted` was painted in the last frame.
+fn painted(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<egui::Rect> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<egui::Rect> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text().starts_with(wanted) => Some(egui::Rect::from_min_size(text.pos, text.galley.size())),
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn the_dialog_stands_where_the_frame_draws_it() {
+    // The frame `account-remove/confirm`: "Remove account…" has no room under it, so the card (328 high) stands 12
+    // over it, centred across the window. The frame's button is at 602, so its card at 480, 262; the form here draws
+    // the button lower (the design README's gaps), and the card keeps the rule.
+    let mut harness = on_studio(&Kept::default());
+    press(&mut harness, "Remove account…");
+    let label = painted(&harness, "CONFIRM").expect("the card's label is drawn");
+    let card = label.min - vec2(25.0, 25.0);
+    let asked = harness.get_all_by_label("Remove account…").next().unwrap().rect();
+    assert_eq!(card, egui::pos2(480.0, asked.top() - 12.0 - 328.0), "the card's corner, over {asked:?}");
+    assert!(harness.query_by_label("Esc cancel").is_some(), "the status line says Esc cancels");
+}
+
+#[test]
+fn in_the_least_window_at_130_the_dialog_s_buttons_stay_in_reach() {
+    // The window's least size and 130 % text, with the message being written: the card stays in the dimmed part and
+    // the owner's press of its danger button removes.
+    let kept = Kept::default();
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())).with_accounts(
+        Arc::new(kept.clone()),
+        Box::new(NoDetect::default()),
+        Box::new(NoWorkers),
+    );
+    app.set_reduce_motion(true);
+    app.set_text_scale(crate::theme::TextScale::ALL[4]);
+    app.compose();
+    let (composer, mailbox) = app.composer_mut();
+    let composer = composer.unwrap();
+    composer.set_account(mailbox, 2).unwrap();
+    composer.text_mut().push_str(WRITTEN);
+    composer.edited();
+    composer.save(mailbox).unwrap();
+    app.open_accounts();
+    let (onboarding, mailbox) = app.onboarding_mut();
+    onboarding.edit(mailbox, 2);
+    let mut harness = Harness::builder()
+        .with_size(vec2(800.0, 480.0))
+        .with_max_steps(40)
+        .with_theme(egui::Theme::Dark)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    press(&mut harness, "Remove account…");
+    harness.get_by_label(WRITING);
+    let cover = crate::component::dialog::cover(&harness.ctx, &crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::ALL[4]));
+    let dialog = crate::component::dialog::layer(egui::Id::unique("account-remove-confirm"));
+    for label in ["Cancel", "Remove account"] {
+        let button = harness.get_all_by_label(label).map(|node| node.rect()).find(|rect| harness.ctx.layer_id_at(rect.center()) == Some(dialog));
+        let button = button.unwrap_or_else(|| panic!("the dialog's {label}"));
+        assert!(cover.contains_rect(button), "{label}: {button:?} in {cover:?}");
+    }
+    let remove = harness.get_all_by_label("Remove account").map(|node| node.rect()).find(|rect| cover.contains_rect(*rect)).unwrap();
+    harness.hover_at(remove.center());
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: remove.center(), button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+    assert_eq!(accounts(&harness), [1], "the owner's press of Remove account removes");
 }

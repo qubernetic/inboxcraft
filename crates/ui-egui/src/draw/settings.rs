@@ -197,6 +197,22 @@ pub(super) enum Asked {
     AskAgain(String),
 }
 
+impl Asked {
+    /// Whether this is a confirmation dialog's answer ([`crate::component::dialog`]): a template's delete kept or
+    /// done, an entry's cancel kept or done, an account kept or removed. Only the dialog asks these; it is the modal
+    /// surface they come from, so they pass where the place's asks under it do not.
+    pub(super) fn answers(&self) -> bool {
+        matches!(
+            self,
+            Self::KeepTemplate
+                | Self::DeleteTemplate(..)
+                | Self::KeepScheduled
+                | Self::CancelScheduled(_)
+                | Self::Page(super::onboard::Asked::KeepAccount | super::onboard::Asked::Remove)
+        )
+    }
+}
+
 /// What the settings show and change.
 pub(super) struct Sheet<'a> {
     pub(super) keymap: &'a Keymap,

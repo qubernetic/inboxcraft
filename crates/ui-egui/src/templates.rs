@@ -103,8 +103,6 @@ fn same_name(one: &str, other: &str) -> bool {
 /// Where the keyboard goes when the page is drawn next.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Hand {
-    /// The confirmation's Cancel.
-    Cancel,
     /// The `delete` of a row: its account and name.
     Delete(u64, String),
     /// "New template".
