@@ -597,3 +597,25 @@ fn windows_opened_and_closed_leave_egui_s_memory_bounded() {
         assert_eq!(ctx.data(|data| data.get_temp::<(u64, f64)>(wipe)), None, "slot {slot}'s wipe is forgotten");
     }
 }
+
+/// #165 for the windows: a picture a window shows is drawn from a texture of the next context, not the old one's.
+#[test]
+fn a_window_s_picture_is_uploaded_again_in_a_new_context() {
+    let ctx = windowing();
+    let mut app = app(&Recorder::default());
+    app.mailbox_mut().open(Place::Folder(5));
+    settle(&ctx, &mut app);
+    let id = open(&ctx, &mut app, "You have won a lighthouse");
+    {
+        let (windows, mailbox) = (&mut app.windows, &mut app.mailbox);
+        windows.shown.first_mut().unwrap().reader.allow_always(mailbox, id);
+    }
+    settle(&ctx, &mut app);
+    let url = "https://track.example.net/open.png?id=4417";
+    assert!(app.windows.shown.first().unwrap().textures.contains_key(url), "the window draws the picture");
+    let next = windowing();
+    settle(&next, &mut app);
+    let texture = app.windows.shown.first().unwrap().textures.get(url).unwrap().id();
+    let named = next.tex_manager().read().meta(texture).map(|meta| meta.name.clone());
+    assert_eq!(named.as_deref(), Some(url), "the texture is the new context's own");
+}
