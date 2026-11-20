@@ -133,7 +133,9 @@ fn lines<'a>(mailbox: &'a Mailbox, open: &BTreeSet<u64>) -> Vec<Line<'a>> {
     for view in mailbox.views().iter().filter(|view| !view.role.is_hidden()) {
         lines.push(Line::Shared(mailbox::Place::View(view.role), role_text(view.role), icon(Some(view.role)), view.unread));
         if view.role == Role::Inbox {
-            lines.push(Line::Shared(mailbox::Place::Senders, tr!("New senders"), iconset::glyph(IconId::People), 0));
+            // New senders counts the senders the screener holds back, as Home's TO SCREEN does.
+            let waiting = u64::try_from(mailbox.waiting().len()).unwrap_or(u64::MAX);
+            lines.push(Line::Shared(mailbox::Place::Senders, tr!("New senders"), iconset::glyph(IconId::People), waiting));
         }
         if view.role == Role::Drafts && sends > 0 {
             lines.push(Line::Shared(mailbox::Place::Outbox, tr!("Outbox"), OUTBOX, sends));
@@ -164,10 +166,12 @@ fn shown(mailbox: &Mailbox, at: Place) -> Option<mailbox::Place> {
 fn line(ui: &mut Ui, theme: &Theme, line: &Line<'_>, active: Option<mailbox::Place>, narrow: bool, asked: &mut Asked, toggled: &mut Option<u64>) {
     let response = match *line {
         Line::Shared(place, name, glyph, count) => {
-            // The Outbox counts sends waiting, not unread mail.
+            // The Outbox counts sends waiting and New senders the senders held back, not unread mail.
             let spoken = match (place, count) {
                 (mailbox::Place::Outbox, 1) => tr!("Outbox, 1 send").to_owned(),
                 (mailbox::Place::Outbox, _) => tr!("Outbox, {count} sends", count = count),
+                (mailbox::Place::Senders, 0) => name.to_owned(),
+                (mailbox::Place::Senders, _) => tr!("{name}, {count} waiting", name = name, count = count),
                 _ => spoken(name, None, count),
             };
             let row = MailboxRow {

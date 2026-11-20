@@ -158,6 +158,16 @@ fn the_shared_mailboxes_are_the_frames_and_no_hidden_folder_of_our_own() {
 }
 
 #[test]
+fn new_senders_counts_the_senders_held_back() {
+    // screen/index/with-counts: New senders carries a count, as Home's TO SCREEN (#325, 3.8).
+    let mailbox = two();
+    let waiting = mailbox.waiting().len();
+    assert!(waiting > 0, "the sample holds senders back");
+    let harness = harness(mailbox, Place::Mail, false, TextScale::default(), 826.0, false);
+    harness.get_by_role_and_label(Role::Button, &format!("New senders, {waiting} waiting"));
+}
+
+#[test]
 fn the_place_shown_is_the_selected_row() {
     for place in [Place::Calendar, Place::Later, Place::Settings] {
         let harness = harness(two(), place, false, TextScale::default(), 826.0, false);
