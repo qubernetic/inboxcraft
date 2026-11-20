@@ -278,9 +278,8 @@ fn subtitle(mailbox: &Mailbox) -> (Option<String>, String) {
     if mailbox.drafts_listed() {
         return (None, mailbox.drafts_count());
     }
-    // The unified inbox of every account, in a view with groups, holds what is left to read, as the design words it
-    // (the List view still counts its messages after whose they are).
-    if switch_shown(mailbox) && mailbox.narrowed().is_none() && !mailbox.groups().is_empty() {
+    // The unified inbox of every account holds what is left to read, as the design words it, in every view.
+    if switch_shown(mailbox) && mailbox.narrowed().is_none() {
         let count = mailbox.messages().iter().filter(|row| !row.seen).count();
         return (None, tr!("{count} to read", count = count));
     }

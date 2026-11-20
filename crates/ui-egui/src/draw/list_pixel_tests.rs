@@ -167,6 +167,12 @@ fn the_list_head_cuts_whose_mail_before_the_count() {
             assert!((list(&harness).width() - 441.0).abs() <= 1.0, "{at}: the list 440 wide");
             let texts = head_texts(&harness, head);
             let shown: String = texts.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" ");
+            if !narrowed {
+                // Every account's inbox says what is left to read, in the List view too (#328): no whose mail to cut.
+                let unread = harness.state().mailbox().messages().iter().filter(|row| !row.seen).count();
+                assert!(shown.contains(&format!("{unread} to read")), "{at}: {texts:?}");
+                continue;
+            }
             assert!(shown.contains(&count), "{at}: the count {count:?} whole in {texts:?}");
             assert!(shown.matches('…').count() <= 1, "{at}: one ellipsis at most: {texts:?}");
             let whose_shown = texts.iter().find(|(text, _)| text.contains('…') || text.contains(&whose)).map(|(text, _)| text.clone());
