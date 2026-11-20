@@ -103,7 +103,8 @@ that is:
   the sample mailbox, `sample.mail.set`; `ui.motion.set` takes `level` (`full`, `reduced` or `off`), and for one
   release still the older `reduce` (`on`, `off` or `system`, which hands the choice back to the computer); its answer
   has `motion_level` and `motion_chosen` beside the older `motion`. Every answer's appearance has `layout`, where the
-  reader (`docked` or `window`) and the composer (`docked`, `floating` or `window`) show;
+  reader (`docked` or `window`) and the composer (`docked`, `floating` or `window`) show, and where the event editor
+  opens (`event_editor`: `small`, `full`, the default, or `window`);
 - `ui.settings.open`, which shows the settings in the window: on the page its optional `page` names (`appearance`,
   `accounts`, `notifications`, `triage`, `sending`, `calendar`, `shortcuts`, `privacy` or `about`), also while they
   show; without `page`, or with one that names none (another case, a planned page, junk), on the page last shown.
