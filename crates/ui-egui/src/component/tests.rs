@@ -34,7 +34,7 @@ pub(crate) fn builder<State>() -> egui_kittest::HarnessBuilder<State> {
 }
 
 /// Tooltips at once, wherever the pointer is.
-pub(super) fn quick_tooltips(ctx: &Context) {
+pub(crate) fn quick_tooltips(ctx: &Context) {
     ctx.all_styles_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;

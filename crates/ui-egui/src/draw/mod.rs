@@ -720,7 +720,8 @@ impl InboxApp {
         let indexed = index::show(index, theme, &self.keymap, &self.mailbox, at, narrow, flags);
         let indexed = Self::index_allowed(surfaces, indexed);
         // A row of the index pressed while a key is waited for ends the wait first, then acts.
-        let pressed = indexed.place.is_some() || indexed.mailbox.is_some() || indexed.account.is_some() || indexed.toggle.is_some();
+        let pressed =
+            indexed.place.is_some() || indexed.mailbox.is_some() || indexed.account.is_some() || indexed.toggle.is_some() || indexed.compose;
         if pressed && self.settings.capturing().is_some() {
             self.settings.captured(None);
         }
@@ -776,7 +777,9 @@ impl InboxApp {
         // settings ends the wait.
         let waiting = surfaces.has(Surface::Capture) && !surfaces.has(Surface::Command) && !surfaces.has(Surface::Float);
         let place = asked.place.filter(|place| Self::index_action(*place).is_some_and(|action| waiting || surfaces.allows_press(action)));
-        if Self::index_live(surfaces) { index::Asked { place, ..asked } } else { index::Asked { place, ..index::Asked::default() } }
+        // New message runs as its key would: where a press may run it.
+        let compose = asked.compose && (waiting || surfaces.allows_press(keymap::COMPOSE));
+        if Self::index_live(surfaces) { index::Asked { place, compose, ..asked } } else { index::Asked { place, compose, ..index::Asked::default() } }
     }
 
     /// Keeps the notification choices when they changed; the sample keeps none.
@@ -2795,6 +2798,7 @@ impl InboxApp {
         let (indexed, commanded) = self.index_and_command(&mut index, &mut command, &theme, &surfaces, setting, (regions, command_keys));
         let index_to_list = Self::shows_list(&indexed);
         ran.extend(indexed.place.and_then(Self::index_action));
+        ran.extend(indexed.compose.then_some(keymap::COMPOSE));
         asked.open = indexed.mailbox;
         asked.narrow = indexed.account;
         let mut dismiss = false;
@@ -3912,6 +3916,9 @@ mod list_tests;
 #[cfg(test)]
 #[path = "narrow_tests.rs"]
 mod narrow_tests;
+#[cfg(test)]
+#[path = "new_message_tests.rs"]
+mod new_message_tests;
 #[cfg(test)]
 #[path = "notify_tests.rs"]
 mod notify_tests;

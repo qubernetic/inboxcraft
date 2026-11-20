@@ -117,10 +117,10 @@ fn at(harness: &Harness<'_, State>, name: &str) -> Rect {
 fn the_index_stands_as_its_frame_draws_with_mail_open() {
     let harness = harness(two(), Place::Mail, false, TextScale::default(), 826.0, false);
     let home = at(&harness, "Home");
-    assert_eq!((home.top(), home.size()), (12.0, vec2(232.0, 34.0)), "HOME 12 down");
-    assert_eq!(at(&harness, "Mail").top(), 46.0);
+    assert_eq!((home.top(), home.size()), (52.0, vec2(232.0, 34.0)), "HOME under New message's 40 high row, 12 down");
+    assert_eq!(at(&harness, "Mail").top(), 86.0);
     let inbox = harness.query_all_by_role(Role::Button).find(|node| node.accesskit_node().label().is_some_and(|l| l.starts_with("Inbox"))).unwrap();
-    assert_eq!((inbox.rect().top(), inbox.rect().height()), (80.0, 30.0), "the mailboxes under MAIL");
+    assert_eq!((inbox.rect().top(), inbox.rect().height()), (120.0, 30.0), "the mailboxes under MAIL");
     assert!(inbox.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True), "the inbox is the mailbox shown");
     assert!(
         harness.query_by_label("New senders").is_some()
@@ -388,4 +388,122 @@ fn a_press_asks_for_a_place_or_a_mailbox() {
     sent.click();
     harness.run();
     assert_eq!(harness.state().asked.mailbox, Some(crate::mailbox::Place::View(inboxcraft_model::Role::Sent)));
+}
+
+/// The sample with no account.
+fn none() -> Mailbox {
+    let session =
+        inboxcraft_engine::Session::new(Box::new(inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default())), clock()).unwrap();
+    Mailbox::new(session, clock())
+}
+
+#[test]
+fn new_message_stands_first_on_every_place_and_the_places_move_down_40() {
+    // screen/index/*: New message 12 down, 12 in, 208 × 32; HOME 40 under its row's top, at 52 (#339).
+    for place in [Place::Home, Place::Mail, Place::Calendar, Place::Later, Place::Settings] {
+        let harness = harness(two(), place, false, TextScale::default(), 826.0, false);
+        let new = at(&harness, "New message");
+        assert_eq!(new, Rect::from_min_size(egui::pos2(12.0, 12.0), vec2(208.0, 32.0)), "{place:?}");
+        assert_eq!(at(&harness, "Home").top(), 52.0, "{place:?}: HOME under New message's row");
+        assert!(!harness.get_by_role_and_label(Role::Button, "New message").accesskit_node().is_disabled(), "{place:?}");
+    }
+}
+
+#[test]
+fn new_message_draws_its_key_at_the_right_edge() {
+    // text-button/with-icon-key: the glyph at 12, the words at 36, the key's chip ending 12 in from the button's right.
+    let harness = harness(two(), Place::Mail, false, TextScale::default(), 826.0, false);
+    let mut found = Vec::new();
+    fn texts(shape: &egui::Shape, found: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Text(text) => found.push((text.galley.job.text.clone(), egui::Rect::from_min_size(text.pos, text.galley.size()))),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, found)),
+            _ => {}
+        }
+    }
+    harness.output().shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut found));
+    let words = found.iter().find(|(text, _)| text == "New message").map(|(_, rect)| rect.left()).unwrap();
+    assert_eq!(words, 12.0 + 36.0, "the words 36 into the button");
+    // The chip 179 into the button, 17 wide: its letter 5 into it.
+    let key = found.iter().find(|(text, rect)| text == "C" && rect.top() < 44.0).map(|(_, rect)| rect.left()).unwrap();
+    assert_eq!(key, 12.0 + 179.0 + 5.0, "the key's chip ending 12 in from the button's right edge");
+}
+
+#[test]
+fn a_press_on_new_message_asks_to_write() {
+    let mut harness = harness(two(), Place::Calendar, false, TextScale::default(), 826.0, false);
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    assert!(harness.state().asked.compose, "New message asks for a new message");
+    assert_eq!(harness.state().asked.place, None, "and for nothing else");
+}
+
+#[test]
+fn without_an_account_new_message_cannot_be_pressed_and_says_why() {
+    for narrow in [false, true] {
+        let mut harness = harness(none(), Place::Home, narrow, TextScale::default(), 826.0, false);
+        crate::component::tests::quick_tooltips(&harness.ctx);
+        let new = harness.get_by_role_and_label(Role::Button, "New message");
+        assert!(new.accesskit_node().is_disabled(), "narrow {narrow}");
+        new.hover();
+        harness.run();
+        harness.run();
+        assert!(harness.query_by_label("no account yet").is_some(), "narrow {narrow}: its tooltip says why");
+        harness.get_by_role_and_label(Role::Button, "New message").click();
+        harness.run();
+        assert!(!harness.state().asked.compose, "narrow {narrow}: nothing asked");
+    }
+}
+
+#[test]
+fn narrow_new_message_is_its_glyph_in_a_32_square_named_in_its_tooltip() {
+    // screen/index/narrowed: the glyph alone in a 32 square 12 in and 12 down; HOME at 52.
+    let mut harness = harness(two(), Place::Mail, true, TextScale::default(), 826.0, false);
+    crate::component::tests::quick_tooltips(&harness.ctx);
+    harness.run();
+    assert_eq!(at(&harness, "New message"), Rect::from_min_size(egui::pos2(12.0, 12.0), vec2(32.0, 32.0)));
+    assert_eq!(at(&harness, "Home").top(), 52.0);
+    assert!(harness.query_all_by_label("New message").count() == 1, "no tooltip before the hover");
+    harness.get_by_role_and_label(Role::Button, "New message").hover();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.query_all_by_label("New message").count(), 2, "the button and its tooltip's name");
+    assert!(harness.query_by_label("C").is_some(), "and its key");
+}
+
+#[test]
+fn new_message_is_the_index_s_first_tab_stop() {
+    let mut harness = harness(two(), Place::Mail, false, TextScale::default(), 826.0, false);
+    let mut order = Vec::new();
+    for _ in 0..3 {
+        harness.key_press(egui::Key::Tab);
+        harness.run();
+        if let Some(node) = harness.query_all_by_role(Role::Button).find(|n| n.accesskit_node().is_focused()) {
+            order.push(node.accesskit_node().label().unwrap_or_default());
+        }
+    }
+    assert_eq!(order.first().map(String::as_str), Some("New message"), "{order:?}");
+    assert!(order.get(1).is_some_and(|label| label.starts_with("Home")), "{order:?}");
+}
+
+#[test]
+fn drafts_has_a_glyph_of_its_own_wide_and_narrow() {
+    // screen/index/active-mail: Drafts U+E704 (file-dashed), not New message's pencil (#354).
+    for narrow in [false, true] {
+        let harness = harness(two(), Place::Mail, narrow, TextScale::default(), 826.0, false);
+        let drafts =
+            harness.query_all_by_role(Role::Button).find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("Drafts"))).unwrap().rect();
+        let mut glyphs = Vec::new();
+        fn texts(shape: &egui::Shape, found: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => found.push((text.galley.job.text.clone(), egui::Rect::from_min_size(text.pos, text.galley.size()))),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, found)),
+                _ => {}
+            }
+        }
+        harness.output().shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut glyphs));
+        let in_row: Vec<&String> = glyphs.iter().filter(|(_, rect)| drafts.contains(rect.center())).map(|(text, _)| text).collect();
+        assert!(in_row.iter().any(|text| text.as_str() == "\u{e704}"), "narrow {narrow}: {in_row:?}");
+        assert!(!in_row.iter().any(|text| text.contains('\u{ebc6}')), "narrow {narrow}: no pencil: {in_row:?}");
+    }
 }

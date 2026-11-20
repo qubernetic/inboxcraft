@@ -192,7 +192,8 @@ fn window_frame_own_stands_where_the_frame_draws_it() {
     assert_eq!(whole, Rect::from_min_size(pos2(1327.0, 7.0), vec2(108.0, 32.0)), "the controls at 1326, 6 of the line");
     assert_eq!(field(&harness), Rect::from_min_size(pos2(234.0, 9.0), vec2(1081.0, 28.0)), "the field at 233, 8 of the line");
     assert!(picture_in(&harness, Rect::from_min_size(pos2(17.0, 12.0), vec2(22.0, 22.0)).expand(0.5)), "the mark at 16, 11");
-    assert!(harness.query_by_label("New message").is_none(), "the command line draws no New message");
+    // New message is the index's (#339): none in the command line.
+    assert!(harness.query_all_by_label("New message").all(|node| node.rect().top() >= line.bottom()), "the command line draws no New message");
     assert!(harness.query_by_label("Restore").is_none(), "a window not maximised offers Maximise");
 }
 
@@ -351,8 +352,11 @@ fn the_index_starts_under_the_command_line_in_every_frame() {
         let harness = harness(true, frame);
         let laid = super::shell::laid(&harness.ctx).unwrap();
         assert!(laid.index.top() > laid.command.bottom(), "{frame:?}: {laid:?}");
+        // New message 12 down, HOME under its 40 high row (#339).
+        let new = harness.get_by_role_and_label(Role::Button, "New message").rect();
+        assert!((new.top() - (laid.index.top() + 12.0)).abs() <= 0.5, "{frame:?}: New message at {}, the index at {}", new.top(), laid.index.top());
         let home = harness.get_by_role_and_label(Role::Button, "Home").rect();
-        assert!((home.top() - (laid.index.top() + 12.0)).abs() <= 0.5, "{frame:?}: HOME at {}, the index at {}", home.top(), laid.index.top());
+        assert!((home.top() - (laid.index.top() + 52.0)).abs() <= 0.5, "{frame:?}: HOME at {}, the index at {}", home.top(), laid.index.top());
     }
 }
 
@@ -385,7 +389,7 @@ fn tab_walks_the_command_line_then_the_window_controls_then_the_index() {
         harness.run();
         walked.push(focused(&harness).unwrap_or_default());
     }
-    assert_eq!(walked, ["Command line", "Minimise", "Maximise", "Close the window", "Home"], "the drawn order");
+    assert_eq!(walked, ["Command line", "Minimise", "Maximise", "Close the window", "New message"], "the drawn order");
     harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
     harness.run();
     assert_eq!(focused(&harness).as_deref(), Some("Close the window"), "Shift Tab walks it back");
