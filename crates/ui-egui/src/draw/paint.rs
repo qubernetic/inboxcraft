@@ -137,8 +137,13 @@ pub(crate) fn within(galley: &Galley, width: f32) -> bool {
 
 /// `job` (one line, cut with an ellipsis) laid out and cut as the design cuts it ([`tight_cut`]), its letters' advances
 /// never above `width`: egui fits the letters by their rounded places and can keep one that reaches past the box (a
-/// comma, a sixteenth mono letter); then it is laid out again narrower, at most a few times, a letter fewer each.
+/// comma, a sixteenth mono letter); then it is laid out again narrower, at most a few times, a letter fewer each. A job
+/// with right-to-left text is put in visual order and cut at its logical end instead ([`crate::bidi::cut_line`]).
 pub(crate) fn cut_within(painter: &Painter, job: LayoutJob, width: f32) -> Arc<Galley> {
+    // Right-to-left text is put in visual order and cut at its logical end, not where egui cuts (the visual right).
+    if crate::bidi::needs(&job.text) {
+        return crate::bidi::cut_line(painter, job, width);
+    }
     let mut job = job;
     let mut galley = tight_cut(painter, painter.layout_job(job.clone()));
     for _ in 0..8 {

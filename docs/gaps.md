@@ -366,10 +366,12 @@ time from the code as it is, not measured.
   fontconfig's rules); in the Flatpak the host's folders should arrive through the runtime's `<remap-dir>` entries,
   which is not checked inside a Flatpak yet, nor on a real desktop. A configuration or font file swapped for a FIFO
   between the type check and the open blocks the search's worker thread (the window is not affected) (#233).
-  Hebrew and Arabic letters are shaped right to left inside a word, but the words and runs still stand left to
-  right (egui has no bidi), so a right-to-left sentence reads with its words in reverse order, and the cursor and
-  selection in a right-to-left run follow the order of the letters, not the picture. A label too long for its room
-  is cut at its right edge, so it can keep a right-to-left word's end and lose its start (#348, #356). egui's
+  The app's one-line labels, lines cut to their room and texts wrapped onto at most eight rows put right-to-left
+  words in the order they are read (the Unicode bidi algorithm, each label a paragraph of its own) and are cut at
+  their logical end (#356). egui itself has no bidi: text laid out by egui's own labels and text fields, a wrapped
+  text of more rows (an open quote) and the reader's message text still stand their words left to right, and the
+  cursor and selection in a right-to-left run follow the order of the letters, not the picture. A right-to-left line
+  stands at its box's left, as a left-to-right one does; only the common bracket pairs are mirrored (#348, #356). egui's
   Ubuntu Light and Hack stand behind Plex only for the signs Plex lacks; they come
   with the `epaint_default_fonts` crate (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml` for that
   crate only, the project owner's to confirm). Most views take the styles through egui's own labels, which carry the

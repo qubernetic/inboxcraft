@@ -222,12 +222,12 @@ pub(crate) fn between(rest: Face, hover: Face, t: f32, toward_hover: bool) -> Fa
 }
 
 /// `text` in `font` and `colour`, on one line as high as the style's line height, with its tracking and, if it asks for
-/// them, in capitals.
+/// them, in capitals; right-to-left words in the order they are read ([`crate::bidi::visual`]).
 pub(crate) fn galley(ui: &Ui, text: &str, font: Font, colour: egui::Color32) -> Arc<Galley> {
     let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap.max_width = f32::INFINITY;
     job.break_on_newline = false;
-    crate::draw::paint::on_baseline(ui.painter().layout_job(job))
+    crate::draw::paint::on_baseline(ui.painter().layout_job(crate::bidi::visual(job)))
 }
 
 /// [`galley`], cut with an ellipsis at `width`. As the design cuts a line, the ellipsis follows the last letter kept:
@@ -246,12 +246,16 @@ pub(crate) fn wrapped(ui: &Ui, text: &str, font: Font, colour: egui::Color32, wi
     let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: rows.max(1), break_anywhere: false, overflow_character: Some('…') };
     job.halign = align;
+    // Right-to-left text: broken into rows in the written order, each row in visual order, cut at its logical end.
+    if let Some(galley) = crate::bidi::wrapped(ui.painter(), &job) {
+        return crate::draw::paint::on_baseline(galley);
+    }
     crate::draw::paint::on_baseline(ui.painter().layout_job(job))
 }
 
 /// `text` with every control character (a NUL, a line break, a tab) put as a space and every explicit bidi embedding,
-/// override and isolate left out: text from outside drawn as plain words, never as layout. egui applies the bidi
-/// algorithm, so an override in a mail's words would turn round what follows it. The direction marks (U+200E, U+200F,
+/// override and isolate left out: text from outside drawn as plain words, never as layout. A label is laid out with the
+/// bidi algorithm ([`crate::bidi`]), so an override in a mail's words would turn round what follows it. The direction marks (U+200E, U+200F,
 /// U+061C) stay: they only settle where brackets and digits of a right-to-left name fall, and the words' own direction
 /// (Hebrew, Arabic) still shows.
 pub(crate) fn plain(text: &str) -> std::borrow::Cow<'_, str> {
