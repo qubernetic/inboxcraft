@@ -375,3 +375,43 @@ fn a_new_event_without_an_alert_carries_the_default_lead_as_its_alarm() {
     let none = create(&mut session, json!({ "alert": "none" })).unwrap();
     assert!(held(&session, none).events[0].alarms.iter().all(|alarm| alarm.action == "NONE"));
 }
+
+/// A location alarm of RFC 9074 section 8, as the RFC writes it: shown on arriving home, with a trigger long past.
+const PROXIMITY: &str = "BEGIN:VALARM\r\nUID:prox@example.org\r\nACTION:DISPLAY\r\nTRIGGER;VALUE=DATE-TIME:19760401T005545Z\r\n\
+                         DESCRIPTION:Water the plants\r\nPROXIMITY:ARRIVE\r\nBEGIN:VLOCATION\r\nUID:home@example.org\r\n\
+                         NAME:Home\r\nURL:geo:47.5,19.04\r\nEND:VLOCATION\r\nEND:VALARM\r\n";
+
+/// The plants on Friday 6 November 2026 at 14:00 UTC with `alarms` and nothing else.
+fn plants(alarms: &str) -> String {
+    object(&format!(
+        "BEGIN:VEVENT\r\nUID:plants@example.org\r\nDTSTAMP:20261101T080000Z\r\nDTSTART:20261106T140000Z\r\n\
+         DTEND:20261106T150000Z\r\nSUMMARY:Plants\r\n{alarms}END:VEVENT\r\n"
+    ))
+}
+
+#[test]
+fn a_location_alarm_is_not_the_alert_and_stays() {
+    let later = PROXIMITY.replace("19760401T005545Z", "20261101T000000Z");
+    let variants = [
+        PROXIMITY.to_owned(),
+        later.clone(),
+        later.replace("PROXIMITY:ARRIVE", "X-APPLE-PROXIMITY:ARRIVE"),
+        PROXIMITY.replace("PROXIMITY:ARRIVE\r\n", ""),
+    ];
+    for variant in variants {
+        let mut session = session();
+        synced(&mut session, "plants", plants(&variant));
+        let location = held(&session, 5).events[0].alarms.clone();
+        assert_eq!(location.len(), 1, "{variant}");
+        assert_eq!(shown(&mut session, 5), json!("none"), "{variant}");
+        session.run("event.update", &json!({ "id": 5, "alert": 30 })).unwrap();
+        let alarms = held(&session, 5).events[0].alarms.clone();
+        assert_eq!(alarms.len(), 2, "{variant}: {alarms:?}");
+        assert_eq!(alarms[0], location[0], "{variant}");
+        assert_eq!((alarms[1].action.as_str(), alarms[1].trigger), ("DISPLAY", Trigger::Start(Span::new(0, -1800).unwrap())));
+        assert_eq!(shown(&mut session, 5), json!(30), "{variant}");
+        session.run("event.update", &json!({ "id": 5, "alert": "none" })).unwrap();
+        assert_eq!(held(&session, 5).events[0].alarms, location, "{variant}");
+        assert_eq!(shown(&mut session, 5), json!("none"), "{variant}");
+    }
+}

@@ -212,6 +212,21 @@ fn rings_here(alarm: &Alarm) -> bool {
     alarm.action.eq_ignore_ascii_case("DISPLAY") || alarm.action.eq_ignore_ascii_case("AUDIO")
 }
 
+/// The properties that make an alarm a location alarm (RFC 9074 section 8, and another program's own name for it).
+const PROXIMITY: [&str; 2] = ["PROXIMITY", "X-APPLE-PROXIMITY"];
+
+/// Whether `alarm` goes off at a place rather than a time: it names a proximity, or its trigger is the moment long past
+/// such alarms are written with.
+fn at_a_place(alarm: &Alarm) -> bool {
+    alarm.other.iter().any(|property| PROXIMITY.iter().any(|name| property.name().eq_ignore_ascii_case(name)))
+        || matches!(alarm.trigger, Trigger::At(at) if at.unix_seconds() <= NONE_AT)
+}
+
+/// Whether `alarm` is the event's alert as the field sees it: a display or a sound at a time, not at a place.
+fn timed_ringer(alarm: &Alarm) -> bool {
+    rings_here(alarm) && !at_a_place(alarm)
+}
+
 /// The properties a moved alarm drops: another program's mark of an alarm it added from its own default, and the
 /// moment an earlier trigger was dismissed (RFC 9074 section 6).
 const DROPPED_ON_MOVE: [&str; 2] = ["X-APPLE-DEFAULT-ALARM", "ACKNOWLEDGED"];
@@ -219,9 +234,9 @@ const DROPPED_ON_MOVE: [&str; 2] = ["X-APPLE-DEFAULT-ALARM", "ACKNOWLEDGED"];
 /// The most characters of the event's summary a new alarm shows.
 const MAX_ALARM_TEXT: usize = 200;
 
-/// Sets `event`'s alert to `lead`. A lead moves the first display or sound alarm (one `DISPLAY` alarm is added when it
-/// has none) and leaves every other alarm as it is; no alert takes every display and sound alarm off, and an event left
-/// without any alarm gets the `ACTION:NONE` alarm (RFC 9074) so the default lead does not ring either.
+/// Sets `event`'s alert to `lead`. A lead moves the first timed display or sound alarm (one `DISPLAY` alarm is added
+/// when it has none) and leaves every other alarm as it is, a location alarm too; no alert takes every timed display and
+/// sound alarm off, and an event left without any alarm gets the `ACTION:NONE` alarm (RFC 9074) so the default lead does not ring either.
 pub(crate) fn set_lead(event: &mut Event, lead: Lead) {
     match lead {
         Lead::Before(minutes) => {
@@ -230,7 +245,7 @@ pub(crate) fn set_lead(event: &mut Event, lead: Lead) {
             let Some(span) = span else { return };
             let trigger = Trigger::Start(span);
             event.alarms.retain(|alarm| !alarm.action.eq_ignore_ascii_case("NONE"));
-            match event.alarms.iter_mut().find(|alarm| rings_here(alarm)) {
+            match event.alarms.iter_mut().find(|alarm| timed_ringer(alarm)) {
                 Some(alarm) => {
                     alarm.trigger = trigger;
                     alarm.other.retain(|property| !DROPPED_ON_MOVE.iter().any(|name| property.name().eq_ignore_ascii_case(name)));
@@ -243,7 +258,7 @@ pub(crate) fn set_lead(event: &mut Event, lead: Lead) {
             }
         }
         Lead::None => {
-            event.alarms.retain(|alarm| !rings_here(alarm));
+            event.alarms.retain(|alarm| !timed_ringer(alarm));
             if event.alarms.is_empty()
                 && let Some(at) = Timestamp::from_unix(NONE_AT, 0)
             {
@@ -325,14 +340,13 @@ fn releaded(component: &Component, lead: Lead) -> Option<Component> {
 }
 
 /// `event`'s alert as `event.list` says it: `null` without any alarm (the default lead rings), `"none"` without a
-/// display or sound alarm, the minutes before the start of its one display or sound alarm, or `"custom"` for what the
-/// field cannot name
-/// (after the start, from the end, at a moment, not in whole minutes, further than [`MAX_LEAD`], or more than one).
+/// timed display or sound alarm (a location alarm is not one), the minutes before the start of its one timed display or
+/// sound alarm, or `"custom"` for what the field cannot name (after the start, from the end, at a moment, not in whole minutes, further than [`MAX_LEAD`], or more than one).
 pub(crate) fn lead_of(event: &Event) -> serde_json::Value {
     if event.alarms.is_empty() {
         return serde_json::Value::Null;
     }
-    let mut ringing = event.alarms.iter().filter(|alarm| rings_here(alarm));
+    let mut ringing = event.alarms.iter().filter(|alarm| timed_ringer(alarm));
     let Some(alarm) = ringing.next() else { return "none".into() };
     if ringing.next().is_some() {
         return "custom".into();
