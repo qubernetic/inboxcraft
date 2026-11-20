@@ -56,6 +56,12 @@ pub use memory::Memory;
 pub use search::{MAX_QUERY_CHARS, MAX_QUERY_WORDS, MAX_RESULTS, Search};
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
 pub use sqlite::{DATABASE_FILE, SCHEMA_VERSION, SOURCES_DIR, Sqlite};
+#[cfg(all(feature = "sqlite", feature = "test-hooks", not(target_arch = "wasm32")))]
+pub use sqlite::{KeepHold, KeeperHooks};
+
+/// What a store that writes drafts behind calls after each such write, landed or failed: a window's redraw, so that a
+/// failure is said without waiting for the person to touch the window.
+pub type KeepWake = std::sync::Arc<dyn Fn() + Send + Sync>;
 
 /// The local-first store. Reads give accounts, folders and messages in id order, messages of a folder in UID order.
 pub trait Storage {
@@ -161,6 +167,42 @@ pub trait Storage {
     ///
     /// As [`Storage::accounts`].
     fn draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError>;
+
+    /// Gives every draft written behind (a native store's draft keeper) whose write failed one more try now, and waits
+    /// at most `within` until every draft written behind is written, landed or failed: the end of a window. A store
+    /// that writes everything at once has nothing to wait for. What failed is in [`Storage::unkept`].
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::DatabaseBusy`] when it is not written in that time.
+    fn settle(&self, within: core::time::Duration) -> Result<(), StoreError> {
+        let _ = within;
+        Ok(())
+    }
+
+    /// A draft written behind whose write started failing, with why, each once until a write of it lands: the store
+    /// keeps its newest text and tries again, 1 s, 2 s, 4 s … at most 30 s apart.
+    fn failed_keep(&self) -> Option<(DraftId, StoreError)> {
+        None
+    }
+
+    /// Every draft written behind whose last write failed and none landed since, with why: the disk holds such a
+    /// draft as it was before, the store's reads its newest text.
+    fn unkept(&self) -> Vec<(DraftId, StoreError)> {
+        Vec::new()
+    }
+
+    /// A count of the drafts handed to be written behind so far: a newer keep since a moment shows as another
+    /// number. A store that writes everything at once has none.
+    fn keeps(&self) -> u64 {
+        0
+    }
+
+    /// Calls `wake` after each draft written behind, landed or failed, from now on. A store that writes everything at
+    /// once never calls it.
+    fn wake_on_keep(&self, wake: KeepWake) {
+        let _ = wake;
+    }
 
     /// The outbox, in draft id order.
     ///

@@ -649,3 +649,67 @@ fn a_click_on_an_alert_opens_its_event_on_the_calendar_and_brings_the_window_for
     tick(&mut desktop, &ctx, false);
     assert_eq!(desktop.app().calendar().picked().map(|event| event.id), Some(id), "a time out of range moves nothing");
 }
+
+/// A desktop over one account on a SQLite store in `dir` that writes drafts behind, telling `told`; its draft 1 holds
+/// "Plot 14", which the disk refused: the keeper's hooks still refuse.
+fn refusing(dir: &std::path::Path, told: &Told) -> (Desktop, Sender<Request>, inboxcraft_store::KeeperHooks) {
+    let mut store = inboxcraft_store::Sqlite::open(dir, inboxcraft_store::StoreConfig::default()).unwrap();
+    store.apply(&Batch::new().with(Change::PutAccount(account()))).unwrap();
+    store.keep_drafts_behind().unwrap();
+    let hooks = store.keeper_hooks().unwrap();
+    let mut mailbox = Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock());
+    let id = mailbox.run_for_agent("compose.new", &json!({})).unwrap()["id"].as_u64().unwrap();
+    hooks.refuse(true);
+    mailbox.run_for_agent("compose.update", &json!({ "id": id, "text": "Plot 14" })).unwrap();
+    let (send, heard) = mpsc::channel();
+    let (_click, clicks) = mpsc::channel();
+    (Desktop::new(InboxApp::new(mailbox), heard).with_notices(Box::new(told.clone()), clicks), send, hooks)
+}
+
+/// A quit without a window whose draft the disk refused says so in a notification: there is no window to say it in
+/// (#338).
+#[test]
+fn a_quit_without_a_window_says_a_draft_not_kept_in_a_notification() {
+    let dir = tempfile::tempdir().unwrap();
+    let told = Told::default();
+    let (desktop, send, _hooks) = refusing(dir.path(), &told);
+    let mut desktop = desktop.without_window();
+    send.send(Request::Quit).unwrap();
+    desktop.wait(SHORT);
+    assert!(desktop.is_quitting());
+    let shown = told.shown.lock().unwrap();
+    assert_eq!(
+        shown.iter().filter(|shown| shown.key == "draft-not-kept").count(),
+        1,
+        "{:?}",
+        shown.iter().map(|shown| &shown.key).collect::<Vec<_>>()
+    );
+}
+
+/// A close of a window that ends InboxCraft, with a draft the disk refused, is taken back: the window stays and
+/// InboxCraft does not end; a second close goes through (#338).
+#[test]
+fn a_close_with_a_draft_not_kept_keeps_the_window_and_inboxcraft() {
+    let dir = tempfile::tempdir().unwrap();
+    let told = Told::default();
+    let (desktop, _send, _hooks) = refusing(dir.path(), &told);
+    let mut desktop = desktop.closing_ends();
+    let ctx = egui::Context::default();
+    let frame = |desktop: &mut Desktop| {
+        let mut info = ViewportInfo::default();
+        info.events.push(ViewportEvent::Close);
+        let mut raw = RawInput::default();
+        raw.viewports.insert(ViewportId::ROOT, info);
+        let mut output = ctx.run_ui(raw, |ui| {
+            desktop.tick(ui.ctx());
+            desktop.frame(ui);
+        });
+        // Nothing paints these: the frame's textures are dropped unused.
+        output.textures_delta.clear();
+        output.viewport_output.get(&ViewportId::ROOT).map(|output| output.commands.clone()).unwrap_or_default()
+    };
+    assert!(frame(&mut desktop).contains(&ViewportCommand::CancelClose));
+    assert!(desktop.has_window() && !desktop.is_quitting(), "{desktop:?}");
+    assert!(!frame(&mut desktop).contains(&ViewportCommand::CancelClose), "a second close goes through");
+    assert!(!desktop.has_window() && desktop.is_quitting());
+}

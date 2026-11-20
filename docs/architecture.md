@@ -333,13 +333,27 @@ cancellation is about as `event.delete` does, with its undo window. Nothing in a
 its own.
 
 Drafts (`engine::draft`) are kept in the store as they change: the composer runs `compose.update` at once for a chip,
-a template or a field left, and at most once a second while a field of it has the keys (each keep writes the whole
-draft on the window's thread), so a kill loses at most the last second typed in its recipient lines, subject and
-text; closing, sending, the window's close and the end of the app keep it at once. What is typed in the field that
-fills a template's blank is not part of the draft: it lives in the composer only, and closing it, answering, opening
+a template or a field left, and at most once a second while a field of it has the keys, so a kill loses at most the
+last second typed in its recipient lines, subject and text; closing, sending, the window's close and the end of the
+app keep it at once. The engine checks each keep on the window's thread; the owner's store
+(`Sqlite::keep_drafts_behind`) then writes a draft it already holds on its draft keeper, one thread with its own
+connection: in order, the newest of each draft, one write at a time, with the same `synchronous=FULL`, each waiting
+at most 2 s for a lock another program holds. Its reads see a keep before it is on the disk, and every other batch (a
+send, a discard, a sync) waits for the keeper first. A write that fails drops nothing: the keeper holds the draft's
+newest text, the reads see it, the status line says it once (the keeper wakes the window), and the keeper tries again
+1 s, 2 s, 4 s … at most 30 s apart until it lands or the draft is discarded; meanwhile a batch that names the draft
+first tries it again and is then refused ("not on the disk yet"), a discard excepted. Closing the composer waits at
+most 3 s for its draft and stays open, saying why, when it is not on the disk ("Draft saved" only once it is). The
+window's close waits at most 3 s too; when a draft is not on the disk it is taken back, the draft open in the
+composer and the failure in the status line with how many more drafts are not kept, and a second close in a row
+(within 10 s, nothing kept since) goes through, losing those drafts' newest text; a close after new typing is taken
+back again. A quit from the tray without a window says it in a notification. The end of the app waits once, about 3 s in all. If the
+keeper's thread ever ends, the store writes what it held and every later draft at once. A new draft, one moved to
+another account, and every store without a keeper (the sample, the browser, the CLI) are written at once.
+What is typed in the field that fills a template's blank is not part of the draft: it lives in the composer only, and closing it, answering, opening
 another draft or quitting drops it. `compose.new` starts
 one from the account that last sent (the newest message in a Sent folder, else the first account) with that
-account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft at once;
+account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft;
 `compose.show` and `compose.list` read them; `compose.discard` removes one here and its copy on the server where
 the server named it; all
 `safe`. A draft on its way (its outbox item waits for the worker's answer) is neither changed nor discarded, so the

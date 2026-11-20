@@ -25,6 +25,9 @@ pub enum StoreError {
     UnknownMessage(MessageId),
     /// A change names a draft the store does not hold.
     UnknownDraft(DraftId),
+    /// A change names a draft whose newest text the store could not write yet: the store keeps it and tries again,
+    /// and refuses the change until that text is on the disk.
+    DraftNotKept(DraftId),
     /// A change names a calendar the store does not hold.
     UnknownCalendar(CalendarId),
     /// A change names a calendar event the store does not hold.
@@ -105,6 +108,9 @@ impl fmt::Display for StoreError {
             Self::UnknownFolder(id) => write!(f, "no folder {id} in the store"),
             Self::UnknownMessage(id) => write!(f, "no message {id} in the store"),
             Self::UnknownDraft(id) => write!(f, "no draft {id} in the store"),
+            Self::DraftNotKept(id) => {
+                write!(f, "draft {id}'s latest change is not on the disk yet: the store is trying again; try later")
+            }
             Self::UnknownCalendar(id) => write!(f, "no calendar {id} in the store"),
             Self::UnknownCalendarEvent(id) => write!(f, "no calendar event {id} in the store"),
             Self::UnknownAlert(id) => write!(f, "no alert {id} in the store"),

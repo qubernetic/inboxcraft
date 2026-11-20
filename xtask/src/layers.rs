@@ -125,6 +125,10 @@ fn violations(member: &Member, own: Class, members: &[Member]) -> Vec<String> {
     let mut found = Vec::new();
     for dep in &member.dependencies {
         let target = &dep.name;
+        // A crate's dev-dependency on itself only turns on its own test features for its integration tests.
+        if target == name && dep.kind == Kind::Dev {
+            continue;
+        }
         if !members.iter().any(|m| &m.name == target) {
             if UI_CRATES.contains(&target.as_str()) && !matches!(own, Class::Layer(6) | Class::Exempt) {
                 found.push(format!("`{name}` ({}) depends on the UI crate `{target}`; UI crates are for layer 6 only", own.describe()));

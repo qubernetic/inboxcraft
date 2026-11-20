@@ -79,6 +79,18 @@ pub struct Shown {
     pub mail: bool,
 }
 
+/// The notification that a draft was not kept when InboxCraft ended without a window: `why` in the store's words.
+#[must_use]
+pub fn unkept(why: &str) -> Shown {
+    Shown {
+        key: "draft-not-kept".to_owned(),
+        title: tr!("A draft was not kept: the disk holds it as it was before").to_owned(),
+        body: why.to_owned(),
+        buttons: Vec::new(),
+        mail: false,
+    }
+}
+
 /// The notification of `notice`; `account` names the account of a count, and an alert's times are on the clock of
 /// `offset`.
 #[must_use]

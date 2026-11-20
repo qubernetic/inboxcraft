@@ -96,3 +96,19 @@ fn the_newest_drafts_are_read_in_index_order_without_a_sort() {
     assert!(plan.iter().any(|step| step.contains("draft_newest")), "{plan:?}");
     assert!(!plan.iter().any(|step| step.contains("TEMP B-TREE")), "no sort of every row: {plan:?}");
 }
+
+#[test]
+fn the_end_of_a_store_whose_keeper_is_gone_says_each_draft_it_held() {
+    use crate::{Batch, Change, Storage};
+    use inboxcraft_model::{AccountId, Draft, DraftId};
+    use inboxcraft_time::Timestamp;
+    let (_tmp, mut store) = drafts_saved_in_turn(2);
+    store.keep_drafts_behind().unwrap();
+    let _hold = store.hold_keeps().unwrap();
+    let saved = Timestamp::from_unix(10, 0).unwrap();
+    store.apply(&Batch::new().with(Change::PutDraft(Draft::new(DraftId::new(2), AccountId::new(1), saved)))).unwrap();
+    store.stop_keeper();
+    let lines = store.keeper.as_ref().unwrap().not_kept();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("draft d2 was not kept"), "{lines:?}");
+}

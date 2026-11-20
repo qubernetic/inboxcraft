@@ -2005,3 +2005,358 @@ fn send_from_the_command_line_of_a_draft_that_cannot_go_says_why_as_its_send_doe
     assert_eq!(problem, "Add a recipient to send");
     assert_eq!(harness.state().notice(), Some(problem.as_str()), "`>` Send says why, in the composer's own words");
 }
+
+/// The sample's accounts in a SQLite store in `dir` whose drafts are written behind, the first able to send, and a
+/// hold on its keeper: a keep waits while it lives.
+fn written_behind(dir: &std::path::Path) -> (Mailbox, inboxcraft_store::KeepHold) {
+    let (mailbox, hooks) = hooked_behind(dir);
+    (mailbox, hooks.hold())
+}
+
+/// The same, with the keeper's test hooks instead of a hold.
+fn hooked_behind(dir: &std::path::Path) -> (Mailbox, inboxcraft_store::KeeperHooks) {
+    let now = Timestamp::from_unix(NOW, 0).unwrap();
+    let mut store = inboxcraft_store::Sqlite::open(dir, inboxcraft_store::StoreConfig::default()).unwrap();
+    let server = Server::new(Host::new("smtp.example.org").unwrap(), Security::Tls.submission_port(), Security::Tls);
+    let mut batch = Batch::new();
+    for account in sample::mailbox(now).unwrap().accounts().unwrap() {
+        let account = if account.id() == AccountId::new(1) { account.with_submission(Some(server.clone())) } else { account };
+        batch.push(Change::PutAccount(account));
+    }
+    store.apply(&batch).unwrap();
+    store.keep_drafts_behind().unwrap();
+    let hooks = store.keeper_hooks().unwrap();
+    (Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()), hooks)
+}
+
+/// The text of draft `id` as the store's reads give it (`compose.show`).
+fn text_read(harness: &mut Harness<'static, InboxApp>, id: u64) -> String {
+    let shown = harness.state_mut().mailbox_mut().run("compose.show", &json!({ "id": id })).unwrap();
+    shown["text"].as_str().unwrap_or_default().to_owned()
+}
+
+/// Whether the last frame asked the window to take back its close.
+fn took_back(harness: &Harness<'static, InboxApp>) -> bool {
+    harness.output().viewport_output.get(&egui::ViewportId::ROOT).is_some_and(|output| output.commands.contains(&egui::ViewportCommand::CancelClose))
+}
+
+/// Asks the window to close in the next frame.
+fn close_window(harness: &mut Harness<'static, InboxApp>) {
+    harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+}
+
+/// The text of draft `id` as the disk holds it, read by a store of its own; `None` without the draft.
+fn text_on_disk(dir: &std::path::Path, id: u64) -> Option<String> {
+    let store = inboxcraft_store::Sqlite::open(dir, inboxcraft_store::StoreConfig::default()).unwrap();
+    store.draft(inboxcraft_model::DraftId::new(id)).unwrap().map(|draft| draft.text)
+}
+
+/// Lets the keeper go after `ms` milliseconds, from another thread.
+fn release_after(hold: inboxcraft_store::KeepHold, ms: u64) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+        drop(hold);
+    })
+}
+
+/// A close of the window waits for the keep on its way to the disk (#338).
+#[test]
+fn closing_the_window_waits_for_the_keep_on_its_way() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hold) = written_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    let id = harness.state().composer().unwrap().draft();
+    typed_by_frames(&mut harness, "Plot 14");
+    harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+    let released = release_after(hold, 300);
+    harness.step();
+    // The window is still there, its store open: the keep is on the disk all the same.
+    assert!(text_on_disk(dir.path(), id).unwrap().starts_with("Plot 14"), "{:?}", text_on_disk(dir.path(), id));
+    assert!(harness.state().mailbox().error().is_none());
+    released.join().unwrap();
+}
+
+/// A keep the store wrote behind and failed is said in the status line once, its newest text kept for the reads and
+/// tried again by the store, not by the composer every frame (#338).
+#[test]
+fn a_keep_that_fails_behind_is_said_once_and_its_newest_text_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    let id = harness.state().composer().unwrap().draft();
+    hooks.refuse(true);
+    typed_by_frames(&mut harness, "Plot 14");
+    let composer = harness.state_mut().composer_mut().0.unwrap();
+    // The last keystrokes wait for their second: kept now, as a blur would, and handed to the keeper.
+    composer.edited();
+    harness.state_mut().keep_draft_now();
+    assert!(!harness.state().composer().unwrap().changed(), "handed to the keeper");
+    assert!(harness.state().mailbox().wait_for_keeps(std::time::Duration::from_secs(5)).is_err());
+    harness.step();
+    let said = harness.state().mailbox().error().map(str::to_owned);
+    assert!(said.is_some(), "the failed keep is said");
+    assert!(!harness.state().composer().unwrap().changed(), "not kept again by the composer every frame");
+    assert!(text_read(&mut harness, id).starts_with("Plot 14"), "the newest text is not dropped");
+    assert!(!text_on_disk(dir.path(), id).unwrap().starts_with("Plot 14"), "the disk holds the draft as it was");
+    hooks.refuse(false);
+    harness.state().mailbox().wait_for_keeps(std::time::Duration::from_secs(5)).unwrap();
+    assert!(text_on_disk(dir.path(), id).unwrap().starts_with("Plot 14"), "it lands once the disk takes it");
+}
+
+/// Closing the composer waits for its draft to reach the disk: one the disk refused leaves it open, saying why, never
+/// "Draft saved" (#338).
+#[test]
+fn closing_the_composer_with_a_draft_the_disk_refused_leaves_it_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    let id = harness.state().composer().unwrap().draft();
+    hooks.refuse(true);
+    typed_by_frames(&mut harness, "Plot 14");
+    harness.state_mut().close_composer();
+    assert!(harness.state().composer().is_some(), "the composer stays, its text with it");
+    assert!(text_of(&harness).starts_with("Plot 14"));
+    assert!(harness.state().mailbox().error().is_some(), "it says why");
+    assert_ne!(harness.state().notice(), Some("Draft saved"));
+    assert!(!text_on_disk(dir.path(), id).unwrap().starts_with("Plot 14"));
+    // The disk takes it again: the next close goes through, the draft on the disk.
+    hooks.refuse(false);
+    harness.state_mut().close_composer();
+    assert!(harness.state().composer().is_none());
+    assert_eq!(harness.state().notice(), Some("Draft saved"));
+    assert!(text_on_disk(dir.path(), id).unwrap().starts_with("Plot 14"));
+}
+
+/// A close of the window with a draft the disk refused is taken back once, the failure said; a second close goes
+/// through (#338).
+#[test]
+fn a_close_of_the_window_with_a_draft_not_kept_is_taken_back_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    hooks.refuse(true);
+    typed_by_frames(&mut harness, "Plot 14");
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness), "the close is taken back");
+    assert!(harness.state_mut().took_back_close(), "the window's owner is told");
+    assert!(harness.state().composer().is_some());
+    assert!(harness.state().mailbox().error().is_some(), "the failure is said");
+    close_window(&mut harness);
+    harness.step();
+    assert!(!took_back(&harness), "a second close goes through");
+    assert!(!harness.state_mut().took_back_close());
+}
+
+/// A close of the window with an agent's draft the disk refused opens that draft in the composer (#338).
+#[test]
+fn a_close_taken_back_for_an_agents_draft_opens_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = harness_over(mailbox, egui::Theme::Light);
+    let id = planted(&mut harness, ["", "", ""]);
+    hooks.refuse(true);
+    harness.state_mut().mailbox_mut().run_for_agent("compose.update", &json!({ "id": id, "text": "Plot 14" })).unwrap();
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness));
+    assert_eq!(harness.state().composer().map(|composer| composer.draft()), Some(id), "the draft not kept is open");
+    assert!(text_of(&harness).starts_with("Plot 14"));
+    // Opening it is no new keep: the next close, in a row, goes through.
+    close_window(&mut harness);
+    harness.step();
+    assert!(!took_back(&harness), "a second close in a row goes through");
+}
+
+/// A close of the window taken back, then new typing, then a close: taken back again and said again, the newest text
+/// not lost without a word; the close in a row after that goes through (#338).
+#[test]
+fn a_close_after_new_typing_is_taken_back_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    hooks.refuse(true);
+    typed_by_frames(&mut harness, "Plot 14");
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness));
+    harness.state_mut().mailbox_mut().dismiss_error();
+    typed_by_frames(&mut harness, " and more");
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness), "a close after new typing is not one in a row");
+    assert!(harness.state().mailbox().error().is_some(), "the failure is said again");
+    close_window(&mut harness);
+    harness.step();
+    assert!(!took_back(&harness), "the close in a row goes through");
+}
+
+/// A close of the window taken back long ago is no close in a row: the next one is taken back again (#338).
+#[test]
+fn a_close_long_after_one_taken_back_is_taken_back_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    hooks.refuse(true);
+    typed_by_frames(&mut harness, "Plot 14");
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness));
+    // More than ten seconds of frames at 60 a second.
+    for _ in 0..(11 * 60) {
+        harness.step();
+    }
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness), "taken back again");
+}
+
+/// The close's own failure is said, not only the keep's earlier one (#338).
+#[test]
+fn a_close_taken_back_says_why_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    hooks.refuse(true);
+    typed_by_frames(&mut harness, "Plot 14");
+    harness.state_mut().composer_mut().0.unwrap().edited();
+    harness.state_mut().keep_draft_now();
+    assert!(harness.state().mailbox().wait_for_keeps(std::time::Duration::from_secs(5)).is_err());
+    harness.step();
+    assert!(harness.state().mailbox().error().is_some(), "the failed keep is said");
+    harness.state_mut().mailbox_mut().dismiss_error();
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness));
+    assert!(harness.state().mailbox().error().is_some(), "the close says why it was taken back");
+}
+
+/// A close taken back with more than one draft not kept says how many more there are (#338).
+#[test]
+fn a_close_taken_back_says_how_many_more_drafts_are_not_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    let id = planted(&mut harness, ["", "", ""]);
+    hooks.refuse(true);
+    harness.state_mut().mailbox_mut().run_for_agent("compose.update", &json!({ "id": id, "text": "Plot 14" })).unwrap();
+    typed_by_frames(&mut harness, "Hello");
+    close_window(&mut harness);
+    harness.step();
+    assert!(took_back(&harness));
+    harness.step();
+    let said = harness.state().mailbox().error().unwrap_or_default().to_owned();
+    assert!(said.contains("1 more draft is not on the disk"), "{said}");
+}
+
+/// The composer's close waits for its own draft only: an agent's draft the disk refuses does not keep it open (#338).
+#[test]
+fn closing_the_composer_counts_only_its_own_draft() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    let id = planted(&mut harness, ["", "", ""]);
+    hooks.refuse_draft(inboxcraft_model::DraftId::new(id), true);
+    harness.state_mut().mailbox_mut().run_for_agent("compose.update", &json!({ "id": id, "text": "Plot 14" })).unwrap();
+    assert!(harness.state().mailbox().wait_for_keeps(std::time::Duration::from_secs(5)).is_err(), "the agent's draft is not kept");
+    typed_by_frames(&mut harness, "Hello");
+    harness.state_mut().close_composer();
+    assert!(harness.state().composer().is_none(), "its own draft is on the disk: the composer closes");
+    assert_eq!(harness.state().notice(), Some("Draft saved"));
+}
+
+/// An agent's send or partial change of a draft whose keep failed: the send is refused, saying why, and a change
+/// builds on the newest text, never on what the disk holds (#338).
+#[test]
+fn a_send_of_a_draft_whose_keep_failed_is_refused_and_a_change_keeps_the_newest_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hooks) = hooked_behind(dir.path());
+    let mut harness = harness_over(mailbox, egui::Theme::Light);
+    let id = planted(&mut harness, ["", "", ""]);
+    hooks.refuse(true);
+    harness.state_mut().mailbox_mut().run_for_agent("compose.update", &json!({ "id": id, "text": "Plot 14" })).unwrap();
+    assert!(harness.state().mailbox().wait_for_keeps(std::time::Duration::from_secs(5)).is_err());
+    // The keeper is idle, the failure old: refused all the same, each time.
+    for _ in 0..2 {
+        let sent = harness.state_mut().mailbox_mut().run("mail.send", &json!({ "id": id }));
+        let error = sent.unwrap_err().to_string();
+        assert!(error.contains("not on the disk yet"), "{error}");
+        assert!(!queued(&mut harness, id));
+    }
+    harness.state_mut().mailbox_mut().run_for_agent("compose.update", &json!({ "id": id, "subject": "Plots" })).unwrap();
+    let shown = harness.state_mut().mailbox_mut().run("compose.show", &json!({ "id": id })).unwrap();
+    assert_eq!((shown["subject"].as_str(), shown["text"].as_str().map(|text| text.starts_with("Plot 14"))), (Some("Plots"), Some(true)));
+    hooks.refuse(false);
+    harness.state().mailbox().wait_for_keeps(std::time::Duration::from_secs(5)).unwrap();
+    assert!(text_on_disk(dir.path(), id).unwrap().starts_with("Plot 14"));
+    harness.state_mut().mailbox_mut().run("mail.send", &json!({ "id": id })).unwrap();
+    assert!(queued(&mut harness, id), "sent once the disk holds it");
+}
+
+/// Send after a keep still on its way sends the newest text: the send waits for the keep (#338).
+#[test]
+fn send_after_a_keep_on_its_way_sends_the_newest_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hold) = written_behind(dir.path());
+    let mut harness = harness_over(mailbox, egui::Theme::Light);
+    let id = planted(&mut harness, ["", "", ""]);
+    harness.state_mut().reopen(id);
+    harness.run();
+    typed_by_frames(&mut harness, "Plot 14");
+    let released = release_after(hold, 200);
+    harness.state_mut().send_composer();
+    assert!(harness.state().composer().is_none(), "sent");
+    // The send's own write waited for the keep: the disk holds the newest text with it.
+    assert!(text_on_disk(dir.path(), id).unwrap().starts_with("Plot 14"), "{:?}", text_on_disk(dir.path(), id));
+    assert!(queued(&mut harness, id));
+    released.join().unwrap();
+}
+
+/// A discard after a keep still on its way leaves no draft: the keep never comes after it (#338).
+#[test]
+fn discard_after_a_keep_on_its_way_leaves_no_draft_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hold) = written_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    let id = harness.state().composer().unwrap().draft();
+    typed_by_frames(&mut harness, "Plot 14");
+    harness.state_mut().keep_draft_now();
+    let released = release_after(hold, 100);
+    harness.state_mut().mailbox_mut().run("compose.discard", &json!({ "id": id })).unwrap();
+    released.join().unwrap();
+    harness.state().mailbox().wait_for_keeps(std::time::Duration::from_secs(5)).unwrap();
+    assert_eq!(text_on_disk(dir.path(), id), None);
+}
+
+/// The window thread's time for one keep of a 1 MiB draft through `compose.update`, on a SQLite store that writes at
+/// once and on one that writes behind: `cargo test --release -p inboxcraft-ui-egui keep_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn keep_cost() {
+    for behind in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut mailbox, hold) = written_behind(dir.path());
+        drop(hold);
+        let id = mailbox.run("compose.new", &json!({})).unwrap()["id"].as_u64().unwrap();
+        let text = "A line of a long letter, written without end. ".repeat(23_000);
+        let text = text.get(..(1 << 20) - 4096).unwrap().to_owned();
+        if !behind {
+            // A store of its own over the same file, without a keeper.
+            let store = inboxcraft_store::Sqlite::open(dir.path(), inboxcraft_store::StoreConfig::default()).unwrap();
+            mailbox = Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock());
+        }
+        let mut times = Vec::new();
+        for n in 0..40 {
+            let text = format!("{n}{}", text.get(8..).unwrap());
+            #[allow(clippy::disallowed_methods, reason = "a measurement of the wall time")]
+            let start = std::time::Instant::now();
+            mailbox.run("compose.update", &json!({ "id": id, "text": text })).unwrap();
+            times.push(start.elapsed().as_secs_f64() * 1000.0);
+            // A keep a second, as typing does: the keeper is idle at the next.
+            mailbox.wait_for_keeps(std::time::Duration::from_secs(5)).unwrap();
+        }
+        times.sort_by(f64::total_cmp);
+        let at = |share: f64| times.get(((times.len() - 1) as f64 * share) as usize).copied().unwrap();
+        println!("keep_cost behind={behind}: median {:.2} ms, p95 {:.2} ms, max {:.2} ms", at(0.5), at(0.95), at(1.0));
+    }
+}

@@ -75,6 +75,13 @@ fn a_dependency_inside_one_layer_passes_only_in_the_intra_layer_order() {
 }
 
 #[test]
+fn a_dev_dependency_of_a_crate_on_itself_passes_but_a_normal_one_fails() {
+    // The way a crate turns on its own test features for its integration tests.
+    passes(&[("inboxcraft-store", "[dev-dependencies]\ninboxcraft-store = { path = \".\", features = [\"test-hooks\"] }\n")]);
+    fails_with(&[("inboxcraft-store", "[dependencies]\ninboxcraft-store = { path = \".\" }\n")], "in its own layer");
+}
+
+#[test]
 fn a_standalone_crate_with_a_workspace_dependency_fails() {
     fails_with(
         &[("inboxcraft-charset", &dep("inboxcraft-time")), ("inboxcraft-time", "")],
