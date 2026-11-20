@@ -199,3 +199,20 @@ fn a_paragraph_separator_and_a_mark_after_latin_words_never_blank_their_row() {
     let shown = wrapped_signs("Wire the deposit today\u{2029}\u{200F}");
     assert!(shown.contains("Wirethedeposittoday") || shown.contains("Wire the deposit today"), "the words are drawn: {shown:?}");
 }
+
+#[test]
+fn a_cut_keeps_the_direction_of_the_whole_label() {
+    // A right-to-left label whose cut keeps only its numbers: they stay in the label's direction, as uncut.
+    let text = "12 34 שלום";
+    let found = laid(|ui| {
+        let room = crate::draw::paint::measured(&crate::component::galley(ui, "12 34…", body(), Color32::WHITE)) + 0.5;
+        vec![
+            crate::component::galley(ui, text, body(), Color32::WHITE),
+            crate::component::cut(ui, text, body(), Color32::WHITE, room),
+            crate::component::fitted(ui, text, body(), Color32::WHITE, room),
+            crate::component::wrapped(ui, text, body(), Color32::WHITE, room, 1, egui::Align::LEFT),
+        ]
+    });
+    let shown: Vec<String> = found.iter().map(|galley| line(galley)).collect();
+    assert_eq!(shown, ["םולש 34 12", "…34 12", "…34 12", "…34 12"]);
+}

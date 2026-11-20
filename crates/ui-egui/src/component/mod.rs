@@ -296,7 +296,7 @@ pub(crate) fn capped(text: &str, most: usize) -> (&str, bool) {
 /// `text` as it fits on one line of `room` points in `font`: whole, or its longest beginning in the written order that
 /// ends at a grapheme boundary, with no space before one closing `…`; empty when not even the `…` fits. A line fits
 /// as the one cutting rule measures it ([`crate::draw::paint::within`]: its letters' advances added up). A
-/// right-to-left name is cut at its logical end and laid out once, so it is never mirrored.
+/// right-to-left name is cut at its logical end and laid out once, so it is never mirrored; its cut keeps its direction.
 pub(crate) fn fit(ui: &Ui, text: &str, font: Font, room: f32) -> String {
     use unicode_segmentation::UnicodeSegmentation as _;
     let fits = |text: &str| crate::draw::paint::within(&galley(ui, text, font, egui::Color32::PLACEHOLDER), room);
@@ -304,9 +304,13 @@ pub(crate) fn fit(ui: &Ui, text: &str, font: Font, room: f32) -> String {
         return text.to_owned();
     }
     let ends: Vec<usize> = text.grapheme_indices(true).map(|(at, grapheme)| at + grapheme.len()).collect();
+    // A cut of a right-to-left name stays right to left (a right-to-left mark leads it) when what it keeps has no letter
+    // that says so ("12 34 …" of "12 34 שלום").
+    let right_to_left = crate::bidi::right_to_left(text);
     let cut = |count: usize| {
         let end = if count == 0 { 0 } else { ends.get(count - 1).copied().unwrap_or(0) };
-        format!("{}…", text.get(..end).unwrap_or_default().trim_end())
+        let kept = format!("{}…", text.get(..end).unwrap_or_default().trim_end());
+        if right_to_left && !crate::bidi::right_to_left(&kept) { format!("\u{200F}{kept}") } else { kept }
     };
     // The most clusters whose cut fits: a binary search, each step one layout (egui keeps the galleys it laid out).
     let (mut low, mut high) = (0_usize, ends.len());

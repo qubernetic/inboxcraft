@@ -128,6 +128,27 @@ fn pieces(text: &str, base: Option<Level>) -> Vec<String> {
     out
 }
 
+/// The direction of `text`'s first paragraph, as UAX #9 P2 and P3 find it (its first strong letter outside an isolate);
+/// `None` when it has none.
+fn base(text: &str) -> Option<Level> {
+    match unicode_bidi::get_base_direction(text) {
+        unicode_bidi::Direction::Ltr => Some(Level::ltr()),
+        unicode_bidi::Direction::Rtl => Some(Level::rtl()),
+        unicode_bidi::Direction::Mixed => None,
+    }
+}
+
+/// Whether `text` reads right to left: its first strong letter (outside an isolate) is of a right-to-left script.
+pub(crate) fn right_to_left(text: &str) -> bool {
+    needs(text) && base(text).is_some_and(|level| level.is_rtl())
+}
+
+/// The sections' directions of `job`, each by the start of its section: what a cut of `job` keeps, whatever it keeps.
+fn bases(job: &LayoutJob) -> Vec<(usize, Option<Level>)> {
+    let section_text = |section: &egui::text::LayoutSection| job.text.get(section.byte_range.start.0..section.byte_range.end.0);
+    job.sections.iter().map(|section| (section.byte_range.start.0, section_text(section).and_then(base))).collect()
+}
+
 /// `text` cut after at most `most` characters between grapheme clusters, and whether it was.
 fn capped(text: &str, most: usize) -> (&str, bool) {
     let mut chars = 0_usize;
@@ -144,7 +165,14 @@ fn capped(text: &str, most: usize) -> (&str, bool) {
 /// is given back as it is. At most [`MOST`] characters are kept, a cut there ending in an ellipsis at the logical end.
 /// Each piece after a section's first takes the section's letter spacing before it, as egui puts it between clusters.
 pub(crate) fn visual(job: LayoutJob) -> LayoutJob {
-    if !needs(&job.text) {
+    ordered(job, &[])
+}
+
+/// [`visual`], each section whose start `bases` names in that direction (a cut of a longer label: the direction of the
+/// whole), the others in the direction of their first strong letter. A section cut at [`MOST`] keeps its own direction.
+fn ordered(job: LayoutJob, bases: &[(usize, Option<Level>)]) -> LayoutJob {
+    let turned = |level: &Option<Level>| level.is_some_and(|level| level.is_rtl());
+    if !needs(&job.text) && !bases.iter().any(|(_, level)| turned(level)) {
         return job;
     }
     let mut out = job;
@@ -153,10 +181,11 @@ pub(crate) fn visual(job: LayoutJob) -> LayoutJob {
     let mut left = MOST;
     for section in sections {
         let Some(slice) = text.get(section.byte_range.start.0..section.byte_range.end.0) else { continue };
+        let named = bases.iter().find(|(start, _)| *start == section.byte_range.start.0).map(|(_, level)| *level);
         let (kept, cut) = capped(slice, left);
         left = left.saturating_sub(kept.chars().count());
         let format = section.format;
-        if !cut && !needs(kept) {
+        if !cut && !needs(kept) && !named.as_ref().is_some_and(turned) {
             if !kept.is_empty() {
                 push(&mut out, kept, section.leading_space, format);
             }
@@ -170,7 +199,8 @@ pub(crate) fn visual(job: LayoutJob) -> LayoutJob {
             kept
         };
         let between = format.extra_letter_spacing.max(0.0);
-        for (index, piece) in pieces(kept, None).iter().enumerate() {
+        let base = named.unwrap_or_else(|| if cut { base(slice) } else { None });
+        for (index, piece) in pieces(kept, base).iter().enumerate() {
             push(&mut out, piece, if index == 0 { section.leading_space } else { between }, format.clone());
         }
         if cut {
@@ -252,9 +282,11 @@ pub(crate) fn cut_line(painter: &Painter, job: LayoutJob, width: f32) -> Arc<Gal
     job.wrap.max_width = f32::INFINITY;
     let (kept, was_capped) = capped(&job.text, MOST - 1);
     let ends: Vec<usize> = kept.grapheme_indices(true).map(|(at, grapheme)| at + grapheme.len()).collect();
+    // Each section's direction, from the whole of it: a cut keeps it.
+    let bases = bases(&job);
     let lay = |count: usize, cut: bool| {
         let end = if count == 0 { 0 } else { ends.get(count - 1).copied().unwrap_or(0) };
-        painter.layout_job(visual(prefix(&job, end, cut.then_some(ellipsis))))
+        painter.layout_job(ordered(prefix(&job, end, cut.then_some(ellipsis)), &bases))
     };
     let fits = |galley: &Galley| crate::draw::paint::within(galley, width);
     if !was_capped {
@@ -296,13 +328,16 @@ pub(crate) fn wrapped(painter: &Painter, job: &LayoutJob) -> Option<Arc<Galley>>
     let format = section.format.clone();
     let ellipsis = job.wrap.overflow_character.unwrap_or('…');
     let (text, was_capped) = capped(job.text.get(section.byte_range.start.0..section.byte_range.end.0)?, MOST.saturating_mul(rows));
-    let one = |line: &str| {
+    // The paragraphs and their directions, from the whole text: a row and a cut keep them.
+    let info = BidiInfo::new(text, None);
+    let base_at = |at: usize| info.paragraphs.iter().find(|para| para.range.contains(&at)).map(|para| para.level);
+    let one = |line: &str, base: Option<Level>| {
         let mut single = LayoutJob::single_section(line.to_owned(), format.clone());
         single.wrap.max_width = f32::INFINITY;
         single.break_on_newline = false;
-        painter.layout_job(visual(single))
+        painter.layout_job(ordered(single, &[(0, base)]))
     };
-    let fits = |line: &str| crate::draw::paint::within(&one(line), width);
+    let fits = |line: &str, base: Option<Level>| crate::draw::paint::within(&one(line, base), width);
     // The rows: byte ranges of `text`, and the cut last row's own text when there is one.
     let mut found: Vec<Range<usize>> = Vec::new();
     let mut cut_row: Option<String> = None;
@@ -313,6 +348,8 @@ pub(crate) fn wrapped(painter: &Painter, job: &LayoutJob) -> Option<Arc<Galley>>
             Some(at) => (rest.get(..at).unwrap_or_default(), at + 1),
             None => (rest, rest.len()),
         };
+        let base = base_at(start);
+        let fits = |line: &str| fits(line, base);
         let last = found.len() + 1 >= rows;
         let ends_text = start + after >= text.len() && !was_capped;
         if fits(segment.trim_end()) && (!last || ends_text) {
@@ -341,7 +378,6 @@ pub(crate) fn wrapped(painter: &Painter, job: &LayoutJob) -> Option<Arc<Galley>>
         found.push(start..start + shown);
         start += taken;
     }
-    let info = BidiInfo::new(text, None);
     let mut out = empty_like(job);
     out.wrap.max_width = f32::INFINITY;
     out.break_on_newline = true;
@@ -369,8 +405,7 @@ pub(crate) fn wrapped(painter: &Painter, job: &LayoutJob) -> Option<Arc<Galley>>
     let cut = cut_row.is_some();
     if let Some(row) = cut_row {
         // The cut row in its paragraph's direction: the paragraph it starts in.
-        let base = info.paragraphs.iter().find(|para| para.range.contains(&start)).map(|para| para.level);
-        put(pieces(&row, base), &mut out);
+        put(pieces(&row, base_at(start)), &mut out);
     }
     let galley = painter.layout_job(out);
     Some(if cut { marked_cut(galley) } else { galley })
