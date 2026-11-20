@@ -704,12 +704,17 @@ fn the_zoom_keys_zoom_nothing_and_ctrl_0_resets_the_text_size_at_a_zoom_of_one()
     harness.run();
     assert_eq!(harness.ctx.zoom_factor(), 1.0, "a kept zoom is set back to 1 at the start");
     assert!(!harness.ctx.options(|options| options.zoom_with_keyboard), "egui's keyboard zoom is off");
-    for key in [Key::Plus, Key::Equals, Key::Minus, Key::Plus, Key::Num0] {
+    for key in [Key::Plus, Key::Equals, Key::Minus, Key::Plus] {
         command(&mut harness, key);
         harness.run();
         assert_eq!(harness.ctx.zoom_factor(), 1.0, "{key:?} zooms nothing");
         assert_eq!(harness.state().screen(), Screen::Mail, "{key:?} moves nothing");
     }
+    assert_eq!(harness.state().text_scale().percent(), 120, "the keys stepped the text size, not the zoom");
+    command(&mut harness, Key::Num0);
+    harness.run();
+    assert_eq!(harness.ctx.zoom_factor(), 1.0, "Ctrl+0 zooms nothing");
+    assert_eq!(harness.state().screen(), Screen::Mail, "Ctrl+0 moves nothing");
     assert_eq!(harness.state().text_scale(), TextScale::default(), "Ctrl+0 is the text size at 100 %");
 }
 
