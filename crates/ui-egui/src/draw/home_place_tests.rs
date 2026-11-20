@@ -94,6 +94,13 @@ fn subject_of(app: &mut InboxApp, id: u64) -> String {
     shown.get("subject").and_then(Value::as_str).unwrap_or_default().to_owned()
 }
 
+/// Shows Home as the index's HOME and the palette do: its action, which has no key at the start.
+fn home(harness: &mut Harness<'static, InboxApp>) {
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::HOME);
+    harness.run();
+}
+
 /// Ctrl and `key`.
 fn command(harness: &mut Harness<'static, InboxApp>, key: Key) {
     harness.key_press_modifiers(Modifiers::COMMAND, key);
@@ -114,9 +121,10 @@ fn the_window_starts_on_home_with_an_account_and_on_the_mail_without() {
 #[test]
 fn home_s_key_its_row_and_the_palette_show_it_and_mail_s_key_leaves_it() {
     let mut harness = window(InboxApp::at_mail(Mailbox::new(sample::session(Box::new(clock())).unwrap(), Box::new(clock()))));
-    assert_eq!(harness.state().keymap().shortcut(keymap::HOME), Some(egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::Num0)));
-    command(&mut harness, Key::Num0);
-    assert_eq!(harness.state().screen(), Screen::Home, "Command 0 shows Home");
+    assert_eq!(harness.state().keymap().shortcut(keymap::HOME), None, "Command 0 is the text size's: Home has no key at the start");
+    harness.state_mut().keymap_mut().bind(keymap::HOME, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::Num9));
+    command(&mut harness, Key::Num9);
+    assert_eq!(harness.state().screen(), Screen::Home, "a key given to Home shows it");
     command(&mut harness, Key::Num1);
     assert_eq!(harness.state().screen(), Screen::Mail, "Command 1 shows the mail");
     harness.get_by_role_and_label(Role::Button, "Home").click();
@@ -137,7 +145,7 @@ fn home_s_key_its_row_and_the_palette_show_it_and_mail_s_key_leaves_it() {
     // From the settings too: Home leaves them.
     super::tests::at_settings(harness.state_mut(), crate::settings::Section::Appearance);
     harness.run();
-    command(&mut harness, Key::Num0);
+    command(&mut harness, Key::Num9);
     assert!(!harness.state().settings().is_open());
     assert_eq!(harness.state().screen(), Screen::Home);
 }
@@ -171,7 +179,7 @@ fn home_is_built_once_at_rest_and_again_only_while_it_shows_when_what_it_shows_c
     assert_eq!(harness.state().home.builds(), 4, "the hour turned");
     // Away and back with nothing changed: once on return, as on every return.
     command(&mut harness, Key::Num1);
-    command(&mut harness, Key::Num0);
+    home(&mut harness);
     harness.run();
     assert_eq!(harness.state().home.builds(), 5, "once on a return with nothing changed");
     // Nothing while another place shows, whatever changes there.
@@ -182,7 +190,7 @@ fn home_is_built_once_at_rest_and_again_only_while_it_shows_when_what_it_shows_c
         harness.run();
     }
     assert_eq!(harness.state().home.builds(), 5, "nothing is built while the mail shows");
-    command(&mut harness, Key::Num0);
+    home(&mut harness);
     harness.run();
     assert_eq!(harness.state().home.builds(), 6, "once on return");
 }
@@ -275,7 +283,7 @@ fn the_buttons_do_what_they_say() {
         press(&mut harness, "Open the calendar");
         assert_eq!(harness.state().screen(), Screen::Calendar, "Open the calendar");
     }
-    command(&mut harness, Key::Num0);
+    home(&mut harness);
     press(&mut harness, "Write");
     assert_eq!(harness.state().screen(), Screen::Mail, "Write");
     assert!(harness.state().composer().is_some_and(|composer| !composer.floating()), "a new message in the reader's place");
@@ -434,7 +442,7 @@ fn discarding_the_draft_being_written_keeps_and_closes_it_first() {
     harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
     harness.get_by_role_and_label(Role::TextInput, "Subject").type_text(" and kilns");
     harness.run();
-    command(&mut harness, Key::Num0);
+    home(&mut harness);
     assert_eq!(harness.state().screen(), Screen::Home);
     press_discard(&mut harness, "Workshop dates");
     assert!(harness.state().composer().is_none(), "the composer closes with its draft");
@@ -480,7 +488,7 @@ fn a_draft_row_pressed_over_a_draft_being_written_keeps_what_was_typed() {
     harness.get_by_role_and_label(Role::TextInput, "Subject").type_text("Typed before Home");
     harness.run();
     let typing = harness.state().composer().map(crate::compose::Composer::draft).unwrap();
-    command(&mut harness, Key::Num0);
+    home(&mut harness);
     assert_eq!(harness.state().screen(), Screen::Home);
     assert!(harness.state().composer().is_some(), "the composer floats over Home");
     press_draft(&mut harness, "Workshop dates");
@@ -522,7 +530,7 @@ fn nothing_of_the_mail_runs_on_home_and_the_window_s_own_runs_as_off_it() {
     harness.run();
     assert!(harness.state().can_run(keymap::UNDO), "Undo could run off Home");
     let before: Vec<(&str, bool)> = keymap::actions().into_iter().map(|action| (action.id, harness.state().can_run(action.id))).collect();
-    command(&mut harness, Key::Num0);
+    home(&mut harness);
     assert_eq!(harness.state().screen(), Screen::Home);
     for (id, could) in before {
         let can = harness.state().can_run(id);
@@ -626,7 +634,7 @@ fn on_home_the_floating_composer_s_send_and_fold_act_by_key_and_by_button() {
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);
     harness.run();
     if harness.state().screen() != Screen::Home {
-        command(&mut harness, Key::Num0);
+        home(&mut harness);
     }
     assert_eq!(harness.state().screen(), Screen::Home);
     assert!(harness.state().composer().is_some() && !harness.state().docked(), "the composer floats over Home");
@@ -662,7 +670,7 @@ fn on_the_settings_the_composer_kept_open_neither_sends_nor_folds() {
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);
     harness.run();
     if harness.state().screen() != Screen::Home {
-        command(&mut harness, Key::Num0);
+        home(&mut harness);
     }
     type_into(&mut harness, "To", "odile@example.org");
     harness.key_press(Key::Enter);
@@ -681,11 +689,11 @@ fn on_the_settings_the_composer_kept_open_neither_sends_nor_folds() {
     assert!(!asked, "Send rests on the settings");
 }
 
-/// The owner's ruling: Ctrl+0 is Home, and egui's own keyboard zoom is off. The interface's size comes from the
-/// text-size setting alone: Ctrl+Plus and Ctrl+Minus change nothing, Ctrl+0 shows Home, and a zoom factor a context
+/// egui's own keyboard zoom is off: the interface's size comes from the text-size setting alone. Ctrl+Plus, Ctrl+=,
+/// Ctrl+Minus and Ctrl+0 step the text size (`keymap_text_size_tests.rs`) and zoom nothing, and a zoom factor a context
 /// came with (an earlier zoom) is set back to 1 at the start.
 #[test]
-fn the_zoom_keys_change_nothing_and_ctrl_0_shows_home_at_a_zoom_of_one() {
+fn the_zoom_keys_zoom_nothing_and_ctrl_0_resets_the_text_size_at_a_zoom_of_one() {
     let mut app = InboxApp::at_mail(Mailbox::new(sample::session(Box::new(clock())).unwrap(), Box::new(clock())));
     app.set_own_frame(true);
     let mut harness = Harness::builder()
@@ -696,15 +704,13 @@ fn the_zoom_keys_change_nothing_and_ctrl_0_shows_home_at_a_zoom_of_one() {
     harness.run();
     assert_eq!(harness.ctx.zoom_factor(), 1.0, "a kept zoom is set back to 1 at the start");
     assert!(!harness.ctx.options(|options| options.zoom_with_keyboard), "egui's keyboard zoom is off");
-    for key in [Key::Plus, Key::Equals, Key::Minus, Key::Plus] {
+    for key in [Key::Plus, Key::Equals, Key::Minus, Key::Plus, Key::Num0] {
         command(&mut harness, key);
         harness.run();
         assert_eq!(harness.ctx.zoom_factor(), 1.0, "{key:?} zooms nothing");
         assert_eq!(harness.state().screen(), Screen::Mail, "{key:?} moves nothing");
     }
-    command(&mut harness, Key::Num0);
-    assert_eq!(harness.state().screen(), Screen::Home, "Ctrl+0 is Home");
-    assert_eq!(harness.ctx.zoom_factor(), 1.0);
+    assert_eq!(harness.state().text_scale(), TextScale::default(), "Ctrl+0 is the text size at 100 %");
 }
 
 /// A draft row pressed while the draft being written cannot be kept (the store refuses `compose.update`; here because
@@ -719,7 +725,7 @@ fn a_switch_to_another_draft_is_refused_while_the_one_being_written_cannot_be_ke
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);
     harness.run();
     if harness.state().screen() != Screen::Home {
-        command(&mut harness, Key::Num0);
+        home(&mut harness);
     }
     harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
     harness.run();

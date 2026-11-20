@@ -17,6 +17,7 @@ use egui::{Context, Event, Key, KeyboardShortcut, Modifiers};
 use serde_json::{Map, Value};
 
 use crate::iconset::IconId;
+use crate::theme::TextScale;
 use crate::tr;
 
 /// Focus the search field.
@@ -25,7 +26,8 @@ pub const FIND: &str = "ui.search.focus";
 /// Show the mail: leave the settings or the add-account page (the rail's Mail button).
 pub const MAIL: &str = "ui.mail.show";
 
-/// Show Home, the brief of today (the index's `[ 00 ] HOME`). Command and 0, as Command and 1 shows `[ 01 ] MAIL`.
+/// Show Home, the brief of today (the index's `[ 00 ] HOME`). No key of its own at the start: Command and 0 resets the
+/// text size ([`TEXT_RESET`]); the index's HOME and the palette show it, and the Shortcuts page can give it a key.
 pub const HOME: &str = "ui.home.open";
 
 /// Open the appearance settings (the rail's settings button).
@@ -81,6 +83,48 @@ pub const DARK: &str = "ui.mode.dark";
 
 /// Show what the system shows (`ui.theme.set`).
 pub const SYSTEM_MODE: &str = "ui.mode.system";
+
+/// Draw every text a step larger (`ui.text_scale.set`, 90 % to 130 % in steps of 10): Command and Plus.
+pub const TEXT_LARGER: &str = "ui.text_size.larger";
+
+/// The same step larger by Command and `=`, the Plus key without Shift on most layouts: [`TEXT_LARGER`]'s second key.
+pub const TEXT_LARGER_EQUALS: &str = "ui.text_size.larger_equals";
+
+/// Draw every text a step smaller: Command and Minus.
+pub const TEXT_SMALLER: &str = "ui.text_size.smaller";
+
+/// Draw every text at 100 % again: Command and 0.
+pub const TEXT_RESET: &str = "ui.text_size.reset";
+
+/// The text size's keys: each changes the text size by one step, or back to 100 %, and the status line says the size.
+pub const TEXT_SIZE_KEYS: [&str; 4] = [TEXT_LARGER, TEXT_LARGER_EQUALS, TEXT_SMALLER, TEXT_RESET];
+
+/// What the text-size action `id` makes of the text size `now`, and what the status line says of it: one step larger
+/// or smaller, or 100 %; at the end it steps towards the size stays and the words say it is the largest or the
+/// smallest. An id that is not one of [`TEXT_SIZE_KEYS`] leaves the size as it is.
+#[must_use]
+pub fn text_size_step(id: &str, now: TextScale) -> (TextScale, String) {
+    let percent = |scale: TextScale| scale.percent();
+    match id {
+        TEXT_LARGER | TEXT_LARGER_EQUALS => match now.larger() {
+            Some(scale) => (scale, tr!("Text size {percent} %", percent = percent(scale))),
+            None => (now, tr!("Text size {percent} %, the largest", percent = percent(now))),
+        },
+        TEXT_SMALLER => match now.smaller() {
+            Some(scale) => (scale, tr!("Text size {percent} %", percent = percent(scale))),
+            None => (now, tr!("Text size {percent} %, the smallest", percent = percent(now))),
+        },
+        TEXT_RESET => (TextScale::default(), tr!("Text size {percent} %", percent = percent(TextScale::default()))),
+        _ => (now, tr!("Text size {percent} %", percent = percent(now))),
+    }
+}
+
+/// Whether `text` is what [`text_size_step`] says, for any size: a newer word on the text size takes its place in the
+/// status line.
+#[must_use]
+pub fn is_text_size_notice(text: &str) -> bool {
+    TextScale::ALL.into_iter().any(|scale| TEXT_SIZE_KEYS.into_iter().any(|id| text_size_step(id, scale).1 == text))
+}
 
 /// Back to the list: in one pane the list takes the open message's place again, its keyed row focused.
 pub const BACK: &str = "ui.reader.back";
@@ -265,6 +309,10 @@ pub fn actions() -> Vec<Action> {
         action(LIGHT, tr!("Light mode"), IconId::Palette),
         action(DARK, tr!("Dark mode"), IconId::Palette),
         action(SYSTEM_MODE, tr!("Mode of the system"), IconId::Palette),
+        action(TEXT_LARGER, tr!("Larger text"), IconId::Palette),
+        action(TEXT_LARGER_EQUALS, tr!("Larger text (=)"), IconId::Palette),
+        action(TEXT_SMALLER, tr!("Smaller text"), IconId::Palette),
+        action(TEXT_RESET, tr!("Text size 100 %"), IconId::Palette),
         action(VIEW_GROUPED, tr!("Inbox view: Grouped"), IconId::Inbox),
         action(VIEW_SMART, tr!("Inbox view: Smart"), IconId::Inbox),
         action(VIEW_LIST, tr!("Inbox view: List"), IconId::Inbox),
@@ -354,7 +402,6 @@ impl Default for Keymap {
     fn default() -> Self {
         let mut keymap = Self::empty();
         keymap.bind(FIND, KeyboardShortcut::new(Modifiers::COMMAND, Key::F));
-        keymap.bind(HOME, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num0));
         keymap.bind(MAIL, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num1));
         keymap.bind(SETTINGS, KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma));
         keymap.bind(DONE, KeyboardShortcut::new(Modifiers::NONE, Key::D));
@@ -386,6 +433,10 @@ impl Default for Keymap {
         keymap.bind(PAGE_UP, KeyboardShortcut::new(Modifiers::NONE, Key::PageUp));
         keymap.bind(FIRST, KeyboardShortcut::new(Modifiers::NONE, Key::Home));
         keymap.bind(LAST, KeyboardShortcut::new(Modifiers::NONE, Key::End));
+        keymap.bind(TEXT_LARGER, KeyboardShortcut::new(Modifiers::COMMAND, Key::Plus));
+        keymap.bind(TEXT_LARGER_EQUALS, KeyboardShortcut::new(Modifiers::COMMAND, Key::Equals));
+        keymap.bind(TEXT_SMALLER, KeyboardShortcut::new(Modifiers::COMMAND, Key::Minus));
+        keymap.bind(TEXT_RESET, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num0));
         keymap
     }
 }
@@ -476,3 +527,7 @@ impl Keymap {
 #[cfg(test)]
 #[path = "keymap_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "keymap_text_size_tests.rs"]
+mod text_size_tests;
