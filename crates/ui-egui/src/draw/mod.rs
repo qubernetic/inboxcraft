@@ -327,15 +327,26 @@ pub struct InboxApp {
 }
 
 /// While the person types in the composer, its draft is kept at most once in this many seconds: keeping it runs
-/// `compose.update`, which writes the whole draft to the store on the window's thread. Leaving a field, closing,
-/// sending, a close of the window and the end of the app keep it at once, so only a crash can lose what was typed in
-/// the last second.
+/// `compose.update`, which checks the draft on the window's thread; the owner's store writes it to the disk behind,
+/// on its draft keeper's thread. Leaving a field, closing, sending, a close of the window and the end of the app keep
+/// it at once, so only a crash can lose what was typed in the last second.
 pub(crate) const KEEP_EVERY: f64 = 1.0;
 
-/// The end of the app keeps the draft being written, however little time passed since it was last kept.
+/// How long a close of the window and the end of the app wait for the drafts kept to reach the disk.
+pub(crate) const KEEP_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The end of the app keeps the draft being written, however little time passed since it was last kept, and waits
+/// (at most [`KEEP_WAIT`]) until it is on the disk.
 impl Drop for InboxApp {
     fn drop(&mut self) {
         self.keep_draft_now();
+        // Nobody sees the window any more: what was not kept goes to the app's standard error.
+        if let Err(error) = self.mailbox.wait_for_keeps(KEEP_WAIT) {
+            eprintln!("the draft being written may not be kept: {error}");
+        }
+        for (_, error) in self.mailbox.failed_keeps() {
+            eprintln!("the draft being written was not kept: {error}");
+        }
         self.discard_waiting();
     }
 }
@@ -2396,22 +2407,40 @@ impl InboxApp {
     }
 
     /// Keeps the draft when something in it changed, silently: at once when no field of the composer has the keys or
-    /// the window is closing, otherwise at most once in [`KEEP_EVERY`], a frame asked for when the rest is due.
+    /// the window is closing, otherwise at most once in [`KEEP_EVERY`], a frame asked for when the rest is due. A close
+    /// of the window waits for the keeps to reach the disk; a keep that failed is said and its draft is kept again.
     fn keep_draft(&mut self, ctx: &egui::Context) {
-        if !self.composer.as_ref().is_some_and(Composer::changed) {
-            return;
-        }
-        let now = ctx.input(|input| input.time);
-        let typing = ctx.memory(|memory| memory.focused()).is_some_and(compose::is_field);
         let closing = ctx.input(|input| input.viewport().close_requested());
-        // A time that went back, or is no number, keeps it now.
-        let wait = self.kept_at.map_or(0.0, |at| KEEP_EVERY - (now - at));
-        if typing && !closing && wait > 0.0 && wait <= KEEP_EVERY {
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
-            return;
+        if self.composer.as_ref().is_some_and(Composer::changed) {
+            let now = ctx.input(|input| input.time);
+            let typing = ctx.memory(|memory| memory.focused()).is_some_and(compose::is_field);
+            // A time that went back, or is no number, keeps it now.
+            let wait = self.kept_at.map_or(0.0, |at| KEEP_EVERY - (now - at));
+            if typing && !closing && wait > 0.0 && wait <= KEEP_EVERY {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+            } else {
+                self.kept_at = Some(now);
+                self.keep_draft_now();
+            }
         }
-        self.kept_at = Some(now);
-        self.keep_draft_now();
+        if closing && let Err(error) = self.mailbox.wait_for_keeps(KEEP_WAIT) {
+            if let Some(composer) = self.composer.as_mut() {
+                composer.edited();
+            }
+            self.mailbox.fail(error);
+        }
+        self.unkept();
+    }
+
+    /// Says in the status line each keep the store wrote behind and failed; the composer's own draft is to be kept
+    /// again, as after a keep refused at once.
+    fn unkept(&mut self) {
+        for (draft, error) in self.mailbox.failed_keeps() {
+            if let Some(composer) = self.composer.as_mut().filter(|composer| composer.draft() == draft) {
+                composer.edited();
+            }
+            self.mailbox.fail(error);
+        }
     }
 
     /// Keeps the draft at once if something in it changed since it was last kept: the end of a window or of the app.

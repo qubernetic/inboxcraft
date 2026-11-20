@@ -2005,3 +2005,146 @@ fn send_from_the_command_line_of_a_draft_that_cannot_go_says_why_as_its_send_doe
     assert_eq!(problem, "Add a recipient to send");
     assert_eq!(harness.state().notice(), Some(problem.as_str()), "`>` Send says why, in the composer's own words");
 }
+
+/// The sample's accounts in a SQLite store in `dir` whose drafts are written behind, the first able to send, and a
+/// hold on its keeper: a keep waits while it lives.
+fn written_behind(dir: &std::path::Path) -> (Mailbox, inboxcraft_store::KeepHold) {
+    let now = Timestamp::from_unix(NOW, 0).unwrap();
+    let mut store = inboxcraft_store::Sqlite::open(dir, inboxcraft_store::StoreConfig::default()).unwrap();
+    let server = Server::new(Host::new("smtp.example.org").unwrap(), Security::Tls.submission_port(), Security::Tls);
+    let mut batch = Batch::new();
+    for account in sample::mailbox(now).unwrap().accounts().unwrap() {
+        let account = if account.id() == AccountId::new(1) { account.with_submission(Some(server.clone())) } else { account };
+        batch.push(Change::PutAccount(account));
+    }
+    store.apply(&batch).unwrap();
+    store.keep_drafts_behind().unwrap();
+    let hold = store.hold_keeps().unwrap();
+    (Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()), hold)
+}
+
+/// The text of draft `id` as the disk holds it, read by a store of its own; `None` without the draft.
+fn text_on_disk(dir: &std::path::Path, id: u64) -> Option<String> {
+    let store = inboxcraft_store::Sqlite::open(dir, inboxcraft_store::StoreConfig::default()).unwrap();
+    store.draft(inboxcraft_model::DraftId::new(id)).unwrap().map(|draft| draft.text)
+}
+
+/// Lets the keeper go after `ms` milliseconds, from another thread.
+fn release_after(hold: inboxcraft_store::KeepHold, ms: u64) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+        drop(hold);
+    })
+}
+
+/// A close of the window waits for the keep on its way to the disk (#338).
+#[test]
+fn closing_the_window_waits_for_the_keep_on_its_way() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hold) = written_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    let id = harness.state().composer().unwrap().draft();
+    typed_by_frames(&mut harness, "Plot 14");
+    harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+    let released = release_after(hold, 300);
+    harness.step();
+    // The window is still there, its store open: the keep is on the disk all the same.
+    assert!(text_on_disk(dir.path(), id).unwrap().starts_with("Plot 14"), "{:?}", text_on_disk(dir.path(), id));
+    assert!(harness.state().mailbox().error().is_none());
+    released.join().unwrap();
+}
+
+/// A keep the store wrote behind and failed is said in the status line, and the composer keeps its draft to be kept
+/// again (#338).
+#[test]
+fn a_keep_that_fails_behind_is_said_and_the_draft_stays_to_be_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hold) = written_behind(dir.path());
+    drop(hold);
+    let mut harness = composing_over(mailbox);
+    let id = harness.state().composer().unwrap().draft();
+    rusqlite::Connection::open(dir.path().join(inboxcraft_store::DATABASE_FILE))
+        .unwrap()
+        .execute_batch("CREATE TRIGGER refuse BEFORE UPDATE ON draft BEGIN SELECT RAISE(ABORT, 'refused'); END;")
+        .unwrap();
+    typed_by_frames(&mut harness, "Plot 14");
+    let composer = harness.state_mut().composer_mut().0.unwrap();
+    // The last keystrokes wait for their second: kept now, as a blur would, and handed to the keeper.
+    composer.edited();
+    harness.state_mut().keep_draft_now();
+    assert!(!harness.state().composer().unwrap().changed(), "handed to the keeper");
+    harness.state().mailbox().wait_for_keeps(std::time::Duration::from_secs(5)).unwrap();
+    harness.step();
+    assert!(harness.state().mailbox().error().is_some(), "the failed keep is said");
+    assert!(harness.state().composer().unwrap().changed(), "still to be kept");
+    assert!(text_of(&harness).starts_with("Plot 14"));
+    assert!(!text_on_disk(dir.path(), id).unwrap().starts_with("Plot 14"), "the disk holds the draft as it was");
+}
+
+/// Send after a keep still on its way sends the newest text: the send waits for the keep (#338).
+#[test]
+fn send_after_a_keep_on_its_way_sends_the_newest_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hold) = written_behind(dir.path());
+    let mut harness = harness_over(mailbox, egui::Theme::Light);
+    let id = planted(&mut harness, ["", "", ""]);
+    harness.state_mut().reopen(id);
+    harness.run();
+    typed_by_frames(&mut harness, "Plot 14");
+    let released = release_after(hold, 200);
+    harness.state_mut().send_composer();
+    assert!(harness.state().composer().is_none(), "sent");
+    // The send's own write waited for the keep: the disk holds the newest text with it.
+    assert!(text_on_disk(dir.path(), id).unwrap().starts_with("Plot 14"), "{:?}", text_on_disk(dir.path(), id));
+    assert!(queued(&mut harness, id));
+    released.join().unwrap();
+}
+
+/// A discard after a keep still on its way leaves no draft: the keep never comes after it (#338).
+#[test]
+fn discard_after_a_keep_on_its_way_leaves_no_draft_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mailbox, hold) = written_behind(dir.path());
+    let mut harness = composing_over(mailbox);
+    let id = harness.state().composer().unwrap().draft();
+    typed_by_frames(&mut harness, "Plot 14");
+    harness.state_mut().keep_draft_now();
+    let released = release_after(hold, 100);
+    harness.state_mut().mailbox_mut().run("compose.discard", &json!({ "id": id })).unwrap();
+    released.join().unwrap();
+    harness.state().mailbox().wait_for_keeps(std::time::Duration::from_secs(5)).unwrap();
+    assert_eq!(text_on_disk(dir.path(), id), None);
+}
+
+/// The window thread's time for one keep of a 1 MiB draft through `compose.update`, on a SQLite store that writes at
+/// once and on one that writes behind: `cargo test --release -p inboxcraft-ui-egui keep_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn keep_cost() {
+    for behind in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut mailbox, hold) = written_behind(dir.path());
+        drop(hold);
+        let id = mailbox.run("compose.new", &json!({})).unwrap()["id"].as_u64().unwrap();
+        let text = "A line of a long letter, written without end. ".repeat(23_000);
+        let text = text.get(..(1 << 20) - 4096).unwrap().to_owned();
+        if !behind {
+            // A store of its own over the same file, without a keeper.
+            let store = inboxcraft_store::Sqlite::open(dir.path(), inboxcraft_store::StoreConfig::default()).unwrap();
+            mailbox = Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock());
+        }
+        let mut times = Vec::new();
+        for n in 0..40 {
+            let text = format!("{n}{}", text.get(8..).unwrap());
+            #[allow(clippy::disallowed_methods, reason = "a measurement of the wall time")]
+            let start = std::time::Instant::now();
+            mailbox.run("compose.update", &json!({ "id": id, "text": text })).unwrap();
+            times.push(start.elapsed().as_secs_f64() * 1000.0);
+            // A keep a second, as typing does: the keeper is idle at the next.
+            mailbox.wait_for_keeps(std::time::Duration::from_secs(5)).unwrap();
+        }
+        times.sort_by(f64::total_cmp);
+        let at = |share: f64| times.get(((times.len() - 1) as f64 * share) as usize).copied().unwrap();
+        println!("keep_cost behind={behind}: median {:.2} ms, p95 {:.2} ms, max {:.2} ms", at(0.5), at(0.95), at(1.0));
+    }
+}

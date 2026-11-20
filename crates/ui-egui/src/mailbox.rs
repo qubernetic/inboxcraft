@@ -1799,6 +1799,30 @@ impl Mailbox {
         self.settle(Err(error));
     }
 
+    /// The drafts whose keep the store wrote behind and failed since last asked, each with why, once: the disk holds
+    /// such a draft as it was before that keep. The database's own words go to the app's standard error, once.
+    pub(crate) fn failed_keeps(&mut self) -> Vec<(u64, UiError)> {
+        let mut failed = Vec::new();
+        while let Some((id, error)) = self.session.store().failed_keep() {
+            let error = EngineError::Store(error);
+            if let Some(line) = crate::store_log(&error, &mut self.logged) {
+                eprintln!("{line}");
+            }
+            failed.push((id.get(), UiError::from(error)));
+        }
+        failed
+    }
+
+    /// Waits at most `within` until every draft the store writes behind is on the disk: the end of a window or of
+    /// the app.
+    ///
+    /// # Errors
+    ///
+    /// The store did not write them in that time.
+    pub(crate) fn wait_for_keeps(&self, within: std::time::Duration) -> Result<(), UiError> {
+        self.session.store().settle(within).map_err(|error| UiError::from(EngineError::Store(error)))
+    }
+
     /// Applies `event` as an account's sync worker tells it, checked by the engine as every worker's is: for a picture
     /// of the status line synced or syncing, which no sample account reaches without a server. Whether it changed
     /// anything.
