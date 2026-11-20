@@ -92,7 +92,10 @@ act back in place of the owner's.
 Every `safe` command runs over the channel; `inboxcraft-cli commands` lists them with their class. Besides reading,
 that is:
 
-- the reader's own changes: read and unread (`mail.open`, `mail.seen`), flags, and `history.undo`;
+- the reader's own changes: read and unread (`mail.open`, `mail.seen`), flags, and `history.undo`, which takes back
+  only an act an agent may make (`not_allowed` otherwise) and, while the owner has an event open in the window's
+  editor, nothing: it is refused with `editing`, "an event is being edited", until the editor is saved, cancelled or
+  left, or the window closes. The owner's own Undo is not held back;
 - drafts: `compose.new`, `compose.update`, `compose.reply`, `compose.reply_all`, `compose.forward`,
   `compose.template` and `compose.discard`, which deletes a draft here and on the server;
 - `account.check`, which connects to the account's servers and signs in to them;
