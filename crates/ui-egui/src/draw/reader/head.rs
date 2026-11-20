@@ -338,10 +338,11 @@ fn tag_width(ui: &Ui, theme: &Theme, words: &str) -> f32 {
 /// The widest a tag's words get, in points.
 const TAG_WIDEST: f32 = 240.0;
 
-/// The head's first line: the tags at the left, the acts at the right (Done, Snooze, Pin, Move, Delete and More). The
-/// acts keep whole and the tags give way, a tag that does not fit left out whole. A pane narrower than the six acts
-/// (a narrow window at 130 % text before the window takes one pane) stands them on lines of their own, as many on a line
-/// as fit, against the right edge, so Delete and More are always there.
+/// The head's first line: the tags at the left (in one pane after the way back to the list, 8 before them), the acts at
+/// the right (Done, Snooze, Pin, Move, Delete and More). The acts keep whole and the tags give way, a tag that does not
+/// fit left out whole. A pane narrower than the six acts (a narrow window at 130 % text before the window takes one
+/// pane) stands them on lines of their own, as many on a line as fit, against the right edge, so Delete and More are
+/// always there.
 fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let side = crate::component::control_side(theme);
     let open = reader.open_id();
@@ -349,7 +350,7 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
     let held = open.is_some_and(|id| mailbox.held(id));
     let width = ui.available_width();
     let line = |count: f32| count * side + (count - 1.0).max(0.0) * TOOL_GAP;
-    // In one pane the way back to the list is the first tool, 8 before the acts.
+    // In one pane the way back to the list is the first tool, at the line's left as the frames draw it.
     let back = if crate::draw::one_pane(ui.ctx()) { 1.0 } else { 0.0 };
     let shown = if held { 1.0 } else { ACTS } + back;
     if !held && line(ACTS + back) > width {
@@ -388,7 +389,13 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
     }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = TOOL_GAP;
-        let room = (ui.available_width() - line(shown) - TOOL_GAP).max(0.0);
+        // In one pane the way back to the list leads the line, 8 before the tags.
+        // The acts keep their ids whether the way back leads the line or not (its one widget counted where it is not
+        // drawn), so the keyboard stays on the act it was on when the window crosses into one pane or out of it.
+        if !super::back_to_list(ui, theme, keymap, drawn) {
+            ui.skip_ahead_auto_ids(1);
+        }
+        let room = (ui.available_width() - line(shown - back) - TOOL_GAP).max(0.0);
         let (_, place) = ui.allocate_space(vec2(room, side));
         let mut child = ui.new_child(UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)));
         child.set_clip_rect(place.intersect(ui.clip_rect()));
@@ -423,7 +430,6 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
             let drawn_tag = tag(&mut child, theme, &words, kind);
             drawn_tag.widget_info(|| WidgetInfo::labeled(Spoken::Label, true, crate::component::spoken(&spoken)));
         }
-        super::back_to_list(ui, theme, keymap, drawn);
         if held {
             act(ui, theme, keymap, mailbox, reader, drawn, ACT_COUNT - 1);
         } else {

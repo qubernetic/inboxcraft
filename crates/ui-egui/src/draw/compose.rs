@@ -1003,7 +1003,7 @@ pub(super) fn floating(
         .fade_in(false)
         .show(ctx, |ui| {
             let shadow = ui.painter().with_clip_rect(screen);
-            for shape in paint::float_shapes(theme, rect, paint::FloatEdge::Keyboard) {
+            for shape in paint::float_shapes(theme, rect, paint::FloatEdge::Keyboard, ui.ctx().pixels_per_point()) {
                 shadow.add(shape);
             }
         });
