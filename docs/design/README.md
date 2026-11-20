@@ -84,6 +84,7 @@ What the app still owes this file, one line each. The finer differences, with th
 - With the own window frame the desktop's window menu is not offered on a right press of the command line.
 - A window narrower than 800 is laid out 800 wide and clipped at its right.
 - New message at the top of the index (Frame › Index) is not built (#339).
+- The index still draws Drafts with the compose pencil, not the file's dashed page (`file-dashed`) (#339).
 
 **Where the composer lives**
 - The composer is docked in the reader's place or floats; its window of its own is not built, and which place it

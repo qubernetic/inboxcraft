@@ -201,7 +201,8 @@ Everything is designed at 1440 × 900. Four fixed regions:
   `[ 01 ] MAIL`, `[ 02 ] CALENDAR`, `[ 03 ] LATER`, `[ 04 ] SETTINGS`. Under MAIL stand the mailboxes every account
   shares, then one row for each account, which opens to its folders. In a short window only the mailboxes scroll.
   The account picker opens from the owner's row at the index's foot. The narrow index shows New message as its
-  glyph alone, in a 32 px square.
+  glyph alone, in a 32 px square. Drafts, in Mail and under Calendar, has a glyph of its own, a page with a dashed
+  edge (`file-dashed`), so it is not taken for New message's pencil.
 - **Panes.** Every list is 440 wide; the pane beside it takes the rest (766 for the reader at 1440). Rows are
   lines, not cards. A pane with nothing in it says so in its centre.
 - **Status line.** At rest: the sync state, the accounts, the outbox, the next event. A notice is a stretch of
