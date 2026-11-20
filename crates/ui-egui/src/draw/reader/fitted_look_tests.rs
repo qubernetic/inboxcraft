@@ -372,3 +372,45 @@ fn the_walk_sees_the_kept_band_under_the_words_on_it() {
     let white = Painted { rect: Rect::ZERO, ink: Color32::WHITE, under: Color32::WHITE, run: String::new() };
     assert_eq!(faint(&[white]).len(), 1);
 }
+
+#[test]
+fn a_band_and_a_button_in_a_column_of_36_keep_their_words_within_its_cell() {
+    let html = r##"<table><tr><td width="36"><div style="background:#0033aa"><p>Supercalifragilistic</p><p>WWWWWWWW</p>
+        <a role="button" href="https://shop.example/">Unsubscribeforever</a></div></td><td><p>Next</p></td></tr></table>"##;
+    for mode in [Mode::Light, Mode::Dark] {
+        let painted = drawn(html, 700.0, mode);
+        let next = painted.iter().filter(|letter| letter.run == "Next").map(|letter| letter.rect.left()).fold(f32::INFINITY, f32::min);
+        assert!(next.is_finite(), "{painted:#?}");
+        let mine: Vec<&Painted> = painted.iter().filter(|letter| letter.run != "Next").collect();
+        assert!(mine.len() >= "SupercalifragilisticWWWWWWWWUnsubscribeforever".len(), "{mine:#?}");
+        // The cell's words end half a gap before the next column's.
+        let right = mine.iter().map(|letter| letter.rect.right()).fold(0.0, f32::max);
+        assert!(right <= next - 6.0, "{right} reaches the next cell at {next}");
+        // The band's words are not one letter a row: the room inside it shrank, it did not vanish.
+        let mut rows = std::collections::BTreeMap::<i32, usize>::new();
+        for letter in mine.iter().take("Supercalifragilistic".len()) {
+            *rows.entry(letter.rect.top().round() as i32).or_default() += 1;
+        }
+        assert!(rows.values().any(|letters| *letters >= 2), "{rows:?}");
+        // The button's words likewise: its sides shrank with the room.
+        let mut rows = std::collections::BTreeMap::<i32, usize>::new();
+        for letter in mine.iter().rev().take("Unsubscribeforever".len()) {
+            *rows.entry(letter.rect.top().round() as i32).or_default() += 1;
+        }
+        assert!(rows.values().any(|letters| *letters >= 2), "button: {rows:?}");
+    }
+}
+
+#[test]
+fn words_set_wider_than_a_column_of_36_are_cut_at_its_cell() {
+    // A list three deep stands 72 in: in a column of 36 its words would stand in the next cell. They are cut.
+    let html =
+        r##"<table><tr><td width="36"><ul><li>One<ul><li>Two<ul><li>Three deep</li></ul></li></ul></li></ul></td><td><p>Next</p></td></tr></table>"##;
+    let painted = drawn(html, 700.0, Mode::Light);
+    let next = painted.iter().filter(|letter| letter.run == "Next").map(|letter| letter.rect.left()).fold(f32::INFINITY, f32::min);
+    assert!(next.is_finite(), "{painted:#?}");
+    let mine: Vec<&Painted> = painted.iter().filter(|letter| letter.run != "Next").collect();
+    assert!(!mine.is_empty(), "{painted:#?}");
+    let right = mine.iter().map(|letter| letter.rect.right()).fold(0.0, f32::max);
+    assert!(right <= next - 6.0, "{right} reaches the next cell at {next}: {mine:#?}");
+}

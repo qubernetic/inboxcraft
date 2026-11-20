@@ -19,16 +19,19 @@
 //! words. A table that asks for a width (pixels or a share) is that wide, never wider than its room, and its columns
 //! that ask for one take it (scaled to fit); the others get their widths from [`column_widths`], each what its words
 //! ask while all fit, cut at whole pixels; a column keeps at least 36, and a table that cannot keep that in its room
-//! scrolls sideways inside itself. A cell's kept background fills the cell.
+//! scrolls sideways inside itself. A cell's kept background fills the cell; what stands wider than its column is cut
+//! there, never painted over the next cell.
 //!
 //! What the message keeps of its look ([`inboxcraft_html::Look`]): a block stands left, in the middle or right; a
 //! picture or a table narrower than its room moves with it. Blocks on a kept background stand in a band of it, 14
-//! above, 16 below and 32 in from the sides, 6 apart, their words and links in the background's own ink (a near
-//! black or white that reaches 4.5:1 on it). A link styled as a button is drawn as a secondary button 36 high, its
-//! words in `button` 16 in from its sides (on its own background where the message keeps one): a Tab stop like any
-//! link, whose target the status float shows under the pointer or the focus; Enter or a click copies it, nothing
-//! opens. Tables nest 4 deep; a deeper one is set as its cells' blocks one
-//! after another. At most 64 columns and 1 000 rows are drawn; a line under the table says what was left out.
+//! above, 16 below and 32 in from the sides (in a narrow column at most a sixth of its width), 6 apart, their words and
+//! links in the background's own ink (a near black or white that reaches 4.5:1 on it); words on a fill the reader
+//! paints of its own inside one (a head row's `panel`, preformatted text's `term`) take the app's ink for that fill,
+//! and the table's note and a quote's fold the band's. A link styled as a button is drawn as a secondary button 36
+//! high, its words in `button` 16 in from its sides (a sixth of a narrow room at most; on its own background where the
+//! message keeps one): a Tab stop like any link, whose target the status float shows under the pointer or the focus;
+//! Enter or a click copies it, nothing opens. Tables nest 4 deep; a deeper one is set as its cells' blocks one after
+//! another. At most 64 columns and 1 000 rows are drawn; a line under the table says what was left out.
 //!
 //! Everything in a message is data and bounded: the blocks are laid out once for a message, a width and the state of
 //! its quotes and pictures, and kept while they are drawn (again only when egui builds its font atlas afresh); each
@@ -279,6 +282,17 @@ struct Grid {
     note: Option<Arc<Galley>>,
     /// The note's ink: `muted`, or the ink of the kept background the table stands on.
     note_ink: Color32,
+}
+
+impl Grid {
+    /// Where column `column`'s cells stand across the table: from half the gap before it to half the gap after it (the
+    /// table's edge for the first and the last).
+    fn span(&self, column: usize) -> Option<(f32, f32)> {
+        let (left, width) = (self.lefts.get(column)?, self.widths.get(column)?);
+        let from = if column == 0 { 0.0 } else { left - CELL_GAP / 2.0 };
+        let to = if column + 1 >= self.lefts.len() { self.size.x } else { left + width + CELL_GAP / 2.0 };
+        Some((from, to))
+    }
 }
 
 /// A row of a table: its top and height in the table, whether it is a row of head cells, its cells laid out.
@@ -659,6 +673,8 @@ fn band<'b>(
 ) {
     let Some(ground) = style.ground else { return };
     let (top, foot, side) = BAND_PAD;
+    // In a narrow room (a table's column) the blocks keep most of it: the sides shrink, never below nought.
+    let side = narrowed(side, width);
     let inner = lay(context, run, (width - side * 2.0).max(1.0), style, depth);
     if inner.items.is_empty() {
         return;
@@ -674,6 +690,12 @@ fn band<'b>(
     laid.rules.extend(inner.rules.into_iter().map(|rule| rule.translate(shift)));
     *y += high;
     *previous = run.last();
+}
+
+/// The room `side` at each side of something in `room`, at most a sixth of it (whole points, never below nought), so
+/// that what stands inside keeps two thirds of a narrow room.
+fn narrowed(side: f32, room: f32) -> f32 {
+    side.min((room / 6.0).floor()).max(0.0)
 }
 
 /// A colour of the message as egui paints it.
@@ -930,7 +952,8 @@ fn button(context: &Context<'_>, spans: &[Span], link: usize, style: Style, room
     let ground = ground_under(style, None).map(|ground| colour_of(ground.ink));
     let ink = own.map(|(_, ink)| ink).or(ground).unwrap_or(theme.palette.ink);
     let font = theme.fonts.button;
-    let (high, pad) = BUTTON;
+    // In a narrow room (a table's column) the words keep most of it: the sides shrink, never below nought.
+    let (high, pad) = (BUTTON.0, narrowed(BUTTON.1, room));
     let mut job = LayoutJob::single_section(font.text(&words), font.format(ink));
     job.wrap.max_width = (room - pad * 2.0).max(1.0);
     job.halign = egui::Align::Center;
@@ -1505,9 +1528,7 @@ impl Show<'_> {
                 }
                 // A cell's kept background fills it, half the gap to its neighbours included.
                 for (column, fill) in row.fills.iter().enumerate() {
-                    let (Some(fill), Some(left), Some(width)) = (fill, grid.lefts.get(column), grid.widths.get(column)) else { continue };
-                    let from = if column == 0 { 0.0 } else { left - CELL_GAP / 2.0 };
-                    let to = if column + 1 >= grid.lefts.len() { grid.size.x } else { left + width + CELL_GAP / 2.0 };
+                    let (Some(fill), Some((from, to))) = (fill, grid.span(column)) else { continue };
                     let cell = Rect::from_min_max(pos2(origin.x + from, origin.y + row.top), pos2(origin.x + to, origin.y + row.top + row.high));
                     painter.rect_filled(paint::on_pixels(painter, cell), 0.0, *fill);
                 }
@@ -1548,7 +1569,14 @@ impl Show<'_> {
             for (column, part) in cells {
                 let (Some(cell), Some(left)) = (row.cells.get(column), grid.lefts.get(column)) else { continue };
                 let at = pos2(origin.x + left, origin.y + row.top + row.tops.get(column).copied().unwrap_or(CELL_PAD_Y));
-                if self.laid(ui, cell, at, id.with(("cell", row_index, column)), part) {
+                // A cell's words stay in its column: what stands wider than it (a list deep in a narrow
+                // column, a letter wider than it) is cut there, never painted over the next cell.
+                let clip = ui.clip_rect();
+                let (from, to) = grid.span(column).unwrap_or((0.0, grid.size.x));
+                ui.set_clip_rect(clip.intersect(Rect::from_x_y_ranges((origin.x + from)..=(origin.x + to), clip.y_range())));
+                let held = self.laid(ui, cell, at, id.with(("cell", row_index, column)), part);
+                ui.set_clip_rect(clip);
+                if held {
                     holds = Some((row_index, column));
                 }
             }
