@@ -230,13 +230,10 @@ fn every_word_on_a_kept_background_reaches_the_contrast_the_app_asks_for() {
         let html =
             format!(r##"<div style="background:{colour};color:{colour}"><p>hidden words</p><a role=button href="https://x.example/">go</a></div>"##);
         for mode in [Mode::Light, Mode::Dark] {
+            // Each letter against the fill painted under it.
+            assert_eq!(faint(&drawn(&html, 600.0, mode)), Vec::<String>::new(), "{colour} in {mode:?}");
             let look = laid_out(&html, 600.0, mode);
-            let ground = look.grounds.first().map(|(_, colour)| *colour);
-            for item in &look.items {
-                let (Some(ground), Seen::Text { colour: ink, .. } | Seen::Button { ink, .. }) = (ground, item) else { continue };
-                assert!(crate::theme::contrast(*ink, ground) >= 4.5, "{colour} in {mode:?}: {item:?}");
-            }
-            if ground.is_none() {
+            if look.grounds.is_empty() {
                 // Dropped: the words are the app's own on the app's own ground.
                 let Seen::Text { colour: ink, .. } = text(&look, "hidden words") else { return };
                 assert!(palette_inks.contains(ink), "{colour}: {ink:?}");
@@ -268,4 +265,110 @@ fn a_mebibyte_of_centred_text_lays_out_centred_once() {
     let [Seen::Text { halign, shift, .. }] = texts(&look).as_slice() else { panic!("one paragraph") };
     assert_eq!((*halign, *shift), (egui::Align::Center, 320.0));
     assert!(look.height > 10_000.0, "{}", look.height);
+}
+
+/// A letter as it is painted: where, in what ink, on what fill (the last opaque fill painted under its middle before
+/// it, else the reader's `surface`), and the text of the run it belongs to.
+#[derive(Debug, Clone)]
+struct Painted {
+    rect: Rect,
+    ink: Color32,
+    under: Color32,
+    run: String,
+}
+
+/// The fills and letters of `shapes`, in the order they are painted, each cut to its clip.
+fn walk(shapes: &[egui::epaint::ClippedShape], surface: Color32) -> Vec<Painted> {
+    fn visit(shape: &egui::Shape, clip: Rect, fills: &mut Vec<(Rect, Color32)>, letters: &mut Vec<Painted>, surface: Color32) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| visit(shape, clip, fills, letters, surface)),
+            egui::Shape::Rect(rect) if rect.fill.a() == 255 => fills.push((rect.rect.intersect(clip), rect.fill)),
+            egui::Shape::Text(text) => {
+                for placed in &text.galley.rows {
+                    let mesh = &placed.row.visuals.mesh;
+                    let range = placed.row.visuals.glyph_vertex_range.clone();
+                    let Some(vertices) = mesh.vertices.get(range) else { continue };
+                    for quad in vertices.chunks(4) {
+                        let Some(first) = quad.first() else { continue };
+                        let rect = Rect::from_points(&quad.iter().map(|vertex| vertex.pos).collect::<Vec<_>>())
+                            .translate(text.pos.to_vec2() + placed.pos.to_vec2())
+                            .intersect(clip);
+                        if !rect.is_positive() {
+                            continue;
+                        }
+                        let ink =
+                            text.override_text_color.unwrap_or(if first.color == Color32::PLACEHOLDER { text.fallback_color } else { first.color });
+                        let under = fills.iter().rev().find(|(fill, _)| fill.contains(rect.center())).map_or(surface, |(_, colour)| *colour);
+                        letters.push(Painted { rect, ink, under, run: text.galley.text().to_owned() });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut fills = Vec::new();
+    let mut letters = Vec::new();
+    for clipped in shapes {
+        visit(&clipped.shape, clipped.clip_rect, &mut fills, &mut letters, surface);
+    }
+    letters
+}
+
+/// `html` drawn as the reader draws a fitted message, `width` wide in `mode`, on the reader's `surface`: its letters.
+fn drawn(html: &str, width: f32, mode: Mode) -> Vec<Painted> {
+    let document = inboxcraft_html::display(html, &inboxcraft_html::Options::default());
+    let theme = Theme::new(mode, TextScale::default());
+    let surface = theme.palette.surface;
+    let mut harness =
+        Harness::builder().with_size(vec2(width, 900.0)).with_max_steps(8).with_context_setup(crate::theme::install_fonts).build_ui(move |ui| {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, theme.palette.surface);
+            let reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
+            let mut textures = super::Textures::default();
+            let mut drawn = super::Drawn::default();
+            super::blocks(ui, &theme, &reader, 1, 0, &document, &document.blocks, 0, &mut textures, &mut drawn);
+        });
+    harness.run();
+    walk(&harness.output().shapes, surface)
+}
+
+/// The letters of `painted` whose ink does not reach 4.5:1 on what is painted under them.
+fn faint(painted: &[Painted]) -> Vec<String> {
+    painted
+        .iter()
+        .filter(|letter| crate::theme::contrast(letter.ink, letter.under) < 4.5)
+        .map(|letter| format!("{:?} on {:?} in {:?} at {:?}", letter.ink, letter.under, letter.run, letter.rect.min))
+        .collect()
+}
+
+#[test]
+fn every_letter_drawn_reaches_the_contrast_the_app_asks_for_on_the_fill_painted_under_it() {
+    // A head row's `panel`, a `<pre>`'s `term`, the table's note and a quote's fold, inside kept colours, in both modes.
+    let wide: String = (0..65).map(|column| format!("<td>{column}</td>")).collect();
+    let cases = [
+        r##"<div style="background:#0033aa"><table><tr><th style="background:#eeeeee">Item</th><th style="background:#eeeeee">Price</th></tr><tr><td>Tea</td><td>3</td></tr></table></div>"##.to_owned(),
+        r##"<table><tr><td bgcolor="#0033aa"><table><tr><th>Item</th><th>Price</th></tr><tr><td>Tea</td><td>3</td></tr></table></td><td>x</td></tr></table>"##.to_owned(),
+        r##"<div style="background:#FF8800"><table><tr><th>Item</th><th>Price</th></tr><tr><td>Tea</td><td>3</td></tr></table></div>"##.to_owned(),
+        r##"<div style="background:#0033aa"><pre>code 1234</pre></div>"##.to_owned(),
+        r##"<div style="background:#FFCC00"><pre>x</pre></div>"##.to_owned(),
+        format!(r##"<div style="background:#0033aa"><table><tr>{wide}</tr></table></div>"##),
+        r##"<table><tr><td bgcolor="#0033aa"><p>Mine.</p><blockquote><p>Theirs.</p></blockquote></td><td>x</td></tr></table>"##.to_owned(),
+        r##"<table><tr><td bgcolor="#FFCC00"><p>Mine.</p><blockquote><p>Theirs.</p></blockquote></td><td>x</td></tr></table>"##.to_owned(),
+    ];
+    for html in &cases {
+        for mode in [Mode::Light, Mode::Dark] {
+            let painted = drawn(html, 700.0, mode);
+            assert!(!painted.is_empty(), "{html} in {mode:?}");
+            assert_eq!(faint(&painted), Vec::<String>::new(), "{html} in {mode:?}");
+        }
+    }
+}
+
+#[test]
+fn the_walk_sees_the_kept_band_under_the_words_on_it() {
+    // The walk itself: words on a band are found on the band's colour, and white on white would be caught.
+    let painted = drawn(r##"<div style="background:#0033aa"><p>On blue.</p></div>"##, 700.0, Mode::Light);
+    assert!(painted.iter().filter(|letter| letter.run.contains("On blue")).all(|letter| letter.under == rgb(0x0033AA)), "{painted:#?}");
+    assert!(painted.iter().any(|letter| letter.run.contains("On blue")));
+    let white = Painted { rect: Rect::ZERO, ink: Color32::WHITE, under: Color32::WHITE, run: String::new() };
+    assert_eq!(faint(&[white]).len(), 1);
 }

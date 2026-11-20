@@ -221,8 +221,8 @@ enum Kind {
     /// A picture that is not, in its box that says why ([`picture_box`]): the box measured, the picture's link and
     /// the key `try again` asks for again.
     Missing { measured: Box<Measured>, link: Option<usize>, key: Option<String> },
-    /// A quote's fold line.
-    Fold { lines: usize, open: bool },
+    /// A quote's fold line, and its words' ink at rest where it stands on a kept background.
+    Fold { lines: usize, open: bool, ink: Option<Color32> },
     /// A table.
     Table(Box<Grid>),
 }
@@ -277,6 +277,8 @@ struct Grid {
     stops: Vec<usize>,
     size: Vec2,
     note: Option<Arc<Galley>>,
+    /// The note's ink: `muted`, or the ink of the kept background the table stands on.
+    note_ink: Color32,
 }
 
 /// A row of a table: its top and height in the table, whether it is a row of head cells, its cells laid out.
@@ -612,7 +614,8 @@ fn lay(context: &Context<'_>, list: &[Block], width: f32, style: Style, depth: u
                 y += GAP;
             }
             let [.., high] = context.theme.boxes().reader;
-            let fold = Kind::Fold { lines: lines_of(run), open: context.quotes };
+            let ink = ground_under(style, None).map(|ground| colour_of(ground.ink));
+            let fold = Kind::Fold { lines: lines_of(run), open: context.quotes, ink };
             laid.items.push(Item { rect: Rect::from_min_size(pos2(0.0, y), vec2(width, high)), kind: fold });
             edge = Some(y);
             y += high;
@@ -708,6 +711,25 @@ fn button_of(document: &Document, spans: &[Span]) -> Option<usize> {
         }
     }
     found.filter(|link| document.links.get(*link).is_some_and(|link| link.button))
+}
+
+/// A fill the reader paints of its own under words, inside whatever kept background stands round them.
+#[derive(Clone, Copy)]
+enum Own {
+    /// A row of head cells' `panel`.
+    Head,
+    /// Preformatted text's `term` box.
+    Term,
+}
+
+/// What is painted under a run of words, as the kept background whose ink they take; the one place that decides it.
+/// Where the reader paints a fill of its own under them (`own`), none: the words take the app's ink for that fill.
+/// Else the kept background they stand on (`style.ground`), none where that is the reader's own ground.
+fn ground_under(style: Style, own: Option<Own>) -> Option<Paint> {
+    match own {
+        Some(Own::Head | Own::Term) => None,
+        None => style.ground,
+    }
 }
 
 /// The room between two blocks in `style`: less in a band of a kept background.
@@ -818,8 +840,9 @@ fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, sty
         return None;
     }
     let font = font_of(theme, kind, style);
-    // On a kept background the words and the links are in its ink.
-    let ground = style.ground.map(|ground| colour_of(ground.ink));
+    let pre = kind == TextKind::Preformatted;
+    // On a kept background the words and the links are in its ink; on preformatted text's own box, the app's.
+    let ground = ground_under(style, pre.then_some(Own::Term)).map(|ground| colour_of(ground.ink));
     let colour = ground.unwrap_or(if quoted || style.head { p.muted } else { p.ink });
     let link_ink = ground.unwrap_or(p.cyan_text);
     let (mark, left) = match kind {
@@ -833,7 +856,6 @@ fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, sty
         }
         _ => (None, 0.0),
     };
-    let pre = kind == TextKind::Preformatted;
     let wrap = if pre { room - PRE_PAD.x * 2.0 } else { room - left };
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap.max(1.0);
@@ -905,7 +927,7 @@ fn button(context: &Context<'_>, spans: &[Span], link: usize, style: Style, room
         return None;
     }
     let own = context.document.links.get(link).and_then(|link| link.fill).map(|paint| (colour_of(paint.fill), colour_of(paint.ink)));
-    let ground = style.ground.map(|ground| colour_of(ground.ink));
+    let ground = ground_under(style, None).map(|ground| colour_of(ground.ink));
     let ink = own.map(|(_, ink)| ink).or(ground).unwrap_or(theme.palette.ink);
     let font = theme.fonts.button;
     let (high, pad) = BUTTON;
@@ -1081,7 +1103,8 @@ fn grid(context: &Context<'_>, rows: &[Vec<Cell>], room: f32, width: Option<Widt
             top += 1.0;
         }
         let head = !row.is_empty() && row.iter().all(|cell| cell.header);
-        let ground = |cell: &Cell| cell.background.or(style.ground);
+        // A head row is painted `panel`: its cells' words take the app's ink unless a cell keeps a fill of its own.
+        let ground = |cell: &Cell| cell.background.or(ground_under(style, head.then_some(Own::Head)));
         let cells: Vec<Laid> = widths
             .iter()
             .enumerate()
@@ -1105,10 +1128,12 @@ fn grid(context: &Context<'_>, rows: &[Vec<Cell>], room: f32, width: Option<Widt
         top += high;
     }
     let shown_columns = rows.iter().take(MOST_ROWS).map(Vec::len).max().unwrap_or(0);
+    // The note stands on what the table stands on: on a kept background, in its ink.
+    let note_ink = ground_under(style, None).map_or(theme.palette.muted, |ground| colour_of(ground.ink));
     let note = crate::component::hairline_table::left_out(shown_columns.saturating_sub(count), rows.len().saturating_sub(MOST_ROWS))
-        .map(|note| crate::component::wrapped(context.ui, &note, theme.fonts.caption, theme.palette.muted, room.max(1.0), 2, egui::Align::LEFT));
+        .map(|note| crate::component::wrapped(context.ui, &note, theme.fonts.caption, note_ink, room.max(1.0), 2, egui::Align::LEFT));
     let stops = laid_rows.iter().enumerate().filter(|(_, row)| !row.stops.is_empty()).map(|(index, _)| index).collect();
-    Grid { lefts, widths, rows: laid_rows, stops, size: vec2(x, top.max(2.0)), note }
+    Grid { lefts, widths, rows: laid_rows, stops, size: vec2(x, top.max(2.0)), note, note_ink }
 }
 
 /// Points of a width the message asks for, in `room`.
@@ -1423,8 +1448,8 @@ impl Show<'_> {
                 }
                 holds
             }
-            Kind::Fold { lines, open } => {
-                if fold_line(ui, theme, rect, rect.bottom(), id.with("fold"), *lines, *open, None).clicked() {
+            Kind::Fold { lines, open, ink } => {
+                if fold_line(ui, theme, rect, rect.bottom(), id.with("fold"), *lines, *open, None, *ink).clicked() {
                     self.drawn.asked.push(Asked::Quotes(self.id));
                 }
                 false
@@ -1456,7 +1481,7 @@ impl Show<'_> {
                     let said = ui.interact(at, id.with("left out"), Sense::hover());
                     said.widget_info(|| WidgetInfo::labeled(Role::Label, true, note.text()));
                     if shows {
-                        paint::rows_at(ui.painter(), at.min, rect.width(), note.clone(), p.muted);
+                        paint::rows_at(ui.painter(), at.min, rect.width(), note.clone(), grid.note_ink);
                     }
                 }
                 holds
