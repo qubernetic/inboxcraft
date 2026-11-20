@@ -503,7 +503,9 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 - Local-first: state that must follow the person between devices lives in the mailbox (hidden folders), because
   the reference server has no IMAP METADATA.
 - The store (`inboxcraft-store`, layer 1, the one crate allowed to depend on `model` inside its layer) is the
-  `Storage` trait with two backends. `Memory` is always built and is the store on wasm. `Sqlite` is native only
+  `Storage` trait with two backends. `Memory` is always built and is the store on wasm; it applies a batch to a
+  copy of its state whose tables stay shared with the old state until the batch writes to them, so a batch copies
+  only the tables it changes (a kept draft the drafts, not the messages). `Sqlite` is native only
   (feature `sqlite`): `store.sqlite3` in WAL mode with `synchronous=FULL` and foreign keys on, its schema version in
   `PRAGMA user_version` with one migration per version, an FTS5 index of the body text, and each message source as
   `sources/<body id>.eml` beside it. A source is written and synced before the row that names it commits and
