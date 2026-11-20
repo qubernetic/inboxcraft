@@ -7,9 +7,13 @@ InboxCraft is a clean-room mail and calendar program. It is not affiliated with,
 Mailspring or any other mail product. Product names mentioned in the documentation (to say what a feature
 corresponds to) are trademarks of their owners.
 
-The InboxCraft mark and wordmark and the Qubernetic mark are trademarks of Qubernetic, all rights reserved. They are
-not licensed under the MIT License or the Apache License; they appear in this repository, in `assets/brand/` and in
-the design files, to show the product's own identity.
+The InboxCraft mark and wordmark and the Qubernetic mark, wordmark and emblem, in `assets/brand/` and in the design
+files, are by Qubernetic and licensed under the Creative Commons Attribution-NoDerivatives 4.0 International licence
+(CC BY-ND 4.0, the legal code in `LICENSES/CC-BY-ND-4.0.txt` and at
+https://creativecommons.org/licenses/by-nd/4.0/legalcode), a Creative Commons licence that allows
+redistribution: they may be copied and shared unchanged, with credit to Qubernetic, and may not be changed. They are
+not licensed under the MIT License or the Apache License. The licence grants no trademark rights: the InboxCraft and
+Qubernetic names and marks remain trademarks of Qubernetic. `REUSE.toml` says which files this covers.
 
 Portions adapted from other projects
 ------------------------------------

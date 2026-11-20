@@ -45,6 +45,10 @@ id = "noto-emoji"
 url = "https://fonts.google.com/specimen/Noto+Emoji"
 version = "v65"
 
+[[source]]
+# The design file in this repository, docs/design/inboxcraft.figcraft.
+id = "inboxcraft-design"
+
 [[file]]
 path = "assets/fonts/audiowide/Audiowide-Regular.ttf"
 source = "qubernetic-brand"
@@ -413,3 +417,21 @@ path = "assets/fonts/noto/emoji/OFL.txt"
 source = "noto-emoji"
 from = "Noto_Emoji.zip/OFL.txt"
 sha256 = "041ef83a3c8edb985efb5ea73a0018141f076ff411f80ed8180c5dac70c37fba"
+
+[[file]]
+path = "assets/brand/qubernetic/wordmark-dark.svg"
+source = "qubernetic-brand"
+from = "logo/svg/wordmark-dark.svg"
+sha256 = "e3d64e35001b3de8d0de3b5064abbc507ed9861b47a4f7d83ee1740887d1551e"
+
+[[file]]
+path = "assets/brand/qubernetic/wordmark-light.svg"
+source = "qubernetic-brand"
+from = "logo/svg/wordmark-light.svg"
+sha256 = "05b441ee435b00a69b0b439d15be03d966894599440206b18651799176cdb49b"
+
+[[file]]
+path = "assets/brand/qubernetic/emblem.txt"
+source = "inboxcraft-design"
+from = "the emblem of the frames screen/home/*"
+sha256 = "4064f2fa55204287d4ffc4dfb5a925d66e98d502c0867b66f9aac6e2afa10097"

@@ -47,7 +47,7 @@ fn mcp_serves_the_tools_on_the_store_until_the_input_ends() {
 }
 
 #[test]
-fn mcp_says_how_weeks_are_counted_and_withholds_mail_why() {
+fn mcp_says_how_weeks_are_counted_and_why_a_message_is_here() {
     let dir = tempfile::tempdir().unwrap();
     store::fixture(dir.path()).unwrap();
     let input = [
@@ -63,7 +63,9 @@ fn mcp_says_how_weeks_are_counted_and_withholds_mail_why() {
     let answers = answers(&out);
     assert_eq!(answers.len(), 4, "{out}");
     let text = |n: usize| answers[n]["result"]["content"][0]["text"].as_str().unwrap().to_owned();
-    assert!(answers[1]["error"]["message"].as_str().unwrap().contains("is not offered yet"), "{out}");
+    assert_eq!(answers[1]["result"]["isError"], false, "{out}");
+    assert!(text(1).starts_with(&format!("mail_why: message {}, 1 reason, most specific first\n", store::LUNCH)), "{}", text(1));
+    assert!(text(1).ends_with("\nrule | why.rule.group | group \"people\"; rule \"other\"\n"), "{}", text(1));
     assert!(text(2).starts_with("week_settings: weeks start on monday"), "{}", text(2));
     assert!(text(3).starts_with("sync_status: offline\n"), "{}", text(3));
 }

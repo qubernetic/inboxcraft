@@ -343,3 +343,16 @@ fn the_question_to_the_guests_stands_in_its_box() {
         assert_eq!(edges, 4, "four sides of cyan_edge");
     }
 }
+
+#[test]
+fn the_small_editor_has_no_alert_field() {
+    let mut harness = on_calendar(egui::Theme::Light);
+    press(&mut harness, "New event");
+    harness.get_by_role_and_label(Role::ComboBox, "Repeat");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Alert").is_none(), "Alert is the full editor's and the window's");
+    press(&mut harness, "Cancel");
+    pick(&mut harness, "Dentist");
+    press(&mut harness, "Edit");
+    assert!(editing(&harness));
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Alert").is_none());
+}

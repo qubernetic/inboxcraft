@@ -376,8 +376,8 @@ time from the code as it is, not measured.
   size but not the line height or tracking; the drawn rows and controls carry all three. egui's text fields still
   take their height from Plex's own line, so the add-account form after Detect runs past the settings sheet and
   scrolls (#232).
-- Text size (#83, #86, #87, #231): the text scale (90 % to 130 %) is set on the appearance settings page or through
-  `ui.text_scale.set`, and kept on disk; the type is IBM Plex, with no choice. The fit test draws the list, the
+- Text size (#83, #86, #87, #231, #341): the text scale (90 % to 130 %) is set on the appearance settings page, by
+  Ctrl+Plus, Ctrl+Minus and Ctrl+0, or through `ui.text_scale.set`, and kept on disk; the type is IBM Plex, with no choice. The fit test draws the list, the
   reader, the add-account page and the settings page at 90 %, 100 % and 130 %, in a window 1200 points wide (and the settings page 820 points wide); a narrower window is not checked.
   Spacing and paddings stay
   on the grid at every scale; only text and the heights that hold it grow. Loading the owner's own font file is an

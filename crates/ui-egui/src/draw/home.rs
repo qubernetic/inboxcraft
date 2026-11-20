@@ -6,7 +6,8 @@
 //! most two lines or the failing banner in its place, the row of four count tiles of one height, the agenda's block,
 //! the drafts' block, two buttons); before the first account the label, the headline, the lede on three lines, the two
 //! buttons and the block of what adding one does. At the right the emblem's place: the character field (the ground of
-//! Home), and on it the emblem only where it fits whole (never cut, never smaller).
+//! Home), and on it the emblem with the names under it (the Qubernetic and the InboxCraft wordmarks and the tagline)
+//! only where they fit whole (never cut, never smaller).
 //!
 //! The page takes what it shows as data ([`crate::home::Home`]) and gives back what was asked ([`Asked`]): it runs
 //! no command, reads no mailbox and opens nothing. Where the body is narrower than the brief and its place, the
@@ -59,6 +60,24 @@ const BAR: egui::Vec2 = vec2(3.0, 12.0);
 /// The block of what adding an account does: the room round its steps and between them, in points.
 const STEPS_PAD_Y: f32 = 10.0;
 const STEPS_GAP: f32 = 2.0;
+
+/// How far below the emblem's place's top the emblem stands where the place is high enough, in points.
+const EMBLEM_TOP: f32 = 95.0;
+
+/// The room between the emblem and the names under it, in points.
+const NAMES_GAP: f32 = 16.0;
+
+/// The names' box: how far it reaches out left of the emblem, its width and the room inside it, in points; it is
+/// filled with the page's `bg`, so the field leaves room for it.
+const NAMES_OUT: f32 = 12.0;
+const NAMES_WIDE: f32 = 394.0;
+const NAMES_PAD: f32 = 12.0;
+
+/// The room between the names' lines, in points.
+const NAMES_LINE_GAP: f32 = 10.0;
+
+/// The room round the dot between the two wordmarks, in points.
+const NAMES_DOT_GAP: f32 = 12.0;
 
 /// The largest side of a page Home draws, in points: a larger rect is cut to it.
 pub const MOST_SIDE: f32 = 16_384.0;
@@ -121,6 +140,10 @@ pub struct Parts {
     pub stage: Option<Rect>,
     /// The emblem, where it stands whole.
     pub emblem: Option<Rect>,
+    /// The names' box under the emblem, where the emblem stands.
+    pub names: Option<Rect>,
+    /// The Qubernetic and the InboxCraft wordmarks in the names' box: the boxes they are drawn in.
+    pub wordmarks: Option<(Rect, Rect)>,
 }
 
 /// What Home drew and what it was asked this frame.
@@ -132,24 +155,66 @@ pub struct Drawn {
     pub parts: Parts,
 }
 
-/// The emblem's place as the caller gives it: the character field Home stands on, the emblem on it (`None`: none),
-/// and the motion level.
+/// The emblem's place as the caller gives it: the character field Home stands on, the emblem on it (`None`: none,
+/// and no names either), and the motion level.
 pub struct Stage<'a> {
-    /// The field: the ground of the emblem's place. The emblem it draws is the one given to it
-    /// ([`Field::with_emblem`]).
+    /// The field: the ground of the emblem's place. Home puts the emblem below on it ([`Field::set_emblem`]).
     pub field: &'a mut Field,
-    /// The emblem, for its size: where it does not fit whole it is not drawn.
+    /// The emblem: where it does not fit whole with the names under it, neither is drawn.
     pub emblem: Option<&'a Emblem>,
     /// How much the field moves.
     pub level: Level,
 }
 
-/// Where `emblem` stands in `stage`: centred, at its one size, and only if it fits whole.
+/// Where `emblem` stands in `stage` at `ppp` with `under` points of names below it: centred across, [`EMBLEM_TOP`]
+/// below the stage's top (pulled up as far as a short stage needs), at its one size, on the whole pixel the field
+/// draws it on, and only if it and the names fit whole.
 #[must_use]
-pub fn emblem_place(stage: Rect, emblem: &Emblem) -> Option<Rect> {
+pub fn emblem_place(stage: Rect, emblem: &Emblem, under: f32, ppp: f32) -> Option<Rect> {
+    let band = emblem_band(stage, emblem, under, ppp)?;
+    field::emblem_corner(emblem, band, stage, ppp).map(|corner| Rect::from_min_size(corner, emblem.size()))
+}
+
+/// The band the emblem is centred in, as wide as `stage`: the emblem's height [`EMBLEM_TOP`] below the stage's top,
+/// or higher where the stage leaves less than that above the emblem and `under` points of names, and two pixels of
+/// `ppp` more each way: the field puts its first cell on the next whole pixel and the emblem on the nearest one from
+/// there, up to a pixel and a half off. `None` where not even a top of 0 leaves room.
+fn emblem_band(stage: Rect, emblem: &Emblem, under: f32, ppp: f32) -> Option<Rect> {
     let size = emblem.size();
-    (size.x > 0.0 && size.y > 0.0 && size.x <= stage.width() && size.y <= stage.height())
-        .then(|| Rect::from_min_size((stage.center() - size / 2.0).round(), size))
+    let top = EMBLEM_TOP.min(stage.height() - size.y - under.max(0.0));
+    let pixel = if ppp.is_finite() && ppp > 0.0 { 2.0 / ppp } else { 2.0 };
+    (under.is_finite() && top.is_finite() && top >= 0.0 && size.x > 0.0 && size.y > 0.0)
+        .then(|| Rect::from_min_size(pos2(stage.left(), stage.top() + top - pixel), vec2(stage.width(), size.y + pixel * 2.0)))
+}
+
+/// The names' height in `theme`: the wordmarks' line (`mono`'s), the tagline (`label`) and a line of `mono_s`, the
+/// room between them and round them.
+fn names_high(theme: &Theme) -> f32 {
+    NAMES_PAD * 2.0 + theme.fonts.mono.line + NAMES_LINE_GAP + theme.fonts.label.line + NAMES_LINE_GAP + theme.fonts.mono_s.line
+}
+
+/// The names under the emblem at `emblem`, within `stage`: a box of `bg` 12 out from the emblem's left and 16 under
+/// it, the Qubernetic wordmark, a dot in `dim` and the InboxCraft wordmark on one line, the tagline under them in
+/// `label` and `muted`. The box, and the boxes of the two wordmarks.
+fn names(ui: &mut Ui, theme: &Theme, stage: Rect, emblem: Rect) -> (Rect, (Rect, Rect)) {
+    use crate::brand::{Mark, paint};
+    let rect = Rect::from_min_size(pos2(emblem.left() - NAMES_OUT, emblem.bottom() + NAMES_GAP), vec2(NAMES_WIDE, names_high(theme)));
+    let painter = ui.painter().with_clip_rect(stage.intersect(ui.clip_rect()));
+    painter.rect_filled(rect, 0.0, theme.palette.bg);
+    let row = Rect::from_min_size(rect.min + vec2(NAMES_PAD, NAMES_PAD), vec2(rect.width() - NAMES_PAD * 2.0, theme.fonts.mono.line));
+    let centred = |left: f32, size: egui::Vec2| Rect::from_min_size(pos2(left, row.center().y - size.y / 2.0), size);
+    let qubernetic = centred(row.left(), Mark::Qubernetic.size());
+    let dot = component::galley(ui, "·", theme.fonts.mono, theme.palette.dim);
+    let dot_at = pos2(qubernetic.right() + NAMES_DOT_GAP, row.top());
+    let inboxcraft = centred(dot_at.x + dot.size().x.ceil() + NAMES_DOT_GAP, Mark::InboxCraft.size());
+    let mut clipped = ui.new_child(UiBuilder::new().max_rect(rect));
+    clipped.set_clip_rect(stage.intersect(ui.clip_rect()));
+    paint(&clipped, Mark::Qubernetic, theme.mode, qubernetic.min);
+    painter.galley(dot_at, dot, theme.palette.dim);
+    paint(&clipped, Mark::InboxCraft, theme.mode, inboxcraft.min);
+    let tagline = component::galley(ui, tr!("Your mail, on your machine."), theme.fonts.label, theme.palette.muted);
+    painter.galley(pos2(row.left(), row.bottom() + NAMES_LINE_GAP), tagline, theme.palette.muted);
+    (rect, (qubernetic, inboxcraft))
 }
 
 /// `rect` as Home draws in it: cut to [`MOST_SIDE`]; `None` for one that is empty or not a number.
@@ -169,13 +234,23 @@ pub fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, rect: Rect
     parts.brief = Some(brief);
     if rect.width() > BRIEF {
         let place = Rect::from_min_max(pos2(brief.right(), rect.top()), rect.max);
-        let emblem = stage.emblem.and_then(|emblem| emblem_place(place, emblem));
-        // The field centres the emblem in the place itself, from the place's own corner: a place moving by parts of a
-        // pixel keeps the emblem on the same cells (a whole-point corner handed in would not).
-        let area = emblem.map(|_| place);
+        let under = NAMES_GAP + names_high(theme);
+        if stage.field.emblem() != stage.emblem {
+            stage.field.set_emblem(stage.emblem);
+        }
+        // The field centres the emblem in its band itself, from the place's own corner: a place moving by parts of a
+        // pixel keeps the emblem on the same cells, and the names are placed from the same pixel.
+        let ppp = ui.ctx().pixels_per_point();
+        let emblem = stage.emblem.and_then(|emblem| emblem_place(place, emblem, under, ppp));
+        let area = stage.emblem.zip(emblem).and_then(|(emblem, _)| emblem_band(place, emblem, under, ppp));
         field::show(ui, theme, stage.field, place, stage.level, Opts { on_home: true, on_pane: false, emblem: area });
         parts.stage = Some(place);
         parts.emblem = emblem;
+        if let Some(emblem) = emblem {
+            let (names, wordmarks) = names(ui, theme, place, emblem);
+            parts.names = Some(names);
+            parts.wordmarks = Some(wordmarks);
+        }
     }
     let mut asked = None;
     ui.scope_builder(UiBuilder::new().max_rect(brief).id_salt("home"), |ui| {
@@ -538,12 +613,12 @@ fn steps(ui: &mut Ui, theme: &Theme) -> Rect {
     .rect
 }
 
-/// The gallery's page of Home in `state` (see [`crate::home::sample`]) across `size`, on a still field without an
-/// emblem; nothing for a state it does not know.
+/// The gallery's page of Home in `state` (see [`crate::home::sample`]) across `size`, on a still field with the
+/// emblem and the names where they fit; nothing for a state it does not know.
 pub fn gallery(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &str, field: &mut Field, size: egui::Vec2) {
     let Some(home) = crate::home::sample(state) else { return };
     let rect = Rect::from_min_size(ui.max_rect().min, size);
-    show(ui, theme, keymap, &home, rect, Stage { field, emblem: None, level: Level::Off });
+    show(ui, theme, keymap, &home, rect, Stage { field, emblem: Some(crate::brand::emblem()), level: Level::Off });
 }
 
 #[cfg(test)]

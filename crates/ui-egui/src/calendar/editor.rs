@@ -3,7 +3,7 @@
 
 //! The event editor's form: a new event (`event.create`) or an event picked on the screen (`event.update`), with its
 //! title, its start and end typed as `2026-11-06 13:00` (a day alone, `2026-11-06`, for an all-day event), all-day,
-//! private, a repeat preset, busy or free, and the guests' addresses. An edit sends only what changed. Editing an
+//! private, a repeat preset, busy or free, the alert, and the guests' addresses. An edit sends only what changed. Editing an
 //! event that has guests asks whether to tell them of the change; the default is not to. A new event asks nothing:
 //! inviting the guests is the invitations' work.
 //!
@@ -18,6 +18,79 @@ use crate::tr;
 
 /// The repeat presets the editor offers, as `event.repeats` names them.
 pub const REPEATS: [&str; 6] = ["none", "daily", "weekdays", "weekly", "monthly", "yearly"];
+
+/// An event's alert, as `event.list` says it and the Alert field picks it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Alert {
+    /// No alarm of its own: the default lead rings, ten minutes before a timed event and a day before an all-day one.
+    #[default]
+    Default,
+    /// No alert.
+    None,
+    /// This many minutes before the start.
+    Before(u32),
+    /// An alarm the field cannot name (after the start, from the end, at a moment), kept as it is.
+    Custom,
+}
+
+impl Alert {
+    /// The alert `event.list` gives: `null` or nothing, `"none"`, the minutes, or anything else as custom.
+    #[must_use]
+    pub fn read(value: Option<&Value>) -> Self {
+        match value {
+            None | Some(Value::Null) => Self::Default,
+            Some(Value::String(word)) if word == "none" => Self::None,
+            Some(value) => value.as_u64().and_then(|minutes| u32::try_from(minutes).ok()).map_or(Self::Custom, Self::Before),
+        }
+    }
+
+    /// What `event.create` and `event.update` take for it; `None` for the default and a custom alarm, which are never
+    /// sent.
+    fn param(self) -> Option<Value> {
+        match self {
+            Self::None => Some(json!("none")),
+            Self::Before(minutes) => Some(json!(minutes)),
+            Self::Default | Self::Custom => None,
+        }
+    }
+}
+
+/// The alerts the Alert field offers.
+pub const ALERTS: [Alert; 11] = [
+    Alert::None,
+    Alert::Before(0),
+    Alert::Before(5),
+    Alert::Before(10),
+    Alert::Before(15),
+    Alert::Before(30),
+    Alert::Before(60),
+    Alert::Before(120),
+    Alert::Before(1440),
+    Alert::Before(2880),
+    Alert::Before(10_080),
+];
+
+/// An alert in words, in its field: `None`, `10 min before`, `1 day before`; the default as the lead it rings with on
+/// a timed or an `all_day` event.
+#[must_use]
+pub fn alert_text(alert: Alert, all_day: bool) -> String {
+    const HOUR: u32 = 60;
+    const DAY: u32 = 24 * HOUR;
+    const WEEK: u32 = 7 * DAY;
+    match alert {
+        Alert::Default => alert_text(Alert::Before(if all_day { DAY } else { 10 }), all_day),
+        Alert::None => tr!("None").to_owned(),
+        Alert::Custom => tr!("Custom").to_owned(),
+        Alert::Before(0) => tr!("At the start").to_owned(),
+        Alert::Before(WEEK) => tr!("1 week before").to_owned(),
+        Alert::Before(minutes) if minutes % WEEK == 0 => tr!("{count} weeks before", count = minutes / WEEK),
+        Alert::Before(DAY) => tr!("1 day before").to_owned(),
+        Alert::Before(minutes) if minutes % DAY == 0 => tr!("{count} days before", count = minutes / DAY),
+        Alert::Before(HOUR) => tr!("1 hour before").to_owned(),
+        Alert::Before(minutes) if minutes % HOUR == 0 => tr!("{count} hours before", count = minutes / HOUR),
+        Alert::Before(minutes) => tr!("{count} min before", count = minutes),
+    }
+}
 
 /// The longest text a field of the editor takes, in characters.
 pub const MAX_FIELD: usize = 1000;
@@ -63,6 +136,8 @@ pub struct Form {
     pub busy: bool,
     /// The repeat preset ([`REPEATS`]), or `custom` for a repeat the presets do not name, kept as it is.
     pub repeat: String,
+    /// The alert; the full editor and the window show it, the small editor does not.
+    pub alert: Alert,
     /// The guests' addresses, separated by commas.
     pub guests: String,
 }
@@ -111,6 +186,7 @@ impl Editor {
             private: false,
             busy: true,
             repeat: REPEATS[0].to_owned(),
+            alert: Alert::Default,
             guests: String::new(),
         };
         Self { id: None, was: form.clone(), form, choices, notify: false, problem: None, menu: None, warned: None }
@@ -130,6 +206,7 @@ impl Editor {
             private: event.private,
             busy: event.busy,
             repeat: event.repeat.clone().unwrap_or_else(|| REPEATS[0].to_owned()),
+            alert: event.alert,
             guests: addresses.join(", "),
         };
         Self { id: Some(event.id), was: form.clone(), form, choices: Vec::new(), notify: false, problem: None, menu: None, warned: None }
@@ -288,6 +365,13 @@ impl Editor {
                 "repeat": form.repeat,
                 "guests": guests,
             });
+            let params = match (params, form.alert.param()) {
+                (Value::Object(mut fields), Some(alert)) => {
+                    fields.insert("alert".to_owned(), alert);
+                    Value::Object(fields)
+                }
+                (params, _) => params,
+            };
             return Ok(Some(("event.create", params)));
         };
         let was = &self.was;
@@ -311,6 +395,11 @@ impl Editor {
         }
         if form.repeat != was.repeat && REPEATS.contains(&form.repeat.as_str()) {
             params.insert("repeat".to_owned(), json!(form.repeat));
+        }
+        if form.alert != was.alert
+            && let Some(alert) = form.alert.param()
+        {
+            params.insert("alert".to_owned(), alert);
         }
         if guests != guests_of(&was.guests) {
             params.insert("guests".to_owned(), json!(guests));
@@ -369,3 +458,7 @@ pub fn guests_of(text: &str) -> Vec<String> {
 #[cfg(test)]
 #[path = "editor_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "editor_alert_tests.rs"]
+mod alert_tests;

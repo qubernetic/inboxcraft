@@ -362,11 +362,23 @@ pub(crate) struct Details {
     pub(crate) private: Option<bool>,
     /// The guests' addresses, each once.
     pub(crate) guests: Option<Vec<EmailAddress>>,
+    /// The alert ([`alert::set_lead`]).
+    pub(crate) alert: Option<alert::Lead>,
 }
 
 impl Details {
     /// Whether it changes nothing.
     pub(crate) fn is_empty(&self) -> bool {
+        self.alert.is_none() && self.only_alert_if_any()
+    }
+
+    /// Whether the alert is all they change.
+    pub(crate) fn only_alert(&self) -> bool {
+        self.alert.is_some() && self.only_alert_if_any()
+    }
+
+    /// Whether they change nothing but, maybe, the alert.
+    fn only_alert_if_any(&self) -> bool {
         self.summary.is_none()
             && self.location.is_none()
             && self.description.is_none()
@@ -397,6 +409,9 @@ impl Details {
         }
         if let Some(private) = self.private {
             event.class = private.then_some(Class::Private);
+        }
+        if let Some(lead) = self.alert {
+            alert::set_lead(event, lead);
         }
         if let Some(guests) = self.guests {
             event.attendees = guests
@@ -479,6 +494,7 @@ pub(crate) fn edit(
     };
     let zone = calendar.zones.offsets(&event.start, local);
     let (start, end) = placed(times, &form, zone, local).ok_or(EditError::Bad("the times cannot be written"))?;
+    let alert = details.alert;
     let event = calendar.events.get_mut(index).ok_or(EditError::Unreadable)?;
     event.start = start;
     event.end = Some(end);
@@ -489,6 +505,9 @@ pub(crate) fn edit(
     let guests = event.attendees.len();
     if notify && guests > 0 {
         event.sequence = event.sequence.saturating_add(1);
+    }
+    if let Some(lead) = alert {
+        alert::set_every_lead(&mut calendar, lead);
     }
     let text = calendar.write().map_err(|_| EditError::Bad("the event cannot be written"))?;
     Ok((text, guests))
@@ -631,6 +650,7 @@ pub(crate) fn row(held: &CalendarEvent, calendar: &Calendar, occurrence: &Occurr
         "recurrence_id": occurrence.recurrence_id.as_ref().map(when),
         "zone": zone(calendar, event, start, end, local),
         "guests": event.attendees.iter().map(guest).collect::<Vec<_>>(),
+        "alert": alert::lead_of(event),
     })
 }
 

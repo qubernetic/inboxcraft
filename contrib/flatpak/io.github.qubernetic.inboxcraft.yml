@@ -48,6 +48,9 @@ modules:
       # The InboxCraft mark at every size and as SVG, as the brand ships it for the icon theme.
       - mkdir -p /app/share/icons/hicolor
       - cp -r assets/brand/inboxcraft/linux/hicolor/. /app/share/icons/hicolor/
+      # The licences the app ships under: the code's (MIT or Apache-2.0) and the brand's marks' (CC BY-ND 4.0, which
+      # wants its notice and its text kept with every copy), and NOTICE, which says which covers what.
+      - install -Dm644 -t /app/share/licenses/io.github.qubernetic.inboxcraft NOTICE LICENSE-MIT LICENSE-APACHE LICENSES/CC-BY-ND-4.0.txt
     sources:
       # The checkout itself, without build output, git data or local private folders.
       - type: dir
