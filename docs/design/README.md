@@ -79,14 +79,8 @@ What the app still owes this file, one line each. The finer differences, with th
 [`docs/gaps.md`](../gaps.md).
 
 **Windows**
-- The reader and the composer in a window of their own (Reader, Composer) are not built: Appearance › Layout shows
-  both rows coming soon.
 - With the own window frame the desktop's window menu is not offered on a right press of the command line.
 - A window narrower than 800 is laid out 800 wide and clipped at its right.
-
-**Where the composer lives**
-- The composer is docked in the reader's place or floats; its window of its own is not built, and which place it
-  opens in by default is not settled yet.
 
 **Messages**
 - The cleaned copy opens in the browser from the reader's More menu, not from the content bar, and a link in it
@@ -117,15 +111,14 @@ What the app still owes this file, one line each. The finer differences, with th
   state show undo, its key, the bar and the seconds only. It is built once a frame draws it.
 
 **Frame, command line and status line**
-- The command line's search of all mail, its GO TO and LAST COMMANDS groups and mixed results are not built; plain
-  text searches the mail shown.
+- The command line shows one kind of result at a time (plain text the mail, `>` the commands, `@` the people, `#`
+  the mailboxes); its mixed results are not built.
 - The send countdown has no "send now" (the file draws none yet, above); the offline "try again" is coming soon.
 - Every "open log" is coming soon: there is no log to open.
 - The index keeps Blocked and Junk rows the file does not draw: their mail has no other place. While one account
   syncs, every account signed in says syncing.
 
 **Home**
-- No source yet for "offline since" or a refused sign-in: the failing banner names refused sends only, on one line.
 - "Look around with sample mail" is coming soon; Home shows two drafts where one frame draws three.
 
 **Lists and the reader**

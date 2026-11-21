@@ -28,9 +28,9 @@ time from the code as it is, not measured.
 - `testkit`'s `TestClient` checks certificates with the rustls WebPKI verifier and the test trust store, not the
   OS verifier `net` will use. It knows its clock is far off because the test sets the offset; the real
   `account.check` needs another reference for the clock (#8).
-- The live test harness has one live test so far, which checks the configuration only; the IMAP, SMTP and CalDAV
-  round trips, and the code that creates and removes the run folder on a server, come with `net`. Deleting the run
-  folder leaves the empty `InboxCraft-Test` parent behind (#10).
+- The live tests (`crates/net/tests/live.rs`) cover the sign-in of both accounts, the IMAP round trip, the write
+  path in the run folder, the account check, one message sent over SMTP and the CalDAV calendar list. Deleting the
+  run folder leaves the empty `InboxCraft-Test` parent behind (#10).
 - `just it-live` reads the credentials with `secret-tool` (Secret Service) or `security` (macOS Keychain) and needs
   bash; Windows Credential Manager is not supported yet. The leak scan of its output looks for the two secrets, the
   two addresses and the two login names, each verbatim and as Rust's `{:?}` prints it, not for encoded forms such
@@ -83,7 +83,7 @@ time from the code as it is, not measured.
   so it refuses `message/rfc822` and every other `message` type but `message/global` (RFC 2046 allows those only
   in an identity encoding): forwarding a message as an attachment needs a writer of its own. Addresses outside ASCII are written as given (RFC 6532), so such a message needs a
   server with `SMTPUTF8`; the SMTP client says `SMTPUTF8` only when `MailOptions::utf8` is set or the sender is not
-  ASCII, and nothing sets it from the message yet (#19, #117).
+  ASCII; `net` sets it when the sender or a recipient is not ASCII (#19, #117).
 - `MessageBuilder` keeps a display name of printable ASCII as a quoted string and writes any other as `B` encoded
   words, which a person reading the raw source cannot read; the text of a long word without spaces becomes encoded
   words throughout so that it can be folded (#19).
@@ -114,9 +114,8 @@ time from the code as it is, not measured.
 - `cargo xtask test-files` reads lines, not a syntax tree: a module line inside a multi-line string counts as a
   module (#5).
 - The IMAP client in `proto` sends one command at a time and only synchronising literals (no pipelining, no
-  LITERAL+). It has no UTF8=ACCEPT, NOOP, CLOSE, UNSELECT, ESEARCH, APPEND, STORE (other than inside a move),
-  XOAUTH2 or OAUTHBEARER yet; APPEND and APPENDUID come with drafts (E2), the rest when a caller needs them and with
-  OAuth (#20, #21, #22).
+  LITERAL+). It has no UTF8=ACCEPT, NOOP, ESEARCH, XOAUTH2 or OAUTHBEARER yet; those come when a caller needs
+  them and with OAuth (#20, #21, #22).
 - `proto` FETCH asks for UID, FLAGS, INTERNALDATE, RFC822.SIZE, MODSEQ and one of `BODY.PEEK[]`, `[HEADER]` and
   `[TEXT]`, and PREVIEW; no ENVELOPE, BODYSTRUCTURE or partial bodies. A FETCH response comes as an event whether a command asked
   for it or the server told of a change; the caller tells them apart by UID (#20).
@@ -135,8 +134,7 @@ time from the code as it is, not measured.
 - `proto` takes an untagged CAPABILITY that comes during LOGIN or AUTHENTICATE as the list after the sign-in: the
   client cannot tell whether the server sent it before or after it signed the session in. Over TLS that can only
   mean an extension goes unseen (#20).
-- `proto` CONDSTORE and QRESYNC: no STORE `UNCHANGEDSINCE` and `[MODIFIED]` (STORE is not there yet), no SEARCH
-  `MODSEQ`, no sequence match data in the QRESYNC parameter, and an untagged `[HIGHESTMODSEQ]` outside SELECT is not
+- `proto` CONDSTORE and QRESYNC: no SEARCH `MODSEQ`, no sequence match data in the QRESYNC parameter, and an untagged `[HIGHESTMODSEQ]` outside SELECT is not
   passed on; the modification sequences of the FETCH responses are. With QRESYNC enabled an EXPUNGE is still taken
   (RFC 7162 says a server must send VANISHED instead). Responses before `[CLOSED]` are passed over only with QRESYNC
   enabled, where the server must send it; without it they count towards the new mailbox until `[CLOSED]` comes, and
@@ -163,7 +161,7 @@ time from the code as it is, not measured.
   compression bomb are `net`'s (E1.7b). The client cannot tell a server that compresses at the TLS layer already;
   such a server answers `NO [COMPRESSIONACTIVE]` (#22).
 - The fake IMAP server knows the UID forms only: FETCH, STORE, SEARCH, COPY and MOVE by sequence number are
-  answered `BAD`. It has no APPEND, CREATE, DELETE, RENAME, SUBSCRIBE, LSUB, UNSELECT, NAMESPACE or ID, no
+  answered `BAD`. It has no RENAME, SUBSCRIBE, LSUB, UNSELECT, NAMESPACE or ID, no
   ENVELOPE, BODYSTRUCTURE, partial or `HEADER.FIELDS` fetch, and no SEARCH by sequence set, KEYWORD, MODSEQ, NEW,
   RECENT or sent date. SEARCH compares arrival days without their zone and text without ASCII case over the raw
   bytes, without decoding encoded words or transfer encodings. `RECENT` is always 0 (#23).
@@ -185,7 +183,7 @@ time from the code as it is, not measured.
   letters and digits; SQLite's `unicode61` tokenizer and the memory backend may split rare characters differently.
   The query language is E5.1 (#24).
 - `store` keeps no lock on its directory: keeping a second process away from an open store is the app's single
-  instance guard, which is not built yet. The memory backend copies its rows on every batch, which is fine for tests and
+  instance guard (`apps/inboxcraft/src/instance.rs`). The memory backend copies its rows on every batch, which is fine for tests and
   the browser build but not for a large mailbox (#24).
 - `store`: a record whose own id is above `i64::MAX` is refused by the SQLite backend (`IdOutOfRange`); the memory
   backend keeps it. Such an id naming a thing to read, change or remove is an unknown id on both (#276). A source file
@@ -264,15 +262,15 @@ time from the code as it is, not measured.
 - `engine`'s `mail.list` reads every message of the view's folders from the store and sorts them by date at each
   call, and `folder.list` reads every message to count them; a large unified inbox costs that much per list until
   the store gives sorted pages and counts (#27).
-- `engine`'s `mail.read` shows the plain text part only; a message with HTML alone shows no text (`has_html` says
-  so) until the reader shows the display blocks of `html`. Its body words are not searched either (#27).
+- `mail.search` looks at the words of a message's plain text part only, so a message with HTML alone is not found
+  by its body words; `mail.read` gives the HTML part as text beside the plain one (#27).
 - `engine` asks for a body once per message while that `FetchBody` job is out; a job the worker never answers
   (neither the body nor a failure) keeps the next `mail.read` from asking again until the session restarts. A body
   over 64 MiB is not kept and not asked for again until the session restarts, so such a message cannot be read in
   InboxCraft. Opening a
   message marks it opened in the store, so its body is kept, also when an agent opens it (#27).
-- `engine` lets an agent run `safe` commands only; per-account access levels and the owner's approval for `owner`
-  commands come with the first `owner` command (#27).
+- `engine` lets an agent run `safe` commands only; there are no per-account access levels, and an agent cannot ask
+  the owner to approve an `owner` command (#27).
 - `account.check` runs for saved accounts only, as a job of the account's worker: onboarding adds the account
   first (`account.add`) and checks it then; changing the settings after a failed check removes the account and adds
   it again under a new id. Detect is no command: the window runs `net`'s Detect on a thread of its own, so an agent
@@ -352,8 +350,8 @@ time from the code as it is, not measured.
   bundled (#83, #232). Tables are laid out as a grid without borders, four deep at most (#33).
 - `mail.thread` reads every message of every account to group the thread; fast enough for the sample and small
   mailboxes, an index comes with the store on disk (#33).
-- The next-message rule applies when the open message leaves the list after a refresh; archive and delete, which
-  will use it most, come with E2. Bodies that arrive while a message is open show the next time it is opened (#33).
+- The next-message rule applies when the open message leaves the list after a refresh or an act (archive, delete,
+  move). Bodies that arrive while a message is open show the next time it is opened (#33).
 - The reader cannot be tested on a real double click in `egui_kittest`, so the list has no double-click shortcut to
   full width; the Full width button is the way (#33).
 - The window's type is IBM Plex Mono and IBM Plex Sans, Regular and SemiBold, in twelve styles, with Audiowide for
@@ -391,14 +389,13 @@ time from the code as it is, not measured.
   in a filled glyph. The design draws an icon `muted`, and `ink` on the current row or a hovered button, never in
   the accent but on a selected icon button; the code still draws some in `cyan_text` (the pin on a row, the icons
   of the settings rows, the add-account steps and the empty list) until those components are restyled. The set has the ids the window and the triage actions need so
-  far; a toolbar or a view that needs another meaning adds an id and its glyph. Only the flag, the attachment tile and the add-account steps use icons yet; the
-  toolbars, the folder pane and the empty states move onto them with E1.17. The Phosphor Regular font is bundled
+  far; a toolbar or a view that needs another meaning adds an id and its glyph. The Phosphor Regular font is bundled
   whole (every Phosphor icon) rather than cut down to the glyphs in use, so a new id needs no new font file. An icon
   is one colour token. The unread dot and the account dots and
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
 - Appearance (#86, #87, #231): the four `ui.*.set` commands, the file that keeps their result and the settings sheet that
-  runs them exist; every section of the sheet opens, and what is not built yet (Calendar, Privacy, About, AI, Plugins, rows on the others) is drawn coming soon (#238). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
+  runs them exist; every section of the sheet opens, and what is not built yet (Calendar, Privacy, About, AI, Plugins, rows on the others) is drawn coming soon (#238). The Accounts page lists the accounts and adds one; an account's row opens its form, where it is changed or removed; a check on demand, its folder roles and the account colours switch are not built, and a row shows no sign-in state (Connection state is drawn coming soon). The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
   or `InboxApp::open_settings`. Motion has its three levels on the page (#313); going back
   to no choice (the computer's wish decides) after a choice is possible only through `ui.motion.set` with
   `reduce: system`. Loading the
@@ -414,9 +411,7 @@ time from the code as it is, not measured.
   undo history holds (#135). In the grouped inbox (cards or grouped list) the arrow keys still step through
   the list in date order, not in the order of the groups, a card shows its first three rows while the keys can select
   one hidden under "Show all", and every row is drawn each frame (the simple list draws only the rows in view). The
-  group menu is a right click on a row or the reader's More menu; it has no key. The rail
-  holds Mail, the calendar and the settings; the other places of the brief (the owner's own avatar) come with
-  their features.
+  group menu is a right click on a row, Shift+F10 or the Menu key, or the reader's More menu.
 - Hover actions (#89, #131): Done, read or unread and Delete act on a real account as on the sample, through the
   engine's commands (#131). Done marks the message read and done (`mail.done`, #135); on a done row under "Show
   done" it is "Not done". Flag and Archive have keys (S, A) but no hover button: the design's hover group is Done,
@@ -427,13 +422,10 @@ time from the code as it is, not measured.
   from More (#131); Reply, Reply all and Forward open the composer filled in (#133). Snooze (H) and Pin act on the
   open message (#135). More also holds Full width,
   Close and the next-message rule; Escape leaves full width but does not close the
-  reader. The quote toggles inside a message are still egui's own buttons in the theme's style, not the design
-  system's text buttons. `ui_shot` cannot open the
-  More menu or the Move menu or hover a link, so none of them has a picture; the UI tests cover them. The thread's earlier messages fold
+  reader. `ui_shot` cannot hover a link, so a hovered link has no picture; the UI tests cover it. The thread's earlier messages fold
   to one line, but the open message is the selected one, not always the latest of the thread.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
-  popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader since #90. The keymap knows three keys of its own (Ctrl+F for the search, Ctrl+1 for Mail, Ctrl+Comma for the
-  settings); the arrow keys and Escape are still read directly; the other keys are changed on the Shortcuts page
+  popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader since #90. The keymap knows the window's actions, the list's and the calendar's keys among them; the keys are changed on the Shortcuts page
   (#130). The motion level is set with
   `ui.motion.set` (full, reduced or off) and kept on disk; the Appearance page offers the three (#313). Until each
   level has movements of its own, reduced and off both land every movement at its end at once and only full runs
@@ -441,7 +433,7 @@ time from the code as it is, not measured.
   KDE keep it differently and the portal has none), so there the owner's default level holds; the web build has no
   window yet, so nothing reads `prefers-reduced-motion` so far. A still level stops egui's fades and its scrolling to a place, but not its smoothing of a mouse wheel's notches
   (about 0.1 s, fixed inside egui 0.37 with no setting), so a wheel still scrolls with a short glide.
-  The row slide-out token waits for the Done of E1.17. A menu row shows its key as text, which a screen reader does
+  A menu row shows its key as text, which a screen reader does
   not read with the row's name. Avatars show initials only; pictures of people (from a vCard or a sender's own
   picture) are not read.
 - Account colours are six fixed bar colours per mode, the design file's, repeating from the seventh account; two
@@ -491,8 +483,7 @@ time from the code as it is, not measured.
   results or the small event editor show; a press there leaves them open. The desktop's own snapping and its window menu
   (right click on a title bar) are not offered. Pictures and the web build draw no
   frame, so the screens in `docs/images` show the window's content only.
-- **The rail** (#104) offers Start and Pins before those views exist: they are disabled and say "Not available
-  yet". Calendar shows the calendars, or their empty state while there is none (#130, #147). The owner's initials at its foot come from the first account's address, as no account holds a
+- **The index** (#104) opens the places Home, Mail, Calendar, Later and Settings. Calendar shows the calendars, or their empty state while there is none (#130, #147). The owner's initials at its foot come from the first account's address, as no account holds a
   name of the person yet.
 - **The folder pane** (#104) lists only an account's own folders under it; its inbox, sent mail and the like are
   reached through the unified views, narrowed to the account with the picker.
@@ -619,7 +610,7 @@ time from the code as it is, not measured.
   screen shows its empty state while no account has a calendar (#130, #147).
 - Acting on mail (#131): one message at a time, no selection of several. The toast's Undo takes back every act made
   after its own, so a message opened (and marked read) after it is unread again. The Move menu lists every folder of
-  the account that holds mail but the message's own; it has no search and no picture (`ui_shot` cannot open it). The
+  the account that holds mail but the message's own; it has no search. The
   window counts the acts it put into the engine's history from the commands' answers; when the engine holds fewer (it
   keeps 100), Ctrl+Z stops quietly. A failed write the server refuses is taken back by the engine, and its toast still
   shows until it goes.
@@ -627,7 +618,7 @@ time from the code as it is, not measured.
   place or Home (#314); it stays in the store (`compose.list`) and in the account's Drafts folder. Plain text only: no formatting, no attachments. Suggestions come from the senders and recipients of the mail kept here (`mail.search`), not from an
   address book; a name that would move the address (`<`, `"`, `,`, `@`) is taken as the address alone. The engine
   takes a domain without a dot (`ansel@example`) as an address, so only a recipient with no `@`, two of them or an
-  empty part is marked as none. The composer has no window of its own.
+  empty part is marked as none.
 - Reply, reply all and forward have no keys yet, only the reader's buttons and the engine's commands (#133).
   Templates are written, edited and removed on Settings, Sending, Templates (#317).
 - A blank is asked for at the foot of the composer, one at a time; its mark in the text is tinted but cannot be
@@ -757,11 +748,10 @@ time from the code as it is, not measured.
 - An event over more than one day shows as a block over whole days in the day, week and month views, even when it
   has times (a night from 22:00 to 02:00); its times show in its details. Overlapping timed events share their
   group's width in equal columns, however short the overlap (#147).
-- The calendar's views have no keys of their own (steps, views, today), and an event picked by the keyboard is
-  reached by Tab only (#147).
+- The calendar's views have no keys of their own for steps, views or today (#147).
 - Hiding a calendar lasts until the window closes; it is not kept between runs (#147).
 - The event editor takes times typed as `2026-11-06 13:00` at the computer's present offset; it has no date or time
-  picker yet, and the place, the description and the event's own zone are not edited in it (#148).
+  picker yet, and the place and the event's own zone are not edited in it (#148).
 - Changing the times of one occurrence of a repeating event moves the whole series to them; there is no "this
   occurrence only" (#148).
 - Telling the guests of a change only counts the event's `SEQUENCE` on: InboxCraft answers invitations (#149) but
