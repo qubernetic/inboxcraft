@@ -226,6 +226,7 @@ fn the_local_tables_are_the_ones_the_epic_needs() {
             "folder",
             "job",
             "message",
+            "message_link",
             "message_state",
             "meta",
             "outbox",
@@ -235,8 +236,9 @@ fn the_local_tables_are_the_ones_the_epic_needs() {
     );
 }
 
-/// What version 5 added, taken off again: a store as version 4 left it, with its rows.
-const BACK_TO_VERSION_4: &str = "DROP INDEX draft_newest;
+/// What versions 5 and 6 added, taken off again: a store as version 4 left it, with its rows.
+const BACK_TO_VERSION_4: &str = "DROP TABLE message_link;
+    DROP INDEX draft_newest;
     ALTER TABLE draft DROP COLUMN saved;
     ALTER TABLE draft DROP COLUMN saved_nanos;
     PRAGMA user_version = 4;";
@@ -287,4 +289,134 @@ fn a_version_4_store_with_a_damaged_draft_opens() {
     kept.sort_by(|a, b| b.saved.cmp(&a.saved).then(b.id.cmp(&a.id)));
     // The damaged two sort oldest, below the 48 the backfill could read.
     assert_eq!(store.newest_drafts(AccountId::new(1), 48).unwrap(), (50, kept));
+}
+
+/// What version 6 added, taken off again: a store as version 5 left it, with its messages.
+const BACK_TO_VERSION_5: &str = "DROP TABLE message_link;
+    PRAGMA user_version = 5;";
+
+#[test]
+fn a_version_5_store_gets_the_links_of_its_messages() {
+    let tmp = dir();
+    let dir = tmp.path();
+    let named = |id: u64, own: &str, answers: &str| {
+        let message = message(id, 1, 1, u32::try_from(id).unwrap(), "Linked", Some(1));
+        let envelope = message
+            .summary()
+            .envelope()
+            .clone()
+            .with_message_id(inboxcraft_model::MessageRef::new(own))
+            .with_in_reply_to(inboxcraft_model::MessageRef::new(answers).into_iter().collect());
+        let summary = inboxcraft_model::Summary::new(message.summary().uid(), envelope);
+        inboxcraft_model::Message::new(message.id(), message.account(), message.folder(), summary)
+    };
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let batch = Batch::new()
+        .with(Change::PutAccount(account(1)))
+        .with(Change::PutFolder(folder(1, 1, "INBOX")))
+        .with(Change::PutMessage(named(1, "first@example.org", "")))
+        .with(Change::PutMessage(named(2, "second@example.org", "first@example.org")));
+    store.apply(&batch).unwrap();
+    drop(store);
+    let conn = Connection::open(dir.join(DATABASE_FILE)).unwrap();
+    conn.execute_batch(BACK_TO_VERSION_5).unwrap();
+    // A record that does not read back is left out of the index; the store opens.
+    conn.execute(
+        "INSERT INTO message (id, account, folder, uid, from_text, to_text, subject_text, record) VALUES (3, 1, 1, 3, '', '', '', 'damaged')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    let linked = |store: &Sqlite, link: &str| -> Vec<u64> {
+        store
+            .linked(&inboxcraft_model::MessageRef::new(link).unwrap(), &std::collections::BTreeSet::new())
+            .unwrap()
+            .iter()
+            .map(|entry| entry.message().id().get())
+            .collect()
+    };
+    assert_eq!(linked(&store, "first@example.org"), [1, 2]);
+    assert_eq!(linked(&store, "second@example.org"), [2]);
+    drop(store);
+    // A record changed behind the index's back is linked only by what it names now.
+    let conn = Connection::open(dir.join(DATABASE_FILE)).unwrap();
+    conn.execute_batch("DELETE FROM message WHERE id = 3; UPDATE message SET record = (SELECT record FROM message WHERE id = 1) WHERE id = 2;")
+        .unwrap();
+    drop(conn);
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    assert_eq!(linked(&store, "second@example.org"), Vec::<u64>::new());
+}
+
+/// An open killed half-way through indexing the links of a version 5 store leaves it at version 5 with no index, and
+/// the next open does the whole of it again.
+#[test]
+fn a_link_indexing_stopped_half_way_is_done_again_at_the_next_open() {
+    let tmp = dir();
+    let dir = tmp.path();
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let mut batch = Batch::new().with(Change::PutAccount(account(1))).with(Change::PutFolder(folder(1, 1, "INBOX")));
+    for id in 1..=4u64 {
+        let message = message(id, 1, 1, u32::try_from(id).unwrap(), "Linked", Some(1));
+        let envelope = message.summary().envelope().clone().with_message_id(inboxcraft_model::MessageRef::new(&format!("m{id}@example.org")));
+        let summary = inboxcraft_model::Summary::new(message.summary().uid(), envelope);
+        batch.push(Change::PutMessage(inboxcraft_model::Message::new(message.id(), message.account(), message.folder(), summary)));
+    }
+    store.apply(&batch).unwrap();
+    drop(store);
+    Connection::open(dir.join(DATABASE_FILE)).unwrap().execute_batch(BACK_TO_VERSION_5).unwrap();
+    Sqlite::stop_link_indexing_after(Some(2));
+    let stopped = Sqlite::open(dir, StoreConfig::default());
+    Sqlite::stop_link_indexing_after(None);
+    assert!(matches!(stopped, Err(inboxcraft_store::StoreError::Migration(_))), "{stopped:?}");
+    let conn = Connection::open(dir.join(DATABASE_FILE)).unwrap();
+    let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+    let tables: u32 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE name = 'message_link'", [], |row| row.get(0)).unwrap();
+    assert_eq!((version, tables), (5, 0));
+    drop(conn);
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    for id in 1..=4u64 {
+        let link = inboxcraft_model::MessageRef::new(&format!("m{id}@example.org")).unwrap();
+        let found: Vec<u64> =
+            store.linked(&link, &std::collections::BTreeSet::new()).unwrap().iter().map(|entry| entry.message().id().get()).collect();
+        assert_eq!(found, [id]);
+    }
+}
+
+/// How long the first open after the update takes to index the links of 100 000 messages, each with a Message-ID,
+/// an In-Reply-To and 10 References: a timing, run by hand in release
+/// (`cargo test --release -p inboxcraft-store --test migration link_indexing_timing -- --ignored --nocapture`).
+#[test]
+#[ignore = "a timing, run by hand in release"]
+#[allow(clippy::disallowed_methods, reason = "a measurement of the wall time")]
+fn link_indexing_timing() {
+    const MESSAGES: u64 = 100_000;
+    let tmp = dir();
+    let dir = tmp.path();
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let mut batch = Batch::new().with(Change::PutAccount(account(1))).with(Change::PutFolder(folder(1, 1, "INBOX")));
+    let named = |n: u64| inboxcraft_model::MessageRef::new(&format!("m{n}@example.org")).unwrap();
+    for id in 1..=MESSAGES {
+        let message = message(id, 1, 1, u32::try_from(id).unwrap(), "A subject of a usual length, said once", Some(1));
+        let envelope = message
+            .summary()
+            .envelope()
+            .clone()
+            .with_message_id(Some(named(id)))
+            .with_in_reply_to(vec![named(id.saturating_sub(1))])
+            .with_references((1..=10).map(|back| named(id.saturating_sub(back))).collect());
+        let summary = inboxcraft_model::Summary::new(message.summary().uid(), envelope);
+        batch.push(Change::PutMessage(inboxcraft_model::Message::new(message.id(), message.account(), message.folder(), summary)));
+    }
+    store.apply(&batch).unwrap();
+    drop(store);
+    Connection::open(dir.join(DATABASE_FILE)).unwrap().execute_batch(BACK_TO_VERSION_5).unwrap();
+    let start = std::time::Instant::now();
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let took = start.elapsed();
+    let rows: i64 = Connection::open(dir.join(DATABASE_FILE)).unwrap().query_row("SELECT count(*) FROM message_link", [], |row| row.get(0)).unwrap();
+    drop(store);
+    println!("indexing the links of {MESSAGES} messages ({rows} rows) on open: {:.3} s", took.as_secs_f64());
 }

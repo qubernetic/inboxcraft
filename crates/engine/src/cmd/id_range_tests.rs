@@ -21,7 +21,7 @@ const PAST: [u64; 3] = [u64::MAX, i64::MAX.unsigned_abs() + 1, i64::MAX.unsigned
 const UNKNOWN: u64 = 999_999;
 
 /// `from`'s records, put into `to` in the order their links need.
-fn copy(from: &dyn Storage, to: &mut Sqlite) {
+pub(crate) fn copy(from: &dyn Storage, to: &mut Sqlite) {
     let accounts = from.accounts().unwrap();
     let mut batch = Batch::new();
     let mut later = Batch::new();

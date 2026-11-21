@@ -240,6 +240,8 @@ pub struct InboxApp {
     editor_window_forward: bool,
     /// When a close of the main window was last taken back for an event's typing, in input seconds.
     editor_close_taken: Option<f64>,
+    /// At the end of the last frame, a float was open or the composer had the keyboard ([`InboxApp::agent_may_move`]).
+    owner_keys: bool,
     /// The composer's field that takes the keyboard in its window of its own at the window's next pass.
     window_focus: Option<egui::Id>,
     /// In one pane, the reader takes the focus once it is drawn: `Enter` or a press opened a message into it.
@@ -336,6 +338,11 @@ pub struct InboxApp {
     facts: (status::Facts, Option<(u64, u64, f64)>),
     /// The mailbox's error the status line was last given, so each is queued once.
     seen_error: Option<String>,
+    /// Whether a field or a list of choices held the keyboard as the last frame ended. egui lets the focus go as an
+    /// `Esc` comes, before the frame is drawn: this keeps that `Esc` the field's, so it never also dismisses the error.
+    keys_held: bool,
+    /// Whether the command line's results list a row, or make a search: what their arrows and `Enter` act on.
+    results_listed: bool,
     /// The draft whose countdown shows and its whole hold in seconds: what its bar is a share of.
     countdown_whole: Option<(u64, f64)>,
     /// The time picker opens over the open message in the next frame, with this text typed.
@@ -554,6 +561,7 @@ impl InboxApp {
             editor_opened: 0,
             editor_window_forward: false,
             editor_close_taken: None,
+            owner_keys: false,
             window_focus: None,
             focus_reader: false,
             focus_walked: false,
@@ -600,6 +608,8 @@ impl InboxApp {
             status: crate::status::Status::default(),
             facts: (status::Facts::default(), None),
             seen_error: None,
+            keys_held: false,
+            results_listed: false,
             countdown_whole: None,
             picker: None,
             sending: None,
@@ -1264,11 +1274,48 @@ impl InboxApp {
         self.composer_in_front() || (!self.docked() && self.message_in_front() && self.reader.open_id().is_some())
     }
 
+    /// Whether an `Esc` with no field holding the keyboard reaches nothing but the status line's error: no surface, no
+    /// field or list of choices that had the keyboard as the last frame ended (an `Esc` leaves it, and only that;
+    /// [`InboxApp::keys_held`]), not back to the settings' sections, and, off the settings, which stand in the place
+    /// whatever is under them, not back to the list and not on the calendar, whose `Esc` lets a pick go.
+    fn esc_free(&self, ctx: &egui::Context, surfaces: &Surfaces) -> bool {
+        let place = if self.settings.is_open() {
+            !(one_pane(ctx) && settings::back_shown(ctx))
+        } else {
+            self.screen != Screen::Calendar && !self.esc_to_list(ctx)
+        };
+        surfaces.top() == Surface::Place && !self.keys_held && place
+    }
+
+    /// Notes, as the frame ends, whether a field or a list of choices holds the keyboard ([`Self::holds_keys`]).
+    fn note_keys_held(&mut self, ctx: &egui::Context) {
+        let held = Self::holds_keys(ctx);
+        if held != self.keys_held {
+            self.keys_held = held;
+            if self.status.has_error() {
+                // The error's `Esc dismiss` comes or goes with it: that frame is drawn, not left for the next input.
+                ctx.request_repaint();
+            }
+        }
+    }
+
+    /// Whether a field, or a list of choices (a menu, a picker, the composer's suggestions), holds the keyboard as the
+    /// frame ends: the list's keyed row is not one ([`InboxApp::keys_held`]).
+    fn holds_keys(ctx: &egui::Context) -> bool {
+        let field = ctx.memory(|memory| memory.focused().is_some()) && list::focused_row(ctx).is_none();
+        field || crate::component::popup::any_open(ctx)
+    }
+
+    /// Whether an `Esc` that reaches the place goes back to the list ([`Self::back_to_list`]).
+    fn esc_to_list(&self, ctx: &egui::Context) -> bool {
+        let swapped = one_pane(ctx) && self.in_place_of_list();
+        self.screen == Screen::Mail && !(self.list_keys && !swapped) && !(self.docked() && !swapped)
+    }
+
     /// `Esc` in the reader gives the keyboard back to the list: its keyed row takes the focus. Whether it did.
     fn back_to_list(&mut self, ctx: &egui::Context) -> bool {
         let single = one_pane(ctx);
-        let swapped = single && self.in_place_of_list();
-        if self.screen != Screen::Mail || (self.list_keys && !swapped) || (self.docked() && !swapped) {
+        if !self.esc_to_list(ctx) {
             return false;
         }
         self.list_keys = true;
@@ -3087,6 +3134,9 @@ impl InboxApp {
         // capture and the event editor take theirs before anything under them. On the settings, a place, an Esc with
         // nothing in front closes nothing; in one pane, on a page alone, it goes back to the list of sections.
         let setting = self.settings.is_open();
+        let esc_free = !quiet && self.esc_free(ui.ctx(), &surfaces);
+        // Read before the settings keep their Esc from the place: there it is the error's all the same.
+        let esc_dismisses = esc_free && to_place;
         self.esc_to_sections(ui.ctx(), to_place && setting);
         let to_place = to_place && !setting;
         // The settings shown in the place of what was, and the palette coming over the window, close the lists, menus and
@@ -3137,7 +3187,6 @@ impl InboxApp {
         ran.extend(indexed.compose.then_some(keymap::COMPOSE));
         asked.open = indexed.mailbox;
         asked.narrow = indexed.account;
-        let mut dismiss = false;
         let mut on_calendar = Vec::new();
         let mut on_home = None;
         // The place the body draws in this frame: a command below that changes it changes it after the body was drawn.
@@ -3229,7 +3278,7 @@ impl InboxApp {
         // So does the event editor's window: what is typed or pressed in it passes the gate.
         let edited_apart = self.event_editor_in_window(ui.ctx(), &theme);
         // The status line, a strip of its own at the window's foot: it covers nothing of the panes.
-        let (mut line, mut undid) = self.status_line(ui, &theme, &surfaces, (quiet, undo_taken), regions.status);
+        let (mut line, mut undid) = self.status_line(ui, &theme, &surfaces, (quiet, undo_taken, esc_free, esc_dismisses), regions.status);
         // The one gate for the place under a modal surface ([`Surfaces::modal`]): whatever pressed it (the pointer, a key,
         // a screen reader's activate, which egui's layers do not stop), nothing the list, the reader, the composer in this
         // window, Home, the calendar, the settings' page or the status line asked for in this frame is applied. The index
@@ -3247,20 +3296,17 @@ impl InboxApp {
             // A confirmation dialog's own answer is no ask of the place under it: it passes ([`settings::Asked::answers`]).
             changed = changed.filter(|asked| surfaces.has(Surface::Dialog) && asked.answers());
             add = false;
-            dismiss = false;
         }
         composed.extend(windowed);
         on_calendar.extend(edited_apart);
-        let (undone, dismissed) = self.apply_line(&line, undid);
-        dismiss |= dismissed;
+        let undone = self.apply_line(&line, undid);
         ran.extend(line.hint);
         add |= line.open_account;
         let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, draft: drafted, server, screener: screener_mode, presets, gained } =
             listed;
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
-        let busy = dismiss
-            || back_to_list
+        let busy = back_to_list
             || acted.is_some()
             || line != status::Pressed::default()
             || outboxed.is_some()
@@ -3308,9 +3354,6 @@ impl InboxApp {
         for asked in drawn.asked {
             self.apply(ui, asked);
         }
-        if dismiss {
-            self.mailbox.dismiss_error();
-        }
         self.go(&asked, header, review);
         if clicked.is_some() {
             self.held_back = None;
@@ -3347,6 +3390,8 @@ impl InboxApp {
         // A press on the index that shows a list beside the docked composer, which holds the list's keys there: the
         // keyboard goes back to the composer's field it was in, never to nothing. Elsewhere the list takes the keys.
         self.keyboard_after_index(ui.ctx(), index_to_list);
+        self.note_keys_held(ui.ctx());
+        self.owner_keys = self.owner_has_keys(ui.ctx());
         self.frame = ui.ctx().cumulative_frame_nr().saturating_add(1);
     }
 
@@ -3491,6 +3536,8 @@ impl InboxApp {
                 crate::command::Mode::Search => {}
             }
         }
+        self.results_listed = self.command.mode() == crate::command::Mode::Search
+            || !(lists.commands.is_empty() && lists.mailboxes.is_empty() && lists.people.is_empty() && lists.last.is_empty());
         let mut asked = std::mem::take(&mut typed.asked);
         asked.extend(command::pick(&ctx, theme, &self.keymap, &mut self.command, &typed, &lists, early));
         if let Some(stamp) = kept {
@@ -3838,8 +3885,16 @@ impl InboxApp {
     /// message shown: the countdown while a send waits for its hold, else a discard's or the last act's Undo, else an
     /// error or a notice of the queue ([`crate::status::Status`]). What was pressed in it, with the message it was
     /// pressed on; nothing is applied here, so the one gate under a modal surface ([`Surfaces::modal`]) holds for it.
-    fn status_line(&mut self, ui: &mut Ui, theme: &Theme, surfaces: &Surfaces, keys: (bool, bool), rect: Rect) -> (status::Pressed, Option<Undone>) {
-        let (quiet, undo_taken) = keys;
+    /// `keys`: whether the keys are quiet, Undo's key was taken, `Esc` would reach nothing else, and it was pressed so.
+    fn status_line(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        surfaces: &Surfaces,
+        keys: (bool, bool, bool, bool),
+        rect: Rect,
+    ) -> (status::Pressed, Option<Undone>) {
+        let (quiet, undo_taken, esc_free, escape) = keys;
         let now = ui.input(|input| input.time);
         let countdown = self.countdown_message(now);
         let discard = if countdown.is_some() {
@@ -3854,6 +3909,10 @@ impl InboxApp {
             if self.seen_error.as_deref() != Some(error) {
                 self.seen_error = Some(error.to_owned());
                 self.status.push(crate::status::Message::Error { text: error.to_owned() });
+            } else if !self.status.holds_error(&crate::status::clean(error)) {
+                // A full queue dropped it: it shows nowhere, so it goes, and the next error is queued again.
+                self.mailbox.dismiss_error();
+                self.seen_error = None;
             }
         } else {
             self.seen_error = None;
@@ -3895,11 +3954,24 @@ impl InboxApp {
                 crate::component::key::key_words(&egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Escape)),
                 word,
             )],
-            None => status::hints(self.status_keys(surfaces))
-                .iter()
-                .filter(|(action, _)| surfaces.allows(action, &self.keymap) || (*action == keymap::DONE && surfaces.list_has_keyboard()))
-                .filter_map(|(action, word)| Some((*action, self.keymap.chip(ui.ctx(), action)?, *word)))
-                .collect(),
+            None => {
+                let error = esc_free && matches!(shown, Some(crate::status::Message::Error { .. }));
+                status::hints(self.status_keys(ui.ctx(), surfaces, error))
+                    .iter()
+                    .filter(|(action, _)| {
+                        (status::fixed_key(action).is_some() && status::has_work(action, self.results_listed))
+                            || surfaces.allows(action, &self.keymap)
+                            || (*action == keymap::DONE && surfaces.list_has_keyboard())
+                    })
+                    .filter_map(|(action, word)| {
+                        let chip = match status::fixed_key(action) {
+                            Some(key) => Some(crate::component::key::key_words(&key)),
+                            None => self.keymap.chip(ui.ctx(), action),
+                        };
+                        Some((*action, chip?, *word))
+                    })
+                    .collect()
+            }
         };
         let countdown_shown = matches!(shown, Some(crate::status::Message::Countdown { .. }));
         let rests = surfaces.undo_rests() && !countdown_shown;
@@ -3916,18 +3988,34 @@ impl InboxApp {
             rests,
             lifted,
             undo_taken,
+            escape,
         };
         let pressed = status::line(ui, theme, &self.keymap, rect, &drawn);
         (pressed, which)
     }
 
-    /// Which key hints the status line shows: the docked composer's, the open message's, or the list's with nothing
-    /// open (none in it: write); away from the mail's lists the open message's set.
-    fn status_keys(&self, surfaces: &Surfaces) -> status::Keys {
-        if self.screen != Screen::Mail || surfaces.on_settings() || self.mailbox.accounts().is_empty() {
+    /// Which key hints the status line shows: the command line's results' over everything, the error's while one shows
+    /// and `Esc` is free for it (`error`), each place's own (Home, the calendar, the settings), and on the mail the docked
+    /// composer's, the one pane's with the message in the list's place, the open message's, or the list's with nothing
+    /// open (none in it: write).
+    fn status_keys(&self, ctx: &egui::Context, surfaces: &Surfaces, error: bool) -> status::Keys {
+        if surfaces.has(Surface::Command) {
+            status::Keys::Results
+        } else if error {
+            // Beside the docked composer its send is kept: its key still works with the list over it.
+            if surfaces.on_settings() || !self.docked() { status::Keys::Error } else { status::Keys::ErrorComposer }
+        } else if surfaces.on_settings() {
+            if one_pane(ctx) && settings::back_shown(ctx) { status::Keys::SettingsPage } else { status::Keys::Settings }
+        } else if self.screen == Screen::Home {
+            if self.mailbox.accounts().is_empty() { status::Keys::FirstRun } else { status::Keys::Home }
+        } else if self.screen == Screen::Calendar {
+            status::Keys::Calendar
+        } else if self.screen != Screen::Mail || self.mailbox.accounts().is_empty() {
             status::Keys::Message
         } else if self.composer.is_some() && self.docked() {
             status::Keys::Composer
+        } else if one_pane(ctx) && self.reader.open_id().is_some() && self.in_place_of_list() {
+            status::Keys::OnePane
         } else if self.reader.open_id().is_some() {
             status::Keys::Message
         } else {
@@ -3940,8 +4028,11 @@ impl InboxApp {
     }
 
     /// Applies what was pressed in the status line on the message `undid` names: a send taken back, a discard dropped.
-    /// Whether the last act is to be taken back, and whether the mailbox's error goes (it was the error dismissed).
-    fn apply_line(&mut self, line: &status::Pressed, undid: Option<Undone>) -> (bool, bool) {
+    /// The error dismissed goes from the mailbox too, when it is the mailbox's. Whether the last act is to be taken back.
+    fn apply_line(&mut self, line: &status::Pressed, undid: Option<Undone>) -> bool {
+        if line.hint == Some(status::SECTIONS) {
+            self.settings.to_list(true);
+        }
         match undid.filter(|_| line.undo) {
             Some(Undone::Send(draft)) => self.unsend(draft),
             Some(Undone::Discard) => self.undiscard(),
@@ -3949,7 +4040,12 @@ impl InboxApp {
         }
         let dismissed =
             line.dismiss && self.status.dismiss().is_some_and(|text| self.mailbox.error().is_some_and(|error| crate::status::clean(error) == text));
-        (line.undo && undid == Some(Undone::Act), dismissed)
+        if dismissed {
+            self.mailbox.dismiss_error();
+            // The same failure told again after this is a new one: it is queued and shown again.
+            self.seen_error = None;
+        }
+        line.undo && undid == Some(Undone::Act)
     }
 
     /// The facts of the line, read again when the mailbox changed or a second has passed ([`status::read`]).
@@ -3957,7 +4053,8 @@ impl InboxApp {
         let stamp = (self.mailbox.revision(), self.mailbox.writes());
         let fresh = self.facts.1.is_some_and(|(revision, writes, at)| (revision, writes) == stamp && (0.0..1.0).contains(&(now - at)));
         if !fresh {
-            let facts = self.mailbox.quietly(status::read);
+            let since = self.facts.0.offline_since;
+            let facts = self.mailbox.quietly(|mailbox| status::read(mailbox, since));
             // The reads are the facts' own: they count as seen.
             self.facts = (facts, Some((self.mailbox.revision(), self.mailbox.writes(), now)));
         }

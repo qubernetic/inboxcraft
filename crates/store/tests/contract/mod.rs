@@ -8,7 +8,7 @@
 
 use inboxcraft_model::{
     Account, AccountId, Address, EmailAddress, Envelope, Flag, Flags, Folder, FolderId, FolderListing, FolderPath, FolderState, Host, Message,
-    MessageId, ModSeq, Security, Server, Summary, Uid, UidValidity,
+    MessageId, MessageRef, ModSeq, Security, Server, Summary, Uid, UidValidity,
 };
 use inboxcraft_store::{Batch, Body, Change, Search, Storage, StoreError};
 use inboxcraft_time::Timestamp;
@@ -427,6 +427,70 @@ pub fn retention_names_the_bodies_to_fetch<S: Storage>(mut store: S) {
     assert_eq!(store.config().body_days, 30);
 }
 
+/// Message `id` in folder `folder` of account 1 (UID `id`), named `own`, answering `answers`, referring to `refers`.
+fn linking(id: u64, folder: u64, own: Option<&str>, answers: &[&str], refers: &[&str]) -> Change {
+    let link = |id: &&str| MessageRef::new(id).unwrap();
+    let message = message(id, 1, folder, u32::try_from(id).unwrap(), "Linked", Some(1));
+    let envelope = message
+        .summary()
+        .envelope()
+        .clone()
+        .with_message_id(own.map(|own| link(&own)))
+        .with_in_reply_to(answers.iter().map(link).collect())
+        .with_references(refers.iter().map(link).collect());
+    let summary = Summary::new(message.summary().uid(), envelope);
+    Change::PutMessage(Message::new(message.id(), message.account(), message.folder(), summary))
+}
+
+fn linked<S: Storage>(store: &S, link: &str) -> Vec<u64> {
+    store
+        .linked(&MessageRef::new(link).unwrap(), &std::collections::BTreeSet::new())
+        .unwrap()
+        .iter()
+        .map(|entry| entry.message().id().get())
+        .collect()
+}
+
+pub fn linked_finds_the_messages_that_name_a_link<S: Storage>(mut store: S) {
+    two_accounts(&mut store);
+    put(
+        &mut store,
+        vec![
+            linking(1, 1, Some("a@example.org"), &[], &[]),
+            linking(2, 2, None, &["a@example.org"], &["a@example.org", "b@example.org"]),
+            linking(3, 1, Some("a@example.org"), &[], &["c@example.org"]),
+            linking(4, 1, Some("A@example.org"), &[], &[]),
+            linking(5, 1, None, &[], &[]),
+        ],
+    )
+    .unwrap();
+    // By its Message-ID, In-Reply-To or References, once each, by our id; compared exactly, as written.
+    assert_eq!(linked(&store, "a@example.org"), [1, 2, 3]);
+    assert_eq!(linked(&store, "<b@example.org>"), [2]);
+    assert_eq!(linked(&store, "c@example.org"), [3]);
+    assert_eq!(linked(&store, "A@example.org"), [4]);
+    assert_eq!(linked(&store, "nobody@example.org"), Vec::<u64>::new());
+    let entry = store.linked(&MessageRef::new("c@example.org").unwrap(), &std::collections::BTreeSet::new()).unwrap();
+    assert_eq!(entry, store.message(m(3)).unwrap().into_iter().collect::<Vec<_>>());
+    // The ones already known are left out.
+    let known = [m(1), m(3), m(9)].into_iter().collect();
+    let found: Vec<u64> =
+        store.linked(&MessageRef::new("a@example.org").unwrap(), &known).unwrap().iter().map(|entry| entry.message().id().get()).collect();
+    assert_eq!(found, [2]);
+    // A replaced message is linked by its new links only; flags keep them; a refused batch changes none.
+    put(&mut store, vec![linking(3, 1, Some("d@example.org"), &[], &[])]).unwrap();
+    assert_eq!(linked(&store, "a@example.org"), [1, 2]);
+    assert_eq!(linked(&store, "c@example.org"), Vec::<u64>::new());
+    put(&mut store, vec![Change::SetFlags(m(3), [Flag::Seen].into_iter().collect::<Flags>())]).unwrap();
+    assert_eq!(linked(&store, "d@example.org"), [3]);
+    assert!(put(&mut store, vec![linking(6, 1, Some("d@example.org"), &[], &[]), Change::PutMessage(message(7, 1, 9, 7, "x", None))]).is_err());
+    assert_eq!(linked(&store, "d@example.org"), [3]);
+    // A removed message, or one in a removed folder, is linked by nothing.
+    put(&mut store, vec![Change::RemoveMessage(m(1)), Change::RemoveFolder(FolderId::new(2))]).unwrap();
+    assert_eq!(linked(&store, "a@example.org"), Vec::<u64>::new());
+    assert_eq!(linked(&store, "b@example.org"), Vec::<u64>::new());
+}
+
 /// One test per contract function. `$make` gives the store and what has to live as long as the test (its directory).
 #[macro_export]
 macro_rules! contract_tests {
@@ -477,6 +541,7 @@ macro_rules! contract_tests {
             a_change_that_needs_an_id_past_what_a_store_holds_is_refused_as_unknown,
             a_removal_of_an_id_past_what_a_store_holds_removes_nothing,
             an_id_past_what_a_store_holds_reaches_no_edge_row,
+            linked_finds_the_messages_that_name_a_link,
         );
     };
     ($make:expr; $($name:ident),+ $(,)?) => {

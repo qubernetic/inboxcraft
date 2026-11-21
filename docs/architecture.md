@@ -563,14 +563,18 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 - The store (`inboxcraft-store`, layer 1, the one crate allowed to depend on `model` inside its layer) is the
   `Storage` trait with two backends. `Memory` is always built and is the store on wasm; it applies a batch to a
   copy of its state whose tables stay shared with the old state until the batch writes to them, so a batch copies
-  only the tables it changes (a kept draft the drafts, not the messages). `Sqlite` is native only
+  only the tables it changes (a kept draft the drafts, not the messages), and each message is shared on its own, so
+  marking one read copies that message and the table of handles, not every message. `Sqlite` is native only
   (feature `sqlite`): `store.sqlite3` in WAL mode with `synchronous=FULL` and foreign keys on, its schema version in
   `PRAGMA user_version` with one migration per version, an FTS5 index of the body text, and each message source as
-  `sources/<body id>.eml` beside it. A source is written and synced before the row that names it commits and
+  `sources/<body id>.eml` beside it. Both backends index the links each message names (`Message-ID`, `In-Reply-To`,
+  `References`; in SQLite the `message_link` table of schema version 6), so `Storage::linked` gives the messages that
+  name one link, leaving out those already found, and `mail.thread` and `mail.why` find one message's thread link
+  by link: one index lookup per link and one record read per message of the thread, not of the store. A source is written and synced before the row that names it commits and
   removed only after that row is gone; opening the store removes the files a kill left behind. Removed mail is
   zeroed in the database (`secure_delete`, FTS5 `secure-delete`) and the write-ahead log is emptied after the batch
   that removed it. The store does no network I/O and parses no mail: the caller hands in each body's text.
-- Beside the mail the store keeps the local records (`model::local`, schema version 5): the job queue, drafts, the
+- Beside the mail the store keeps the local records (`model::local`, schema versions 4 and 5): the job queue, drafts, the
   outbox, the schedule, senders (known, the screener's decision, the group), each message's own state (done, parked,
   pinned, snoozed, follow-up) and the calendars with their sync token, events (ETag and iCalendar text) and alerts.
   Each row holds its record as JSON, so a new field needs no migration; a draft's save time is a column of its own

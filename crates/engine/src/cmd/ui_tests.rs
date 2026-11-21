@@ -192,21 +192,21 @@ fn the_removed_appearance_commands_are_unknown() {
 
 #[test]
 fn settings_open_is_safe_and_asks_the_window_for_the_page_named() {
-    use crate::shown::{SETTINGS_PAGES, SettingsAsked};
+    use crate::shown::{Asked, SETTINGS_PAGES, SettingsAsked};
     let mut session = session();
     assert_eq!(session.registry().get("ui.settings.open").unwrap().class, Some(AgentClass::Safe));
     for page in SETTINGS_PAGES {
         let answer = session.run_as(Caller::Agent, "ui.settings.open", &json!({ "page": page })).unwrap();
         assert_eq!(answer, json!({ "page": page, "window": false }));
-        assert_eq!(session.take_settings_asked(), vec![SettingsAsked { page: Some(page), bare: false, by_agent: true }], "{page}");
+        assert_eq!(session.take_asked(), vec![Asked::Settings(SettingsAsked { page: Some(page), bare: false, by_agent: true })], "{page}");
     }
     for bare in [json!({}), json!(null), json!({ "page": null })] {
         assert_eq!(session.run_as(Caller::Agent, "ui.settings.open", &bare).unwrap(), json!({ "page": null, "window": false }), "{bare}");
-        assert_eq!(session.take_settings_asked(), vec![SettingsAsked { page: None, bare: true, by_agent: true }], "{bare}: as the key");
+        assert_eq!(session.take_asked(), vec![Asked::Settings(SettingsAsked { page: None, bare: true, by_agent: true })], "{bare}: as the key");
     }
     session.run_as(Caller::Owner, "ui.settings.open", &json!({ "page": "about" })).unwrap();
-    assert_eq!(session.take_settings_asked(), vec![SettingsAsked { page: Some("about"), bare: false, by_agent: false }], "the owner's own");
-    assert!(session.take_settings_asked().is_empty(), "taken once");
+    assert_eq!(session.take_asked(), vec![Asked::Settings(SettingsAsked { page: Some("about"), bare: false, by_agent: false })], "the owner's own");
+    assert!(session.take_asked().is_empty(), "taken once");
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn settings_open_refuses_other_parameters_in_its_own_words() {
         assert!(matches!(error, EngineError::BadParams { .. }), "{params}: {error:?}");
         assert!(!error.to_string().contains("evil"), "the junk is not echoed: {error}");
     }
-    assert!(session.take_settings_asked().is_empty(), "a refused call asks for nothing");
+    assert!(session.take_asked().is_empty(), "a refused call asks for nothing");
 }
 
 #[test]
@@ -229,9 +229,13 @@ fn the_window_s_asks_are_kept_up_to_a_few_while_nobody_takes_them() {
         session.run("ui.settings.open", &json!({ "page": "about" })).unwrap();
     }
     session.run("ui.settings.open", &json!({ "page": "accounts" })).unwrap();
-    let asked = session.take_settings_asked();
+    let asked = session.take_asked();
     assert_eq!(asked.len(), MAX_ASKED);
-    assert_eq!(asked.last().and_then(|asked| asked.page), Some("accounts"), "the newest kept");
+    let page = |asked: &crate::shown::Asked| match asked {
+        crate::shown::Asked::Settings(asked) => asked.page,
+        crate::shown::Asked::Home(_) => None,
+    };
+    assert_eq!(asked.last().and_then(page), Some("accounts"), "the newest kept");
 }
 
 #[test]
@@ -242,6 +246,51 @@ fn settings_open_says_whether_a_window_takes_the_ask() {
     session.set_window(true);
     let shown = session.run_as(Caller::Agent, "ui.settings.open", &json!({ "page": "accounts" })).unwrap();
     assert_eq!(shown, json!({ "page": "accounts", "window": true }));
+}
+
+#[test]
+fn home_open_is_safe_and_asks_the_window_for_home_by_whoever_ran_it() {
+    use crate::shown::{Asked, HomeAsked};
+    let mut session = session();
+    assert_eq!(session.registry().get("ui.home.open").unwrap().class, Some(AgentClass::Safe));
+    for params in [json!({}), json!(null)] {
+        assert_eq!(session.run_as(Caller::Agent, "ui.home.open", &params).unwrap(), json!({ "window": false }), "{params}");
+        assert_eq!(session.take_asked(), vec![Asked::Home(HomeAsked { by_agent: true })], "{params}");
+    }
+    session.run_as(Caller::Owner, "ui.home.open", &json!({})).unwrap();
+    assert_eq!(session.take_asked(), vec![Asked::Home(HomeAsked { by_agent: false })], "the owner's own");
+    assert!(session.take_asked().is_empty(), "taken once");
+}
+
+#[test]
+fn home_open_says_whether_a_window_takes_the_ask() {
+    let mut session = session();
+    assert_eq!(session.run_as(Caller::Agent, "ui.home.open", &json!({})).unwrap(), json!({ "window": false }), "on a store nothing is shown");
+    session.set_window(true);
+    assert_eq!(session.run_as(Caller::Agent, "ui.home.open", &json!({})).unwrap(), json!({ "window": true }));
+}
+
+#[test]
+fn home_open_refuses_every_parameter_in_its_own_words() {
+    let mut session = session();
+    let hostile = "\u{202e}\r\n\u{0}evil";
+    for params in [json!({ hostile: 1 }), json!({ "page": "accounts" }), json!([hostile]), json!(hostile), json!(1)] {
+        let error = session.run_as(Caller::Agent, "ui.home.open", &params).unwrap_err();
+        assert!(matches!(error, EngineError::BadParams { .. }), "{params}: {error:?}");
+        assert!(!error.to_string().contains("evil"), "the junk is not echoed: {error}");
+    }
+    assert!(session.take_asked().is_empty(), "a refused call asks for nothing");
+}
+
+#[test]
+fn the_window_s_asks_keep_the_order_the_commands_ran_in() {
+    use crate::shown::{Asked, HomeAsked, SettingsAsked};
+    let mut session = session();
+    session.run_as(Caller::Agent, "ui.home.open", &json!({})).unwrap();
+    session.run_as(Caller::Agent, "ui.settings.open", &json!({ "page": "about" })).unwrap();
+    session.run_as(Caller::Owner, "ui.home.open", &json!({})).unwrap();
+    let settings = Asked::Settings(SettingsAsked { page: Some("about"), bare: false, by_agent: true });
+    assert_eq!(session.take_asked(), vec![Asked::Home(HomeAsked { by_agent: true }), settings, Asked::Home(HomeAsked { by_agent: false })]);
 }
 
 #[test]

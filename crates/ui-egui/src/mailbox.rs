@@ -662,6 +662,8 @@ pub struct Mailbox {
     offset: Offset,
     accounts: Vec<AccountRow>,
     views: Vec<ViewRow>,
+    /// The folders of each of [`Mailbox::views`], in its order: what a view's unread count adds up.
+    view_folders: Vec<Vec<u64>>,
     folders: Vec<FolderRow>,
     narrowed: Option<u64>,
     place: Place,
@@ -742,8 +744,9 @@ pub struct Mailbox {
     last: Option<&'static str>,
     /// Who the window's commands run for: the owner, or an agent while a picture's script steps drive the window.
     caller: Caller,
-    /// The newest `ui.settings.open` of an agent, waiting for the frame's end ([`crate::InboxApp::act_on_agent_ask`]).
-    agent_ask: Option<inboxcraft_engine::shown::SettingsAsked>,
+    /// The newest `ui.settings.open` or `ui.home.open` of an agent, waiting for the frame's end
+    /// ([`crate::InboxApp::act_on_agent_ask`]).
+    agent_ask: Option<inboxcraft_engine::shown::Asked>,
     /// The first command [`Mailbox::run`] refused for [`Mailbox::caller`].
     refused: Option<&'static str>,
     /// The calendars' sync: the owner's press, its jobs and its events ([`crate::calendar::sync`]).
@@ -1019,6 +1022,7 @@ impl Mailbox {
             offset: Offset::UTC,
             accounts: Vec::new(),
             views: Vec::new(),
+            view_folders: Vec::new(),
             folders: Vec::new(),
             narrowed: None,
             place: Place::View(Role::Inbox),
@@ -1526,7 +1530,7 @@ impl Mailbox {
         let answer = self.run("mail.open", &json!({ "id": id }))?;
         if answer.get("marked_seen").and_then(Value::as_bool) == Some(true) {
             self.history = self.history.saturating_add(1);
-            self.refresh();
+            self.shown_read(id);
         }
         Ok(answer)
     }
@@ -1774,18 +1778,18 @@ impl Mailbox {
         Some(due.duration_since(self.clock.now()).filter(|left| !left.is_zero()).unwrap_or(OVERDUE_WAKE))
     }
 
-    /// What commands asked the window to show since the last call ([`Session::take_settings_asked`]), oldest first.
-    pub fn take_settings_asked(&mut self) -> Vec<inboxcraft_engine::shown::SettingsAsked> {
-        self.session.take_settings_asked()
+    /// What commands asked the window to show since the last call ([`Session::take_asked`]), oldest first.
+    pub fn take_asked(&mut self) -> Vec<inboxcraft_engine::shown::Asked> {
+        self.session.take_asked()
     }
 
     /// Holds an agent's ask until the frame's end, in the place of one held before: the newest only.
-    pub(crate) fn hold_agent_ask(&mut self, asked: inboxcraft_engine::shown::SettingsAsked) {
+    pub(crate) fn hold_agent_ask(&mut self, asked: inboxcraft_engine::shown::Asked) {
         self.agent_ask = Some(asked);
     }
 
     /// The agent's ask held, taken.
-    pub(crate) fn take_agent_ask(&mut self) -> Option<inboxcraft_engine::shown::SettingsAsked> {
+    pub(crate) fn take_agent_ask(&mut self) -> Option<inboxcraft_engine::shown::Asked> {
         self.agent_ask.take()
     }
 
@@ -2054,17 +2058,40 @@ impl Mailbox {
             key(a).cmp(&key(b)).then_with(|| a.name.cmp(&b.name))
         });
         let unread: BTreeMap<u64, u64> = folders.iter().map(|folder| (folder.id, folder.unread)).collect();
-        self.views = array("folder.list", &answer, "views")?
+        (self.views, self.view_folders) = array("folder.list", &answer, "views")?
             .iter()
             .filter_map(|view| {
                 let role = view.get("role").and_then(Value::as_str).and_then(role)?;
-                let ids = view.get("folders").and_then(Value::as_array)?;
-                let unread = ids.iter().filter_map(Value::as_u64).filter_map(|id| unread.get(&id)).fold(0_u64, |sum, n| sum.saturating_add(*n));
-                Some(ViewRow { role, unread })
+                let ids: Vec<u64> = view.get("folders").and_then(Value::as_array)?.iter().filter_map(Value::as_u64).collect();
+                let unread = ids.iter().filter_map(|id| unread.get(id)).fold(0_u64, |sum, n| sum.saturating_add(*n));
+                Some((ViewRow { role, unread }, ids))
             })
-            .collect();
+            .unzip();
         self.folders = folders;
         Ok(())
+    }
+
+    /// The message `id` was marked read by `mail.open`: its row, its folder's unread count and those of the views over
+    /// it say so as a refresh would, without reading the list and the folders again (#406). A message the list does not
+    /// show, or shows as read already, is read again with everything.
+    fn shown_read(&mut self, id: u64) {
+        let Some(row) = self.messages.iter_mut().find(|row| row.id == id && !row.seen) else {
+            self.refresh();
+            return;
+        };
+        row.seen = true;
+        let folder = row.folder;
+        if let Some(held) = self.folders.iter_mut().find(|held| held.id == folder) {
+            held.unread = held.unread.saturating_sub(1);
+        }
+        for (view, ids) in self.views.iter_mut().zip(&self.view_folders) {
+            if ids.contains(&folder) {
+                let unread = self.folders.iter().filter(|held| ids.contains(&held.id)).fold(0_u64, |sum, held| sum.saturating_add(held.unread));
+                view.unread = unread;
+            }
+        }
+        self.revision = self.revision.wrapping_add(1);
+        self.rows_serial = self.rows_serial.wrapping_add(1);
     }
 
     fn load_screener(&mut self) -> Result<(), UiError> {
@@ -2385,7 +2412,7 @@ impl Mailbox {
             Ok(answer) => {
                 if answer.get("marked_seen").and_then(Value::as_bool) == Some(true) {
                     self.history = self.history.saturating_add(1);
-                    self.refresh();
+                    self.shown_read(id);
                 }
             }
             Err(error) => self.error = Some(error.to_string()),
@@ -3000,6 +3027,9 @@ pub(crate) fn changes_nothing(command: &str) -> bool {
     READS.iter().any(|end| command.ends_with(end)) || command == "mail.attachment"
 }
 
+#[cfg(test)]
+#[path = "mailbox_read_tests.rs"]
+mod read_tests;
 #[cfg(test)]
 #[path = "mailbox_tests.rs"]
 mod tests;

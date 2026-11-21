@@ -20,8 +20,18 @@ fn syncing(level: Level) -> Harness<'static> {
     let mut harness = crate::component::tests::builder().with_size(vec2(900.0, 40.0)).with_step_dt(0.01).build_ui(move |ui| {
         crate::motion::set_level(ui.ctx(), level);
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(900.0, 26.0));
-        let shown =
-            Shown { facts: &facts, message: None, now: 0.0, whole: 0.0, hints: &[], undo_key: false, rests: false, lifted: false, undo_taken: false };
+        let shown = Shown {
+            facts: &facts,
+            message: None,
+            now: 0.0,
+            whole: 0.0,
+            hints: &[],
+            undo_key: false,
+            rests: false,
+            lifted: false,
+            undo_taken: false,
+            escape: false,
+        };
         let _ = line(ui, &theme, &Keymap::default(), rect, &shown);
     });
     harness.run_steps(2);

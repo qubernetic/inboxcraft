@@ -413,6 +413,7 @@ impl Storage for Watched {
     fn message(&self, m: MessageId) -> Result<Option<inboxcraft_store::Entry>, StoreError> {
         if self.1.fail_reads.load(Ordering::Relaxed) { Err(StoreError::Corrupt("watched")) } else { self.0.message(m) }
     }
+    fn linked(&self, l: &inboxcraft_model::MessageRef, k: &std::collections::BTreeSet<MessageId>) -> Result<Vec<inboxcraft_store::Entry>, StoreError> { self.0.linked(l, k) }
     fn body(&self, m: MessageId) -> Result<Option<inboxcraft_store::Body>, StoreError> { self.0.body(m) }
     fn search(&self, s: &inboxcraft_store::Search) -> Result<Vec<MessageId>, StoreError> { self.whole(); self.0.search(s) }
     fn queued_jobs(&self) -> Result<Vec<inboxcraft_model::Job>, StoreError> { self.0.queued_jobs() }

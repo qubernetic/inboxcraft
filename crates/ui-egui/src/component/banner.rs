@@ -6,7 +6,7 @@
 //! 8 above and below, 12 left and right and between the label and the words, 16 between the links; links that do not
 //! fit on one line stand on lines of their own, 4 apart, in order, and the banner grows to hold them. Its text is data:
 //! drawn as plain words (every control character a space, no bidi override), on one line, cut between grapheme clusters
-//! with one ellipsis; a link's words are cut so too, and a screen reader hears them whole. A link gives back the id the
+//! with one ellipsis (or wrapped onto a few lines, the last cut so: [`banner_lines`]); a link's words are cut so too, and a screen reader hears them whole. A link gives back the id the
 //! caller gave it, never words from the text.
 //! Nothing in it moves.
 
@@ -59,7 +59,21 @@ const LINK_GAP: f32 = 16.0;
 
 /// A banner of `kind` across `ui`'s width saying `text`, with `links` under it; the id of the link pressed.
 pub fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, kind: BannerKind, text: &str, links: &[BannerLink<'_>]) -> Option<String> {
-    banner_in(ui, theme, keymap, kind, text, links, Ground::Boxed).0
+    banner_in(ui, theme, keymap, kind, text, links, Ground::Boxed, 1).0
+}
+
+/// [`banner`] with its words wrapped onto at most `rows` lines (at least one), the last cut with one ellipsis; the
+/// banner grows to hold them.
+pub fn banner_lines(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    kind: BannerKind,
+    text: &str,
+    links: &[BannerLink<'_>],
+    rows: usize,
+) -> Option<String> {
+    banner_in(ui, theme, keymap, kind, text, links, Ground::Boxed, rows).0
 }
 
 /// What a banner paints under its words.
@@ -86,8 +100,9 @@ pub(crate) fn spoken(theme: &Theme, kind: BannerKind, text: &str) -> String {
     format!("{}: {}", look(theme, kind).0, super::spoken(text))
 }
 
-/// [`banner`] on `ground`: the id of the link pressed and the banner's rect. The banner is a group named by
+/// [`banner`] on `ground`, its words on at most `rows` lines: the id of the link pressed and the banner's rect. The banner is a group named by
 /// [`spoken`]; its words are a label of their own, named by the words.
+#[expect(clippy::too_many_arguments, reason = "a banner's words, its links, its ground and how many lines its words take")]
 pub(crate) fn banner_in(
     ui: &mut Ui,
     theme: &Theme,
@@ -96,6 +111,7 @@ pub(crate) fn banner_in(
     text: &str,
     links: &[BannerLink<'_>],
     ground: Ground,
+    rows: usize,
 ) -> (Option<String>, Rect) {
     let p = &theme.palette;
     let f = &theme.fonts;
@@ -105,7 +121,7 @@ pub(crate) fn banner_in(
     let label_width = paint::run_box(label.size().x);
     let left = PAD_X + label_width + PAD_X;
     let room = (width - left - PAD_X).max(1.0);
-    let words = words(ui, theme, &super::plain(text), room);
+    let words = if rows > 1 { wrapped_words(ui, theme, text, room, rows) } else { words(ui, theme, &super::plain(text), room) };
     let words_high = words.size().y.max(f.caption.line);
     let link_high = theme.boxes().row_link;
     // The links, measured once: on one line where they fit, else as many on a line as fit, in order.
@@ -187,6 +203,14 @@ fn link_lines(ui: &Ui, theme: &Theme, links: &[BannerLink<'_>], room: f32) -> Ve
 pub(crate) fn words(ui: &Ui, theme: &Theme, text: &str, room: f32) -> std::sync::Arc<egui::Galley> {
     let f = theme.fonts.caption;
     super::galley(ui, &super::fit_capped(ui, text, f, room), f, theme.palette.ink)
+}
+
+/// The banner's words `text` wrapped in `room` points onto at most `rows` lines, the last cut with one ellipsis; at
+/// most [`super::MOST`] characters are laid out at all, made plain first.
+fn wrapped_words(ui: &Ui, theme: &Theme, text: &str, room: f32, rows: usize) -> std::sync::Arc<egui::Galley> {
+    let f = theme.fonts.caption;
+    let kept = super::plain(super::capped(text, super::MOST).0);
+    super::wrapped(ui, &kept, f, theme.palette.ink, room, rows, Align::LEFT)
 }
 
 /// A link's `name` as it fits in `room` points in the small link's face: whole, or cut between grapheme clusters in its

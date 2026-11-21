@@ -246,7 +246,7 @@ fn send_sends_and_the_toast_says_so() {
     harness.run();
     assert!(harness.state().composer().is_none());
     assert!(harness.state().counting().is_some(), "the countdown shows in place of a notice");
-    harness.get_by_label("sending · Hello, 5 s");
+    harness.get_by_label("sending · Hello, can be undone");
 }
 
 #[test]

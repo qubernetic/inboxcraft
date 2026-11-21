@@ -3,12 +3,13 @@
 
 //! The in-memory backend: always built, used on wasm and in tests.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use inboxcraft_model::{
     Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, Due, EmailAddress, Flags, Folder,
-    FolderId, FolderState, Job, Message, MessageId, MessageState, Outgoing, ScheduleId, Scheduled, Sender, Uid,
+    FolderId, FolderState, Job, Message, MessageId, MessageRef, MessageState, Outgoing, ScheduleId, Scheduled, Sender, Uid,
 };
 use inboxcraft_time::Timestamp;
 
@@ -19,7 +20,9 @@ use crate::{Batch, Body, Change, Entry, Search, Storage, StoreConfig, StoreError
 ///
 /// A batch is applied to a copy of the state that replaces it only when every change went through. The copy shares
 /// every table with the state until a change writes to it ([`Shared`]), and bodies are shared between the copies, so a
-/// batch costs the tables it changes: a kept draft copies the drafts, not the messages.
+/// batch costs the tables it changes: a kept draft copies the drafts, not the messages. A message is held behind an
+/// [`Arc`] of its own, so a batch that changes one message copies the map of the messages' handles and that one
+/// message, not every message.
 #[derive(Debug, Clone, Default)]
 pub struct Memory {
     config: StoreConfig,
@@ -30,8 +33,11 @@ pub struct Memory {
 struct State {
     accounts: Shared<BTreeMap<AccountId, Account>>,
     folders: Shared<BTreeMap<FolderId, (Folder, Option<FolderState>)>>,
-    messages: Shared<BTreeMap<MessageId, Held>>,
+    messages: Shared<BTreeMap<MessageId, Arc<Held>>>,
     uids: Shared<BTreeMap<FolderId, BTreeMap<Uid, MessageId>>>,
+    /// Each link a message names ([`inboxcraft_model::links`]) by its [`link_key`], beside the message: two links
+    /// with one key share the entries, which [`Storage::linked`] tells apart by the links themselves.
+    links: Shared<BTreeSet<(u64, MessageId)>>,
     /// The job queue, in order.
     jobs: Shared<Vec<Job>>,
     drafts: Shared<BTreeMap<DraftId, Draft>>,
@@ -71,6 +77,13 @@ impl<T: Clone> std::ops::DerefMut for Shared<T> {
 }
 
 /// The key a sender is kept under: its address in lower case.
+/// The key of `link` in the index of links: a hash, the same for the same link in one process.
+fn link_key(link: &MessageRef) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    link.hash(&mut hasher);
+    hasher.finish()
+}
+
 pub(crate) fn sender_key(address: &EmailAddress) -> String {
     address.as_str().to_lowercase()
 }
@@ -143,7 +156,7 @@ impl State {
             }
             Change::RemoveBody(id) => {
                 if let Some(held) = self.messages.get_mut(id) {
-                    held.body = None;
+                    Arc::make_mut(held).body = None;
                 }
             }
             Change::MarkOpened(id) => self.held(*id)?.opened = true,
@@ -257,7 +270,7 @@ impl State {
     }
 
     fn held(&mut self, id: MessageId) -> Result<&mut Held, StoreError> {
-        self.messages.get_mut(&id).ok_or(StoreError::UnknownMessage(id))
+        self.messages.get_mut(&id).map(Arc::make_mut).ok_or(StoreError::UnknownMessage(id))
     }
 
     fn put_folder(&mut self, folder: &Folder) -> Result<(), StoreError> {
@@ -294,21 +307,32 @@ impl State {
         let (opened, body) = match old {
             Some((opened, body, old)) => {
                 self.forget_uid(&old);
+                self.forget_links(&old);
                 (opened, body)
             }
             None => (false, None),
         };
         self.uids.entry(folder).or_default().insert(uid, message.id());
-        self.messages.insert(message.id(), Held { message: message.clone(), fields: Fields::of(message), opened, body });
+        for link in inboxcraft_model::links(message) {
+            self.links.insert((link_key(link), message.id()));
+        }
+        self.messages.insert(message.id(), Arc::new(Held { message: message.clone(), fields: Fields::of(message), opened, body }));
         Ok(())
     }
 
     fn remove_message(&mut self, id: MessageId) {
         if let Some(held) = self.messages.remove(&id) {
             self.forget_uid(&held.message);
+            self.forget_links(&held.message);
         }
         self.states.remove(&id);
         self.schedule.retain(|_, entry| !matches!(entry.what, Due::Unsnooze(message) | Due::FollowUp(message) if message == id));
+    }
+
+    fn forget_links(&mut self, message: &Message) {
+        for link in inboxcraft_model::links(message) {
+            self.links.remove(&(link_key(link), message.id()));
+        }
     }
 
     fn forget_uid(&mut self, message: &Message) {
@@ -352,11 +376,18 @@ impl Storage for Memory {
 
     fn messages(&self, folder: FolderId) -> Result<Vec<Entry>, StoreError> {
         let ids = self.state.uids.get(&folder).into_iter().flat_map(BTreeMap::values);
-        Ok(ids.filter_map(|id| self.state.messages.get(id)).map(Held::entry).collect())
+        Ok(ids.filter_map(|id| self.state.messages.get(id)).map(|held| held.entry()).collect())
     }
 
     fn message(&self, id: MessageId) -> Result<Option<Entry>, StoreError> {
-        Ok(self.state.messages.get(&id).map(Held::entry))
+        Ok(self.state.messages.get(&id).map(|held| held.entry()))
+    }
+
+    fn linked(&self, link: &MessageRef, known: &BTreeSet<MessageId>) -> Result<Vec<Entry>, StoreError> {
+        let key = link_key(link);
+        let ids = self.state.links.range((key, MessageId::new(0))..=(key, MessageId::new(u64::MAX))).map(|(_, id)| id);
+        let held = ids.filter(|id| !known.contains(*id)).filter_map(|id| self.state.messages.get(id));
+        Ok(held.filter(|held| inboxcraft_model::links(&held.message).any(|named| named == link)).map(|held| held.entry()).collect())
     }
 
     fn body(&self, id: MessageId) -> Result<Option<Body>, StoreError> {

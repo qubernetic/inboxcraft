@@ -155,13 +155,12 @@ fn each_frame_stands_where_its_sheet_puts_it_in_dark_and_light() {
     }
 }
 
-/// The failing state as the page draws it now, its banner one line of text (54 high, where `home/everything-failing`
-/// wraps it onto two, 72 high, and the tiles stand at 280): pinned so that a banner that wraps is seen here and its
-/// gaps line goes with it.
+/// The failing state as `home/everything-failing` draws it: the banner's words on two lines, 72 high, the tiles at 280
+/// and the buttons at 724; at 130 % the lines grow with the text and stay two.
 #[test]
-fn the_failing_state_stands_with_its_one_line_banner_at_100_and_130_percent() {
+fn the_failing_state_stands_with_its_two_line_banner_at_100_and_130_percent() {
     for mode in [Mode::Dark, Mode::Light] {
-        for (percent, banner, counts, buttons) in [(100, (188.0, 54.0), 262.0, 706.0), (130, (222.0, 64.0), 306.0, 864.0)] {
+        for (percent, banner, counts, buttons) in [(100, (188.0, 72.0), 280.0, 724.0), (130, (222.0, 86.0), 328.0, 886.0)] {
             let p = harness("everything-failing", mode, percent).state().drawn.parts;
             let at = format!("{mode:?} {percent}: {:?} {:?} {:?}", p.banner, p.counts, p.buttons);
             assert_eq!(tall(p.banner), banner, "{at}");
@@ -169,6 +168,20 @@ fn the_failing_state_stands_with_its_one_line_banner_at_100_and_130_percent() {
             assert_eq!(tall(p.buttons).0, buttons, "{at}");
         }
     }
+}
+
+/// A banner of any length takes at most two lines: 10 000 characters stand as high as the frame's sentence.
+#[test]
+fn a_failing_banner_of_any_length_takes_two_lines_at_most() {
+    let mut home = sample("everything-failing").unwrap();
+    let frame = harness("everything-failing", Mode::Dark, 100).state().drawn.parts.banner;
+    home.failing = Some(crate::home::Failing { text: "Offline since 14:10 ".repeat(500), account: true, outbox: true });
+    let long = harness_with(home, Mode::Dark, 100, BODY, Rect::from_min_size(pos2(0.0, 0.0), BODY), None, Level::Off, false);
+    assert_eq!(tall(long.state().drawn.parts.banner), tall(frame));
+    let mut home = sample("everything-failing").unwrap();
+    home.failing = Some(crate::home::Failing { text: "Offline since 14:10.".into(), account: false, outbox: true });
+    let short = harness_with(home, Mode::Dark, 100, BODY, Rect::from_min_size(pos2(0.0, 0.0), BODY), None, Level::Off, false);
+    assert_eq!(tall(short.state().drawn.parts.banner), (188.0, 54.0), "words of one line take one");
 }
 
 #[test]
@@ -768,4 +781,80 @@ fn a_key_during_the_headline_ends_it_in_that_frame() {
     harness.key_press(Key::Tab);
     harness.step();
     assert_eq!(headline_lines(&harness).0, greeting, "the key acts and the headline reads at once");
+}
+
+/// The drafts' block of the sample `state` in its frame of its own (`home-drafts/*`), in `mode`: the block's rect and
+/// the draft rows the harness holds.
+fn drafts_frame(state: &str, mode: Mode) -> (Rect, usize) {
+    let theme = Theme::new(mode, scale(100));
+    let keymap = crate::component::gallery::keymap();
+    let home = sample(state).unwrap();
+    let mut harness = Harness::builder().with_size(vec2(600.0, 300.0)).with_context_setup(install_fonts).build_ui_state(
+        |ui, block: &mut Rect| {
+            *block = super::drafts_frame(ui, &theme, &keymap, &home, Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 300.0)));
+        },
+        Rect::NOTHING,
+    );
+    harness.run_ok();
+    let rows = ["Price list for the winter workshops", "Re: Kiln service", "to Marit Solheim"]
+        .into_iter()
+        .filter(|words| harness.query_by(|node| node.label().is_some_and(|label| label.contains(words))).is_some())
+        .count();
+    (*harness.state(), rows)
+}
+
+/// `home-drafts/default` draws three drafts of five, the block 494 × 201 25 in its frame; `home-drafts/empty` the empty
+/// line, 79 high; the page's frames draw two, and the page gives the block no more (`today`, `overflow-counts` pinned
+/// above at 157).
+#[test]
+fn the_drafts_block_draws_three_where_its_frame_draws_three() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let (block, rows) = drafts_frame("drafts", mode);
+        assert_eq!(at(Some(block)), (25.0, 25.0, 494.0, 201.0), "{mode:?}: home-drafts/default");
+        assert_eq!(rows, 3, "{mode:?}: three rows");
+        let (block, rows) = drafts_frame("drafts-empty", mode);
+        assert_eq!(at(Some(block)), (25.0, 25.0, 494.0, 79.0), "{mode:?}: home-drafts/empty");
+        assert_eq!(rows, 0, "{mode:?}");
+    }
+    let page = sample("drafts").unwrap();
+    let harness = harness_with(page, Mode::Dark, 100, BODY, Rect::from_min_size(pos2(0.0, 0.0), BODY), None, Level::Off, false);
+    assert_eq!(tall(harness.state().drawn.parts.drafts).1, 157.0, "the page draws two of three");
+}
+
+/// Every text the last frame painted inside `within`, joined in the order painted.
+fn painted_in(harness: &Harness<'_, State>, within: Rect) -> String {
+    fn walk(shape: &egui::Shape, within: Rect, found: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, within, found)),
+            egui::Shape::Text(text) if within.expand(1.0).contains_rect(Rect::from_min_size(text.pos, text.galley.size())) => {
+                found.push(text.galley.job.text.clone());
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, within, &mut found));
+    found.join(" ")
+}
+
+/// The longest account name the banner's sentence holds leaves its end in sight: "refused the sign-in" shows on the
+/// banner's two lines at a 600 point brief and at 130 %, alone and after "Offline since …".
+#[test]
+fn a_long_account_name_leaves_refused_the_sign_in_in_sight() {
+    let name = crate::home::named(&"W".repeat(200));
+    assert_eq!(name.chars().count(), crate::home::NAME_MOST + 1, "cut, with one …");
+    for since in [None, Some("14:10")] {
+        for percent in [100, 130] {
+            for width in [600.0, BRIEF] {
+                let mut home = sample("everything-failing").unwrap();
+                let text = crate::home::failing_text(since, std::slice::from_ref(&name), 1, 1, Some("Odette Marchand"));
+                home.failing = Some(Failing { text, account: true, outbox: true });
+                let page = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, BODY.y));
+                let harness = harness_with(home, Mode::Dark, percent, page.size(), page, None, Level::Off, false);
+                let banner = harness.state().drawn.parts.banner.unwrap();
+                let shown = painted_in(&harness, banner);
+                assert!(shown.contains("refused the sign-in"), "{since:?} at {width} and {percent} %: {shown}");
+            }
+        }
+    }
 }

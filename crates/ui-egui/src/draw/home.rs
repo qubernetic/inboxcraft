@@ -3,7 +3,7 @@
 
 //! Home, the page (`docs/design.md`, "Home"): at the left the brief of today, 600 wide, 56 in, 36 down and 24 above
 //! its foot, its parts 20 apart (the section label, the headline in `display` on two lines, the lede in `read` on at
-//! most two lines or the failing banner in its place, the row of four count tiles of one height, the agenda's block,
+//! most two lines or the failing banner in its place, its words on at most two lines, the row of four count tiles of one height, the agenda's block,
 //! the drafts' block, two buttons); before the first account the label, the headline, the lede on three lines, the two
 //! buttons and the block of what adding one does. At the right the emblem's place: the character field (the ground of
 //! Home), and on it the emblem with the names under it (the Qubernetic and the InboxCraft wordmarks and the tagline)
@@ -17,7 +17,7 @@
 
 use egui::{Align, Id, Layout, Rect, Response, Role, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
-use crate::component::banner::{BannerKind, BannerLink, banner};
+use crate::component::banner::{BannerKind, BannerLink, banner_lines};
 use crate::component::block::{Block, Inset, block};
 use crate::component::block_line::{BlockLine, block_line};
 use crate::component::button::TextButton;
@@ -43,6 +43,17 @@ const PAD_FOOT: f32 = 24.0;
 
 /// The room between the brief's parts, in points.
 const GAP: f32 = 20.0;
+
+/// The most drafts the drafts' block draws in its frame of its own, as `home-drafts/default` draws them; on the page it
+/// draws [`DRAFTS`], as the page's frames do.
+pub const BLOCK_DRAFTS: usize = 3;
+
+/// The drafts' frames (`home-drafts/*`): their width and the room round the block, the frame's 1 px edge within it.
+const DRAFTS_FRAME: f32 = 544.0;
+const DRAFTS_FRAME_PAD: f32 = 25.0;
+
+/// The most lines the failing banner's words take, as `home/everything-failing` wraps them.
+const BANNER_LINES: usize = 2;
 
 /// The room between the two buttons, in points.
 const BUTTON_GAP: f32 = 8.0;
@@ -290,7 +301,7 @@ fn brief_parts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, parts: 
         }
         let top = ui.cursor().min.y;
         let text = crate::home::kept(&failing.text);
-        if let Some(id) = banner(ui, theme, keymap, BannerKind::Failing, &text, &links) {
+        if let Some(id) = banner_lines(ui, theme, keymap, BannerKind::Failing, &text, &links, BANNER_LINES) {
             asked = Some(if id == "account" { Asked::OpenAccount } else { Asked::OpenOutbox });
         }
         parts.banner = Some(Rect::from_min_max(pos2(ui.min_rect().left(), top), pos2(ui.min_rect().right(), ui.min_rect().bottom())));
@@ -310,7 +321,7 @@ fn brief_parts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, parts: 
     let (rect, pressed) = agenda(ui, theme, keymap, home);
     parts.agenda = Some(rect);
     asked = asked.or(pressed);
-    let (rect, pressed) = drafts(ui, theme, keymap, home);
+    let (rect, pressed) = drafts(ui, theme, keymap, home, DRAFTS);
     parts.drafts = Some(rect);
     asked = asked.or(pressed);
     let (rect, pressed) = buttons(ui, theme, keymap, home.buttons);
@@ -501,8 +512,8 @@ fn agenda_line(ui: &mut Ui, theme: &Theme, line: &crate::home::AgendaLine) {
     painter.rect_filled(Rect::from_min_max(pos2(rect.left(), line_y), rect.max), 0.0, p.panel_line);
 }
 
-/// The drafts' block: the newest drafts (at most [`DRAFTS`]) and "all drafts (N)", or why there are none.
-fn drafts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home) -> (Rect, Option<Asked>) {
+/// The drafts' block: the newest drafts (at most `most`) and "all drafts (N)", or why there are none.
+fn drafts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, most: usize) -> (Rect, Option<Asked>) {
     let head = Block {
         id: Id::unique("home-drafts"),
         index: "[ 02 ]",
@@ -520,7 +531,7 @@ fn drafts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home) -> (Rect, Op
         let ctx = ui.ctx().clone();
         let keyboard = ctx.memory(|memory| memory.focused()).and_then(|id| ctx.read_response(id)).map(|response| response.rect);
         let shift = ui.input(|input| input.modifiers.shift);
-        for draft in home.drafts.iter().take(DRAFTS) {
+        for draft in home.drafts.iter().take(most) {
             let subject = draft.subject.as_deref().map(crate::home::kept);
             let [to, when] = [&draft.to, &draft.when].map(|text| crate::home::kept(text));
             let spoken = format!("{} {to} {when}", subject.as_deref().unwrap_or(tr!("(no subject)")));
@@ -613,14 +624,65 @@ fn steps(ui: &mut Ui, theme: &Theme) -> Rect {
     .rect
 }
 
+/// `ui.home.open`, whoever ran it.
+impl super::InboxApp {
+    /// One ask of `ui.home.open`: the owner's shows Home; an agent's takes nothing from the owner: it is passed over
+    /// while the owner holds the keys ([`Self::agent_may_move`]).
+    pub(super) fn apply_home_ask(&mut self, asked: inboxcraft_engine::shown::HomeAsked) {
+        if asked.by_agent && !self.agent_may_move() {
+            return;
+        }
+        self.show_home();
+    }
+
+    /// Whether an agent's `ui.home.open` or `ui.settings.open` may change the place: not while the owner holds the
+    /// keys. They do while the command line's results, a dialog or a key's capture stand in front, a float (a menu,
+    /// a list, a picker) is open, the composer has the keyboard (docked or floating), the event editor is open
+    /// (whether or not the settings are over it), or the account form holds what the owner typed.
+    pub(super) fn agent_may_move(&self) -> bool {
+        let held = self.command.results() || self.settings.confirms(self.onboarding.asking_remove()) || self.settings.capturing().is_some();
+        !(held || self.owner_keys || self.calendar.editor().is_some() || self.onboarding.holds_typing())
+    }
+
+    /// Whether the owner holds the keys in a way only the frame can tell: a float is open, or the keyboard is in the
+    /// composer drawn in the main window. Kept at the frame's end for [`Self::agent_may_move`].
+    pub(super) fn owner_has_keys(&self, ctx: &egui::Context) -> bool {
+        crate::component::popup::any_open(ctx) || (self.composer_drawn() && super::compose::has_keys(ctx))
+    }
+}
+
 /// The gallery's page of Home in `state` (see [`crate::home::sample`]) across `size`, on a still field with the
-/// emblem and the names where they fit; nothing for a state it does not know.
+/// emblem and the names where they fit; the drafts' states (`drafts`, `drafts-empty`) the drafts' block alone, as
+/// `home-drafts/*` draws it, at the page's top left; nothing for a state it does not know.
 pub fn gallery(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &str, field: &mut Field, size: egui::Vec2) {
     let Some(home) = crate::home::sample(state) else { return };
     let rect = Rect::from_min_size(ui.max_rect().min, size);
+    if matches!(state, "drafts" | "drafts-empty") {
+        drafts_frame(ui, theme, keymap, &home, rect);
+        return;
+    }
     show(ui, theme, keymap, &home, rect, Stage { field, emblem: Some(crate::brand::emblem()), level: Level::Off });
+}
+
+/// The drafts' block of `home` in a frame of its own at the top left of `rect`, as `home-drafts/*` draws it: 544 wide
+/// on `bg` in a 1 px `line` edge, the block 25 in. The block's rect.
+pub fn drafts_frame(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, rect: Rect) -> Rect {
+    ui.painter().rect_filled(rect, 0.0, theme.palette.bg);
+    let inner = Rect::from_min_size(rect.min + vec2(DRAFTS_FRAME_PAD, DRAFTS_FRAME_PAD), vec2(DRAFTS_FRAME - DRAFTS_FRAME_PAD * 2.0, 0.0));
+    let drawn = ui.scope_builder(UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)).id_salt("home-drafts-frame"), |ui| {
+        ui.set_width(inner.width());
+        drafts(ui, theme, keymap, home, BLOCK_DRAFTS).0
+    });
+    let block = drawn.inner;
+    let frame = Rect::from_min_max(rect.min, pos2(rect.left() + DRAFTS_FRAME, block.bottom() + DRAFTS_FRAME_PAD));
+    ui.painter().rect_stroke(frame, 0.0, Stroke::new(1.0, theme.palette.line), StrokeKind::Inside);
+    block
 }
 
 #[cfg(test)]
 #[path = "home_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "home_ask_tests.rs"]
+mod ask_tests;
