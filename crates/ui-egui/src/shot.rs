@@ -1977,6 +1977,9 @@ fn window(shot: &Shot) -> Result<(InboxApp, FakeClock), UiError> {
         if drafts {
             keep_drafts(&mut app, &clock, &shot.out, FRAMES_WORDS.drafts)?;
         }
+        // What the sample leaves due (the drafts' copies for the server) is done here, as the window's first frame
+        // would do it: that frame's refresh would otherwise settle over what the scene shows, such as an error.
+        app.mailbox_mut().pump(&mut crate::workers::NoWorkers);
     }
     Ok((app, clock))
 }
@@ -2252,3 +2255,7 @@ mod fail_tests;
 #[cfg(test)]
 #[path = "shot_frames_tests.rs"]
 mod frames_tests;
+
+#[cfg(test)]
+#[path = "shot_scenes_tests.rs"]
+mod scenes_tests;
