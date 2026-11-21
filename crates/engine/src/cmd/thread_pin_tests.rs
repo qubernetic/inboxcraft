@@ -6,11 +6,14 @@
 //! stood before #406 read one thread without grouping the store: each thread is the one `group_threads` finds over
 //! every message, and the answers hash to the digest written down then.
 
-use inboxcraft_model::{AccountId, Envelope, FolderId, Message, MessageId, MessageRef, Summary, Uid, group_threads};
+use inboxcraft_model::{AccountId, Envelope, FolderId, Message, MessageId, MessageRef, MessageState, Summary, Uid, group_threads};
 use inboxcraft_store::{Batch, Change, Memory, Storage};
+use std::cell::Cell;
+use std::rc::Rc;
+
 use serde_json::{Value, json};
 
-use crate::test_support::{NOW, address, at, mailbox, session_with};
+use crate::test_support::{NOW, address, at, clock, mailbox, session_with};
 use crate::{Registry, Session};
 
 /// The first id of the long thread, and how many it holds.
@@ -144,4 +147,61 @@ fn the_answers_over_a_hostile_mailbox_are_as_before() {
     let (store, probes) = hostile_store();
     let mut session = session_with(store, Registry::builtin().unwrap());
     assert_eq!(digest(&mut session, &probes), 15_720_900_201_687_580_080);
+}
+
+/// A store that counts the folders read whole (`.1`) and the links looked up (`.2`).
+#[derive(Debug)]
+struct Reads(Memory, Rc<Cell<u32>>, Rc<Cell<u32>>);
+
+#[rustfmt::skip]
+impl Storage for Reads {
+    fn config(&self) -> inboxcraft_store::StoreConfig { self.0.config() }
+    fn apply(&mut self, batch: &Batch) -> Result<(), inboxcraft_store::StoreError> { self.0.apply(batch) }
+    fn accounts(&self) -> Result<Vec<inboxcraft_model::Account>, inboxcraft_store::StoreError> { self.0.accounts() }
+    fn folders(&self, a: AccountId) -> Result<Vec<inboxcraft_model::Folder>, inboxcraft_store::StoreError> { self.0.folders(a) }
+    fn folder_state(&self, f: FolderId) -> Result<Option<inboxcraft_model::FolderState>, inboxcraft_store::StoreError> { self.0.folder_state(f) }
+    fn messages(&self, f: FolderId) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.1.set(self.1.get().saturating_add(1)); self.0.messages(f) }
+    fn message(&self, m: MessageId) -> Result<Option<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.0.message(m) }
+    fn linked(&self, l: &MessageRef) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.2.set(self.2.get().saturating_add(1)); self.0.linked(l) }
+    fn body(&self, m: MessageId) -> Result<Option<inboxcraft_store::Body>, inboxcraft_store::StoreError> { self.0.body(m) }
+    fn search(&self, s: &inboxcraft_store::Search) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { self.0.search(s) }
+    fn queued_jobs(&self) -> Result<Vec<inboxcraft_model::Job>, inboxcraft_store::StoreError> { self.0.queued_jobs() }
+    fn drafts(&self, a: AccountId) -> Result<Vec<inboxcraft_model::Draft>, inboxcraft_store::StoreError> { self.0.drafts(a) }
+    fn newest_drafts(&self, a: AccountId, n: usize) -> Result<(u64, Vec<inboxcraft_model::Draft>), inboxcraft_store::StoreError> { self.0.newest_drafts(a, n) }
+    fn draft(&self, d: inboxcraft_model::DraftId) -> Result<Option<inboxcraft_model::Draft>, inboxcraft_store::StoreError> { self.0.draft(d) }
+    fn outbox(&self) -> Result<Vec<inboxcraft_model::Outgoing>, inboxcraft_store::StoreError> { self.0.outbox() }
+    fn schedule(&self) -> Result<Vec<inboxcraft_model::Scheduled>, inboxcraft_store::StoreError> { self.0.schedule() }
+    fn sender(&self, e: &inboxcraft_model::EmailAddress) -> Result<Option<inboxcraft_model::Sender>, inboxcraft_store::StoreError> { self.0.sender(e) }
+    fn senders(&self) -> Result<Vec<inboxcraft_model::Sender>, inboxcraft_store::StoreError> { self.0.senders() }
+    fn message_state(&self, m: MessageId) -> Result<MessageState, inboxcraft_store::StoreError> { self.0.message_state(m) }
+    fn message_states(&self) -> Result<Vec<(MessageId, MessageState)>, inboxcraft_store::StoreError> { self.0.message_states() }
+    fn calendars(&self, a: AccountId) -> Result<Vec<inboxcraft_model::Calendar>, inboxcraft_store::StoreError> { self.0.calendars(a) }
+    fn sync_token(&self, c: inboxcraft_model::CalendarId) -> Result<Option<String>, inboxcraft_store::StoreError> { self.0.sync_token(c) }
+    fn calendar_events(&self, c: inboxcraft_model::CalendarId) -> Result<Vec<inboxcraft_model::CalendarEvent>, inboxcraft_store::StoreError> { self.0.calendar_events(c) }
+    fn calendar_event(&self, e: inboxcraft_model::CalendarEventId) -> Result<Option<inboxcraft_model::CalendarEvent>, inboxcraft_store::StoreError> { self.0.calendar_event(e) }
+    fn alerts(&self, e: inboxcraft_model::CalendarEventId) -> Result<Vec<inboxcraft_model::Alert>, inboxcraft_store::StoreError> { self.0.alerts(e) }
+    fn alert(&self, a: inboxcraft_model::AlertId) -> Result<Option<inboxcraft_model::Alert>, inboxcraft_store::StoreError> { self.0.alert(a) }
+    fn stale_bodies(&self, t: inboxcraft_time::Timestamp) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { self.0.stale_bodies(t) }
+    fn missing_bodies(&self, f: FolderId, t: inboxcraft_time::Timestamp) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { self.0.missing_bodies(f, t) }
+}
+
+/// One message's thread reads no folder whole: in a store of over 10 000 messages, `mail.thread` and `mail.why` look
+/// up each link of the thread once, a loop of references included, and the thread of 10 000 is found whole.
+#[test]
+fn a_thread_is_found_by_its_links_not_by_reading_the_store() {
+    let (store, _) = hostile_store();
+    let (folders, links) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let mut session = Session::with_registry(Box::new(Reads(store, folders.clone(), links.clone())), Box::new(clock()), Registry::builtin().unwrap()).unwrap();
+    for (id, total, looked_up) in [(100, 3, 3), (103, 1, 1), (111, 3, 2), (113, 1, 1), (122, 4, 1), (1, 1, 0), (CHAIN + 5, CHAIN_LEN, CHAIN_LEN)] {
+        for command in ["mail.thread", "mail.why"] {
+            folders.set(0);
+            links.set(0);
+            let answer = session.run(command, &json!({ "id": id })).unwrap();
+            assert_eq!(folders.get(), 0, "{command} {id} read a folder whole");
+            assert_eq!(u64::from(links.get()), looked_up, "{command} {id}");
+            if command == "mail.thread" {
+                assert_eq!(answer["total"], total, "{id}");
+            }
+        }
+    }
 }
