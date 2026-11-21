@@ -2351,9 +2351,6 @@ const QUEUE_GAP: f32 = 20.0;
 const CARD_GAP: f32 = 12.0;
 const CARD_WIDE: f32 = 900.0;
 
-/// The account's bar beside a sender's name ([`crate::component::account_bar`]), wide, in points.
-const ACCOUNT_BAR_WIDE: f32 = 3.0;
-
 /// "New senders", the design's queue: its label, "Who gets in?", what it is for, the screener's mode, then a card for
 /// each sender who waits (their avatar, name, account and address, their newest message and how many more, its first
 /// line) with Let in and Keep out; the first card is the current one, its edge in the accent, Let in primary and the
@@ -2583,7 +2580,7 @@ fn sender_card(
                             // The name leaves the account's bar and the address their room, the address at least half
                             // the line: a long name ends with an ellipsis instead of pushing them out of the card.
                             let several = mailbox.accounts().len() > 1;
-                            let bar = if several { ACCOUNT_BAR_WIDE + 10.0 } else { 0.0 };
+                            let bar = if several { crate::component::ACCOUNT_BAR.x + 10.0 } else { 0.0 };
                             let address = crate::component::galley(ui, &message.address, theme.fonts.mono_s, p.muted).size().x.ceil();
                             let room = ui.available_width();
                             let name_most = (room - bar - 10.0 - address).max(room / 2.0).max(0.0);

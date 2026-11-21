@@ -479,7 +479,7 @@ pub(crate) fn margin(x: f32, y: f32) -> Margin {
 }
 
 /// The size of the account bar in points: a fixed mark, as large at every text scale.
-const ACCOUNT_BAR: egui::Vec2 = egui::vec2(3.0, 12.0);
+pub(crate) const ACCOUNT_BAR: egui::Vec2 = egui::vec2(3.0, 12.0);
 
 /// The account bar: 3 × 12 px, square, in the colour of the account counted `account` from 0, the six colours
 /// repeating from the seventh (`accounts[account % 6]`). It is a mark beside a row's sender; the row says the account.
