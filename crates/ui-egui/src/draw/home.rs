@@ -613,6 +613,19 @@ fn steps(ui: &mut Ui, theme: &Theme) -> Rect {
     .rect
 }
 
+/// `ui.home.open`, whoever ran it.
+impl super::InboxApp {
+    /// One ask of `ui.home.open`: the owner's shows Home; an agent's takes nothing from the owner, as an agent's
+    /// `ui.settings.open` does: it is passed over while the account form holds what the owner typed or a key is waited
+    /// for, and while the owner edits an event in the window's event editor (Home's own key does not run there either).
+    pub(super) fn apply_home_ask(&mut self, asked: inboxcraft_engine::shown::HomeAsked) {
+        if asked.by_agent && (self.settings.capturing().is_some() || self.onboarding.holds_typing() || self.editing_event()) {
+            return;
+        }
+        self.show_home();
+    }
+}
+
 /// The gallery's page of Home in `state` (see [`crate::home::sample`]) across `size`, on a still field with the
 /// emblem and the names where they fit; nothing for a state it does not know.
 pub fn gallery(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &str, field: &mut Field, size: egui::Vec2) {

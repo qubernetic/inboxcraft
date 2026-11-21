@@ -1355,25 +1355,33 @@ impl super::InboxApp {
         self.open_settings_on(page);
     }
 
-    /// Takes what `ui.settings.open` asked for since the last look: the owner's own asks are shown at once, in order;
-    /// of an agent's only the newest is kept, for [`Self::act_on_agent_ask`] at the frame's end.
+    /// Takes what `ui.settings.open` and `ui.home.open` asked for since the last look: the owner's own asks are shown at
+    /// once, in order; of an agent's only the newest is kept, for [`Self::act_on_agent_ask`] at the frame's end.
     pub fn follow_settings_asked(&mut self) {
-        for asked in self.mailbox.take_settings_asked() {
-            if asked.by_agent {
+        for asked in self.mailbox.take_asked() {
+            if asked.by_agent() {
                 self.mailbox.hold_agent_ask(asked);
             } else {
-                self.apply_settings_ask(asked);
+                self.apply_asked(asked);
             }
         }
     }
 
-    /// Shows the agent's ask held, unless `owner_acted`: the owner's own key or press on the settings this frame wins,
-    /// and the ask goes. At most one agent's ask a frame.
+    /// Shows the agent's ask held, unless `owner_acted`: the owner's own key or press on the settings or the place this
+    /// frame wins, and the ask goes. At most one agent's ask a frame.
     pub fn act_on_agent_ask(&mut self, owner_acted: bool) {
         if let Some(asked) = self.mailbox.take_agent_ask()
             && !owner_acted
         {
-            self.apply_settings_ask(asked);
+            self.apply_asked(asked);
+        }
+    }
+
+    /// One ask of the window, the settings' or Home's.
+    fn apply_asked(&mut self, asked: inboxcraft_engine::shown::Asked) {
+        match asked {
+            inboxcraft_engine::shown::Asked::Settings(asked) => self.apply_settings_ask(asked),
+            inboxcraft_engine::shown::Asked::Home(asked) => self.apply_home_ask(asked),
         }
     }
 

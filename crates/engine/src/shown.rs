@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! What a command asks the window to show. `ui.settings.open` (`safe`) asks for the settings, on one of
-//! [`SETTINGS_PAGES`] when its `page` names one; the session keeps the asks ([`MAX_ASKED`] at most) until the front end
-//! takes them ([`crate::Session::take_settings_asked`]). The engine shows nothing itself: headless an ask is answered
-//! and goes nowhere.
+//! [`SETTINGS_PAGES`] when its `page` names one, and `ui.home.open` (`safe`) for Home; the session keeps the asks in the
+//! order they came ([`MAX_ASKED`] at most) until the front end takes them ([`crate::Session::take_asked`]). The engine
+//! shows nothing itself: headless an ask is answered and goes nowhere.
 
 use serde_json::Value;
 
@@ -29,6 +29,34 @@ pub struct SettingsAsked {
     /// An agent asked (the control channel, the CLI in the app): the window never toggles for it and passes over it
     /// while the owner types in the account form or gives a key. Only the command's caller sets it, never a parameter.
     pub by_agent: bool,
+}
+
+/// The window is asked to show Home.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HomeAsked {
+    /// An agent asked: the window passes over it as over an agent's [`SettingsAsked`], and while the owner edits an
+    /// event. Only the command's caller sets it, never a parameter.
+    pub by_agent: bool,
+}
+
+/// One ask of the window, in the order the commands ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asked {
+    /// `ui.settings.open`.
+    Settings(SettingsAsked),
+    /// `ui.home.open`.
+    Home(HomeAsked),
+}
+
+impl Asked {
+    /// Whether an agent asked.
+    #[must_use]
+    pub const fn by_agent(&self) -> bool {
+        match self {
+            Self::Settings(asked) => asked.by_agent,
+            Self::Home(asked) => asked.by_agent,
+        }
+    }
 }
 
 /// The page `value` names: one of [`SETTINGS_PAGES`] exactly; anything else (no text, a text over [`MAX_PAGE`] bytes,

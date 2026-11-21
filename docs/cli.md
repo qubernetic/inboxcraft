@@ -104,6 +104,8 @@ database's words only to its own standard error, when the owner's store does not
   command; the appearance the other `ui.*.set` commands answer has its `layout`.
 - `ui.settings.open` shows the settings of the running app; on a store it shows nothing, and its answer says so
   with `"window": false`.
+- `ui.home.open` shows Home in the running app; on a store it shows nothing, and its answer says so with
+  `"window": false`.
 - Headless there are no workers, so `sync.status` on a store with an account answers `offline`, with no progress and
   no last sync; in the app it answers what the workers told.
 

@@ -23,7 +23,7 @@ use crate::draft;
 use crate::notify::{self, Notice, Settings};
 use crate::schedule::{self, Fired};
 use crate::send::Hold;
-use crate::shown::SettingsAsked;
+use crate::shown::{Asked, HomeAsked, SettingsAsked};
 use crate::undo::{Act, Step};
 use crate::writes::{Settled, Writes};
 use crate::{Caller, EngineError, Registry, error};
@@ -60,8 +60,8 @@ pub struct Outcome {
     week: Option<WeekRule>,
     /// Held jobs withdrawn: their removal from the store's queue is in the batch.
     withdrawn: Vec<JobId>,
-    /// The window is asked to show the settings.
-    settings: Option<SettingsAsked>,
+    /// The window is asked to show the settings or Home.
+    shown: Option<Asked>,
 }
 
 /// A job before it has an id.
@@ -99,7 +99,7 @@ impl Outcome {
             hold: None,
             week: None,
             withdrawn: Vec::new(),
-            settings: None,
+            shown: None,
         }
     }
 
@@ -212,7 +212,13 @@ impl Outcome {
 
     /// The outcome asking the window to show the settings.
     pub(crate) fn with_settings(mut self, asked: SettingsAsked) -> Self {
-        self.settings = Some(asked);
+        self.shown = Some(Asked::Settings(asked));
+        self
+    }
+
+    /// The outcome asking the window to show Home.
+    pub(crate) fn with_home(mut self, asked: HomeAsked) -> Self {
+        self.shown = Some(Asked::Home(asked));
         self
     }
 
@@ -333,9 +339,9 @@ pub(crate) struct State {
     pub(crate) window: bool,
     /// Whether the owner has an event open in the editor ([`Session::set_editing`]): an agent's `history.undo` waits.
     pub(crate) editing: bool,
-    /// What the window is asked to show, for the front end to take ([`Session::take_settings_asked`]); the newest
+    /// What the window is asked to show, in order, for the front end to take ([`Session::take_asked`]); the newest
     /// [`crate::shown::MAX_ASKED`].
-    pub(crate) settings_asked: VecDeque<SettingsAsked>,
+    pub(crate) asked: VecDeque<Asked>,
     /// The owner's own moves that come back through a sync, to tell nothing of (see [`crate::notify`]).
     pub(crate) quiet: VecDeque<String>,
     /// The id the next added account gets: past every id this session has held, so a removed account's id is not
@@ -681,7 +687,8 @@ impl Session {
         notify::collapse(std::mem::take(&mut self.state.notices))
     }
 
-    /// Says that a window takes what commands ask it to show (`ui.settings.open`): its answer's `window` is then `true`.
+    /// Says that a window takes what commands ask it to show (`ui.settings.open`, `ui.home.open`): their answer's `window`
+    /// is then `true`.
     pub fn set_window(&mut self, window: bool) {
         self.state.window = window;
     }
@@ -695,8 +702,8 @@ impl Session {
 
     /// What commands asked the window to show since the last call, oldest first: at most
     /// [`crate::shown::MAX_ASKED`], the newest.
-    pub fn take_settings_asked(&mut self) -> Vec<SettingsAsked> {
-        std::mem::take(&mut self.state.settings_asked).into()
+    pub fn take_asked(&mut self) -> Vec<Asked> {
+        std::mem::take(&mut self.state.asked).into()
     }
 
     /// Takes the computer's offset from UTC over time; until then the session works in UTC.
@@ -745,7 +752,7 @@ impl Session {
             hold,
             week,
             withdrawn,
-            settings,
+            shown,
         } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
         for job in withdrawn {
@@ -800,11 +807,11 @@ impl Session {
         if let Some(rule) = week {
             self.state.week = rule;
         }
-        if let Some(asked) = settings {
-            if self.state.settings_asked.len() >= crate::shown::MAX_ASKED {
-                self.state.settings_asked.pop_front();
+        if let Some(asked) = shown {
+            if self.state.asked.len() >= crate::shown::MAX_ASKED {
+                self.state.asked.pop_front();
             }
-            self.state.settings_asked.push_back(asked);
+            self.state.asked.push_back(asked);
         }
         for account in removed {
             self.state.accounts.remove(&account);

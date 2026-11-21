@@ -112,6 +112,10 @@ that is:
   typed into the account form or a key is being given on the Shortcuts page; at most its newest call acts in a frame,
   and the owner's own key or press in that frame wins. The answer is the page asked for (or `null`) and `window`,
   `true` in the app; it is the same whether the window acted or passed over the call;
+- `ui.home.open`, which shows Home in the window; it takes no parameters. An agent's call is passed over as an agent's
+  `ui.settings.open` is, and also while the owner edits an event in the event editor in the window; the owner's own
+  key or press in that frame wins, and of an agent's calls of the two only the newest acts in a frame. The answer is
+  `window`, `true` in the app, the same whether the window acted or passed over the call;
 - snooze, park and pin, as they land.
 
 `sync.status` reads how syncing stands in the app, from what its workers told: the state, the folder syncs done of
