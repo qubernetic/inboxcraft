@@ -767,8 +767,9 @@ impl crate::desk::Desk for PicturedDesk {
 
 /// What a scene writes, selects and sends in a sample: the people, subjects and lines it types.
 struct Words {
-    /// The signature of the first account.
+    /// The signature, and the accounts that sign with it.
     signature: &'static str,
+    signed: &'static [u64],
     /// The recipients typed in a written message, half a name typed after them for the suggestions, and an address
     /// that is none.
     to: &'static str,
@@ -799,6 +800,7 @@ struct Words {
 /// The present sample's words.
 const PRESENT_WORDS: Words = Words {
     signature: "Mira\nPlot 14",
+    signed: &[1],
     to: "Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,",
     suggest: "Odile Brannock <odile@example.org>, te",
     bad: "ansel.example.org,",
@@ -827,6 +829,8 @@ const PRESENT_WORDS: Words = Words {
 /// The frames' words.
 const FRAMES_WORDS: Words = Words {
     signature: "Odile",
+    // The reply to Teodor goes from the Studio account.
+    signed: &[1, 2],
     to: "Cosima Reuter <cosima@example.org>,",
     suggest: "Cosima Reuter <cosima@example.org>, an",
     bad: "anders.example.org,",
@@ -862,10 +866,12 @@ fn words(shot: &Shot) -> &'static Words {
     if frames(shot) { &FRAMES_WORDS } else { &PRESENT_WORDS }
 }
 
-/// Signs the first account's messages with the invented signature of `words`.
+/// Signs the messages of the accounts of `words` with its invented signature.
 fn sign(app: &mut InboxApp, words: &Words) {
-    // The sample takes every signature; a refusal would only leave the picture without one.
-    let _ = app.mailbox_mut().run("compose.signature", &serde_json::json!({ "account": 1, "signature": words.signature }));
+    for account in words.signed {
+        // The sample takes every signature; a refusal would only leave the picture without one.
+        let _ = app.mailbox_mut().run("compose.signature", &serde_json::json!({ "account": account, "signature": words.signature }));
+    }
     app.mailbox_mut().refresh();
 }
 
