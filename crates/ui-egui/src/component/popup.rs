@@ -202,6 +202,33 @@ pub enum Leave {
     Beside,
 }
 
+/// Where a held float's ground lay in the last pass, and in which pass: the window's own title bar takes a press beside
+/// it ([`ground`], [`press_is_the_window_s`]).
+fn ground_id() -> Id {
+    Id::unique("popup-held-ground")
+}
+
+/// The rect of the held float whose ground ([`backdrop`]) lay over the window in the last pass, while it does: the
+/// window's own title bar moves the window from where neither the float nor a control stands, as the frames draw no
+/// ground over it.
+pub(crate) fn ground(ctx: &Context) -> Option<Rect> {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<(u64, Rect)>(ground_id())).filter(|(shown, _)| shown.saturating_add(1) >= pass).map(|(_, rect)| rect)
+}
+
+/// Notes that the press of this pass is the window's (its own title bar's, beside a held float): it is no press outside
+/// the float. Called before the float is drawn.
+pub(crate) fn press_is_the_window_s(ctx: &Context) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(ground_id().with("window-press"), pass));
+}
+
+/// Whether the press of this pass is the window's ([`press_is_the_window_s`]).
+fn window_pressed(ctx: &Context) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<u64>(ground_id().with("window-press"))) == Some(pass)
+}
+
 /// Whether a float closes itself on `Esc` and a press outside it, or its caller decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -213,7 +240,8 @@ enum Mode {
 
 /// The ground under a held float, over the window's panes (as the palette's dim ground): a
 /// press outside the float lands on it, from the press to the release, and reaches nothing under it. It paints
-/// nothing and takes no keyboard. The window's own controls and the toasts stand over it, as over those grounds. It
+/// nothing and takes no keyboard. The window's own controls and the toasts stand over it, as over those grounds, and
+/// the own title bar's free part still moves the window ([`ground`]). It
 /// stays on top of the other middle layers (the floating composer), whichever showed first: a press on them only
 /// warns.
 fn backdrop(ctx: &Context, float: Id) {
@@ -281,6 +309,8 @@ fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl F
             let beside = input.pointer.any_pressed() && input.pointer.interact_pos().is_some_and(|at| rect.is_some_and(|rect| !rect.contains(at)));
             (input.consume_key(Modifiers::NONE, Key::Escape), beside)
         });
+        // A press the window's own title bar took moves the window; it leaves a held float as it is.
+        let beside = beside && !(mode != Mode::Closes && window_pressed(ctx));
         if mode != Mode::Closes {
             // Held: the caller decides, and the float stays as it is (no second unfolding).
             leave = if escaped {
@@ -318,6 +348,9 @@ fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl F
     }
     if mode == (Mode::Held { quiet: false }) {
         backdrop(ctx, float.id);
+        if let Some(rect) = kept.map(|kept| kept.rect) {
+            ctx.data_mut(|data| data.insert_temp(ground_id(), (pass, rect)));
+        }
     }
     if !quiet {
         // Only the float takes the keyboard and the pointer while it is open: Tab goes round its rows.

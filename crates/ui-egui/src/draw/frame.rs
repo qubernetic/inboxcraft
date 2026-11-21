@@ -54,11 +54,12 @@ const MOVE_AFTER: f32 = 3.0;
 /// restores it on a double click. The press is kept here rather than taken from egui's drag: while the desktop moves
 /// the window it holds the pointer, the app never hears the button come up, and egui would take the next press for
 /// the same drag still going on.
-fn moves_the_window(ctx: &Context, response: &Response) {
+/// Where `free`, the pointer is on the handle's free part under a held float's ground, which egui's hover does not see.
+fn moves_the_window(ctx: &Context, response: &Response, free: bool) {
     let id = response.id.with("pressed-at");
     let (pressed, released, at) = ctx.input(|input| (input.pointer.primary_pressed(), input.pointer.primary_released(), input.pointer.latest_pos()));
     // Hovered, not only under the pointer: where the field or a control stands over the handle, the press is theirs.
-    if pressed && response.hovered() {
+    if pressed && (response.hovered() || free) {
         ctx.data_mut(|data| data.insert_temp(id, at));
     } else if released {
         ctx.data_mut(|data| data.insert_temp(id, None::<Pos2>));
@@ -68,17 +69,31 @@ fn moves_the_window(ctx: &Context, response: &Response) {
         ctx.data_mut(|data| data.insert_temp(id, None::<Pos2>));
         hand_over(ctx, ViewportCommand::StartDrag);
     }
-    if response.double_clicked() {
+    let doubled = free && ctx.input(|input| input.pointer.button_double_clicked(egui::PointerButton::Primary));
+    if response.double_clicked() || doubled {
         ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximised(ctx)));
     }
 }
 
 /// The handle that makes the command line `line` the title bar: registered before the field and the controls, which
 /// take the press where they stand, so a press anywhere else on the line (the mark's column, the gaps) moves the
-/// window, and a double press maximises or restores it. By the pointer only: a handle is no Tab stop.
+/// window, and a double press maximises or restores it. By the pointer only: a handle is no Tab stop. Under the event
+/// editor too, whose ground lies over the window though the frames draw none: there the handle's free part (neither
+/// the editor, the field nor a control under the pointer) moves the window, and the press is no press outside the
+/// editor. The field under it stays the editor's press outside.
 pub(super) fn title_bar(ui: &Ui, line: Rect) {
+    let ctx = ui.ctx();
     let handle = ui.interact(line, title_bar_id(), Sense::CLICK | Sense::DRAG);
-    moves_the_window(ui.ctx(), &handle);
+    let free = crate::component::popup::ground(ctx).is_some_and(|float| {
+        let field = ctx.data(|data| data.get_temp::<Rect>(crate::command::field_id().with("box")));
+        let controls = Rect::from_min_max(pos2(line.right() - CONTROLS_ROOM + GAP_BEFORE, line.top()), line.max);
+        ctx.input(|input| input.pointer.interact_pos())
+            .is_some_and(|at| line.contains(at) && !float.contains(at) && !controls.contains(at) && !field.is_some_and(|field| field.contains(at)))
+    });
+    if free && ctx.input(|input| input.pointer.any_pressed()) {
+        crate::component::popup::press_is_the_window_s(ctx);
+    }
+    moves_the_window(ctx, &handle, free);
 }
 
 /// The title bar's handle.

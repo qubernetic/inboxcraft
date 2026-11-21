@@ -448,3 +448,52 @@ fn after_a_press_on_the_index_the_list_takes_its_keys_at_once() {
         assert!(picked[0] != picked[1] && picked[1] != picked[2], "{name}: each key moved the selection: {picked:?}");
     }
 }
+
+#[test]
+fn the_window_asks_the_desktop_for_the_least_size_it_lays_out() {
+    // #412: no frame draws the window under 800 (the least width, `size-800/*`); a narrower window would be laid out
+    // 800 wide and cut at its right, so the window asks the desktop never to make it narrower.
+    assert_eq!(shell::LEAST_WINDOW.x, shell::LEAST_WIDTH, "the least width asked is the least laid out");
+    for percent in [90, 100, 130] {
+        let least = shell::regions(shell::LEAST_WINDOW, &theme(percent), 1.0);
+        assert_eq!(least.command.right(), shell::LEAST_WINDOW.x - 1.0, "{percent}: nothing cut at the right");
+        assert_eq!(least.status.bottom(), shell::LEAST_WINDOW.y - 1.0, "{percent}: nothing cut at the foot");
+        // The body keeps room for a pane at the least height: its head and some rows.
+        assert!(least.body.height() >= 320.0, "{percent}: the body {:?} at the least height", least.body);
+    }
+    // One point narrower is laid out at the least width all the same: cut, which the least size keeps from happening.
+    let narrower = shell::regions(shell::LEAST_WINDOW - vec2(1.0, 0.0), &theme(100), 1.0);
+    assert!(narrower.command.right() > shell::LEAST_WINDOW.x - 2.0, "laid out 800 wide");
+}
+
+#[test]
+fn a_toast_at_its_widest_at_1300_never_covers_the_reader_s_reply() {
+    // #412: a toast wider than about 450 beside the docked composer or over the list reached the reader's Reply at the
+    // body's foot. The toast is the status line's message, at most 560 wide, in a strip of its own; also while lifted
+    // over the command line's results.
+    for results in [false, true] {
+        let mut harness = window(vec2(1300.0, 872.0));
+        let id = harness.state().mailbox().messages().get(2).map(|row| row.id).unwrap();
+        harness.state_mut().mailbox_mut().select(Some(id));
+        harness.run();
+        harness.state_mut().mailbox_mut().act(id, crate::mailbox::Act::Flag);
+        harness.run_steps(4);
+        if results {
+            let ctx = harness.ctx.clone();
+            harness.state_mut().run_action(&ctx, crate::keymap::PALETTE);
+            harness.run_steps(4);
+        }
+        let text = harness.state().mailbox().undoable().map(|undo| undo.text.clone()).unwrap();
+        let toast = harness
+            .query_all_by_role(Role::Label)
+            // A label's words are its value.
+            .find(|node| node.accesskit_node().value().is_some_and(|said| said.contains(&text)))
+            .map(|node| node.rect())
+            .unwrap();
+        assert!(toast.width() > 450.0, "results {results}: the toast at its widest, {toast:?}");
+        let status = shell::laid(&harness.ctx).unwrap().status;
+        assert!(status.contains_rect(toast), "results {results}: the toast {toast:?} in the status line {status:?}");
+        let reply = harness.get_by_role_and_label(Role::Button, "Reply").rect();
+        assert!(!reply.intersects(toast), "results {results}: Reply {reply:?} under the toast {toast:?}");
+    }
+}

@@ -26,6 +26,12 @@ pub(crate) const INDEX_NARROW: f32 = 56.0;
 pub(crate) const NARROW_INDEX_UNDER: f32 = 1280.0;
 /// The least width the window is laid out at; a narrower one is clipped.
 pub(crate) const LEAST_WIDTH: f32 = 800.0;
+/// The least height the window asks the desktop for, in points.
+const LEAST_HEIGHT: f32 = 480.0;
+/// The least size the window asks the desktop for, in points: no frame draws it under 800 wide, the least width, so it
+/// never asks to be laid out narrower ([`LEAST_WIDTH`]). A desktop that does not keep to it (some tiling ones) gets
+/// the window laid out 800 wide and cut at its right.
+pub const LEAST_WINDOW: Vec2 = Vec2::new(LEAST_WIDTH, LEAST_HEIGHT);
 
 /// The frame's four regions, in points, inside the window's outline with a hairline between each two.
 #[derive(Debug, Clone, Copy, PartialEq)]

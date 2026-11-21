@@ -318,5 +318,7 @@ fn the_desktop_file_opens_the_app_and_its_actions_the_sample_and_quit() {
 
 #[test]
 fn the_window_carries_the_app_id_so_the_desktop_finds_its_entry() {
-    assert!(repo_file("apps/inboxcraft/src/main.rs").contains(&format!(".with_app_id(\"{APP_ID}\")")));
+    // The window's builder lives in the app's library (`viewport`), which `main` opens.
+    assert!(repo_file("apps/inboxcraft/src/lib.rs").contains(&format!(".with_app_id(\"{APP_ID}\")")));
+    assert!(repo_file("apps/inboxcraft/src/main.rs").contains("inboxcraft::viewport("));
 }
