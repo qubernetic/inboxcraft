@@ -97,3 +97,16 @@ fn the_invitation_board_shows_the_card_while_its_answer_changes() {
         .unwrap();
     assert!((keep.left() - no.right() - 8.0).abs() <= 0.5, "8 after No: {no:?} {keep:?}");
 }
+
+#[test]
+fn every_board_ends_inside_the_page_s_margins() {
+    // The page is as tall as its tallest column and that column's margins: 8 round the page, 12 under the boards.
+    let harness = harness(Mode::Dark, true);
+    let floor = size().y - 8.0 - 12.0;
+    for role in [Role::Group, Role::Button, Role::Label] {
+        for node in harness.query_all_by_role(role) {
+            let rect = node.rect();
+            assert!(rect.bottom() <= floor + 0.5, "{:?} {rect:?} ends under {floor}", node.accesskit_node().label());
+        }
+    }
+}

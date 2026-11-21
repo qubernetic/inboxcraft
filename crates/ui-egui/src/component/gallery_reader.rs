@@ -27,7 +27,7 @@ pub fn size() -> Vec2 {
 const WIDTH: f32 = 2400.0;
 
 /// The page's height, in points: the tallest column and its margins.
-const HEIGHT: f32 = 2560.0;
+const HEIGHT: f32 = 2574.0;
 
 /// The room between two boards, in points.
 const BOARD_GAP: f32 = 24.0;
