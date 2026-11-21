@@ -1036,6 +1036,15 @@ pub fn plain_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, name: &
     response
 }
 
+/// The key under which [`plain_text`] keeps where it drew its text last.
+const GALLEY_AT: &str = "inboxcraft-field-galley-at";
+
+/// Where the text of the [`plain_text`] field `id` was drawn last (its layout's origin), if it was.
+#[must_use]
+pub fn galley_at(ctx: &egui::Context, id: Id) -> Option<egui::Pos2> {
+    ctx.data(|data| data.get_temp(id.with(GALLEY_AT)))
+}
+
 /// An edit of several lines without a box, `rows` rows high at least and laid out by `layouter`: the composer's
 /// message text, in the box the composer draws round it. `name` is its screen-reader name; its caret is the fields'
 /// block, blinking ([`crate::motion::blink`]). It holds at most [`MAX_BODY`]; what would pass it is refused whole, and
@@ -1069,6 +1078,7 @@ pub fn plain_text(
                 .desired_width(ui.available_width())
                 .desired_rows(rows)
                 .show(ui);
+            ui.data_mut(|data| data.insert_temp(id.with(GALLEY_AT), output.galley_pos));
             if output.response.response.has_focus() {
                 let clip = ui.clip_rect();
                 // The text's caret is as high as its letters: 20 in its rows of 26.

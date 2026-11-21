@@ -258,10 +258,12 @@ jobs:
         with:
           persist-credentials: false
       # No flatpak-builder cache: nothing a PR run writes feeds a later run.
+      # The runtime, SDK and Rust extension go into the user installation, an empty folder: updating the image's own
+      # system installation renames inside the image's lower overlay layer, which fails with EXDEV (#391).
       - name: Build the bundle
         run: |
-          flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak-builder --disable-rofiles-fuse --install-deps-from=flathub --force-clean \
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak-builder --user --disable-rofiles-fuse --install-deps-from=flathub --force-clean \
             --state-dir=target/flatpak/state --repo=target/flatpak/repo \
             target/flatpak/build contrib/flatpak/io.github.qubernetic.inboxcraft.yml
           flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \

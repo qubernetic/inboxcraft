@@ -92,7 +92,9 @@ What the app still owes this file, one line each. The finer differences, with th
 - The original cannot be opened in the browser from a cleaned copy. The fitted view draws a mail's tables used for
   layout with hairlines (the Messages page draws them without lines), a coloured cell round a link as a band rather
   than the mail's button, and every band 14 above and 16 below its blocks (the receipt's band is 12 and 14).
-- A reply's quote is plain `> ` lines in the body, not the file's quote block.
+- A reply's quote block says "Odile Brannock <odile@example.org> wrote on 5 Nov 2026 at 08:35:" where the file says
+  "On Mon 16 Nov 2026 at 14:02, Teodor Vasquez wrote:", and stands a blank line of 26 under the text over it where
+  the file puts 20 (`screen/composer-docked/reply-quote`, `screen/composer-floating/reply-quote`).
 
 **Event drafts and the event editor**
 - A half-typed event is not kept as a draft; while the editor is open the command line offers only the editor's
