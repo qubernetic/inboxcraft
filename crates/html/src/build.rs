@@ -13,10 +13,11 @@
 use std::collections::HashSet;
 
 use crate::entities::unescape;
+use crate::look::{self, Said};
 use crate::tokenizer::{Tag, Token, Tokenizer};
 use crate::{
-    Block, Cell, Document, Image, ImageSource, Link, MAX_BLOCKS, MAX_DEPTH, MAX_IMAGES, MAX_INPUT, MAX_LINKS, MAX_TABLE_COLUMNS, MAX_TABLE_DEPTH,
-    MAX_TABLE_ROWS, Marker, Options, Span, TextKind, link, truncate,
+    Align, Block, Cell, Document, Image, ImageSource, Link, LinkTarget, Look, MAX_BLOCKS, MAX_DEPTH, MAX_IMAGES, MAX_INPUT, MAX_LINKS,
+    MAX_TABLE_COLUMNS, MAX_TABLE_DEPTH, MAX_TABLE_ROWS, Marker, Options, Paint, Span, TextKind, Width, link, truncate,
 };
 
 /// Most characters of a link's text kept for comparing with its target.
@@ -117,6 +118,10 @@ struct Elem {
     heading: Option<u8>,
     /// How many frames there were before it pushed one.
     frame: Option<usize>,
+    /// The look that was current before it, when it changed it.
+    look: Option<Look>,
+    /// It is a link styled as a button (or a `<button>`): its words are a block of their own.
+    button: bool,
 }
 
 impl Elem {
@@ -129,6 +134,9 @@ impl Elem {
 #[derive(Debug, Default)]
 struct TableFrame {
     quote: u8,
+    /// Where the table stands and the background around it.
+    look: Look,
+    width: Option<Width>,
     rows: Vec<Vec<Cell>>,
     caption: Vec<Block>,
     /// What did not fit: the content of rows and cells past the caps.
@@ -161,19 +169,23 @@ impl TableFrame {
     /// The caption, then the table (or, when it has one column, its cells' blocks), then what did
     /// not fit. The second value says whether the table itself is a new block.
     fn into_blocks(self) -> (Vec<Block>, Option<Block>, Vec<Block>) {
-        let TableFrame { quote, rows, mut caption, after, .. } = self;
+        let TableFrame { quote, look, width, rows, mut caption, after, .. } = self;
         if rows.iter().all(|r| r.len() <= 1) {
-            caption.extend(rows.into_iter().flatten().flat_map(|c| c.blocks));
+            // A cell's background stays under its blocks once the table is gone.
+            caption.extend(rows.into_iter().flatten().flat_map(|c| {
+                let ground = c.background;
+                c.blocks.into_iter().map(move |block| on_ground(block, ground))
+            }));
             return (caption, None, after);
         }
-        (caption, Some(Block::Table { quote, rows }), after)
+        (caption, Some(Block::Table { quote, look, width, rows }), after)
     }
 }
 
 #[derive(Debug)]
 enum Frame {
     Body(Vec<Block>),
-    Cell { header: bool, implicit: bool, blocks: Vec<Block> },
+    Cell { header: bool, implicit: bool, blocks: Vec<Block>, background: Option<Paint>, width: Option<Width> },
     Caption(Vec<Block>),
     Table(TableFrame),
 }
@@ -210,6 +222,8 @@ struct Builder<'o> {
     hidden: u32,
     heading: u8,
     link: Option<usize>,
+    /// The alignment and background the blocks written now take.
+    look: Look,
     /// The paragraph being written.
     line: Vec<Span>,
     /// White space seen since the last character, with the look it was seen in.
@@ -263,6 +277,7 @@ impl<'o> Builder<'o> {
             hidden: 0,
             heading: 0,
             link: None,
+            look: Look::default(),
             line: Vec::new(),
             space: None,
             pre_start: false,
@@ -395,7 +410,7 @@ impl<'o> Builder<'o> {
             TextKind::Paragraph
         };
         let quote = self.quote_depth();
-        self.emit(Block::Text { kind, quote, spans });
+        self.emit(Block::Text { kind, quote, look: self.look, spans });
     }
 
     // ---- blocks and frames ----
@@ -416,7 +431,7 @@ impl<'o> Builder<'o> {
         if let Some(Frame::Table(t)) = self.frames.last()
             && t.can_add_cell()
         {
-            self.frames.push(Frame::Cell { header: false, implicit: true, blocks: Vec::new() });
+            self.frames.push(Frame::Cell { header: false, implicit: true, blocks: Vec::new(), background: None, width: None });
         }
         let (frames, spare) = (&mut self.frames, &mut self.spare);
         match frames.last_mut() {
@@ -430,9 +445,9 @@ impl<'o> Builder<'o> {
     /// Close the innermost frame and hand its content to the one around it.
     fn finish_frame(&mut self) {
         match self.frames.pop() {
-            Some(Frame::Cell { header, blocks, .. }) => {
+            Some(Frame::Cell { header, blocks, background, width, .. }) => {
                 if let Some(Frame::Table(t)) = self.frames.last_mut() {
-                    t.add_cell(Cell { header, blocks });
+                    t.add_cell(Cell { header, blocks, background, width });
                 }
             }
             Some(Frame::Caption(blocks)) => {
@@ -495,8 +510,11 @@ impl<'o> Builder<'o> {
         } else if self.in_table() && matches!(name, "table" | "tr" | "td" | "th" | "caption") {
             self.table_part(tag, &mut elem);
         } else if name == "table" {
-            self.table(&mut elem);
+            self.table(tag, &mut elem);
         } else {
+            if BLOCK.contains(&name) {
+                self.restyle(tag, &mut elem);
+            }
             self.element(tag, &mut elem);
         }
         self.elems.push(elem);
@@ -543,6 +561,7 @@ impl<'o> Builder<'o> {
                 elem.item = true;
             }
             "a" => self.anchor(tag, elem),
+            "button" => self.button(tag, elem),
             _ => {}
         }
     }
@@ -553,20 +572,87 @@ impl<'o> Builder<'o> {
             self.truncated = true;
             return;
         }
-        self.links.push(Link { target: link::target(&href), text: String::new(), mismatch: false });
+        let background = look::background(tag);
+        let button = look::is_button(tag, background);
+        let fill = match background {
+            Said::Kept(paint) if button => Some(paint),
+            _ => None,
+        };
+        if button {
+            self.flush();
+            elem.button = true;
+        }
+        self.links.push(Link { target: link::target(&href), text: String::new(), mismatch: false, button, fill });
         self.link_chars.push(0);
         elem.link = Some(self.link);
         self.link = Some(self.links.len().saturating_sub(1));
     }
 
-    fn table(&mut self, elem: &mut Elem) {
+    /// A `<button>`: inside a link, it makes that link a button; alone, it is a button-link that goes nowhere (a
+    /// form's action is never kept, so nothing can be submitted).
+    fn button(&mut self, tag: &Tag<'_>, elem: &mut Elem) {
+        let fill = match look::background(tag) {
+            Said::Kept(paint) => Some(paint),
+            Said::Dropped | Said::Nothing => None,
+        };
+        self.flush();
+        elem.button = true;
+        if let Some(link) = self.link.and_then(|index| self.links.get_mut(index)) {
+            link.button = true;
+            link.fill = link.fill.or(fill);
+            return;
+        }
+        if self.links.len() >= MAX_LINKS {
+            self.truncated = true;
+            return;
+        }
+        self.links.push(Link { target: LinkTarget::Refused, text: String::new(), mismatch: false, button: true, fill });
+        self.link_chars.push(0);
+        elem.link = Some(self.link);
+        self.link = Some(self.links.len().saturating_sub(1));
+    }
+
+    /// What a block element changes of the look its blocks take: its alignment and background (`center` centres).
+    fn restyle(&mut self, tag: &Tag<'_>, elem: &mut Elem) {
+        let before = self.look;
+        if tag.name == "center" {
+            self.look.align = Align::Centre;
+        }
+        if let Said::Kept(align) = look::align(tag) {
+            self.look.align = align;
+        }
+        match look::background(tag) {
+            Said::Kept(paint) => self.look.background = Some(paint),
+            Said::Dropped => self.look.background = None,
+            Said::Nothing => {}
+        }
+        if self.look != before {
+            elem.look = Some(before);
+        }
+    }
+
+    fn table(&mut self, tag: &Tag<'_>, elem: &mut Elem) {
         if self.tables.len() >= MAX_TABLE_DEPTH || self.flat > 0 {
             elem.flat = true;
             self.flat = self.flat.saturating_add(1);
             return;
         }
         let quote = self.quote_depth();
-        self.push_frame(elem, Frame::Table(TableFrame { quote, ..TableFrame::default() }));
+        // The table stands where its own `align` or margins put it, else where the text around it does; its
+        // background goes to its cells.
+        let mut own = self.look;
+        if let Said::Kept(align) = look::table_align(tag) {
+            own.align = align;
+        }
+        let width = look::width(tag);
+        let before = self.look;
+        match look::background(tag) {
+            Said::Kept(paint) => self.look.background = Some(paint),
+            Said::Dropped => self.look.background = None,
+            Said::Nothing => {}
+        }
+        elem.look = Some(before);
+        self.push_frame(elem, Frame::Table(TableFrame { quote, look: own, width, ..TableFrame::default() }));
         elem.table = true;
         self.tables.push(TableAt { elem: self.elems.len().saturating_add(1), row: None });
     }
@@ -576,10 +662,12 @@ impl<'o> Builder<'o> {
         let Some(at) = self.tables.last().map(|t| (t.elem, t.row)) else { return };
         let name = elem.name.clone();
         match name.as_str() {
-            "table" => self.table(elem),
+            "table" => self.table(tag, elem),
             "tr" => {
+                // The row before closes first (its `</tr>` may be left out), so its look does not outlast it.
                 self.close_to(at.0);
                 self.finish_implicit_cell();
+                self.restyle(tag, elem);
                 if let Some(Frame::Table(t)) = self.frames.last_mut() {
                     t.start_row();
                 }
@@ -599,7 +687,19 @@ impl<'o> Builder<'o> {
                 let room = matches!(self.frames.last(), Some(Frame::Table(t)) if t.can_add_cell());
                 let header = tag.name == "th";
                 if room {
-                    self.push_frame(elem, Frame::Cell { header, implicit: false, blocks: Vec::new() });
+                    // The cell keeps its background (its own, its row's or its table's); its blocks stand on it.
+                    let before = self.look;
+                    if let Said::Kept(align) = look::align(tag) {
+                        self.look.align = align;
+                    }
+                    let background = match look::background(tag) {
+                        Said::Kept(paint) => Some(paint),
+                        Said::Dropped => None,
+                        Said::Nothing => self.look.background,
+                    };
+                    self.look.background = None;
+                    elem.look = Some(before);
+                    self.push_frame(elem, Frame::Cell { header, implicit: false, blocks: Vec::new(), background, width: look::width(tag) });
                 }
                 if header {
                     (elem.bold, self.bold) = (true, self.bold.saturating_add(1));
@@ -644,7 +744,7 @@ impl<'o> Builder<'o> {
         self.flush();
         let quote = self.quote_depth();
         let size = side(tag.attr("width").as_deref()).zip(side(tag.attr("height").as_deref()));
-        self.emit(Block::Image { quote, image: Image { alt, source, link: self.link, size } });
+        self.emit(Block::Image { quote, look: self.look, image: Image { alt, source, link: self.link, size } });
     }
 
     fn close(&mut self, name: &str) {
@@ -685,6 +785,10 @@ impl<'o> Builder<'o> {
 
     fn pop(&mut self) {
         let Some(e) = self.elems.pop() else { return };
+        // A block that changed the look, or a button's words, ends here: the words before stand on that look.
+        if e.look.is_some() || e.button {
+            self.flush();
+        }
         let dec = |n: &mut u32, on: bool| {
             if on {
                 *n = n.saturating_sub(1);
@@ -730,6 +834,21 @@ impl<'o> Builder<'o> {
                 self.finish_frame();
             }
         }
+        if let Some(previous) = e.look {
+            self.look = previous;
+        }
+    }
+}
+
+/// `block` standing on `ground` where it has no background of its own.
+fn on_ground(block: Block, ground: Option<Paint>) -> Block {
+    let Some(ground) = ground else { return block };
+    let lay = |look: Look| Look { background: look.background.or(Some(ground)), ..look };
+    match block {
+        Block::Text { kind, quote, look, spans } => Block::Text { kind, quote, look: lay(look), spans },
+        Block::Image { quote, look, image } => Block::Image { quote, look: lay(look), image },
+        Block::Table { quote, look, width, rows } => Block::Table { quote, look: lay(look), width, rows },
+        rule @ Block::Rule { .. } => rule,
     }
 }
 
