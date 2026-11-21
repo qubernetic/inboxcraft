@@ -28,7 +28,6 @@ use inboxcraft::desktop::{Desktop, WINDOWLESS_TICK};
 use inboxcraft::fonts::Fallbacks;
 use inboxcraft::instance::Request;
 use inboxcraft::{Source, Step};
-use inboxcraft_engine::appearance::WindowFrame;
 use inboxcraft_time::SystemClock;
 use inboxcraft_ui_egui::fetch::Wake;
 
@@ -77,15 +76,7 @@ fn windows(mut desktop: Desktop, shown: &Shown) -> ExitCode {
             desktop.wait(WINDOWLESS_TICK);
             continue;
         }
-        let mut viewport = egui::ViewportBuilder::default()
-            .with_title("InboxCraft")
-            .with_app_id("io.github.qubernetic.inboxcraft")
-            .with_inner_size([1200.0, 760.0])
-            .with_min_inner_size([800.0, 480.0])
-            // See-through where the app paints nothing: the corners of its own frame.
-            .with_transparent(true)
-            // The app draws its own frame unless the owner chose the desktop's title bar (`ui.frame.set`).
-            .with_decorations(desktop.app().mailbox().appearance().frame == WindowFrame::System);
+        let mut viewport = inboxcraft::viewport(desktop.app().mailbox().appearance().frame);
         desktop.app_mut().set_own_frame(true);
         // On Wayland the desktop finds the icon through the app id; X11 and other systems take it from the window.
         if let Ok(icon) = inboxcraft_ui_egui::icons::window_icon() {

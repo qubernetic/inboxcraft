@@ -80,6 +80,21 @@ pub enum Step {
     RevokeControl,
 }
 
+/// The main window as `main` opens it, the frame `frame` chosen: 1200 × 760 at first, and never smaller than the
+/// least size the window is laid out at ([`inboxcraft_ui_egui::LEAST_WINDOW`]), so it is never cut at its right.
+#[must_use]
+pub fn viewport(frame: inboxcraft_engine::appearance::WindowFrame) -> eframe::egui::ViewportBuilder {
+    eframe::egui::ViewportBuilder::default()
+        .with_title("InboxCraft")
+        .with_app_id("io.github.qubernetic.inboxcraft")
+        .with_inner_size([1200.0, 760.0])
+        .with_min_inner_size(inboxcraft_ui_egui::LEAST_WINDOW)
+        // See-through where the app paints nothing: the corners of its own frame.
+        .with_transparent(true)
+        // The app draws its own frame unless the owner chose the desktop's title bar (`ui.frame.set`).
+        .with_decorations(frame == inboxcraft_engine::appearance::WindowFrame::System)
+}
+
 /// What `--help` prints.
 #[must_use]
 pub fn usage() -> String {

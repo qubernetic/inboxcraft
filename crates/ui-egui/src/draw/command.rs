@@ -276,10 +276,11 @@ fn field_rect(rect: Rect, theme: &Theme, index: f32, room: f32) -> Rect {
     Rect::from_min_max(pos2(left, top), pos2(right, top + high))
 }
 
-/// The field as drawn this frame: what its typing asked for, and its box.
+/// The field as drawn this frame: what its typing asked for, its box and the command line's region.
 pub(super) struct Typed {
     pub(super) asked: Vec<Asked>,
     rect: Rect,
+    line: Rect,
 }
 
 /// Draws the command line's field into `ui` over `line` (the command line's region; `index` how far in from its left
@@ -335,7 +336,7 @@ pub(super) fn field(
     // keyboard from a field before the frame in which `Esc` is pressed).
     ui.ctx().data_mut(|data| data.insert_temp(field_id().with("box"), typed.rect));
     command.keep_focus(ui.ctx());
-    Typed { asked, rect }
+    Typed { asked, rect, line }
 }
 
 /// The arrows, Enter and the results under the field `typed` drew, for `lists` (the rows of the text as it is now);
@@ -349,7 +350,7 @@ pub(super) fn pick(ctx: &Context, theme: &Theme, keymap: &Keymap, command: &mut 
         asked.extend(chosen(command, lists, command.picked(), false));
     }
     if command.results() {
-        asked.extend(results(ctx, theme, keymap, command, typed.rect, lists));
+        asked.extend(results(ctx, theme, keymap, command, (typed.rect, typed.line), lists));
     }
     asked
 }
@@ -382,12 +383,15 @@ fn chosen(command: &Command, lists: &Lists, at: usize, pressed: bool) -> Option<
     }
 }
 
-/// The dimmed window under the command line and the results hanging under the field `rect`; what a press asked for.
-fn results(ctx: &Context, theme: &Theme, keymap: &Keymap, command: &mut Command, rect: Rect, lists: &Lists) -> Vec<Asked> {
+/// The dimmed window under the command line `line` and the results hanging under the field `rect`; what a press asked
+/// for.
+fn results(ctx: &Context, theme: &Theme, keymap: &Keymap, command: &mut Command, (rect, line): (Rect, Rect), lists: &Lists) -> Vec<Asked> {
     let mut asked = Vec::new();
     let screen = ctx.content_rect();
-    // The window under the command line, dimmed: a press on it closes the results and reaches nothing under it.
-    let dim = Rect::from_min_max(pos2(screen.left(), rect.bottom()), screen.max);
+    // The window under the command line, dimmed from the line's foot as the frames draw it: a press on it closes the
+    // results and reaches nothing under it. The line itself stays as it is: in the own frame the title bar, whose free
+    // parts move the window while the results show.
+    let dim = Rect::from_min_max(pos2(screen.left(), line.bottom()), screen.max);
     let beside = Area::new(Id::unique("command-line-dim")).order(Order::Middle).fixed_pos(dim.min).constrain(false).fade_in(false).show(ctx, |ui| {
         let (area, response) = ui.allocate_exact_size(dim.size(), Sense::click());
         ui.painter().rect_filled(area, 0.0, theme.palette.scrim);

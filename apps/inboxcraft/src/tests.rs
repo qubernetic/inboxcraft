@@ -320,3 +320,14 @@ fn autostart_without_a_config_folder_or_with_a_refusal_fails() {
 fn the_instance_folder_holds_the_store() {
     assert_eq!(instance_dir(), store::store_dir().and_then(|dir| dir.parent().map(std::path::Path::to_path_buf)));
 }
+
+#[test]
+fn the_window_asks_never_to_be_narrower_than_the_least_width_laid_out() {
+    // #412: the window is laid out at least 800 wide; narrower, it would be cut at its right.
+    for frame in [inboxcraft_engine::appearance::WindowFrame::Own, inboxcraft_engine::appearance::WindowFrame::System] {
+        let viewport = super::viewport(frame);
+        assert_eq!(viewport.min_inner_size, Some(inboxcraft_ui_egui::LEAST_WINDOW), "{frame:?}");
+        assert_eq!(viewport.decorations, Some(frame == inboxcraft_engine::appearance::WindowFrame::System), "{frame:?}");
+    }
+    assert_eq!(inboxcraft_ui_egui::LEAST_WINDOW.x, 800.0);
+}

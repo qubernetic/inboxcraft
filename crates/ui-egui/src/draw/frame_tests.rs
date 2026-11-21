@@ -8,7 +8,7 @@ use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, ResizeDirection, ViewportCommand, ViewportId, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
-use inboxcraft_engine::appearance::WindowFrame;
+use inboxcraft_engine::appearance::{EventEditorHost, WindowFrame};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
@@ -503,5 +503,117 @@ fn close_closes_over_the_command_line_s_results_a_menu_and_the_event_editor() {
             };
             assert!(seen.contains(&ViewportCommand::Close), "{surface}, activate {activate}: {seen:?}");
         }
+    }
+}
+
+/// Opens the command line's results (commands, none found).
+fn open_results(harness: &mut Harness<'static, InboxApp>) {
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::PALETTE);
+    harness.run();
+    harness.state_mut().command_mut().set_text(">zz");
+    harness.run();
+    assert!(harness.state().command().results(), "the results show");
+}
+
+/// Opens a new event's editor on the calendar.
+fn open_editor(harness: &mut Harness<'static, InboxApp>) {
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::CALENDAR);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "New event").click();
+    harness.run();
+    assert!(harness.state().calendar().editor().is_some(), "the editor shows");
+}
+
+/// The title bar's free points: the mark's column at the line's middle and under the field, and the gap before the
+/// controls.
+fn free_points(harness: &Harness<'_, InboxApp>) -> [Pos2; 3] {
+    let (line, field, first) = (line(harness), field(harness), controls(harness)[0]);
+    let mark = free(harness);
+    [mark, pos2(mark.x, ((field.bottom() + line.bottom()) / 2.0).round()), pos2((field.right() + first.left()) / 2.0, line.center().y)]
+}
+
+#[test]
+fn under_the_command_line_s_results_the_title_bar_stays_the_title_bar() {
+    // #412 (#305 m4): the frames' scrim under the results starts at the command line's foot, so the whole title bar
+    // stays one, the mark's column under the field too: a drag there moves the window and the results stay.
+    let at = free_points(&self::harness(true, WindowFrame::Own));
+    for at in at {
+        let mut harness = self::harness(true, WindowFrame::Own);
+        open_results(&mut harness);
+        let seen = drag_from(&mut harness, at);
+        assert!(seen.contains(&ViewportCommand::StartDrag), "{at:?}: {seen:?}");
+        assert!(harness.state().command().results(), "{at:?}: the results stay");
+    }
+    // The scrim (the command line's dim ground) starts at the line's foot, as the frames draw it (the window's y 45),
+    // not at the field's (37): a press on the title bar under the field is the title bar's, and the results stay.
+    let mut harness = self::harness(true, WindowFrame::Own);
+    open_results(&mut harness);
+    let dim = harness.ctx.memory(|memory| memory.area_rect(egui::Id::unique("command-line-dim"))).unwrap();
+    assert_eq!(dim.top(), line(&harness).bottom(), "the scrim {dim:?} under the line");
+    let [_, under_field, _] = free_points(&harness);
+    click_at(&mut harness, under_field);
+    harness.run();
+    assert!(harness.state().command().results(), "a press on the title bar under the field keeps the results");
+    // Under the line a press lands on the scrim: it closes the results and moves nothing.
+    let under = pos2(free(&harness).x, line(&harness).bottom() + 20.0);
+    let seen = click_at(&mut harness, under);
+    assert!(!seen.contains(&ViewportCommand::StartDrag), "{seen:?}");
+    assert!(!harness.state().command().results(), "a press under the line closes the results");
+}
+
+/// The sample at 1440 × 900 in a native window that may draw its frame, `frame` chosen, the event editor opening
+/// `small` (a float over the calendar) or full.
+fn editor_harness(frame: WindowFrame, small: bool) -> Harness<'static, InboxApp> {
+    let host = if small { EventEditorHost::Small } else { EventEditorHost::Full };
+    harness_with(true, frame, vec2(1440.0, 900.0), Some(1.0 / 60.0), |app| app.set_event_editor_host(host))
+}
+
+#[test]
+fn under_the_event_editor_the_title_bar_moves_the_window_and_leaves_the_editor_open() {
+    // #412 (#305 m5): the frames draw no ground over the window under the event editor; the command line stays the
+    // title bar. A drag on its free parts moves the window and is no press outside the editor.
+    for small in [true, false] {
+        let at = free_points(&editor_harness(WindowFrame::Own, small));
+        for at in at {
+            let mut harness = editor_harness(WindowFrame::Own, small);
+            open_editor(&mut harness);
+            let seen = drag_from(&mut harness, at);
+            assert!(seen.contains(&ViewportCommand::StartDrag), "small {small}, {at:?}: {seen:?}");
+            harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+            harness.run();
+            assert!(harness.state().calendar().editor().is_some(), "small {small}, {at:?}: the editor stays open");
+        }
+        // A double press there maximises the window, as anywhere on the title bar.
+        let mut harness = editor_harness(WindowFrame::Own, small);
+        open_editor(&mut harness);
+        // Half a second after the press that opened it, so the two presses are a double press of their own.
+        harness.run_steps(30);
+        let at = free(&harness);
+        harness.hover_at(at);
+        harness.step();
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            for pressed in [true, false] {
+                harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+            }
+            harness.step();
+            seen.extend(commands(&harness));
+        }
+        assert!(seen.contains(&ViewportCommand::Maximized(true)), "small {small}: a double press, {seen:?}");
+        assert!(harness.state().calendar().editor().is_some(), "small {small}: the editor stays open after a double press");
+        // A drag from the field moves nothing.
+        let mut harness = editor_harness(WindowFrame::Own, small);
+        open_editor(&mut harness);
+        let at = field(&harness).center();
+        let seen = drag_from(&mut harness, at);
+        assert!(!seen.contains(&ViewportCommand::StartDrag), "small {small}: the field moved the window: {seen:?}");
+        // Where the app leaves the title bar to the desktop, nothing moves the window from the app.
+        let mut harness = editor_harness(WindowFrame::System, small);
+        open_editor(&mut harness);
+        let at = free(&harness);
+        let seen = drag_from(&mut harness, at);
+        assert!(!seen.contains(&ViewportCommand::StartDrag), "small {small}, the system frame: {seen:?}");
     }
 }

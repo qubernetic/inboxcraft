@@ -194,7 +194,8 @@ Everything is designed at 1440 × 900. Four fixed regions:
 
 - **Command line.** Plain text searches, `>` runs a command, `@` finds a person, `#` goes to a mailbox. `Ctrl K`
   and `/` open it empty; `Ctrl F` opens the same field narrowed to searching mail in the current mailbox. Results
-  hang under the field as a float and the window behind is dimmed. `Esc` returns to the list.
+  hang under the field as a float and the window under the command line is dimmed; the line itself is not. `Esc`
+  returns to the list.
 - **Index.** At the top stands New message, above the places and as wide as the column: a secondary button with
   the compose glyph, its words and its key, `C`, 32 high with 12 px at its sides and 8 px under it. It is the same
   on every place, and disabled while there is no account to write from. Then five places: `[ 00 ] HOME`,
@@ -208,8 +209,9 @@ Everything is designed at 1440 × 900. Four fixed regions:
 - **Status line.** At rest: the sync state, the accounts, the outbox, the next event. A notice is a stretch of
   this line under a 2 px line in its kind's colour, not a box. An undo line stays 5 s, a notice with nothing to
   undo 4 s, an error until it is dismissed.
-- **Frame.** With the window's own frame the command line is also the title bar and the drag strip. The other
-  setting is the system's frame. Both are drawn maximised and without focus as well.
+- **Frame.** With the window's own frame the command line is also the title bar and the drag strip, also while its
+  results or the event editor show. The other setting is the system's frame. Both are drawn maximised and without
+  focus as well.
 - **Keys.** `D` done (mark as read and archive), `A` archive, `H` snooze, `R` read, `S` flag, `C` write, `J` and
   `K` or the arrows move in a list, `Ctrl Z` undo, `Ctrl Enter` send. Single letters work when the focus is not in
   a text field. `Tab` goes through the regions in reading order. Every key can be changed in Settings.
@@ -222,7 +224,7 @@ screens at 1100 and at 800 as well as at 1440.
 |---|---|---|
 | under 1280 (drawn at 1100) | the index narrows to 56 px of icons; the command field takes the room | the reader beside the 440 px list would have less than 606 px |
 | under 980 (drawn at 800) | the body holds one pane; list and reader swap (`Enter` opens, `Esc` goes back) | the reader would have less than 482 px |
-| 800 | the least width; the one pane is 743 px | |
+| 800 | the least width; the one pane is 743 px; the window cannot be made narrower | no frame draws it narrower |
 
 The command line and the status line keep their heights and never leave. The list keeps 440 px whenever a second
 pane stands beside it. A control is never cut: text cuts on one line with `…`, and a part that does not fit is
