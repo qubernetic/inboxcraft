@@ -17,6 +17,11 @@
 //! nothing; its answer's `window` says whether a window takes the ask (`false` headless, where nothing is shown). An
 //! agent's ask is guarded as an agent's `ui.settings.open` is ([`crate::shown::HomeAsked`]).
 //!
+//! `ui.list.unread` (`safe`) asks the window to list the unread messages of the place it shows alone (`on: true`), all
+//! of them again (`on: false`), or the other of the two (no `on`). It changes nothing in the store; its answer's
+//! `window` says whether a window takes the ask (`false` headless). An agent's ask is guarded as an agent's
+//! `ui.settings.open` is ([`crate::shown::UnreadAsked`]).
+//!
 //! `ui.motion.set` takes `level` (`full`, `reduced` or `off`); the older `reduce` (`on`, `off` or `system`) still
 //! answers for one release, and `level` wins when both are given.
 
@@ -25,15 +30,15 @@ use serde_json::{Value, json};
 
 use crate::appearance::{Appearance, ComposerHost, EventEditorHost, Layout, MotionLevel, ReaderHost, TEXT_SCALES, ThemeMode, WindowFrame};
 use crate::params::{NoParams, decode, decode_quietly};
-use crate::shown::{self, HomeAsked, SettingsAsked};
+use crate::shown::{self, HomeAsked, SettingsAsked, UnreadAsked};
 use crate::{AgentClass, Caller, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[FRAME, HOME, LAYOUT, MOTION, SETTINGS, TEXT_SCALE, THEME];
+pub(crate) const COMMANDS: &[CommandSpec] = &[FRAME, HOME, LAYOUT, MOTION, SETTINGS, TEXT_SCALE, THEME, UNREAD];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["mode", "percent", "level", "reduce", "frame", "page", "reader", "composer", "event_editor"];
+pub(crate) const FIELDS: &[&str] = &["mode", "percent", "level", "reduce", "frame", "page", "reader", "composer", "event_editor", "on"];
 
 /// `ui.theme.set`: light, dark or the system's.
 pub(crate) const THEME: CommandSpec =
@@ -73,6 +78,14 @@ pub(crate) const SETTINGS: CommandSpec = CommandSpec {
 
 /// `ui.home.open`: Home.
 pub(crate) const HOME: CommandSpec = CommandSpec { id: "ui.home.open", class: Some(AgentClass::Safe), summary: "Show Home, the brief of today", run: home_open };
+
+/// `ui.list.unread`: the unread messages alone in the list, or all again.
+pub(crate) const UNREAD: CommandSpec = CommandSpec {
+    id: "ui.list.unread",
+    class: Some(AgentClass::Safe),
+    summary: "List only the unread messages of the place shown, or all of them again",
+    run: unread,
+};
 
 /// The outcome of a change to the appearance: the whole appearance as the answer.
 fn changed(appearance: Appearance) -> Outcome {
@@ -210,4 +223,17 @@ fn home_open(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineErr
     let NoParams {} = decode_quietly(HOME.id, params)?;
     let asked = HomeAsked { by_agent: context.caller() == Caller::Agent };
     Ok(Outcome::new(json!({ "window": context.state().window })).with_home(asked))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UnreadParams {
+    /// On, off, or (not given) the other of what the place shows.
+    on: Option<bool>,
+}
+
+fn unread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: UnreadParams = decode_quietly(UNREAD.id, params)?;
+    let asked = UnreadAsked { on: params.on, by_agent: context.caller() == Caller::Agent };
+    Ok(Outcome::new(json!({ "on": params.on, "window": context.state().window })).with_unread(asked))
 }

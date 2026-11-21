@@ -209,8 +209,9 @@ fn the_palette_no_longer_closes_settings() {
 
 /// Every action that touches a message, a thread, the list, the reader or the calendar: none runs on the settings,
 /// which show none of them. The test's own list, so that an id dropped from the window's rule fails it.
-pub(super) const OF_THE_MAIL: [&str; 29] = [
+pub(super) const OF_THE_MAIL: [&str; 30] = [
     keymap::DONE,
+    keymap::UNREAD,
     keymap::SNOOZE,
     keymap::ARCHIVE,
     keymap::READ,

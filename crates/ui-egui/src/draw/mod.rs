@@ -1063,6 +1063,8 @@ impl InboxApp {
             // The list's keys and its views act on the list: hidden, it is not there to act on.
             _ if keymap::LIST_KEYS.contains(&id) => self.screen == Screen::Mail && !self.list_hidden && (self.list_row.is_some() || self.list_keys),
             keymap::VIEW_GROUPED | keymap::VIEW_SMART | keymap::VIEW_LIST => !self.list_hidden,
+            // Where the list shows a place that has it, as its pill.
+            keymap::UNREAD => self.screen == Screen::Mail && !self.list_hidden && self.mailbox.can_unread_only(),
             _ => keymap::action(id).is_some(),
         }
     }
@@ -1171,6 +1173,10 @@ impl InboxApp {
             keymap::VIEW_GROUPED => self.mailbox.set_inbox_view(InboxView::Grouped),
             keymap::VIEW_SMART => self.mailbox.set_inbox_view(InboxView::Smart),
             keymap::VIEW_LIST => self.mailbox.set_inbox_view(InboxView::List),
+            keymap::UNREAD => {
+                let on = !self.mailbox.unread_only();
+                self.mailbox.set_unread_only(on);
+            }
             keymap::OPEN => self.open_from_list(ctx),
             keymap::BACK => {
                 let _ = self.back_to_list(ctx);
@@ -2168,6 +2174,8 @@ impl InboxApp {
                 composer.set_floating(true);
             }
             self.reader.open(&mut self.mailbox, opening);
+            // Under "Unread only" the read row the owner moved on from leaves now, after the reader moved on.
+            self.mailbox.let_read_row_go();
             self.hover = None;
             self.card = opening.and_then(|id| {
                 let groups = self.mailbox.groups();
@@ -3324,6 +3332,7 @@ impl InboxApp {
             || header.searched.is_some()
             || header.open.is_some()
             || header.show_done.is_some()
+            || header.unread_only.is_some()
             || header.view.is_some()
             || done_all.is_some()
             || review
@@ -3412,6 +3421,9 @@ impl InboxApp {
         }
         if let Some(show) = header.show_done {
             self.mailbox.set_show_done(show);
+        }
+        if let Some(on) = header.unread_only {
+            self.mailbox.set_unread_only(on);
         }
         let place = if review { Some(Place::Senders) } else { asked.open.or(header.open) };
         if let Some(place) = place {

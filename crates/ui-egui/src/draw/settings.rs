@@ -1379,11 +1379,16 @@ impl super::InboxApp {
         }
     }
 
-    /// One ask of the window, the settings' or Home's.
+    /// One ask of the window: the settings', Home's or "Unread only".
     fn apply_asked(&mut self, asked: inboxcraft_engine::shown::Asked) {
         match asked {
             inboxcraft_engine::shown::Asked::Settings(asked) => self.apply_settings_ask(asked),
             inboxcraft_engine::shown::Asked::Home(asked) => self.apply_home_ask(asked),
+            // Only the list's place changes: nothing is shown in place of what shows.
+            inboxcraft_engine::shown::Asked::Unread(asked) => {
+                let on = asked.on.unwrap_or(!self.mailbox.unread_only());
+                self.mailbox.set_unread_only(on);
+            }
         }
     }
 

@@ -78,6 +78,8 @@ pub(super) struct Header {
     pub(super) open: Option<Place>,
     /// "Show done" turned on or off.
     pub(super) show_done: Option<bool>,
+    /// "Unread only" turned on or off.
+    pub(super) unread_only: Option<bool>,
     /// A view of the unified inbox chosen on the view switch.
     pub(super) view: Option<InboxView>,
 }
@@ -113,7 +115,7 @@ pub(super) fn has_filters(mailbox: &Mailbox) -> bool {
 }
 
 /// The filters' line under the head, 36 high at the text scale, its parts 16 in from the pane's edges and 8 apart:
-/// the piles in "Later"; elsewhere "Show done" and the park pile (after the view switch when the head has no room
+/// the piles in "Later"; elsewhere "Show done", "Unread only" where the place has it, and the park pile (after the view switch when the head has no room
 /// for it). While searching, the search's words.
 fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header, switch_here: bool) {
     let high = Theme::size(theme, FILTERS);
@@ -154,6 +156,9 @@ fn pill_parts(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header,
     }
     if pill(ui, theme, tr!("Show done"), mailbox.show_done()).clicked() {
         asked.show_done = Some(!mailbox.show_done());
+    }
+    if mailbox.can_unread_only() && pill(ui, theme, tr!("Unread only"), mailbox.unread_only()).clicked() {
+        asked.unread_only = Some(!mailbox.unread_only());
     }
     let parked = mailbox.parked();
     if parked > 0 && pill(ui, theme, &tr!("Parked ({count})", count = parked), false).clicked() {
@@ -325,6 +330,12 @@ fn empty_list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) {
             query = mailbox.query()
         );
         (tr!("{place} · SEARCH", place = upper), tr!("No messages match.").to_owned(), help)
+    } else if mailbox.unread_only() {
+        let help = join(
+            tr!("“Unread only” leaves out what you have read. Turn it off to see every message here again."),
+            with_key(keymap, keymap::UNREAD, |key| tr!("{key} turns it off.", key = key)),
+        );
+        (tr!("{place} · UNREAD", place = upper), tr!("Nothing unread here.").to_owned(), help)
     } else {
         let palette = with_key(keymap, keymap::PALETTE, |key| tr!("or with {key}", key = key));
         let (title, help) = match mailbox.place() {
@@ -3045,3 +3056,7 @@ mod list_pixel_tests;
 #[cfg(test)]
 #[path = "list_scroll_tests.rs"]
 mod list_scroll_tests;
+
+#[cfg(test)]
+#[path = "unread_tests.rs"]
+mod unread_tests;

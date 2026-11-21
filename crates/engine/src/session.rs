@@ -24,7 +24,7 @@ use crate::draft;
 use crate::notify::{self, Notice, Settings};
 use crate::schedule::{self, Fired};
 use crate::send::Hold;
-use crate::shown::{Asked, HomeAsked, SettingsAsked};
+use crate::shown::{Asked, HomeAsked, SettingsAsked, UnreadAsked};
 use crate::undo::{Act, Step};
 use crate::writes::{Settled, Writes};
 use crate::{Caller, EngineError, Registry, error};
@@ -223,6 +223,12 @@ impl Outcome {
     /// The outcome asking the window to show Home.
     pub(crate) fn with_home(mut self, asked: HomeAsked) -> Self {
         self.shown = Some(Asked::Home(asked));
+        self
+    }
+
+    /// The outcome asking the window to list the unread messages alone, or all again.
+    pub(crate) fn with_unread(mut self, asked: UnreadAsked) -> Self {
+        self.shown = Some(Asked::Unread(asked));
         self
     }
 

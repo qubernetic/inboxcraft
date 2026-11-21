@@ -705,6 +705,12 @@ pub struct Mailbox {
     previewed: Option<u64>,
     /// "Show done": the done mail is listed in its old place, dimmed.
     show_done: bool,
+    /// The places that list their unread messages alone ("Unread only"), for the session; a handful at most, as the
+    /// owner turns them on.
+    unread_only: Vec<Place>,
+    /// Under "Unread only", the message the owner moved on from, read: its row leaves once the reader has moved on too
+    /// ([`Mailbox::let_read_row_go`]).
+    letting_go: Option<u64>,
     /// How many messages of the place shown are on the park pile, from `mail.list`.
     parked: u64,
     /// How many messages each pile of "Later" holds, read while "Later" shows.
@@ -1046,6 +1052,8 @@ impl Mailbox {
             focused_in: None,
             previewed: None,
             show_done: false,
+            unread_only: Vec::new(),
+            letting_go: None,
             parked: 0,
             piles: [0; 3],
             presets: Vec::new(),
@@ -1171,8 +1179,32 @@ impl Mailbox {
             Some(at) => at.saturating_sub(rows),
         };
         if let Some(id) = order.get(next).copied().filter(|id| self.messages.iter().any(|row| row.id == *id)) {
-            self.selected = Some(id);
+            let before = self.selected.replace(id);
             self.keyed = true;
+            self.let_read_go(before);
+        }
+    }
+
+    /// Under "Unread only" the owner moved on from the message `before`: once the reader has moved on too, its row
+    /// leaves if it was read ([`Mailbox::let_read_row_go`]), so the next one is the next unread one.
+    fn let_read_go(&mut self, before: Option<u64>) {
+        if let Some(left) = before.filter(|id| self.selected != Some(*id)) {
+            self.letting_go = Some(left);
+        }
+    }
+
+    /// The row the owner moved on from under "Unread only" ([`Mailbox::let_read_go`]) leaves the list when it is read
+    /// and not selected again. The window calls it once the reader shows what is selected, so the reader never sees
+    /// its open message leave the list.
+    pub(crate) fn let_read_row_go(&mut self) {
+        let Some(left) = self.letting_go.take() else { return };
+        if self.selected == Some(left) || !self.query.is_empty() || !self.unread_only() {
+            return;
+        }
+        let count = self.messages.len();
+        self.messages.retain(|row| row.id != left || !row.seen);
+        if self.messages.len() != count {
+            self.rows_serial = self.rows_serial.wrapping_add(1);
         }
     }
 
@@ -1554,8 +1586,15 @@ impl Mailbox {
     /// [`Mailbox::left`]; a row still closing is let go first.
     pub fn start(&mut self, id: u64, act: Act) {
         self.left();
+        // Under "Unread only" a row marked read leaves the list as a done one does; the open one stays until the owner
+        // moves on.
+        let read_leaves = act == Act::Read
+            && self.unread_only()
+            && self.query.is_empty()
+            && self.selected != Some(id)
+            && self.messages.iter().any(|row| row.id == id && !row.seen);
         // With "show done" a done message stays where it is, dimmed.
-        if !act.slides() || (act == Act::Done && self.show_done) {
+        if !(act.slides() || read_leaves) || (act == Act::Done && self.show_done) {
             self.act(id, act);
             return;
         }
@@ -2261,6 +2300,13 @@ impl Mailbox {
             if self.show_done {
                 fields.insert("done".to_owned(), Value::Bool(true));
             }
+            if self.unread_only_in(place) {
+                fields.insert("unread".to_owned(), Value::Bool(true));
+                // The message open in the place stays in its row once it is read, until the owner moves on.
+                if let Some(open) = self.selected.filter(|_| place == self.place) {
+                    fields.insert("keep".to_owned(), json!(open));
+                }
+            }
         }
         let answer = self.run("mail.list", &params)?;
         self.parked = number(&answer, "parked");
@@ -2372,18 +2418,21 @@ impl Mailbox {
     /// Selects a row of the list, or none. A message not in the list is not selected.
     pub fn select(&mut self, message: Option<u64>) {
         self.keyed = false;
+        let before = self.selected;
         match message {
             Some(id) if self.messages.iter().any(|row| row.id == id) => self.selected = Some(id),
             Some(_) => {}
             None => self.selected = None,
         }
+        self.let_read_go(before);
     }
 
     /// Selects the message `id` as the keyboard does ([`Mailbox::keyed`]): `Tab` onto its row keys it.
     pub fn select_keyed(&mut self, id: u64) {
         if self.messages.iter().any(|row| row.id == id) {
-            self.selected = Some(id);
+            let before = self.selected.replace(id);
             self.keyed = true;
+            self.let_read_go(before);
         }
     }
 
@@ -2532,6 +2581,46 @@ impl Mailbox {
         self.show_done = show;
         let result = self.load_list(self.place);
         self.settle(result);
+    }
+
+    /// Whether the place shown can list its unread messages alone: a unified view or a folder of mail, not the drafts,
+    /// "New senders", "Later" or the outbox.
+    #[must_use]
+    pub fn can_unread_only(&self) -> bool {
+        Self::has_unread_only(self.place)
+    }
+
+    fn has_unread_only(place: Place) -> bool {
+        matches!(place, Place::Folder(_)) || matches!(place, Place::View(role) if role != Role::Drafts)
+    }
+
+    /// Whether "Unread only" is on in `place`.
+    fn unread_only_in(&self, place: Place) -> bool {
+        self.unread_only.contains(&place)
+    }
+
+    /// Whether the list shows the unread messages of its place alone ("Unread only"), its place's own choice.
+    #[must_use]
+    pub fn unread_only(&self) -> bool {
+        self.can_unread_only() && self.unread_only_in(self.place)
+    }
+
+    /// Turns "Unread only" on or off for the place shown, for the session, and reads the list again; a place that
+    /// cannot ([`Mailbox::can_unread_only`]) is left as it is.
+    pub fn set_unread_only(&mut self, on: bool) {
+        if !self.can_unread_only() || self.unread_only() == on {
+            return;
+        }
+        let place = self.place;
+        if on {
+            self.unread_only.push(place);
+        } else {
+            self.unread_only.retain(|kept| *kept != place);
+        }
+        if self.query.is_empty() {
+            let result = self.load_list(place);
+            self.settle(result);
+        }
     }
 
     /// How many messages of the place shown wait on the park pile.

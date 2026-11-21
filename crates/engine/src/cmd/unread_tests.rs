@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! "Unread only": `mail.list` with `unread` lists the unread messages alone, but the one `keep` names, and counts
-//! them so.
+//! them so; `ui.list.unread` (`safe`) asks the window for it and changes nothing in the store.
 
 use serde_json::{Value, json};
 
+use crate::shown::{Asked, UnreadAsked};
 use crate::test_support::session;
-use crate::{EngineError, Session};
+use crate::{AgentClass, Caller, EngineError, Session};
 
 fn ids(answer: &Value) -> Vec<u64> {
     answer["messages"].as_array().unwrap().iter().map(|row| row["id"].as_u64().unwrap()).collect()
@@ -62,4 +63,37 @@ fn unread_and_keep_refuse_what_is_not_their_kind() {
         let error = session.run("mail.list", &params).unwrap_err();
         assert!(matches!(error, EngineError::BadParams { .. }), "{params}: {error:?}");
     }
+}
+
+#[test]
+fn unread_only_is_safe_and_asks_the_window_by_whoever_ran_it() {
+    let mut session = session();
+    assert_eq!(session.registry().get("ui.list.unread").unwrap().class, Some(AgentClass::Safe));
+    for (params, on) in [(json!({}), None), (json!(null), None), (json!({ "on": true }), Some(true)), (json!({ "on": false }), Some(false))] {
+        assert_eq!(session.run_as(Caller::Agent, "ui.list.unread", &params).unwrap(), json!({ "on": on, "window": false }), "{params}");
+        assert_eq!(session.take_asked(), vec![Asked::Unread(UnreadAsked { on, by_agent: true })], "{params}");
+    }
+    session.set_window(true);
+    session.run_as(Caller::Owner, "ui.list.unread", &json!({ "on": true })).unwrap();
+    assert_eq!(session.take_asked(), vec![Asked::Unread(UnreadAsked { on: Some(true), by_agent: false })], "the owner's own");
+}
+
+#[test]
+fn unread_only_changes_nothing_in_the_store() {
+    let mut session = session();
+    let before = session.run("mail.list", &json!({ "role": "inbox" })).unwrap();
+    session.run_as(Caller::Agent, "ui.list.unread", &json!({ "on": true })).unwrap();
+    assert_eq!(session.run("mail.list", &json!({ "role": "inbox" })).unwrap(), before);
+}
+
+#[test]
+fn unread_only_refuses_other_parameters_without_echoing_them() {
+    let mut session = session();
+    let hostile = "\u{202e}\r\n\u{0}evil";
+    for params in [json!({ hostile: 1 }), json!({ "on": "yes" }), json!({ "on": 1 }), json!([hostile]), json!(hostile), json!(1)] {
+        let error = session.run_as(Caller::Agent, "ui.list.unread", &params).unwrap_err();
+        assert!(matches!(error, EngineError::BadParams { .. }), "{params}: {error:?}");
+        assert!(!error.to_string().contains("evil"), "the junk is not echoed: {error}");
+    }
+    assert!(session.take_asked().is_empty(), "a refused call asks for nothing");
 }

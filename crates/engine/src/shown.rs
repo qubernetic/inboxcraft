@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! What a command asks the window to show. `ui.settings.open` (`safe`) asks for the settings, on one of
-//! [`SETTINGS_PAGES`] when its `page` names one, and `ui.home.open` (`safe`) for Home; the session keeps the asks in the
+//! [`SETTINGS_PAGES`] when its `page` names one, `ui.home.open` (`safe`) for Home and `ui.list.unread` (`safe`) for
+//! the unread messages alone in the list's place, or all of them again; the session keeps the asks in the
 //! order they came ([`MAX_ASKED`] at most) until the front end takes them ([`crate::Session::take_asked`]). The engine
 //! shows nothing itself: headless an ask is answered and goes nowhere.
 
@@ -40,6 +41,17 @@ pub struct HomeAsked {
     pub by_agent: bool,
 }
 
+/// The window is asked to list the unread messages of the place shown alone, or all of them again. Only the window's
+/// list changes: nothing in the store or on a server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnreadAsked {
+    /// On (`true`), off (`false`), or the other of what the place shows now (`None`).
+    pub on: Option<bool>,
+    /// An agent asked: the window passes over it as over an agent's [`SettingsAsked`]. Only the command's caller sets
+    /// it, never a parameter.
+    pub by_agent: bool,
+}
+
 /// One ask of the window, in the order the commands ran.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Asked {
@@ -47,6 +59,8 @@ pub enum Asked {
     Settings(SettingsAsked),
     /// `ui.home.open`.
     Home(HomeAsked),
+    /// `ui.list.unread`.
+    Unread(UnreadAsked),
 }
 
 impl Asked {
@@ -56,6 +70,7 @@ impl Asked {
         match self {
             Self::Settings(asked) => asked.by_agent,
             Self::Home(asked) => asked.by_agent,
+            Self::Unread(asked) => asked.by_agent,
         }
     }
 }

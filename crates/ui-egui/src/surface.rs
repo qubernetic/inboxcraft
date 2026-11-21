@@ -277,8 +277,8 @@ pub(crate) fn of_the_composer(action: &str) -> bool {
 }
 
 /// The window's actions that act on the mail shown, besides the list's keys and the acts on a row.
-const MAIL_ONLY: [&str; 7] =
-    [keymap::UNDO, keymap::VIEW_GROUPED, keymap::VIEW_SMART, keymap::VIEW_LIST, keymap::BACK, keymap::OPEN_HELD, keymap::SNOOZE];
+const MAIL_ONLY: [&str; 8] =
+    [keymap::UNDO, keymap::VIEW_GROUPED, keymap::VIEW_SMART, keymap::VIEW_LIST, keymap::BACK, keymap::OPEN_HELD, keymap::SNOOZE, keymap::UNREAD];
 
 /// The acts on the selected row: the list takes their keys.
 const ROW_ACTS: [&str; 5] = [keymap::DONE, keymap::ARCHIVE, keymap::READ, keymap::FLAG, keymap::DELETE];

@@ -124,7 +124,7 @@ fn every_surface_at_once_is_held_in_nine_and_the_place_stays_last() {
 /// stacking: the actions it let run. Send is left out: its key needs the keyboard in the composer, which no surface
 /// is. Generated once from those functions (the test `draw::surface_old_tests`, removed with them), checked against
 /// `Surfaces::allows` there.
-const WINDOW: [&str; 26] = [
+const WINDOW: [&str; 27] = [
     "ui.palette.open",
     "ui.command.open",
     "ui.search.focus",
@@ -151,6 +151,7 @@ const WINDOW: [&str; 26] = [
     "ui.view.grouped",
     "ui.view.smart",
     "ui.view.list",
+    "ui.list.unread",
 ];
 
 /// The list's keys.
@@ -198,7 +199,7 @@ const ON_SETTINGS: [&str; 19] = [
 const ON_HOME: [&str; 19] = ON_SETTINGS;
 
 /// What runs with a modifier beside the composer in front: the window's keys but Undo, the composer's text's.
-const COMPOSER: [&str; 26] = [
+const COMPOSER: [&str; 27] = [
     "ui.palette.open",
     "ui.command.open",
     "ui.search.focus",
@@ -225,6 +226,7 @@ const COMPOSER: [&str; 26] = [
     "ui.view.grouped",
     "ui.view.smart",
     "ui.view.list",
+    "ui.list.unread",
 ];
 
 /// The composer's fold: it runs wherever a composer is drawn, on any place, and rests where none is. Before #303's
