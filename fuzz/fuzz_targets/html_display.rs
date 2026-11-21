@@ -121,6 +121,37 @@ const PAGE_TAGS: [&str; 27] = [
     "s", "code", "span", "table", "tr", "td", "th",
 ];
 
+/// Checks the markup of a written page: no attribute that loads or runs (`href`, `src`, `srcset`, `on…`), and no
+/// address (`://`) or CSS `url(` in any attribute's value or in the `<style>`. The words between the tags are the
+/// message's text, escaped, and inert whatever they say, so they are not looked at.
+fn inert(written: &str) {
+    let mut rest = written;
+    while let Some(open) = rest.find('<') {
+        let after = rest.get(open + 1..).unwrap_or_default();
+        let close = after.find('>').unwrap_or(after.len());
+        let tag = after.get(..close).unwrap_or_default();
+        rest = after.get(close..).unwrap_or_default();
+        if tag == "style" {
+            let body = rest.get(..rest.find("</style>").unwrap_or(rest.len())).unwrap_or_default();
+            assert!(!body.contains("url(") && !body.contains("://") && !body.contains("@import"), "<style>{body}");
+        }
+        // The tag's name, then its attributes: `name="value"`, the value with no `"` in it (escaped as `&quot;`).
+        let mut attributes = tag.split_once(' ').map_or("", |(_, attributes)| attributes);
+        while let Some(equals) = attributes.find('=') {
+            let name = attributes.get(..equals).unwrap_or_default().trim().to_ascii_lowercase();
+            assert!(!matches!(name.as_str(), "href" | "src" | "srcset" | "action" | "formaction" | "background" | "poster" | "data"), "{name}= in <{tag}>");
+            assert!(!name.starts_with("on"), "{name}= in <{tag}>");
+            let value_and_rest = attributes.get(equals + 1..).unwrap_or_default();
+            assert!(value_and_rest.starts_with('"'), "an unquoted value in <{tag}>");
+            let value_and_rest = value_and_rest.get(1..).unwrap_or_default();
+            let end = value_and_rest.find('"').unwrap_or(value_and_rest.len());
+            let value = value_and_rest.get(..end).unwrap_or_default().to_ascii_lowercase();
+            assert!(!value.contains("://") && !value.contains("url("), "{name}=\"{value}\" in <{tag}>");
+            attributes = value_and_rest.get(end + 1..).unwrap_or_default();
+        }
+    }
+}
+
 fuzz_target!(|data: &[u8]| {
     let html = String::from_utf8_lossy(data);
     for consent in [false, true] {
@@ -135,6 +166,7 @@ fuzz_target!(|data: &[u8]| {
             let name: String = tag.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '!' || *c == '/').collect();
             assert!(PAGE_TAGS.contains(&name.trim_start_matches('/')), "<{name}");
         }
+        inert(&written);
     }
     // The input, escaped, as a button's action, script and words: the link the button itself makes (the first) goes
     // nowhere. A link inside the input may be a button that goes somewhere; escaped, it cannot be made here.
