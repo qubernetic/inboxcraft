@@ -78,3 +78,35 @@ fn the_fitted_message_board_shows_its_quote_folded_and_open() {
     assert_eq!(harness.query_all_by_role_and_label(Role::Link, "the full rota").count(), 2);
     harness.get_by_label("The shed key is under the pot.");
 }
+
+#[test]
+fn the_invitation_board_shows_the_card_while_its_answer_changes() {
+    // The design's `invite-card/state=changing`: Going (primary), Maybe, No and Keep my answer, 8 apart, in a cell of
+    // its own after the request.
+    let harness = harness(Mode::Dark, true);
+    let changing = harness.get_by_label("changing").rect();
+    let request = harness.get_by_label("request").rect();
+    assert!(changing.top() > request.top(), "the changing cell stands after the request: {request:?} {changing:?}");
+    let keep: Vec<_> = harness.query_all_by_role_and_label(Role::Button, "Keep my answer").map(|node| node.rect()).collect();
+    let [keep] = keep[..] else { panic!("one Keep my answer on the page: {keep:?}") };
+    assert!(keep.top() > changing.top(), "Keep my answer is in the changing cell: {changing:?} {keep:?}");
+    let no = harness
+        .query_all_by_role_and_label(Role::Button, "No")
+        .map(|node| node.rect())
+        .find(|rect| (rect.center().y - keep.center().y).abs() <= 0.5)
+        .unwrap();
+    assert!((keep.left() - no.right() - 8.0).abs() <= 0.5, "8 after No: {no:?} {keep:?}");
+}
+
+#[test]
+fn every_board_ends_inside_the_page_s_margins() {
+    // The page is as tall as its tallest column and that column's margins: 8 round the page, 12 under the boards.
+    let harness = harness(Mode::Dark, true);
+    let floor = size().y - 8.0 - 12.0;
+    for role in [Role::Group, Role::Button, Role::Label] {
+        for node in harness.query_all_by_role(role) {
+            let rect = node.rect();
+            assert!(rect.bottom() <= floor + 0.5, "{:?} {rect:?} ends under {floor}", node.accesskit_node().label());
+        }
+    }
+}

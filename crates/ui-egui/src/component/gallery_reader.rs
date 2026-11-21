@@ -27,7 +27,7 @@ pub fn size() -> Vec2 {
 const WIDTH: f32 = 2400.0;
 
 /// The page's height, in points: the tallest column and its margins.
-const HEIGHT: f32 = 2560.0;
+const HEIGHT: f32 = 2574.0;
 
 /// The room between two boards, in points.
 const BOARD_GAP: f32 = 24.0;
@@ -192,9 +192,10 @@ fn fitted_messages(ui: &mut Ui, theme: &Theme) {
     }
 }
 
-/// The invitation card's board: its nine states, 640 wide, with the design board's words.
+/// The invitation card's board: its ten states (the request also while the owner changes an answer), 640 wide, with
+/// the design board's words.
 fn invite_cards(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
-    use super::invite_card::{CardEvent, CardState, Said, invite_card};
+    use super::invite_card::{CardEvent, CardState, Said, invite_card_with};
     title(ui, theme, tr!("Invitation card"));
     let event = CardEvent {
         weekday: "MON",
@@ -214,28 +215,31 @@ fn invite_cards(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         (Said::No, "Pavel Hruska is not going."),
         (Said::Nothing, "Dmitri Vale has not answered."),
     ];
+    // Each state's card, and whether it carries Keep my answer (the owner changing an answer they gave).
     let states = [
-        (tr!("request"), CardState::Request { goes_to: goes }),
-        (tr!("changed"), CardState::Changed { changed: "time 14:00 → 15:00", goes_to: goes }),
-        (tr!("out-of-date"), CardState::OutOfDate { line: "Out of date: a later invitation replaces this one. You answered Going." }),
-        (tr!("answered"), CardState::Answered { answer: "You answered Going." }),
-        (tr!("cancelled"), CardState::Cancelled { line: "Marit Solheim cancelled this event.", remove: true }),
-        (tr!("reply"), CardState::Replies { replies: &replies }),
-        (tr!("no-answer-asked"), CardState::NoAnswerAsked),
+        (tr!("request"), CardState::Request { goes_to: goes }, false),
+        (tr!("changing"), CardState::Request { goes_to: goes }, true),
+        (tr!("changed"), CardState::Changed { changed: "time 14:00 → 15:00", goes_to: goes }, false),
+        (tr!("out-of-date"), CardState::OutOfDate { line: "Out of date: a later invitation replaces this one. You answered Going." }, false),
+        (tr!("answered"), CardState::Answered { answer: "You answered Going." }, false),
+        (tr!("cancelled"), CardState::Cancelled { line: "Marit Solheim cancelled this event.", remove: true }, false),
+        (tr!("reply"), CardState::Replies { replies: &replies }, false),
+        (tr!("no-answer-asked"), CardState::NoAnswerAsked, false),
         (
             tr!("cannot-answer"),
             CardState::CannotAnswer {
                 why: "it was sent to lists@example.org, which is not one of your addresses, and the organiser asked only that address.",
             },
+            false,
         ),
-        (tr!("clash"), CardState::Clash { clash: "Call Ines 15:30 – 15:45 is in the same hour", goes_to: goes }),
+        (tr!("clash"), CardState::Clash { clash: "Call Ines 15:30 – 15:45 is in the same hour", goes_to: goes }, false),
     ];
-    for (state, card) in states {
+    for (state, card, keep) in states {
         cells(ui, theme, |ui| {
             cell(ui, theme, state, |ui| {
                 ui.set_width(640.0);
                 // Each card's controls stand apart from the others' for the keyboard and a screen reader.
-                ui.push_id(state, |ui| invite_card(ui, theme, keymap, &event, &card));
+                ui.push_id(state, |ui| invite_card_with(ui, theme, keymap, &event, &card, keep, true));
             });
         });
     }
