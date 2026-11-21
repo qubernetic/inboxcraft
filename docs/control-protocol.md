@@ -118,7 +118,9 @@ that is:
   `ui.settings.open` is, while the owner holds the keys; the owner's own
   key or press in that frame wins, and of an agent's calls of the two only the newest acts in a frame. The answer is
   `window`, `true` in the app, the same whether the window acted or passed over the call;
-- snooze, park and pin, as they land.
+- putting mail aside: `mail.snooze`, `mail.unsnooze`, `mail.park`, `mail.pin`, `mail.follow_up` and
+  `mail.cancel_follow_up`. `mail.done`, the screener's and the groups' choices (`screener.*`, `group.set`,
+  `group.account`), `pin.set` and `after.set` are the owner's and refused with `not_allowed`.
 
 `sync.status` reads how syncing stands in the app, from what its workers told: the state, the folder syncs done of
 all in the rounds under way, the last sync and the number of failing accounts. The state is the first that holds:

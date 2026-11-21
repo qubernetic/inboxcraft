@@ -125,7 +125,7 @@ a message asks for it, and every tool is `safe`.
 
 - On a store it runs no job: no body is fetched and no account is checked.
 - It has no resources, prompts, sampling or `outputSchema`; the results are text only, not the CLI's JSON.
-- `mail_list` has no group column yet: the grouped inbox is a later slice.
+- `mail_list` has no group column: a message's group in the grouped inbox is not in its line.
 - An HTML-only message gives no text yet.
 - It has no tool for the appearance; `ui.layout.set`, where the reader, the composer and the event editor show, is the owner's alone.
 - It has no tool for `event.all_day_alert.set`, the hour a new all-day event's alert rings: it is the owner's alone.
