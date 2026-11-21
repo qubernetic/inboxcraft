@@ -730,9 +730,7 @@ fn row(
     let response = &drawn.row.response;
     // egui does not scroll to what gains the focus: a row Tab reaches (the next one is always built, two below the
     // viewport) comes into sight, so Tab walks the whole list.
-    if response.gained_focus() {
-        response.scroll_to_me(None);
-    }
+    scroll_on_focus(ui, response, message.id);
     // Its place among all the list's rows, built or not: a screen reader says "12 of 1000".
     slot.tell(ui, response.id);
     keep_arrows(ui, response);
@@ -999,9 +997,7 @@ fn later(
     };
     let drawn = later_row(ui, theme, keymap, &shown, keyed, None);
     let response = &drawn.row.response;
-    if response.gained_focus() {
-        response.scroll_to_me(None);
-    }
+    scroll_on_focus(ui, response, message.id);
     slot.tell(ui, response.id);
     keep_arrows(ui, response);
     Drawn {
@@ -1047,6 +1043,23 @@ pub(super) fn bring(ctx: &egui::Context, id: u64) {
     ctx.data_mut(|data| data.insert_temp(bring_id(), id));
 }
 
+/// Scrolls message `id`'s row into sight when it gains the focus, unless a landing gave it ([`land_now`]): the
+/// landing already chose a row in sight, or one that comes into sight as a left row's room above it closes.
+fn scroll_on_focus(ui: &Ui, response: &egui::Response, id: u64) {
+    if !response.gained_focus() {
+        return;
+    }
+    let landed = ui.data_mut(|data| data.remove_temp::<u64>(landed_quiet_id()));
+    if landed != Some(id) {
+        response.scroll_to_me(None);
+    }
+}
+
+/// Where the row a landing gave the keyboard to is kept until it gains the focus ([`scroll_on_focus`]).
+fn landed_quiet_id() -> Id {
+    Id::unique("list-landed-quiet")
+}
+
 /// Where the row the keyboard lands on is kept, with the pass that asked for it ([`land`]).
 fn land_id() -> Id {
     Id::unique("list-land")
@@ -1077,6 +1090,13 @@ fn landing(listing: &Listing<'_>, wanted: u64, top: f32, bottom: f32) -> Option<
     let at = listing.find(wanted);
     if let Some(id) = at.as_ref().and_then(whole) {
         return Some(id);
+    }
+    // The row walked on to after an act is whole in sight once the left row's room above it has closed.
+    if let Some(index) = at
+        && let Some(Line::Mail(message)) = listing.lines.get(index)
+        && listing.settled(index).is_some_and(|(above, below)| above >= top && below <= bottom)
+    {
+        return Some(message.id);
     }
     let below = at.and_then(|at| listing.span(at)).is_some_and(|(above, _)| above >= bottom);
     if below { (first..end).rev().find_map(|index| whole(&index)) } else { (first..end).find_map(|index| whole(&index)) }
@@ -1595,6 +1615,17 @@ impl Listing<'_> {
         Some((*self.tops.get(index)?, *self.bottoms.get(index)?))
     }
 
+    /// The top and bottom of line `index` once the lines above it that are leaving have closed: where the row the
+    /// keyboard walks on to after an act comes to stand, not where it stands while the left row's room still closes.
+    fn settled(&self, index: usize) -> Option<(f32, f32)> {
+        let (top, bottom) = self.span(index)?;
+        let closing: f32 = (0..index)
+            .filter(|above| matches!(self.lines.get(*above), Some(Line::Leaving(..) | Line::HeadLeaving(..))))
+            .filter_map(|above| self.span(above).map(|(from, to)| (to - from).max(0.0)))
+            .sum();
+        Some(((top - closing).max(0.0), (bottom - closing).max(0.0)))
+    }
+
     /// The line of message `id`, or in the drafts place of draft `id`.
     fn find(&self, id: u64) -> Option<usize> {
         self.lines.iter().position(|line| match line {
@@ -2052,7 +2083,10 @@ fn land_now(ui: &Ui, listing: &Listing<'_>, kept: Option<&Kept>, forced: Option<
     };
     if let Some(target) = target {
         ctx.memory_mut(|memory| memory.request_focus(row_id(target)));
-        ctx.data_mut(|data| data.insert_temp(landed_on_id(), (wanted, target)));
+        ctx.data_mut(|data| {
+            data.insert_temp(landed_on_id(), (wanted, target));
+            data.insert_temp(landed_quiet_id(), target);
+        });
     }
 }
 
@@ -2126,7 +2160,9 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
     // A line of the drafts place the keyboard landed on, by its place.
     let line = ui.data_mut(|data| data.remove_temp::<usize>(bring_line_id()));
     let mut scroll_to = None;
-    if let Some((top, bottom)) = moved.and_then(|id| listing.find(id)).or(line).and_then(|index| listing.span(index)) {
+    // Where the row will stand once a left row's room above it closed: brought into sight by what it lacks there, not
+    // by the room that is closing.
+    if let Some((top, bottom)) = moved.and_then(|id| listing.find(id)).or(line).and_then(|index| listing.settled(index)) {
         match &kept {
             // The least scroll that shows the row whole, set before the lines are built, so the row is built (and
             // can keep a focus given to it) in this frame.
@@ -2636,6 +2672,12 @@ pub(super) fn view_rect(ctx: &egui::Context) -> Option<Rect> {
     ctx.data(|data| data.get_temp::<Rect>(Id::unique("list-view-rect")))
 }
 
+/// How far the list was scrolled down, in points, in the last frame that drew one.
+#[cfg(test)]
+pub(super) fn scrolled(ctx: &egui::Context) -> Option<f32> {
+    ctx.data(|data| data.get_temp::<f32>(Id::unique("list-scrolled")))
+}
+
 /// What the list built in the last frame that drew one.
 #[cfg(test)]
 pub(super) fn built(ctx: &egui::Context) -> Option<Built> {
@@ -2887,3 +2929,7 @@ mod card_motion_tests;
 #[cfg(test)]
 #[path = "list_pixel_tests.rs"]
 mod list_pixel_tests;
+
+#[cfg(test)]
+#[path = "list_scroll_tests.rs"]
+mod list_scroll_tests;
