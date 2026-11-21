@@ -18,6 +18,8 @@ use crate::theme::{Mode, TextScale, Theme, install_fonts};
 thread_local! {
     /// The input the next window pass gets.
     static WINDOW_INPUT: RefCell<RawInput> = RefCell::new(RawInput::default());
+    /// The shapes of the last window pass and the window's rect.
+    static WINDOW_SHAPES: RefCell<(Vec<egui::epaint::ClippedShape>, Rect)> = const { RefCell::new((Vec::new(), Rect::NOTHING)) };
 }
 
 /// The window's viewport in these tests.
@@ -33,8 +35,13 @@ fn windowing() -> Context {
         raw.viewport_id = viewport.ids.this;
         raw.viewports.entry(viewport.ids.this).or_default();
         raw.screen_rect = Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(704.0, 720.0)));
-        let mut output = ctx.run_ui(raw, |ui| (viewport.viewport_ui_cb)(ui));
+        let mut rect = Rect::NOTHING;
+        let mut output = ctx.run_ui(raw, |ui| {
+            rect = ui.ctx().content_rect();
+            (viewport.viewport_ui_cb)(ui);
+        });
         output.textures_delta.clear();
+        WINDOW_SHAPES.with(|shapes| *shapes.borrow_mut() = (std::mem::take(&mut output.shapes), rect));
     });
     let ctx = Context::default();
     install_fonts(&ctx);
@@ -214,4 +221,43 @@ fn a_window_s_title_is_one_clean_line_of_bounded_length() {
     assert_eq!(clean_title("Re: a\r\nb\u{0}c"), "Re: a  b c");
     assert_eq!(clean_title("a\u{202E}b\u{2066}c"), "abc", "no direction overrides");
     assert_eq!(clean_title(&"x".repeat(10_000)).chars().count(), 200);
+}
+
+/// A window of its own has square corners in every state (#442); its outline in `line` shows in the own frame while
+/// the window is neither maximised nor full screen, never in the desktop's frame.
+#[test]
+fn a_window_of_its_own_has_square_corners_and_the_outline_only_in_the_own_frame_s_normal_window() {
+    let ctx = windowing();
+    let theme = light();
+    for (frame_by, state, outline) in [
+        (WindowFrame::Own, "normal", true),
+        (WindowFrame::Own, "maximised", false),
+        (WindowFrame::Own, "full screen", false),
+        (WindowFrame::System, "normal", false),
+    ] {
+        let at = format!("{frame_by:?} {state}");
+        let mut raw = RawInput::default();
+        let info = raw.viewports.entry(window_id()).or_default();
+        info.maximized = Some(state == "maximised");
+        info.fullscreen = Some(state == "full screen");
+        WINDOW_INPUT.with(|input| *input.borrow_mut() = raw);
+        let mut output = ctx.run_ui(RawInput::default(), |ui| {
+            show(ui.ctx(), Host::Window(window_id()), "Note", look(&theme, frame_by), |_, _| ());
+        });
+        output.textures_delta.clear();
+        let (shapes, window) = WINDOW_SHAPES.with(|shapes| std::mem::replace(&mut *shapes.borrow_mut(), (Vec::new(), Rect::NOTHING)));
+        let rects = crate::draw::frame_tests::whole_window_rects(&shapes, window);
+        assert!(!rects.is_empty(), "{at}: the window's ground");
+        // The own frame's title bar, one point in from the outline, is square too.
+        let bar = Rect::from_min_max(egui::pos2(1.0, 1.0), egui::pos2(window.right() - 1.0, 1.0 + crate::draw::shell::COMMAND_LINE));
+        let bars = crate::draw::frame_tests::whole_window_rects(&shapes, bar);
+        assert_eq!(bars.is_empty(), frame_by == WindowFrame::System, "{at}: the title bar");
+        for rect in &bars {
+            assert_eq!(rect.corner_radius, egui::CornerRadius::ZERO, "{at}: the title bar's corners {rect:?}");
+        }
+        for rect in &rects {
+            assert_eq!(rect.corner_radius, egui::CornerRadius::ZERO, "{at}: a rounded corner {rect:?}");
+        }
+        assert_eq!(crate::draw::frame_tests::outlined(&rects, theme.palette.line), outline, "{at}: the outline");
+    }
 }

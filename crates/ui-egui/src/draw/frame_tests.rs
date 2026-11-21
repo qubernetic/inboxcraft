@@ -207,7 +207,7 @@ fn window_frame_own_maximised_offers_restore() {
     assert_eq!(restore.size(), vec2(36.0, 32.0));
     let seen = click_at(&mut harness, restore.center());
     assert!(seen.contains(&ViewportCommand::Maximized(false)), "{seen:?}");
-    assert_eq!(harness.state().window_corner(&harness.ctx), 0.0, "a maximised window has square corners");
+    assert!(!harness.state().window_outlined(&harness.ctx), "a maximised window has no outline");
 }
 
 /// `window-frame/own-unfocused`: with another window in front the controls are still drawn, named and pressable.
@@ -305,11 +305,51 @@ fn the_window_controls_lie_over_no_other_control() {
     }
 }
 
+/// Every rect shape of the last frame that covers the whole window `window` (the ground, the outline).
+pub(super) fn whole_window_rects(shapes: &[egui::epaint::ClippedShape], window: Rect) -> Vec<egui::epaint::RectShape> {
+    fn walk(shape: &egui::Shape, window: Rect, found: &mut Vec<egui::epaint::RectShape>) {
+        match shape {
+            egui::Shape::Rect(rect) if rect.rect == window => found.push(rect.clone()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, window, found)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    shapes.iter().for_each(|clipped| walk(&clipped.shape, window, &mut found));
+    found
+}
+
+/// Whether the outline is among `rects`: a stroke of `line` and nothing filled.
+pub(super) fn outlined(rects: &[egui::epaint::RectShape], line: egui::Color32) -> bool {
+    rects.iter().any(|rect| rect.stroke.width > 0.0 && rect.stroke.color == line && rect.fill == egui::Color32::TRANSPARENT)
+}
+
+/// The window's corners are square in every state (#442): no shape over the whole window has a radius. The thin
+/// outline in `line` shows while the app draws the frame and the window is neither maximised nor full screen.
 #[test]
-fn the_window_s_corners_are_round_only_while_the_app_draws_the_frame() {
-    assert!(harness(true, WindowFrame::Own).state().window_corner(&egui::Context::default()) > 0.0);
-    assert_eq!(harness(true, WindowFrame::System).state().window_corner(&egui::Context::default()), 0.0);
-    assert_eq!(harness(false, WindowFrame::Own).state().window_corner(&egui::Context::default()), 0.0);
+fn the_window_s_corners_are_square_and_its_outline_shows_only_in_the_own_frame_s_normal_window() {
+    for (own, frame, state, outline) in [
+        (true, WindowFrame::Own, "normal", true),
+        (true, WindowFrame::Own, "maximised", false),
+        (true, WindowFrame::Own, "full screen", false),
+        (true, WindowFrame::System, "normal", false),
+        (false, WindowFrame::Own, "normal", false),
+    ] {
+        let at = format!("{own} {frame:?} {state}");
+        let mut harness = harness_sized(own, frame, vec2(1440.0, 900.0), |_| {});
+        let viewport = harness.input_mut().viewports.entry(ViewportId::ROOT).or_default();
+        viewport.maximized = Some(state == "maximised");
+        viewport.fullscreen = Some(state == "full screen");
+        harness.run();
+        let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+        let rects = whole_window_rects(&harness.output().shapes, harness.ctx.content_rect());
+        assert!(!rects.is_empty(), "{at}: the window's ground");
+        for rect in &rects {
+            assert_eq!(rect.corner_radius, egui::CornerRadius::ZERO, "{at}: a rounded corner {rect:?}");
+        }
+        assert_eq!(outlined(&rects, theme.palette.line), outline, "{at}: the outline");
+        assert_eq!(harness.state().window_outlined(&harness.ctx), outline, "{at}");
+    }
 }
 
 #[test]

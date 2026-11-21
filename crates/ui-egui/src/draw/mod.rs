@@ -3152,8 +3152,7 @@ impl InboxApp {
         let back_to_list = (to_place || matches!(escape, Some(Surface::Composer | Surface::OnePaneReader))) && self.back_to_list(ui.ctx());
         // The window's ground first, under the error banner too; then the place for the panes, then everything else.
         // The panes touch; a hairline divides them.
-        let corner = self.window_corner(ui.ctx());
-        ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
+        ui.painter().rect_filled(ui.max_rect(), 0.0, p.bg);
         // The frame's four regions ([`shell::regions`]): the command line (the title bar in the own frame), the index at the left,
         // everything else in the body, the status line across the foot. Under 1280 the index is the narrow one and the
         // command field takes its room ([`shell::narrow`]).
@@ -3377,7 +3376,7 @@ impl InboxApp {
         self.rows_changed(ui.ctx(), rows_drawn);
         self.reader_changed(ui.ctx(), reader_drawn, drawn_place, regions.status, &theme);
         // The outline before the change of mode keeps the window's picture: it is part of the window that fades (M14).
-        self.own_frame_over(ui.ctx(), &theme, corner);
+        self.own_frame_over(ui.ctx(), &theme);
         self.mode_changed(ui.ctx(), mode_drawn, ui.ctx().content_rect());
         self.follow_accounts_page();
         self.keep_keys();
@@ -3436,10 +3435,8 @@ impl InboxApp {
     }
 
     /// The app's own frame over the panes, when it draws one: the window's outline.
-    fn own_frame_over(&self, ctx: &egui::Context, theme: &Theme, corner: f32) {
-        if self.draws_frame() {
-            frame::outline(ctx, theme, corner);
-        }
+    fn own_frame_over(&self, ctx: &egui::Context, theme: &Theme) {
+        frame::outline(ctx, theme, self.draws_frame());
     }
 
     /// The command line in its region (`ui`): the field from the index's column to the window's controls, and its
@@ -3809,10 +3806,10 @@ impl InboxApp {
         frame::release_after_grab(ctx, raw);
     }
 
-    /// The window's corner radius in `ctx`.
+    /// Whether the window's outline shows in `ctx`; its corners are square in every state.
     #[must_use]
-    pub fn window_corner(&self, ctx: &egui::Context) -> f32 {
-        frame::corner(ctx, self.draws_frame())
+    pub fn window_outlined(&self, ctx: &egui::Context) -> bool {
+        frame::outlined(ctx, self.draws_frame())
     }
 
     /// Tells a native window to show the desktop's title bar or none, when the frame changed.

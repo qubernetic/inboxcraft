@@ -220,30 +220,21 @@ fn full_screen(ctx: &Context) -> bool {
     ctx.input(|input| input.viewport().fullscreen.unwrap_or(false))
 }
 
-/// The window's corner radius when it is round, in points; about what the desktops give their own windows.
-const CORNER: f32 = 12.0;
-
-/// The window's corner radius: round while the app draws the frame, square when the window is maximised or full
-/// screen, or when the desktop draws the frame.
-pub(super) fn corner(ctx: &Context, drawn: bool) -> f32 {
-    if drawn && !maximised(ctx) && !full_screen(ctx) { CORNER } else { 0.0 }
+/// Whether the window's outline shows: while the app draws the frame (`drawn`) and the window is neither maximised nor
+/// full screen. The window's corners are square in every state.
+pub(super) fn outlined(ctx: &Context, drawn: bool) -> bool {
+    drawn && !maximised(ctx) && !full_screen(ctx)
 }
 
-/// The window's outline, a line one pixel wide inside its edge with its corners, over everything; nothing when the
-/// corners are square (the window is maximised, or the desktop draws the frame).
-pub(super) fn outline(ctx: &Context, theme: &Theme, corner: f32) {
-    if corner <= 0.0 {
+/// The window's outline, a line one pixel wide inside its square edge, over everything; nothing when it does not show
+/// ([`outlined`]: the window is maximised or full screen, or the desktop draws the frame).
+pub(super) fn outline(ctx: &Context, theme: &Theme, drawn: bool) {
+    if !outlined(ctx, drawn) {
         return;
     }
     let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("window-outline")));
     let width = 1.0 / ctx.pixels_per_point();
-    painter.rect_stroke(ctx.content_rect(), round(corner), Stroke::new(width, theme.palette.line), StrokeKind::Inside);
-}
-
-/// `corner` as egui's radius, all four corners.
-fn round(corner: f32) -> CornerRadius {
-    // A few points; the clamp keeps the cast inside u8.
-    CornerRadius::same(corner.clamp(0.0, 255.0) as u8)
+    painter.rect_stroke(ctx.content_rect(), CornerRadius::ZERO, Stroke::new(width, theme.palette.line), StrokeKind::Inside);
 }
 
 /// Whether the app draws its own frame for `frame` in a window that `owns` one.
