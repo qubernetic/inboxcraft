@@ -75,7 +75,7 @@ pub mod theme;
 mod why;
 pub mod workers;
 
-pub use draw::{InboxApp, Screen, rows_built};
+pub use draw::{InboxApp, LEAST_WINDOW, Screen, rows_built};
 pub use error::{UiError, store_log};
 
 /// The crate's package name.

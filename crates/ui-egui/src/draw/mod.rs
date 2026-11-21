@@ -58,6 +58,7 @@ mod shell;
 pub(crate) mod status;
 
 pub use list::rows_built;
+pub use shell::LEAST_WINDOW;
 
 use std::sync::Arc;
 
