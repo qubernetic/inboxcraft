@@ -166,7 +166,9 @@ these when it is built.
 - **Avatars** are a square with two mono initials on `stage`.
 - **The character field.** The ground of Home, the first start and the cover is a grid of 8 × 15 px cells; about
   5 in 100 hold a `·` in `faint`. The pattern is fixed and never moves by itself. It shows at 20 % on the empty
-  area of a pane, never behind text a person reads, and never takes a click.
+  area of a pane and never takes a click. On Home it lies under the whole page, the brief too, and calms near the
+  text: inside a text block its cells flip with 0.2 of their chance and a flipped one shows at 0.2 of its opacity,
+  coming back to the whole over 80 px, eased; the dots at rest and the emblem do not change.
 
 ## Wording
 - Plain words: say what happened, then what to do. No codes without words. "Could not reach mail.example.org.
@@ -321,7 +323,8 @@ A page of its own: at the left a 600 px brief of today (a headline, four counts,
 pick up, two buttons), at the right the Qubernetic emblem drawn in characters on the character field. It is also
 drawn with nothing to do, with overflowing counts, before the first account, and with everything failing. The
 emblem with the names under it (the two wordmarks and the tagline, 16 below it) stands centred in the free area
-right of the brief and under the command line, across and down, at any window height. Where the window is too
+right of the brief and under the command line, across and down, at any window height. The character field lies
+under the whole page and answers the pointer anywhere on it, calmer near the brief's text and the names. Where the window is too
 narrow or too low for the emblem and its names, it leaves whole; it is never cut or made smaller. The headline greets the
 owner by the first word of the sending name, titles such as Dr. skipped; Settings › Sending sets the last word, the
 full name or no name instead.
@@ -431,7 +434,7 @@ and the movement jumps to its end. A scrambling character changes once, so nothi
 
 | | What moves | Full | Reduced | Off | What it tells |
 |---|---|---|---|---|---|
-| M1 | the character field | cells within 60 px of the pointer flip to code glyphs, the nearest most often, and flip again while the pointer stands still; each is back 80 to 200 ms after its flip, taking new glyphs on the way once the pointer has left it | on Home only, within 30 px, with 0.4 of the chance | still dots | where the pointer is; it carries no fact |
+| M1 | the character field | cells within 60 px of the pointer flip to code glyphs, the nearest most often, and flip again while the pointer stands still; each is back 80 to 200 ms after its flip, taking new glyphs on the way once the pointer has left it; near Home's text with 0.2 to 1 of the chance and opacity | on Home only, as at full | still dots | where the pointer is; it carries no fact |
 | M2 | the emblem on Home | cells under the pointer flip and settle back; by itself one cell at a time twinkles to a code glyph (about 7.5 a second, half of the ink ones in cyan) for 250 to 750 ms | the same | still | whose program this is |
 | M3 | scramble | a label resolves from the left on hover, 70 ms a character, at most 300 ms; a headline on load, 700 ms | no hover; Home's headline once per launch | none | that a control can be pressed; that a page was just made |
 | M4 | a new row arrives | the row decodes in over 300 ms; the unread square blinks once | fades in, 125 ms; the square blinks once | the row is there | that mail came and which row it is |
