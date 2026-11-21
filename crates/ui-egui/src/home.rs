@@ -693,8 +693,7 @@ pub fn sample(state: &str) -> Option<Home> {
         "first-run" => Home::first_run(),
         "everything-failing" => Home {
             failing: Some(Failing {
-                text: "Offline since 14:10: what you see is what this computer holds. Studio refused the sign-in, and one message was not sent."
-                    .into(),
+                text: crate::home::failing_text(Some("14:10"), &["Studio".to_owned()], 1, 1, Some("Odette Marchand")),
                 account: true,
                 outbox: true,
             }),
