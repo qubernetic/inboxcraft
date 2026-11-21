@@ -898,3 +898,23 @@ fn at_full_motion_the_window_rests_once_home_does_not_show() {
     assert!(harness.state().settings().is_open());
     assert!(crate::component::tests::rests(&mut harness, 30), "Home under the settings keeps asking for frames");
 }
+
+/// In a window of 1920 × 1034, the size the owner checked Home in, the emblem stands centred in the free area right of
+/// the brief and under the command line, with its names under it: across in the middle of the body right of the 600
+/// of the brief, down as much room above the emblem as under the names. The stage there is 842–1911 across and 54–998
+/// down, which stands the emblem's middle at (1376.5, 483): within 20 of (1365, 467), where the owner marked it on a
+/// sketch.
+#[test]
+fn in_a_1920_by_1034_window_the_emblem_stands_centred_right_of_the_brief() {
+    let harness = window_of(sample_app(&clock()), vec2(1920.0, 1034.0));
+    let body = super::shell::laid(&harness.ctx).unwrap().body;
+    let Some(corner) = harness.state().field.emblem_at() else { panic!("no emblem in {body:?}") };
+    let emblem = Rect::from_min_size(corner, crate::brand::emblem().size());
+    let stage = Rect::from_min_max(egui::pos2(body.left() + super::home::BRIEF, body.top()), body.max);
+    // The block: the emblem, 16, the names' box of 70 (24 round, a line of 20, 10, the tagline's 16).
+    let (above, under) = (emblem.top() - stage.top(), stage.bottom() - (emblem.bottom() + 16.0 + 70.0));
+    assert!(above > 0.0 && (above - under).abs() <= 1.0, "{above} above the block, {under} under it in {stage:?}");
+    assert!((emblem.center().x - stage.center().x).abs() <= 1.0, "across: {emblem:?} in {stage:?}");
+    let centre = emblem.center();
+    assert!((centre.x - 1365.0).abs() <= 20.0 && (centre.y - 467.0).abs() <= 20.0, "near the owner's mark: {centre:?}");
+}
