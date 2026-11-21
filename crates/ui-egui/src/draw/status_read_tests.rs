@@ -87,3 +87,13 @@ fn a_clock_set_back_never_says_offline_since_a_time_still_to_come() {
     assert_eq!(read_now.offline_since, Some(now));
     assert_eq!(read_now.sync, Sync::Offline(Some(mailbox.short_date(now))));
 }
+
+#[test]
+fn every_failure_kind_the_engine_names_reads_back_as_itself() {
+    for kind in inboxcraft_model::ErrorKind::ALL {
+        let name = inboxcraft_engine::error_kind_name(kind);
+        assert_eq!(super::error_kind(&name), Some(kind), "{name}");
+    }
+    assert_eq!(super::error_kind("no_such_kind"), None);
+    assert_eq!(super::error_kind("LoginRefused"), None, "only the engine's own names");
+}
