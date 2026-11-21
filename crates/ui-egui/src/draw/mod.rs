@@ -431,6 +431,13 @@ fn list_panel() -> Panel {
     Panel::left("list").resizable(false).exact_size(LIST_WIDTH).show_separator_line(false)
 }
 
+/// The margin of a pane beside the list: its first column is the line between them ([`Panes`] draws it there), and
+/// what it holds starts right of it, as the frames measure from the line; a pane at the body's left has none.
+fn after_line(ui: &Ui, body_left: f32) -> Margin {
+    let beside = ui.max_rect().left() > body_left + 0.5;
+    Margin { left: i8::from(beside), ..Margin::ZERO }
+}
+
 /// Where the list stands in a frame.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ListPlace {
@@ -2619,10 +2626,11 @@ impl InboxApp {
     /// The reader on a card `left` from the list: the open message, or nothing open; what was asked in it.
     fn reader_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, left: f32) -> reader::Drawn {
         let gap = 0.0;
+        let body_left = ui.max_rect().left();
         if self.reader.open_id().is_none() {
             let empty = self.reader_says();
             CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| {
-                layers.card(ui, Margin::ZERO, |ui| match empty {
+                layers.card(ui, after_line(ui, body_left), |ui| match empty {
                     ReaderSays::Message => reader::nothing_open(ui, theme, &self.keymap),
                     ReaderSays::Draft | ReaderSays::Nothing | ReaderSays::Outbox => nothing_to_open(ui, theme, &self.keymap, empty),
                 });
@@ -2631,8 +2639,9 @@ impl InboxApp {
         }
         let hover = self.hover.take();
         let shown = CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| {
-            layers
-                .card(ui, Margin::ZERO, |ui| reader::show(ui, theme, &self.keymap, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref()))
+            layers.card(ui, after_line(ui, body_left), |ui| {
+                reader::show(ui, theme, &self.keymap, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref())
+            })
         });
         // A press in the reader: someone reads there, and the list's keys rest until a row is pressed or keyed.
         let reader = shown.response.rect;
@@ -2657,9 +2666,10 @@ impl InboxApp {
         let Some(composer) = self.composer.as_mut() else { return Vec::new() };
         // Flush with the body like the list: no band of the ground above, beside or under it.
         let mut card = Rect::NOTHING;
+        let body_left = ui.max_rect().left();
         let shown = CentralPanel::no_frame().frame(around(left, 0.0, 0.0)).show(ui, |ui| {
             card = ui.max_rect();
-            layers.card(ui, Margin::ZERO, |ui| compose::show(ui, theme, keymap, mailbox, composer))
+            layers.card(ui, after_line(ui, body_left), |ui| compose::show(ui, theme, keymap, mailbox, composer))
         });
         // The card's own rect, inside its pane's margins.
         self.reader_place = Some(card);

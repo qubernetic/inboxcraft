@@ -71,7 +71,7 @@ fn the_list_head_is_one_line_with_the_view_switch_at_its_right_and_the_pills_und
 
 /// `inbox-grouped/filled`, `shell/reader-open`: the list stands on the frame's pixels, from the index's line (233 in the
 /// 1440 frame) to the reader's (674): 440 wide from the body's left (234), the place and Show done 16 in, the rows
-/// across it, the reader's pane (its line first) from 674.
+/// across it, the reader's pane (its line first) from 674 and its subject 40 right of that line.
 #[test]
 fn the_list_stands_440_wide_between_the_index_s_line_and_the_reader_s() {
     for open in [false, true] {
@@ -94,6 +94,10 @@ fn the_list_stands_440_wide_between_the_index_s_line_and_the_reader_s() {
             let reader = super::super::reader_rect(&harness.ctx).unwrap();
             // The reader's pane starts at the list's right with its line in its first column (674 in the frame).
             assert_eq!(reader.left(), left + 440.0, "the reader's line 440 from the list's left");
+            // `shell/reader-open`: the subject 40 right of the reader's line (715 in the frame).
+            let subject = harness.state().mailbox().messages().first().unwrap().subject.clone();
+            let title = harness.query_all_by_label(&subject).map(|node| node.rect()).find(|rect| rect.left() > reader.left()).unwrap();
+            assert_eq!(title.left(), reader.left() + 1.0 + 40.0, "the subject 40 from the reader's line: {title:?}");
         }
     }
 }
