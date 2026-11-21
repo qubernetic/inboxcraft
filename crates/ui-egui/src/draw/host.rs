@@ -115,9 +115,7 @@ pub(crate) fn show_with<R>(
         let mut inside = ui.new_child(UiBuilder::new().max_rect(content));
         inside.set_clip_rect(content);
         let inner = add(&mut inside, &surfaces);
-        if own {
-            frame::outline(&ctx, look.theme, frame::corner(&ctx, true));
-        }
+        frame::outline(&ctx, look.theme, own);
         Hosted::Window(Windowed { inner, closed: escaped || asked })
     })
 }
@@ -140,15 +138,13 @@ fn forget_when_reopened(ctx: &Context, id: ViewportId) {
 fn window_frame(ui: &Ui, look: Look<'_>, own: bool, title: &str) -> Rect {
     let ctx = ui.ctx();
     let (theme, rect) = (look.theme, ui.max_rect());
-    let corner = frame::corner(ctx, own);
-    ui.painter().rect_filled(rect, CornerRadius::same(corner.clamp(0.0, 255.0) as u8), theme.palette.bg);
+    ui.painter().rect_filled(rect, CornerRadius::ZERO, theme.palette.bg);
     if !own {
         return rect;
     }
     // The title bar one point in from the outline, as tall as the main window's command line.
     let line = Rect::from_min_max(pos2(rect.left() + 1.0, rect.top() + 1.0), pos2(rect.right() - 1.0, rect.top() + 1.0 + shell::COMMAND_LINE));
-    let top = (corner - 1.0).clamp(0.0, 255.0) as u8;
-    ui.painter().rect_filled(line, CornerRadius { nw: top, ne: top, sw: 0, se: 0 }, theme.palette.panel);
+    ui.painter().rect_filled(line, CornerRadius::ZERO, theme.palette.panel);
     frame::title_bar(ui, line);
     frame::edges(ctx);
     frame::mark(ui, theme, line, false);
