@@ -1266,6 +1266,18 @@ impl InboxApp {
         surfaces.top() == Surface::Place && !self.keys_held && place
     }
 
+    /// Notes, as the frame ends, whether a field or a list of choices holds the keyboard ([`Self::holds_keys`]).
+    fn note_keys_held(&mut self, ctx: &egui::Context) {
+        let held = Self::holds_keys(ctx);
+        if held != self.keys_held {
+            self.keys_held = held;
+            if self.status.has_error() {
+                // The error's `Esc dismiss` comes or goes with it: that frame is drawn, not left for the next input.
+                ctx.request_repaint();
+            }
+        }
+    }
+
     /// Whether a field, or a list of choices (a menu, a picker, the composer's suggestions), holds the keyboard as the
     /// frame ends: the list's keyed row is not one ([`InboxApp::keys_held`]).
     fn holds_keys(ctx: &egui::Context) -> bool {
@@ -3357,14 +3369,7 @@ impl InboxApp {
         // A press on the index that shows a list beside the docked composer, which holds the list's keys there: the
         // keyboard goes back to the composer's field it was in, never to nothing. Elsewhere the list takes the keys.
         self.keyboard_after_index(ui.ctx(), index_to_list);
-        let held = Self::holds_keys(ui.ctx());
-        if held != self.keys_held {
-            self.keys_held = held;
-            if self.status.has_error() {
-                // The error's `Esc dismiss` comes or goes with it: that frame is drawn, not left for the next input.
-                ui.ctx().request_repaint();
-            }
-        }
+        self.note_keys_held(ui.ctx());
         self.frame = ui.ctx().cumulative_frame_nr().saturating_add(1);
     }
 
