@@ -253,8 +253,8 @@ fn only_counts_read_as_0_make_home_quiet_and_an_unread_count_is_left_out_of_the_
 }
 
 #[test]
-fn the_sample_states_are_the_five_frames() {
-    for state in ["today", "nothing-to-do", "overflow-counts", "first-run", "everything-failing"] {
+fn the_sample_states_are_the_five_frames_and_the_drafts_two() {
+    for state in ["today", "nothing-to-do", "overflow-counts", "first-run", "everything-failing", "drafts", "drafts-empty"] {
         assert!(sample(state).is_some(), "{state}");
     }
     assert!(sample("nothing").is_none());
@@ -288,4 +288,248 @@ fn the_headline_greets_by_the_word_the_owner_chose() {
     // A choice handed back from an earlier run runs no command and changes no revision: the kept Home still follows.
     mailbox.restore_greet_by(GreetBy::Last);
     assert_eq!(kept.current(&mut mailbox, None).name.as_deref(), Some("Holloway"), "the kept Home follows a restored choice");
+}
+
+/// Tells `account` of `mailbox` what its worker would: its connection `state`, and a sync round ended at `synced`.
+fn told(mailbox: &mut Mailbox, account: u64, state: inboxcraft_model::ConnectionState, synced: Option<i64>) {
+    use inboxcraft_model::{AccountId, Event, EventKind};
+    let account = AccountId::new(account);
+    if let Some(at) = synced {
+        mailbox.tell(&Event::new(account, None, EventKind::Connection(inboxcraft_model::ConnectionState::Online))).unwrap();
+        mailbox.tell(&Event::new(account, None, EventKind::SyncFinished { at: Timestamp::from_unix(at, 0).unwrap() })).unwrap();
+    }
+    mailbox.tell(&Event::new(account, None, EventKind::Connection(state))).unwrap();
+}
+
+/// Tells `account` of `mailbox` that its sign-in was refused.
+fn refused(mailbox: &mut Mailbox, account: u64) {
+    use inboxcraft_model::{AccountId, ErrorKind, Event, EventKind};
+    let failed = EventKind::Failed { kind: ErrorKind::LoginRefused, folder: None };
+    mailbox.tell(&Event::new(AccountId::new(account), None, failed)).unwrap();
+}
+
+fn accounts(mailbox: &Mailbox) -> Vec<(u64, String)> {
+    mailbox.accounts().iter().map(|account| (account.id, account.label.clone())).collect()
+}
+
+const OFFLINE: inboxcraft_model::ConnectionState = inboxcraft_model::ConnectionState::Offline;
+const ONLINE: inboxcraft_model::ConnectionState = inboxcraft_model::ConnectionState::Online;
+
+#[test]
+fn offline_says_since_the_last_sync_sync_status_names() {
+    let mut mailbox = mailbox();
+    assert_eq!(build(&mut mailbox).failing, None, "nothing told yet: the status line says offline, the banner nothing");
+    let all = accounts(&mailbox);
+    // Synced at 07:40 and 08:10 today, then every account offline: since the newest sync.
+    for (index, (account, _)) in all.iter().enumerate() {
+        told(&mut mailbox, *account, OFFLINE, Some(NOW - 80 * 60 + 30 * 60 * index as i64));
+    }
+    let failing = build(&mut mailbox).failing.unwrap();
+    let since = mailbox.short_date(Timestamp::from_unix(NOW - 80 * 60 + 30 * 60 * (all.len() as i64 - 1), 0).unwrap());
+    assert_eq!(failing.text, format!("Offline since {since}: what you see is what this computer holds."));
+    assert!(!failing.account && !failing.outbox, "nothing to open for being offline");
+    // One account back online: Home is no longer offline.
+    told(&mut mailbox, all[0].0, ONLINE, None);
+    assert_eq!(build(&mut mailbox).failing, None);
+}
+
+#[test]
+fn a_refused_sign_in_is_named_by_its_account_and_offers_the_account() {
+    let mut mailbox = mailbox();
+    let all = accounts(&mailbox);
+    let (studio, label) = all.last().unwrap().clone();
+    for (account, _) in &all {
+        told(&mut mailbox, *account, ONLINE, Some(NOW - 600));
+    }
+    refused(&mut mailbox, studio);
+    let failing = build(&mut mailbox).failing.unwrap();
+    assert_eq!(failing.text, format!("{label} refused the sign-in."));
+    assert!(failing.account && !failing.outbox);
+    // Every account refused: counted, not listed.
+    for (account, _) in &all {
+        refused(&mut mailbox, *account);
+    }
+    let failing = build(&mut mailbox).failing.unwrap();
+    if all.len() > 1 {
+        assert_eq!(failing.text, format!("{} accounts refused the sign-in.", all.len()));
+    }
+    // Their connections down as well: an account stopped for the owner is refused, not offline.
+    for (account, _) in &all {
+        told(&mut mailbox, *account, OFFLINE, None);
+    }
+    assert!(!build(&mut mailbox).failing.unwrap().text.contains("Offline"), "an account refused is not offline");
+}
+
+#[test]
+fn everything_failing_says_offline_the_refused_sign_in_and_the_send_in_one_banner() {
+    let mut mailbox = mailbox();
+    let all = accounts(&mailbox);
+    assert!(all.len() >= 2, "the sample has two accounts");
+    let (studio, label) = all.last().unwrap().clone();
+    for (account, _) in &all {
+        told(&mut mailbox, *account, OFFLINE, Some(NOW - 50 * 60));
+    }
+    refused(&mut mailbox, studio);
+    let since = mailbox.short_date(Timestamp::from_unix(NOW - 50 * 60, 0).unwrap());
+    let failing = build(&mut mailbox).failing.unwrap();
+    assert_eq!(failing.text, format!("Offline since {since}: what you see is what this computer holds. {label} refused the sign-in."));
+    assert!(failing.account);
+    // The words are the parts in their order, and a refused send joins them.
+    let parts = super::failing_text(Some(&since), std::slice::from_ref(&label), 1, 1, Some("Odette Marchand"));
+    assert_eq!(
+        parts,
+        format!(
+            "Offline since {since}: what you see is what this computer holds. {label} refused the sign-in, and one message to Odette Marchand was not sent. Nothing is lost."
+        )
+    );
+    assert_eq!(super::failing_text(None, &[], 0, 3, None), "3 messages were not sent. Nothing is lost.");
+    assert_eq!(super::failing_text(None, &[], 0, 1, None), "One message was not sent. Nothing is lost.");
+    assert_eq!(super::failing_text(None, &[], 0, 1, Some("Odette")), "One message to Odette was not sent. Nothing is lost.");
+}
+
+#[test]
+fn an_account_s_name_in_the_banner_is_plain_and_capped() {
+    let hostile = format!("\u{202e}Studio\r\n\u{0}{}", "x".repeat(10_000));
+    let text = super::failing_text(None, &[super::kept(&hostile)], 1, 0, None);
+    assert!(text.chars().count() <= MOST + 40, "{}", text.len());
+    assert!(!text.contains('\u{202e}') && !text.contains('\n') && !text.contains('\u{0}'));
+}
+
+#[test]
+fn of_every_error_kind_only_a_refused_sign_in_is_read_as_refused() {
+    use inboxcraft_model::ErrorKind;
+    for kind in ErrorKind::ALL {
+        let mut mailbox = mailbox();
+        let all = accounts(&mailbox);
+        for (account, _) in &all {
+            told(&mut mailbox, *account, ONLINE, Some(NOW - 600));
+        }
+        let (studio, _) = all.last().unwrap().clone();
+        let failed = inboxcraft_model::EventKind::Failed { kind, folder: None };
+        mailbox.tell(&inboxcraft_model::Event::new(inboxcraft_model::AccountId::new(studio), None, failed)).unwrap();
+        // The name `account.list` gives the kind is read back as that kind.
+        let listed = mailbox.run("account.list", &json!({})).unwrap();
+        let row = listed["accounts"].as_array().unwrap().iter().find(|row| row["id"] == json!(studio)).unwrap().clone();
+        let name = row["failure"]["kind"].as_str().unwrap();
+        assert_eq!(super::error_kind(name), Some(kind), "{name}");
+        let refused = build(&mut mailbox).failing.is_some_and(|failing| failing.account);
+        assert_eq!(refused, kind == ErrorKind::LoginRefused, "{kind:?}");
+    }
+    assert_eq!(super::error_kind("LoginRefused"), None, "only the names the answers give");
+    assert_eq!(super::error_kind(""), None);
+}
+const CONNECTING: inboxcraft_model::ConnectionState = inboxcraft_model::ConnectionState::Connecting;
+const BACKING_OFF: inboxcraft_model::ConnectionState = inboxcraft_model::ConnectionState::BackingOff { attempt: 1, retry_in_secs: 30 };
+
+/// Tells every account of `mailbox` its connection `state`.
+fn all_told(mailbox: &mut Mailbox, state: inboxcraft_model::ConnectionState) {
+    for (account, _) in accounts(mailbox) {
+        told(mailbox, account, state, None);
+    }
+}
+
+/// Tells every account of `mailbox` a failure of `kind` that does not stop it.
+fn all_failed(mailbox: &mut Mailbox, kind: inboxcraft_model::ErrorKind) {
+    use inboxcraft_model::{AccountId, Event, EventKind};
+    for (account, _) in accounts(mailbox) {
+        mailbox.tell(&Event::new(AccountId::new(account), None, EventKind::Failed { kind, folder: None })).unwrap();
+    }
+}
+
+/// Workers that run nothing and give back, once, the events queued: what an account's worker tells on a network loss.
+#[derive(Default)]
+struct Told(Vec<inboxcraft_model::Event>);
+
+impl crate::workers::Workers for Told {
+    fn send(&mut self, _account: &inboxcraft_model::Account, _job: inboxcraft_model::Job) {}
+
+    fn keep(&mut self, _accounts: &[inboxcraft_model::AccountId]) {}
+
+    fn events(&mut self) -> Vec<inboxcraft_model::Event> {
+        std::mem::take(&mut self.0)
+    }
+}
+
+/// Every account of `mailbox` told `kinds` by its worker, through [`Mailbox::pump`] as a frame does.
+fn pumped(mailbox: &mut Mailbox, kinds: &[inboxcraft_model::EventKind]) {
+    use inboxcraft_model::{AccountId, Event};
+    let mut workers = Told::default();
+    for (account, _) in accounts(mailbox) {
+        workers.0.extend(kinds.iter().map(|kind| Event::new(AccountId::new(account), None, kind.clone())));
+    }
+    assert!(mailbox.pump(&mut workers), "the events changed something");
+}
+
+#[test]
+fn a_reconnect_attempt_keeps_the_offline_banner_up_through_the_kept_home() {
+    use inboxcraft_model::EventKind::{Connection, Failed};
+    let mut mailbox = mailbox();
+    for (account, _) in accounts(&mailbox) {
+        told(&mut mailbox, account, OFFLINE, Some(NOW - 600));
+    }
+    mailbox.refresh();
+    let mut kept = super::Kept::default();
+    let offline = kept.current(&mut mailbox, None).failing.clone();
+    assert!(offline.as_ref().is_some_and(|failing| failing.text.starts_with("Offline since ")), "{offline:?}");
+    // Offline, then connecting again (nothing on record), then a timeout and backing off, then connecting again:
+    // the banner stands the whole time, and Home is built again for each event.
+    let timed_out = Failed { kind: inboxcraft_model::ErrorKind::TimedOut, folder: None };
+    let steps = [
+        ("connecting after offline", vec![Connection(CONNECTING)]),
+        ("backing off", vec![timed_out, Connection(BACKING_OFF)]),
+        ("connecting after backing off", vec![Connection(CONNECTING)]),
+        ("backing off again", vec![Connection(BACKING_OFF)]),
+    ];
+    for (step, kinds) in steps {
+        let builds = kept.builds();
+        pumped(&mut mailbox, &kinds);
+        assert_eq!(kept.current(&mut mailbox, None).failing, offline, "{step}");
+        assert!(kept.builds() > builds, "{step}: built again");
+    }
+    // Signed in again: the banner goes.
+    pumped(&mut mailbox, &[Connection(ONLINE)]);
+    assert_eq!(kept.current(&mut mailbox, None).failing, None, "online ends it");
+}
+
+#[test]
+fn connecting_with_a_failure_on_record_is_away_and_a_first_connection_is_not() {
+    // At startup: connecting, nothing synced, nothing on record: nothing to say.
+    let mut mailbox = mailbox();
+    all_told(&mut mailbox, CONNECTING);
+    assert_eq!(build(&mut mailbox).failing, None, "a first connection says nothing");
+    // Synced, then a transient failure on record and connecting again: away, even for a build that saw nothing before.
+    for (account, _) in accounts(&mailbox) {
+        told(&mut mailbox, account, ONLINE, Some(NOW - 600));
+    }
+    all_failed(&mut mailbox, inboxcraft_model::ErrorKind::ConnectionDropped);
+    all_told(&mut mailbox, CONNECTING);
+    let failing = build(&mut mailbox).failing.unwrap();
+    assert!(failing.text.starts_with("Offline since "), "{}", failing.text);
+}
+
+#[test]
+fn a_reconnect_from_signed_in_with_nothing_on_record_is_not_offline() {
+    let mut mailbox = mailbox();
+    for (account, _) in accounts(&mailbox) {
+        told(&mut mailbox, account, ONLINE, Some(NOW - 600));
+    }
+    mailbox.refresh();
+    let mut kept = super::Kept::default();
+    assert_eq!(kept.current(&mut mailbox, None).failing, None);
+    let builds = kept.builds();
+    pumped(&mut mailbox, &[inboxcraft_model::EventKind::Connection(CONNECTING)]);
+    assert_eq!(kept.current(&mut mailbox, None).failing, None, "a reconnect from signed in is not being offline");
+    assert!(kept.builds() > builds, "built again");
+}
+#[test]
+fn a_blank_label_is_named_by_the_address_and_a_long_one_is_cut() {
+    let blank = json!({ "label": "   ", "address": "studio@example.org" });
+    assert_eq!(super::name_of(&blank).as_deref(), Some("studio@example.org"));
+    assert_eq!(super::name_of(&json!({ "label": "", "address": "\u{202e}studio@example.org\r\n" })).as_deref(), Some("studio@example.org"));
+    assert_eq!(super::name_of(&json!({ "label": " ", "address": " " })), None, "both blank: no name");
+    let long = super::name_of(&json!({ "label": "x".repeat(10_000), "address": "studio@example.org" })).unwrap();
+    assert_eq!(long.chars().count(), super::NAME_MOST + 1);
+    assert!(long.ends_with('…'));
+    // Through the banner: "One account" is never said for an account that has an address.
+    assert_eq!(super::failing_text(None, &[super::name_of(&blank).unwrap()], 1, 0, None), "studio@example.org refused the sign-in.");
 }

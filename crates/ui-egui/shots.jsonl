@@ -454,6 +454,11 @@
 {"out": "docs/images/home-first-run-dark.png", "mode": "dark", "home": "first-run"}
 {"out": "docs/images/home-everything-failing-light.png", "mode": "light", "home": "everything-failing"}
 {"out": "docs/images/home-everything-failing-dark.png", "mode": "dark", "home": "everything-failing"}
+# Home's drafts' block in its frames of its own (#399): three drafts of five, and none.
+{"out": "docs/images/home-drafts-light.png", "mode": "light", "home": "drafts"}
+{"out": "docs/images/home-drafts-dark.png", "mode": "dark", "home": "drafts"}
+{"out": "docs/images/home-drafts-empty-light.png", "mode": "light", "home": "drafts-empty"}
+{"out": "docs/images/home-drafts-empty-dark.png", "mode": "dark", "home": "drafts-empty"}
 {"out": "docs/images/home-place-light.png", "mode": "light", "size": [1440, 900], "home_place": true}
 {"out": "docs/images/home-place-dark.png", "mode": "dark", "size": [1440, 900], "home_place": true}
 {"out": "docs/images/home-place-1000-light.png", "mode": "light", "size": [1000, 760], "home_place": true}

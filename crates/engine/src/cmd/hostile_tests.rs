@@ -171,8 +171,12 @@ fn open_with_a_junk_page_never_panics() {
                 let answer = session.run_as(caller, "ui.settings.open", &json!({ "page": page }));
                 assert_eq!(answer, Ok(json!({ "page": null, "window": false })), "{page}");
             }
-            let asked = session.take_settings_asked();
-            assert!(asked.len() == 2 && asked.iter().all(|asked| asked.page.is_none() && (!asked.bare || page.is_null())), "{page}: {asked:?}");
+            let asked = session.take_asked();
+            let none = |asked: &crate::shown::Asked| match asked {
+                crate::shown::Asked::Settings(asked) => asked.page.is_none() && (!asked.bare || page.is_null()),
+                crate::shown::Asked::Home(_) => false,
+            };
+            assert!(asked.len() == 2 && asked.iter().all(none), "{page}: {asked:?}");
         }
     }
 }
