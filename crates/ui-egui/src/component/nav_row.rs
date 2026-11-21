@@ -70,6 +70,9 @@ pub(crate) fn base(ui: &mut Ui, theme: &Theme, id: Id, height: f32, active: bool
     let p = &theme.palette;
     let high = Theme::size(theme, height);
     let (_, rect) = ui.allocate_space(vec2(ui.available_width().max(0.0), high));
+    // Its edges on whole physical pixels (a 34-point row is 42.5 pixels at 125 %): the next row's top is this one's
+    // bottom rounded the same way, so rows still touch, and the fill, the bar and the focus edge stand on whole pixels.
+    let rect = paint::on_pixels(ui.painter(), rect);
     let sense = if pressable { super::soon::sense(ui, Sense::click()) } else { Sense::hover() };
     let response = ui.interact(rect, id, sense);
     // Rows touch: a row owns its top edge and not its bottom one.
