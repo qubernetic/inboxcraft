@@ -312,14 +312,7 @@ fn reason(failure: &Value) -> (String, bool) {
 
 /// The error kind named in snake case (`login_refused`), as the engine names it.
 fn error_kind(name: &str) -> Option<inboxcraft_model::ErrorKind> {
-    let pascal: String = name
-        .split('_')
-        .map(|word| {
-            let mut letters = word.chars();
-            letters.next().map(|first| first.to_uppercase().chain(letters).collect::<String>()).unwrap_or_default()
-        })
-        .collect();
-    serde_json::from_value(Value::String(pascal)).ok()
+    inboxcraft_model::ErrorKind::ALL.into_iter().find(|kind| inboxcraft_engine::error_kind_name(*kind) == name)
 }
 
 /// One fact of the line: its text, its kind, and what a press of it asks for.
