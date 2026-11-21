@@ -556,9 +556,21 @@ fn m1_at_full_flips_the_cells_within_60_and_cools_them_in_200_ms() {
     key_frames(Level::Full, false, REACH_FULL);
 }
 
+/// At the reduced level Home's field answers the pointer as at full: the same cells flip at the same times, the same
+/// glyphs; elsewhere it is still (`m1_at_reduced_elsewhere_and_at_off_is_still_dots`).
 #[test]
-fn m1_at_reduced_on_home_flips_the_cells_within_30() {
-    key_frames(Level::Reduced, true, REACH_REDUCED);
+fn m1_at_reduced_on_home_is_m1_at_full() {
+    let (mut reduced, mut full) = (emblem_field(), emblem_field());
+    for step in 0..120_u64 {
+        let at = pos2(200.0 + step as f32 * 4.0, 300.0 + (step as f32 / 7.0).sin() * 80.0);
+        let pointer = (step % 40 < 30).then_some(at);
+        let now = 1.0 + step as f64 * FRAME;
+        reduced.update(now, step + 1, pointer, Level::Reduced, true);
+        full.update(now, step + 1, pointer, Level::Full, true);
+        assert_eq!(reduced.warm, full.warm, "step {step}: reduced on Home differs from full");
+        assert_eq!(reduced.next_change(now), full.next_change(now), "step {step}");
+    }
+    assert!(full.warm.keys().any(|spot| matches!(spot, Spot::Field(_))) || full.flips > 100, "the pointer flipped nothing");
 }
 
 #[test]
@@ -954,10 +966,11 @@ fn m2_the_emblem_does_not_twinkle_in_its_first_quarter_second_so_a_picture_rests
 
 /// The share of the field's cells within `reach` of the pointer that are flipped, on average over the frames of the
 /// second second under a pointer standing still at `level`, at 60 Hz, over a few places on the field.
-fn warm_share(level: Level, reach: f32) -> f64 {
+fn warm_share(level: Level, reach: f32, quiet: &[Rect]) -> f64 {
     let (mut warm, mut within) = (0_usize, 0_usize);
     for at in [pos2(300.0, 300.0), pos2(212.0, 157.0), pos2(640.0, 420.0), pos2(500.0, 250.0)] {
         let mut field = Field::new(7);
+        field.set_quiet(quiet);
         field.build(RECT, TextScale::default(), None, 1.0);
         let cells = field.cells.clone().unwrap();
         let near: BTreeSet<u32> = (0..cells.columns * cells.rows)
@@ -981,10 +994,10 @@ fn warm_share(level: Level, reach: f32) -> f64 {
 
 #[test]
 fn m1_under_a_still_pointer_about_as_many_cells_are_flipped_as_in_the_source() {
-    // The source's chance (0.8 × f², at reduced × 0.4) and times give about 22 in 100 at full and 10 in 100 at reduced
-    // flipped at a time: a simulation of its `update` at 60 Hz.
-    let shares = [(Level::Full, REACH_FULL, 0.22), (Level::Reduced, REACH_REDUCED, 0.10)].map(|(level, reach, source)| {
-        let share = warm_share(level, reach);
+    // The source's chance (0.8 × f²) and times give about 22 in 100 flipped at a time away from text: a simulation of
+    // its `update` at 60 Hz.
+    let shares = [(Level::Full, REACH_FULL, 0.22)].map(|(level, reach, source)| {
+        let share = warm_share(level, reach, &[]);
         eprintln!("{level:?}: {share:.3} of the cells within reach flipped under a still pointer (source {source})");
         (level, share, source)
     });
@@ -1018,4 +1031,103 @@ fn a_cell_waits_to_roll_again_only_while_it_is_within_reach() {
     // The pointer off the field but in the window: nothing waits, and nothing asks for a frame for it.
     field.update(1.0 + FRAME, 11, Some(pos2(5000.0, 300.0)), Level::Full, false);
     assert!(field.waiting.is_empty(), "{} cells out of reach wait", field.waiting.len());
+}
+
+#[test]
+fn quiet_is_a_fifth_inside_a_block_and_comes_back_eased_over_80_points() {
+    let block = Rect::from_min_max(pos2(100.0, 100.0), pos2(300.0, 140.0));
+    let quiet = |at: Pos2| quiet_at(&[block], at);
+    assert_eq!(quiet(pos2(200.0, 120.0)), QUIET_IN, "inside");
+    assert_eq!(quiet(pos2(100.0, 140.0)), QUIET_IN, "on its edge");
+    // 40 points off: k = 0.5, 0.2 + 0.8 × 0.25.
+    assert!((quiet(pos2(340.0, 120.0)) - 0.4).abs() < 1e-6, "40 right: {}", quiet(pos2(340.0, 120.0)));
+    assert!((quiet(pos2(200.0, 60.0)) - 0.4).abs() < 1e-6, "40 above: {}", quiet(pos2(200.0, 60.0)));
+    // Off a corner the distance is the corner's: 30 and 40 make 50, k = 0.625.
+    assert!((quiet(pos2(330.0, 180.0)) - (0.2 + 0.8 * 0.625 * 0.625)).abs() < 1e-6);
+    for far in [pos2(380.0, 120.0), pos2(200.0, 220.0), pos2(1000.0, 1000.0)] {
+        assert_eq!(quiet(far), 1.0, "{far:?}: 80 points or more off");
+    }
+    // The least over the blocks; none near: the whole.
+    let other = Rect::from_min_max(pos2(360.0, 100.0), pos2(400.0, 140.0));
+    assert_eq!(quiet_at(&[block, other], pos2(380.0, 120.0)), QUIET_IN);
+    assert_eq!(quiet_at(&[], pos2(200.0, 120.0)), 1.0);
+    let nan = quiet_at(&[block], pos2(f32::NAN, 120.0));
+    assert!((QUIET_IN..=1.0).contains(&nan), "a point that is not a number: {nan}");
+}
+
+#[test]
+fn set_quiet_keeps_usable_blocks_only_and_at_most_its_cap() {
+    let mut field = Field::new(7);
+    let good = Rect::from_min_max(pos2(0.0, 0.0), pos2(10.0, 10.0));
+    let hostile = [Rect::NOTHING, Rect::EVERYTHING, Rect::from_min_max(pos2(f32::NAN, 0.0), pos2(1.0, 1.0)), good];
+    field.set_quiet(&hostile);
+    assert_eq!(field.quiet(), &[good]);
+    field.set_quiet(&vec![good; MAX_QUIET * 3]);
+    assert_eq!(field.quiet().len(), MAX_QUIET);
+    field.set_quiet(&[]);
+    assert!(field.quiet().is_empty());
+}
+
+/// Within a quiet block the cells under a still pointer flip with a fifth of their chance: far fewer are flipped at a
+/// time than away from text.
+#[test]
+fn m1_near_a_quiet_block_flips_fewer_cells() {
+    let free = warm_share(Level::Full, REACH_FULL, &[]);
+    let quiet = warm_share(Level::Full, REACH_FULL, &[RECT]);
+    eprintln!("flipped under a still pointer: {free:.3} away from text, {quiet:.3} inside a quiet block");
+    assert!(quiet > 0.0 && quiet * 2.5 < free, "{quiet:.3} flipped inside a quiet block, {free:.3} away from one");
+}
+
+/// A flipped cell near a quiet block shows at the quiet share of its opacity; one away from it and the dots at rest at
+/// their own.
+#[test]
+fn a_flipped_cell_near_a_quiet_block_shows_at_its_quiet_opacity() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let cells = built(RECT, 7, TextScale::default());
+    let row = 4;
+    let middle = row_top(&cells, row) + cells.height / 2.0;
+    // A block over columns 0 to 9 of the row; column 3 inside it, column 60 far from it.
+    let block = Rect::from_min_max(pos2(0.0, middle - 5.0), pos2(80.0, middle + 5.0));
+    let warm = |glyph: u8| Warm { glyph, tint: false, at: 1.0, until: 1.1, seen: 1, next: 1.05 };
+    let job = field_row(&cells, row, &[(3, warm(0)), (60, warm(1))], &[block], &theme).unwrap();
+    let colours: Vec<_> = job
+        .sections
+        .iter()
+        .map(|section| (job.text[section.byte_range.start.0..section.byte_range.end.0].to_owned(), section.format.color))
+        .collect();
+    let of = |glyph: char| colours.iter().find(|(text, _)| text.contains(glyph)).map(|(_, colour)| *colour);
+    assert_eq!(of('0'), Some(crate::theme::mix(theme.palette.bg, theme.palette.dim, QUIET_IN)), "inside the block: {colours:?}");
+    assert_eq!(of('1'), Some(theme.palette.dim), "far from it: {colours:?}");
+    assert!(colours.iter().filter(|(text, _)| text.contains('·')).all(|(_, colour)| *colour == theme.palette.faint), "a dot quietened");
+}
+
+/// The emblem's cells keep their own chance next to a quiet block: the same of them flip in a roll with a block over
+/// the whole field as without one, while fewer of the field's own cells do.
+#[test]
+fn the_emblem_is_not_quietened() {
+    let (mut emblem_hits, mut emblem_within, mut quiet_field, mut free_field) = (0, 0, 0, 0);
+    for step in 0..24_u64 {
+        let at = pos2(330.0 + step as f32 * 10.0, 120.0 + step as f32 * 15.0);
+        let (mut quiet, mut free) = (emblem_field(), emblem_field());
+        // Every cell of the block emblem is on: those whose centre lies within reach.
+        let corner = quiet.emblem_at().unwrap();
+        let (columns, rows) = block().grid();
+        emblem_within += (0..rows)
+            .flat_map(|row| (0..columns).map(move |column| corner + vec2((column as f32 + 0.5) * EMBLEM_CELL.x, (row as f32 + 0.5) * EMBLEM_CELL.y)))
+            .filter(|centre| centre.distance(at) <= EMBLEM_REACH)
+            .count();
+        quiet.set_quiet(&[RECT]);
+        quiet.update(1.0, 1, Some(at), Level::Full, true);
+        free.update(1.0, 1, Some(at), Level::Full, true);
+        let emblem = |field: &Field| field.warm.keys().filter(|spot| matches!(spot, Spot::Emblem(_))).copied().collect::<Vec<_>>();
+        let field = |field: &Field| field.warm.keys().filter(|spot| matches!(spot, Spot::Field(_))).count();
+        assert_eq!(emblem(&quiet), emblem(&free), "{at:?}: the quiet block changed which of the emblem's cells flip");
+        emblem_hits += emblem(&quiet).len();
+        quiet_field += field(&quiet);
+        free_field += field(&free);
+    }
+    // 0.25 + 0.75 × f over the reach's disc: about half of them in a roll.
+    let share = emblem_hits as f64 / emblem_within as f64;
+    assert!((0.4..0.6).contains(&share), "{emblem_hits} of the emblem's {emblem_within} cells within reach flipped inside a quiet block");
+    assert!(quiet_field * 2 < free_field, "the field's cells: {quiet_field} flipped with the block, {free_field} without");
 }
