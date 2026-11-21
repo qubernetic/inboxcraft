@@ -666,6 +666,9 @@ pub struct Mailbox {
     place: Place,
     query: String,
     messages: Vec<MessageRow>,
+    /// The query [`Mailbox::messages`] were found for, and whether a field of its search read as many as the engine
+    /// lists; `None` when they are a place's rows.
+    found_for: Option<(String, bool)>,
     /// Counts each new list of rows, so what is worked out from them can be kept until they change.
     rows_serial: u64,
     selected: Option<u64>,
@@ -1019,6 +1022,7 @@ impl Mailbox {
             place: Place::View(Role::Inbox),
             query: String::new(),
             messages: Vec::new(),
+            found_for: None,
             rows_serial: 0,
             selected: None,
             keyed: false,
@@ -2189,7 +2193,13 @@ impl Mailbox {
         self.revision = self.revision.wrapping_add(1);
         // The outbox shows while anything is in it, and gives way to the inbox after.
         let place = if place == Place::Outbox && self.outbox.is_empty() { Place::View(Role::Inbox) } else { place };
-        let rows = if self.query.is_empty() { self.list(place)? } else { self.found()? };
+        let (rows, found_for) = if self.query.is_empty() {
+            (self.list(place)?, None)
+        } else {
+            let query = self.query.clone();
+            let (rows, more) = self.search_all(&query)?;
+            (rows, Some((query, more)))
+        };
         if place == Place::View(Role::Drafts) && self.query.is_empty() {
             self.load_drafts()?;
         } else {
@@ -2200,6 +2210,7 @@ impl Mailbox {
         }
         self.place = place;
         self.messages = rows;
+        self.found_for = found_for;
         self.rows_serial = self.rows_serial.wrapping_add(1);
         if self.selected.is_some_and(|id| self.messages.iter().all(|row| row.id != id)) {
             self.selected = None;
@@ -2264,30 +2275,37 @@ impl Mailbox {
         Ok(rows)
     }
 
-    /// The search: every message whose subject, sender or recipient holds the query, newest first.
-    fn found(&mut self) -> Result<Vec<MessageRow>, UiError> {
-        let query = self.query.clone();
-        self.searched(&query)
+    /// Every message of the accounts shown whose subject, sender or recipient holds `query` (cut as
+    /// [`Mailbox::search`] cuts it), newest first: what the list shows searched for it; and whether a field's search
+    /// read as many as the engine lists ([`MAX_LIST`]), so that there may be more. The list's own rows when it shows
+    /// that search already: one search per text.
+    pub(crate) fn searched(&mut self, query: &str) -> Result<(Vec<MessageRow>, bool), UiError> {
+        let query: String = query.trim().chars().take(MAX_QUERY).collect();
+        if let Some((_, more)) = self.found_for.as_ref().filter(|(found, _)| *found == query) {
+            return Ok((self.messages.clone(), *more));
+        }
+        self.search_all(&query)
     }
 
-    /// Every message of the accounts shown whose subject, sender or recipient holds `query` (cut as
-    /// [`Mailbox::search`] cuts it), newest first: what the list shows searched for it.
-    pub(crate) fn searched(&mut self, query: &str) -> Result<Vec<MessageRow>, UiError> {
-        let query: String = query.trim().chars().take(MAX_QUERY).collect();
+    /// The search behind [`Mailbox::searched`], run.
+    fn search_all(&mut self, query: &str) -> Result<(Vec<MessageRow>, bool), UiError> {
         let mut rows: BTreeMap<u64, MessageRow> = BTreeMap::new();
+        let mut more = false;
         for field in ["subject", "from", "to"] {
             let mut params = json!({ "account": self.narrowed, "limit": MAX_LIST });
             if let Value::Object(fields) = &mut params {
-                fields.insert(field.to_owned(), Value::String(query.clone()));
+                fields.insert(field.to_owned(), Value::String(query.to_owned()));
             }
             let answer = self.run("mail.search", &params)?;
-            for row in array("mail.search", &answer, "messages")?.iter().map(message_row) {
+            let found = array("mail.search", &answer, "messages")?;
+            more |= u64::try_from(found.len()).unwrap_or(u64::MAX) >= MAX_LIST;
+            for row in found.iter().map(message_row) {
                 rows.insert(row.id, row);
             }
         }
         let mut rows: Vec<MessageRow> = rows.into_values().collect();
         rows.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| b.id.cmp(&a.id)));
-        Ok(rows)
+        Ok((rows, more))
     }
 
     /// Shows one account (`Some`) or all of them (`None`). An account that is not there narrows nothing; an open

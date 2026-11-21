@@ -3390,6 +3390,19 @@ impl InboxApp {
         {
             self.command.text_mut().clone_from(&self.search);
         }
+        let index = regions.index.right() + 1.0 - regions.command.left();
+        let room = if self.draws_frame() { frame::CONTROLS_ROOM } else { frame::NO_CONTROLS_ROOM };
+        let mailbox = self.mailbox.title();
+        // The field first, and the list searched as it was typed: the rows below are those of the text as this frame's
+        // typing left it, and the line's lookup finds the list's own search done.
+        let mut typed = command::field(ui, theme, &self.keymap, &mut self.command, (regions.command, index, room, &mailbox));
+        for asked in std::mem::take(&mut typed.asked) {
+            if matches!(asked, command::Asked::Searched(_)) {
+                let _ = self.apply_command(&ctx, asked);
+            } else {
+                typed.asked.push(asked);
+            }
+        }
         if command::wants_people(&self.command) {
             let mut skip = std::collections::BTreeSet::new();
             skip.extend(self.mailbox.accounts().iter().map(|account| account.address.to_lowercase()));
@@ -3397,6 +3410,7 @@ impl InboxApp {
             self.command.set_people(found);
         }
         let mut lists = command::Lists::default();
+        let mut kept = None;
         if self.command.results() {
             let screen = if self.screen == Screen::Calendar { keymap::Scope::Calendar } else { keymap::Scope::Mail };
             // Over the event editor only what comes over it and the window's look: nothing of the mail or the
@@ -3425,24 +3439,33 @@ impl InboxApp {
                 // At most six, looked up only when the text changed.
                 crate::command::Mode::Person => lists.people = self.command.people().map(<[_]>::to_vec).unwrap_or_default(),
                 // Not narrowed to the mailbox shown: GO TO and LAST COMMANDS with nothing typed, else the mail, the
-                // people and the mailboxes found, looked up only when the text or the window's data changed.
+                // people and the mailboxes found, looked up only when what they read changed. Over the event editor
+                // nothing that leaves the calendar is offered: no GO TO row, nothing found.
                 crate::command::Mode::Search if !self.command.narrowed() => {
                     let text = self.command.text().to_owned();
-                    let stamp = |writes| crate::command::Stamp { text: text.clone(), narrowed: false, writes };
-                    if self.command.found(&stamp(self.mailbox.writes())).is_none() {
-                        let found = command::look_up(&mut self.mailbox, &text);
-                        self.command.set_found(stamp(self.mailbox.writes()), found);
-                    }
-                    lists.found = self.command.found(&stamp(self.mailbox.writes())).cloned().unwrap_or_default();
                     lists.go_to = text.trim().is_empty();
-                    lists.searched = !lists.go_to;
+                    lists.searched = !lists.go_to && !editing;
+                    if !editing {
+                        lists.goals = command::GOALS.to_vec();
+                    }
+                    if lists.go_to || lists.searched {
+                        let stamp = self.line_stamp(&text, editing);
+                        lists.found = match self.command.take_found(&stamp) {
+                            Some(found) => found,
+                            None => {
+                                self.command.looked_up();
+                                command::look_up(&mut self.mailbox, &text)
+                            }
+                        };
+                        // Taken after the lookup, as Home's: its own reads count as seen.
+                        kept = Some(self.line_stamp(&text, editing));
+                    }
                     if lists.go_to {
-                        let all = crate::palette::rows("");
                         lists.last = self
                             .command
-                            .last()
+                            .last_rows()
                             .iter()
-                            .filter_map(|id| all.iter().find(|row| row.page.unwrap_or(row.id) == *id && listed(row)))
+                            .filter(|row| listed(row))
                             .map(|row| command::Listed { row: row.clone(), refused: self.refused_on_the_line(&ctx, row.id) })
                             .collect();
                     }
@@ -3450,10 +3473,26 @@ impl InboxApp {
                 crate::command::Mode::Search => {}
             }
         }
-        let index = regions.index.right() + 1.0 - regions.command.left();
-        let room = if self.draws_frame() { frame::CONTROLS_ROOM } else { frame::NO_CONTROLS_ROOM };
-        let mailbox = self.mailbox.title();
-        command::show(ui, theme, &self.keymap, &mut self.command, (regions.command, index, room, &mailbox), &lists, early)
+        let mut asked = std::mem::take(&mut typed.asked);
+        asked.extend(command::pick(&ctx, theme, &self.keymap, &mut self.command, &typed, &lists, early));
+        if let Some(stamp) = kept {
+            self.command.set_found(stamp, std::mem::take(&mut lists.found));
+        }
+        asked
+    }
+
+    /// What the command line's lookup for `text` reads, now (`editing`: the event editor is open).
+    fn line_stamp(&self, text: &str, editing: bool) -> crate::command::Stamp {
+        let now = self.mailbox.now();
+        crate::command::Stamp {
+            text: text.to_owned(),
+            editing,
+            revision: self.mailbox.revision(),
+            writes: self.mailbox.writes(),
+            account: self.mailbox.narrowed(),
+            place: self.mailbox.place(),
+            minute: (now.unix_seconds().div_euclid(60), self.mailbox.offset().minutes()),
+        }
     }
 
     /// The place the index shows selected: Settings while they are shown (`setting`), else Home, the calendar, Later
@@ -4007,18 +4046,25 @@ impl InboxApp {
             // line runs nothing of an agent's); the keyboard is in the line, not in the composer, so the key's rule
             // ([`InboxApp::can_run`]) is not the one that decides here.
             command::Asked::Run(keymap::SEND) => {
-                self.command.ran(keymap::SEND);
                 self.command.close(ctx);
                 // A draft kept for a reason says it, in its Send's words: the line closed, they may not be in sight.
-                if self.can_run_from_the_line(keymap::SEND) && !soon::blocked(ctx, keymap::SEND) && self.send_drawn() {
-                    let problem = self.composer.as_ref().and_then(|composer| compose::send_problem(&self.mailbox, composer));
-                    if let Some(problem) = problem {
-                        self.say(&problem);
+                if self.can_run_from_the_line(keymap::SEND) && !soon::blocked(ctx, keymap::SEND) {
+                    if self.send_drawn() {
+                        let problem = self.composer.as_ref().and_then(|composer| compose::send_problem(&self.mailbox, composer));
+                        if let Some(problem) = problem {
+                            self.say(&problem);
+                        }
+                    } else if self.composer.is_none() {
+                        // Sent (or scheduled): only now is it a command that ran from the line.
+                        self.command.ran(keymap::SEND);
                     }
                 }
             }
             command::Asked::Run(id) => {
-                self.command.ran(id);
+                // Recorded as run only when it runs: by the gate [`InboxApp::run_action`] puts it through after this.
+                if self.can_run(id) && !soon::blocked(ctx, id) {
+                    self.command.ran(id);
+                }
                 self.command.close(ctx);
                 return Some(id);
             }

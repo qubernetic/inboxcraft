@@ -95,6 +95,8 @@ pub(super) struct Lists {
     pub(super) all_commands: usize,
     /// A search with nothing typed: GO TO and LAST COMMANDS list.
     pub(super) go_to: bool,
+    /// The GO TO rows offered: none over the event editor, as every one of them leaves the calendar.
+    pub(super) goals: Vec<Goal>,
     /// A search with a text typed whose mail, people and mailboxes were looked up: [`Lists::found`] lists them.
     pub(super) searched: bool,
     /// What a search looked up.
@@ -112,7 +114,7 @@ pub(super) enum Goal {
 }
 
 /// The GO TO rows, in their order.
-const GOALS: [Goal; 3] = [Goal::Inbox, Goal::Senders, Goal::Calendar];
+pub(super) const GOALS: [Goal; 3] = [Goal::Inbox, Goal::Senders, Goal::Calendar];
 
 /// A row of the results, by what it runs.
 enum Entry<'a> {
@@ -127,7 +129,7 @@ impl Lists {
     /// How many rows the results hold for `mode`.
     fn count(&self, mode: Mode) -> usize {
         match mode {
-            Mode::Search if self.go_to => GOALS.len().saturating_add(self.last.len()),
+            Mode::Search if self.go_to => self.goals.len().saturating_add(self.last.len()),
             Mode::Search if self.searched => self.found.mail.len().saturating_add(self.found.people.len()).saturating_add(self.found.mailboxes.len()),
             Mode::Search => 0,
             Mode::Command => self.commands.len(),
@@ -140,7 +142,7 @@ impl Lists {
     fn lines(&self, mode: Mode) -> usize {
         let count = self.count(mode);
         let heads = match mode {
-            Mode::Search if self.go_to => 1 + usize::from(!self.last.is_empty()),
+            Mode::Search if self.go_to => usize::from(!self.goals.is_empty()) + usize::from(!self.last.is_empty()),
             Mode::Search => {
                 [self.found.mail.len(), self.found.people.len(), self.found.mailboxes.len()].iter().filter(|rows| self.searched && **rows > 0).count()
             }
@@ -154,9 +156,9 @@ impl Lists {
     /// Row `at` of the results of `mode`, from the top.
     fn entry(&self, mode: Mode, at: usize) -> Option<Entry<'_>> {
         match mode {
-            Mode::Search if self.go_to => match GOALS.get(at) {
+            Mode::Search if self.go_to => match self.goals.get(at) {
                 Some(goal) => Some(Entry::Go(*goal)),
-                None => self.last.get(at.checked_sub(GOALS.len())?).map(Entry::Command),
+                None => self.last.get(at.checked_sub(self.goals.len())?).map(Entry::Command),
             },
             Mode::Search if self.searched => {
                 let found = &self.found;
@@ -274,18 +276,23 @@ fn field_rect(rect: Rect, theme: &Theme, index: f32, room: f32) -> Rect {
     Rect::from_min_max(pos2(left, top), pos2(right, top + high))
 }
 
-/// Draws the command line into `ui` over `line` (the command line's region; `index` how far in from its left the field
-/// starts, `room` what it leaves at the line's right end), `mailbox` the name of the mailbox shown for a narrowed
-/// search, and its results for `lists`; what was asked for.
-pub(super) fn show(
+/// The field as drawn this frame: what its typing asked for, and its box.
+pub(super) struct Typed {
+    pub(super) asked: Vec<Asked>,
+    rect: Rect,
+}
+
+/// Draws the command line's field into `ui` over `line` (the command line's region; `index` how far in from its left
+/// the field starts, `room` what it leaves at the line's right end), `mailbox` the name of the mailbox shown for a
+/// narrowed search; what its typing asked for. It comes before the results' rows are built, so that they are the rows
+/// of the text as this frame's typing left it ([`pick`]).
+pub(super) fn field(
     ui: &mut Ui,
     theme: &Theme,
     keymap: &Keymap,
     command: &mut Command,
     (line, index, room, mailbox): (Rect, f32, f32, &str),
-    lists: &Lists,
-    early: Early,
-) -> Vec<Asked> {
+) -> Typed {
     let mut asked = Vec::new();
     let ctx = ui.ctx().clone();
     // While the results show they hold the keyboard, as a modal surface does: taken by anything outside them (Tab,
@@ -328,23 +335,37 @@ pub(super) fn show(
     // keyboard from a field before the frame in which `Esc` is pressed).
     ui.ctx().data_mut(|data| data.insert_temp(field_id().with("box"), typed.rect));
     command.keep_focus(ui.ctx());
+    Typed { asked, rect }
+}
+
+/// The arrows, Enter and the results under the field `typed` drew, for `lists` (the rows of the text as it is now);
+/// what was asked for.
+pub(super) fn pick(ctx: &Context, theme: &Theme, keymap: &Keymap, command: &mut Command, typed: &Typed, lists: &Lists, early: Early) -> Vec<Asked> {
+    let mut asked = Vec::new();
     if let Some(down) = early.step {
         command.step(down, lists.count(command.mode()));
     }
     if early.enter {
-        asked.extend(chosen(command, lists, command.picked()));
+        asked.extend(chosen(command, lists, command.picked(), false));
     }
     if command.results() {
-        asked.extend(results(ui.ctx(), theme, keymap, command, rect, lists));
+        asked.extend(results(ctx, theme, keymap, command, typed.rect, lists));
     }
     asked
 }
 
-/// What running row `at` of the results asks for: a command that cannot run asks for its reason in the status line.
-fn chosen(command: &Command, lists: &Lists, at: usize) -> Option<Asked> {
+/// What running row `at` of the results asks for, by Enter or by a press (`pressed`): a command that cannot run asks
+/// for its reason in the status line.
+fn chosen(command: &Command, lists: &Lists, at: usize, pressed: bool) -> Option<Asked> {
+    let bare = command.text().trim().is_empty() && !command.stepped();
     // A bare prefix runs nothing, unless the arrows picked a row.
-    if command.mode() != Mode::Search && command.text().trim().is_empty() && !command.stepped() {
+    if command.mode() != Mode::Search && bare {
         return None;
+    }
+    // Enter on an empty line goes nowhere (GO TO and LAST COMMANDS run on an arrow's pick or a press): what it did
+    // before they were listed, the mail shown as it is, no place left.
+    if command.mode() == Mode::Search && bare && !pressed {
+        return Some(Asked::Find(String::new()));
     }
     match lists.entry(command.mode(), at) {
         Some(Entry::Go(goal)) => Some(Asked::GoTo(goal)),
@@ -402,9 +423,15 @@ fn said_picked(ui: &Ui, response: &egui::Response, picked: bool, kept: &mut Opti
     }
 }
 
-/// The head over a group of `shown` rows of `total`: "3 of 4", or the count when all show.
-fn group_head(ui: &mut Ui, theme: &Theme, label: &str, shown: usize, total: usize) {
-    let counted = if shown < total { tr!("{shown} of {all}", shown = shown, all = total) } else { total.to_string() };
+/// The head over a group of `shown` rows of `total`: "3 of 4", or the count when all show; "3 of 1000+" when the
+/// search read as many as it lists (`more`), so that there may be more.
+fn group_head(ui: &mut Ui, theme: &Theme, label: &str, shown: usize, (total, more): (usize, bool)) {
+    let counted = match (shown < total, more) {
+        (true, false) => tr!("{shown} of {all}", shown = shown, all = total),
+        (true, true) => tr!("{shown} of {all}+", shown = shown, all = total),
+        (false, false) => total.to_string(),
+        (false, true) => tr!("{all}+", all = total),
+    };
     popup::head(ui, theme, label, Some(&counted));
 }
 
@@ -426,7 +453,9 @@ fn command_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, listed: &Listed, pic
         None => (Some(tr!("{id} · no key", id = id)), None),
     };
     let item = Item { icon: Some(listed.row.icon), name: &listed.row.name, caption: caption.as_deref(), action, state };
-    popup::menu_item(ui, theme, keymap, &item)
+    // A row of LAST COMMANDS recalls a command, it is not a control of it: its chip offers nothing to the coming-soon
+    // gate, which a command listed there goes through as a `>` row does (its refusal).
+    if keyed { popup::menu_item_unoffered(ui, theme, keymap, &item) } else { popup::menu_item(ui, theme, keymap, &item) }
 }
 
 /// A found message's or mailbox's row.
@@ -481,7 +510,7 @@ impl Walk<'_> {
         let response = draw(ui, here == self.picked);
         said_picked(ui, &response, here == self.picked, &mut self.picked_id);
         if response.clicked() {
-            self.asked = chosen(command, lists, here);
+            self.asked = chosen(command, lists, here, true);
         }
     }
 }
@@ -492,8 +521,10 @@ fn search_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &Command, l
     let mut walk = Walk { lines, at: 0, picked: command.picked(), picked_id: None, asked: None };
     let found = &lists.found;
     if lists.go_to {
-        walk.head(|| popup::head(ui, theme, tr!("Go to"), None));
-        for goal in GOALS {
+        if !lists.goals.is_empty() {
+            walk.head(|| popup::head(ui, theme, tr!("Go to"), None));
+        }
+        for goal in lists.goals.iter().copied() {
             walk.row(ui, command, lists, |ui, picked| goal_row(ui, theme, keymap, found, goal, picked));
         }
         if !lists.last.is_empty() {
@@ -504,19 +535,19 @@ fn search_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &Command, l
         }
     } else if lists.searched {
         if !found.mail.is_empty() {
-            walk.head(|| group_head(ui, theme, tr!("Mail"), found.mail.len(), found.mail_total));
+            walk.head(|| group_head(ui, theme, tr!("Mail"), found.mail.len(), (found.mail_total, found.mail_more)));
             for hit in &found.mail {
                 walk.row(ui, command, lists, |ui, picked| hit_row(ui, theme, keymap, hit, picked));
             }
         }
         if !found.people.is_empty() {
-            walk.head(|| group_head(ui, theme, tr!("People"), found.people.len(), found.people_total));
+            walk.head(|| group_head(ui, theme, tr!("People"), found.people.len(), (found.people_total, false)));
             for person in &found.people {
                 walk.row(ui, command, lists, |ui, picked| popup::suggestion_row(ui, theme, &person.name, &person.address, picked));
             }
         }
         if !found.mailboxes.is_empty() {
-            walk.head(|| group_head(ui, theme, tr!("Mailboxes"), found.mailboxes.len(), found.mailboxes_total));
+            walk.head(|| group_head(ui, theme, tr!("Mailboxes"), found.mailboxes.len(), (found.mailboxes_total, false)));
             for hit in &found.mailboxes {
                 walk.row(ui, command, lists, |ui, picked| hit_row(ui, theme, keymap, hit, picked));
             }
@@ -533,8 +564,9 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
     let mut picked_id = None;
     let count = lists.count(command.mode());
     let counted = count.to_string();
-    let nothing = count == 0 && !text.is_empty() && (command.mode() != Mode::Search || lists.searched);
-    let mut lines = Lines::of(ui.ctx(), command.mode(), lists.lines(command.mode()), nothing);
+    let failed = lists.found.error.as_deref().filter(|_| command.mode() == Mode::Search && lists.searched);
+    let nothing = failed.is_none() && count == 0 && !text.is_empty() && (command.mode() != Mode::Search || lists.searched);
+    let mut lines = Lines::of(ui.ctx(), command.mode(), lists.lines(command.mode()), nothing || failed.is_some());
     match command.mode() {
         Mode::Search => (asked, picked_id) = search_rows(ui, theme, keymap, command, lists, &mut lines),
         Mode::Command => {
@@ -558,7 +590,7 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
                         ui.scroll_to_rect(response.rect, None);
                     }
                     if response.clicked() {
-                        asked = chosen(command, lists, at);
+                        asked = chosen(command, lists, at, true);
                     }
                 }
                 (asked, picked_id)
@@ -587,7 +619,7 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
                 let response = popup::suggestion_row(ui, theme, &person.name, &person.address, at == picked);
                 said_picked(ui, &response, at == picked, &mut picked_id);
                 if response.clicked() {
-                    asked = chosen(command, lists, at);
+                    asked = chosen(command, lists, at, true);
                 }
             }
         }
@@ -601,12 +633,16 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
                 let response = popup::menu_item(ui, theme, keymap, &item);
                 said_picked(ui, &response, at == picked, &mut picked_id);
                 if response.clicked() {
-                    asked = chosen(command, lists, at);
+                    asked = chosen(command, lists, at, true);
                 }
             }
         }
     }
-    if nothing && lines.next() {
+    if let Some(error) = failed
+        && lines.next()
+    {
+        popup::empty(ui, theme, &tr!("Search failed: {error}", error = error));
+    } else if nothing && lines.next() {
         popup::empty(ui, theme, &tr!("Nothing matches “{text}”.", text = text));
     }
     if !lines.next() {
@@ -647,14 +683,20 @@ pub(super) fn mailboxes(mailbox: &crate::mailbox::Mailbox, text: &str) -> Vec<Ma
         .flat_map(|account| mailbox.folders_of(account.id).into_iter().map(move |folder| (account, folder)))
         .filter(|(_, folder)| folder.name.to_lowercase().contains(&wanted))
         .take(MOST_ROWS)
-        .map(|(account, folder)| Mailbox { id: folder.id, name: folder.name.clone(), account: account.name.clone() })
+        .map(|(account, folder)| Mailbox { id: folder.id, name: crate::home::kept(&folder.name), account: crate::home::kept(&account.name) })
         .collect()
 }
 
 /// What a search of the line finds for `text` (none: what GO TO says), from the mailbox: the messages as the list
-/// searched for it finds them (`mail.search`), the people the mail knows, the mailboxes whose path holds it; at most
-/// [`MOST_FOUND`] of each kept, with how many there were.
+/// searched for it finds them (`mail.search`, or the list's own rows when it shows that search), the people the mail
+/// knows, the mailboxes whose path holds it; at most [`MOST_FOUND`] of each kept, with how many there were. Read
+/// quietly: what the line looks up is not a command the owner ran ([`crate::mailbox::Mailbox::last_run`]).
 pub(super) fn look_up(mailbox: &mut crate::mailbox::Mailbox, text: &str) -> Found {
+    mailbox.quietly(|mailbox| looked_up(mailbox, text))
+}
+
+/// [`look_up`], read.
+fn looked_up(mailbox: &mut crate::mailbox::Mailbox, text: &str) -> Found {
     if text.trim().is_empty() {
         return Found {
             to_read: mailbox.views().iter().find(|view| view.role == inboxcraft_model::Role::Inbox).map(|view| view.unread),
@@ -663,7 +705,11 @@ pub(super) fn look_up(mailbox: &mut crate::mailbox::Mailbox, text: &str) -> Foun
             ..Found::default()
         };
     }
-    let rows = mailbox.searched(text).unwrap_or_default();
+    let mut error = None;
+    let (rows, more) = mailbox.searched(text).unwrap_or_else(|failed| {
+        error = Some(failed.to_string());
+        (Vec::new(), false)
+    });
     let roles: std::collections::BTreeMap<u64, Option<inboxcraft_model::Role>> =
         mailbox.accounts().iter().flat_map(|account| mailbox.folders_of(account.id)).map(|folder| (folder.id, folder.role)).collect();
     let mail = rows
@@ -679,11 +725,15 @@ pub(super) fn look_up(mailbox: &mut crate::mailbox::Mailbox, text: &str) -> Foun
         .collect();
     let mut skip = std::collections::BTreeSet::new();
     skip.extend(mailbox.accounts().iter().map(|account| account.address.to_lowercase()));
-    let people = crate::compose::people(mailbox, text, skip).unwrap_or_default();
+    let people = crate::compose::people(mailbox, text, skip).unwrap_or_else(|failed| {
+        error.get_or_insert_with(|| failed.to_string());
+        Vec::new()
+    });
     let boxes = mailboxes(mailbox, text);
     Found {
         mail,
         mail_total: rows.len(),
+        mail_more: more,
         people_total: people.len(),
         people: people.into_iter().take(MOST_FOUND).collect(),
         mailboxes_total: boxes.len(),
@@ -692,6 +742,8 @@ pub(super) fn look_up(mailbox: &mut crate::mailbox::Mailbox, text: &str) -> Foun
             .take(MOST_FOUND)
             .map(|mailbox| Hit { id: mailbox.id, name: mailbox.name, caption: mailbox.account, icon: IconId::Move })
             .collect(),
+        // The error's own words, as the banner shows them, kept to a line without controls.
+        error: error.map(|error| crate::home::kept(&error)),
         ..Found::default()
     }
 }
@@ -743,6 +795,9 @@ pub(super) fn wants_people(command: &Command) -> bool {
     command.mode() == Mode::Person && !command.text().trim().is_empty() && command.people().is_none()
 }
 
+#[cfg(test)]
+#[path = "command_last_tests.rs"]
+mod command_last_tests;
 #[cfg(test)]
 #[path = "command_motion_tests.rs"]
 mod command_motion_tests;

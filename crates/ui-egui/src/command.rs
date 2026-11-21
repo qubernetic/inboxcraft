@@ -39,6 +39,8 @@ pub struct Found {
     pub mail: Vec<Hit>,
     /// How many messages were found.
     pub mail_total: usize,
+    /// Whether a search read as many as the engine lists ([`inboxcraft_engine::MAX_LIST`]): there may be more.
+    pub mail_more: bool,
     /// The first people found.
     pub people: Vec<Suggestion>,
     /// How many people were found.
@@ -53,17 +55,30 @@ pub struct Found {
     pub waiting: usize,
     /// The first of today's events left: its title and start.
     pub next: Option<(String, String)>,
+    /// Why the search failed, in its own words (cleaned), when it did.
+    pub error: Option<String>,
 }
 
-/// What a lookup was made for: the text, whether narrowed, and the window's writes at the time.
+/// What a lookup was made for: everything its results read. The text; whether the event editor is open (nothing
+/// that leaves the calendar is looked up over it); the store's revision (a load of the list: an agent's write, a sync,
+/// a search, a narrowing) and the window's writes; the account and the place shown; and the minute, for the captions
+/// that say when.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stamp {
     /// The text typed.
     pub text: String,
-    /// Whether the line was narrowed to the mailbox shown.
-    pub narrowed: bool,
+    /// Whether the event editor is open.
+    pub editing: bool,
+    /// The list's revision ([`crate::mailbox::Mailbox::revision`]).
+    pub revision: u64,
     /// The window's writes ([`crate::mailbox::Mailbox::writes`]).
     pub writes: u64,
+    /// The account shown, `None` for all of them.
+    pub account: Option<u64>,
+    /// The place shown.
+    pub place: crate::mailbox::Place,
+    /// The minute of the list's clock and its offset from UTC, in minutes.
+    pub minute: (i64, i16),
 }
 
 /// The most characters the command line holds.
@@ -124,8 +139,12 @@ pub struct Command {
     slash: u8,
     /// What was looked up, and for what.
     found: Option<(Stamp, Found)>,
+    /// How many lookups were made ([`Command::looked_up`]).
+    lookups: u64,
     /// The commands run from the line, newest first, at most [`LAST`].
     last: Vec<&'static str>,
+    /// Their rows, built when one ran.
+    last_rows: Vec<crate::palette::Row>,
 }
 
 impl Default for Command {
@@ -144,7 +163,9 @@ impl Default for Command {
             had_focus: false,
             slash: 0,
             found: None,
+            lookups: 0,
             last: Vec::new(),
+            last_rows: Vec::new(),
         }
     }
 }
@@ -162,7 +183,10 @@ impl Command {
         self.mode = Mode::Search;
         self.narrowed = narrowed_to_mailbox;
         self.picked = 0;
+        self.stepped = false;
         self.results = true;
+        // What was looked up before is not trusted: it is looked up again for this opening.
+        self.found = None;
         ctx.memory_mut(|memory| memory.request_focus(field_id()));
     }
 
@@ -239,6 +263,7 @@ impl Command {
     pub fn close_results(&mut self) {
         self.results = false;
         self.picked = 0;
+        self.stepped = false;
     }
 
     /// Closes the command line: the results go, a command, a person or a mailbox typed goes (a search stays, as the
@@ -348,10 +373,13 @@ impl Command {
         self.people_for = Some(self.text.clone());
     }
 
-    /// What was looked up for `stamp`, if it was.
-    #[must_use]
-    pub fn found(&self, stamp: &Stamp) -> Option<&Found> {
-        self.found.as_ref().filter(|(kept, _)| kept == stamp).map(|(_, found)| found)
+    /// What was looked up for `stamp`, taken out to be listed (and kept again by [`Command::set_found`]); none when
+    /// nothing was, or for something else.
+    pub fn take_found(&mut self, stamp: &Stamp) -> Option<Found> {
+        match self.found.take() {
+            Some((kept, found)) if kept == *stamp => Some(found),
+            _ => None,
+        }
     }
 
     /// Keeps what was looked up for `stamp`.
@@ -359,11 +387,30 @@ impl Command {
         self.found = Some((stamp, found));
     }
 
+    /// A lookup was made: counted, for the tests of what each frame costs.
+    pub fn looked_up(&mut self) {
+        self.lookups = self.lookups.wrapping_add(1);
+    }
+
+    /// How many lookups were made since the window opened.
+    #[must_use]
+    pub fn lookups(&self) -> u64 {
+        self.lookups
+    }
+
     /// The command `id` ran from the line: it heads LAST COMMANDS, once.
     pub fn ran(&mut self, id: &'static str) {
         self.last.retain(|known| *known != id);
         self.last.insert(0, id);
         self.last.truncate(LAST);
+        let all = crate::palette::rows("");
+        self.last_rows = self.last.iter().filter_map(|id| all.iter().find(|row| row.page.unwrap_or(row.id) == *id)).cloned().collect();
+    }
+
+    /// The rows of the commands run from the line, newest first.
+    #[must_use]
+    pub fn last_rows(&self) -> &[crate::palette::Row] {
+        &self.last_rows
     }
 
     /// The commands run from the line, newest first.
