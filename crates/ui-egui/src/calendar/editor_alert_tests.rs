@@ -11,6 +11,7 @@ use super::{ALERTS, Alert, Editor, alert_text};
 use crate::calendar::{Calendar, EventRow};
 use crate::mailbox::Mailbox;
 use crate::sample;
+use inboxcraft_engine::all_day_alert::AllDayAlert;
 
 /// 2026-11-05T09:00:00Z, a Thursday.
 const NOW: i64 = 1_793_869_200;
@@ -53,7 +54,7 @@ fn the_row_reads_the_alert_and_takes_anything_else_as_custom() {
 
 #[test]
 fn the_field_names_its_choices_and_the_default_as_the_lead_it_rings_with() {
-    let names: Vec<String> = ALERTS.iter().map(|alert| alert_text(*alert, false)).collect();
+    let names: Vec<String> = ALERTS.iter().map(|alert| alert_text(*alert, None)).collect();
     assert_eq!(
         names,
         [
@@ -70,12 +71,39 @@ fn the_field_names_its_choices_and_the_default_as_the_lead_it_rings_with() {
             "1 week before"
         ]
     );
-    assert_eq!(alert_text(Alert::Default, false), "10 min before");
-    assert_eq!(alert_text(Alert::Default, true), "1 day before");
-    assert_eq!(alert_text(Alert::Custom, false), "Custom");
-    assert_eq!(alert_text(Alert::Before(90), false), "90 min before");
-    assert_eq!(alert_text(Alert::Before(20_160), false), "2 weeks before");
-    assert_eq!(alert_text(Alert::Before(u32::MAX), false), "4294967295 min before");
+    assert_eq!(alert_text(Alert::Default, None), "10 min before");
+    assert_eq!(alert_text(Alert::Custom, None), "Custom");
+    assert_eq!(alert_text(Alert::Before(90), None), "90 min before");
+    assert_eq!(alert_text(Alert::Before(20_160), None), "2 weeks before");
+    assert_eq!(alert_text(Alert::Before(u32::MAX), None), "4294967295 min before");
+}
+
+#[test]
+fn an_all_day_events_default_alert_says_the_hour_the_setting_chose() {
+    let texts: Vec<String> = AllDayAlert::ALL.iter().map(|choice| alert_text(Alert::Default, Some(*choice))).collect();
+    assert_eq!(texts, ["09:00 the day before", "12:00 the day before", "18:00 the day before", "09:00 on the day"]);
+    // What a saved all-day event reads back: its lead before midnight as the hour the day before.
+    assert_eq!(alert_text(Alert::Before(900), Some(AllDayAlert::DayBefore18)), "09:00 the day before");
+    assert_eq!(alert_text(Alert::Before(360), Some(AllDayAlert::default())), "18:00 the day before");
+    assert_eq!(alert_text(Alert::Before(60), Some(AllDayAlert::default())), "23:00 the day before");
+    // Whole days, minutes that are no whole hour, and a timed event keep their words.
+    assert_eq!(alert_text(Alert::Before(1440), Some(AllDayAlert::default())), "1 day before");
+    assert_eq!(alert_text(Alert::Before(90), Some(AllDayAlert::default())), "90 min before");
+    assert_eq!(alert_text(Alert::Before(0), Some(AllDayAlert::default())), "At the start");
+    assert_eq!(alert_text(Alert::Before(900), None), "15 hours before");
+}
+
+#[test]
+fn a_new_all_day_event_in_the_calendar_says_the_hour_the_session_holds() {
+    let (mut mailbox, mut calendar) = loaded();
+    mailbox.set_all_day_alert(AllDayAlert::DayBefore18);
+    calendar.follow_week(&mut mailbox);
+    calendar.new_event();
+    let editor = calendar.editor().unwrap();
+    assert_eq!(editor.all_day_alert(), AllDayAlert::DayBefore18, "taken when it opens");
+    mailbox.set_all_day_alert(AllDayAlert::OnTheDay9);
+    calendar.follow_week(&mut mailbox);
+    assert_eq!(calendar.editor().unwrap().all_day_alert(), AllDayAlert::OnTheDay9, "and followed while it is open");
 }
 
 #[test]

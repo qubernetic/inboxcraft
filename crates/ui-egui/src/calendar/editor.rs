@@ -10,6 +10,7 @@
 //! The times are the computer's wall clock at its offset, sent to the engine in UTC. Changing the times of an
 //! occurrence of a repeating event moves the whole series to them.
 
+use inboxcraft_engine::all_day_alert::AllDayAlert;
 use inboxcraft_time::{CivilDateTime, Offset};
 use serde_json::{Map, Value, json};
 
@@ -71,14 +72,21 @@ pub const ALERTS: [Alert; 11] = [
 ];
 
 /// An alert in words, in its field: `None`, `10 min before`, `1 day before`; the default as the lead it rings with on
-/// a timed or an `all_day` event.
+/// a timed event, or on an all-day one at the hour `all_day` names; a lead of a whole number of hours under a day
+/// before an all-day event as the hour the day before it rings at.
 #[must_use]
-pub fn alert_text(alert: Alert, all_day: bool) -> String {
+pub fn alert_text(alert: Alert, all_day: Option<AllDayAlert>) -> String {
     const HOUR: u32 = 60;
     const DAY: u32 = 24 * HOUR;
     const WEEK: u32 = 7 * DAY;
     match alert {
-        Alert::Default => alert_text(Alert::Before(if all_day { DAY } else { 10 }), all_day),
+        Alert::Default => match all_day {
+            Some(choice) => all_day_alert_text(choice).to_owned(),
+            None => alert_text(Alert::Before(10), None),
+        },
+        Alert::Before(minutes) if all_day.is_some() && minutes > 0 && minutes < DAY && minutes % HOUR == 0 => {
+            tr!("{hour}:00 the day before", hour = format!("{:02}", (DAY - minutes) / HOUR))
+        }
         Alert::None => tr!("None").to_owned(),
         Alert::Custom => tr!("Custom").to_owned(),
         Alert::Before(0) => tr!("At the start").to_owned(),
@@ -89,6 +97,17 @@ pub fn alert_text(alert: Alert, all_day: bool) -> String {
         Alert::Before(HOUR) => tr!("1 hour before").to_owned(),
         Alert::Before(minutes) if minutes % HOUR == 0 => tr!("{count} hours before", count = minutes / HOUR),
         Alert::Before(minutes) => tr!("{count} min before", count = minutes),
+    }
+}
+
+/// When an all-day event's alert rings, in words: the setting's choices and a new all-day event's default alert.
+#[must_use]
+pub fn all_day_alert_text(choice: AllDayAlert) -> &'static str {
+    match choice {
+        AllDayAlert::DayBefore9 => tr!("09:00 the day before"),
+        AllDayAlert::DayBefore12 => tr!("12:00 the day before"),
+        AllDayAlert::DayBefore18 => tr!("18:00 the day before"),
+        AllDayAlert::OnTheDay9 => tr!("09:00 on the day"),
     }
 }
 
@@ -169,6 +188,9 @@ pub struct Editor {
     /// The form and the guests' answer as they were when the editor said the typing is not saved, and whether Esc made
     /// it say so: an Esc after Esc's warning, with nothing changed since, throws the typing away; any change asks again.
     warned: Option<(Form, bool, bool)>,
+    /// When an all-day event's alert rings by default, as the calendar last took it from the session: what a new
+    /// all-day event's Alert says it rings with.
+    all_day_alert: AllDayAlert,
 }
 
 /// A list of choices of the form that opens over it.
@@ -212,6 +234,7 @@ impl Editor {
             description_cut: false,
             menu: None,
             warned: None,
+            all_day_alert: AllDayAlert::default(),
         }
     }
 
@@ -245,6 +268,7 @@ impl Editor {
             description_cut: event.description.chars().count() >= MAX_DESCRIPTION,
             menu: None,
             warned: None,
+            all_day_alert: AllDayAlert::default(),
         }
     }
 
@@ -252,6 +276,17 @@ impl Editor {
     #[must_use]
     pub fn day(&self) -> Option<Day> {
         self.form.start.trim().get(..10).and_then(Day::parse)
+    }
+
+    /// When an all-day event's alert rings by default ([`Editor::set_all_day_alert`]).
+    #[must_use]
+    pub fn all_day_alert(&self) -> AllDayAlert {
+        self.all_day_alert
+    }
+
+    /// Takes when an all-day event's alert rings by default, from the session.
+    pub fn set_all_day_alert(&mut self, choice: AllDayAlert) {
+        self.all_day_alert = choice;
     }
 
     /// The list of choices open in the form, when one is.
