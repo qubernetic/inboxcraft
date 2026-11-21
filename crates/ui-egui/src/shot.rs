@@ -301,7 +301,8 @@ pub struct Shot {
     #[serde(default)]
     pub command_sets: Option<bool>,
     /// Home, the page, in one of its states (`today`, `nothing-to-do`, `overflow-counts`, `first-run`,
-    /// `everything-failing`; `@130` after it for 130 % text) in the body of a 1440 × 872 window, instead of the window.
+    /// `everything-failing`; `@130` after it for 130 % text) in the body of a 1440 × 872 window, instead of the window;
+    /// `drafts` and `drafts-empty` its drafts' block alone, at the body's top left.
     #[serde(default)]
     pub home: Option<String>,
     /// The app's own window frame, as a native window draws it: `own` (the older `strip` and `top_row` read as it); none

@@ -634,6 +634,108 @@ fn the_owner_s_key_in_the_same_frame_wins_over_an_agent_s_ask() {
     assert_eq!(desktop.app().settings().section(), Section::Appearance, "the agent's ask went");
 }
 
+/// Runs `ui.home.open` over the control channel, ticks and draws a frame; its answer.
+fn open_home(desktop: &mut Desktop, calls: &mpsc::Sender<Call>, ctx: &egui::Context) -> serde_json::Value {
+    let (open, answer) = call("ui.home.open", json!({}));
+    calls.send(open).unwrap();
+    tick(desktop, ctx, false);
+    frame(desktop, ctx, Vec::new());
+    answer.try_recv().unwrap().unwrap()
+}
+
+#[test]
+fn ui_home_open_over_the_control_channel_shows_home_from_any_place() {
+    use inboxcraft_ui_egui::Screen;
+    let (mut desktop, calls, ctx) = controlled();
+    desktop.app_mut().show_mail();
+    frame(&mut desktop, &ctx, Vec::new());
+    assert_eq!(open_home(&mut desktop, &calls, &ctx), json!({ "window": true }));
+    assert_eq!(desktop.app().screen(), Screen::Home);
+    desktop.app_mut().open_settings_page(Some("about"));
+    frame(&mut desktop, &ctx, Vec::new());
+    open_home(&mut desktop, &calls, &ctx);
+    assert!(!desktop.app().settings().is_open(), "Home leaves the settings, as its place in the index does");
+    assert_eq!(desktop.app().screen(), Screen::Home);
+}
+
+#[test]
+fn an_agent_s_home_waits_while_the_form_holds_typing_or_a_key_is_given() {
+    use inboxcraft_ui_egui::Screen;
+    use inboxcraft_ui_egui::settings::Section;
+    let (mut desktop, calls, ctx) = on_the_form(|form| form.host = "imap.example.org".to_owned());
+    desktop.app_mut().show_mail();
+    desktop.app_mut().open_settings_page(Some("accounts"));
+    frame(&mut desktop, &ctx, Vec::new());
+    let skipped = open_home(&mut desktop, &calls, &ctx);
+    assert!(desktop.app().settings().is_open(), "the owner's page stays");
+    assert_eq!(desktop.app().screen(), Screen::Mail);
+    assert_eq!(desktop.app().onboarding().form().host, "imap.example.org", "the field is kept");
+    let (mut desktop, calls, ctx) = controlled();
+    desktop.app_mut().show_mail();
+    desktop.app_mut().open_settings_page(Some("shortcuts"));
+    desktop.app_mut().settings_mut().capture(inboxcraft_ui_egui::keymap::FIND);
+    frame(&mut desktop, &ctx, Vec::new());
+    let captured = open_home(&mut desktop, &calls, &ctx);
+    assert_eq!(desktop.app().settings().capturing(), Some(inboxcraft_ui_egui::keymap::FIND), "the capture goes on");
+    assert_eq!(desktop.app().settings().section(), Section::Shortcuts);
+    let (mut desktop, calls, ctx) = on_the_form(|_| {});
+    let acted = open_home(&mut desktop, &calls, &ctx);
+    assert_eq!(desktop.app().screen(), Screen::Home, "an empty form holds nothing to lose");
+    assert_eq!(skipped.to_string(), acted.to_string(), "the answer tells nothing of what the owner does");
+    assert_eq!(captured.to_string(), acted.to_string());
+}
+
+#[test]
+fn an_agent_s_home_waits_while_the_owner_edits_an_event() {
+    use inboxcraft_ui_egui::Screen;
+    let (mut desktop, calls, ctx) = controlled();
+    desktop.app_mut().show_calendar();
+    desktop.app_mut().calendar_mut().0.new_event();
+    frame(&mut desktop, &ctx, Vec::new());
+    assert!(desktop.app().calendar().editor().is_some(), "the editor is open");
+    open_home(&mut desktop, &calls, &ctx);
+    assert_eq!(desktop.app().screen(), Screen::Calendar, "Home does not come over the event editor");
+    assert!(desktop.app().calendar().editor().is_some(), "the editor stays");
+}
+
+#[test]
+fn the_owner_s_place_in_the_same_frame_wins_over_an_agent_s_home() {
+    use inboxcraft_ui_egui::Screen;
+    let (mut desktop, calls, ctx) = controlled();
+    desktop.app_mut().show_calendar();
+    frame(&mut desktop, &ctx, Vec::new());
+    let (open, _answer) = call("ui.home.open", json!({}));
+    calls.send(open).unwrap();
+    tick(&mut desktop, &ctx, false);
+    let mail = desktop.app().keymap().shortcut(inboxcraft_ui_egui::keymap::MAIL).unwrap();
+    let key = egui::Event::Key { key: mail.logical_key, physical_key: None, pressed: true, repeat: false, modifiers: mail.modifiers };
+    frame(&mut desktop, &ctx, vec![key]);
+    assert_eq!(desktop.app().screen(), Screen::Mail, "the owner's key showed the mail");
+    frame(&mut desktop, &ctx, Vec::new());
+    assert_eq!(desktop.app().screen(), Screen::Mail, "the agent's ask went");
+}
+
+#[test]
+fn of_an_agent_s_asks_in_one_tick_the_newest_acts_home_or_the_settings() {
+    use inboxcraft_ui_egui::Screen;
+    let (mut desktop, calls, ctx) = controlled();
+    desktop.app_mut().show_mail();
+    frame(&mut desktop, &ctx, Vec::new());
+    for (command, params) in [("ui.home.open", json!({})), ("ui.settings.open", json!({ "page": "about" }))] {
+        calls.send(call(command, params).0).unwrap();
+    }
+    tick(&mut desktop, &ctx, false);
+    frame(&mut desktop, &ctx, Vec::new());
+    assert!(desktop.app().settings().is_open(), "the settings, asked last");
+    for (command, params) in [("ui.settings.open", json!({ "page": "about" })), ("ui.home.open", json!({}))] {
+        calls.send(call(command, params).0).unwrap();
+    }
+    tick(&mut desktop, &ctx, false);
+    frame(&mut desktop, &ctx, Vec::new());
+    assert!(!desktop.app().settings().is_open(), "Home, asked last");
+    assert_eq!(desktop.app().screen(), Screen::Home);
+}
+
 #[test]
 fn a_thousand_calls_in_a_tick_act_once_and_leave_the_window_usable() {
     use inboxcraft_ui_egui::settings::Section;
@@ -647,7 +749,7 @@ fn a_thousand_calls_in_a_tick_act_once_and_leave_the_window_usable() {
     }
     tick(&mut desktop, &ctx, false);
     assert!(answers.iter().all(|answer| answer.try_recv().is_ok_and(|answer| answer.is_ok())), "every call answered");
-    assert!(desktop.app_mut().mailbox_mut().take_settings_asked().is_empty(), "nothing left in the queue");
+    assert!(desktop.app_mut().mailbox_mut().take_asked().is_empty(), "nothing left in the queue");
     frame(&mut desktop, &ctx, Vec::new());
     // The newest, a bare call, acted once: the settings on the page last shown.
     assert!(desktop.app().settings().is_open());

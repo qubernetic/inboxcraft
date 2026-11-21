@@ -134,6 +134,7 @@ pub use arrive::screener::ScreenerMode;
 pub use class::{AgentClass, Caller};
 pub use cmd::MAX_LIST;
 pub use error::{EngineError, MAX_ERROR_TEXT};
+pub use json::error_kind_name;
 pub use registry::{CommandSpec, Registry, Run, is_command_id};
 pub use send::Hold;
 pub use session::{Applied, Context, Outcome, Session};

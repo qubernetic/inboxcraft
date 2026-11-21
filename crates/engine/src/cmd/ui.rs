@@ -13,6 +13,10 @@
 //! [`crate::shown::SETTINGS_PAGES`]); a `page` that names none is no page, never an error. It changes nothing; its
 //! answer's `window` says whether a window takes the ask (`false` headless, where nothing is shown).
 //!
+//! `ui.home.open` (`safe`, no parameters) asks the window to show Home, as Home's place in the index does. It changes
+//! nothing; its answer's `window` says whether a window takes the ask (`false` headless, where nothing is shown). An
+//! agent's ask is guarded as an agent's `ui.settings.open` is ([`crate::shown::HomeAsked`]).
+//!
 //! `ui.motion.set` takes `level` (`full`, `reduced` or `off`); the older `reduce` (`on`, `off` or `system`) still
 //! answers for one release, and `level` wins when both are given.
 
@@ -20,12 +24,12 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::appearance::{Appearance, ComposerHost, EventEditorHost, Layout, MotionLevel, ReaderHost, TEXT_SCALES, ThemeMode, WindowFrame};
-use crate::params::decode;
-use crate::shown::{self, SettingsAsked};
+use crate::params::{NoParams, decode, decode_quietly};
+use crate::shown::{self, HomeAsked, SettingsAsked};
 use crate::{AgentClass, Caller, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[FRAME, LAYOUT, MOTION, SETTINGS, TEXT_SCALE, THEME];
+pub(crate) const COMMANDS: &[CommandSpec] = &[FRAME, HOME, LAYOUT, MOTION, SETTINGS, TEXT_SCALE, THEME];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
@@ -66,6 +70,9 @@ pub(crate) const SETTINGS: CommandSpec = CommandSpec {
     summary: "Show the settings, on the page named; without one as their key does",
     run: settings_open,
 };
+
+/// `ui.home.open`: Home.
+pub(crate) const HOME: CommandSpec = CommandSpec { id: "ui.home.open", class: Some(AgentClass::Safe), summary: "Show Home, the brief of today", run: home_open };
 
 /// The outcome of a change to the appearance: the whole appearance as the answer.
 fn changed(appearance: Appearance) -> Outcome {
@@ -195,4 +202,12 @@ fn settings_open(context: &Context<'_>, params: &Value) -> Result<Outcome, Engin
     let page = shown::page(given);
     let asked = SettingsAsked { page, bare: given.is_none(), by_agent: context.caller() == Caller::Agent };
     Ok(Outcome::new(json!({ "page": page, "window": context.state().window })).with_settings(asked))
+}
+
+/// Takes no parameters, and a refusal repeats nothing it was sent. The answer is whether a window takes the ask; it says nothing of what the window shows, so a
+/// window that passes over an agent's ask answers the same.
+fn home_open(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let NoParams {} = decode_quietly(HOME.id, params)?;
+    let asked = HomeAsked { by_agent: context.caller() == Caller::Agent };
+    Ok(Outcome::new(json!({ "window": context.state().window })).with_home(asked))
 }

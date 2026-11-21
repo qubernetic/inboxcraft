@@ -240,6 +240,8 @@ pub struct InboxApp {
     editor_window_forward: bool,
     /// When a close of the main window was last taken back for an event's typing, in input seconds.
     editor_close_taken: Option<f64>,
+    /// At the end of the last frame, a float was open or the composer had the keyboard ([`InboxApp::agent_may_move`]).
+    owner_keys: bool,
     /// The composer's field that takes the keyboard in its window of its own at the window's next pass.
     window_focus: Option<egui::Id>,
     /// In one pane, the reader takes the focus once it is drawn: `Enter` or a press opened a message into it.
@@ -552,6 +554,7 @@ impl InboxApp {
             editor_opened: 0,
             editor_window_forward: false,
             editor_close_taken: None,
+            owner_keys: false,
             window_focus: None,
             focus_reader: false,
             focus_walked: false,
@@ -3381,6 +3384,7 @@ impl InboxApp {
         // keyboard goes back to the composer's field it was in, never to nothing. Elsewhere the list takes the keys.
         self.keyboard_after_index(ui.ctx(), index_to_list);
         self.note_keys_held(ui.ctx());
+        self.owner_keys = self.owner_has_keys(ui.ctx());
         self.frame = ui.ctx().cumulative_frame_nr().saturating_add(1);
     }
 

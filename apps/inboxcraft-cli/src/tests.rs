@@ -138,6 +138,15 @@ fn ui_settings_open_goes_to_the_running_app_with_its_page() {
 }
 
 #[test]
+fn ui_home_open_is_safe_and_goes_to_the_running_app() {
+    let (code, out, _) = run_with(&["commands"]);
+    assert_eq!(code, 0);
+    assert!(out.lines().any(|line| line.starts_with("ui.home.open ") && line.contains(" safe ")), "{out}");
+    let asked = Request::Run { store: None, id: "ui.home.open".to_owned(), params: json!({}) };
+    assert_eq!(parsed(&["ui.home.open"]), Ok(asked));
+}
+
+#[test]
 fn a_closed_output_is_an_error_code_not_a_panic() {
     let mut err = Vec::new();
     assert_eq!(run([OsString::from("--version")], &mut Broken, &mut err), 1);

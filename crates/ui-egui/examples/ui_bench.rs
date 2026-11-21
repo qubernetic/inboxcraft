@@ -40,8 +40,13 @@
 //! `home-window-sweep`, among the four scenes above and alone with `--home`: the window on Home, the start place, at the
 //! full motion level, the pointer sweeping across its character field every frame.
 //!
+//! `reader-step-why`, among them too and alone with `--why`: the first row of the grouped list pressed, then J every
+//! frame, so each frame opens the next message in the reader beside the list and asks the engine why it is here
+//! (`mail.why`) for its why line. It fails the run if a measured frame opened no new message or showed no reasons. Under it a line
+//! gives the median of each part a step runs, alone: `mail.why`, `mail.thread`, `mail.open` and the list read again.
+//!
 //! ```text
-//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose | --calendar | --settings | --large | --field | --home]
+//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose | --calendar | --settings | --large | --field | --home | --why]
 //! ```
 
 use std::process::ExitCode;
@@ -169,6 +174,8 @@ enum Scene {
     ListScroll,
     /// The reader open on an HTML message, the inbox in the default view beside it.
     ReaderHtml,
+    /// The reader stepping down the grouped list with J, one message a frame, its why line shown.
+    ReaderStep,
     /// The reader open on an HTML message of two megabytes made as `large` says; `scrolling` 40 points a frame.
     ReaderLarge { large: Large, scrolling: bool },
     /// The composer with a message text of `kib` KiB, focused; `typing` a character a frame; `accesskit` on.
@@ -184,7 +191,7 @@ enum Scene {
 }
 
 impl Scene {
-    const ALL: [Self; 5] = [Self::DefaultRest, Self::ListRest, Self::ListScroll, Self::ReaderHtml, Self::HomeSweep];
+    const ALL: [Self; 6] = [Self::DefaultRest, Self::ListRest, Self::ListScroll, Self::ReaderHtml, Self::ReaderStep, Self::HomeSweep];
 
     /// The composer's scenes, every size at rest and typing, without AccessKit and with it.
     fn compose() -> Vec<Self> {
@@ -216,6 +223,7 @@ impl Scene {
             Self::ListRest => "inbox-list-rest".to_owned(),
             Self::ListScroll => "inbox-list-scroll".to_owned(),
             Self::ReaderHtml => "reader-html".to_owned(),
+            Self::ReaderStep => "reader-step-why".to_owned(),
             Self::HomeSweep => "home-window-sweep".to_owned(),
             Self::CalendarWeek => "calendar-week-200".to_owned(),
             Self::CalendarCrowd(view) => format!("calendar-{}-{CROWD_EVENTS}", format!("{view:?}").to_lowercase()),
@@ -233,7 +241,7 @@ impl Scene {
     /// The inbox view it sets; `None` keeps the default.
     fn view(self) -> Option<InboxView> {
         match self {
-            Self::ListRest | Self::ListScroll => Some(InboxView::Grouped),
+            Self::ListRest | Self::ListScroll | Self::ReaderStep => Some(InboxView::Grouped),
             Self::DefaultRest
             | Self::ReaderHtml
             | Self::ReaderLarge { .. }
@@ -419,6 +427,14 @@ fn message_text(output: &egui::FullOutput) -> Option<Pos2> {
     })
 }
 
+/// Where the list's row of `subject` is, from the AccessKit tree of a frame: the first node whose name holds it.
+fn row_of(output: &egui::FullOutput, subject: &str) -> Option<Pos2> {
+    let update = output.platform_output.accesskit_update.as_ref()?;
+    update.nodes.iter().find_map(|(_, node)| {
+        node.label().filter(|label| label.contains(subject)).and(node.bounds()).map(|bounds| pos2(bounds.x0 as f32 + 8.0, bounds.y0 as f32 + 8.0))
+    })
+}
+
 /// The value at `share` (0 to 1) of sorted `values`, nearest rank.
 fn percentile(values: &[f64], share: f64) -> f64 {
     if values.is_empty() {
@@ -444,12 +460,22 @@ fn measure(scene: Scene) -> Result<Measured, UiError> {
         let output = ctx.run_ui(input, |ui| app.ui(ui));
         press = Some(message_text(&output).ok_or_else(|| UiError::Shot("no message text".to_owned()))?);
     }
+    // The step scene presses the first listed row, as the owner would: it opens and the list has the keyboard.
+    if scene == Scene::ReaderStep {
+        let subject = app.mailbox().messages().first().map(|row| row.subject.clone()).ok_or_else(|| UiError::Shot("no rows".to_owned()))?;
+        ctx.enable_accesskit();
+        let input = RawInput { screen_rect: Some(screen), ..RawInput::default() };
+        let output = ctx.run_ui(input, |ui| app.ui(ui));
+        press = Some(row_of(&output, &subject).ok_or_else(|| UiError::Shot(format!("no row {subject:?}")))?);
+    }
     let before = app.composer().map(|composer| composer.text().len());
     // Over the list, left of the reader and right of the folders; for the large message, over its text.
     let over_list = if let Scene::ReaderLarge { .. } = scene { pos2(WINDOW.x * 0.8, WINDOW.y * 0.6) } else { pos2(WINDOW.x * 0.35, WINDOW.y * 0.6) };
     let clock = SystemClock::new();
     let mut times = Vec::with_capacity(FRAMES);
     let (mut shapes, mut rows) = (0, None);
+    // The step scene: the messages the reader showed in the measured frames, and the frames its why line had words.
+    let (mut stepped, mut why_shown) = (std::collections::BTreeSet::new(), 0_usize);
     for frame in 0..WARM_UP + FRAMES {
         // On Home: across its field (right of the 600 of the brief) and back, up and down, a new place every frame.
         let t = frame as f32 / 60.0;
@@ -473,6 +499,12 @@ fn measure(scene: Scene) -> Result<Measured, UiError> {
         {
             events.push(Event::Text("a".to_owned()));
         }
+        if scene == Scene::ReaderStep && frame >= 2 {
+            // J pressed and let go: one step down the list, the warm-up's frames too.
+            for pressed in [true, false] {
+                events.push(Event::Key { key: egui::Key::J, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE });
+            }
+        }
         if matches!(scene, Scene::ListScroll | Scene::ReaderLarge { scrolling: true, .. }) && frame >= WARM_UP {
             events.push(Event::MouseWheel {
                 unit: MouseWheelUnit::Point,
@@ -491,8 +523,16 @@ fn measure(scene: Scene) -> Result<Measured, UiError> {
             times.push(took.as_secs_f64() * 1000.0);
             shapes = output.shapes.iter().map(|clipped| count(&clipped.shape)).sum();
             rows = rows_built(&ctx).or(rows);
+            if scene == Scene::ReaderStep {
+                stepped.extend(app.reader().open_id());
+                why_shown = why_shown.saturating_add(usize::from(!app.reader().why().is_empty()));
+            }
         }
         drop(primitives);
+    }
+    // A step scene that did not open a new message every frame, or showed no reasons, measured something else.
+    if scene == Scene::ReaderStep && (stepped.len() < FRAMES || why_shown < FRAMES) {
+        return Err(UiError::Shot(format!("the steps opened {} messages in {FRAMES} frames, {why_shown} with a why line", stepped.len())));
     }
     // A typing scene that typed nothing measured nothing: the press missed the text.
     let after = app.composer().map(|composer| composer.text().len());
@@ -525,6 +565,37 @@ fn measure(scene: Scene) -> Result<Measured, UiError> {
     }
     times.sort_by(f64::total_cmp);
     Ok(Measured { median_ms: percentile(&times, 0.5), p95_ms: percentile(&times, 0.95), max_ms: percentile(&times, 1.0), shapes, rows_built: rows })
+}
+
+/// Where a step's time goes: the median milliseconds of each engine command the reader runs as it opens a message
+/// (`mail.open`, `mail.thread`, `mail.why`), each run alone over a session of its own on the grown sample for the
+/// messages the step scene opens, and of the list read again (`refresh`) when the open marks the message read.
+fn step_costs() -> Result<Vec<(&'static str, f64)>, UiError> {
+    let mut app = app(Scene::ReaderStep)?;
+    let ids: Vec<u64> = app.mailbox().messages().iter().take(WARM_UP + FRAMES).map(|row| row.id).collect();
+    let time = Timestamp::from_unix(TIME, 0).ok_or_else(|| UiError::Shot("no time".to_owned()))?;
+    let mut session = sample::session_over(sample::grown(time, MESSAGES)?, Box::new(FakeClock::new(time)))?;
+    let clock = SystemClock::new();
+    let mut costs = Vec::new();
+    for command in ["mail.why", "mail.thread", "mail.open"] {
+        let mut times = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let started = clock.monotonic();
+            session.run(command, &serde_json::json!({ "id": id })).map_err(UiError::Engine)?;
+            times.push(clock.monotonic().saturating_sub(started).as_secs_f64() * 1000.0);
+        }
+        times.sort_by(f64::total_cmp);
+        costs.push((command, percentile(&times, 0.5)));
+    }
+    let mut times = Vec::with_capacity(WARM_UP);
+    for _ in 0..WARM_UP {
+        let started = clock.monotonic();
+        app.mailbox_mut().refresh();
+        times.push(clock.monotonic().saturating_sub(started).as_secs_f64() * 1000.0);
+    }
+    times.sort_by(f64::total_cmp);
+    costs.push(("refresh", percentile(&times, 0.5)));
+    Ok(costs)
 }
 
 /// Runs a field of `size` for the warm-up and [`FRAMES`] frames, the pointer sweeping across it.
@@ -622,6 +693,8 @@ fn main() -> ExitCode {
         Scene::settings()
     } else if asked("--home") {
         vec![Scene::HomeSweep]
+    } else if asked("--why") {
+        vec![Scene::ReaderStep]
     } else if asked("--large") {
         Large::ALL.into_iter().flat_map(|large| [false, true].map(|scrolling| Scene::ReaderLarge { large, scrolling })).collect()
     } else {
@@ -646,6 +719,15 @@ fn main() -> ExitCode {
                     measured.shapes,
                     rows
                 );
+                if scene == Scene::ReaderStep {
+                    match step_costs() {
+                        Ok(costs) => {
+                            let costs: Vec<String> = costs.iter().map(|(what, ms)| format!("{what} {ms:.3}")).collect();
+                            println!("{:<24} median_ms of each part, run alone: {}", "", costs.join(", "));
+                        }
+                        Err(error) => eprintln!("ui_bench: {}: the parts: {error}", scene.name()),
+                    }
+                }
             }
             Err(error) => {
                 eprintln!("ui_bench: {}: {error}", scene.name());

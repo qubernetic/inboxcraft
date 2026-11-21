@@ -46,9 +46,15 @@ fn connection(state: ConnectionState) -> Value {
     }
 }
 
+/// The name a failure's `kind` has in every answer (`login_refused`), for a client that reads the kind back.
+#[must_use]
+pub fn error_kind_name(kind: ErrorKind) -> String {
+    snake(&format!("{kind:?}"))
+}
+
 /// A failure: its kind, the English sentence for logs and agents, and the folder.
 pub(crate) fn failure(kind: ErrorKind, folder: Option<FolderId>) -> Value {
-    json!({ "kind": name(kind), "message": kind.to_string(), "folder": folder.map(FolderId::get) })
+    json!({ "kind": error_kind_name(kind), "message": kind.to_string(), "folder": folder.map(FolderId::get) })
 }
 
 /// An account with what the session knows of its connection. It holds no secret: the account has none.

@@ -31,10 +31,10 @@ use crate::control::Call;
 use crate::instance::Request;
 use crate::notify::{Click, Deliver, shown};
 
-/// What the settings show: whether, which page, and the action waiting for a key.
-fn settings_now(app: &InboxApp) -> (bool, inboxcraft_ui_egui::settings::Section, Option<&'static str>) {
+/// What the settings show: whether, which page, and the action waiting for a key; and the place the window shows.
+fn settings_now(app: &InboxApp) -> (bool, inboxcraft_ui_egui::settings::Section, Option<&'static str>, inboxcraft_ui_egui::Screen) {
     let settings = app.settings();
-    (settings.is_open(), settings.section(), settings.capturing())
+    (settings.is_open(), settings.section(), settings.capturing(), app.screen())
 }
 
 /// How often InboxCraft without a window looks for the workers' events.
@@ -193,7 +193,7 @@ impl Desktop {
     }
 
     /// Draws a frame of the window, then shows an agent's ask that came in before it ([`InboxApp::act_on_agent_ask`])
-    /// unless the owner's own key or press changed the settings in this frame: the owner's wins.
+    /// unless the owner's own key or press changed the settings or the place in this frame: the owner's wins.
     pub fn frame(&mut self, ui: &mut egui::Ui) {
         let before = settings_now(&self.app);
         self.app.ui(ui);
@@ -281,8 +281,9 @@ impl Desktop {
             }
             call.answer(answer.map_err(|error| Failure::new(error.code(), error.to_string())));
         }
-        // `ui.settings.open` asks the window to show the settings: the owner's at once, an agent's newest at the end of
-        // the next frame ([`Desktop::frame`]), or at once without a window, where the owner cannot act.
+        // `ui.settings.open` and `ui.home.open` ask the window to show the settings or Home: the owner's at once, an
+        // agent's newest at the end of the next frame ([`Desktop::frame`]), or at once without a window, where the owner
+        // cannot act.
         self.app.follow_settings_asked();
         if !self.window {
             self.app.act_on_agent_ask(false);
