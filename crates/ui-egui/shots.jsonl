@@ -1,73 +1,73 @@
 # The pictures of the mail list for docs/images and the PR (ui_shot, see crates/ui-egui/src/shot.rs), in the one
 # palette of each mode.
-{"out": "docs/images/list-light.png", "mode": "light", "select": "Photos from the coast walk"}
-{"out": "docs/images/list-dark.png", "mode": "dark", "select": "Photos from the coast walk"}
-{"out": "docs/images/narrowed-light.png", "mode": "light", "narrow": 2}
-{"out": "docs/images/narrowed-dark.png", "mode": "dark", "narrow": 2}
-{"out": "docs/images/search-light.png", "mode": "light", "search": "odile"}
-{"out": "docs/images/search-dark.png", "mode": "dark", "search": "odile"}
+{"out": "docs/images/list-light.png", "mode": "light", "sample": "frames", "select": "Draft logo for the bakery"}
+{"out": "docs/images/list-dark.png", "mode": "dark", "sample": "frames", "select": "Draft logo for the bakery"}
+{"out": "docs/images/narrowed-light.png", "mode": "light", "sample": "frames", "narrow": 2}
+{"out": "docs/images/narrowed-dark.png", "mode": "dark", "sample": "frames", "narrow": 2}
+{"out": "docs/images/search-light.png", "mode": "light", "sample": "frames", "search": "bak"}
+{"out": "docs/images/search-dark.png", "mode": "dark", "sample": "frames", "search": "bak"}
 # The reader (E1.12b): a reply with its thread and quote, a newsletter before and after its pictures are allowed, a
 # link that says one place and goes to another, attachments in the full-width reader.
-{"out": "docs/images/reader-thread-light.png", "mode": "light", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
-{"out": "docs/images/reader-thread-dark.png", "mode": "dark", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
-{"out": "docs/images/reader-blocked-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service"}
-{"out": "docs/images/reader-blocked-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service"}
-{"out": "docs/images/reader-pictures-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service", "pictures": "once", "details": true}
-{"out": "docs/images/reader-pictures-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "pictures": "once", "details": true}
-{"out": "docs/images/reader-full-light.png", "mode": "light", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
-{"out": "docs/images/reader-full-dark.png", "mode": "dark", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+{"out": "docs/images/reader-thread-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Re: Thursday workshop", "quotes": true}
+{"out": "docs/images/reader-thread-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Re: Thursday workshop", "quotes": true}
+{"out": "docs/images/reader-blocked-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Studio Collective news · November"}
+{"out": "docs/images/reader-blocked-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Studio Collective news · November"}
+{"out": "docs/images/reader-pictures-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Studio Collective news · November", "pictures": "once", "details": true}
+{"out": "docs/images/reader-pictures-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Studio Collective news · November", "pictures": "once", "details": true}
+{"out": "docs/images/reader-full-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+{"out": "docs/images/reader-full-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
 # The reader's More menu open, its dividers between the groups of rows; the service mail ends with a rule (<hr>)
 # (#233).
-{"out": "docs/images/reader-more-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service", "menu": "more"}
-{"out": "docs/images/reader-more-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "menu": "more"}
+{"out": "docs/images/reader-more-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Studio Collective news · November", "menu": "more"}
+{"out": "docs/images/reader-more-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Studio Collective news · November", "menu": "more"}
 # The reader after the server took the open message away (#237): no row selected in the list, nothing open, the bare
 # empty state in the pane.
-{"out": "docs/images/reader-nothing-open-light.png", "mode": "light", "size": [1440, 900], "select": "Allotment rota for November", "act": "removed"}
-{"out": "docs/images/reader-nothing-open-dark.png", "mode": "dark", "size": [1440, 900], "select": "Allotment rota for November", "act": "removed"}
+{"out": "docs/images/reader-nothing-open-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "select": "Draft logo for the bakery", "act": "removed", "motion": "reduced"}
+{"out": "docs/images/reader-nothing-open-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "select": "Draft logo for the bakery", "act": "removed", "motion": "reduced"}
 # The reader's Move menu hung by its button's right edge, and a narrow reader at 130 % with its acts on two lines (#237).
-{"out": "docs/images/reader-move-light.png", "mode": "light", "size": [1440, 900], "select": "Photos from the coast walk", "menu": "move"}
-{"out": "docs/images/reader-move-dark.png", "mode": "dark", "size": [1440, 900], "select": "Photos from the coast walk", "menu": "move"}
-{"out": "docs/images/reader-narrow-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "select": "Draft logo for the bakery"}
-{"out": "docs/images/reader-narrow-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "select": "Draft logo for the bakery"}
+{"out": "docs/images/reader-move-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "select": "Draft logo for the bakery", "menu": "move"}
+{"out": "docs/images/reader-move-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "select": "Draft logo for the bakery", "menu": "move"}
+{"out": "docs/images/reader-narrow-130-light.png", "mode": "light", "sample": "frames", "size": [1024, 800], "text_scale": 130, "select": "Draft logo for the bakery"}
+{"out": "docs/images/reader-narrow-130-dark.png", "mode": "dark", "sample": "frames", "size": [1024, 800], "text_scale": 130, "select": "Draft logo for the bakery"}
 # The error banner over the panes, one line between them (#233).
-{"out": "docs/images/error-banner-light.png", "mode": "light", "open": {"folder": 4242}}
-{"out": "docs/images/error-banner-dark.png", "mode": "dark", "open": {"folder": 4242}}
+{"out": "docs/images/error-banner-light.png", "mode": "light", "sample": "frames", "open": {"folder": 4242}}
+{"out": "docs/images/error-banner-dark.png", "mode": "dark", "sample": "frames", "open": {"folder": 4242}}
 # The error banner in the app's own frame: under the title strip, beside the rail (#233).
-{"out": "docs/images/error-banner-strip-light.png", "mode": "light", "frame": "own", "open": {"folder": 4242}}
-{"out": "docs/images/error-banner-strip-dark.png", "mode": "dark", "frame": "own", "open": {"folder": 4242}}
+{"out": "docs/images/error-banner-strip-light.png", "mode": "light", "sample": "frames", "frame": "own", "open": {"folder": 4242}}
+{"out": "docs/images/error-banner-strip-dark.png", "mode": "dark", "sample": "frames", "frame": "own", "open": {"folder": 4242}}
 # The account picker open in a low window, so its list scrolls and shows its thumb (#233).
-{"out": "docs/images/account-picker-open-light.png", "mode": "light", "size": [1200, 600], "steps": [{"press": "Show mail of: mira@example.org"}]}
-{"out": "docs/images/account-picker-open-dark.png", "mode": "dark", "size": [1200, 600], "steps": [{"press": "Show mail of: mira@example.org"}]}
+{"out": "docs/images/account-picker-open-light.png", "mode": "light", "sample": "frames", "size": [1200, 600], "steps": [{"press": "Show mail of: odile@example.org"}]}
+{"out": "docs/images/account-picker-open-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 600], "steps": [{"press": "Show mail of: odile@example.org"}]}
 # Acting on mail (#131): the open message archived, the next one open (and read) and the toast with Undo.
-{"out": "docs/images/reader-archive-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
-{"out": "docs/images/reader-archive-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
+{"out": "docs/images/reader-archive-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "act": "archive", "motion": "reduced"}
+{"out": "docs/images/reader-archive-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "act": "archive", "motion": "reduced"}
 # The window with no account yet (#238): the welcome box in the middle, with Add account and where it leads.
-{"out": "docs/images/welcome-light.png", "mode": "light", "size": [1200, 820], "first": true}
-{"out": "docs/images/welcome-dark.png", "mode": "dark", "size": [1200, 820], "first": true}
+{"out": "docs/images/welcome-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "first": true}
+{"out": "docs/images/welcome-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "first": true}
 # Adding an account (E1.11, #238), over the sample: the form empty, typed by hand, with a port and a CalDAV address
 # typed wrong, at 130 % text, after Detect (what it asked beside the form), the check at its third step, passed, and
 # failed at the certificate. The check is scripted; nothing connects.
-{"out": "docs/images/onboard-empty-light.png", "mode": "light", "size": [1200, 820], "onboard": "empty"}
-{"out": "docs/images/onboard-empty-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "empty"}
-{"out": "docs/images/onboard-invalid-light.png", "mode": "light", "size": [1200, 820], "onboard": "invalid"}
-{"out": "docs/images/onboard-invalid-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "invalid"}
-{"out": "docs/images/onboard-form-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "onboard": "form"}
-{"out": "docs/images/onboard-form-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "onboard": "form"}
-{"out": "docs/images/onboard-form-light.png", "mode": "light", "size": [1200, 820], "onboard": "form"}
-{"out": "docs/images/onboard-form-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "form"}
-{"out": "docs/images/onboard-detected-light.png", "mode": "light", "size": [1200, 820], "onboard": "detected"}
-{"out": "docs/images/onboard-detected-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "detected"}
-{"out": "docs/images/onboard-checking-light.png", "mode": "light", "size": [1200, 820], "onboard": "checking", "motion": "reduced"}
-{"out": "docs/images/onboard-checking-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "checking", "motion": "reduced"}
-{"out": "docs/images/onboard-passed-light.png", "mode": "light", "size": [1200, 820], "onboard": "passed"}
-{"out": "docs/images/onboard-passed-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "passed"}
-{"out": "docs/images/onboard-failed-light.png", "mode": "light", "size": [1200, 820], "onboard": "failed"}
-{"out": "docs/images/onboard-failed-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "failed"}
+{"out": "docs/images/onboard-empty-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "onboard": "empty"}
+{"out": "docs/images/onboard-empty-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "onboard": "empty"}
+{"out": "docs/images/onboard-invalid-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "onboard": "invalid"}
+{"out": "docs/images/onboard-invalid-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "onboard": "invalid"}
+{"out": "docs/images/onboard-form-130-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "text_scale": 130, "onboard": "form"}
+{"out": "docs/images/onboard-form-130-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "text_scale": 130, "onboard": "form"}
+{"out": "docs/images/onboard-form-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "onboard": "form"}
+{"out": "docs/images/onboard-form-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "onboard": "form"}
+{"out": "docs/images/onboard-detected-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "onboard": "detected"}
+{"out": "docs/images/onboard-detected-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "onboard": "detected"}
+{"out": "docs/images/onboard-checking-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "onboard": "checking", "motion": "reduced"}
+{"out": "docs/images/onboard-checking-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "onboard": "checking", "motion": "reduced"}
+{"out": "docs/images/onboard-passed-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "onboard": "passed"}
+{"out": "docs/images/onboard-passed-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "onboard": "passed"}
+{"out": "docs/images/onboard-failed-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "onboard": "failed"}
+{"out": "docs/images/onboard-failed-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "onboard": "failed"}
 # The text scale (E1.15c): the list with the reader at the smallest and the largest scale.
-{"out": "docs/images/list-text-90-light.png", "mode": "light", "text_scale": 90, "select": "Photos from the coast walk"}
-{"out": "docs/images/list-text-90-dark.png", "mode": "dark", "text_scale": 90, "select": "Photos from the coast walk"}
-{"out": "docs/images/list-text-130-light.png", "mode": "light", "text_scale": 130, "select": "Photos from the coast walk"}
-{"out": "docs/images/list-text-130-dark.png", "mode": "dark", "text_scale": 130, "select": "Photos from the coast walk"}
+{"out": "docs/images/list-text-90-light.png", "mode": "light", "sample": "frames", "text_scale": 90, "select": "Draft logo for the bakery"}
+{"out": "docs/images/list-text-90-dark.png", "mode": "dark", "sample": "frames", "text_scale": 90, "select": "Draft logo for the bakery"}
+{"out": "docs/images/list-text-130-light.png", "mode": "light", "sample": "frames", "text_scale": 130, "select": "Draft logo for the bakery"}
+{"out": "docs/images/list-text-130-dark.png", "mode": "dark", "sample": "frames", "text_scale": 130, "select": "Draft logo for the bakery"}
 # The icon set (E1.15d): every icon in Phosphor Regular at 24 px (text colour), 16 px (accent) and 14 px (muted).
 {"out": "docs/images/icons-light.png", "mode": "light", "icons": true, "scale": 2}
 {"out": "docs/images/icons-dark.png", "mode": "dark", "icons": true, "scale": 2}
@@ -100,333 +100,333 @@
 {"out": "docs/images/components-index-light.png", "mode": "light", "index": true}
 {"out": "docs/images/components-index-dark.png", "mode": "dark", "index": true}
 # The appearance settings page (E1.16b).
-{"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true, "motion": "reduced"}
-{"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true, "motion": "reduced"}
+{"out": "docs/images/settings-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "settings": true, "motion": "reduced"}
+{"out": "docs/images/settings-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "settings": true, "motion": "reduced"}
 # The settings pages (#238): the sections not shot elsewhere, dark and light; Appearance and Shortcuts at 130 %.
-{"out": "docs/images/settings-accounts-light.png", "mode": "light", "size": [1200, 820], "section": "accounts"}
-{"out": "docs/images/settings-accounts-dark.png", "mode": "dark", "size": [1200, 820], "section": "accounts"}
-{"out": "docs/images/settings-calendar-light.png", "mode": "light", "size": [1200, 820], "section": "calendar"}
-{"out": "docs/images/settings-calendar-dark.png", "mode": "dark", "size": [1200, 820], "section": "calendar"}
-{"out": "docs/images/settings-calendar-editor-small-light.png", "mode": "light", "size": [1440, 900], "event_editor": "small", "section": "calendar"}
-{"out": "docs/images/settings-calendar-editor-small-dark.png", "mode": "dark", "size": [1440, 900], "event_editor": "small", "section": "calendar"}
-{"out": "docs/images/settings-calendar-editor-window-light.png", "mode": "light", "size": [1440, 900], "event_editor": "window", "section": "calendar"}
-{"out": "docs/images/settings-calendar-editor-window-dark.png", "mode": "dark", "size": [1440, 900], "event_editor": "window", "section": "calendar"}
-{"out": "docs/images/settings-privacy-light.png", "mode": "light", "size": [1200, 820], "section": "privacy"}
-{"out": "docs/images/settings-privacy-dark.png", "mode": "dark", "size": [1200, 820], "section": "privacy"}
-{"out": "docs/images/settings-about-light.png", "mode": "light", "size": [1200, 820], "section": "about"}
-{"out": "docs/images/settings-about-dark.png", "mode": "dark", "size": [1200, 820], "section": "about"}
-{"out": "docs/images/settings-ai-light.png", "mode": "light", "size": [1200, 820], "section": "ai"}
-{"out": "docs/images/settings-ai-dark.png", "mode": "dark", "size": [1200, 820], "section": "ai"}
-{"out": "docs/images/settings-plugins-light.png", "mode": "light", "size": [1200, 820], "section": "plugins"}
-{"out": "docs/images/settings-plugins-dark.png", "mode": "dark", "size": [1200, 820], "section": "plugins"}
-{"out": "docs/images/settings-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "section": "appearance", "motion": "reduced"}
-{"out": "docs/images/settings-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "section": "appearance", "motion": "reduced"}
+{"out": "docs/images/settings-accounts-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "section": "accounts"}
+{"out": "docs/images/settings-accounts-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "section": "accounts"}
+{"out": "docs/images/settings-calendar-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "section": "calendar"}
+{"out": "docs/images/settings-calendar-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "section": "calendar"}
+{"out": "docs/images/settings-calendar-editor-small-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "event_editor": "small", "section": "calendar"}
+{"out": "docs/images/settings-calendar-editor-small-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "event_editor": "small", "section": "calendar"}
+{"out": "docs/images/settings-calendar-editor-window-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "event_editor": "window", "section": "calendar"}
+{"out": "docs/images/settings-calendar-editor-window-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "event_editor": "window", "section": "calendar"}
+{"out": "docs/images/settings-privacy-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "section": "privacy"}
+{"out": "docs/images/settings-privacy-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "section": "privacy"}
+{"out": "docs/images/settings-about-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "section": "about"}
+{"out": "docs/images/settings-about-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "section": "about"}
+{"out": "docs/images/settings-ai-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "section": "ai"}
+{"out": "docs/images/settings-ai-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "section": "ai"}
+{"out": "docs/images/settings-plugins-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "section": "plugins"}
+{"out": "docs/images/settings-plugins-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "section": "plugins"}
+{"out": "docs/images/settings-130-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "text_scale": 130, "section": "appearance", "motion": "reduced"}
+{"out": "docs/images/settings-130-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "text_scale": 130, "section": "appearance", "motion": "reduced"}
 # The appearance page in a 1440 window, as its frame (#328).
-{"out": "docs/images/settings-appearance-1440-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "section": "appearance", "motion": "reduced"}
-{"out": "docs/images/settings-appearance-1440-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "section": "appearance", "motion": "reduced"}
-{"out": "docs/images/shortcuts-130-light.png", "mode": "light", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
-{"out": "docs/images/shortcuts-130-dark.png", "mode": "dark", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
+{"out": "docs/images/settings-appearance-1440-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "sync": "synced", "section": "appearance", "motion": "reduced"}
+{"out": "docs/images/settings-appearance-1440-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "sync": "synced", "section": "appearance", "motion": "reduced"}
+{"out": "docs/images/shortcuts-130-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
+{"out": "docs/images/shortcuts-130-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "text_scale": 130, "section": "shortcuts"}
 # Settings in a narrow window (#373), as the Sizes page's settings-800 and settings-1000-130 frames: at 800 one pane,
 # the list of sections (← Settings pressed) or a page alone; at 1000 with 130 % text the list beside a narrower page.
-{"out": "docs/images/settings-800-sections-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "appearance", "steps": [{"press": "← Settings"}]}
-{"out": "docs/images/settings-800-sections-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "appearance", "steps": [{"press": "← Settings"}]}
-{"out": "docs/images/settings-800-appearance-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "appearance"}
-{"out": "docs/images/settings-800-appearance-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "appearance"}
-{"out": "docs/images/settings-800-accounts-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "accounts"}
-{"out": "docs/images/settings-800-accounts-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "accounts"}
-{"out": "docs/images/settings-800-notifications-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "notifications"}
-{"out": "docs/images/settings-800-notifications-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "notifications"}
-{"out": "docs/images/settings-800-triage-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "triage"}
-{"out": "docs/images/settings-800-triage-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "triage"}
-{"out": "docs/images/settings-800-sending-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "sending"}
-{"out": "docs/images/settings-800-sending-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "sending"}
-{"out": "docs/images/settings-800-templates-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "templates"}
-{"out": "docs/images/settings-800-templates-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "templates"}
-{"out": "docs/images/settings-800-scheduled-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "scheduled"}
-{"out": "docs/images/settings-800-scheduled-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "scheduled"}
-{"out": "docs/images/settings-800-calendar-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "calendar"}
-{"out": "docs/images/settings-800-calendar-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "calendar"}
-{"out": "docs/images/settings-800-shortcuts-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "shortcuts"}
-{"out": "docs/images/settings-800-shortcuts-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "shortcuts"}
-{"out": "docs/images/settings-800-privacy-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "privacy"}
-{"out": "docs/images/settings-800-privacy-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "privacy"}
-{"out": "docs/images/settings-800-about-light.png", "mode": "light", "size": [800, 900], "sync": "synced", "section": "about"}
-{"out": "docs/images/settings-800-about-dark.png", "mode": "dark", "size": [800, 900], "sync": "synced", "section": "about"}
-{"out": "docs/images/settings-1000-130-appearance-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "appearance"}
-{"out": "docs/images/settings-1000-130-appearance-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "appearance"}
-{"out": "docs/images/settings-1000-130-accounts-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "accounts"}
-{"out": "docs/images/settings-1000-130-accounts-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "accounts"}
-{"out": "docs/images/settings-1000-130-notifications-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "notifications"}
-{"out": "docs/images/settings-1000-130-notifications-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "notifications"}
-{"out": "docs/images/settings-1000-130-triage-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "triage"}
-{"out": "docs/images/settings-1000-130-triage-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "triage"}
-{"out": "docs/images/settings-1000-130-sending-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "sending"}
-{"out": "docs/images/settings-1000-130-sending-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "sending"}
-{"out": "docs/images/settings-1000-130-templates-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "templates"}
-{"out": "docs/images/settings-1000-130-templates-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "templates"}
-{"out": "docs/images/settings-1000-130-scheduled-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "scheduled"}
-{"out": "docs/images/settings-1000-130-scheduled-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "scheduled"}
-{"out": "docs/images/settings-1000-130-calendar-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "calendar"}
-{"out": "docs/images/settings-1000-130-calendar-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "calendar"}
-{"out": "docs/images/settings-1000-130-shortcuts-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "shortcuts"}
-{"out": "docs/images/settings-1000-130-shortcuts-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "shortcuts"}
-{"out": "docs/images/settings-1000-130-privacy-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "privacy"}
-{"out": "docs/images/settings-1000-130-privacy-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "privacy"}
-{"out": "docs/images/settings-1000-130-about-light.png", "mode": "light", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "about"}
-{"out": "docs/images/settings-1000-130-about-dark.png", "mode": "dark", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "about"}
+{"out": "docs/images/settings-800-sections-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "appearance", "steps": [{"press": "← Settings"}]}
+{"out": "docs/images/settings-800-sections-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "appearance", "steps": [{"press": "← Settings"}]}
+{"out": "docs/images/settings-800-appearance-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "appearance"}
+{"out": "docs/images/settings-800-appearance-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "appearance"}
+{"out": "docs/images/settings-800-accounts-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "accounts"}
+{"out": "docs/images/settings-800-accounts-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "accounts"}
+{"out": "docs/images/settings-800-notifications-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "notifications"}
+{"out": "docs/images/settings-800-notifications-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "notifications"}
+{"out": "docs/images/settings-800-triage-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "triage"}
+{"out": "docs/images/settings-800-triage-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "triage"}
+{"out": "docs/images/settings-800-sending-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "sending"}
+{"out": "docs/images/settings-800-sending-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "sending"}
+{"out": "docs/images/settings-800-templates-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "templates"}
+{"out": "docs/images/settings-800-templates-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "templates"}
+{"out": "docs/images/settings-800-scheduled-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "scheduled"}
+{"out": "docs/images/settings-800-scheduled-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "scheduled"}
+{"out": "docs/images/settings-800-calendar-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "calendar"}
+{"out": "docs/images/settings-800-calendar-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "calendar"}
+{"out": "docs/images/settings-800-shortcuts-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "shortcuts"}
+{"out": "docs/images/settings-800-shortcuts-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "shortcuts"}
+{"out": "docs/images/settings-800-privacy-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "privacy"}
+{"out": "docs/images/settings-800-privacy-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "privacy"}
+{"out": "docs/images/settings-800-about-light.png", "mode": "light", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "about"}
+{"out": "docs/images/settings-800-about-dark.png", "mode": "dark", "sample": "frames", "size": [800, 900], "sync": "synced", "section": "about"}
+{"out": "docs/images/settings-1000-130-appearance-light.png", "mode": "light", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "appearance"}
+{"out": "docs/images/settings-1000-130-appearance-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "appearance"}
+{"out": "docs/images/settings-1000-130-accounts-light.png", "mode": "light", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "accounts"}
+{"out": "docs/images/settings-1000-130-accounts-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "accounts"}
+{"out": "docs/images/settings-1000-130-notifications-light.png", "mode": "light", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "notifications"}
+{"out": "docs/images/settings-1000-130-notifications-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "notifications"}
+{"out": "docs/images/settings-1000-130-triage-light.png", "mode": "light", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "triage"}
+{"out": "docs/images/settings-1000-130-triage-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "triage"}
+{"out": "docs/images/settings-1000-130-sending-light.png", "mode": "light", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "sending"}
+{"out": "docs/images/settings-1000-130-sending-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "sending"}
+{"out": "docs/images/settings-1000-130-templates-light.png", "mode": "light", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "templates"}
+{"out": "docs/images/settings-1000-130-templates-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "templates"}
+{"out": "docs/images/settings-1000-130-scheduled-light.png", "mode": "light", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "scheduled"}
+{"out": "docs/images/settings-1000-130-scheduled-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "scheduled"}
+{"out": "docs/images/settings-1000-130-calendar-light.png", "mode": "light", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "calendar"}
+{"out": "docs/images/settings-1000-130-calendar-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "calendar"}
+{"out": "docs/images/settings-1000-130-shortcuts-light.png", "mode": "light", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "shortcuts"}
+{"out": "docs/images/settings-1000-130-shortcuts-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "shortcuts"}
+{"out": "docs/images/settings-1000-130-privacy-light.png", "mode": "light", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "privacy"}
+{"out": "docs/images/settings-1000-130-privacy-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "privacy"}
+{"out": "docs/images/settings-1000-130-about-light.png", "mode": "light", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "about"}
+{"out": "docs/images/settings-1000-130-about-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 900], "sync": "synced", "text_scale": 130, "section": "about"}
 # The message list (E1.17a): the screener and group cards and the hover actions on the row selected by
 # keyboard, with invented data the app does not show yet.
-{"out": "docs/images/list-showcase-light.png", "mode": "light", "size": [1400, 860], "showcase": true, "step": 2}
-{"out": "docs/images/list-showcase-dark.png", "mode": "dark", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "showcase": true, "step": 2}
 # A hovered row beside the reader (#235): its hover actions on the first line right of its middle, its flag left of
 # them, its time given way.
-{"out": "docs/images/list-hover-light.png", "mode": "light", "size": [1400, 860], "select": "Photos from the coast walk", "pointer": [470, 335]}
-{"out": "docs/images/list-hover-dark.png", "mode": "dark", "size": [1400, 860], "select": "Photos from the coast walk", "pointer": [470, 335]}
+{"out": "docs/images/list-hover-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "pointer": [470, 335]}
+{"out": "docs/images/list-hover-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "pointer": [470, 335]}
 # The row the keyboard is on, with the app's own keys (#235): its time kept, its actions left of it.
-{"out": "docs/images/list-keyed-light.png", "mode": "light", "size": [1400, 860], "step": 2}
-{"out": "docs/images/list-keyed-dark.png", "mode": "dark", "size": [1400, 860], "step": 2}
-{"out": "docs/images/list-slide-light.png", "mode": "light", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
-{"out": "docs/images/list-slide-dark.png", "mode": "dark", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
-{"out": "docs/images/list-toast-light.png", "mode": "light", "size": [1400, 860], "step": 1, "act": "done"}
-{"out": "docs/images/list-toast-dark.png", "mode": "dark", "size": [1400, 860], "step": 1, "act": "done"}
+{"out": "docs/images/list-keyed-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "step": 2}
+{"out": "docs/images/list-keyed-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "step": 2}
+{"out": "docs/images/list-slide-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-slide-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-toast-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "step": 1, "act": "done", "motion": "reduced"}
+{"out": "docs/images/list-toast-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "step": 1, "act": "done", "motion": "reduced"}
 # The status line synced and syncing (#309): the sample is offline without the accounts' workers telling it otherwise.
-{"out": "docs/images/status-line-synced-light.png", "mode": "light", "size": [1400, 860], "sync": "synced"}
-{"out": "docs/images/status-line-synced-dark.png", "mode": "dark", "size": [1400, 860], "sync": "synced"}
-{"out": "docs/images/status-line-syncing-light.png", "mode": "light", "size": [1400, 860], "sync": "syncing", "motion": "reduced"}
-{"out": "docs/images/status-line-syncing-dark.png", "mode": "dark", "size": [1400, 860], "sync": "syncing", "motion": "reduced"}
+{"out": "docs/images/status-line-synced-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "sync": "synced"}
+{"out": "docs/images/status-line-synced-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "sync": "synced"}
+{"out": "docs/images/status-line-syncing-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "sync": "syncing", "motion": "reduced"}
+{"out": "docs/images/status-line-syncing-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "sync": "syncing", "motion": "reduced"}
 # The status line's other states and the window at 1100 wide, to pair with their frames (#325).
-{"out": "docs/images/status-line-offline-light.png", "mode": "light", "size": [1440, 900]}
-{"out": "docs/images/status-line-offline-dark.png", "mode": "dark", "size": [1440, 900]}
-{"out": "docs/images/status-line-outbox-waiting-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "outbox": "waiting"}
-{"out": "docs/images/status-line-outbox-waiting-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "outbox": "waiting"}
-{"out": "docs/images/status-line-send-countdown-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "outbox": "countdown"}
-{"out": "docs/images/status-line-send-countdown-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "outbox": "countdown"}
-{"out": "docs/images/status-line-undo-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "step": 1, "act": "done"}
-{"out": "docs/images/status-line-undo-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "step": 1, "act": "done"}
-{"out": "docs/images/status-line-discard-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "compose": "discarded"}
-{"out": "docs/images/status-line-discard-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "compose": "discarded"}
-{"out": "docs/images/status-line-error-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "open": {"folder": 4242}}
-{"out": "docs/images/status-line-error-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "open": {"folder": 4242}}
-{"out": "docs/images/status-line-notice-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "notice": "Link copied: https://example.org/open-day"}
-{"out": "docs/images/status-line-notice-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "notice": "Link copied: https://example.org/open-day"}
-{"out": "docs/images/status-line-account-refused-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "fail": "refused"}
-{"out": "docs/images/status-line-account-refused-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "fail": "refused"}
-{"out": "docs/images/status-line-everything-failing-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "fail": "everything"}
-{"out": "docs/images/status-line-everything-failing-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "fail": "everything"}
+{"out": "docs/images/status-line-offline-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "sync": "offline"}
+{"out": "docs/images/status-line-offline-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "sync": "offline"}
+{"out": "docs/images/status-line-outbox-waiting-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "sync": "synced", "outbox": "waiting"}
+{"out": "docs/images/status-line-outbox-waiting-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "sync": "synced", "outbox": "waiting"}
+{"out": "docs/images/status-line-send-countdown-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "sync": "synced", "outbox": "countdown", "motion": "reduced"}
+{"out": "docs/images/status-line-send-countdown-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "sync": "synced", "outbox": "countdown", "motion": "reduced"}
+{"out": "docs/images/status-line-undo-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "sync": "synced", "step": 1, "act": "done", "motion": "reduced"}
+{"out": "docs/images/status-line-undo-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "sync": "synced", "step": 1, "act": "done", "motion": "reduced"}
+{"out": "docs/images/status-line-discard-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "sync": "synced", "compose": "discarded", "motion": "reduced"}
+{"out": "docs/images/status-line-discard-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "sync": "synced", "compose": "discarded", "motion": "reduced"}
+{"out": "docs/images/status-line-error-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "sync": "synced", "open": {"folder": 4242}}
+{"out": "docs/images/status-line-error-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "sync": "synced", "open": {"folder": 4242}}
+{"out": "docs/images/status-line-notice-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "sync": "synced", "notice": "Link copied: https://example.org/open-day"}
+{"out": "docs/images/status-line-notice-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "sync": "synced", "notice": "Link copied: https://example.org/open-day"}
+{"out": "docs/images/status-line-account-refused-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "sync": "synced", "fail": "refused"}
+{"out": "docs/images/status-line-account-refused-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "sync": "synced", "fail": "refused"}
+{"out": "docs/images/status-line-everything-failing-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "sync": "synced", "fail": "everything"}
+{"out": "docs/images/status-line-everything-failing-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "sync": "synced", "fail": "everything"}
 # The window with every account failing and a message open (#328).
-{"out": "docs/images/shell-everything-failing-light.png", "mode": "light", "size": [1440, 900], "sync": "synced", "fail": "everything", "select": "Photos from the coast walk"}
-{"out": "docs/images/shell-everything-failing-dark.png", "mode": "dark", "size": [1440, 900], "sync": "synced", "fail": "everything", "select": "Photos from the coast walk"}
-{"out": "docs/images/size-1100-frame-light.png", "mode": "light", "size": [1100, 900], "sync": "synced"}
-{"out": "docs/images/size-1100-frame-dark.png", "mode": "dark", "size": [1100, 900], "sync": "synced"}
-{"out": "docs/images/size-1100-inbox-reader-light.png", "mode": "light", "size": [1100, 900], "sync": "synced", "select": "Photos from the coast walk"}
-{"out": "docs/images/size-1100-inbox-reader-dark.png", "mode": "dark", "size": [1100, 900], "sync": "synced", "select": "Photos from the coast walk"}
-{"out": "docs/images/size-1100-composer-light.png", "mode": "light", "size": [1100, 900], "sync": "synced", "compose": "new"}
-{"out": "docs/images/size-1100-composer-dark.png", "mode": "dark", "size": [1100, 900], "sync": "synced", "compose": "new"}
-{"out": "docs/images/size-1100-calendar-light.png", "mode": "light", "size": [1100, 900], "sync": "synced", "calendar": true}
-{"out": "docs/images/size-1100-calendar-dark.png", "mode": "dark", "size": [1100, 900], "sync": "synced", "calendar": true}
+{"out": "docs/images/shell-everything-failing-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "sync": "synced", "fail": "everything", "select": "Draft logo for the bakery"}
+{"out": "docs/images/shell-everything-failing-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "sync": "synced", "fail": "everything", "select": "Draft logo for the bakery"}
+{"out": "docs/images/size-1100-frame-light.png", "mode": "light", "sample": "frames", "size": [1100, 900], "sync": "synced"}
+{"out": "docs/images/size-1100-frame-dark.png", "mode": "dark", "sample": "frames", "size": [1100, 900], "sync": "synced"}
+{"out": "docs/images/size-1100-inbox-reader-light.png", "mode": "light", "sample": "frames", "size": [1100, 900], "sync": "synced", "select": "Draft logo for the bakery"}
+{"out": "docs/images/size-1100-inbox-reader-dark.png", "mode": "dark", "sample": "frames", "size": [1100, 900], "sync": "synced", "select": "Draft logo for the bakery"}
+{"out": "docs/images/size-1100-composer-light.png", "mode": "light", "sample": "frames", "size": [1100, 900], "sync": "synced", "compose": "new"}
+{"out": "docs/images/size-1100-composer-dark.png", "mode": "dark", "sample": "frames", "size": [1100, 900], "sync": "synced", "compose": "new"}
+{"out": "docs/images/size-1100-calendar-light.png", "mode": "light", "sample": "frames", "size": [1100, 900], "sync": "synced", "calendar": true}
+{"out": "docs/images/size-1100-calendar-dark.png", "mode": "dark", "sample": "frames", "size": [1100, 900], "sync": "synced", "calendar": true}
 # The reader on the design system (E1.17b): the mail-action toolbar, the subject with who wrote, the
 # thread as cards and the open message's attachments with Reply, Reply all and Forward, in the full-width reader.
 # The command line's commands, the Shortcuts page (one action waiting for a key) and the calendar's empty state (E3.10).
-{"out": "docs/images/command-line-light.png", "mode": "light", "size": [1440, 900], "command": ">sn"}
-{"out": "docs/images/command-line-dark.png", "mode": "dark", "size": [1440, 900], "command": ">sn"}
-{"out": "docs/images/command-line-mode-light.png", "mode": "light", "size": [1200, 820], "command": ">mode"}
-{"out": "docs/images/command-line-mode-dark.png", "mode": "dark", "size": [1200, 820], "command": ">mode"}
+{"out": "docs/images/command-line-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "command": ">sn"}
+{"out": "docs/images/command-line-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "command": ">sn"}
+{"out": "docs/images/command-line-mode-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "command": ">mode"}
+{"out": "docs/images/command-line-mode-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "command": ">mode"}
 # The command line with nothing typed (GO TO) and with a search typed (mail, people, mailboxes) (#397).
-{"out": "docs/images/command-line-focus-light.png", "mode": "light", "size": [1440, 900], "command": ""}
-{"out": "docs/images/command-line-focus-dark.png", "mode": "dark", "size": [1440, 900], "command": ""}
-{"out": "docs/images/command-line-search-light.png", "mode": "light", "size": [1440, 900], "command": "bakery"}
-{"out": "docs/images/command-line-search-dark.png", "mode": "dark", "size": [1440, 900], "command": "bakery"}
-{"out": "docs/images/shortcuts-light.png", "mode": "light", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
-{"out": "docs/images/shortcuts-dark.png", "mode": "dark", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
-{"out": "docs/images/calendar-empty-light.png", "mode": "light", "size": [1200, 820], "first": true, "calendar": true}
-{"out": "docs/images/calendar-empty-dark.png", "mode": "dark", "size": [1200, 820], "first": true, "calendar": true}
+{"out": "docs/images/command-line-focus-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "command": ""}
+{"out": "docs/images/command-line-focus-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "command": ""}
+{"out": "docs/images/command-line-search-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "command": "bakery"}
+{"out": "docs/images/command-line-search-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "command": "bakery"}
+{"out": "docs/images/shortcuts-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
+{"out": "docs/images/shortcuts-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
+{"out": "docs/images/calendar-empty-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "first": true, "calendar": true}
+{"out": "docs/images/calendar-empty-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "first": true, "calendar": true}
 # The calendar's views over the sample's calendars, an event picked with its details in the side panel (E4.4).
-{"out": "docs/images/calendar-week-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "week", "event": "Ferry to the island"}
-{"out": "docs/images/calendar-week-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "week", "event": "Ferry to the island"}
-{"out": "docs/images/calendar-month-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "month", "event": "Coast trip"}
-{"out": "docs/images/calendar-month-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "month", "event": "Coast trip"}
-{"out": "docs/images/calendar-agenda-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "agenda"}
-{"out": "docs/images/calendar-agenda-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "agenda"}
-{"out": "docs/images/calendar-day-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "day", "event": "Call with Petra about the logo"}
-{"out": "docs/images/calendar-day-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "day", "event": "Call with Petra about the logo"}
+{"out": "docs/images/calendar-week-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "calendar_view": "week", "event": "Design review"}
+{"out": "docs/images/calendar-week-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "calendar_view": "week", "event": "Design review"}
+{"out": "docs/images/calendar-month-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "calendar_view": "month", "event": "Design review"}
+{"out": "docs/images/calendar-month-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "calendar_view": "month", "event": "Design review"}
+{"out": "docs/images/calendar-agenda-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "calendar_view": "agenda"}
+{"out": "docs/images/calendar-agenda-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "calendar_view": "agenda"}
+{"out": "docs/images/calendar-day-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "calendar_view": "day", "event": "Design review"}
+{"out": "docs/images/calendar-day-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "calendar_view": "day", "event": "Design review"}
 # The event editor: a new event, an edit of an event with guests (the notify prompt), a deleted event's toast (E4.5);
 # someone else's event, read-only (#344).
-{"out": "docs/images/event-new-light.png", "mode": "light", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "edit_event": "new"}
-{"out": "docs/images/event-new-dark.png", "mode": "dark", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "edit_event": "new"}
-{"out": "docs/images/event-edit-light.png", "mode": "light", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Call with Petra about the logo", "edit_event": "edit"}
-{"out": "docs/images/event-edit-dark.png", "mode": "dark", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Call with Petra about the logo", "edit_event": "edit"}
-{"out": "docs/images/event-read-only-light.png", "mode": "light", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Allotment work party", "edit_event": "edit"}
-{"out": "docs/images/event-read-only-dark.png", "mode": "dark", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Allotment work party", "edit_event": "edit"}
-{"out": "docs/images/event-deleted-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "week", "event": "Dentist", "delete_event": true}
-{"out": "docs/images/event-deleted-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "week", "event": "Dentist", "delete_event": true}
+{"out": "docs/images/event-new-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "edit_event": "new"}
+{"out": "docs/images/event-new-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "edit_event": "new"}
+{"out": "docs/images/event-edit-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
+{"out": "docs/images/event-edit-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
+{"out": "docs/images/event-read-only-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
+{"out": "docs/images/event-read-only-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
+{"out": "docs/images/event-deleted-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "calendar_view": "week", "event": "Dentist", "delete_event": true, "motion": "reduced"}
+{"out": "docs/images/event-deleted-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "calendar_view": "week", "event": "Dentist", "delete_event": true, "motion": "reduced"}
 # The event editor full in the calendar's place, the event's day beside it (#370): new, an edit, someone
 # else's event read-only.
-{"out": "docs/images/event-full-new-light.png", "mode": "light", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "edit_event": "new"}
-{"out": "docs/images/event-full-new-dark.png", "mode": "dark", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "edit_event": "new"}
-{"out": "docs/images/event-full-edit-light.png", "mode": "light", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Call with Petra about the logo", "edit_event": "edit"}
-{"out": "docs/images/event-full-edit-dark.png", "mode": "dark", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Call with Petra about the logo", "edit_event": "edit"}
-{"out": "docs/images/event-full-read-only-light.png", "mode": "light", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Allotment work party", "edit_event": "edit"}
-{"out": "docs/images/event-full-read-only-dark.png", "mode": "dark", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Allotment work party", "edit_event": "edit"}
+{"out": "docs/images/event-full-new-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "edit_event": "new"}
+{"out": "docs/images/event-full-new-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "edit_event": "new"}
+{"out": "docs/images/event-full-edit-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
+{"out": "docs/images/event-full-edit-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
+{"out": "docs/images/event-full-read-only-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
+{"out": "docs/images/event-full-read-only-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
 # The composer in the reader's place (E2.3): new, written, an address that is none, the suggestions under a
 # half-typed name, the floating panel over the reader, and the Sending page with a signature.
-{"out": "docs/images/compose-new-light.png", "mode": "light", "size": [1400, 860], "compose": "new"}
-{"out": "docs/images/compose-new-dark.png", "mode": "dark", "size": [1400, 860], "compose": "new"}
-{"out": "docs/images/compose-written-light.png", "mode": "light", "size": [1400, 860], "compose": "written"}
-{"out": "docs/images/compose-written-dark.png", "mode": "dark", "size": [1400, 860], "compose": "written"}
-{"out": "docs/images/compose-bad-address-light.png", "mode": "light", "size": [1400, 860], "compose": "bad"}
-{"out": "docs/images/compose-bad-address-dark.png", "mode": "dark", "size": [1400, 860], "compose": "bad"}
-{"out": "docs/images/compose-suggest-light.png", "mode": "light", "size": [1400, 860], "compose": "suggest"}
-{"out": "docs/images/compose-suggest-dark.png", "mode": "dark", "size": [1400, 860], "compose": "suggest"}
-{"out": "docs/images/compose-floating-light.png", "mode": "light", "size": [1400, 860], "compose": "floating"}
-{"out": "docs/images/compose-floating-dark.png", "mode": "dark", "size": [1400, 860], "compose": "floating"}
-{"out": "docs/images/compose-folded-light.png", "mode": "light", "size": [1400, 860], "compose": "folded"}
-{"out": "docs/images/compose-folded-dark.png", "mode": "dark", "size": [1400, 860], "compose": "folded"}
+{"out": "docs/images/compose-new-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "new"}
+{"out": "docs/images/compose-new-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "compose": "new"}
+{"out": "docs/images/compose-written-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "written"}
+{"out": "docs/images/compose-written-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "compose": "written"}
+{"out": "docs/images/compose-bad-address-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "bad"}
+{"out": "docs/images/compose-bad-address-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "compose": "bad"}
+{"out": "docs/images/compose-suggest-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "suggest"}
+{"out": "docs/images/compose-suggest-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "compose": "suggest"}
+{"out": "docs/images/compose-floating-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "floating"}
+{"out": "docs/images/compose-floating-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "compose": "floating"}
+{"out": "docs/images/compose-folded-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "folded"}
+{"out": "docs/images/compose-folded-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "compose": "folded"}
 # Reply and templates (E2.4, E2.5): a reply to Odile's rota with a line written over the quote, docked and floating
 # over a message (its quote drawn as the quote block, #389); a template whose
 # blank is still to fill in, Send blocked until it is.
-{"out": "docs/images/compose-reply-light.png", "mode": "light", "size": [1400, 860], "compose": "reply"}
-{"out": "docs/images/compose-reply-dark.png", "mode": "dark", "size": [1400, 860], "compose": "reply"}
-{"out": "docs/images/compose-reply-floating-light.png", "mode": "light", "size": [1400, 860], "compose": "reply-floating"}
-{"out": "docs/images/compose-reply-floating-dark.png", "mode": "dark", "size": [1400, 860], "compose": "reply-floating"}
-{"out": "docs/images/compose-template-light.png", "mode": "light", "size": [1400, 860], "compose": "template"}
-{"out": "docs/images/compose-template-dark.png", "mode": "dark", "size": [1400, 860], "compose": "template"}
-{"out": "docs/images/settings-sending-light.png", "mode": "light", "size": [1200, 820], "sending": true}
-{"out": "docs/images/settings-sending-dark.png", "mode": "dark", "size": [1200, 820], "sending": true}
+{"out": "docs/images/compose-reply-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "reply"}
+{"out": "docs/images/compose-reply-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "compose": "reply"}
+{"out": "docs/images/compose-reply-floating-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "reply-floating"}
+{"out": "docs/images/compose-reply-floating-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "compose": "reply-floating"}
+{"out": "docs/images/compose-template-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "template"}
+{"out": "docs/images/compose-template-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "compose": "template"}
+{"out": "docs/images/settings-sending-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "sending": true}
+{"out": "docs/images/settings-sending-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "sending": true}
 # Sending scrolled to "Your name" (#349): how Home greets you, the keyboard on the first word.
-{"out": "docs/images/settings-sending-greeting-light.png", "mode": "light", "size": [1200, 820], "sending": true, "steps": [{"shift_tab": 1}]}
-{"out": "docs/images/settings-sending-greeting-dark.png", "mode": "dark", "size": [1200, 820], "sending": true, "steps": [{"shift_tab": 1}]}
+{"out": "docs/images/settings-sending-greeting-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "sending": true, "steps": [{"shift_tab": 1}]}
+{"out": "docs/images/settings-sending-greeting-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "sending": true, "steps": [{"shift_tab": 1}]}
 # The Templates page under Sending (#317): the list, a delete asked in place, the form on a template.
-{"out": "docs/images/settings-templates-list-light.png", "mode": "light", "size": [1440, 900], "section": "templates"}
-{"out": "docs/images/settings-templates-list-dark.png", "mode": "dark", "size": [1440, 900], "section": "templates"}
-{"out": "docs/images/settings-templates-delete-confirm-light.png", "mode": "light", "size": [1440, 900], "section": "templates", "steps": [{"press": "Delete the template Away from the studio"}]}
-{"out": "docs/images/settings-templates-delete-confirm-dark.png", "mode": "dark", "size": [1440, 900], "section": "templates", "steps": [{"press": "Delete the template Away from the studio"}]}
-{"out": "docs/images/settings-templates-editing-light.png", "mode": "light", "size": [1440, 900], "section": "templates", "steps": [{"press": "Edit the template Workshop invitation"}]}
-{"out": "docs/images/settings-templates-editing-dark.png", "mode": "dark", "size": [1440, 900], "section": "templates", "steps": [{"press": "Edit the template Workshop invitation"}]}
+{"out": "docs/images/settings-templates-list-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "section": "templates"}
+{"out": "docs/images/settings-templates-list-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "section": "templates"}
+{"out": "docs/images/settings-templates-delete-confirm-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "section": "templates", "steps": [{"press": "Delete the template Away from the studio"}]}
+{"out": "docs/images/settings-templates-delete-confirm-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "section": "templates", "steps": [{"press": "Delete the template Away from the studio"}]}
+{"out": "docs/images/settings-templates-editing-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "section": "templates", "steps": [{"press": "Edit the template Workshop invitation"}]}
+{"out": "docs/images/settings-templates-editing-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "section": "templates", "steps": [{"press": "Edit the template Workshop invitation"}]}
 # The Scheduled page under Sending (#317): the list, a cancel asked in place, nothing waiting.
-{"out": "docs/images/settings-scheduled-list-light.png", "mode": "light", "size": [1440, 900], "section": "scheduled"}
-{"out": "docs/images/settings-scheduled-list-dark.png", "mode": "dark", "size": [1440, 900], "section": "scheduled"}
-{"out": "docs/images/settings-scheduled-cancel-confirm-light.png", "mode": "light", "size": [1440, 900], "section": "scheduled", "steps": [{"press": "Cancel the send Fri 11:00: Thank-you cards: the proof"}]}
-{"out": "docs/images/settings-scheduled-cancel-confirm-dark.png", "mode": "dark", "size": [1440, 900], "section": "scheduled", "steps": [{"press": "Cancel the send Fri 11:00: Thank-you cards: the proof"}]}
-{"out": "docs/images/screener-senders-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
-{"out": "docs/images/screener-accepted-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps", "act": "accept"}
-{"out": "docs/images/grouped-cards-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "act": "newsletters"}
-{"out": "docs/images/grouped-list-light.png", "mode": "light", "size": [1400, 860], "view": "grouped"}
-{"out": "docs/images/settings-triage-light.png", "mode": "light", "size": [1400, 860], "triage": true}
-{"out": "docs/images/screener-senders-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
-{"out": "docs/images/screener-accepted-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps", "act": "accept"}
-{"out": "docs/images/grouped-cards-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "newsletters"}
-{"out": "docs/images/grouped-list-dark.png", "mode": "dark", "size": [1400, 860], "view": "grouped"}
-{"out": "docs/images/settings-triage-dark.png", "mode": "dark", "size": [1400, 860], "triage": true}
-{"out": "docs/images/settings-notifications-light.png", "mode": "light", "size": [1400, 860], "notifications": true}
-{"out": "docs/images/settings-notifications-dark.png", "mode": "dark", "size": [1400, 860], "notifications": true}
+{"out": "docs/images/settings-scheduled-list-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "section": "scheduled"}
+{"out": "docs/images/settings-scheduled-list-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "section": "scheduled"}
+{"out": "docs/images/settings-scheduled-cancel-confirm-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "section": "scheduled", "steps": [{"press": "Cancel the send Tue 08:00: Thank-you cards: the proof"}]}
+{"out": "docs/images/settings-scheduled-cancel-confirm-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "section": "scheduled", "steps": [{"press": "Cancel the send Tue 08:00: Thank-you cards: the proof"}]}
+{"out": "docs/images/screener-senders-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "open": {"role": "senders"}, "select": "Prices for the sign, oak or steel"}
+{"out": "docs/images/screener-accepted-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "open": {"role": "senders"}, "select": "Prices for the sign, oak or steel", "act": "accept", "motion": "reduced"}
+{"out": "docs/images/grouped-cards-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "act": "newsletters", "motion": "reduced"}
+{"out": "docs/images/grouped-list-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "view": "grouped"}
+{"out": "docs/images/settings-triage-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "triage": true}
+{"out": "docs/images/screener-senders-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "open": {"role": "senders"}, "select": "Prices for the sign, oak or steel"}
+{"out": "docs/images/screener-accepted-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "open": {"role": "senders"}, "select": "Prices for the sign, oak or steel", "act": "accept", "motion": "reduced"}
+{"out": "docs/images/grouped-cards-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "act": "newsletters", "motion": "reduced"}
+{"out": "docs/images/grouped-list-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "view": "grouped"}
+{"out": "docs/images/settings-triage-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "triage": true}
+{"out": "docs/images/settings-notifications-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "notifications": true}
+{"out": "docs/images/settings-notifications-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "notifications": true}
 # Done, park, pin, snooze and follow-up (E3.3, E3.5, E3.7): Later from the rail on the snoozed pile and on the pins,
 # the inbox with "Show done" (a done message dimmed, one back from a snooze marked), the time picker of Snooze with a
 # typed time, and the reminder picker over a sent message.
-{"out": "docs/images/later-snoozed-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "later": "snoozed", "select": "Your ferry booking is confirmed"}
-{"out": "docs/images/later-snoozed-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "later": "snoozed", "select": "Your ferry booking is confirmed"}
-{"out": "docs/images/show-done-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "show_done": true, "view": "list"}
-{"out": "docs/images/show-done-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "show_done": true, "view": "list"}
-{"out": "docs/images/snooze-picker-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
-{"out": "docs/images/snooze-picker-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
-{"out": "docs/images/follow-up-picker-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}
-{"out": "docs/images/follow-up-picker-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}
+{"out": "docs/images/later-snoozed-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "later": "snoozed", "select": "Kiln service: two dates to choose from"}
+{"out": "docs/images/later-snoozed-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "later": "snoozed", "select": "Kiln service: two dates to choose from"}
+{"out": "docs/images/show-done-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "show_done": true, "view": "list"}
+{"out": "docs/images/show-done-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "show_done": true, "view": "list"}
+{"out": "docs/images/snooze-picker-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "picker": "sat 9"}
+{"out": "docs/images/snooze-picker-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "picker": "sat 9"}
+{"out": "docs/images/follow-up-picker-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "open": {"role": "sent"}, "select": "Shelving for the store room: two options", "picker": "mon 9"}
+{"out": "docs/images/follow-up-picker-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "open": {"role": "sent"}, "select": "Shelving for the store room: two options", "picker": "mon 9"}
 # The invitation card (E4.6): Odile's lunch moved from 11:00 to 12:30, its update with what changed and the answer
 # given before, and the first invitation as the strip a later one replaced.
 # Right-to-left words (#356): a Hebrew and an Arabic sender and subject in the list, the Hebrew one open in the reader.
-{"out": "docs/images/rtl-list-light.png", "mode": "light", "size": [1400, 860], "right_to_left": true, "select": "סיור בגינה ביום שלישי"}
-{"out": "docs/images/rtl-list-dark.png", "mode": "dark", "size": [1400, 860], "right_to_left": true, "select": "סיור בגינה ביום שלישי"}
-{"out": "docs/images/rtl-reader-light.png", "mode": "light", "size": [1400, 860], "right_to_left": true, "select": "موعد ورشة الفخار يوم السبت", "full_width": true}
-{"out": "docs/images/rtl-reader-dark.png", "mode": "dark", "size": [1400, 860], "right_to_left": true, "select": "موعد ورشة الفخار يوم السبت", "full_width": true}
-{"out": "docs/images/invite-update-light.png", "mode": "light", "size": [1400, 860], "invitations": true, "select": "Updated invitation: Lunch with Odile"}
-{"out": "docs/images/invite-update-dark.png", "mode": "dark", "size": [1400, 860], "invitations": true, "select": "Updated invitation: Lunch with Odile"}
-{"out": "docs/images/invite-outdated-light.png", "mode": "light", "size": [1400, 860], "invitations": true, "select": "Invitation: Lunch with Odile"}
-{"out": "docs/images/invite-outdated-dark.png", "mode": "dark", "size": [1400, 860], "invitations": true, "select": "Invitation: Lunch with Odile"}
+{"out": "docs/images/rtl-list-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "right_to_left": true, "select": "סיור בגינה ביום שלישי"}
+{"out": "docs/images/rtl-list-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "right_to_left": true, "select": "סיור בגינה ביום שלישי"}
+{"out": "docs/images/rtl-reader-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "right_to_left": true, "select": "موعد ورشة الفخار يوم السبت", "full_width": true}
+{"out": "docs/images/rtl-reader-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "right_to_left": true, "select": "موعد ورشة الفخار يوم السبت", "full_width": true}
+{"out": "docs/images/invite-update-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Updated invitation: Design review, Mon 16 Nov 15:00"}
+{"out": "docs/images/invite-update-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Updated invitation: Design review, Mon 16 Nov 15:00"}
+{"out": "docs/images/invite-outdated-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Invitation: Design review, Mon 16 Nov 14:00", "open": {"role": "archive"}}
+{"out": "docs/images/invite-outdated-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Invitation: Design review, Mon 16 Nov 14:00", "open": {"role": "archive"}}
 # The outbox (E2.6, E3.6): a send counting down its hold with its toast, one scheduled and one the server refused;
 # a refused send changed since (#245), offering only Edit;
 # the toast of a message just sent; the composer with a time picked, Send become Schedule, and its send-later picker;
 # a sent message a delivery report says did not get through.
-{"out": "docs/images/outbox-light.png", "mode": "light", "size": [1400, 860], "outbox": "waiting"}
-{"out": "docs/images/outbox-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "waiting"}
-{"out": "docs/images/outbox-changed-light.png", "mode": "light", "size": [1400, 860], "outbox": "changed"}
-{"out": "docs/images/outbox-changed-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "changed"}
-{"out": "docs/images/undo-send-light.png", "mode": "light", "size": [1400, 860], "outbox": "countdown"}
-{"out": "docs/images/undo-send-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "countdown"}
-{"out": "docs/images/send-later-light.png", "mode": "light", "size": [1400, 860], "outbox": "schedule"}
-{"out": "docs/images/send-later-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "schedule"}
-{"out": "docs/images/bounce-light.png", "mode": "light", "size": [1400, 860], "outbox": "bounce"}
-{"out": "docs/images/bounce-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "bounce"}
-{"out": "docs/images/account-settings-light.png", "mode": "light", "size": [1200, 820], "accounts": true, "edit_account": 1}
-{"out": "docs/images/account-settings-dark.png", "mode": "dark", "size": [1200, 820], "accounts": true, "edit_account": 1}
+{"out": "docs/images/outbox-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "outbox": "waiting"}
+{"out": "docs/images/outbox-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "outbox": "waiting"}
+{"out": "docs/images/outbox-changed-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "outbox": "changed"}
+{"out": "docs/images/outbox-changed-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "outbox": "changed"}
+{"out": "docs/images/undo-send-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "outbox": "countdown", "motion": "reduced"}
+{"out": "docs/images/undo-send-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "outbox": "countdown", "motion": "reduced"}
+{"out": "docs/images/send-later-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "outbox": "schedule"}
+{"out": "docs/images/send-later-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "outbox": "schedule"}
+{"out": "docs/images/bounce-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "outbox": "bounce"}
+{"out": "docs/images/bounce-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "outbox": "bounce"}
+{"out": "docs/images/account-settings-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "accounts": true, "edit_account": 1}
+{"out": "docs/images/account-settings-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "accounts": true, "edit_account": 1}
 # Removing an account (#317): the question in the buttons' place on Studio's form, and the list after the owner's press.
-{"out": "docs/images/account-remove-confirm-light.png", "mode": "light", "size": [1200, 820], "accounts": true, "edit_account": 2, "steps": [{"press": "Remove account…"}]}
-{"out": "docs/images/account-remove-confirm-dark.png", "mode": "dark", "size": [1200, 820], "accounts": true, "edit_account": 2, "steps": [{"press": "Remove account…"}]}
-{"out": "docs/images/account-remove-removed-light.png", "mode": "light", "size": [1200, 820], "accounts": true, "remove_account": 2}
-{"out": "docs/images/account-remove-removed-dark.png", "mode": "dark", "size": [1200, 820], "accounts": true, "remove_account": 2}
-{"out": "docs/images/inbox-smart-light.png", "mode": "light", "size": [1440, 900], "select": "Allotment rota for November"}
-{"out": "docs/images/inbox-grouped-light.png", "mode": "light", "size": [1440, 900], "view": "grouped", "select": "Allotment rota for November"}
-{"out": "docs/images/inbox-list-light.png", "mode": "light", "size": [1440, 900], "view": "list", "select": "Allotment rota for November"}
-{"out": "docs/images/later-pins-light.png", "mode": "light", "size": [1440, 900], "put_away": true, "later": "pins"}
-{"out": "docs/images/new-senders-queue-light.png", "mode": "light", "size": [1440, 900], "open": {"role": "senders"}}
-{"out": "docs/images/list-empty-light.png", "mode": "light", "size": [1440, 900], "open": {"folder": 8}}
-{"out": "docs/images/inbox-smart-dark.png", "mode": "dark", "size": [1440, 900], "select": "Allotment rota for November"}
-{"out": "docs/images/inbox-grouped-dark.png", "mode": "dark", "size": [1440, 900], "view": "grouped", "select": "Allotment rota for November"}
-{"out": "docs/images/inbox-list-dark.png", "mode": "dark", "size": [1440, 900], "view": "list", "select": "Allotment rota for November"}
-{"out": "docs/images/later-pins-dark.png", "mode": "dark", "size": [1440, 900], "put_away": true, "later": "pins"}
-{"out": "docs/images/new-senders-queue-dark.png", "mode": "dark", "size": [1440, 900], "open": {"role": "senders"}}
-{"out": "docs/images/list-empty-dark.png", "mode": "dark", "size": [1440, 900], "open": {"folder": 8}}
-{"out": "docs/images/list-scrolling-light.png", "mode": "light", "size": [1440, 520], "view": "list", "step": 1}
-{"out": "docs/images/list-scrolling-dark.png", "mode": "dark", "size": [1440, 520], "view": "list", "step": 1}
-{"out": "docs/images/one-pane-800-light.png", "mode": "light", "size": [800, 700], "select": "Allotment rota for November"}
-{"out": "docs/images/one-pane-800-dark.png", "mode": "dark", "size": [800, 700], "select": "Allotment rota for November"}
-{"out": "docs/images/one-pane-900-list-light.png", "mode": "light", "size": [900, 700]}
-{"out": "docs/images/one-pane-900-list-dark.png", "mode": "dark", "size": [900, 700]}
-{"out": "docs/images/one-pane-900-reader-light.png", "mode": "light", "size": [900, 700], "select": "Allotment rota for November"}
-{"out": "docs/images/one-pane-900-reader-dark.png", "mode": "dark", "size": [900, 700], "select": "Allotment rota for November"}
-{"out": "docs/images/one-pane-900-composer-light.png", "mode": "light", "size": [900, 700], "compose": "written"}
-{"out": "docs/images/one-pane-900-composer-dark.png", "mode": "dark", "size": [900, 700], "compose": "written"}
+{"out": "docs/images/account-remove-confirm-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "accounts": true, "edit_account": 2, "steps": [{"press": "Remove account…"}]}
+{"out": "docs/images/account-remove-confirm-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "accounts": true, "edit_account": 2, "steps": [{"press": "Remove account…"}]}
+{"out": "docs/images/account-remove-removed-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "accounts": true, "remove_account": 2}
+{"out": "docs/images/account-remove-removed-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "accounts": true, "remove_account": 2}
+{"out": "docs/images/inbox-smart-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "select": "Draft logo for the bakery"}
+{"out": "docs/images/inbox-grouped-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "view": "grouped", "select": "Draft logo for the bakery"}
+{"out": "docs/images/inbox-list-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "view": "list", "select": "Draft logo for the bakery"}
+{"out": "docs/images/later-pins-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "later": "pins"}
+{"out": "docs/images/new-senders-queue-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "open": {"role": "senders"}}
+{"out": "docs/images/list-empty-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "open": {"folder": 17}}
+{"out": "docs/images/inbox-smart-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "select": "Draft logo for the bakery"}
+{"out": "docs/images/inbox-grouped-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "view": "grouped", "select": "Draft logo for the bakery"}
+{"out": "docs/images/inbox-list-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "view": "list", "select": "Draft logo for the bakery"}
+{"out": "docs/images/later-pins-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "later": "pins"}
+{"out": "docs/images/new-senders-queue-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "open": {"role": "senders"}}
+{"out": "docs/images/list-empty-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "open": {"folder": 17}}
+{"out": "docs/images/list-scrolling-light.png", "mode": "light", "sample": "frames", "size": [1440, 520], "view": "list", "step": 1}
+{"out": "docs/images/list-scrolling-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 520], "view": "list", "step": 1}
+{"out": "docs/images/one-pane-800-light.png", "mode": "light", "sample": "frames", "size": [800, 700], "select": "Draft logo for the bakery"}
+{"out": "docs/images/one-pane-800-dark.png", "mode": "dark", "sample": "frames", "size": [800, 700], "select": "Draft logo for the bakery"}
+{"out": "docs/images/one-pane-900-list-light.png", "mode": "light", "sample": "frames", "size": [900, 700]}
+{"out": "docs/images/one-pane-900-list-dark.png", "mode": "dark", "sample": "frames", "size": [900, 700]}
+{"out": "docs/images/one-pane-900-reader-light.png", "mode": "light", "sample": "frames", "size": [900, 700], "select": "Draft logo for the bakery"}
+{"out": "docs/images/one-pane-900-reader-dark.png", "mode": "dark", "sample": "frames", "size": [900, 700], "select": "Draft logo for the bakery"}
+{"out": "docs/images/one-pane-900-composer-light.png", "mode": "light", "sample": "frames", "size": [900, 700], "compose": "written"}
+{"out": "docs/images/one-pane-900-composer-dark.png", "mode": "dark", "sample": "frames", "size": [900, 700], "compose": "written"}
 # Two panes under 1280 at 130 %: the docked composer beside the list, which keeps its 440 (#312).
-{"out": "docs/images/narrow-1024-composer-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "compose": "written"}
-{"out": "docs/images/narrow-1024-composer-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "compose": "written"}
-{"out": "docs/images/one-pane-900-held-light.png", "mode": "light", "size": [900, 700], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
-{"out": "docs/images/one-pane-900-held-dark.png", "mode": "dark", "size": [900, 700], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/narrow-1024-composer-130-light.png", "mode": "light", "sample": "frames", "size": [1024, 800], "text_scale": 130, "compose": "written"}
+{"out": "docs/images/narrow-1024-composer-130-dark.png", "mode": "dark", "sample": "frames", "size": [1024, 800], "text_scale": 130, "compose": "written"}
+{"out": "docs/images/one-pane-900-held-light.png", "mode": "light", "sample": "frames", "size": [900, 700], "open": {"role": "senders"}, "select": "Prices for the sign, oak or steel"}
+{"out": "docs/images/one-pane-900-held-dark.png", "mode": "dark", "sample": "frames", "size": [900, 700], "open": {"role": "senders"}, "select": "Prices for the sign, oak or steel"}
 # The menus as floats (#234): the reader's More and Move, the composer's From and Templates, a row's group menu.
-{"out": "docs/images/menu-more-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "menu": "more"}
-{"out": "docs/images/menu-more-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "menu": "more"}
-{"out": "docs/images/menu-move-light.png", "mode": "light", "size": [1400, 860], "select": "Photos from the coast walk", "menu": "move"}
-{"out": "docs/images/menu-move-dark.png", "mode": "dark", "size": [1400, 860], "select": "Photos from the coast walk", "menu": "move"}
-{"out": "docs/images/menu-from-light.png", "mode": "light", "size": [1400, 860], "compose": "new", "menu": "from"}
-{"out": "docs/images/menu-from-dark.png", "mode": "dark", "size": [1400, 860], "compose": "new", "menu": "from"}
-{"out": "docs/images/menu-templates-light.png", "mode": "light", "size": [1400, 860], "compose": "template", "menu": "templates"}
-{"out": "docs/images/menu-templates-dark.png", "mode": "dark", "size": [1400, 860], "compose": "template", "menu": "templates"}
-{"out": "docs/images/menu-group-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}
-{"out": "docs/images/menu-group-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}
+{"out": "docs/images/menu-more-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "menu": "more"}
+{"out": "docs/images/menu-more-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "menu": "more"}
+{"out": "docs/images/menu-move-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "menu": "move"}
+{"out": "docs/images/menu-move-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "menu": "move"}
+{"out": "docs/images/menu-from-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "new", "menu": "from"}
+{"out": "docs/images/menu-from-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "compose": "new", "menu": "from"}
+{"out": "docs/images/menu-templates-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "template", "menu": "templates"}
+{"out": "docs/images/menu-templates-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "compose": "template", "menu": "templates"}
+{"out": "docs/images/menu-group-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "menu": "group"}
+{"out": "docs/images/menu-group-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "menu": "group"}
 # The Accounts page with no account: one box in the middle of the page, Add account in it (settings-accounts/empty).
-{"out": "docs/images/settings-accounts-empty-light.png", "mode": "light", "size": [1200, 820], "first": true, "accounts": true}
-{"out": "docs/images/settings-accounts-empty-dark.png", "mode": "dark", "size": [1200, 820], "first": true, "accounts": true}
+{"out": "docs/images/settings-accounts-empty-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "first": true, "accounts": true}
+{"out": "docs/images/settings-accounts-empty-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "first": true, "accounts": true}
 # The reader's banners, cards and states (#237): remote pictures held back with their boxes, a held sender's let-in
 # card, an invitation that asks and a narrow reader at 130 % with an invitation and a held sender.
-{"out": "docs/images/reader-remote-light.png", "mode": "light", "size": [1440, 900], "open": {"folder": 5}, "select": "You have won a lighthouse"}
-{"out": "docs/images/reader-remote-dark.png", "mode": "dark", "size": [1440, 900], "open": {"folder": 5}, "select": "You have won a lighthouse"}
-{"out": "docs/images/reader-held-light.png", "mode": "light", "size": [1440, 900], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
-{"out": "docs/images/reader-held-dark.png", "mode": "dark", "size": [1440, 900], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
-{"out": "docs/images/reader-invite-narrow-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "invitations": true, "select": "Updated invitation: Lunch with Odile"}
-{"out": "docs/images/reader-invite-narrow-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "invitations": true, "select": "Updated invitation: Lunch with Odile"}
-{"out": "docs/images/reader-held-narrow-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
-{"out": "docs/images/reader-held-narrow-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/reader-remote-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "select": "Studio Collective news · November"}
+{"out": "docs/images/reader-remote-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "select": "Studio Collective news · November"}
+{"out": "docs/images/reader-held-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "open": {"role": "senders"}, "select": "Prices for the sign, oak or steel"}
+{"out": "docs/images/reader-held-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "open": {"role": "senders"}, "select": "Prices for the sign, oak or steel"}
+{"out": "docs/images/reader-invite-narrow-130-light.png", "mode": "light", "sample": "frames", "size": [1024, 800], "text_scale": 130, "select": "Updated invitation: Design review, Mon 16 Nov 15:00"}
+{"out": "docs/images/reader-invite-narrow-130-dark.png", "mode": "dark", "sample": "frames", "size": [1024, 800], "text_scale": 130, "select": "Updated invitation: Design review, Mon 16 Nov 15:00"}
+{"out": "docs/images/reader-held-narrow-130-light.png", "mode": "light", "sample": "frames", "size": [1024, 800], "text_scale": 130, "open": {"role": "senders"}, "select": "Prices for the sign, oak or steel"}
+{"out": "docs/images/reader-held-narrow-130-dark.png", "mode": "dark", "sample": "frames", "size": [1024, 800], "text_scale": 130, "open": {"role": "senders"}, "select": "Prices for the sign, oak or steel"}
 # A fitted HTML message (#237): the reader's plain-text view of it, and the fitted view at 130 % in a narrow window.
-{"out": "docs/images/reader-plain-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service", "html_view": "plain"}
-{"out": "docs/images/reader-plain-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "html_view": "plain"}
-{"out": "docs/images/reader-fitted-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "select": "Your bike is due for a service"}
-{"out": "docs/images/reader-fitted-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "select": "Your bike is due for a service"}
-{"out": "docs/images/list-focus-thumb-light.png", "mode": "light", "size": [1200, 560], "view": "list", "steps": [{"focus": "Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged"}]}
-{"out": "docs/images/list-focus-thumb-dark.png", "mode": "dark", "size": [1200, 560], "view": "list", "steps": [{"focus": "Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged"}]}
-{"out": "docs/images/accounts-open-light.png", "mode": "light", "size": [1400, 860], "steps": [{"press": "Show mail of: mira@example.org"}]}
-{"out": "docs/images/accounts-open-dark.png", "mode": "dark", "size": [1400, 860], "steps": [{"press": "Show mail of: mira@example.org"}]}
-{"out": "docs/images/row-snooze-picker-light.png", "mode": "light", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}
-{"out": "docs/images/row-snooze-picker-dark.png", "mode": "dark", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}
+{"out": "docs/images/reader-plain-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "48 hours: winter lamps −30 %", "html_view": "plain", "open": {"role": "archive"}}
+{"out": "docs/images/reader-plain-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "48 hours: winter lamps −30 %", "html_view": "plain", "open": {"role": "archive"}}
+{"out": "docs/images/reader-fitted-130-light.png", "mode": "light", "sample": "frames", "size": [1024, 800], "text_scale": 130, "select": "Studio Collective news · November"}
+{"out": "docs/images/reader-fitted-130-dark.png", "mode": "dark", "sample": "frames", "size": [1024, 800], "text_scale": 130, "select": "Studio Collective news · November"}
+{"out": "docs/images/list-focus-thumb-light.png", "mode": "light", "sample": "frames", "size": [1200, 560], "view": "list", "steps": [{"focus": "Teodor Vasquez, Draft logo for the bakery, 14:02, unread"}]}
+{"out": "docs/images/list-focus-thumb-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 560], "view": "list", "steps": [{"focus": "Teodor Vasquez, Draft logo for the bakery, 14:02, unread"}]}
+{"out": "docs/images/accounts-open-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "steps": [{"press": "Show mail of: odile@example.org"}]}
+{"out": "docs/images/accounts-open-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "steps": [{"press": "Show mail of: odile@example.org"}]}
+{"out": "docs/images/row-snooze-picker-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}
+{"out": "docs/images/row-snooze-picker-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}
 # An open list on the settings sheet: the add-account form's IMAP security select, its list open over the sheet (#238).
-{"out": "docs/images/settings-select-open-light.png", "mode": "light", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
-{"out": "docs/images/settings-select-open-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
+{"out": "docs/images/settings-select-open-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
+{"out": "docs/images/settings-select-open-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
 # The character field with the emblem's place holder at rest, at 100 % and 130 % text (#275).
 {"out": "docs/images/character-field-light.png", "mode": "light", "character_field": true}
 {"out": "docs/images/character-field-dark.png", "mode": "dark", "character_field": true}
@@ -459,14 +459,14 @@
 {"out": "docs/images/home-drafts-dark.png", "mode": "dark", "home": "drafts"}
 {"out": "docs/images/home-drafts-empty-light.png", "mode": "light", "home": "drafts-empty"}
 {"out": "docs/images/home-drafts-empty-dark.png", "mode": "dark", "home": "drafts-empty"}
-{"out": "docs/images/home-place-light.png", "mode": "light", "size": [1440, 900], "home_place": true}
-{"out": "docs/images/home-place-dark.png", "mode": "dark", "size": [1440, 900], "home_place": true}
-{"out": "docs/images/home-place-1000-light.png", "mode": "light", "size": [1000, 760], "home_place": true}
-{"out": "docs/images/home-place-1000-dark.png", "mode": "dark", "size": [1000, 760], "home_place": true}
-{"out": "docs/images/home-place-130-light.png", "mode": "light", "size": [1440, 900], "text_scale": 130, "home_place": true}
-{"out": "docs/images/home-place-130-dark.png", "mode": "dark", "size": [1440, 900], "text_scale": 130, "home_place": true}
+{"out": "docs/images/home-place-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "home_place": true}
+{"out": "docs/images/home-place-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "home_place": true}
+{"out": "docs/images/home-place-1000-light.png", "mode": "light", "sample": "frames", "size": [1000, 760], "home_place": true}
+{"out": "docs/images/home-place-1000-dark.png", "mode": "dark", "sample": "frames", "size": [1000, 760], "home_place": true}
+{"out": "docs/images/home-place-130-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "text_scale": 130, "home_place": true}
+{"out": "docs/images/home-place-130-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "text_scale": 130, "home_place": true}
 # The drafts place (#314): the kept drafts as draft rows, newest first, and its empty state.
-{"out": "docs/images/drafts-filled-light.png", "mode": "light", "size": [1440, 900], "drafts": "filled"}
-{"out": "docs/images/drafts-filled-dark.png", "mode": "dark", "size": [1440, 900], "drafts": "filled"}
-{"out": "docs/images/drafts-empty-light.png", "mode": "light", "size": [1440, 900], "drafts": "empty"}
-{"out": "docs/images/drafts-empty-dark.png", "mode": "dark", "size": [1440, 900], "drafts": "empty"}
+{"out": "docs/images/drafts-filled-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "drafts": "filled"}
+{"out": "docs/images/drafts-filled-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "drafts": "filled"}
+{"out": "docs/images/drafts-empty-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "drafts": "empty"}
+{"out": "docs/images/drafts-empty-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "drafts": "empty"}
