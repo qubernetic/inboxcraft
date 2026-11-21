@@ -179,16 +179,16 @@ fn shift(at: Timestamp, span: Span, zone: &dyn Offsets) -> Option<Timestamp> {
     Timestamp::from_unix(moved.unix_seconds().checked_add(span.seconds())?, 0)
 }
 
-/// `at` moved by `span` on the wall clock of `zone`, days and seconds alike: the triggers of an all-day event, whose
-/// day starts at midnight on the owner's clock, so an hour named is that hour whatever the clock does between.
+/// `at`, the midnight an all-day event's day starts or ends at, moved by `span` on the wall clock of `zone`, days and
+/// seconds alike: an hour named is that hour whatever the clock does between. It counts from 00:00 of `at`'s day, so
+/// on a clock that skips midnight (where the day starts at 01:00, as [`Offsets::resolve`] puts it) 09:00 is still 09:00.
 fn shift_on_the_clock(at: Timestamp, span: Span, zone: &dyn Offsets) -> Option<Timestamp> {
     seconds(span)?;
-    let civil = zone.civil(at)?;
-    let of_day = i64::from(civil.hour()) * 3600 + i64::from(civil.minute()) * 60 + i64::from(civil.second());
-    let of_day = of_day.checked_add(span.seconds())?;
+    let date = inboxcraft_ical::Date::of(zone.civil(at)?);
+    let of_day = span.seconds();
     let days = span.days().checked_add(of_day.div_euclid(86_400))?;
     let rest = of_day.rem_euclid(86_400);
-    let day = inboxcraft_ical::Date::of(civil).add_days(days)?;
+    let day = date.add_days(days)?;
     let (hour, minute, second) = (u8::try_from(rest / 3600).ok()?, u8::try_from(rest % 3600 / 60).ok()?, u8::try_from(rest % 60).ok()?);
     zone.resolve(CivilDateTime::new(day.year(), day.month(), day.day(), hour, minute, second)?)
 }
@@ -240,16 +240,18 @@ fn timed_default() -> Lead {
     Lead::Before(u32::try_from(DEFAULT_LEAD.as_secs() / 60).unwrap_or(10))
 }
 
-/// Gives every event of `calendar` that becomes all-day the all-day alert `choice` in place of the timed default: an
-/// event whose shown alarm rings [`DEFAULT_LEAD`] before its start would ring late the evening before once its start
-/// is midnight. An alarm the owner set to anything else is kept.
-pub(crate) fn follow_all_day(calendar: &mut Calendar, choice: AllDayAlert) {
+/// Trades `event`'s default alert for the other kind's when an edit makes it all-day (`to_all_day`) or no longer, and
+/// leaves an alarm the owner set to anything else as it is. A timed event's alarm still at [`DEFAULT_LEAD`] would ring
+/// late the evening before once its start is midnight, so it becomes `choice`; an all-day event's alarm at one of the
+/// hours [`AllDayAlert`] writes would ring hours before a timed start (or after it), so it becomes [`DEFAULT_LEAD`].
+pub(crate) fn follow_switch(event: &mut Event, to_all_day: bool, choice: AllDayAlert) {
     let Lead::Before(minutes) = timed_default() else { return };
     let Some(timed) = Span::new(0, -i64::from(minutes) * 60) else { return };
-    for event in &mut calendar.events {
-        if event.all_day() && event.alarms.iter().find(|alarm| timed_ringer(alarm)).is_some_and(|alarm| alarm.trigger == Trigger::Start(timed)) {
-            set_lead(event, Lead::AllDay(choice));
-        }
+    let Some(shown) = event.alarms.iter().find(|alarm| timed_ringer(alarm)).map(|alarm| alarm.trigger) else { return };
+    if to_all_day && shown == Trigger::Start(timed) {
+        set_lead(event, Lead::AllDay(choice));
+    } else if !to_all_day && AllDayAlert::ALL.iter().any(|hour| hour.span().is_some_and(|span| shown == Trigger::Start(span))) {
+        set_lead(event, timed_default());
     }
 }
 

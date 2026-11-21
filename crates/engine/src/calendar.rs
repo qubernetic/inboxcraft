@@ -458,7 +458,7 @@ pub(crate) struct Edit {
     pub(crate) end: Option<String>,
     /// All-day from now on, or no longer.
     pub(crate) all_day: Option<bool>,
-    /// The alert an event that becomes all-day gets in place of the timed default.
+    /// The alert an event that becomes all-day gets in place of the timed default (and the one it trades back).
     pub(crate) all_day_alert: AllDayAlert,
 }
 
@@ -487,7 +487,8 @@ pub(crate) fn edit(
     let index = calendar.events.iter().position(|event| event.recurrence_id.is_none()).ok_or(EditError::Unreadable)?;
     let event = calendar.events.get(index).ok_or(EditError::Unreadable)?;
     let times = times(&calendar, event, change, local)?;
-    let to_all_day = change.all_day == Some(true) && !event.all_day();
+    // Only the series itself changes between timed and all-day here; its changed instances keep their own form.
+    let switch = change.all_day.filter(|all_day| *all_day != event.all_day());
     let repeated = !event.rules.is_empty() || !event.dates.is_empty();
     let repeating = match details.repeat {
         Some(repeat) => repeat != Repeat::None,
@@ -526,8 +527,13 @@ pub(crate) fn edit(
     }
     match alert {
         Some(lead) => alert::set_every_lead(&mut calendar, lead),
-        None if to_all_day => alert::follow_all_day(&mut calendar, change.all_day_alert),
-        None => {}
+        None => {
+            if let Some(to_all_day) = switch
+                && let Some(event) = calendar.events.get_mut(index)
+            {
+                alert::follow_switch(event, to_all_day, change.all_day_alert);
+            }
+        }
     }
     let text = calendar.write().map_err(|_| EditError::Bad("the event cannot be written"))?;
     Ok((text, guests))

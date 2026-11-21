@@ -694,9 +694,17 @@ impl Session {
         self.state.all_day_alert
     }
 
-    /// Takes the all-day alert kept from an earlier run, read with [`crate::all_day_alert::from_value`].
+    /// Takes the all-day alert kept from an earlier run, read with [`crate::all_day_alert::from_value`]. When it
+    /// changes after the start, the next tick works the alerts out again, so the first sweep's are not kept.
     pub fn set_all_day_alert(&mut self, choice: AllDayAlert) {
+        if choice == self.state.all_day_alert {
+            return;
+        }
         self.state.all_day_alert = choice;
+        // The alerts of all-day events without alarms move: the next tick works them out again.
+        if self.state.sweep_at.is_some() {
+            self.state.sweep_at = Some(self.clock.now());
+        }
     }
 
     /// What to tell the owner since the last call, in order: more than [`notify::MAX_SINGLE`] new messages of one
@@ -825,12 +833,8 @@ impl Session {
         if let Some(rule) = week {
             self.state.week = rule;
         }
-        if let Some(choice) = all_day_alert.filter(|choice| *choice != self.state.all_day_alert) {
-            self.state.all_day_alert = choice;
-            // The alerts of all-day events without alarms move: the next tick works them out again.
-            if self.state.sweep_at.is_some() {
-                self.state.sweep_at = Some(self.clock.now());
-            }
+        if let Some(choice) = all_day_alert {
+            self.set_all_day_alert(choice);
         }
         if let Some(asked) = settings {
             if self.state.settings_asked.len() >= crate::shown::MAX_ASKED {

@@ -17,7 +17,7 @@
 //! says it back. Without one, a new event gets the default: ten minutes before a timed event, and for an all-day one
 //! the hour `event.all_day_alert.set` (`owner`, a setting: it changes what is written to the server) chose (see
 //! `crate::all_day_alert`). An update that makes a timed event all-day moves an alarm still at the timed default to
-//! that hour.
+//! that hour, and one that makes it timed again moves an alarm at any of the hours back to the timed default.
 //!
 //! Invitations in mail (see `crate::arrive::invite`): `invite.show` (`safe`) reads a message's invitation as its
 //! card shows it, with the version before it, what changed since, whether a later version made it out of date, the

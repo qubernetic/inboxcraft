@@ -5,12 +5,15 @@
 //! here at that hour; a timed event made all-day takes it in place of the timed default; events already written keep
 //! their alarms.
 
+use std::time::Duration;
+
 use inboxcraft_model::{AccountId, CalendarEventId, CalendarId, CalendarReport, Event, EventKind, FetchedEvent};
 use inboxcraft_time::{CivilDateTime, FakeClock, Offset, OffsetTable, Timestamp};
 use serde_json::{Value, json};
 
 use super::calendar_tests::{WORK, object, session_at};
 use crate::all_day_alert::AllDayAlert;
+use crate::notify::Notice;
 use crate::test_support::{NOW, at};
 use crate::{Caller, Session};
 
@@ -211,4 +214,115 @@ fn the_setting_is_the_owners_and_takes_only_its_choices() {
     next.set_all_day_alert(crate::all_day_alert::from_value(&crate::all_day_alert::to_value(session.all_day_alert())));
     let id = day_off(&mut next);
     assert!(text(&next, id).contains("TRIGGER:PT9H\r\n"));
+}
+
+/// The alert notices of event `id` the owner was told since the last call.
+fn told(session: &mut Session, id: u64) -> usize {
+    let id = CalendarEventId::new(id);
+    session.take_notices().into_iter().filter(|notice| matches!(notice, Notice::Alert { about, .. } if about.event == id)).count()
+}
+
+#[test]
+fn a_choice_kept_from_an_earlier_run_rings_from_the_first_sweep_on() {
+    // The front end hands the kept choice back after the start's sweep: the next tick works the alerts out again.
+    let clock = FakeClock::new(at(NOW));
+    let mut session = session_at(&clock);
+    session.set_offsets(Box::new(europe()));
+    session.start();
+    let id = synced_without_alarms(&mut session);
+    session.tick().unwrap();
+    assert_eq!(alerts(&session, id), [utc(2026, 11, 9, 8, 0)], "the start sweeps with the default");
+    session.set_all_day_alert(AllDayAlert::DayBefore18);
+    session.tick().unwrap();
+    assert_eq!(alerts(&session, id), [utc(2026, 11, 9, 17, 0)], "the kept choice holds from the next tick");
+    clock.set(utc(2026, 11, 9, 17, 0));
+    session.tick().unwrap();
+    assert_eq!(told(&mut session, id), 1, "it rings at 18:00 on the owner's clock");
+}
+
+#[test]
+fn a_change_of_choice_never_loses_the_next_ring_still_ahead() {
+    // Monday 9 November at 10:00 in Budapest; the holiday is on Tuesday, its 18:00 ring ahead.
+    for (choice, rings) in [("day_before_12", utc(2026, 11, 9, 11, 0)), ("on_the_day_9", utc(2026, 11, 10, 8, 0))] {
+        let clock = FakeClock::new(utc(2026, 11, 9, 9, 0));
+        let mut session = session_at(&clock);
+        session.set_offsets(Box::new(europe()));
+        set(&mut session, "day_before_18");
+        session.start();
+        let id = synced_without_alarms(&mut session);
+        session.tick().unwrap();
+        assert_eq!(alerts(&session, id), [utc(2026, 11, 9, 17, 0)], "{choice}");
+        set(&mut session, choice);
+        session.tick().unwrap();
+        assert_eq!(alerts(&session, id), [rings], "{choice}");
+        clock.set(rings);
+        session.tick().unwrap();
+        assert_eq!(told(&mut session, id), 1, "{choice}: the new hour rings");
+        clock.advance(Duration::from_secs(86_400));
+        session.tick().unwrap();
+        assert_eq!(told(&mut session, id), 0, "{choice}: and nothing else, the old hour neither");
+    }
+}
+
+#[test]
+fn an_all_day_event_made_timed_trades_any_of_the_hours_for_the_timed_default() {
+    for choice in AllDayAlert::ALL {
+        let mut session = session();
+        set(&mut session, choice.name());
+        let id = day_off(&mut session);
+        session.run("event.update", &json!({ "id": id, "all_day": false, "start": "2026-11-10T13:00:00Z" })).unwrap();
+        let written = text(&session, id);
+        assert!(written.contains("TRIGGER:-PT10M\r\n"), "{}: {written}", choice.name());
+        assert_eq!(written.matches("BEGIN:VALARM").count(), 1, "{written}");
+        assert_eq!(alerts(&session, id), [utc(2026, 11, 10, 12, 50)], "{}", choice.name());
+    }
+}
+
+#[test]
+fn an_all_day_event_made_timed_keeps_an_alarm_the_owner_set() {
+    let mut session = session();
+    for minutes in [1440, 180] {
+        let id = create(&mut session, json!({ "calendar": 1, "summary": "Trip", "start": "2026-11-10", "all_day": true, "alert": minutes }));
+        let before = text(&session, id);
+        let trigger = before.lines().find(|line| line.starts_with("TRIGGER")).unwrap().to_owned();
+        session.run("event.update", &json!({ "id": id, "all_day": false, "start": "2026-11-10T13:00:00Z" })).unwrap();
+        let written = text(&session, id);
+        assert!(written.contains(&trigger), "{trigger}: {written}");
+        assert!(!written.contains("TRIGGER:-PT10M"), "{written}");
+    }
+}
+
+#[test]
+fn timed_to_all_day_and_back_comes_home_to_the_timed_default() {
+    let mut session = session();
+    set(&mut session, "day_before_12");
+    let id = create(&mut session, json!({ "calendar": 1, "summary": "Dentist", "start": "2026-11-06T14:00:00Z" }));
+    session.run("event.update", &json!({ "id": id, "all_day": true, "start": "2026-11-10" })).unwrap();
+    assert!(text(&session, id).contains("TRIGGER:-PT12H\r\n"), "{}", text(&session, id));
+    // The setting changed since: the hour written is still one of its hours, so it goes back all the same.
+    set(&mut session, "on_the_day_9");
+    session.run("event.update", &json!({ "id": id, "all_day": false, "start": "2026-11-10T13:00:00Z" })).unwrap();
+    let written = text(&session, id);
+    assert!(written.contains("TRIGGER:-PT10M\r\n"), "{written}");
+    assert_eq!(written.matches("BEGIN:VALARM").count(), 1, "{written}");
+}
+
+#[test]
+fn only_the_series_the_edit_makes_all_day_trades_its_alarm() {
+    let mut session = session();
+    // A weekly walk, with its 17 November already a whole day of its own, keeping ten minutes.
+    let alarm = "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Walk\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\n";
+    let ical = object(&format!(
+        "BEGIN:VEVENT\r\nUID:walk@example.org\r\nDTSTART:20261110T080000Z\r\nDTEND:20261110T090000Z\r\nRRULE:FREQ=WEEKLY;COUNT=3\r\nSUMMARY:Walk\r\n{alarm}END:VEVENT\r\n\
+         BEGIN:VEVENT\r\nUID:walk@example.org\r\nRECURRENCE-ID:20261117T080000Z\r\nDTSTART;VALUE=DATE:20261117\r\nDTEND;VALUE=DATE:20261118\r\nSUMMARY:Walk day\r\n{alarm}END:VEVENT\r\n"
+    ));
+    let fetched = FetchedEvent { url: format!("{WORK}walk.ics"), etag: Some("\"w1\"".to_owned()), ical };
+    let synced = CalendarReport::Synced { calendar: CalendarId::new(1), changed: vec![fetched], removed: vec![], token: None, full: false };
+    session.apply(&Event::new(AccountId::new(1), None, EventKind::Calendar(synced))).unwrap();
+    let list = session.run("event.list", &json!({ "from": "2026-11-09", "to": "2026-11-12" })).unwrap();
+    let id = list["events"].as_array().unwrap().iter().find(|row| row["summary"] == json!("Walk")).unwrap()["id"].as_u64().unwrap();
+    session.run("event.update", &json!({ "id": id, "all_day": true, "start": "2026-11-10" })).unwrap();
+    let written = text(&session, id);
+    assert_eq!(written.matches("TRIGGER:-PT15H\r\n").count(), 1, "the series: {written}");
+    assert_eq!(written.matches("TRIGGER:-PT10M\r\n").count(), 1, "the day already whole keeps its own: {written}");
 }

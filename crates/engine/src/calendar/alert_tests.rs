@@ -89,6 +89,26 @@ fn an_all_day_alert_keeps_its_hour_on_the_days_the_clock_moves() {
     assert_eq!(upcoming(&timed, spring, &europe(), None, AllDayAlert::default()), [utc(2026, 3, 29, 8, 0)]);
 }
 
+/// Asunción-like: -04:00, -03:00 from 4 October 2026 04:00 UTC (00:00 becomes 01:00), -04:00 again from 28 March 2027
+/// 03:00 UTC (00:00 goes back to 23:00 the day before).
+fn midnight_jumps() -> OffsetTable {
+    OffsetTable::new(hours(-4)).with_change(utc(2026, 10, 4, 4, 0), hours(-3)).with_change(utc(2027, 3, 28, 3, 0), hours(-4))
+}
+
+#[test]
+fn an_all_day_alert_counts_from_00_00_on_a_clock_that_skips_or_repeats_midnight() {
+    let now = utc(2026, 10, 1, 0, 0);
+    // 4 October has no 00:00: 09:00 that day is 12:00 UTC, not an hour later.
+    assert_eq!(all_day_rings("20261004", "TRIGGER:PT9H", &midnight_jumps(), now), [utc(2026, 10, 4, 12, 0)]);
+    // 09:00 the day before, at -04:00.
+    assert_eq!(all_day_rings("20261004", "TRIGGER:-PT15H", &midnight_jumps(), now), [utc(2026, 10, 3, 13, 0)]);
+    assert_eq!(all_day_rings("20261004", "TRIGGER:-PT6H", &midnight_jumps(), now), [utc(2026, 10, 3, 22, 0)]);
+    // 28 March 2027 has 00:00 twice: 09:00 that day is 13:00 UTC, 09:00 the day before 12:00 UTC.
+    let spring = utc(2027, 3, 20, 0, 0);
+    assert_eq!(all_day_rings("20270328", "TRIGGER:PT9H", &midnight_jumps(), spring), [utc(2027, 3, 28, 13, 0)]);
+    assert_eq!(all_day_rings("20270328", "TRIGGER:-PT15H", &midnight_jumps(), spring), [utc(2027, 3, 27, 12, 0)]);
+}
+
 #[test]
 fn the_events_own_display_and_audio_alarms_take_the_place_of_the_defaults() {
     let lines = format!(
