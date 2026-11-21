@@ -2020,6 +2020,9 @@ struct Kept {
     /// The keyed row's message last frame: a row is brought into sight when the keyed message changes (a key or a
     /// press moved it) or the list is first shown, never because lines above it came or went.
     keyed: Option<u64>,
+    /// The pass that drew it: a list drawn again after passes away (a message in front in one pane) is not one whose
+    /// viewport changed under it.
+    pass: u64,
 }
 
 /// Lands the keyboard asked for by [`land`] on its row before the lines are built, so the row sees the focus it
@@ -2102,7 +2105,24 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
     let keyed = mailbox.selected().filter(|_| mailbox.keyed());
     // A row a menu was asked for comes into sight as a newly keyed one does.
     let bring = ui.data_mut(|data| data.remove_temp::<u64>(bring_id()));
-    let moved = keyed.filter(|keyed| kept.as_ref().is_none_or(|kept| kept.keyed != Some(*keyed))).or(bring);
+    // The viewport this pass: the area fills the room left, which a resized window changes.
+    let room = ui.available_rect_before_wrap().height();
+    // A keyed row whole in the last pass's viewport stays whole when the viewport changes height (a window made
+    // shorter in the pass after a step): it is brought into sight by this pass's viewport, not the last one's.
+    let resized = keyed.filter(|keyed| {
+        kept.as_ref().is_some_and(|kept| {
+            kept.keyed == Some(*keyed)
+                && kept.pass.saturating_add(1) >= ui.ctx().cumulative_pass_nr()
+                && kept.height > 0
+                && room.is_finite()
+                && hundredths(room) != kept.height
+                && listing
+                    .find(*keyed)
+                    .and_then(|index| listing.span(index))
+                    .is_some_and(|(top, bottom)| hundredths(top) >= kept.offset && hundredths(bottom) <= kept.offset.saturating_add(kept.height))
+        })
+    });
+    let moved = keyed.filter(|keyed| kept.as_ref().is_none_or(|kept| kept.keyed != Some(*keyed))).or(bring).or(resized);
     // A line of the drafts place the keyboard landed on, by its place.
     let line = ui.data_mut(|data| data.remove_temp::<usize>(bring_line_id()));
     let mut scroll_to = None;
@@ -2111,8 +2131,6 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
             // The least scroll that shows the row whole, set before the lines are built, so the row is built (and
             // can keep a focus given to it) in this frame.
             Some(kept) if kept.height > 0 => {
-                // The viewport this frame: the area fills the room left, which a resized window changes.
-                let room = ui.available_rect_before_wrap().height();
                 let view = if room.is_finite() && room > 0.0 { room } else { points(kept.height) };
                 let offset = forced.unwrap_or_else(|| points(kept.offset));
                 let wanted = if top < offset {
@@ -2193,9 +2211,12 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
     });
     ui.spacing_mut().scroll.kinetic = kinetic;
     let (built, anchor, offset, height) = output.inner;
-    let kept = Kept { place: mailbox.place(), view: mailbox.inbox_view(), query: mailbox.query().to_owned(), anchor, offset, height, keyed };
+    let pass = ui.ctx().cumulative_pass_nr();
+    let kept = Kept { place: mailbox.place(), view: mailbox.inbox_view(), query: mailbox.query().to_owned(), anchor, offset, height, keyed, pass };
     ui.data_mut(|data| {
         data.insert_temp(Id::unique("list-view-rect"), output.inner_rect);
+        #[cfg(test)]
+        data.insert_temp(Id::unique("list-scrolled"), points(offset));
         data.insert_temp(kept_id, kept);
         if let Some((id, _)) = anchor {
             data.insert_temp(Id::unique("list-first-in-sight"), id);

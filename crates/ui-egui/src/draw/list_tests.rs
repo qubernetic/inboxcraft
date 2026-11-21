@@ -2662,7 +2662,6 @@ fn the_list_keys_rest_under_a_rows_open_menu() {
 }
 
 #[test]
-#[ignore = "an old one-pass slip (list.rs untouched by #309): when the window shrinks in the pass after a step, the keyed row lies below that pass's viewport for one pass and is whole from the next; the in-app trigger (the error banner) is gone with #309, a window resize is the one left"]
 fn a_step_in_the_pass_the_list_shrinks_scrolls_by_that_passs_viewport() {
     /// Each pass's viewport, the keyed message and its row's rect as the pass built it.
     type Seen = Vec<(egui::Rect, Option<u64>, Option<egui::Rect>)>;
