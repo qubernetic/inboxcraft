@@ -109,6 +109,20 @@ fn an_unknown_or_unclassified_command_does_not_run() {
 }
 
 #[test]
+fn history_len_counts_the_acts_undo_holds() {
+    let mut session = crate::test_support::session();
+    assert_eq!(session.history_len(), 0);
+    session.run("mail.flag", &json!({ "id": 1, "flagged": true })).unwrap();
+    session.run("mail.flag", &json!({ "id": 1, "flagged": false })).unwrap();
+    assert_eq!(session.history_len(), 2);
+    // An act that changes nothing is no step.
+    session.run("mail.flag", &json!({ "id": 1, "flagged": false })).unwrap();
+    assert_eq!(session.history_len(), 2);
+    session.run("history.undo", &json!({})).unwrap();
+    assert_eq!(session.history_len(), 1);
+}
+
+#[test]
 fn a_session_shows_its_commands_and_store() {
     let session = crate::test_support::session();
     assert!(session.registry().get("account.list").is_some());

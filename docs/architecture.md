@@ -324,7 +324,19 @@ stay, and the guests are not told. What stays is byte-identical for text in cano
 form (the case of names, CRLF, folding) and parameter quoting change. A changed instance that cannot be read is kept
 as it came while the others take the alert. `event.list` says the alert back: `null` without any alarm, `"none"`, on
 an all-day event the name of the hour its alarm rings at (`"day_before_9"` … `"on_the_day_9"`), the minutes, or `"custom"` for what the field cannot show (a trigger it cannot name, or more than one timed display or
-sound alarm). A delete is a kept job the session holds back for the undo window
+sound alarm). `calendar.import` (`owner`) adds the `VEVENT`s of an `.ics` text (at most 5 000 000 bytes and 5000
+events, read by `ical::parse_within` with room for 250 000 items) to one calendar, each as `event.create` writes an
+event but under the file's own UID, in a URL of InboxCraft's that never holds the UID, as a first write (`Put` without
+an entity tag, sent as `If-None-Match: *`; a 412 is a conflict like any other, so the server's copy comes back with the
+next sync). A UID the calendar already holds is skipped and left as it is, so a second import adds nothing. Times are
+placed through the file's own zones as the calendar screen places them (`Zones::resolve`), and a time that cannot be
+placed is an error of that event, not a guess; a preset repeat keeps its end and its exceptions, any other repeat (or
+an `RDATE`) is added once and counted, a changed instance (`RECURRENCE-ID`) is left out, an alert the app can name is
+kept and any other gives the default lead, and guests and the organiser are not carried, so nobody is mailed. The
+answer counts what was added, skipped, added once, left out and refused, each list naming its first hundred events by
+their place in the file with a reason word. The whole import is one step of `history.undo`, which deletes every event
+of it still held. `calendar.import.preview` (`safe`) reads the file the same way and changes nothing: the calendar's
+name, the counts and the first five events to add. A delete is a kept job the session holds back for the undo window
 (`Outcome::with_held_job`, six seconds, as long as the toast with Undo shows): `Session::tick` hands it to the worker
 once the window is over, `history.undo` before then withdraws it from the queue and puts the event back, and a restart
 hands it out at once. Writes to one event go out one at a time (`engine::writes`): a second write (an edit, an undo, a

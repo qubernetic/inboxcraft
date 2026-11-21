@@ -46,6 +46,8 @@ pub(crate) enum EventUndo {
     Update(CalendarEvent),
     /// Bring the deleted event back as it `was`, while its delete is still held.
     Delete(CalendarEvent),
+    /// Take the events an import added off again, on the server too: one step for the whole file.
+    Import(Vec<CalendarEventId>),
 }
 
 /// What takes a screener decision or a group choice on `address` back: the sender as it was `before` (`None`:

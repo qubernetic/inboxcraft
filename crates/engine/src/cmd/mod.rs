@@ -8,6 +8,7 @@
 //! `hostile_params_never_panic` runs it with junk parameters, its `FIELDS` among them. A new module is one more name
 //! in the `modules!` line below.
 
+pub(crate) use calendar::{MAX_DESCRIPTION, MAX_LINE};
 pub use mail::MAX_LIST;
 pub(crate) use sync::{finished as sync_finished, progress as sync_progress};
 
@@ -41,7 +42,7 @@ macro_rules! modules {
     };
 }
 
-modules!(account, act, calendar, compose, folder, home, mail, notify, outbox, remote, sample, schedule, send, sync, template, triage, ui);
+modules!(account, act, calendar, compose, folder, home, import, mail, notify, outbox, remote, sample, schedule, send, sync, template, triage, ui);
 
 /// Every built-in command.
 pub(crate) fn all() -> Vec<CommandSpec> {
@@ -108,6 +109,9 @@ mod hostile_tests;
 #[cfg(test)]
 #[path = "id_range_tests.rs"]
 mod id_range_tests;
+#[cfg(test)]
+#[path = "import_tests.rs"]
+mod import_tests;
 #[cfg(test)]
 #[path = "invite_tests.rs"]
 mod invite_tests;

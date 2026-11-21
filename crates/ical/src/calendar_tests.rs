@@ -6,7 +6,7 @@ use proptest::prelude::*;
 
 use super::{Calendar, Expansion, MAX_OCCURRENCES, MAX_STEPS, Occurrence};
 use crate::zone::tests::BUDAPEST;
-use crate::{Event, IcalError, When};
+use crate::{Event, IcalError, Limits, MAX_BYTES, MAX_ITEMS, When};
 
 fn civil(year: i32, month: u8, day: u8, hour: u8, minute: u8) -> CivilDateTime {
     CivilDateTime::new(year, month, day, hour, minute, 0).unwrap()
@@ -337,4 +337,14 @@ fn a_rule_without_a_dtstart_match_still_counts_dtstart() {
         starts(&calendar, utc(2026, 11, 1, 0, 0), utc(2026, 12, 1, 0, 0)),
         [utc(2026, 11, 3, 9, 0), utc(2026, 11, 9, 9, 0), utc(2026, 11, 16, 9, 0)]
     );
+}
+
+#[test]
+fn parse_within_reads_a_calendar_longer_than_parse_does() {
+    let event = "BEGIN:VEVENT\r\nUID:a@example.org\r\nDTSTART:20261112T080000Z\r\nEND:VEVENT\r\n";
+    let text = format!("BEGIN:VCALENDAR\r\nX-PAD:{}\r\n{event}END:VCALENDAR\r\n", "a".repeat(MAX_BYTES));
+    let calendar = Calendar::parse_within(text.as_bytes(), Limits { bytes: 5_000_000, items: MAX_ITEMS }).unwrap();
+    assert_eq!(calendar.events.len(), 1);
+    assert_eq!(Calendar::parse(text.as_bytes()), Err(IcalError::TooLarge { limit: MAX_BYTES }));
+    assert_eq!(Calendar::parse_within(b"BEGIN:VCARD\r\nEND:VCARD\r\n", Limits::default()), Err(IcalError::NotACalendar));
 }

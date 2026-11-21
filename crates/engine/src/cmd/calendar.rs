@@ -87,10 +87,10 @@ pub(crate) const ALL_DAY_ALERT_SET: CommandSpec = CommandSpec {
 };
 
 /// The longest summary or location, in characters.
-const MAX_LINE: usize = 1000;
+pub(crate) const MAX_LINE: usize = 1000;
 
 /// The longest description, in characters.
-const MAX_DESCRIPTION: usize = 20_000;
+pub(crate) const MAX_DESCRIPTION: usize = 20_000;
 
 /// The most guests of one event.
 const MAX_GUESTS: usize = 100;
@@ -517,8 +517,8 @@ fn held_event(context: &Context<'_>, id: u64) -> Result<CalendarEvent, EngineErr
     context.store().calendar_event(CalendarEventId::new(id))?.ok_or(EngineError::NotFound { what: "event", id })
 }
 
-/// The calendar of `event` and the account it belongs to.
-fn owner_of(context: &Context<'_>, calendar: CalendarId) -> Result<(inboxcraft_model::Calendar, Account), EngineError> {
+/// Calendar `calendar` and the account it belongs to.
+pub(super) fn owner_of(context: &Context<'_>, calendar: CalendarId) -> Result<(inboxcraft_model::Calendar, Account), EngineError> {
     let held = calendar::calendar_by_id(context.store(), calendar)?.ok_or(EngineError::NotFound { what: "calendar", id: calendar.get() })?;
     let owner = account(context, held.account.get())?;
     Ok((held, owner))
@@ -636,10 +636,12 @@ pub(crate) fn undo(context: &Context<'_>, command: &'static str, undo: &EventUnd
     let id = match undo {
         EventUndo::Create(id) => *id,
         EventUndo::Update(was) | EventUndo::Delete(was) => was.id,
+        EventUndo::Import(ids) => return undo_import(context, command, ids),
     };
     let answer = |undone: bool| Outcome::new(json!({ "command": command, "id": id.get(), "undone": undone })).with_undo(Step::Pop);
     match undo {
-        EventUndo::Create(_) => {
+        // An import was taken back above.
+        EventUndo::Create(_) | EventUndo::Import(_) => {
             let Some(held) = store.calendar_event(id)? else { return Ok(answer(false)) };
             let Some(calendar) = calendar::calendar_by_id(store, held.calendar)? else { return Ok(answer(false)) };
             let job = CalendarJob::Delete { calendar: held.calendar, event: id, url: held.href, etag: held.etag };
@@ -662,6 +664,23 @@ pub(crate) fn undo(context: &Context<'_>, command: &'static str, undo: &EventUnd
             Ok(answer(true).with_change(Change::PutCalendarEvent(was.clone())).with_withdrawn(job.id))
         }
     }
+}
+
+/// Takes an import back: each event of `ids` still held deleted, on the server too. `removed` counts them; one gone
+/// meanwhile is left out.
+fn undo_import(context: &Context<'_>, command: &'static str, ids: &[CalendarEventId]) -> Result<Outcome, EngineError> {
+    let store = context.store();
+    let mut outcome = Outcome::new(Value::Null);
+    let mut removed = 0_usize;
+    for id in ids {
+        let Some(held) = store.calendar_event(*id)? else { continue };
+        let Some(calendar) = calendar::calendar_by_id(store, held.calendar)? else { continue };
+        let job = CalendarJob::Delete { calendar: held.calendar, event: *id, url: held.href, etag: held.etag };
+        outcome = outcome.with_change(Change::RemoveCalendarEvent(*id)).with_kept_job(calendar.account, JobKind::Calendar(job));
+        removed = removed.saturating_add(1);
+    }
+    *outcome.value_mut() = json!({ "command": command, "undone": removed > 0, "removed": removed });
+    Ok(outcome.with_undo(Step::Pop))
 }
 
 /// `invite.show`: a message's invitation, as its card shows it.

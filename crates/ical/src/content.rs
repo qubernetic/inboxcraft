@@ -237,8 +237,35 @@ impl Component {
 /// that is no content line, an `END` that does not match, a component left open, or not exactly one component at the
 /// top.
 pub fn parse(input: &[u8]) -> Result<Component, IcalError> {
-    if input.len() > MAX_BYTES {
-        return Err(IcalError::TooLarge { limit: MAX_BYTES });
+    parse_within(input, Limits::default())
+}
+
+/// How much [`parse_within`] reads: the longest input in bytes, and the most properties and components, all levels
+/// together. The nesting stays capped at [`MAX_DEPTH`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    /// The longest input, in bytes.
+    pub bytes: usize,
+    /// The most properties and components.
+    pub items: usize,
+}
+
+impl Default for Limits {
+    /// [`MAX_BYTES`] and [`MAX_ITEMS`], what [`parse`] reads.
+    fn default() -> Self {
+        Self { bytes: MAX_BYTES, items: MAX_ITEMS }
+    }
+}
+
+/// Reads the one component at the top of `input` as [`parse`] does, within `limits` in place of [`MAX_BYTES`] and
+/// [`MAX_ITEMS`]: for a whole calendar file someone hands over, which may hold far more than one calendar object.
+///
+/// # Errors
+///
+/// As [`parse`], the sizes those of `limits`.
+pub fn parse_within(input: &[u8], limits: Limits) -> Result<Component, IcalError> {
+    if input.len() > limits.bytes {
+        return Err(IcalError::TooLarge { limit: limits.bytes });
     }
     let mut stack: Vec<Component> = Vec::new();
     let mut top: Option<Component> = None;
@@ -247,8 +274,8 @@ pub fn parse(input: &[u8]) -> Result<Component, IcalError> {
         let number = index.saturating_add(1);
         let property = read_line(&String::from_utf8_lossy(raw)).ok_or(IcalError::BadLine { line: number })?;
         items = items.saturating_add(1);
-        if items > MAX_ITEMS {
-            return Err(IcalError::TooManyItems { limit: MAX_ITEMS });
+        if items > limits.items {
+            return Err(IcalError::TooManyItems { limit: limits.items });
         }
         if top.is_some() {
             return Err(IcalError::NotACalendar);

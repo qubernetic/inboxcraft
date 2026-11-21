@@ -12,7 +12,7 @@ use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp};
 
 use crate::value::{DAY_SECS, civil_from_seconds, civil_seconds};
 use crate::zone::{ZoneClock, is_utc};
-use crate::{Component, Date, End, Event, IcalError, Property, Rule, Span, TimeZone, When, Zones, parse};
+use crate::{Component, Date, End, Event, IcalError, Limits, Property, Rule, Span, TimeZone, When, Zones, parse_within};
 
 /// The most occurrences [`Calendar::occurrences`] gives for one span; it holds no more while it looks.
 pub const MAX_OCCURRENCES: usize = 10_000;
@@ -96,10 +96,19 @@ impl Calendar {
     ///
     /// # Errors
     ///
-    /// What [`parse`] refuses, and [`IcalError::NotACalendar`] when the component at the top is no `VCALENDAR`.
+    /// What [`parse`](crate::parse) refuses, and [`IcalError::NotACalendar`] when the component at the top is no `VCALENDAR`.
     /// An event or a zone that cannot be read is no error: it is kept in [`Calendar::components`].
     pub fn parse(input: &[u8]) -> Result<Self, IcalError> {
-        Self::from_component(&parse(input)?)
+        Self::parse_within(input, Limits::default())
+    }
+
+    /// Reads a calendar object as [`Calendar::parse`] does, within `limits` (see [`parse_within`](crate::parse_within)).
+    ///
+    /// # Errors
+    ///
+    /// What [`parse_within`](crate::parse_within) refuses, and [`IcalError::NotACalendar`] when the component at the top is no `VCALENDAR`.
+    pub fn parse_within(input: &[u8], limits: Limits) -> Result<Self, IcalError> {
+        Self::from_component(&parse_within(input, limits)?)
     }
 
     /// The calendar a `VCALENDAR` component describes.

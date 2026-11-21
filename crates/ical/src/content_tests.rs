@@ -3,7 +3,7 @@
 
 use proptest::prelude::*;
 
-use super::{Component, MAX_BYTES, MAX_DEPTH, MAX_ITEMS, Property, parse};
+use super::{Component, Limits, MAX_BYTES, MAX_DEPTH, MAX_ITEMS, Property, parse, parse_within};
 use crate::IcalError;
 
 const SMALL: &str = "BEGIN:VCALENDAR\r\n\
@@ -81,6 +81,23 @@ fn refuses_unbalanced_and_unterminated_components() {
     assert_eq!(parse(b"BEGIN:X\r\nEND:X\r\nBEGIN:X\r\nEND:X\r\n"), Err(IcalError::NotACalendar));
     // The END matches in any case.
     assert!(parse(b"BEGIN:x\r\nEND:X\r\n").is_ok());
+}
+
+#[test]
+fn parse_within_reads_what_its_limits_allow() {
+    let wide = Limits { bytes: 5_000_000, items: MAX_ITEMS };
+    let (head, tail) = ("BEGIN:VCALENDAR\r\nX-PAD:", "\r\nEND:VCALENDAR\r\n");
+    let large = format!("{head}{}{tail}", "a".repeat(MAX_BYTES + 1 - head.len() - tail.len()));
+    assert_eq!(large.len(), MAX_BYTES + 1);
+    assert_eq!(parse_within(large.as_bytes(), wide).unwrap().properties().len(), 1);
+    assert_eq!(parse(large.as_bytes()), Err(IcalError::TooLarge { limit: MAX_BYTES }));
+    assert_eq!(parse_within(large.as_bytes(), Limits { bytes: MAX_BYTES, ..wide }), Err(IcalError::TooLarge { limit: MAX_BYTES }));
+
+    // BEGIN and END are two items: 50 001 in all.
+    let many = format!("BEGIN:X\r\n{}END:X\r\n", "A:b\r\n".repeat(MAX_ITEMS - 1));
+    assert_eq!(parse_within(many.as_bytes(), Limits { items: MAX_ITEMS + 1, ..wide }).unwrap().properties().len(), MAX_ITEMS - 1);
+    assert_eq!(parse(many.as_bytes()), Err(IcalError::TooManyItems { limit: MAX_ITEMS }));
+    assert_eq!(Limits::default(), Limits { bytes: MAX_BYTES, items: MAX_ITEMS });
 }
 
 #[test]
