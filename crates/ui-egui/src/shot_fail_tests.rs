@@ -103,7 +103,24 @@ fn the_status_line_says_a_failing_account_s_reason_in_the_frames_few_words() {
     let mut app = app();
     sync(&mut app, &shot).unwrap();
     fail(&mut app, &shot).unwrap();
-    let facts = crate::draw::status::read(app.mailbox_mut());
-    assert_eq!(facts.failures, ["Personal: no connection", "Studio: sign-in refused"]);
-    assert_eq!(facts.failing, 2);
+    let facts = crate::draw::status::read(app.mailbox_mut(), None);
+    // `status-line/everything-failing`: the worst first, what needs the owner before what mends itself.
+    assert_eq!(facts.failures, ["Studio: sign-in refused", "Personal: no connection"]);
+    assert_eq!(facts.problems, 2);
+}
+
+#[test]
+fn a_server_not_found_mends_itself_and_waits_behind_a_refused_sign_in() {
+    // The engine's own side: a host not found is not the owner's to mend, a refused sign-in is.
+    use inboxcraft_model::{AccountId, ErrorKind, Event, EventKind};
+    let shot = shot(r#"{"out": "x.png", "mode": "dark", "sync": "synced", "fail": "refused"}"#);
+    let mut app = app();
+    sync(&mut app, &shot).unwrap();
+    fail(&mut app, &shot).unwrap();
+    let personal = app.mailbox().accounts().first().map(|account| account.id).unwrap();
+    let failed = EventKind::Failed { kind: ErrorKind::HostNotFound, folder: None };
+    app.mailbox_mut().tell(&Event::new(AccountId::new(personal), None, failed)).unwrap();
+    let facts = crate::draw::status::read(app.mailbox_mut(), None);
+    assert_eq!(facts.failures, ["Studio: sign-in refused", "Personal: server not found"]);
+    assert_eq!(facts.problems, 2);
 }

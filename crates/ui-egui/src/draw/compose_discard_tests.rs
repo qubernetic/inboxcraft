@@ -257,7 +257,7 @@ fn a_send_s_countdown_keeps_the_line_while_a_discard_waits_under_it() {
     let discarded = write(&mut harness, "Kiln rota");
     press_discard(&mut harness);
     assert_eq!(harness.state().discarding(), Some(discarded), "the discard waits");
-    harness.get_by_label("sending · Work party, 5 s");
+    harness.get_by_label("sending · Work party, can be undone");
     // Undo is the send's while its countdown has the line: the send comes back, the discard still waits.
     press_undo(&mut harness);
     assert_eq!(harness.state().counting(), None);

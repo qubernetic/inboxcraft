@@ -19,10 +19,10 @@ const KEY: Option<&str> = Some("Ctrl Z");
 const LEFT: Option<Left> = Some(Left { seconds: 4, share: 0.8, bar: true });
 
 /// The sheet's kinds with their words.
-/// What a screen reader hears of `message`: its text, and a send countdown's seconds left after it.
+/// What a screen reader hears of `message`: its text, and of a send counting down that it can be undone, never its seconds.
 fn said(message: StatusMessage<'_>) -> String {
     match message.kind {
-        Kind::Countdown { left: Some(left), .. } => format!("{}, {} s", message.text, left.seconds),
+        Kind::Countdown { .. } => format!("{}, can be undone", message.text),
         _ => message.text.to_owned(),
     }
 }

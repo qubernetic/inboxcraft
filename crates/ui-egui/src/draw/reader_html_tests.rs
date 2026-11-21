@@ -664,7 +664,14 @@ fn opened_with(fetch: &Recorder, folder: u64, subject: &str) -> Harness<'static,
 
 /// Whether the node labelled `name` has the focus.
 fn has_focus(harness: &Harness<'static, InboxApp>, name: &str) -> bool {
-    harness.query_by_label(name).is_some_and(|node| node.accesskit_node().is_focused())
+    picture_controls(harness, name).into_iter().any(|focused| focused)
+}
+
+/// Whether each node labelled `name` outside the status line has the focus: the status line's own `try again` (the
+/// sample is offline) is not the picture's.
+fn picture_controls(harness: &Harness<'static, InboxApp>, name: &str) -> Vec<bool> {
+    let status = super::shell::laid(&harness.ctx).map(|regions| regions.status).unwrap_or(egui::Rect::NOTHING);
+    harness.query_all_by_label(name).filter(|node| !status.contains_rect(node.rect())).map(|node| node.accesskit_node().is_focused()).collect()
 }
 
 /// A fitted message's remote picture is the picture box in each of its states: not loaded, here, failed with `try
@@ -682,7 +689,7 @@ fn a_fitted_message_s_remote_picture_is_its_box_in_every_state() {
     };
     // Not loaded: the dashed box, nothing asked.
     harness.get_by_label_contains("Remote picture not loaded");
-    assert!(harness.query_by_label("try again").is_none());
+    assert!(picture_controls(&harness, "try again").is_empty());
     assert!(fetch.asked.lock().unwrap().is_empty());
     // Loaded: the picture itself, no box.
     harness.get_by_label("always for prize-desk@example.org").click();
@@ -714,7 +721,7 @@ fn a_fitted_message_s_remote_picture_is_its_box_in_every_state() {
     settle(&mut harness);
     harness.get_by_label_contains("Picture not shown: its data could not be drawn");
     assert!(harness.query_by_label_contains("could not be shown").is_none(), "not the failed box");
-    assert!(harness.query_by_label("try again").is_none(), "a try again that can do nothing");
+    assert!(picture_controls(&harness, "try again").is_empty(), "a try again that can do nothing");
 }
 
 /// The remote-picture banner stands over a fitted message, not over the plain view the owner chose; over the plain

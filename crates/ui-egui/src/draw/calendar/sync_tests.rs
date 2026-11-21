@@ -202,7 +202,7 @@ fn the_foot_draws_idle_syncing_synced_and_failed_as_the_frames_do() {
         assert_eq!(control(&harness), "Personal calendars: sign-in refused, try again");
         harness.get_by_label("open log");
         assert_eq!(started(&harness), 2);
-        harness.get_by_label_contains("try again").click();
+        harness.get_by_label_contains(", try again").click();
         frames(&mut harness);
         assert_eq!(started(&harness), 3, "a failure offers the press again");
         assert!(matches!(state(&harness), SyncState::Syncing { .. }));
@@ -228,7 +228,7 @@ fn a_failure_names_the_account_on_one_clean_capped_line() {
     assert!(account.chars().count() <= crate::calendar::sync::MOST_NAME, "{}", account.chars().count());
     assert!(!account.chars().any(|c| c.is_control() || c == '\u{202E}'), "{account:?}");
     assert_eq!(why.words(), "not secure", "the window's words, never a server's");
-    let link = harness.get_by_label_contains("try again").rect();
+    let link = harness.get_by_label_contains(", try again").rect();
     assert!(link.right() <= 1200.0 - 15.0 + 0.5 && link.bottom() <= 820.0, "{link:?}");
 }
 

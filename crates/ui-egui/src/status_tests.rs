@@ -14,8 +14,9 @@ fn at_rest() -> Facts {
     Facts {
         sync: Sync::Synced(Some("14:02".to_owned())),
         accounts: 2,
+        offline_since: None,
         failures: Vec::new(),
-        failing: 0,
+        problems: 0,
         outbox: 1,
         outbox_goes: None,
         next: Some(("15:00".to_owned(), "Design review".to_owned(), 58)),
@@ -50,13 +51,19 @@ fn syncing() {
 
 #[test]
 fn offline() {
-    let facts = Facts { sync: Sync::Offline, ..at_rest() };
-    assert_eq!(parts(&facts, false), [item("offline", Kind::Offline), item("showing what is kept on this computer", Kind::Plain)]);
+    // `status-line/offline`: since when, what the window shows meanwhile, and the way to try again (coming soon: no
+    // command signs the accounts in before their wait ends).
+    let facts = Facts { sync: Sync::Offline(Some("14:10".to_owned())), ..at_rest() };
+    assert_eq!(
+        parts(&facts, false),
+        [item("offline since 14:10", Kind::Offline), item("showing what is kept on this computer", Kind::Plain), Part::Link("try again", true)]
+    );
+    assert_eq!(parts(&facts, true), [item("offline since 14:10", Kind::Offline)], "beside a message the one fact");
 }
 
 #[test]
 fn account_refused() {
-    let facts = Facts { failures: vec!["Studio: sign-in refused".to_owned()], failing: 1, outbox: 0, ..at_rest() };
+    let facts = Facts { failures: vec!["Studio: sign-in refused".to_owned()], problems: 1, outbox: 0, ..at_rest() };
     assert_eq!(
         parts(&facts, false),
         [
@@ -72,7 +79,7 @@ fn account_refused() {
 #[test]
 fn everything_failing() {
     let failures = ["Studio: sign-in refused", "Personal: no route", "Club: timed out", "Work: certificate refused"].map(str::to_owned).to_vec();
-    let facts = Facts { failures, failing: 4, ..at_rest() };
+    let facts = Facts { failures, problems: 4, ..at_rest() };
     assert_eq!(
         parts(&facts, false),
         [item("Studio: sign-in refused", Kind::Error), item("and 3 more problems", Kind::Plain), Part::Link("open log", true)]
@@ -131,12 +138,16 @@ fn error() {
 fn the_worst_state_and_a_count() {
     // Offline, one account refused and one more failing: the failure wins the first fact, with the count of the rest;
     // offline is not said over it.
-    let facts =
-        Facts { sync: Sync::Offline, failures: vec!["Studio: sign-in refused".to_owned(), "Personal: no route".to_owned()], failing: 2, ..at_rest() };
+    let facts = Facts {
+        sync: Sync::Offline(None),
+        failures: vec!["Studio: sign-in refused".to_owned(), "Personal: no route".to_owned()],
+        problems: 2,
+        ..at_rest()
+    };
     let shown = parts(&facts, false);
     assert_eq!(shown.first(), Some(&item("Studio: sign-in refused", Kind::Error)));
-    assert_eq!(shown.get(1), Some(&item("and 1 more problems", Kind::Plain)));
-    assert!(!shown.contains(&item("offline", Kind::Offline)), "{shown:?}");
+    assert_eq!(shown.get(1), Some(&item("and 1 more problem", Kind::Plain)), "one more problem, not problems");
+    assert!(!shown.iter().any(|part| matches!(part, Part::Item(_, Kind::Offline))), "{shown:?}");
     // With a message shown, the failure is still the one fact.
     assert_eq!(parts(&facts, true), [item("Studio: sign-in refused", Kind::Error)]);
 }

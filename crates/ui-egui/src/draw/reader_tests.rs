@@ -192,7 +192,9 @@ fn a_picture_that_cannot_be_drawn_offers_no_try_again() {
     settle(&mut harness);
     harness.get_by_label_contains("Picture not shown: its data could not be drawn");
     assert!(harness.query_by_label_contains("does not draw this kind").is_none(), "its own reason, not another kind's");
-    assert!(harness.query_by_label("try again").is_none(), "a try again that can do nothing");
+    // The status line's own (the sample is offline) is not the picture's.
+    let status = super::shell::laid(&harness.ctx).unwrap().status;
+    assert!(harness.query_all_by_label("try again").all(|node| status.contains_rect(node.rect())), "a try again that can do nothing");
 }
 
 #[test]

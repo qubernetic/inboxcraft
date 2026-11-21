@@ -113,14 +113,14 @@ What the app still owes this file, one line each. The finer differences, with th
 **Waiting for the file to be redrawn**
 - The owner's rulings of 2026-11-18 are in the code but not yet in this file: the invitation card has one primary
   answer and keeps "Keep my answer", and the add form's Detect and "Check and add" can always be pressed.
+- The send countdown's "send now" is not drawn: `status-line/send-countdown` and the status message's countdown
+  state show undo, its key, the bar and the seconds only. It is built once a frame draws it.
 
 **Frame, command line and status line**
 - The command line's search of all mail, its GO TO and LAST COMMANDS groups and mixed results are not built; plain
   text searches the mail shown.
-- The status line says "offline" with no time since and no "try again", the send countdown has no "send now", and
-  its first failure is the first failing account, not the worst.
+- The send countdown has no "send now" (the file draws none yet, above); the offline "try again" is coming soon.
 - Every "open log" is coming soon: there is no log to open.
-- On Home, the calendar, the settings and in one pane the status line keeps the mail's key hints.
 - The index keeps Blocked and Junk rows the file does not draw: their mail has no other place. While one account
   syncs, every account signed in says syncing.
 
