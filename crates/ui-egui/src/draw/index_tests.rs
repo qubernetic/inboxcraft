@@ -73,12 +73,24 @@ fn harness(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, height: 
 
 /// [`harness`] with `beside` points of window on the index's right, where its floats may reach.
 fn harness_in(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, height: f32, open: bool, beside: f32) -> Harness<'static, State> {
+    harness_at(mailbox, (at, narrow, scale), (height, beside), open, 1.0)
+}
+
+/// [`harness_in`] at `ppp` physical pixels per point.
+fn harness_at(
+    mailbox: Mailbox,
+    (at, narrow, scale): (Place, bool, TextScale),
+    (height, beside): (f32, f32),
+    open: bool,
+    ppp: f32,
+) -> Harness<'static, State> {
     let theme = Theme::new(Mode::Dark, scale);
     let width = if narrow { 56.0 } else { 232.0 };
     let ids: BTreeSet<u64> = mailbox.accounts().iter().map(|account| account.id).collect();
     let state = State { mailbox, at, narrow, asked: Asked::default(), keymap: Keymap::default(), theme };
     let mut harness = Harness::builder()
         .with_size(vec2(width + beside, height))
+        .with_pixels_per_point(ppp)
         .with_context_setup(move |ctx| {
             install_fonts(ctx);
             crate::motion::set_reduced(ctx, true);
@@ -505,5 +517,31 @@ fn drafts_has_a_glyph_of_its_own_wide_and_narrow() {
         let in_row: Vec<&String> = glyphs.iter().filter(|(_, rect)| drafts.contains(rect.center())).map(|(text, _)| text).collect();
         assert!(in_row.iter().any(|text| text.as_str() == "\u{e704}"), "narrow {narrow}: {in_row:?}");
         assert!(!in_row.iter().any(|text| text.contains('\u{ebc6}')), "narrow {narrow}: no pencil: {in_row:?}");
+    }
+}
+
+#[test]
+fn every_row_stands_on_whole_pixels_at_125() {
+    // At 125 % a 34-point row is 42.5 pixels: each row's edges are rounded to whole pixels, so neighbours share
+    // theirs and no fill, bar or focus edge is smeared over half a pixel (#398, pixel round 3.5).
+    for narrow in [false, true] {
+        for scale in [TextScale::default(), TextScale::from_percent(130).unwrap()] {
+            let mut harness = harness_at(two(), (Place::Calendar, narrow, scale), (826.0, 0.0), true, 1.25);
+            harness.run();
+            let mut seen = 0;
+            for node in harness.query_all_by_role(Role::Button) {
+                let label = node.accesskit_node().label().unwrap_or_default().to_owned();
+                // New message is a button of its own (`component/button.rs`), as high as every control: not a row.
+                if label == "New message" {
+                    continue;
+                }
+                let Some(bounds) = node.accesskit_node().bounding_box() else { continue };
+                for edge in [bounds.x0, bounds.y0, bounds.x1, bounds.y1] {
+                    assert!((edge - edge.round()).abs() < 1e-3, "narrow {narrow}, {scale:?}: {label:?} at {bounds:?}");
+                }
+                seen += 1;
+            }
+            assert!(seen > 10, "narrow {narrow}: {seen} rows");
+        }
     }
 }
