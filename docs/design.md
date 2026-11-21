@@ -319,8 +319,10 @@ The 64 sets of the file. A screen is built from instances of these only.
 ### Home
 A page of its own: at the left a 600 px brief of today (a headline, four counts, the day's agenda, the drafts to
 pick up, two buttons), at the right the Qubernetic emblem drawn in characters on the character field. It is also
-drawn with nothing to do, with overflowing counts, before the first account, and with everything failing. Where
-the window is too narrow for the emblem, it leaves whole; it is never cut or made smaller. The headline greets the
+drawn with nothing to do, with overflowing counts, before the first account, and with everything failing. The
+emblem with the names under it (the two wordmarks and the tagline, 16 below it) stands centred in the free area
+right of the brief and under the command line, across and down, at any window height. Where the window is too
+narrow or too low for the emblem and its names, it leaves whole; it is never cut or made smaller. The headline greets the
 owner by the first word of the sending name, titles such as Dr. skipped; Settings › Sending sets the last word, the
 full name or no name instead.
 

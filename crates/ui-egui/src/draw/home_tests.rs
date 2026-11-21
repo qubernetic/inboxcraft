@@ -313,10 +313,11 @@ fn pictures(harness: &Harness<'_, State>) -> Vec<Rect> {
 }
 
 /// `home/*` at 1440 × 900, in dark and light: the Qubernetic emblem (76 × 40 cells, 547 × 500) centred across the
-/// emblem's place, at 629 of the body as the frames draw it; the names' box (394 × 96, `bg`) 12 out from its left and
-/// 16 under it; in it, 12 in, the Qubernetic wordmark (88 × 14), the dot and the InboxCraft wordmark (102.17 × 13)
-/// centred on a line of 20, the InboxCraft wordmark at 120 of the box's content. Down, the emblem stands 95 below the
-/// place's top, as the frames draw it, and the names at 611.
+/// emblem's place, at 629 of the body as the frames draw it; the names' box (394 wide, `bg`) 12 out from its left and
+/// 16 under it, 70 high: the frames' 96 less the design note's line, which is not drawn; in it, 12 in, the Qubernetic
+/// wordmark (88 × 14), the dot and the InboxCraft wordmark (102.17 × 13) centred on a line of 20, the InboxCraft
+/// wordmark at 120 of the box's content. Down, the emblem and the names stand centred in the 826 of the place:
+/// (826 − 500 − 16 − 70) / 2 = 120 above the emblem and under the names, where the frames put the emblem 95 down.
 #[test]
 fn the_emblem_and_the_names_stand_where_the_frames_draw_them_in_dark_and_light() {
     for mode in [Mode::Dark, Mode::Light] {
@@ -325,11 +326,11 @@ fn the_emblem_and_the_names_stand_where_the_frames_draw_them_in_dark_and_light()
             let harness = harness_with(sample(state).unwrap(), mode, 100, BODY, body, Some(crate::brand::emblem().clone()), Level::Off, false);
             let what = format!("{state}, {mode:?}");
             let p = harness.state().drawn.parts;
-            assert_eq!(at(p.emblem), (629.0, 95.0, 547.0, 500.0), "{what}: the emblem");
-            assert_eq!(at(p.names), (617.0, 611.0, 394.0, 96.0), "{what}: the names' box");
+            assert_eq!(at(p.emblem), (629.0, 120.0, 547.0, 500.0), "{what}: the emblem");
+            assert_eq!(at(p.names), (617.0, 636.0, 394.0, 70.0), "{what}: the names' box");
             let (qubernetic, inboxcraft) = p.wordmarks.unwrap();
-            assert_eq!(qubernetic, Rect::from_min_size(pos2(629.0, 626.0), vec2(88.0, 14.0)), "{what}: the Qubernetic wordmark");
-            assert_eq!(inboxcraft, Rect::from_min_size(pos2(749.0, 626.5), vec2(102.17, 13.0)), "{what}: the InboxCraft wordmark");
+            assert_eq!(qubernetic, Rect::from_min_size(pos2(629.0, 651.0), vec2(88.0, 14.0)), "{what}: the Qubernetic wordmark");
+            assert_eq!(inboxcraft, Rect::from_min_size(pos2(749.0, 651.5), vec2(102.17, 13.0)), "{what}: the InboxCraft wordmark");
             // Each is painted as a picture from the whole pixel its box starts in.
             let painted = pictures(&harness);
             for (name, wordmark) in [("Qubernetic", qubernetic), ("InboxCraft", inboxcraft)] {
@@ -343,18 +344,17 @@ fn the_emblem_and_the_names_stand_where_the_frames_draw_them_in_dark_and_light()
 }
 
 /// The names come with the emblem: where the emblem and the names do not fit whole together, neither stands, at a
-/// window of 1381 across and in a place too low for both (95 + 500 + 16 + 96 = 707 high stands it at 95, 612 pulls it
-/// up to the top, 611 leaves none); at 130 % text the names' lines grow and both still stand.
+/// window of 1381 across and in a place too low for both (500 + 16 + 70 = 586 high stands them at its top, 585 leaves
+/// none); at 130 % text the names' lines grow and both still stand.
 #[test]
 fn the_names_leave_with_the_emblem() {
     let emblem = crate::brand::emblem().clone();
     for (width, high, percent, whole) in [
         (1146.0, 826.0, 100, false),
         (1147.0, 826.0, 100, true),
-        (1205.0, 611.0, 100, false),
-        (1205.0, 612.0, 100, true),
+        (1205.0, 585.0, 100, false),
+        (1205.0, 586.0, 100, true),
         (1205.0, 700.0, 100, true),
-        (1205.0, 707.0, 100, true),
         (1205.0, 826.0, 130, true),
     ] {
         let body = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, high));
@@ -371,24 +371,23 @@ fn the_names_leave_with_the_emblem() {
     }
 }
 
-/// The emblem stands 95 below the place's top in a place as high as the frames' and in a taller one (it is not
-/// centred down), and a place too short for that pulls it up just enough: the names end at the place's foot.
+/// The emblem and the names under it stand as one block centred down the place, as much room above as under, in a
+/// place as high as the frames', in a taller and a lower one, in one of an odd height and at 130 % text; across the
+/// emblem stays centred (629 of the body); a place just as high as the block stands it at its top.
 #[test]
-fn the_emblem_stands_95_down_and_a_short_place_pulls_it_up() {
+fn the_emblem_and_its_names_stand_centred_down_the_place() {
     let emblem = crate::brand::emblem().clone();
-    for (high, percent, top) in
-        [(826.0, 100, 95.0), (1100.0, 100, 95.0), (707.0, 100, 95.0), (700.0, 100, 88.0), (612.0, 100, 0.0), (826.0, 130, 95.0)]
-    {
+    for (high, percent) in [(826.0, 100), (1100.0, 100), (700.0, 100), (827.0, 100), (586.0, 100), (826.0, 130), (1100.0, 130)] {
         let body = Rect::from_min_size(pos2(0.0, 0.0), vec2(BODY.x, high));
         let harness = harness_with(sample("today").unwrap(), Mode::Dark, percent, body.size(), body, Some(emblem.clone()), Level::Off, false);
         let p = harness.state().drawn.parts;
         let what = format!("{high} high at {percent} %");
-        assert_eq!(at(p.emblem), (629.0, top, 547.0, 500.0), "{what}: the emblem");
-        assert_eq!(p.names.unwrap().top(), top + 516.0, "{what}: the names 16 under it");
-        assert_eq!(harness.state().field.emblem_at(), p.emblem.map(|rect| rect.min), "{what}: the field draws it there");
-        if high < 707.0 {
-            assert_eq!(p.names.unwrap().bottom(), high, "{what}: pulled up just enough");
-        }
+        let (Some(placed), Some(names), Some(stage)) = (p.emblem, p.names, p.stage) else { panic!("{what}: none: {p:?}") };
+        assert_eq!((placed.left(), placed.size()), (629.0, vec2(547.0, 500.0)), "{what}: across as before, never smaller");
+        assert_eq!(names.top(), placed.bottom() + 16.0, "{what}: the names 16 under it");
+        let (above, under) = (placed.top() - stage.top(), stage.bottom() - names.bottom());
+        assert!(above >= 0.0 && under >= 0.0 && (above - under).abs() <= 1.0, "{what}: {above} above the block, {under} under it");
+        assert_eq!(harness.state().field.emblem_at(), Some(placed.min), "{what}: the field draws it there");
     }
 }
 

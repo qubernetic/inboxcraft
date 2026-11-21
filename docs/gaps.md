@@ -1393,10 +1393,11 @@ time from the code as it is, not measured.
 - The why line still gives up its link before it cuts its first reason (a narrow reader at 130 % shows
   "groupe…" with no link); the frames draw only the 684 wide line, where both fit (#328)
 - The text size slider's names keep 4 apart at least; at 130 % "120 %" and "130 %" stand about 6 apart (#328)
-- Home (#335): the frames draw it only in a window 900 high; in a lower one the emblem and the names under it are
-  pulled up toward the top of the emblem's place, and leave only where even that leaves no room. The frames' line
-  "↳ the field reacts under the pointer here, and only here" under the tagline is a note on the design and is not
-  drawn; the names' box keeps its room.
+- Home (#335, #437): the frames draw it only in a window 900 high, the emblem 95 below the top of its place; the code
+  centres the emblem and the names under it down the place in every window (120 down at 1440 × 900, the owner's
+  choice), and they leave only where they cannot fit whole. The frames' line "↳ the field reacts under the pointer
+  here, and only here" under the tagline is a note on the design and is not drawn; the names' box keeps no room for
+  it, 70 high where the frames' is 96.
 - Privacy (#337): `remote.list` keeps no sender name, so each row shows the address at 16 in up to 616 of a 720 row,
   where the frames draw the name at 16 in 180 and the address at 208 in 424; a row with a name would keep the
   frames' columns.

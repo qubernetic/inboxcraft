@@ -72,9 +72,6 @@ const BAR: egui::Vec2 = vec2(3.0, 12.0);
 const STEPS_PAD_Y: f32 = 10.0;
 const STEPS_GAP: f32 = 2.0;
 
-/// How far below the emblem's place's top the emblem stands where the place is high enough, in points.
-const EMBLEM_TOP: f32 = 95.0;
-
 /// The room between the emblem and the names under it, in points.
 const NAMES_GAP: f32 = 16.0;
 
@@ -177,31 +174,31 @@ pub struct Stage<'a> {
     pub level: Level,
 }
 
-/// Where `emblem` stands in `stage` at `ppp` with `under` points of names below it: centred across, [`EMBLEM_TOP`]
-/// below the stage's top (pulled up as far as a short stage needs), at its one size, on the whole pixel the field
-/// draws it on, and only if it and the names fit whole.
+/// Where `emblem` stands in `stage` at `ppp` with `under` points of names below it: centred across, and down with the
+/// names as one block, at its one size, on the whole pixel the field draws it on, and only if it and the names fit
+/// whole.
 #[must_use]
 pub fn emblem_place(stage: Rect, emblem: &Emblem, under: f32, ppp: f32) -> Option<Rect> {
     let band = emblem_band(stage, emblem, under, ppp)?;
     field::emblem_corner(emblem, band, stage, ppp).map(|corner| Rect::from_min_size(corner, emblem.size()))
 }
 
-/// The band the emblem is centred in, as wide as `stage`: the emblem's height [`EMBLEM_TOP`] below the stage's top,
-/// or higher where the stage leaves less than that above the emblem and `under` points of names, and two pixels of
-/// `ppp` more each way: the field puts its first cell on the next whole pixel and the emblem on the nearest one from
-/// there, up to a pixel and a half off. `None` where not even a top of 0 leaves room.
+/// The band the emblem is centred in, as wide as `stage`: the emblem's height where the emblem and `under` points of
+/// names below it stand centred down the stage, as much room above the block as under it, and two pixels of `ppp`
+/// more each way: the field puts its first cell on the next whole pixel and the emblem on the nearest one from there,
+/// up to a pixel and a half off. `None` where the stage is lower than the block.
 fn emblem_band(stage: Rect, emblem: &Emblem, under: f32, ppp: f32) -> Option<Rect> {
     let size = emblem.size();
-    let top = EMBLEM_TOP.min(stage.height() - size.y - under.max(0.0));
+    let top = (stage.height() - size.y - under.max(0.0)) / 2.0;
     let pixel = if ppp.is_finite() && ppp > 0.0 { 2.0 / ppp } else { 2.0 };
     (under.is_finite() && top.is_finite() && top >= 0.0 && size.x > 0.0 && size.y > 0.0)
         .then(|| Rect::from_min_size(pos2(stage.left(), stage.top() + top - pixel), vec2(stage.width(), size.y + pixel * 2.0)))
 }
 
-/// The names' height in `theme`: the wordmarks' line (`mono`'s), the tagline (`label`) and a line of `mono_s`, the
-/// room between them and round them.
+/// The names' height in `theme`: the wordmarks' line (`mono`'s) and the tagline (`label`), the room between them and
+/// round them. The frames' third line under the tagline is a note on the design, not drawn, and keeps no room.
 fn names_high(theme: &Theme) -> f32 {
-    NAMES_PAD * 2.0 + theme.fonts.mono.line + NAMES_LINE_GAP + theme.fonts.label.line + NAMES_LINE_GAP + theme.fonts.mono_s.line
+    NAMES_PAD * 2.0 + theme.fonts.mono.line + NAMES_LINE_GAP + theme.fonts.label.line
 }
 
 /// The names under the emblem at `emblem`, within `stage`: a box of `bg` 12 out from the emblem's left and 16 under

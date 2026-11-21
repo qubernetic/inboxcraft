@@ -96,9 +96,11 @@ What the app still owes this file, one line each. The finer differences, with th
   and the window's commands. The file does not draw event drafts yet either.
 
 **The marks**
-- The file draws Home only in a window 900 high. In a lower one the code pulls the emblem and the names under it up
-  toward the top of their place, and drops them only where even that leaves no room. The line "↳ the field reacts
-  under the pointer here, and only here" is a note on the design, not drawn; the names' box keeps its room.
+- The file draws Home only in a window 900 high, with the emblem 95 below the top of its place. The code centres the
+  emblem and the names under it down their place in every window (120 down at 1440 × 900), and drops them only where
+  they cannot fit whole. The line "↳ the field reacts under the pointer here, and only here" is a note on the
+  design, not drawn, and the names' box keeps no room for it: 70 high where the file's is 96. The frames
+  `screen/home/*` (and `screen/event-draft-past/home`) still stand the emblem at 95 and the box at 96.
 
 **Sample content**
 - The sample mailbox and the pictures in `docs/images/` use their own people, subjects, times and counts, not the
