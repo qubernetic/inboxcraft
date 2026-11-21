@@ -305,3 +305,24 @@ fn the_right_to_left_mail_is_the_inbox_s_newest_two() {
         assert!(message["from"].to_string().contains("@example.org"), "{message}");
     }
 }
+
+/// FNV-1a over `bytes`, on from `hash`.
+fn fnv(hash: u64, bytes: &[u8]) -> u64 {
+    bytes.iter().fold(hash, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3))
+}
+
+#[test]
+fn the_why_and_the_thread_of_every_sample_message_are_as_before() {
+    // Pinned as they stood before #406 found one thread without grouping the store: the answers hash to this.
+    let mut session = session(Box::new(FakeClock::new(now()))).unwrap();
+    let mut hash = 0xcbf2_9ce4_8422_2325;
+    for id in 1..=u64::try_from(MESSAGES.len()).unwrap() {
+        for command in ["mail.why", "mail.thread", "mail.open"] {
+            let answer = session.run(command, &json!({ "id": id })).unwrap();
+            hash = fnv(hash, format!("{command} {id} {answer}\n").as_bytes());
+        }
+    }
+    let answer = session.run("mail.list", &json!({ "limit": 1000 })).unwrap();
+    hash = fnv(hash, answer.to_string().as_bytes());
+    assert_eq!(hash, 17_009_599_241_181_191_699);
+}

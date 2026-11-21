@@ -19,7 +19,7 @@ use std::time::Duration;
 use crate::KeepWake;
 use inboxcraft_model::{
     Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId,
-    FolderState, Job, Message, MessageId, MessageState, Outgoing, Scheduled, Sender,
+    FolderState, Job, Message, MessageId, MessageRef, MessageState, Outgoing, Scheduled, Sender,
 };
 use inboxcraft_time::Timestamp;
 use keeper::Keeper;
@@ -183,6 +183,13 @@ impl Sqlite {
     #[must_use]
     pub fn keeper_tries(&self) -> u64 {
         self.keeper.as_ref().map_or(0, Keeper::tries)
+    }
+
+    /// Makes an open on this thread fail after indexing the links of `after` messages, as a kill half-way through
+    /// the migration would; `None` lets it finish (tests).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn stop_link_indexing_after(after: Option<usize>) {
+        schema::FAIL_LINKS_AFTER.with(|stop| stop.set(after));
     }
 
     /// Ends the draft keeper's thread as if it had died (tests).
@@ -491,6 +498,10 @@ fn put_folder(tx: &Transaction<'_>, folder: &Folder) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// The messages that name the link `?1`, by id: those [`Storage::linked`] gives.
+/// One message a link names, read by [`Storage::linked`].
+const LINKED: &str = "SELECT record, opened, EXISTS (SELECT 1 FROM body WHERE body.message = message.id) FROM message WHERE id = ?1";
+
 fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError> {
     let folder = message.folder();
     let account = match folder_account(tx, folder)? {
@@ -515,6 +526,19 @@ fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError
              subject_text = excluded.subject_text, record = excluded.record",
         params![id, account, folder_key, uid.get(), fields.date, fields.from, fields.to, fields.subject, json(message)?],
     )?;
+    tx.execute("DELETE FROM message_link WHERE message = ?1", [id])?;
+    Ok(put_links(&mut tx.prepare(PUT_LINK)?, id, message)?)
+}
+
+/// One link of a message into the index of links, prepared once for all the links of a message, or of every message
+/// a migration indexes.
+pub(super) const PUT_LINK: &str = "INSERT OR IGNORE INTO message_link (link, message) VALUES (?1, ?2)";
+
+/// The links `message` (row `id`) names, into the index of links by `statement` ([`PUT_LINK`]): each once.
+pub(super) fn put_links(statement: &mut rusqlite::Statement<'_>, id: i64, message: &Message) -> rusqlite::Result<()> {
+    for link in inboxcraft_model::links(message) {
+        statement.execute(params![link.as_str(), id])?;
+    }
     Ok(())
 }
 
@@ -619,6 +643,30 @@ impl Storage for Sqlite {
 
     fn message(&self, id: MessageId) -> Result<Option<Entry>, StoreError> {
         Ok(self.entries("id = ?1", key(id.get()))?.into_iter().next())
+    }
+
+    fn linked(&self, link: &MessageRef, known: &BTreeSet<MessageId>) -> Result<Vec<Entry>, StoreError> {
+        // The ids from the index alone (its primary key), then the record of each one not known yet.
+        let ids: Vec<i64> = {
+            let mut statement = self.conn.prepare("SELECT message FROM message_link WHERE link = ?1 ORDER BY message")?;
+            let rows = statement.query_map([link.as_str()], |row| row.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let mut statement = self.conn.prepare(LINKED)?;
+        let mut found = Vec::new();
+        for id in ids {
+            if u64::try_from(id).is_ok_and(|id| known.contains(&MessageId::new(id))) {
+                continue;
+            }
+            let row = statement.query_row([id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?))).optional()?;
+            let Some((record, opened, has_body)) = row else { continue };
+            let entry = Entry::new(serde_json::from_str(&record)?, opened, has_body);
+            // The index is written with the record; a record that no longer names the link is not linked by it.
+            if inboxcraft_model::links(entry.message()).any(|named| named == link) {
+                found.push(entry);
+            }
+        }
+        Ok(found)
     }
 
     fn body(&self, id: MessageId) -> Result<Option<Body>, StoreError> {

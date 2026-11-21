@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use inboxcraft_model::{
-    Account, AccountId, EmailAddress, FolderId, JobKind, Message, MessageId, MessageRef, MessageState, Role, Screening, group_threads,
-    is_invisible_mark,
+    Account, AccountId, EmailAddress, FolderId, JobKind, Message, MessageId, MessageRef, MessageState, Role, Screening, is_invisible_mark, links,
+    thread_order,
 };
 use inboxcraft_store::{Change, Entry, Search, Storage};
 use inboxcraft_time::Timestamp;
@@ -280,8 +280,8 @@ fn thread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     let params: ThreadParams = decode(THREAD.id, params)?;
     let id = MessageId::new(params.id);
     let store = context.store();
-    store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
-    let (thread, entries) = thread_of(store, id)?;
+    let entry = store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let (thread, entries) = thread_of(store, entry)?;
     let skip = thread.len().saturating_sub(limit(Some(MAX_LIST)));
     let shown: Vec<Value> = thread.iter().skip(skip).filter_map(|id| entries.get(id)).map(json::message).collect();
     let mut drafts = Vec::new();
@@ -295,18 +295,35 @@ fn thread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     Ok(Outcome::new(json!({ "total": thread.len(), "messages": shown, "drafts": drafts })))
 }
 
-/// The thread `id` is in, oldest first (a thread of one when it names no other), and every message of the store by id.
-fn thread_of(store: &dyn Storage, id: MessageId) -> Result<(Vec<MessageId>, BTreeMap<MessageId, Entry>), EngineError> {
-    let mut entries = BTreeMap::new();
-    for account in store.accounts()? {
-        for folder in store.folders(account.id())? {
-            for entry in store.messages(folder.id())? {
-                entries.insert(entry.message().id(), entry);
+/// The thread `entry`'s message is in, oldest first (a thread of one when it names no other), and its messages by id:
+/// the thread [`inboxcraft_model::group_threads`] finds over every message, found from the message by its links
+/// through [`Storage::linked`]. Each distinct link is looked up once, without recursion, and the messages found so
+/// far are passed as known, so the store reads each message's record once however many links of the thread name it:
+/// the work is one index lookup per link and one record per message of the thread, whatever the store holds
+/// besides; a loop of references ends where it began.
+fn thread_of(store: &dyn Storage, entry: Entry) -> Result<(Vec<MessageId>, BTreeMap<MessageId, Entry>), EngineError> {
+    // Every link ever queued, so each is queued (and looked up) once.
+    let mut queued: BTreeSet<MessageRef> = links(entry.message()).cloned().collect();
+    let mut to_follow: Vec<MessageRef> = queued.iter().cloned().collect();
+    let mut known = BTreeSet::from([entry.message().id()]);
+    let mut entries = BTreeMap::from([(entry.message().id(), entry)]);
+    while let Some(link) = to_follow.pop() {
+        for found in store.linked(&link, &known)? {
+            let id = found.message().id();
+            if known.insert(id) {
+                for named in links(found.message()) {
+                    if !queued.contains(named) {
+                        queued.insert(named.clone());
+                        to_follow.push(named.clone());
+                    }
+                }
+                entries.insert(id, found);
             }
         }
     }
-    let messages: Vec<Message> = entries.values().map(|entry| entry.message().clone()).collect();
-    let thread = group_threads(&messages).into_iter().find(|thread| thread.contains(&id)).unwrap_or_else(|| vec![id]);
+    let mut thread: Vec<&Message> = entries.values().map(Entry::message).collect();
+    thread.sort_by_key(|message| thread_order(message));
+    let thread = thread.into_iter().map(Message::id).collect();
     Ok((thread, entries))
 }
 
@@ -613,7 +630,7 @@ fn why(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     }
 
     // The thread: one the owner wrote in, or another.
-    let (thread, entries) = thread_of(store, id)?;
+    let (thread, entries) = thread_of(store, entry.clone())?;
     if thread.len() > 1 {
         let yours = thread.iter().filter(|other| **other != id).filter_map(|other| entries.get(other)).any(|other| role_of(other.message()) == Some(Role::Sent));
         let text_id = if yours { text_id::THREAD_YOURS } else { text_id::THREAD_OTHER };
@@ -647,3 +664,6 @@ mod tests;
 #[cfg(test)]
 #[path = "mail_row_tests.rs"]
 mod row_tests;
+#[cfg(test)]
+#[path = "thread_pin_tests.rs"]
+mod thread_pin_tests;

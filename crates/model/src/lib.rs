@@ -87,7 +87,7 @@ pub use message::{
 pub use role::{Role, RoleError, RoleMap, RoleSource, detect_role};
 pub use signs::{Precedence, Signs};
 pub use text::is_invisible_mark;
-pub use thread::{Thread, group_threads};
+pub use thread::{Thread, group_threads, links, thread_order};
 pub use uid_set::UidSet;
 
 /// The crate's package name.
