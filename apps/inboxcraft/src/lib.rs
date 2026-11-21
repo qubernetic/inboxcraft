@@ -215,7 +215,7 @@ fn with_originals(app: InboxApp, _whose: Whose) -> InboxApp {
     app
 }
 
-/// Removes the cleaned copies `whose` window opened in the browser: at the start, those of an earlier run.
+/// Removes the cleaned copies `whose` window opened in the browser: at the start (an earlier run's) and at a normal close.
 pub fn sweep_originals(whose: Whose) {
     #[cfg(unix)]
     original::sweep_all(whose);

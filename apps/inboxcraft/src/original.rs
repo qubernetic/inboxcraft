@@ -15,8 +15,8 @@
 //!   made new (`O_CREAT | O_EXCL`, which follows no symbolic link, a dangling one included) with mode `0600`; whatever
 //!   stood at the name before (an earlier copy, or a link someone planted) is unlinked first, never followed, and a
 //!   file that then turns out not to be the owner's is removed again.
-//! - Old copies go: every copy at the start ([`sweep_all`]), and at each open those older than [`KEEP_FOR`], then the
-//!   oldest beyond [`MAX_FILES`]. Only names of the [`name`] pattern are touched.
+//! - Old copies go: every copy at the start and at a normal close ([`sweep_all`]), and at each open those older than
+//!   [`KEEP_FOR`], then the oldest beyond [`MAX_FILES`]. Only names of the [`name`] pattern are touched.
 //! - The hand-off ([`Hand`]) asks the desktop portal's `OpenURI.OpenFile` with the file opened read-only, so the
 //!   browser gets the file even when it runs in a sandbox of its own; without a portal, outside the Flatpak,
 //!   `xdg-open` is run on the path (no shell, the path its one argument). The bus call gives up after
@@ -228,7 +228,7 @@ pub fn sweep_folder(folder: &Path) {
     sweep(folder, Duration::ZERO, 0);
 }
 
-/// Removes every copy in `whose`'s [`folder`]: at the start, what an earlier run left.
+/// Removes every copy in `whose`'s [`folder`]: at the start (what an earlier run left) and at a normal close.
 pub fn sweep_all(whose: Whose) {
     if let Some(folder) = folder(whose) {
         sweep_folder(&folder);
