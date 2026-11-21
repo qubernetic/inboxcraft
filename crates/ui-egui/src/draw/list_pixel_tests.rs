@@ -58,13 +58,46 @@ fn the_list_head_is_one_line_with_the_view_switch_at_its_right_and_the_pills_und
             for (name, rect) in [("place", title), ("what it holds", holds), ("switch", switch)] {
                 assert!((rect.center().y - middle).abs() <= 1.0, "{at}: {name} {rect:?} on the head's line at {middle}");
             }
-            assert!((title.left() - (pane.left() + 1.0 + 16.0)).abs() <= 1.0, "{at}: the place 16 in: {title:?} in {pane:?}");
+            assert!((title.left() - (pane.left() + 16.0)).abs() <= 1.0, "{at}: the place 16 in: {title:?} in {pane:?}");
             assert!((holds.left() - title.right() - 10.0).abs() <= 1.0, "{at}: 10 between: {title:?} {holds:?}");
             assert!((switch.right() - (pane.right() - 16.0)).abs() <= 1.0, "{at}: the switch 16 in from the right: {switch:?} in {pane:?}");
             // The filters' line under the head and its hairline, "Show done" at its start.
             let filters_middle = pane.top() + head + 1.0 + filters / 2.0;
             assert!((done.center().y - filters_middle).abs() <= 1.0, "{at}: Show done {done:?} on the filters' line at {filters_middle}");
-            assert!((done.left() - (pane.left() + 1.0 + 16.0)).abs() <= 1.0, "{at}: Show done 16 in: {done:?}");
+            assert!((done.left() - (pane.left() + 16.0)).abs() <= 1.0, "{at}: Show done 16 in: {done:?}");
+        }
+    }
+}
+
+/// `inbox-grouped/filled`, `shell/reader-open`: the list stands on the frame's pixels, from the index's line (233 in the
+/// 1440 frame) to the reader's (674): 440 wide from the body's left (234), the place and Show done 16 in, the rows
+/// across it, the reader's pane (its line first) from 674 and its subject 40 right of that line.
+#[test]
+fn the_list_stands_440_wide_between_the_index_s_line_and_the_reader_s() {
+    for open in [false, true] {
+        let mut harness = grouped(1440.0, TextScale::default());
+        if open {
+            let first = harness.state().mailbox().messages().first().map(|row| row.id);
+            harness.state_mut().mailbox_mut().select(first);
+            harness.run();
+            harness.run();
+        }
+        let pane = list(&harness);
+        let body = super::super::shell::laid(&harness.ctx).unwrap().body;
+        assert_eq!((pane.left(), pane.width()), (body.left(), 440.0), "open {open}: the list from the body's left, 440 wide: {pane:?}");
+        let left = pane.left();
+        assert_eq!(harness.get_by_label("Inbox").rect().left(), left + 16.0, "open {open}: the place 16 in");
+        assert_eq!(harness.get_by_role_and_label(Role::Button, "Show done").rect().left(), left + 16.0, "open {open}: Show done 16 in");
+        let row = harness.get_all_by_role(Role::ListBoxOption).next().unwrap().rect();
+        assert_eq!((row.left(), row.right()), (left, left + 440.0), "open {open}: a row across the list");
+        if open {
+            let reader = super::super::reader_rect(&harness.ctx).unwrap();
+            // The reader's pane starts at the list's right with its line in its first column (674 in the frame).
+            assert_eq!(reader.left(), left + 440.0, "the reader's line 440 from the list's left");
+            // `shell/reader-open`: the subject 40 right of the reader's line (715 in the frame).
+            let subject = harness.state().mailbox().messages().first().unwrap().subject.clone();
+            let title = harness.query_all_by_label(&subject).map(|node| node.rect()).find(|rect| rect.left() > reader.left()).unwrap();
+            assert_eq!(title.left(), reader.left() + 1.0 + 40.0, "the subject 40 from the reader's line: {title:?}");
         }
     }
 }
@@ -104,8 +137,8 @@ fn the_answers_of_a_sender_card_end_on_its_padding() {
 }
 
 /// `inbox-grouped/screener-card`: Review (32) centred on the 64 card, 16 from its top, on a whole pixel; the first
-/// group's head under the card; at 130 % the card is 84 and Review 42. (The design draws the card's line under its 64;
-/// here it is inside, a line's height staying even.)
+/// group's head right under the card's 64, its line drawn on the head's first point; at 130 % the card is 84 and
+/// Review 42.
 #[test]
 fn the_screener_card_centres_review_on_its_64() {
     for (scale, card, review) in [(TextScale::default(), 64.0, 32.0), (TextScale::from_percent(130).unwrap(), 84.0, 42.0)] {
@@ -117,8 +150,89 @@ fn the_screener_card_centres_review_on_its_64() {
         assert_eq!(head.height(), head_high, "{scale:?}: the group's head");
         let row = harness.get_all_by_role(Role::ListBoxOption).next().unwrap().rect();
         assert_eq!(row.height(), row_high, "{scale:?}: a row {row:?}");
-        let top = head.top() - card;
-        assert_eq!(pressed.top() - top, (card - review) / 2.0, "{scale:?}: Review {pressed:?} in the card from {top}");
+        let top = pressed.top() - (card - review) / 2.0;
+        assert_eq!(top, top.round(), "{scale:?}: Review {pressed:?} on a whole pixel");
+        // The card's 64 (84); its line stands on the head's first point.
+        assert_eq!(head.top() - top, card, "{scale:?}: the head {head:?} under the card's {card} from {top}");
+    }
+}
+
+/// At 1×, 1.25×, 1.5× and 2× the screener card and the lines under it stand on whole pixels from the card's top: the
+/// card 64, a group's head 32, a row 56, at 1.25× 80, 40 and 70 pixels.
+#[test]
+fn the_lines_under_the_screener_card_stand_on_whole_pixels_at_every_display_scale() {
+    for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+        let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
+        let invented = sample::showcase(&mailbox);
+        mailbox.set_showcase(invented);
+        let app = InboxApp::at_mail(mailbox);
+        let mut harness = crate::component::tests::builder()
+            .with_size(vec2(1440.0, 900.0))
+            .with_pixels_per_point(ppp)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        harness.run();
+        let pressed = harness.get_by_role_and_label(Role::Button, "Review").rect();
+        let card = pressed.top() - 16.0;
+        let head = harness.get_by_label_contains("People, ").rect();
+        assert_eq!(head.top() - card, 64.0, "at {ppp}: the head right under the card's 64");
+        let rows: Vec<Rect> = harness.get_all_by_role(Role::ListBoxOption).map(|row| row.rect()).take(6).collect();
+        assert!(rows.len() >= 3, "at {ppp}: rows under the card");
+        for (name, at) in [("head top", head.top()), ("head bottom", head.bottom())]
+            .into_iter()
+            .chain(rows.iter().flat_map(|row| [("row top", row.top()), ("row bottom", row.bottom())]))
+        {
+            let from = (at - card) * ppp;
+            assert_eq!(from.fract(), 0.0, "at {ppp}: {name} {at} is {from} px from the card's top {card}, not whole");
+        }
+    }
+}
+
+/// In the List view the screener card's line is painted on the first row's first point, after the row: over its fill
+/// when the row is selected, not under it.
+#[test]
+fn the_screener_card_s_line_stands_over_the_selected_row_under_it() {
+    for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+        let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
+        mailbox.set_inbox_view(crate::mailbox::InboxView::List);
+        let first = mailbox.messages().first().map(|row| row.id);
+        mailbox.select(first);
+        let app = InboxApp::at_mail(mailbox);
+        let mut harness = crate::component::tests::builder()
+            .with_size(vec2(1440.0, 900.0))
+            .with_pixels_per_point(ppp)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        harness.run();
+        let pane = list(&harness);
+        let row = harness.get_all_by_role(Role::ListBoxOption).next().unwrap().rect();
+        // The line's colour in either mode (the harness follows the system's).
+        let colours =
+            [crate::theme::Mode::Light, crate::theme::Mode::Dark].map(|mode| crate::theme::Theme::new(mode, TextScale::default()).palette.line);
+        let mut shapes = Vec::new();
+        for clipped in &harness.output().shapes {
+            flatten(&clipped.shape, &mut shapes);
+        }
+        let probe = egui::pos2(pane.center().x, row.top() + 0.25);
+        let line = shapes.iter().rposition(|shape| match shape {
+            egui::Shape::LineSegment { points, stroke } => {
+                colours.contains(&stroke.color)
+                    && (points[0].y - probe.y).abs() < 1.0
+                    && points[0].x <= pane.left() + 1.0
+                    && points[1].x >= pane.right() - 1.0
+            }
+            _ => false,
+        });
+        let line = line.unwrap_or_else(|| panic!("at {ppp}: no card line across the list at the first row's top {row:?}"));
+        let fill = shapes.iter().rposition(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.fill.a() > 0 && rect.rect.contains(probe)));
+        let fill = fill.unwrap_or_else(|| panic!("at {ppp}: the selected row paints no fill at {probe:?}"));
+        assert!(line > fill, "at {ppp}: the card's line ({line}) painted before the row's fill ({fill})");
+    }
+}
+
+/// Every shape of `shape`, nested lists opened, in paint order.
+fn flatten(shape: &egui::Shape, found: &mut Vec<egui::Shape>) {
+    match shape {
+        egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| flatten(shape, found)),
+        shape => found.push(shape.clone()),
     }
 }
 
@@ -164,7 +278,7 @@ fn the_list_head_cuts_whose_mail_before_the_count() {
             let count = harness.state().mailbox().list_count();
             let whose = harness.state().mailbox().subtitle();
             let at = format!("{scale:?} narrowed {narrowed}");
-            assert!((list(&harness).width() - 441.0).abs() <= 1.0, "{at}: the list 440 wide");
+            assert!((list(&harness).width() - 440.0).abs() <= 1.0, "{at}: the list 440 wide");
             let texts = head_texts(&harness, head);
             let shown: String = texts.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" ");
             // Nothing in the words runs under the view switch where it stands in the head (with too little room it

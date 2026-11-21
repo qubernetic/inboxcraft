@@ -283,6 +283,11 @@ fn subtitle(mailbox: &Mailbox) -> (Option<String>, String) {
         let count = mailbox.messages().iter().filter(|row| !row.seen).count();
         return (None, tr!("{count} to read", count = count));
     }
+    // Later holds what was put aside on all its piles, as the design words it; whose mail only when narrowed.
+    if matches!(mailbox.place(), Place::Later(_)) && mailbox.query().is_empty() {
+        let aside = Pile::ALL.iter().fold(0_u64, |sum, pile| sum.saturating_add(mailbox.pile_count(*pile)));
+        return (mailbox.narrowed().map(|_| mailbox.subtitle()), tr!("{count} put aside", count = aside));
+    }
     match mailbox.outbox_summary().filter(|_| mailbox.place() == Place::Outbox && mailbox.query().is_empty()) {
         Some(summary) => (None, summary),
         None => (Some(mailbox.subtitle()), mailbox.list_count()),
@@ -730,9 +735,7 @@ fn row(
     let response = &drawn.row.response;
     // egui does not scroll to what gains the focus: a row Tab reaches (the next one is always built, two below the
     // viewport) comes into sight, so Tab walks the whole list.
-    if response.gained_focus() {
-        response.scroll_to_me(None);
-    }
+    scroll_on_focus(ui, response, message.id);
     // Its place among all the list's rows, built or not: a screen reader says "12 of 1000".
     slot.tell(ui, response.id);
     keep_arrows(ui, response);
@@ -999,9 +1002,7 @@ fn later(
     };
     let drawn = later_row(ui, theme, keymap, &shown, keyed, None);
     let response = &drawn.row.response;
-    if response.gained_focus() {
-        response.scroll_to_me(None);
-    }
+    scroll_on_focus(ui, response, message.id);
     slot.tell(ui, response.id);
     keep_arrows(ui, response);
     Drawn {
@@ -1047,6 +1048,23 @@ pub(super) fn bring(ctx: &egui::Context, id: u64) {
     ctx.data_mut(|data| data.insert_temp(bring_id(), id));
 }
 
+/// Scrolls message `id`'s row into sight when it gains the focus, unless a landing gave it ([`land_now`]): the
+/// landing already chose a row in sight, or one that comes into sight as a left row's room above it closes.
+fn scroll_on_focus(ui: &Ui, response: &egui::Response, id: u64) {
+    if !response.gained_focus() {
+        return;
+    }
+    let landed = ui.data_mut(|data| data.remove_temp::<u64>(landed_quiet_id()));
+    if landed != Some(id) {
+        response.scroll_to_me(None);
+    }
+}
+
+/// Where the row a landing gave the keyboard to is kept until it gains the focus ([`scroll_on_focus`]).
+fn landed_quiet_id() -> Id {
+    Id::unique("list-landed-quiet")
+}
+
 /// Where the row the keyboard lands on is kept, with the pass that asked for it ([`land`]).
 fn land_id() -> Id {
     Id::unique("list-land")
@@ -1077,6 +1095,13 @@ fn landing(listing: &Listing<'_>, wanted: u64, top: f32, bottom: f32) -> Option<
     let at = listing.find(wanted);
     if let Some(id) = at.as_ref().and_then(whole) {
         return Some(id);
+    }
+    // The row walked on to after an act is whole in sight once the left row's room above it has closed.
+    if let Some(index) = at
+        && let Some(Line::Mail(message)) = listing.lines.get(index)
+        && listing.settled(index, top).is_some_and(|(above, below)| above >= top && below <= bottom)
+    {
+        return Some(message.id);
     }
     let below = at.and_then(|at| listing.span(at)).is_some_and(|(above, _)| above >= bottom);
     if below { (first..end).rev().find_map(|index| whole(&index)) } else { (first..end).find_map(|index| whole(&index)) }
@@ -1410,24 +1435,25 @@ impl Rows<'_> {
     }
 }
 
-/// The screener card's height at 100 % text, in points: the design's 64, its line under it inside (the design draws
-/// the line under the 64; a line's height stays even, for whole pixels at 1.5×).
+/// The screener card's height at 100 % text, in points: the design's 64, its panel. Its line is drawn on the first
+/// point of the line under it ([`show_lines`]), not in a point of its own, so that every line of the list stays a
+/// multiple of 4 points high at 100 % and ends on a whole pixel at 1.25×, 1.5× and 2×; the lines under the card stand
+/// 1 point higher than the design's, which gives the line a point of its own (65).
 const SCREENER_HEIGHT: f32 = 64.0;
 
 /// The screener card across `ui`'s line, as the design draws it on top of the inbox: the people mark, how many new
-/// senders wait and that they are held back, the first three's avatars and Review, which opens New senders; the line
-/// under it. Whether Review was pressed.
+/// senders wait and that they are held back, the first three's avatars and Review, which opens New senders. Its line
+/// is drawn over the next line ([`card_line`]). Whether Review was pressed.
 fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, waiting: &[Waiting]) -> bool {
     let p = &theme.palette;
     let f = &theme.fonts;
     let rect = ui.max_rect();
     let painter = ui.painter().clone();
     painter.rect_filled(rect, 0.0, p.panel);
-    super::paint::hairline(&painter, pos2(rect.left(), rect.bottom() - 1.0), pos2(rect.right(), rect.bottom() - 1.0), p.line);
     const PAD: f32 = 16.0;
     const GAP: f32 = 12.0;
     let icon = theme.boxes().icon;
-    let mark = Rect::from_min_size(pos2(rect.left() + PAD, rect.top() + ((rect.height() - 1.0 - icon) / 2.0).round()), vec2(icon, icon));
+    let mark = Rect::from_min_size(pos2(rect.left() + PAD, rect.top() + ((rect.height() - icon) / 2.0).round()), vec2(icon, icon));
     crate::iconset::paint(&painter, mark, IconId::People, p.cyan_text);
     // Review at the right end, the avatars before it, the two lines in what is left.
     let face = Theme::size(theme, 24.0);
@@ -1456,7 +1482,7 @@ fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, waiting: &[Waiting]) ->
     let count = waiting.len();
     let title = if count == 1 { tr!("1 new sender").to_owned() } else { tr!("{count} new senders", count = count) };
     let lines = f.strong.line + 2.0 + f.caption.line;
-    let top = rect.top() + ((rect.height() - 1.0 - lines) / 2.0).round();
+    let top = rect.top() + ((rect.height() - lines) / 2.0).round();
     let words = Rect::from_min_size(pos2(left, top), vec2(room, lines));
     let note = tr!("Held back until you let them in");
     // A screen reader reads the two lines as they are written.
@@ -1471,6 +1497,12 @@ fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, waiting: &[Waiting]) ->
     let note = crate::component::fitted(ui, note, f.caption, p.muted, room);
     super::paint::run_at(&painter, pos2(left, top + f.strong.line + 2.0), note, p.muted);
     review
+}
+
+/// The line under the screener card `card`, across it on the point below its bottom: the first point of the line under
+/// the card, painted after that line, so it stands over the line's fills.
+fn card_line(ui: &Ui, theme: &Theme, card: Rect) {
+    super::paint::hairline(ui.painter(), card.left_bottom(), card.right_bottom(), theme.palette.line);
 }
 
 /// One line of a list. A list is its lines one under another, each as high as [`line_height`] says for its kind, so
@@ -1593,6 +1625,21 @@ impl Listing<'_> {
     /// The top and bottom of line `index`.
     pub(super) fn span(&self, index: usize) -> Option<(f32, f32)> {
         Some((*self.tops.get(index)?, *self.bottoms.get(index)?))
+    }
+
+    /// The top and bottom of line `index` once the lines above it that are leaving have closed: where the row the
+    /// keyboard walks on to after an act comes to stand, not where it stands while the left row's room still closes;
+    /// never above `offset`, the viewport's top. While the list is scrolled, the first message in sight stays where it
+    /// stands ([`show_lines`]): a left row's room that closes above the viewport moves the offset with the content, and
+    /// only the part of it in sight closes in the viewport, so the rows under it rise at most to the viewport's top.
+    fn settled(&self, index: usize, offset: f32) -> Option<(f32, f32)> {
+        let (top, bottom) = self.span(index)?;
+        let closing: f32 = (0..index)
+            .filter(|above| matches!(self.lines.get(*above), Some(Line::Leaving(..) | Line::HeadLeaving(..))))
+            .filter_map(|above| self.span(above).map(|(from, to)| (to - from).max(0.0)))
+            .sum();
+        let rise = closing.min((top - offset).max(0.0));
+        Some((top - rise, bottom - rise))
     }
 
     /// The line of message `id`, or in the drafts place of draft `id`.
@@ -1841,9 +1888,10 @@ struct HeadPressed {
     fold: bool,
 }
 
-/// A group's head across `ui`, the design's group head: its index, name and unread count; in Smart, while it has more
-/// rows than it shows, how many show and "show all" or "show fewer"; "done all" while it is hovered or keyed.
-fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState, done_all: bool) -> HeadPressed {
+/// A group's head across `ui`, the design's group head: its index, name and unread count (with `held`, Later's heads,
+/// the messages it holds); in Smart, while it has more rows than it shows, how many show and "show all" or "show
+/// fewer"; "done all" while it is hovered or keyed.
+fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState, done_all: bool, held: bool) -> HeadPressed {
     let letter = char::from(b'A'.saturating_add(u8::try_from(state.index % 26).unwrap_or(0)));
     let index = format!("[ {letter} ]");
     let shown = state.folds.then(|| {
@@ -1856,6 +1904,7 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadS
         index: &index,
         name: &group.name,
         unread: state.unread,
+        held: held.then(|| u64::try_from(state.count).unwrap_or(u64::MAX)),
         shown: shown.as_deref(),
         link,
         // A head over no message left (its last row leaving) offers nothing to mark done.
@@ -1867,7 +1916,7 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadS
 
 /// The head of a group whose last row is leaving, in the line `ui` gives it: drawn whole from the line's top, cut to
 /// the line as it closes and faded as the row is; it takes no pointer or focus.
-fn leaving_head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState, gone: Gone) {
+fn leaving_head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState, gone: Gone, held: bool) {
     let line = ui.max_rect();
     let whole = Rect::from_min_size(line.min, vec2(line.width(), theme.boxes().group_head));
     let mut face = ui.new_child(UiBuilder::new().max_rect(whole).id_salt("leaving-head"));
@@ -1882,6 +1931,7 @@ fn leaving_head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, stat
         index: &index,
         name: &group.name,
         unread: 0,
+        held: held.then(|| u64::try_from(state.count).unwrap_or(u64::MAX)),
         shown: None,
         link: None,
         hover_link: None,
@@ -1908,9 +1958,10 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, slot: Slot) {
     let (theme, keymap, mailbox) = (rows.theme, rows.keymap, rows.mailbox);
     match line {
         Line::Head(group, state) => {
-            // Later's heads sort the snoozed pile by when it comes back: they mark nothing done.
-            let done_all = !matches!(mailbox.place(), Place::Later(_));
-            let pressed = head(ui, theme, keymap, group, *state, done_all);
+            // Later's heads sort the snoozed pile by when it comes back: they mark nothing done, and count the
+            // messages they hold, not the unread ones.
+            let later = matches!(mailbox.place(), Place::Later(_));
+            let pressed = head(ui, theme, keymap, group, *state, !later, later);
             if pressed.done_all {
                 let all = mailbox.messages().iter().filter(|message| group.messages.contains(&message.id)).map(|message| message.id);
                 rows.done_all.set(Some(all.collect()));
@@ -1919,7 +1970,9 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, slot: Slot) {
                 ui.data_mut(|data| data.insert_temp(group_open_id(&group.name), !state.open));
             }
         }
-        Line::HeadLeaving(group, state, gone) => leaving_head(ui, theme, keymap, group, *state, *gone),
+        Line::HeadLeaving(group, state, gone) => {
+            leaving_head(ui, theme, keymap, group, *state, *gone, matches!(mailbox.place(), Place::Later(_)));
+        }
         Line::Mail(message) => rows.mail(ui, message, slot),
         Line::Draft(draft) => {
             if let Some(pressed) = kept_draft(ui, theme, keymap, mailbox, draft) {
@@ -2020,6 +2073,9 @@ struct Kept {
     /// The keyed row's message last frame: a row is brought into sight when the keyed message changes (a key or a
     /// press moved it) or the list is first shown, never because lines above it came or went.
     keyed: Option<u64>,
+    /// The pass that drew it: a list drawn again after passes away (a message in front in one pane) is not one whose
+    /// viewport changed under it.
+    pass: u64,
 }
 
 /// Lands the keyboard asked for by [`land`] on its row before the lines are built, so the row sees the focus it
@@ -2049,7 +2105,10 @@ fn land_now(ui: &Ui, listing: &Listing<'_>, kept: Option<&Kept>, forced: Option<
     };
     if let Some(target) = target {
         ctx.memory_mut(|memory| memory.request_focus(row_id(target)));
-        ctx.data_mut(|data| data.insert_temp(landed_on_id(), (wanted, target)));
+        ctx.data_mut(|data| {
+            data.insert_temp(landed_on_id(), (wanted, target));
+            data.insert_temp(landed_quiet_id(), target);
+        });
     }
 }
 
@@ -2102,32 +2161,55 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
     let keyed = mailbox.selected().filter(|_| mailbox.keyed());
     // A row a menu was asked for comes into sight as a newly keyed one does.
     let bring = ui.data_mut(|data| data.remove_temp::<u64>(bring_id()));
-    let moved = keyed.filter(|keyed| kept.as_ref().is_none_or(|kept| kept.keyed != Some(*keyed))).or(bring);
+    // The viewport this pass: the area fills the room left, which a resized window changes.
+    let room = ui.available_rect_before_wrap().height();
+    // A keyed row whole in the last pass's viewport stays whole when the viewport changes height (a window made
+    // shorter in the pass after a step): it is brought into sight by this pass's viewport, not the last one's.
+    // Whole there is judged where the row comes to stand ([`Listing::settled`]) under the offset this pass shows (the
+    // first message in sight kept in place), so a row still sliding up after Done counts, and one the owner scrolled
+    // partly out does not.
+    let resized = keyed.filter(|keyed| {
+        kept.as_ref().is_some_and(|kept| {
+            let (top, view) = (forced.unwrap_or_else(|| points(kept.offset)), points(kept.height));
+            kept.keyed == Some(*keyed)
+                && kept.pass.saturating_add(1) >= ui.ctx().cumulative_pass_nr()
+                && kept.height > 0
+                && room.is_finite()
+                && hundredths(room) != kept.height
+                && listing
+                    .find(*keyed)
+                    .and_then(|index| listing.settled(index, top))
+                    .is_some_and(|(above, below)| hundredths(above) >= hundredths(top) && hundredths(below) <= hundredths(top + view))
+        })
+    });
+    let moved = keyed.filter(|keyed| kept.as_ref().is_none_or(|kept| kept.keyed != Some(*keyed))).or(bring).or(resized);
     // A line of the drafts place the keyboard landed on, by its place.
     let line = ui.data_mut(|data| data.remove_temp::<usize>(bring_line_id()));
     let mut scroll_to = None;
-    if let Some((top, bottom)) = moved.and_then(|id| listing.find(id)).or(line).and_then(|index| listing.span(index)) {
+    // Where the row will stand once a left row's room above it closed: brought into sight by what it lacks there, not
+    // by the room that is closing.
+    if let Some(index) = moved.and_then(|id| listing.find(id)).or(line) {
         match &kept {
             // The least scroll that shows the row whole, set before the lines are built, so the row is built (and
             // can keep a focus given to it) in this frame.
             Some(kept) if kept.height > 0 => {
-                // The viewport this frame: the area fills the room left, which a resized window changes.
-                let room = ui.available_rect_before_wrap().height();
                 let view = if room.is_finite() && room > 0.0 { room } else { points(kept.height) };
                 let offset = forced.unwrap_or_else(|| points(kept.offset));
-                let wanted = if top < offset {
-                    top
-                } else if bottom > offset + view {
-                    bottom - view
-                } else {
-                    offset
-                };
-                if forced.is_some() || hundredths(wanted) != kept.offset {
-                    forced = Some(wanted.max(0.0));
+                if let Some((top, bottom)) = listing.settled(index, offset) {
+                    let wanted = if top < offset {
+                        top
+                    } else if bottom > offset + view {
+                        bottom - view
+                    } else {
+                        offset
+                    };
+                    if forced.is_some() || hundredths(wanted) != kept.offset {
+                        forced = Some(wanted.max(0.0));
+                    }
                 }
             }
-            // The list first shown: egui scrolls to it once it knows the viewport.
-            _ => scroll_to = Some((top, bottom)),
+            // The list first shown, at its top: egui scrolls to it once it knows the viewport.
+            _ => scroll_to = listing.settled(index, 0.0),
         }
     }
     land_now(ui, listing, kept.as_ref(), forced);
@@ -2175,6 +2257,12 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
                 draw_line(ui, rows, line, slot);
             });
         }
+        // The screener card's line, on the first point of the line under it, over what that line drew there.
+        if let Some(index) = (from..to).find(|index| matches!(listing.lines.get(*index), Some(Line::Card(_))))
+            && let Some((top, bottom)) = listing.span(index)
+        {
+            card_line(&listed, theme, at(top, bottom));
+        }
         if let Some((top, bottom)) = scroll_to {
             ui.scroll_to_rect(at(top, bottom), None);
         }
@@ -2193,9 +2281,12 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
     });
     ui.spacing_mut().scroll.kinetic = kinetic;
     let (built, anchor, offset, height) = output.inner;
-    let kept = Kept { place: mailbox.place(), view: mailbox.inbox_view(), query: mailbox.query().to_owned(), anchor, offset, height, keyed };
+    let pass = ui.ctx().cumulative_pass_nr();
+    let kept = Kept { place: mailbox.place(), view: mailbox.inbox_view(), query: mailbox.query().to_owned(), anchor, offset, height, keyed, pass };
     ui.data_mut(|data| {
         data.insert_temp(Id::unique("list-view-rect"), output.inner_rect);
+        #[cfg(test)]
+        data.insert_temp(Id::unique("list-scrolled"), points(offset));
         data.insert_temp(kept_id, kept);
         if let Some((id, _)) = anchor {
             data.insert_temp(Id::unique("list-first-in-sight"), id);
@@ -2262,9 +2353,9 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
     let area = ScrollArea::vertical().id_salt("new-senders").auto_shrink([false, false]);
     crate::component::scroll::show(ui, theme, area, |ui| {
         let pad = if ui.available_width() > CARD_WIDE { QUEUE_PAD.0 } else { theme.spacing.s4 };
-        // From the body's left edge: the list's 1 px line column is already behind the room (#328).
+        // From the body's left edge, where the list's room starts (#328).
         let side = i8::try_from(pad as i32).unwrap_or(16);
-        Frame::new().inner_margin(Margin { left: side.saturating_sub(1), right: side, top: 36, bottom: 36 }).show(ui, |ui| {
+        Frame::new().inner_margin(Margin { left: side, right: side, top: 36, bottom: 36 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, QUEUE_GAP);
             let count = askers.len();
             let word = if count == 1 {
@@ -2615,6 +2706,12 @@ pub(super) fn view_rect(ctx: &egui::Context) -> Option<Rect> {
     ctx.data(|data| data.get_temp::<Rect>(Id::unique("list-view-rect")))
 }
 
+/// How far the list was scrolled down, in points, in the last frame that drew one.
+#[cfg(test)]
+pub(super) fn scrolled(ctx: &egui::Context) -> Option<f32> {
+    ctx.data(|data| data.get_temp::<f32>(Id::unique("list-scrolled")))
+}
+
 /// What the list built in the last frame that drew one.
 #[cfg(test)]
 pub(super) fn built(ctx: &egui::Context) -> Option<Built> {
@@ -2866,3 +2963,7 @@ mod card_motion_tests;
 #[cfg(test)]
 #[path = "list_pixel_tests.rs"]
 mod list_pixel_tests;
+
+#[cfg(test)]
+#[path = "list_scroll_tests.rs"]
+mod list_scroll_tests;
