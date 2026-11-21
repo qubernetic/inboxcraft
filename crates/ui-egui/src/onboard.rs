@@ -1337,9 +1337,10 @@ impl Onboarding {
             self.error = Some(error.to_string());
             return;
         }
+        // A save that fails keeps what the owner typed, the new password too (in memory, while the form is open), so
+        // Save stays on and the owner can try again from the form.
         if password {
             let stored = self.keychain.store(id, self.form.password.expose());
-            self.form.password.clear();
             if let Err(refused) = stored {
                 self.error = Some(tr!(
                     "The system's credential store did not take the new password, so nothing was changed: {reason}",
@@ -1359,6 +1360,7 @@ impl Onboarding {
             mailbox.refresh();
             return;
         }
+        self.form.password.clear();
         if changes.caldav
             && let Err(error) = mailbox.run("calendar.server", &json!({ "account": id, "url": optional(&self.form.caldav) }))
         {
