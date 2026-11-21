@@ -19,7 +19,9 @@ use crate::{Batch, Body, Change, Entry, Search, Storage, StoreConfig, StoreError
 ///
 /// A batch is applied to a copy of the state that replaces it only when every change went through. The copy shares
 /// every table with the state until a change writes to it ([`Shared`]), and bodies are shared between the copies, so a
-/// batch costs the tables it changes: a kept draft copies the drafts, not the messages.
+/// batch costs the tables it changes: a kept draft copies the drafts, not the messages. A message is held behind an
+/// [`Arc`] of its own, so a batch that changes one message copies the map of the messages' handles and that one
+/// message, not every message.
 #[derive(Debug, Clone, Default)]
 pub struct Memory {
     config: StoreConfig,
@@ -30,7 +32,7 @@ pub struct Memory {
 struct State {
     accounts: Shared<BTreeMap<AccountId, Account>>,
     folders: Shared<BTreeMap<FolderId, (Folder, Option<FolderState>)>>,
-    messages: Shared<BTreeMap<MessageId, Held>>,
+    messages: Shared<BTreeMap<MessageId, Arc<Held>>>,
     uids: Shared<BTreeMap<FolderId, BTreeMap<Uid, MessageId>>>,
     /// The job queue, in order.
     jobs: Shared<Vec<Job>>,
@@ -143,7 +145,7 @@ impl State {
             }
             Change::RemoveBody(id) => {
                 if let Some(held) = self.messages.get_mut(id) {
-                    held.body = None;
+                    Arc::make_mut(held).body = None;
                 }
             }
             Change::MarkOpened(id) => self.held(*id)?.opened = true,
@@ -257,7 +259,7 @@ impl State {
     }
 
     fn held(&mut self, id: MessageId) -> Result<&mut Held, StoreError> {
-        self.messages.get_mut(&id).ok_or(StoreError::UnknownMessage(id))
+        self.messages.get_mut(&id).map(Arc::make_mut).ok_or(StoreError::UnknownMessage(id))
     }
 
     fn put_folder(&mut self, folder: &Folder) -> Result<(), StoreError> {
@@ -299,7 +301,7 @@ impl State {
             None => (false, None),
         };
         self.uids.entry(folder).or_default().insert(uid, message.id());
-        self.messages.insert(message.id(), Held { message: message.clone(), fields: Fields::of(message), opened, body });
+        self.messages.insert(message.id(), Arc::new(Held { message: message.clone(), fields: Fields::of(message), opened, body }));
         Ok(())
     }
 
@@ -352,11 +354,11 @@ impl Storage for Memory {
 
     fn messages(&self, folder: FolderId) -> Result<Vec<Entry>, StoreError> {
         let ids = self.state.uids.get(&folder).into_iter().flat_map(BTreeMap::values);
-        Ok(ids.filter_map(|id| self.state.messages.get(id)).map(Held::entry).collect())
+        Ok(ids.filter_map(|id| self.state.messages.get(id)).map(|held| held.entry()).collect())
     }
 
     fn message(&self, id: MessageId) -> Result<Option<Entry>, StoreError> {
-        Ok(self.state.messages.get(&id).map(Held::entry))
+        Ok(self.state.messages.get(&id).map(|held| held.entry()))
     }
 
     fn body(&self, id: MessageId) -> Result<Option<Body>, StoreError> {

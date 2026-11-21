@@ -64,3 +64,25 @@ fn a_refused_batch_leaves_a_shared_table_as_it_was() {
     assert_eq!(store.draft(DraftId::new(1)).unwrap().map(|draft| draft.text), Some("Plot 14".to_owned()));
     assert_eq!(store.draft(DraftId::new(2)).unwrap(), None);
 }
+
+/// Marking one message read or flagging it copies that message and the map of handles, never the other messages: the
+/// copy of every message was most of the cost of opening one in a mailbox of 10 000 (#406). The copy it leaves
+/// behind is as it was.
+#[test]
+fn an_act_on_one_message_copies_that_message_only() {
+    let mut store = Memory::new(StoreConfig::default());
+    let folder = Folder::new(FolderId::new(1), AccountId::new(1), FolderListing::new(FolderPath::new("INBOX", Some('/')).unwrap(), vec![], true));
+    let message = |id: u64| {
+        let uid = Uid::new(u32::try_from(id).unwrap()).unwrap();
+        Message::new(MessageId::new(id), AccountId::new(1), FolderId::new(1), Summary::new(uid, Envelope::new("Plot 14")))
+    };
+    let batch = Batch::new().with(Change::PutAccount(account(1))).with(Change::PutFolder(folder));
+    store.apply(&batch.with(Change::PutMessage(message(1))).with(Change::PutMessage(message(2)))).unwrap();
+    let before = store.clone();
+    store.apply(&Batch::new().with(Change::MarkOpened(MessageId::new(1)))).unwrap();
+    let held = |store: &Memory, id: u64| Arc::clone(store.state.messages.get(&MessageId::new(id)).unwrap());
+    assert!(Arc::ptr_eq(&held(&before, 2), &held(&store, 2)), "the other message was copied");
+    assert!(!Arc::ptr_eq(&held(&before, 1), &held(&store, 1)), "the message changed in place of a copy");
+    assert!(store.message(MessageId::new(1)).unwrap().unwrap().opened());
+    assert!(!before.message(MessageId::new(1)).unwrap().unwrap().opened(), "the copy left behind changed");
+}
