@@ -173,15 +173,27 @@ fn pill_parts(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header,
 }
 
 /// The search's words on the filters' line: what was searched and where, and the planned search in the text of
-/// messages, coming soon.
+/// messages, coming soon. The planned part, the link and its mark, is drawn whole after the words or left out whole
+/// where the line has no room for it, as the other planned parts of the line.
 fn search_head(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) {
-    ui.spacing_mut().item_spacing.x = theme.spacing.s3;
+    let gap = theme.spacing.s3;
+    ui.spacing_mut().item_spacing.x = gap;
     let said = tr!("“{query}” in subjects, senders and recipients", query = mailbox.query());
-    ui.add(egui::Label::new(theme.fonts.mono_s.rich(&said).color(theme.palette.muted)).truncate());
-    crate::component::soon::soon(ui, theme, |ui| {
-        let _ = button::link_sized(ui, theme, &Keymap::empty(), tr!("in message text"), button::LinkSize::Small);
-    });
-    let _ = crate::component::soon::soon_tag(ui, theme);
+    let font = theme.fonts.mono_s;
+    let planned = tr!("in message text");
+    let words = crate::component::galley(ui, &said, font, theme.palette.muted).size().x.ceil();
+    let need = gap
+        + crate::component::galley(ui, planned, font, theme.palette.cyan_text).size().x.ceil()
+        + gap
+        + crate::component::tag::width(ui, theme, tr!("coming soon"));
+    let room = ui.available_size_before_wrap().x;
+    ui.add(egui::Label::new(font.rich(&said).color(theme.palette.muted)).truncate());
+    if words + need <= room + 0.5 {
+        crate::component::soon::soon(ui, theme, |ui| {
+            let _ = button::link_sized(ui, theme, &Keymap::empty(), planned, button::LinkSize::Small);
+        });
+        let _ = crate::component::soon::soon_tag(ui, theme);
+    }
 }
 
 /// The head above the list, as the design draws it: one 48 line (at the text scale) with the place in `heading`, what
@@ -2339,6 +2351,9 @@ const QUEUE_GAP: f32 = 20.0;
 const CARD_GAP: f32 = 12.0;
 const CARD_WIDE: f32 = 900.0;
 
+/// The account's bar beside a sender's name ([`crate::component::account_bar`]), wide, in points.
+const ACCOUNT_BAR_WIDE: f32 = 3.0;
+
 /// "New senders", the design's queue: its label, "Who gets in?", what it is for, the screener's mode, then a card for
 /// each sender who waits (their avatar, name, account and address, their newest message and how many more, its first
 /// line) with Let in and Keep out; the first card is the current one, its edge in the accent, Let in primary and the
@@ -2368,16 +2383,30 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
             ui.label(f.display.rich(tr!("Who gets in?")).color(p.ink));
             let about = tr!("Nobody new reaches the inbox before you say so. If you keep a sender out, their mail goes to Blocked from then on.");
             ui.add(egui::Label::new(f.read.rich(about).color(p.muted)).wrap());
-            // The label centred on the switch's 32 line (8 above its 16), 12 before it.
+            // The label centred on the switch's 32 line (8 above its 16), 12 before it; where the line has no room for
+            // the label and the choices' whole names (a narrow pane, a larger text), the switch goes under the label.
+            let modes = ScreenerMode::ALL.map(|choice| (choice, super::settings::screener_name(choice), f.button));
+            let label_wide = crate::component::galley(ui, tr!("Screener"), f.label, p.muted).size().x.ceil();
+            let one_line = label_wide + theme.spacing.s3 + crate::component::segmented::least_width(ui, theme, &modes) <= ui.available_width() + 0.5;
             let line = vec2(ui.available_width(), theme.boxes().button);
-            ui.allocate_ui_with_layout(line, Layout::left_to_right(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = theme.spacing.s3;
-                crate::component::label(ui, f.label, tr!("Screener"), p.muted);
-                let modes = ScreenerMode::ALL.map(|choice| (choice, super::settings::screener_name(choice), f.button));
+            let mut switch = |ui: &mut Ui| {
                 if let Some(choice) = segmented_for(ui, theme, &modes, mailbox.screener_mode(), Some(tr!("the screener"))) {
                     mode = Some(choice);
                 }
-            });
+            };
+            if one_line {
+                ui.allocate_ui_with_layout(line, Layout::left_to_right(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = theme.spacing.s3;
+                    crate::component::label(ui, f.label, tr!("Screener"), p.muted);
+                    switch(ui);
+                });
+            } else {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = theme.spacing.s2;
+                    crate::component::label(ui, f.label, tr!("Screener"), p.muted);
+                    switch(ui);
+                });
+            }
             ui.spacing_mut().item_spacing.y = CARD_GAP;
             // The cards just answered, while they leave (M11): each at its place in the queue, as far as it has gone.
             let leaving: Vec<(Answered, Gone)> = answered(ui.ctx(), &askers)
@@ -2551,8 +2580,18 @@ fn sender_card(
                         ui.spacing_mut().item_spacing.y = 4.0;
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 10.0;
-                            ui.add(egui::Label::new(f.strong.rich(&message.sender).color(p.ink)).truncate());
-                            if mailbox.accounts().len() > 1 {
+                            // The name leaves the account's bar and the address their room, the address at least half
+                            // the line: a long name ends with an ellipsis instead of pushing them out of the card.
+                            let several = mailbox.accounts().len() > 1;
+                            let bar = if several { ACCOUNT_BAR_WIDE + 10.0 } else { 0.0 };
+                            let address = crate::component::galley(ui, &message.address, theme.fonts.mono_s, p.muted).size().x.ceil();
+                            let room = ui.available_width();
+                            let name_most = (room - bar - 10.0 - address).max(room / 2.0).max(0.0);
+                            ui.scope(|ui| {
+                                ui.set_max_width(name_most);
+                                ui.add(egui::Label::new(f.strong.rich(&message.sender).color(p.ink)).truncate());
+                            });
+                            if several {
                                 let index = mailbox.account(message.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0));
                                 let _ = crate::component::account_bar(ui, theme, index);
                             }
@@ -2564,7 +2603,22 @@ fn sender_card(
                             // The subject opens the message as a preview in the reader, which asks the same and more; on a
                             // card answered and leaving it is plain text.
                             let sense = if live { Sense::click() } else { Sense::hover() };
-                            let opened = ui.add(egui::Label::new(f.body.rich(subject).color(p.ink)).truncate().sense(sense));
+                            // How many more and the time keep their room after it: the subject ends with an ellipsis
+                            // where the line is short, so nothing runs out of the card.
+                            let more = (asker.more > 0).then(|| tr!("and {count} more", count = asker.more));
+                            let date = mailbox.row_date(message);
+                            let after: f32 = more
+                                .iter()
+                                .chain(std::iter::once(&date))
+                                .map(|words| crate::component::galley(ui, words, theme.fonts.mono_s, p.muted).size().x.ceil() + 10.0)
+                                .sum();
+                            let subject_most = (ui.available_width() - after).max(0.0);
+                            let opened = ui
+                                .scope(|ui| {
+                                    ui.set_max_width(subject_most);
+                                    ui.add(egui::Label::new(f.body.rich(subject).color(p.ink)).truncate().sense(sense))
+                                })
+                                .inner;
                             if live {
                                 let spoken = mailbox.spoken(message);
                                 opened.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Link, true, &spoken));
@@ -2572,10 +2626,10 @@ fn sender_card(
                             if opened.clicked() {
                                 *open = true;
                             }
-                            if asker.more > 0 {
-                                ui.label(theme.fonts.mono_s.rich(&tr!("and {count} more", count = asker.more)).color(p.muted));
+                            if let Some(more) = more {
+                                ui.label(theme.fonts.mono_s.rich(&more).color(p.muted));
                             }
-                            ui.label(theme.fonts.mono_s.rich(&mailbox.row_date(message)).color(p.muted));
+                            ui.label(theme.fonts.mono_s.rich(&date).color(p.muted));
                         });
                         if !message.preview.trim().is_empty() {
                             ui.add(egui::Label::new(f.caption.rich(&message.preview).color(p.muted)).truncate());
