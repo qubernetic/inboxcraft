@@ -178,3 +178,166 @@ fn in_two_panes_the_first_esc_gives_the_list_the_keyboard_the_second_dismisses()
     harness.run();
     assert!(harness.query_by_label_contains("Not moved").is_none(), "the second dismissed the error");
 }
+
+const NOT_MOVED: &str = "Not moved: the message is still in Inbox.";
+
+/// Tells the mailbox's error [`NOT_MOVED`] and draws it.
+fn fail(harness: &mut Harness<'static, InboxApp>) {
+    harness.state_mut().mailbox_mut().fail(crate::UiError::Shot(NOT_MOVED.to_owned()));
+    harness.run();
+    assert!(harness.query_by_label_contains("Not moved").is_some(), "the error shows");
+}
+
+fn shown(harness: &Harness<'static, InboxApp>) -> bool {
+    harness.query_by_label_contains("Not moved").is_some()
+}
+
+fn escape(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press(Key::Escape);
+    harness.run();
+}
+
+/// Focuses the field `label` of `role`, an error showing: the first `Esc` leaves the field and leaves the error, the
+/// next dismisses it.
+fn esc_leaves_the_field_first(harness: &mut Harness<'static, InboxApp>, role: Role, label: &str) {
+    fail(harness);
+    harness.get_by_role_and_label(role, label).focus();
+    harness.run();
+    assert!(harness.ctx.memory(|memory| memory.focused().is_some()), "the field has the keyboard");
+    escape(harness);
+    assert!(shown(harness), "the Esc that left the field left the error");
+    assert!(harness.ctx.memory(|memory| memory.focused().is_none()), "and left the field");
+    assert!(hints(harness).contains(&"dismiss".to_owned()), "now Esc is the error's: {:?}", hints(harness));
+    escape(harness);
+    assert!(!shown(harness), "the next Esc dismissed it");
+}
+
+#[test]
+fn esc_in_a_settings_field_over_home_leaves_the_field_not_the_error() {
+    let mut harness = window(1440.0, |app| {
+        app.show_home();
+        app.open_settings_page(Some("sending"));
+    });
+    esc_leaves_the_field_first(&mut harness, Role::MultilineTextInput, "Signature of Personal");
+}
+
+#[test]
+fn esc_in_a_template_field_leaves_the_field_not_the_error() {
+    let mut harness = window(1440.0, |app| {
+        let template = serde_json::json!({ "account": 2, "name": "Workshop invitation", "subject": "Thursday workshop", "text": "Hello." });
+        app.mailbox_mut().run("template.save", &template).unwrap();
+        app.open_templates();
+    });
+    harness.get_by_label("Edit the template Workshop invitation").click();
+    harness.run();
+    esc_leaves_the_field_first(&mut harness, Role::TextInput, "Subject");
+}
+
+#[test]
+fn esc_in_the_floating_composer_s_suggestions_puts_them_away_not_the_error() {
+    let mut harness = window(1440.0, |_| {});
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
+    harness.state_mut().composer_mut().0.unwrap().set_floating(true);
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "To").focus();
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "To").type_text("teo");
+    harness.run();
+    assert!(!harness.state().composer().unwrap().suggestions().1.is_empty(), "suggested");
+    fail(&mut harness);
+    escape(&mut harness);
+    assert!(harness.state().composer().unwrap().suggestions().1.is_empty(), "the suggestions went");
+    assert!(shown(&harness), "the Esc that put them away left the error");
+    // The line keeps the keys: its next Esc leaves it, and only then is Esc the error's.
+    while harness.ctx.memory(|memory| memory.focused().is_some()) {
+        escape(&mut harness);
+        assert!(shown(&harness), "an Esc that left a field left the error");
+    }
+    escape(&mut harness);
+    assert!(!shown(&harness), "the Esc with nothing holding the keyboard dismissed it");
+}
+
+#[test]
+fn the_same_failure_told_again_after_a_dismissal_shows_again() {
+    let mut harness = failing(1440.0, NOT_MOVED);
+    // The line's dismiss applied, as a frame applies it, and no frame drawn after it.
+    let dismissed = super::Pressed { dismiss: true, ..super::Pressed::default() };
+    harness.state_mut().apply_line(&dismissed, None);
+    assert_eq!(harness.state().mailbox().error(), None, "dismissed");
+    // Told again before the next frame's status line reads it.
+    harness.state_mut().mailbox_mut().fail(crate::UiError::Shot(NOT_MOVED.to_owned()));
+    harness.run();
+    assert!(shown(&harness), "the same failure told again is shown again");
+}
+
+#[test]
+fn on_the_settings_esc_dismisses_whatever_is_under_them() {
+    // Over the mail with the reader keyed, where Esc would give the list the keyboard were the mail shown.
+    let mut harness = window(1440.0, |_| {});
+    harness.query_all_by_role(Role::ListBoxOption).next().unwrap().focus();
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.state_mut().open_settings();
+    harness.ctx.memory_mut(|memory| {
+        if let Some(focused) = memory.focused() {
+            memory.surrender_focus(focused);
+        }
+    });
+    harness.run();
+    fail(&mut harness);
+    assert_eq!(hints(&harness), ["dismiss", "commands"]);
+    escape(&mut harness);
+    assert!(!shown(&harness), "dismissed, as over Home");
+}
+
+#[test]
+fn with_the_list_over_the_docked_composer_an_error_keeps_the_composer_s_send() {
+    // In one pane the list comes over the docked composer by Esc; an error then says its dismiss and keeps send.
+    let mut harness = window(800.0, |_| {});
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
+    harness.ctx.memory_mut(|memory| {
+        if let Some(focused) = memory.focused() {
+            memory.surrender_focus(focused);
+        }
+    });
+    harness.run();
+    escape(&mut harness);
+    harness.ctx.memory_mut(|memory| {
+        if let Some(focused) = memory.focused() {
+            memory.surrender_focus(focused);
+        }
+    });
+    harness.run();
+    fail(&mut harness);
+    // All three kept, the error's first; the narrow line keeps the last two, so the composer's send stays in sight.
+    assert_eq!(super::hints(super::Keys::ErrorComposer).iter().map(|(_, word)| *word).collect::<Vec<_>>(), ["dismiss", "send", "commands"]);
+    assert_eq!(hints(&harness), ["send", "commands"]);
+    escape(&mut harness);
+    assert!(!shown(&harness), "Esc still dismisses it, its hint left out for room");
+    assert!(harness.state().composer().is_some(), "and leaves the draft");
+}
+
+#[test]
+fn in_one_pane_the_docked_composer_s_keys_come_before_the_list_s() {
+    // `size-800/composer`: send and commands, not `Esc list`, with a message opened before.
+    let mut harness = window(800.0, |_| {});
+    open_in_one_pane(&mut harness);
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
+    assert_eq!(hints(&harness), ["send", "commands"]);
+}
+
+#[test]
+fn the_results_say_no_next_previous_or_run_with_nothing_listed() {
+    let mut harness = window(1440.0, |_| {});
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::PALETTE);
+    harness.run();
+    assert_eq!(hints(&harness), ["next", "previous", "run", "close"]);
+    harness.get_by_role_and_label(Role::TextInput, "Command line").type_text(">qqqzzzxxx");
+    harness.run();
+    assert_eq!(hints(&harness), ["close"], "nothing listed: only close works");
+}

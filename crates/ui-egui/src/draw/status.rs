@@ -85,6 +85,11 @@ const RESULTS_HINTS: [(&str, &str); 4] = [(RESULTS_NEXT, "next"), (RESULTS_PREVI
 /// The key hints while an error shows and `Esc` reaches nothing else (`status-line/error`).
 const ERROR_HINTS: [(&str, &str); 2] = [(DISMISS, "dismiss"), (keymap::PALETTE, "commands")];
 
+/// The key hints while an error shows beside the docked composer and `Esc` reaches nothing else (the list over it):
+/// both sets kept, the error's `dismiss` first. A narrow line keeps the last two, so there the composer's `send`, whose
+/// key still works, stays beside commands, and `Esc` still dismisses.
+const ERROR_COMPOSER_HINTS: [(&str, &str); 3] = [(DISMISS, "dismiss"), (keymap::SEND, "send"), (keymap::PALETTE, "commands")];
+
 /// The id of the error's `dismiss` hint, by `Esc` ([`fixed_key`]): a press on it dismisses the error shown.
 pub(crate) const DISMISS: &str = "status.dismiss";
 
@@ -143,6 +148,8 @@ pub(crate) enum Keys {
     Results,
     /// An error shown, `Esc` free to dismiss it.
     Error,
+    /// An error shown beside the docked composer, `Esc` free to dismiss it.
+    ErrorComposer,
 }
 
 /// The key hints the line may show for `keys`, in order: the action and its word.
@@ -161,7 +168,14 @@ pub(crate) fn hints(keys: Keys) -> &'static [(&'static str, &'static str)] {
         Keys::OnePane => &ONE_PANE_HINTS,
         Keys::Results => &RESULTS_HINTS,
         Keys::Error => &ERROR_HINTS,
+        Keys::ErrorComposer => &ERROR_COMPOSER_HINTS,
     }
+}
+
+/// Whether the hint `id` has something to act on: the command line's results' arrows need a row to step to, and their
+/// `Enter` a row to run or a search to make (`listed`). Every other hint is checked as its key is.
+pub(crate) fn has_work(id: &str, listed: bool) -> bool {
+    !matches!(id, RESULTS_NEXT | RESULTS_PREVIOUS | RESULTS_RUN) || listed
 }
 
 /// An event this near, in minutes, is the accent of the line.
@@ -233,7 +247,9 @@ pub(crate) fn read(mailbox: &mut Mailbox, since: Option<inboxcraft_time::Timesta
     let last = status.get("last_synced").and_then(Value::as_str).and_then(crate::mailbox::parse_date).map(|at| mailbox.short_date(at));
     facts.sync = match state {
         "offline" => {
-            let since = since.unwrap_or_else(|| mailbox.now());
+            // A clock set back since the first read never makes it a time still to come.
+            let now = mailbox.now();
+            let since = since.map_or(now, |since| since.min(now));
             facts.offline_since = Some(since);
             Sync::Offline(Some(mailbox.short_date(since)))
         }
@@ -282,13 +298,15 @@ pub(crate) fn read(mailbox: &mut Mailbox, since: Option<inboxcraft_time::Timesta
 
 /// A failing account's reason in the window's few words, by the `kind` of `failure` as `account.list` gives it
 /// ("sign-in refused"); the engine's sentence where the kind is one the window does not know. And whether it mends
-/// itself (no connection), so it waits behind what needs the owner.
+/// itself, as the engine has it ([`inboxcraft_model::ErrorKind::needs_the_owner`]), so it waits behind what needs the
+/// owner; a kind the window does not know waits too.
 fn reason(failure: &Value) -> (String, bool) {
     use crate::calendar::sync::Why;
     let kind = failure.get("kind").and_then(Value::as_str).and_then(error_kind);
+    let mends = !kind.is_some_and(inboxcraft_model::ErrorKind::needs_the_owner);
     match kind.map(Why::of) {
-        Some(why) => (why.words().to_owned(), why == Why::NoConnection),
-        None => (failure.get("message").and_then(Value::as_str).unwrap_or_default().to_owned(), false),
+        Some(why) => (why.words().to_owned(), mends),
+        None => (failure.get("message").and_then(Value::as_str).unwrap_or_default().to_owned(), mends),
     }
 }
 

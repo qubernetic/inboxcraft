@@ -75,3 +75,15 @@ fn a_send_the_server_refused_is_a_problem_counted_with_the_accounts() {
     assert_eq!(facts.problems, 1, "the refused send");
     assert!(facts.failures.is_empty(), "no account fails: {:?}", facts.failures);
 }
+
+#[test]
+fn a_clock_set_back_never_says_offline_since_a_time_still_to_come() {
+    let clock = clock();
+    let mut mailbox = mailbox(&clock);
+    // The first read was an hour later than the clock now says: the clock was set back since.
+    let ahead = Timestamp::from_unix(NOW + 3600, 0).unwrap();
+    let read_now = read(&mut mailbox, Some(ahead));
+    let now = Timestamp::from_unix(NOW, 0).unwrap();
+    assert_eq!(read_now.offline_since, Some(now));
+    assert_eq!(read_now.sync, Sync::Offline(Some(mailbox.short_date(now))));
+}

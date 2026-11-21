@@ -121,6 +121,11 @@ impl Status {
         self.queue.iter().any(|waiting| matches!(&waiting.message, Message::Error { text: said } if said == text))
     }
 
+    /// Whether an error waits or shows.
+    pub(crate) fn has_error(&self) -> bool {
+        self.queue.iter().any(|waiting| matches!(waiting.message, Message::Error { .. }))
+    }
+
     /// The newest notice waiting or shown: what it says.
     pub(crate) fn notice(&self) -> Option<&str> {
         self.queue.iter().rev().find(|waiting| matches!(waiting.message, Message::Notice { .. })).map(|waiting| waiting.message.text())
