@@ -173,7 +173,9 @@ the store's message state table), which no server keeps. `mail.done` (`owner`) m
 archive like `mail.archive` and keeps the folder it came from; done `false` moves it back there and clears the mark.
 A done message out of the archive (the server refused the move) is filed again by the next done.
 "Show done" is `mail.list` with `done`: the done mail whose old place is in the view is listed among the mail there,
-by date, with `done` set. `mail.park` (`safe`) puts a message on the park pile: `mail.list` leaves the pile out and
+by date, with `done` set. "Unread only" is `mail.list` with `unread`: the read messages are left out before the page
+is cut, so `total` and `offset` count the unread ones, but the one `keep` names (the message open in the reader stays
+in its row once it is read); `ui.list.unread` (`safe`) asks the window to turn it for the place shown. `mail.park` (`safe`) puts a message on the park pile: `mail.list` leaves the pile out and
 counts it in `parked` (the window's pill), `parked` lists it too, and `park.list` (`safe`) lists the pile across the
 accounts. `mail.pin` (`safe`) pins a message: it stays in its lists, and `pin.list` (`safe`) is the pins view across
 the accounts. Done takes the pin off unless the owner keeps pins through done (`pin.set`, `owner`; the session keeps
