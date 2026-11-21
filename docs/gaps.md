@@ -331,8 +331,8 @@ time from the code as it is, not measured.
   with E5.1 (#30).
 - The arrow keys step through the list only while no control has the keyboard focus; Tab moves the focus through
   every folder and row, and Enter or Space selects (#30, #33).
-- A link in a message is never opened: the window has no browser hand-off (egui's `links` feature is off, and
-  turning it on is the project owner's call), so a click copies the address and the float over the reader shows
+- A link in a message is never opened: the one browser hand-off is the cleaned copy of the reader's More menu (#388),
+  in which a link is text (egui's `links` feature is off, and turning it on is the project owner's call), so a click copies the address and the float over the reader shows
   where it goes. Plain-text bodies show web addresses as text, not as links (#33).
 - "Always for this sender" is kept for the session only (`remote.allow` keeps it in the engine's memory) until
   settings are kept on disk. It goes by the sender's address, which a forged `From` can borrow: a forger who
