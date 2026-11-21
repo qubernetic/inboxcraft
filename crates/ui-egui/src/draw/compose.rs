@@ -31,6 +31,9 @@ use egui::{
 use inboxcraft_time::Timestamp;
 
 use super::paint;
+
+#[path = "compose_quote.rs"]
+pub(super) mod quote;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::field::{self, Field};
 use crate::component::recipient::{self, Recipient, RecipientState, Recipients};
@@ -581,11 +584,17 @@ fn blank(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Composer, r
 /// The text laid out in `read` with the marks of the open blanks in `mono` and `cyan_text` on the accent's wash, so
 /// they stand out.
 fn marked(ui: &Ui, theme: &Theme, marks: &[String], text: &str, width: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = width;
+    append_marked(&mut job, theme, marks, text);
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
+/// `text` appended to `job` as [`marked`] lays it out.
+fn append_marked(job: &mut LayoutJob, theme: &Theme, marks: &[String], text: &str) {
     let p = &theme.palette;
     let plain = theme.fonts.read.format(p.ink);
     let mark = TextFormat { background: p.cyan_muted, ..theme.fonts.mono.format(p.cyan_text) };
-    let mut job = LayoutJob::default();
-    job.wrap.max_width = width;
     let mut rest = text;
     while !rest.is_empty() {
         let next = marks.iter().filter(|held| !held.is_empty()).filter_map(|held| rest.find(held.as_str()).map(|at| (at, held.len()))).min();
@@ -602,7 +611,6 @@ fn marked(ui: &Ui, theme: &Theme, marks: &[String], text: &str, width: f32) -> s
         job.append(found, 0.0, mark.clone());
         rest = after;
     }
-    ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
 /// What Send says: "Send", or "Schedule · Sat 08:00" with a time picked; and why it cannot go yet, a time picked that
@@ -867,7 +875,18 @@ fn text(ui: &mut Ui, theme: &Theme, composer: &mut Composer, rect: Rect, asked: 
     let view = rect.shrink(1.0 + theme.spacing.s4);
     let rows = (view.height() / theme.fonts.read.line).floor().max(1.0);
     let marks = composer.blanks().to_vec();
-    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, width: f32| marked(ui, theme, &marks, text.as_str(), width);
+    // The blocks of the last layout: a reply's quote, drawn as the quote block (its text stays as it is).
+    let blocks = std::cell::RefCell::new(None);
+    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, width: f32| match quote::layout(ui, theme, &marks, text.as_str(), width) {
+        Some(laid) => {
+            blocks.replace(Some(laid.blocks));
+            laid.galley
+        }
+        None => {
+            blocks.replace(None);
+            marked(ui, theme, &marks, text.as_str(), width)
+        }
+    };
     let mut child = ui.new_child(UiBuilder::new().max_rect(view));
     child.set_clip_rect(view.intersect(ui.clip_rect()));
     let area = egui::ScrollArea::vertical().id_salt("compose-text-scroll").max_height(view.height()).auto_shrink([false, false]);
@@ -877,7 +896,30 @@ fn text(ui: &mut Ui, theme: &Theme, composer: &mut Composer, rect: Rect, asked: 
         if response.changed() {
             asked.push(Asked::Edited);
         }
+        let at = field::galley_at(ui.ctx(), text_id());
+        let bars: Vec<Rect> = match (blocks.borrow().as_ref(), at) {
+            (Some(blocks), Some(at)) => {
+                blocks.iter().map(|block| Rect::from_x_y_ranges(at.x..=at.x + quote::BAR, block.min + at.y..=block.max + at.y)).collect()
+            }
+            _ => Vec::new(),
+        };
+        for bar in &bars {
+            ui.painter().rect_filled(*bar, 0.0, p.muted);
+        }
+        #[cfg(test)]
+        ui.data_mut(|data| data.insert_temp(quote_bars_id(), bars));
     });
+}
+
+#[cfg(test)]
+fn quote_bars_id() -> Id {
+    Id::unique("compose-quote-bars")
+}
+
+/// The bars of the quote blocks the composer's text drew in its last frame, on the screen.
+#[cfg(test)]
+pub(super) fn quote_bars(ctx: &egui::Context) -> Vec<Rect> {
+    ctx.data(|data| data.get_temp(quote_bars_id())).unwrap_or_default()
 }
 
 /// The composer in `area` (inside its pads): the head, the lines, the text, the blank's panel and the foot, the foot
