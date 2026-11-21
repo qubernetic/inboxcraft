@@ -489,7 +489,16 @@ pub(crate) fn imported(
     if source.description.as_ref().is_some_and(|text| text.chars().count() > MAX_DESCRIPTION) {
         return Err("description");
     }
-    let repeat = Repeat::of(source);
+    let mut repeat = Repeat::of(source);
+    let series = match (&source.start, repeat) {
+        (When::Date(_), _) | (_, None | Some(Repeat::None)) => None,
+        _ => Some(Series::of(source, zones, local).ok_or("times")?),
+    };
+    // Monday to Friday on the source's days is another set of weekdays once the start moves to another day here: no
+    // preset writes that, so the series stands once.
+    if repeat == Some(Repeat::Weekdays) && series.as_ref().is_some_and(|series| series.shift != 0) {
+        repeat = None;
+    }
     let details = Details {
         summary: Some(summary),
         location,
@@ -503,21 +512,61 @@ pub(crate) fn imported(
     let mut event = created(&source.uid, times, details, organizer, now, local).ok_or("write")?;
     if let (Some(rule), Some(written)) = (source.rules.first(), event.rules.first_mut()) {
         // The written start is a day for an all-day series and the computer's wall clock for a timed one: the end
-        // and the exceptions take the same form.
-        let all_day = matches!(event.start, When::Date(_));
-        let form = |when: &When| {
-            let at = zones.resolve(when, local)?;
-            let civil = local.civil(at)?;
-            Some(if all_day { When::Date(Date::of(civil)) } else { When::Floating(civil) })
+        // and the exceptions take the same form. A timed series' occurrences fall at the written start's time of day,
+        // so an exception or an end goes there too, on the day of the source's occurrence it names.
+        let form = |when: &When, until: bool| match &series {
+            Some(series) => series.place(when, until, zones, local),
+            None => Some(When::Date(Date::of(local.civil(zones.resolve(when, local)?)?))),
         };
         written.end = match &rule.end {
-            inboxcraft_ical::End::Until(until) => inboxcraft_ical::End::Until(form(until).ok_or("times")?),
+            inboxcraft_ical::End::Until(until) => inboxcraft_ical::End::Until(form(until, true).ok_or("times")?),
             other => other.clone(),
         };
-        event.exceptions = source.exceptions.iter().map(form).collect::<Option<Vec<When>>>().ok_or("times")?;
+        event.exceptions = source.exceptions.iter().map(|when| form(when, false)).collect::<Option<Vec<When>>>().ok_or("times")?;
     }
     let ical = object(event).ok_or("write")?;
     Ok(Imported { ical, single: repeat.is_none() })
+}
+
+/// A timed series of an imported file and where it is written: its start on its own clock (UTC, its zone, or the
+/// computer's), the written start on the computer's wall clock, and the days between the two dates.
+struct Series {
+    /// The source's start.
+    start: When,
+    /// The start as the source's clock shows it.
+    origin: CivilDateTime,
+    /// The written start, on the computer's wall clock.
+    first: CivilDateTime,
+    /// Days from the source's start date to the written one (the start can fall on another day here).
+    shift: i64,
+}
+
+impl Series {
+    /// The series `source` starts.
+    fn of(source: &Event, zones: &Zones, local: &dyn Offsets) -> Option<Self> {
+        let at = zones.resolve(&source.start, local)?;
+        let origin = zones.offsets(&source.start, local).civil(at)?;
+        let first = local.civil(at)?;
+        let shift = days_between(Date::of(origin), Date::of(first))?;
+        Some(Self { start: source.start.clone(), origin, first, shift })
+    }
+
+    /// `when` of the source (an `EXDATE`, or the `UNTIL` when `until`) as the written series names the same
+    /// occurrence: its day on the source's clock, moved by [`Series::shift`], at the written start's time of day. An
+    /// `UNTIL` earlier in its day than the start ends the series the day before.
+    fn place(&self, when: &When, until: bool, zones: &Zones, local: &dyn Offsets) -> Option<When> {
+        let day = match when {
+            When::Date(day) => *day,
+            _ => {
+                // On the clock of the source's start, where each occurrence has its day.
+                let civil = zones.offsets(&self.start, local).civil(zones.resolve(when, local)?)?;
+                let time = |civil: CivilDateTime| (civil.hour(), civil.minute(), civil.second());
+                if until && time(civil) < time(self.origin) { Date::of(civil).add_days(-1)? } else { Date::of(civil) }
+            }
+        };
+        let day = day.add_days(self.shift)?;
+        CivilDateTime::new(day.year(), day.month(), day.day(), self.first.hour(), self.first.minute(), self.first.second()).map(When::Floating)
+    }
 }
 
 /// The times of an imported `source`: whole days from its first day to the day before its `DTEND` date (or its first

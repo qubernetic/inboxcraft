@@ -330,8 +330,9 @@ event but under the file's own UID, in a URL of InboxCraft's that never holds th
 an entity tag, sent as `If-None-Match: *`; a 412 is a conflict like any other, so the server's copy comes back with the
 next sync). A UID the calendar already holds is skipped and left as it is, so a second import adds nothing. Times are
 placed through the file's own zones as the calendar screen places them (`Zones::resolve`), and a time that cannot be
-placed is an error of that event, not a guess; a preset repeat keeps its end and its exceptions, any other repeat (or
-an `RDATE`) is added once and counted, a changed instance (`RECURRENCE-ID`) is left out, an alert the app can name is
+placed is an error of that event, not a guess; a preset repeat keeps its end and its exceptions (written at the written start's time of day on the day of
+the occurrence they name, so they still meet it across a summer-time change), any other repeat (or an `RDATE`, or
+Monday to Friday that falls on other days on this computer's clock) is added once and counted, a changed instance (`RECURRENCE-ID`) is left out, an alert the app can name is
 kept and any other gives the default lead, and guests and the organiser are not carried, so nobody is mailed. The
 answer counts what was added, skipped, added once, left out and refused, each list naming its first hundred events by
 their place in the file with a reason word. The whole import is one step of `history.undo`, which deletes every event

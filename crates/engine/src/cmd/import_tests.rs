@@ -7,11 +7,11 @@
 
 use inboxcraft_ical::{Calendar, End, Frequency, When};
 use inboxcraft_model::{AccountId, CalendarEventId, CalendarId, CalendarJob, CalendarReport, Event, EventKind, JobKind};
-use inboxcraft_time::{CivilDateTime, FakeClock, Offset};
+use inboxcraft_time::{CivilDateTime, FakeClock, Offset, OffsetTable, Offsets, Timestamp};
 use proptest::prelude::*;
 use serde_json::{Value, json};
 
-use super::calendar_tests::{WORK, session_at};
+use super::calendar_tests::{NEW_YORK, WORK, session_at};
 use crate::calendar::alert;
 use crate::test_support::{NOW, at};
 use crate::{Caller, EngineError, Session};
@@ -512,4 +512,83 @@ proptest! {
             }
         }
     }
+}
+
+/// A computer in Budapest around the end of summer time 2026: +02:00, +01:00 from 25 October 01:00 UTC.
+fn autumn() -> OffsetTable {
+    let change = crate::params::parse_date("2026-10-25T01:00:00Z").unwrap();
+    OffsetTable::new(Offset::from_minutes(120).unwrap()).with_change(change, Offset::from_minutes(60).unwrap())
+}
+
+/// A computer in Budapest around the start of summer time 2027: +01:00, +02:00 from 28 March 01:00 UTC.
+fn spring() -> OffsetTable {
+    let change = crate::params::parse_date("2027-03-28T01:00:00Z").unwrap();
+    OffsetTable::new(Offset::from_minutes(60).unwrap()).with_change(change, Offset::from_minutes(120).unwrap())
+}
+
+fn wall(year: i32, month: u8, day: u8, hour: u8) -> When {
+    When::Floating(CivilDateTime::new(year, month, day, hour, 0, 0).unwrap())
+}
+
+/// The days of the occurrences of event `id` from `from` for 40 days, on `offsets`.
+fn days(session: &Session, id: u64, from: &str, offsets: &OffsetTable) -> Vec<u8> {
+    let from: Timestamp = crate::params::parse_date(from).unwrap();
+    let to = from.checked_add(std::time::Duration::from_secs(40 * 86_400)).unwrap();
+    let object = object(session, id);
+    object.occurrences(from, to, offsets).occurrences.iter().map(|occurrence| offsets.civil(occurrence.start).unwrap().day()).collect()
+}
+
+#[test]
+fn a_utc_series_keeps_its_exception_and_its_last_day_across_a_summer_time_change() {
+    let (mut session, _) = session();
+    session.set_offsets(Box::new(autumn()));
+    let daily = "UID:u@example.org\r\nDTSTART:20261020T080000Z\r\nSUMMARY:Daily\r\nRRULE:FREQ=DAILY;UNTIL=20261030T080000Z\r\n\
+                 EXDATE:20261028T080000Z";
+    assert_eq!(import(&mut session, &[daily])["added"], json!(1));
+    let event = &object(&session, FIRST).events[0];
+    // Written at 10:00 on the computer's clock, the start's time of day; the exception and the end too, on their days.
+    assert_eq!(event.start, wall(2026, 10, 20, 10));
+    assert_eq!(event.exceptions, [wall(2026, 10, 28, 10)]);
+    assert_eq!(event.rules[0].end, End::Until(wall(2026, 10, 30, 10)));
+    assert_eq!(days(&session, FIRST, "2026-10-19T00:00:00Z", &autumn()), [20, 21, 22, 23, 24, 25, 26, 27, 29, 30]);
+}
+
+#[test]
+fn a_series_of_another_zone_keeps_its_exception_and_its_last_day_across_a_summer_time_change() {
+    let (mut session, _) = session();
+    session.set_offsets(Box::new(spring()));
+    // 9:00 in New York, which moves to summer time on 14 March, two weeks before Budapest: 15:00 here at the start,
+    // 14:00 here in between.
+    let daily = "UID:n@example.org\r\nDTSTART;TZID=America/New_York:20270301T090000\r\nSUMMARY:Call\r\n\
+                 RRULE:FREQ=DAILY;UNTIL=20270320T130000Z\r\nEXDATE;TZID=America/New_York:20270316T090000";
+    let text = ics(&[daily]).replace("PRODID:-//Example//Export//EN\r\n", &format!("PRODID:-//Example//Export//EN\r\n{NEW_YORK}"));
+    assert_eq!(session.run("calendar.import", &json!({ "calendar": 1, "ics": text })).unwrap()["added"], json!(1));
+    let event = &object(&session, FIRST).events[0];
+    assert_eq!(event.start, wall(2027, 3, 1, 15));
+    assert_eq!(event.exceptions, [wall(2027, 3, 16, 15)]);
+    assert_eq!(event.rules[0].end, End::Until(wall(2027, 3, 20, 15)));
+    let expected: Vec<u8> = (1..=20).filter(|day| *day != 16).collect();
+    assert_eq!(days(&session, FIRST, "2027-02-28T00:00:00Z", &spring()), expected);
+}
+
+#[test]
+fn an_until_earlier_in_its_day_than_the_start_ends_the_day_before() {
+    let (mut session, _) = session();
+    let daily = "UID:e@example.org\r\nDTSTART:20261112T080000Z\r\nSUMMARY:Daily\r\nRRULE:FREQ=DAILY;UNTIL=20261115T070000Z";
+    import(&mut session, &[daily]);
+    assert_eq!(object(&session, FIRST).events[0].rules[0].end, End::Until(wall(2026, 11, 14, 9)));
+    assert_eq!(days(&session, FIRST, "2026-11-11T00:00:00Z", &OffsetTable::new(Offset::from_minutes(60).unwrap())), [12, 13, 14]);
+}
+
+#[test]
+fn weekdays_that_fall_on_other_days_here_stand_once() {
+    let (mut session, _) = session();
+    let weekdays =
+        |uid: &str, start: &str| format!("UID:{uid}@example.org\r\nDTSTART:{start}\r\nSUMMARY:Work\r\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR");
+    // 23:30 UTC on Thursday is 0:30 on Friday here: Monday to Friday there is Tuesday to Saturday here.
+    let answer = import(&mut session, &[&weekdays("late", "20261112T233000Z"), &weekdays("day", "20261112T080000Z")]);
+    assert_eq!((answer["added"].clone(), answer["single"].clone()), (json!(2), json!(1)));
+    assert_eq!(answer["not_supported"], json!([{ "index": 0, "reason": "repeat" }]));
+    assert!(object(&session, FIRST).events[0].rules.is_empty());
+    assert_eq!(object(&session, FIRST + 1).events[0].rules.len(), 1);
 }
