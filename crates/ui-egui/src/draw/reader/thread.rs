@@ -111,7 +111,7 @@ fn head_line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, rea
         whom = tr!("{to}, copy to {cc}", to = whom, cc = names(&opened.header.cc));
     }
     let address = opened.header.from.first().map_or_else(|| row.address.clone(), |person| person.address.clone());
-    let about = tr!("{address}  ·  to {whom}", address = address, whom = whom);
+    let about = tr!("{address}  ·  to {whom}", address = crate::bidi::address(&address), whom = whom);
     let (date, line, preview) = line_of(mailbox, row, Some(&about));
     let line = ThreadLine { preview: &preview, date: &date, unread: false, ..line };
     let pressed = thread_row(ui, theme, keymap, &line);
@@ -146,7 +146,10 @@ fn line_menu(ui: &Ui, theme: &Theme, keymap: &Keymap, row: &egui::Response, id: 
 pub(super) fn addressed(people: &[Person]) -> String {
     people
         .iter()
-        .map(|person| if person.name.is_empty() { person.address.clone() } else { format!("{}  <{}>", person.name, person.address) })
+        .map(|person| {
+            let address = crate::bidi::address(&person.address);
+            if person.name.is_empty() { address.into_owned() } else { crate::bidi::left_to_right(format!("{}  <{address}>", person.name)) }
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }

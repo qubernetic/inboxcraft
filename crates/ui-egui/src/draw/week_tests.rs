@@ -3,13 +3,14 @@
 
 //! The window and the week rule (`week.set`): the calendar takes a new rule at the next frame, the rule is kept
 //! between runs beside the notification choices, a kept file that cannot be read is the default, and a rule taken back
-//! at the start reads no calendar the owner has not opened.
+//! at the start reads no calendar the owner has not opened. The hour all-day alerts ring at is kept beside the rule.
 
 use std::sync::{Arc, Mutex};
 
 use egui::vec2;
 use egui_kittest::Harness;
 use inboxcraft_engine::Session;
+use inboxcraft_engine::all_day_alert::AllDayAlert;
 use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::notify::{Level, Settings as NotifySettings};
 use inboxcraft_model::AccountId;
@@ -192,4 +193,48 @@ fn the_calendar_page_sets_the_first_day_and_the_first_week_on_the_owner_s_press(
     harness.state_mut().show_calendar();
     harness.step();
     assert_eq!(harness.state().calendar.week_rule(), SUNDAY);
+}
+
+#[test]
+fn the_calendar_page_sets_the_hour_all_day_alerts_ring_at_on_the_owner_s_press() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
+    let mut app = real_app();
+    app.open_settings_page(Some(crate::settings::Section::Calendar.id()));
+    let mut harness = harness_of(app);
+    let shown =
+        |harness: &Harness<'static, InboxApp>| harness.get_by_role_and_label(Role::ComboBox, "All-day alerts ring at").accesskit_node().value();
+    assert_eq!(shown(&harness).as_deref(), Some("09:00 the day before"), "the default");
+    harness.get_by_label("All-day alerts ring at").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().all_day_alert(), AllDayAlert::DayBefore9, "opening the choice changes nothing");
+    harness.get_by_label("18:00 the day before").click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().mailbox().last_run(), Some("event.all_day_alert.set"));
+    assert_eq!(harness.state().mailbox().all_day_alert(), AllDayAlert::DayBefore18);
+    assert_eq!(shown(&harness).as_deref(), Some("18:00 the day before"));
+}
+
+#[test]
+fn the_all_day_alert_is_kept_beside_the_week_rule_and_an_old_file_reads_as_the_default() {
+    let keep = Held::default();
+    let mut harness = harness_of(real_app().with_keep(Box::new(keep.clone())));
+    harness.state_mut().mailbox_mut().run("event.all_day_alert.set", &json!({ "at": "on_the_day_9" })).unwrap();
+    harness.run();
+    harness.run();
+    let stored = keep.stored.lock().unwrap().clone();
+    assert_eq!(stored.len(), 1, "kept once per change, the week rule's file too");
+    assert_eq!(stored.last().and_then(|kept| kept.get("all_day_alert")), Some(&json!("on_the_day_9")));
+    let again = real_app().with_keep(Box::new(keep.clone()));
+    assert_eq!(again.mailbox().all_day_alert(), AllDayAlert::OnTheDay9, "it came back at the start");
+    assert_eq!(again.mailbox().week_rule(), WeekRule::default(), "beside the week rule, which stays");
+    // A file kept before the setting, or with junk under its key: the default, and the week rule still read.
+    for old in [sunday(), json!({ "first_day": "sunday", "first_week": "week_of_1_january", "all_day_alert": 9 })] {
+        let keep = Held::default();
+        *keep.week.lock().unwrap() = Some(old.clone());
+        let app = real_app().with_keep(Box::new(keep));
+        assert_eq!(app.mailbox().all_day_alert(), AllDayAlert::DayBefore9, "{old}");
+        assert_eq!(app.mailbox().week_rule(), SUNDAY, "{old}");
+    }
 }

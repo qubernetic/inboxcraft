@@ -78,7 +78,7 @@ pub(super) fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reade
     } else {
         tr!("{count} remote pictures are not shown. Loading them tells the sender that you opened this message.", count = count)
     };
-    let always = opened.header.from.first().map(|sender| tr!("always for {address}", address = sender.address));
+    let always = opened.header.from.first().map(|sender| tr!("always for {address}", address = crate::bidi::address(&sender.address)));
     let mut links = vec![BannerLink { name: tr!("load once"), id: "once" }];
     links.extend(always.as_deref().map(|always| BannerLink { name: always, id: "always" }));
     match unwiped(ui, |ui| component_banner(ui, theme, keymap, BannerKind::RemotePictures, &text, &links)).as_deref() {

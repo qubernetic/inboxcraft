@@ -359,6 +359,7 @@ impl Goes {
 /// The line of whom the answer goes `to`, `room` wide; `not_from_organiser` names the organiser, not the sender.
 fn goes_line(ui: &Ui, theme: &Theme, to: &str, not_from_organiser: bool, room: f32) -> Goes {
     let (f, p) = (&theme.fonts, &theme.palette);
+    let to = &*crate::bidi::address(to);
     if !not_from_organiser {
         let whole = tr!("Your answer goes to {address} at once.", address = to);
         return Goes { lines: vec![super::fitted(ui, &whole, f.caption, p.muted, room)], whole, line: f.caption.line };

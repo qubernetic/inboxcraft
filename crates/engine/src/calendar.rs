@@ -23,6 +23,7 @@ use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp, Weekday};
 use serde_json::{Value, json};
 
 use crate::EngineError;
+use crate::all_day_alert::AllDayAlert;
 use crate::arrive::invite::Owner;
 use crate::sync::Plan;
 
@@ -457,6 +458,8 @@ pub(crate) struct Edit {
     pub(crate) end: Option<String>,
     /// All-day from now on, or no longer.
     pub(crate) all_day: Option<bool>,
+    /// The alert an event that becomes all-day gets in place of the timed default (and the one it trades back).
+    pub(crate) all_day_alert: AllDayAlert,
 }
 
 /// Why an edit cannot be made.
@@ -484,6 +487,8 @@ pub(crate) fn edit(
     let index = calendar.events.iter().position(|event| event.recurrence_id.is_none()).ok_or(EditError::Unreadable)?;
     let event = calendar.events.get(index).ok_or(EditError::Unreadable)?;
     let times = times(&calendar, event, change, local)?;
+    // Only the series itself changes between timed and all-day here; its changed instances keep their own form.
+    let switch = change.all_day.filter(|all_day| *all_day != event.all_day());
     let repeated = !event.rules.is_empty() || !event.dates.is_empty();
     let repeating = match details.repeat {
         Some(repeat) => repeat != Repeat::None,
@@ -520,8 +525,15 @@ pub(crate) fn edit(
     if notify && guests > 0 {
         event.sequence = event.sequence.saturating_add(1);
     }
-    if let Some(lead) = alert {
-        alert::set_every_lead(&mut calendar, lead);
+    match alert {
+        Some(lead) => alert::set_every_lead(&mut calendar, lead),
+        None => {
+            if let Some(to_all_day) = switch
+                && let Some(event) = calendar.events.get_mut(index)
+            {
+                alert::follow_switch(event, to_all_day, change.all_day_alert);
+            }
+        }
     }
     let text = calendar.write().map_err(|_| EditError::Bad("the event cannot be written"))?;
     Ok((text, guests))

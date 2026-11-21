@@ -274,8 +274,8 @@ pub struct InboxApp {
     /// The notification choices the keep holds; `None` for the sample, which keeps none: its accounts are not the
     /// owner's.
     kept_notify: Option<NotifySettings>,
-    /// The week rule the keep holds; `None` for the sample, which keeps none.
-    kept_week: Option<inboxcraft_time::WeekRule>,
+    /// The week rule and the all-day alert the keep holds; `None` for the sample, which keeps none.
+    kept_week: Option<(inboxcraft_time::WeekRule, inboxcraft_engine::all_day_alert::AllDayAlert)>,
     /// How weeks are counted where the owner chose nothing: the locale's ([`InboxApp::with_week_default`]).
     week_default: inboxcraft_time::WeekRule,
     /// The app's side of running without a window, when it has one.
@@ -698,7 +698,7 @@ impl InboxApp {
                 Some(kept) => self.mailbox.restore_week_or(&kept, self.week_default),
                 None => self.mailbox.restore_week_rule(self.week_default),
             }
-            self.kept_week = Some(self.mailbox.week_rule());
+            self.kept_week = Some((self.mailbox.week_rule(), self.mailbox.all_day_alert()));
         }
         self.keep = keep;
         self
@@ -709,6 +709,16 @@ impl InboxApp {
     #[must_use]
     pub fn with_desk(mut self, desk: Box<dyn Desk>) -> Self {
         self.set_desk(desk);
+        self
+    }
+
+    /// The same window, offering in the reader's More menu to open a message's original in the browser through
+    /// `original` (a cleaned copy: see [`crate::original`]). A window without one does not offer it.
+    #[must_use]
+    pub fn with_original(mut self, original: Box<dyn crate::original::Original>) -> Self {
+        let original = crate::original::Shared::new(original);
+        self.reader.set_original(original.clone());
+        self.windows.set_original(&original);
         self
     }
 
@@ -836,10 +846,10 @@ impl InboxApp {
         }
     }
 
-    /// Keeps the week rule when it changed; the sample keeps none.
+    /// Keeps the week rule and the all-day alert beside it when either changed; the sample keeps none.
     fn keep_week(&mut self) {
         let Some(kept) = self.kept_week else { return };
-        let now = self.mailbox.week_rule();
+        let now = (self.mailbox.week_rule(), self.mailbox.all_day_alert());
         if now == kept {
             return;
         }
@@ -4169,6 +4179,7 @@ impl InboxApp {
             settings::Asked::Alerts(on) => self.mailbox.set_notify_alerts(on),
             settings::Asked::FirstDay(day) => self.mailbox.set_week(Some(day), None),
             settings::Asked::FirstWeek(first) => self.mailbox.set_week(None, Some(first)),
+            settings::Asked::AllDayAlert(choice) => self.mailbox.set_all_day_alert(choice),
             settings::Asked::Background(on) => self.set_background(on),
             settings::Asked::Login(on) => self.set_login(on),
             asked @ (settings::Asked::Templates
@@ -4264,6 +4275,7 @@ impl InboxApp {
             reader::Asked::Retry(id, key) => reader.retry(mailbox, id, &key),
             reader::Asked::Always(id) => reader.allow_always(mailbox, id),
             reader::Asked::Save(id, index) => reader.save(mailbox, id, index),
+            reader::Asked::Original(id) => reader.open_original(id, ui.ctx()),
             reader::Asked::FullWidth(full) => reader.set_full_width(full),
             reader::Asked::Close => mailbox.select(None),
             reader::Asked::After(after) => mailbox.set_after(after),

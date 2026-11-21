@@ -66,6 +66,8 @@ pub(super) struct Windows {
     shown: Vec<Shown>,
     fetch: fetch::Shared,
     save: save::Shared,
+    /// Where the readers' originals go to the browser, when the window can open one.
+    original: Option<crate::original::Shared>,
     /// How many frames the windows followed ([`Windows::follow`]).
     frames: u64,
     /// The slots of the windows that closed, each with the frame it closed in: taken again two frames on at the soonest.
@@ -95,7 +97,15 @@ pub(super) struct Drawn {
 impl Windows {
     /// No window open yet; the readers they open fetch through `fetch` and save through `save`.
     pub(super) fn new(fetch: fetch::Shared, save: save::Shared) -> Self {
-        Self { shown: Vec::new(), fetch, save, frames: 0, freed: Vec::new(), closing: Vec::new(), real: false, told: false }
+        Self { shown: Vec::new(), fetch, save, original: None, frames: 0, freed: Vec::new(), closing: Vec::new(), real: false, told: false }
+    }
+
+    /// The readers opened from now on open their originals through `original`; so do those open now.
+    pub(super) fn set_original(&mut self, original: &crate::original::Shared) {
+        self.original = Some(original.clone());
+        for shown in &mut self.shown {
+            shown.reader.set_original(original.clone());
+        }
     }
 
     /// The messages open in windows of their own, oldest window first; a window whose message is gone has none.
@@ -122,6 +132,9 @@ impl Windows {
         }
         let row = mailbox.messages().iter().find(|row| row.id == id).cloned();
         let mut reader = Reader::new(Box::new(self.fetch.another()), Box::new(self.save.clone()));
+        if let Some(original) = &self.original {
+            reader.set_original(original.clone());
+        }
         reader.open(mailbox, Some(id));
         // What the head shows once the list has moved on.
         let row = mailbox.messages().iter().find(|row| row.id == id).cloned().or(row);
@@ -255,6 +268,7 @@ impl Windows {
             reader::Asked::Retry(id, key) => reader.retry(mailbox, id, &key),
             reader::Asked::Always(id) => reader.allow_always(mailbox, id),
             reader::Asked::Save(id, index) => reader.save(mailbox, id, index),
+            reader::Asked::Original(id) => reader.open_original(id, ctx),
             reader::Asked::After(after) => mailbox.set_after(after),
             reader::Asked::Copy(url) => {
                 reader.set_notice(tr!("Link copied: {url}", url = crate::mailbox::shown(&url)));

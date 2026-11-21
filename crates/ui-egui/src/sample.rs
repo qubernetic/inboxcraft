@@ -465,6 +465,37 @@ pub fn invitations(now: Timestamp) -> Result<Vec<Change>, UiError> {
     Ok(changes)
 }
 
+/// Two invented people who write right to left, for the pictures of a Hebrew and an Arabic sender and subject.
+const YAEL: Person = person("יעל אבני", "yael@example.org");
+const LAYLA: Person = person("ليلى حداد", "layla@example.org");
+
+/// A Hebrew and an Arabic message, their senders' names, subjects and words in those scripts with a time in digits:
+/// the newest two in Mira's inbox.
+const RIGHT_TO_LEFT: [Sample; 2] = [
+    sample(1, YAEL, MIRA, "סיור בגינה ביום שלישי", "שלום מירה, נפגשים ליד השער בשעה 10:30. תביאי כפפות.", 4, false, false),
+    sample(1, LAYLA, MIRA, "موعد ورشة الفخار يوم السبت", "مرحبا ميرا، تبدأ الورشة الساعة 11 صباحا في الاستوديو.", 9, false, false),
+];
+
+/// A Hebrew and an Arabic message ([`RIGHT_TO_LEFT`]), as changes to the sample [`mailbox`] of `now`: messages after
+/// the sample's, in Mira's inbox after its mail.
+///
+/// # Errors
+///
+/// None in practice: the sample is fixed. A value the model or the store refuses becomes [`UiError::Sample`].
+pub fn right_to_left(now: Timestamp) -> Result<Vec<Change>, UiError> {
+    let first_id = u64::try_from(MESSAGES.len()).unwrap_or(u64::MAX).saturating_add(1);
+    let inbox = u32::try_from(MESSAGES.iter().filter(|sample| sample.folder == 1).count()).unwrap_or(u32::MAX);
+    let mut changes = Vec::new();
+    for (index, sample) in RIGHT_TO_LEFT.iter().enumerate() {
+        let n = u32::try_from(index).unwrap_or(0);
+        let id = first_id.saturating_add(u64::from(n));
+        changes.push(Change::PutMessage(message(id, inbox.saturating_add(1).saturating_add(n), 1, sample, now)?));
+        let (source, text) = source(sample)?;
+        changes.push(Change::PutBody(MessageId::new(id), Body::new(source, &text).map_err(UiError::sample)?));
+    }
+    Ok(changes)
+}
+
 /// The thread links: a subject, its `Message-ID` and the `Message-ID` it answers.
 const LINKS: &[(&str, &str, Option<&str>)] = &[
     ("Allotment rota for November", "rota.1@example.org", None),

@@ -373,7 +373,7 @@ fn a_new_event_without_an_alert_carries_the_default_lead_as_its_alarm() {
     assert_eq!(alerts(&session, id), [utc(2026, 11, 6, 13, 50)]);
     let day = session.run("event.create", &json!({ "calendar": 1, "summary": "Holiday", "start": "2026-11-09", "all_day": true })).unwrap();
     let day = day["id"].as_u64().unwrap();
-    assert!(text(&session, day).contains("TRIGGER:-P1D\r\n"), "{}", text(&session, day));
+    assert!(text(&session, day).contains("TRIGGER:-PT15H\r\n"), "{}", text(&session, day));
     let none = create(&mut session, json!({ "alert": "none" })).unwrap();
     assert!(held(&session, none).events[0].alarms.iter().all(|alarm| alarm.action == "NONE"));
 }
