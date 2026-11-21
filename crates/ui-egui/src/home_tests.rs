@@ -395,7 +395,6 @@ fn an_account_s_name_in_the_banner_is_plain_and_capped() {
     assert!(!text.contains('\u{202e}') && !text.contains('\n') && !text.contains('\u{0}'));
 }
 
-
 #[test]
 fn of_every_error_kind_only_a_refused_sign_in_is_read_as_refused() {
     use inboxcraft_model::ErrorKind;
