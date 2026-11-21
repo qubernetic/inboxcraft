@@ -295,7 +295,14 @@ pub fn build(mailbox: &mut Mailbox) -> Home {
 /// Home as [`build`] makes it, with the draft `hidden` left out of the drafts' block and its count: a discard waits
 /// behind its toast ([`Kept::current`]).
 pub fn build_hiding(mailbox: &mut Mailbox, hidden: Option<u64>) -> Home {
+    build_seeing(mailbox, hidden, &mut Vec::new())
+}
+
+/// Home as [`build_hiding`] makes it, with `away` the accounts an earlier build saw offline or backing off: one of them
+/// connecting again is still away ([`failing`]); `away` is left with the accounts this build saw away.
+fn build_seeing(mailbox: &mut Mailbox, hidden: Option<u64>, away: &mut Vec<u64>) -> Home {
     if mailbox.accounts().is_empty() {
+        away.clear();
         return Home::first_run();
     }
     let now = mailbox.now();
@@ -333,7 +340,7 @@ pub fn build_hiding(mailbox: &mut Mailbox, hidden: Option<u64>) -> Home {
         greeting: Greeting::at(civil.map_or(12, |civil| civil.hour())),
         name,
         lede: String::new(),
-        failing: failing(mailbox, refused),
+        failing: failing(mailbox, refused, away),
         counts,
         agenda,
         agenda_total,
@@ -354,26 +361,40 @@ pub fn build_hiding(mailbox: &mut Mailbox, hidden: Option<u64>) -> Home {
 /// that is not stopped for the owner is offline or backing off; the accounts that refused the sign-in; the sends the
 /// server refused. `None` when none of it holds, also before a first sync: offline with nothing synced yet is the
 /// status line's to say. A refused read leaves its part out. At most one account's name is kept.
-fn failing(mailbox: &mut Mailbox, refused: u64) -> Option<Failing> {
+///
+/// An account connecting again is still away when it has a failure on record that does not stop it, or when it is
+/// one of `away`, the accounts an earlier build saw offline or backing off: a reconnect attempt does not take the
+/// banner down and put it back. `away` is left with the accounts seen away now. At startup nothing is on record and
+/// nothing was synced, so a first connection says nothing.
+fn failing(mailbox: &mut Mailbox, refused: u64, away: &mut Vec<u64>) -> Option<Failing> {
     let status = mailbox.run("sync.status", &json!({})).ok();
     let last = status.as_ref().and_then(|status| status.get("last_synced")).and_then(Value::as_str).and_then(crate::mailbox::parse_date);
     let listed = mailbox.run("account.list", &json!({})).ok();
     let rows = listed.as_ref().and_then(|listed| listed.get("accounts")).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
-    let (mut signed_in, mut away, mut refusals, mut names) = (false, false, 0_u64, Vec::new());
+    let (mut signed_in, mut gone, mut refusals, mut names) = (false, false, 0_u64, Vec::new());
+    let mut seen = Vec::new();
     for row in rows {
         let state = row.get("connection").and_then(|connection| connection.get("state")).and_then(Value::as_str);
         let kind = row.get("failure").and_then(|failure| failure.get("kind")).and_then(Value::as_str);
+        let known = kind.and_then(error_kind);
+        let stopped = known.is_some_and(inboxcraft_model::ErrorKind::needs_the_owner);
+        let id = row.get("id").and_then(Value::as_u64);
+        let was = id.is_some_and(|id| away.contains(&id));
+        let trying = state == Some("connecting") && (kind.is_some() || was);
         signed_in |= matches!(state, Some("online" | "watching"));
-        away |=
-            !kind.and_then(error_kind).is_some_and(inboxcraft_model::ErrorKind::needs_the_owner) && matches!(state, Some("offline" | "backing_off"));
-        if kind == Some("login_refused") {
+        if !stopped && (matches!(state, Some("offline" | "backing_off")) || trying) {
+            gone = true;
+            seen.extend(id);
+        }
+        if known == Some(inboxcraft_model::ErrorKind::LoginRefused) {
             refusals = refusals.saturating_add(1);
             if names.is_empty() {
                 names.extend(row.get("label").and_then(Value::as_str).map(kept));
             }
         }
     }
-    let since = last.filter(|_| !signed_in && away).map(|at| mailbox.short_date(at));
+    *away = seen;
+    let since = last.filter(|_| !signed_in && gone).map(|at| mailbox.short_date(at));
     let to = mailbox
         .outbox()
         .iter()
@@ -575,6 +596,8 @@ pub struct Kept {
     home: Option<Home>,
     stamp: Option<Stamp>,
     builds: u64,
+    /// The accounts the last build saw offline or backing off (see [`failing`]).
+    away: Vec<u64>,
 }
 
 impl Kept {
@@ -591,7 +614,7 @@ impl Kept {
         let ended = |home: &Home| home.until.zip(moment).is_some_and(|(until, now)| until <= now);
         let stale = self.stamp != Some(stamp) || self.home.as_ref().is_none_or(ended);
         if stale {
-            let home = build_hiding(mailbox, hidden);
+            let home = build_seeing(mailbox, hidden, &mut self.away);
             self.builds = self.builds.saturating_add(1);
             // The build read the mailbox: the stamp is taken after it, so its own reads count as seen.
             self.stamp = Some(Stamp { revision: mailbox.revision(), writes: mailbox.writes(), hour, hidden, greet_by: mailbox.greet_by() });

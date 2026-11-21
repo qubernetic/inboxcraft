@@ -419,3 +419,106 @@ fn of_every_error_kind_only_a_refused_sign_in_is_read_as_refused() {
     assert_eq!(super::error_kind("LoginRefused"), None, "only the names the answers give");
     assert_eq!(super::error_kind(""), None);
 }
+const CONNECTING: inboxcraft_model::ConnectionState = inboxcraft_model::ConnectionState::Connecting;
+const BACKING_OFF: inboxcraft_model::ConnectionState = inboxcraft_model::ConnectionState::BackingOff { attempt: 1, retry_in_secs: 30 };
+
+/// Tells every account of `mailbox` its connection `state`.
+fn all_told(mailbox: &mut Mailbox, state: inboxcraft_model::ConnectionState) {
+    for (account, _) in accounts(mailbox) {
+        told(mailbox, account, state, None);
+    }
+}
+
+/// Tells every account of `mailbox` a failure of `kind` that does not stop it.
+fn all_failed(mailbox: &mut Mailbox, kind: inboxcraft_model::ErrorKind) {
+    use inboxcraft_model::{AccountId, Event, EventKind};
+    for (account, _) in accounts(mailbox) {
+        mailbox.tell(&Event::new(AccountId::new(account), None, EventKind::Failed { kind, folder: None })).unwrap();
+    }
+}
+
+/// Workers that run nothing and give back, once, the events queued: what an account's worker tells on a network loss.
+#[derive(Default)]
+struct Told(Vec<inboxcraft_model::Event>);
+
+impl crate::workers::Workers for Told {
+    fn send(&mut self, _account: &inboxcraft_model::Account, _job: inboxcraft_model::Job) {}
+
+    fn keep(&mut self, _accounts: &[inboxcraft_model::AccountId]) {}
+
+    fn events(&mut self) -> Vec<inboxcraft_model::Event> {
+        std::mem::take(&mut self.0)
+    }
+}
+
+/// Every account of `mailbox` told `kinds` by its worker, through [`Mailbox::pump`] as a frame does.
+fn pumped(mailbox: &mut Mailbox, kinds: &[inboxcraft_model::EventKind]) {
+    use inboxcraft_model::{AccountId, Event};
+    let mut workers = Told::default();
+    for (account, _) in accounts(mailbox) {
+        workers.0.extend(kinds.iter().map(|kind| Event::new(AccountId::new(account), None, kind.clone())));
+    }
+    assert!(mailbox.pump(&mut workers), "the events changed something");
+}
+
+#[test]
+fn a_reconnect_attempt_keeps_the_offline_banner_up_through_the_kept_home() {
+    use inboxcraft_model::EventKind::{Connection, Failed};
+    let mut mailbox = mailbox();
+    for (account, _) in accounts(&mailbox) {
+        told(&mut mailbox, account, OFFLINE, Some(NOW - 600));
+    }
+    mailbox.refresh();
+    let mut kept = super::Kept::default();
+    let offline = kept.current(&mut mailbox, None).failing.clone();
+    assert!(offline.as_ref().is_some_and(|failing| failing.text.starts_with("Offline since ")), "{offline:?}");
+    // Offline, then connecting again (nothing on record), then a timeout and backing off, then connecting again:
+    // the banner stands the whole time, and Home is built again for each event.
+    let timed_out = Failed { kind: inboxcraft_model::ErrorKind::TimedOut, folder: None };
+    let steps = [
+        ("connecting after offline", vec![Connection(CONNECTING)]),
+        ("backing off", vec![timed_out, Connection(BACKING_OFF)]),
+        ("connecting after backing off", vec![Connection(CONNECTING)]),
+        ("backing off again", vec![Connection(BACKING_OFF)]),
+    ];
+    for (step, kinds) in steps {
+        let builds = kept.builds();
+        pumped(&mut mailbox, &kinds);
+        assert_eq!(kept.current(&mut mailbox, None).failing, offline, "{step}");
+        assert!(kept.builds() > builds, "{step}: built again");
+    }
+    // Signed in again: the banner goes.
+    pumped(&mut mailbox, &[Connection(ONLINE)]);
+    assert_eq!(kept.current(&mut mailbox, None).failing, None, "online ends it");
+}
+
+#[test]
+fn connecting_with_a_failure_on_record_is_away_and_a_first_connection_is_not() {
+    // At startup: connecting, nothing synced, nothing on record: nothing to say.
+    let mut mailbox = mailbox();
+    all_told(&mut mailbox, CONNECTING);
+    assert_eq!(build(&mut mailbox).failing, None, "a first connection says nothing");
+    // Synced, then a transient failure on record and connecting again: away, even for a build that saw nothing before.
+    for (account, _) in accounts(&mailbox) {
+        told(&mut mailbox, account, ONLINE, Some(NOW - 600));
+    }
+    all_failed(&mut mailbox, inboxcraft_model::ErrorKind::ConnectionDropped);
+    all_told(&mut mailbox, CONNECTING);
+    let failing = build(&mut mailbox).failing.unwrap();
+    assert!(failing.text.starts_with("Offline since "), "{}", failing.text);
+}
+
+#[test]
+fn a_reconnect_from_signed_in_with_nothing_on_record_is_not_offline() {
+    let mut mailbox = mailbox();
+    for (account, _) in accounts(&mailbox) {
+        told(&mut mailbox, account, ONLINE, Some(NOW - 600));
+    }
+    mailbox.refresh();
+    let mut kept = super::Kept::default();
+    assert_eq!(kept.current(&mut mailbox, None).failing, None);
+    let builds = kept.builds();
+    pumped(&mut mailbox, &[inboxcraft_model::EventKind::Connection(CONNECTING)]);
+    assert_eq!(kept.current(&mut mailbox, None).failing, None, "a reconnect from signed in is not being offline");
+    assert!(kept.builds() > builds, "built again");
+}
