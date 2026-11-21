@@ -25,12 +25,38 @@ fn the_field_page_has_no_tab_stop_and_its_emblems_twinkle() {
         // frames.
         harness.run_steps(20);
         assert!(!rests(&mut harness, 1), "{mode:?}: the page's emblems do not twinkle");
-        // The pointer on the first board's emblem: its cells warm, and the page does not panic.
-        harness.hover_at(egui::pos2(300.0, 400.0));
-        harness.step();
-        harness.hover_at(egui::pos2(5.0, 5.0));
-        harness.run_steps(20);
     }
+}
+
+/// The texts the last frame drew.
+fn texts(harness: &Harness<'static>) -> Vec<String> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => found.push(text.galley.text().to_owned()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &harness.output().shapes {
+        walk(&clipped.shape, &mut found);
+    }
+    found
+}
+
+#[test]
+fn the_field_pages_cells_change_under_a_still_pointer() {
+    // Two pages in step, one with the pointer standing on the first board's emblem: the twinkles are alike, so what
+    // differs is what the pointer flipped.
+    let (mut away, mut on) = (harness(Mode::Dark), harness(Mode::Dark));
+    on.hover_at(egui::pos2(300.0, 400.0));
+    let mut differ = 0;
+    for _ in 0..8 {
+        away.step();
+        on.step();
+        differ += usize::from(texts(&away) != texts(&on));
+    }
+    assert!(differ >= 6, "the pointer changed the page in {differ} of 8 frames");
 }
 
 #[test]
