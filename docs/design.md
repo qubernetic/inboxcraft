@@ -429,8 +429,8 @@ and the movement jumps to its end. A scrambling character changes once, so nothi
 
 | | What moves | Full | Reduced | Off | What it tells |
 |---|---|---|---|---|---|
-| M1 | the character field | cells within 60 px of the pointer flip to code glyphs and cool down over 200 ms | on Home only, within 30 px | still dots | where the pointer is; it carries no fact |
-| M2 | the emblem on Home | cells under the pointer flip and settle back | the same | still | whose program this is |
+| M1 | the character field | cells within 60 px of the pointer flip to code glyphs, the nearest most often, and flip again while the pointer stands still; each is back 80 to 200 ms after its flip, taking new glyphs on the way once the pointer has left it | on Home only, within 30 px, with 0.4 of the chance | still dots | where the pointer is; it carries no fact |
+| M2 | the emblem on Home | cells under the pointer flip and settle back; by itself one cell at a time twinkles to a code glyph (about 7.5 a second, half of the ink ones in cyan) for 250 to 750 ms | the same | still | whose program this is |
 | M3 | scramble | a label resolves from the left on hover, 70 ms a character, at most 300 ms; a headline on load, 700 ms | no hover; Home's headline once per launch | none | that a control can be pressed; that a page was just made |
 | M4 | a new row arrives | the row decodes in over 300 ms; the unread square blinks once | fades in, 125 ms; the square blinks once | the row is there | that mail came and which row it is |
 | M5 | Done | the words dissolve (125 ms), the row closes (180 ms); undo line with a 5 s bar | the row closes (180 ms); undo line with its bar | the row is gone; undo line without a bar | which row went, and that it can be taken back |
