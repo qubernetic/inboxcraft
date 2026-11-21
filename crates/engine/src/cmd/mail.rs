@@ -647,3 +647,6 @@ mod tests;
 #[cfg(test)]
 #[path = "mail_row_tests.rs"]
 mod row_tests;
+#[cfg(test)]
+#[path = "thread_pin_tests.rs"]
+mod thread_pin_tests;
