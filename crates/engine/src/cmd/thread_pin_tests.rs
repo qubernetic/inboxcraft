@@ -7,13 +7,14 @@
 //! every message, and the answers hash to the digest written down then.
 
 use inboxcraft_model::{AccountId, Envelope, FolderId, Message, MessageId, MessageRef, MessageState, Summary, Uid, group_threads};
-use inboxcraft_store::{Batch, Change, Memory, Storage};
+use inboxcraft_store::{Batch, Change, Memory, Sqlite, Storage, StoreConfig};
 use std::cell::Cell;
 use std::rc::Rc;
 
 use serde_json::{Value, json};
 
 use crate::test_support::{NOW, address, at, clock, mailbox, session_with};
+use crate::cmd::id_range_tests::copy;
 use crate::{Registry, Session};
 
 /// The first id of the long thread, and how many it holds.
@@ -127,6 +128,14 @@ fn threads_are_the_grouped_ones(session: &mut Session, probes: &[u64]) {
     }
 }
 
+/// `store` copied into a new SQLite store, and its directory.
+fn on_sqlite(store: &dyn Storage) -> (Sqlite, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut sqlite = Sqlite::open(dir.path(), StoreConfig::default()).unwrap();
+    copy(store, &mut sqlite);
+    (sqlite, dir)
+}
+
 #[test]
 fn the_threads_are_the_ones_grouping_every_message_finds() {
     let (store, probes) = hostile_store();
@@ -137,24 +146,51 @@ fn the_threads_are_the_ones_grouping_every_message_finds() {
 }
 
 #[test]
+fn on_sqlite_the_threads_are_the_ones_grouping_every_message_finds() {
+    let (store, probes) = hostile_store();
+    let (store, _dir) = on_sqlite(&store);
+    let mut session = Session::with_registry(Box::new(store), Box::new(clock()), Registry::builtin().unwrap()).unwrap();
+    threads_are_the_grouped_ones(&mut session, &probes);
+    let (store, _dir) = on_sqlite(&mailbox());
+    let mut session = Session::with_registry(Box::new(store), Box::new(clock()), Registry::builtin().unwrap()).unwrap();
+    threads_are_the_grouped_ones(&mut session, &[1, 2, 3, 4, 5]);
+}
+
+const MAILBOX_DIGEST: u64 = 4_121_917_223_662_759_176;
+const HOSTILE_DIGEST: u64 = 15_720_900_201_687_580_080;
+
+#[test]
 fn the_answers_over_the_test_mailbox_are_as_before() {
     let mut session = session_with(mailbox(), Registry::builtin().unwrap());
-    assert_eq!(digest(&mut session, &[1, 2, 3, 4, 5]), 4_121_917_223_662_759_176);
+    assert_eq!(digest(&mut session, &[1, 2, 3, 4, 5]), MAILBOX_DIGEST);
 }
 
 #[test]
 fn the_answers_over_a_hostile_mailbox_are_as_before() {
     let (store, probes) = hostile_store();
     let mut session = session_with(store, Registry::builtin().unwrap());
-    assert_eq!(digest(&mut session, &probes), 15_720_900_201_687_580_080);
+    assert_eq!(digest(&mut session, &probes), HOSTILE_DIGEST);
 }
 
-/// A store that counts the folders read whole (`.1`) and the links looked up (`.2`).
+/// The same answers, word for word, from the SQLite store the app runs on.
+#[test]
+fn on_sqlite_the_answers_are_the_same() {
+    let (store, _dir) = on_sqlite(&mailbox());
+    let mut session = Session::with_registry(Box::new(store), Box::new(clock()), Registry::builtin().unwrap()).unwrap();
+    assert_eq!(digest(&mut session, &[1, 2, 3, 4, 5]), MAILBOX_DIGEST);
+    let (store, probes) = hostile_store();
+    let (store, _dir) = on_sqlite(&store);
+    let mut session = Session::with_registry(Box::new(store), Box::new(clock()), Registry::builtin().unwrap()).unwrap();
+    assert_eq!(digest(&mut session, &probes), HOSTILE_DIGEST);
+}
+
+/// A store that counts the folders read whole (`.1`), the links looked up (`.2`) and the messages those lookups
+/// gave back (`.3`).
 #[derive(Debug)]
-struct Reads(Memory, Rc<Cell<u32>>, Rc<Cell<u32>>);
+struct Reads<S>(S, Counter, Counter, Counter);
 
 #[rustfmt::skip]
-impl Storage for Reads {
+impl<S: Storage> Storage for Reads<S> {
     fn config(&self) -> inboxcraft_store::StoreConfig { self.0.config() }
     fn apply(&mut self, batch: &Batch) -> Result<(), inboxcraft_store::StoreError> { self.0.apply(batch) }
     fn accounts(&self) -> Result<Vec<inboxcraft_model::Account>, inboxcraft_store::StoreError> { self.0.accounts() }
@@ -162,7 +198,12 @@ impl Storage for Reads {
     fn folder_state(&self, f: FolderId) -> Result<Option<inboxcraft_model::FolderState>, inboxcraft_store::StoreError> { self.0.folder_state(f) }
     fn messages(&self, f: FolderId) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.1.set(self.1.get().saturating_add(1)); self.0.messages(f) }
     fn message(&self, m: MessageId) -> Result<Option<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.0.message(m) }
-    fn linked(&self, l: &MessageRef) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.2.set(self.2.get().saturating_add(1)); self.0.linked(l) }
+    fn linked(&self, l: &MessageRef, k: &std::collections::BTreeSet<MessageId>) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> {
+        self.2.set(self.2.get().saturating_add(1));
+        let found = self.0.linked(l, k)?;
+        self.3.set(self.3.get().saturating_add(u32::try_from(found.len()).unwrap()));
+        Ok(found)
+    }
     fn body(&self, m: MessageId) -> Result<Option<inboxcraft_store::Body>, inboxcraft_store::StoreError> { self.0.body(m) }
     fn search(&self, s: &inboxcraft_store::Search) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { self.0.search(s) }
     fn queued_jobs(&self) -> Result<Vec<inboxcraft_model::Job>, inboxcraft_store::StoreError> { self.0.queued_jobs() }
@@ -185,23 +226,112 @@ impl Storage for Reads {
     fn missing_bodies(&self, f: FolderId, t: inboxcraft_time::Timestamp) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { self.0.missing_bodies(f, t) }
 }
 
+/// One count of [`Reads`].
+type Counter = Rc<Cell<u32>>;
+
+/// `store` behind a counting [`Reads`], in a session, and its counters.
+fn counted<S: Storage + 'static>(store: S) -> (Session, Counter, Counter, Counter) {
+    let (folders, links, returned) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let store = Reads(store, folders.clone(), links.clone(), returned.clone());
+    let session = Session::with_registry(Box::new(store), Box::new(clock()), Registry::builtin().unwrap()).unwrap();
+    (session, folders, links, returned)
+}
+
 /// One message's thread reads no folder whole: in a store of over 10 000 messages, `mail.thread` and `mail.why` look
 /// up each link of the thread once, a loop of references included, and the thread of 10 000 is found whole.
 #[test]
 fn a_thread_is_found_by_its_links_not_by_reading_the_store() {
     let (store, _) = hostile_store();
-    let (folders, links) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
-    let mut session = Session::with_registry(Box::new(Reads(store, folders.clone(), links.clone())), Box::new(clock()), Registry::builtin().unwrap()).unwrap();
+    let (mut session, folders, links, returned) = counted(store);
     for (id, total, looked_up) in [(100, 3, 3), (103, 1, 1), (111, 3, 2), (113, 1, 1), (122, 4, 1), (1, 1, 0), (CHAIN + 5, CHAIN_LEN, CHAIN_LEN)] {
         for command in ["mail.thread", "mail.why"] {
             folders.set(0);
             links.set(0);
+            returned.set(0);
             let answer = session.run(command, &json!({ "id": id })).unwrap();
             assert_eq!(folders.get(), 0, "{command} {id} read a folder whole");
             assert_eq!(u64::from(links.get()), looked_up, "{command} {id}");
+            assert_eq!(u64::from(returned.get()), total - 1, "{command} {id}: a message read twice");
             if command == "mail.thread" {
                 assert_eq!(answer["total"], total, "{id}");
             }
+        }
+    }
+}
+
+/// The first id of the thread written as a mailing list writes it, and how many it holds.
+const LIST: u64 = 20_000;
+const LIST_LEN: u64 = 10_000;
+
+/// The test mailbox and a thread of [`LIST_LEN`] as RFC 5322 asks a reply to be written: each answers the one before
+/// and refers to what that one referred to and to it, the newest 64 kept, so a message is named by up to 66 others.
+fn list_store() -> Memory {
+    let mut store = mailbox();
+    let mut batch = Batch::new();
+    let mut refers: Vec<String> = Vec::new();
+    for n in 0..LIST_LEN {
+        let own = format!("list-{n}@example.org");
+        let previous = n.checked_sub(1).map(|p| format!("list-{p}@example.org"));
+        let answers: Vec<&str> = previous.as_deref().into_iter().collect();
+        let named: Vec<&str> = refers.iter().map(String::as_str).collect();
+        batch.push(hostile(LIST + n, 1, 3, Some(&own), &answers, &named, 200 + i64::try_from(n).unwrap()));
+        refers.push(own);
+        if refers.len() > 64 {
+            refers.remove(0);
+        }
+    }
+    store.apply(&batch).unwrap();
+    store
+}
+
+/// A mailing list's thread of 10 000 costs one record per message, not one per link that names it (up to 66 here),
+/// on both stores: the messages the lookups give back are the thread less the one asked about.
+#[test]
+fn each_message_of_a_list_thread_is_read_once() {
+    let memory = list_store();
+    let (sqlite, _dir) = on_sqlite(&memory);
+    let sessions = [counted(memory), counted(sqlite)];
+    for (backend, (mut session, folders, links, returned)) in ["memory", "sqlite"].into_iter().zip(sessions) {
+        for id in [LIST, LIST + 1, LIST + 4321, LIST + LIST_LEN - 1] {
+            for command in ["mail.thread", "mail.why"] {
+                folders.set(0);
+                links.set(0);
+                returned.set(0);
+                let answer = session.run(command, &json!({ "id": id })).unwrap();
+                assert_eq!(folders.get(), 0, "{backend} {command} {id} read a folder whole");
+                assert_eq!(u64::from(links.get()), LIST_LEN, "{backend} {command} {id}");
+                assert_eq!(u64::from(returned.get()), LIST_LEN - 1, "{backend} {command} {id}: a message read more than once");
+                if command == "mail.thread" {
+                    assert_eq!(answer["total"], LIST_LEN, "{backend} {id}");
+                }
+            }
+        }
+    }
+}
+
+/// How long `mail.thread` and `mail.why` take on the mailing list's thread of 10 000, on both stores: a timing, run
+/// by hand in release (`cargo test --release -p inboxcraft-engine --lib list_thread_timing -- --ignored --nocapture`).
+#[test]
+#[ignore = "a timing, run by hand in release"]
+#[allow(clippy::disallowed_methods, reason = "a measurement of the wall time")]
+fn list_thread_timing() {
+    let memory = list_store();
+    let (sqlite, _dir) = on_sqlite(&memory);
+    let sessions: [(&str, Session); 2] = [
+        ("memory", session_with(memory, Registry::builtin().unwrap())),
+        ("sqlite", Session::with_registry(Box::new(sqlite), Box::new(clock()), Registry::builtin().unwrap()).unwrap()),
+    ];
+    for (backend, mut session) in sessions {
+        for command in ["mail.thread", "mail.why"] {
+            let mut times: Vec<f64> = (0..15)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    session.run(command, &json!({ "id": LIST + 4321 })).unwrap();
+                    start.elapsed().as_secs_f64() * 1000.0
+                })
+                .collect();
+            times.sort_by(f64::total_cmp);
+            println!("{backend} {command}: median {:.3} ms, max {:.3} ms", times[7], times[14]);
         }
     }
 }

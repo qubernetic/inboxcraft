@@ -330,7 +330,12 @@ fn a_version_5_store_gets_the_links_of_its_messages() {
     let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
     let linked = |store: &Sqlite, link: &str| -> Vec<u64> {
-        store.linked(&inboxcraft_model::MessageRef::new(link).unwrap()).unwrap().iter().map(|entry| entry.message().id().get()).collect()
+        store
+            .linked(&inboxcraft_model::MessageRef::new(link).unwrap(), &std::collections::BTreeSet::new())
+            .unwrap()
+            .iter()
+            .map(|entry| entry.message().id().get())
+            .collect()
     };
     assert_eq!(linked(&store, "first@example.org"), [1, 2]);
     assert_eq!(linked(&store, "second@example.org"), [2]);

@@ -297,24 +297,29 @@ fn thread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
 
 /// The thread `entry`'s message is in, oldest first (a thread of one when it names no other), and its messages by id:
 /// the thread [`inboxcraft_model::group_threads`] finds over every message, found from the message by its links
-/// through [`Storage::linked`]. Each link is followed once and each message taken once, without recursion, so the
-/// work is that of the thread's messages and their links, whatever the store holds besides; a loop of references
-/// ends where it began.
+/// through [`Storage::linked`]. Each distinct link is looked up once, without recursion, and the messages found so
+/// far are passed as known, so the store reads each message's record once however many links of the thread name it:
+/// the work is one index lookup per link and one record per message of the thread, whatever the store holds
+/// besides; a loop of references ends where it began.
 fn thread_of(store: &dyn Storage, entry: Entry) -> Result<(Vec<MessageId>, BTreeMap<MessageId, Entry>), EngineError> {
-    let mut followed: BTreeSet<MessageRef> = BTreeSet::new();
-    let mut to_follow: Vec<MessageRef> = links(entry.message()).cloned().collect();
+    // Every link ever queued, so each is queued (and looked up) once.
+    let mut queued: BTreeSet<MessageRef> = links(entry.message()).cloned().collect();
+    let mut to_follow: Vec<MessageRef> = queued.iter().cloned().collect();
+    let mut known = BTreeSet::from([entry.message().id()]);
     let mut entries = BTreeMap::from([(entry.message().id(), entry)]);
     while let Some(link) = to_follow.pop() {
-        if followed.contains(&link) {
-            continue;
-        }
-        for found in store.linked(&link)? {
-            if let std::collections::btree_map::Entry::Vacant(slot) = entries.entry(found.message().id()) {
-                to_follow.extend(links(found.message()).filter(|named| !followed.contains(*named)).cloned());
-                slot.insert(found);
+        for found in store.linked(&link, &known)? {
+            let id = found.message().id();
+            if known.insert(id) {
+                for named in links(found.message()) {
+                    if !queued.contains(named) {
+                        queued.insert(named.clone());
+                        to_follow.push(named.clone());
+                    }
+                }
+                entries.insert(id, found);
             }
         }
-        followed.insert(link);
     }
     let mut thread: Vec<&Message> = entries.values().map(Entry::message).collect();
     thread.sort_by_key(|message| thread_order(message));

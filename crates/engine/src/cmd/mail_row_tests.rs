@@ -65,6 +65,7 @@ impl Storage for Counting {
     fn folder_state(&self, f: FolderId) -> Result<Option<inboxcraft_model::FolderState>, inboxcraft_store::StoreError> { self.0.folder_state(f) }
     fn messages(&self, f: FolderId) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.count(); self.0.messages(f) }
     fn message(&self, m: MessageId) -> Result<Option<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.0.message(m) }
+    fn linked(&self, l: &inboxcraft_model::MessageRef, k: &std::collections::BTreeSet<MessageId>) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.0.linked(l, k) }
     fn body(&self, m: MessageId) -> Result<Option<inboxcraft_store::Body>, inboxcraft_store::StoreError> { self.0.body(m) }
     fn search(&self, s: &inboxcraft_store::Search) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { self.count(); self.0.search(s) }
     fn queued_jobs(&self) -> Result<Vec<inboxcraft_model::Job>, inboxcraft_store::StoreError> { self.0.queued_jobs() }

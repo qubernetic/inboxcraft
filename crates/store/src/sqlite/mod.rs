@@ -492,8 +492,8 @@ fn put_folder(tx: &Transaction<'_>, folder: &Folder) -> Result<(), StoreError> {
 }
 
 /// The messages that name the link `?1`, by id: those [`Storage::linked`] gives.
-const LINKED: &str = "SELECT record, opened, EXISTS (SELECT 1 FROM body WHERE body.message = message.id) FROM message
-    WHERE id IN (SELECT message FROM message_link WHERE link = ?1) ORDER BY id";
+/// One message a link names, read by [`Storage::linked`].
+const LINKED: &str = "SELECT record, opened, EXISTS (SELECT 1 FROM body WHERE body.message = message.id) FROM message WHERE id = ?1";
 
 fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError> {
     let folder = message.folder();
@@ -635,12 +635,21 @@ impl Storage for Sqlite {
         Ok(self.entries("id = ?1", key(id.get()))?.into_iter().next())
     }
 
-    fn linked(&self, link: &MessageRef) -> Result<Vec<Entry>, StoreError> {
+    fn linked(&self, link: &MessageRef, known: &BTreeSet<MessageId>) -> Result<Vec<Entry>, StoreError> {
+        // The ids from the index alone (its primary key), then the record of each one not known yet.
+        let ids: Vec<i64> = {
+            let mut statement = self.conn.prepare("SELECT message FROM message_link WHERE link = ?1 ORDER BY message")?;
+            let rows = statement.query_map([link.as_str()], |row| row.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
         let mut statement = self.conn.prepare(LINKED)?;
-        let rows = statement.query_map([link.as_str()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?)))?;
         let mut found = Vec::new();
-        for row in rows {
-            let (record, opened, has_body) = row?;
+        for id in ids {
+            if u64::try_from(id).is_ok_and(|id| known.contains(&MessageId::new(id))) {
+                continue;
+            }
+            let row = statement.query_row([id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?))).optional()?;
+            let Some((record, opened, has_body)) = row else { continue };
             let entry = Entry::new(serde_json::from_str(&record)?, opened, has_body);
             // The index is written with the record; a record that no longer names the link is not linked by it.
             if inboxcraft_model::links(entry.message()).any(|named| named == link) {

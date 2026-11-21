@@ -58,6 +58,7 @@ pub use search::{MAX_QUERY_CHARS, MAX_QUERY_WORDS, MAX_RESULTS, Search};
 pub use sqlite::{DATABASE_FILE, SCHEMA_VERSION, SOURCES_DIR, Sqlite};
 #[cfg(all(feature = "sqlite", feature = "test-hooks", not(target_arch = "wasm32")))]
 pub use sqlite::{KeepHold, KeeperHooks};
+use std::collections::BTreeSet;
 
 /// What a store that writes drafts behind calls after each such write, landed or failed: a window's redraw, so that a
 /// failure is said without waiting for the person to touch the window.
@@ -111,25 +112,16 @@ pub trait Storage {
     /// As [`Storage::accounts`].
     fn message(&self, id: MessageId) -> Result<Option<Entry>, StoreError>;
 
-    /// The messages that name `link` as their `Message-ID`, in `In-Reply-To` or in `References`, by our id: what
-    /// links one message of a thread to the next, at the cost of the messages found, not of the store. The backends
-    /// keep an index of the links; this default reads every message.
+    /// The messages that name `link` as their `Message-ID`, in `In-Reply-To` or in `References`, by our id, leaving
+    /// out those in `known`: what links one message of a thread to the next. The backends find them by an index of
+    /// the links and read the record of a message only when it is not in `known`, so a walk that puts every message
+    /// it finds into `known` reads each record once, however many links name it. There is no default: a backend
+    /// that read every message here would make one thread cost the whole store once per link.
     ///
     /// # Errors
     ///
     /// As [`Storage::accounts`].
-    fn linked(&self, link: &MessageRef) -> Result<Vec<Entry>, StoreError> {
-        let mut found = Vec::new();
-        for account in self.accounts()? {
-            for folder in self.folders(account.id())? {
-                found.extend(
-                    self.messages(folder.id())?.into_iter().filter(|entry| inboxcraft_model::links(entry.message()).any(|named| named == link)),
-                );
-            }
-        }
-        found.sort_by_key(|entry| entry.message().id());
-        Ok(found)
-    }
+    fn linked(&self, link: &MessageRef, known: &BTreeSet<MessageId>) -> Result<Vec<Entry>, StoreError>;
 
     /// The kept body of a message.
     ///

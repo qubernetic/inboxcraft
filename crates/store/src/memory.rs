@@ -383,10 +383,10 @@ impl Storage for Memory {
         Ok(self.state.messages.get(&id).map(|held| held.entry()))
     }
 
-    fn linked(&self, link: &MessageRef) -> Result<Vec<Entry>, StoreError> {
+    fn linked(&self, link: &MessageRef, known: &BTreeSet<MessageId>) -> Result<Vec<Entry>, StoreError> {
         let key = link_key(link);
         let ids = self.state.links.range((key, MessageId::new(0))..=(key, MessageId::new(u64::MAX))).map(|(_, id)| id);
-        let held = ids.filter_map(|id| self.state.messages.get(id));
+        let held = ids.filter(|id| !known.contains(*id)).filter_map(|id| self.state.messages.get(id));
         Ok(held.filter(|held| inboxcraft_model::links(&held.message).any(|named| named == link)).map(|held| held.entry()).collect())
     }
 

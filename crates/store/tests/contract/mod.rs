@@ -443,7 +443,12 @@ fn linking(id: u64, folder: u64, own: Option<&str>, answers: &[&str], refers: &[
 }
 
 fn linked<S: Storage>(store: &S, link: &str) -> Vec<u64> {
-    store.linked(&MessageRef::new(link).unwrap()).unwrap().iter().map(|entry| entry.message().id().get()).collect()
+    store
+        .linked(&MessageRef::new(link).unwrap(), &std::collections::BTreeSet::new())
+        .unwrap()
+        .iter()
+        .map(|entry| entry.message().id().get())
+        .collect()
 }
 
 pub fn linked_finds_the_messages_that_name_a_link<S: Storage>(mut store: S) {
@@ -465,8 +470,13 @@ pub fn linked_finds_the_messages_that_name_a_link<S: Storage>(mut store: S) {
     assert_eq!(linked(&store, "c@example.org"), [3]);
     assert_eq!(linked(&store, "A@example.org"), [4]);
     assert_eq!(linked(&store, "nobody@example.org"), Vec::<u64>::new());
-    let entry = store.linked(&MessageRef::new("c@example.org").unwrap()).unwrap();
+    let entry = store.linked(&MessageRef::new("c@example.org").unwrap(), &std::collections::BTreeSet::new()).unwrap();
     assert_eq!(entry, store.message(m(3)).unwrap().into_iter().collect::<Vec<_>>());
+    // The ones already known are left out.
+    let known = [m(1), m(3), m(9)].into_iter().collect();
+    let found: Vec<u64> =
+        store.linked(&MessageRef::new("a@example.org").unwrap(), &known).unwrap().iter().map(|entry| entry.message().id().get()).collect();
+    assert_eq!(found, [2]);
     // A replaced message is linked by its new links only; flags keep them; a refused batch changes none.
     put(&mut store, vec![linking(3, 1, Some("d@example.org"), &[], &[])]).unwrap();
     assert_eq!(linked(&store, "a@example.org"), [1, 2]);
