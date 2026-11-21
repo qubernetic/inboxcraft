@@ -106,8 +106,22 @@ fn event_editor(ui: &mut Ui, theme: &Theme, now: EventEditorHost) -> Option<Even
     chosen
 }
 
-/// The width of the all-day alert's choice, in points.
+/// The least width of the all-day alert's choice, in points.
 const ALL_DAY_ALERT: f32 = 220.0;
+
+/// The room a select's field takes around its words: 12 before them, 8 to the caret, the caret's 8 and 12 after it,
+/// in points.
+const SELECT_ROOM: f32 = 40.0;
+
+/// The width of the all-day alert's choice: [`ALL_DAY_ALERT`], or more where the widest choice needs it to read whole
+/// (large text), on whole points.
+fn all_day_alert_width(ui: &Ui, theme: &Theme) -> f32 {
+    let widest = AllDayAlert::ALL
+        .iter()
+        .map(|choice| crate::component::galley(ui, all_day_alert_text(*choice), theme.fonts.mono, theme.palette.ink).size().x)
+        .fold(0.0_f32, f32::max);
+    (widest.ceil() + SELECT_ROOM).max(ALL_DAY_ALERT)
+}
 
 /// "All-day alerts ring at": a select of the hours a new all-day event's alert rings at; another one on the owner's
 /// press, never on a held key's repeat.
@@ -124,7 +138,7 @@ fn all_day_alert(ui: &mut Ui, theme: &Theme, now: AllDayAlert) -> Option<AllDayA
             options: &options,
             current: Some(now),
             icon: IconId::Notify,
-            width: ALL_DAY_ALERT,
+            width: all_day_alert_width(ui, theme),
         };
         let (_, picked) = select.show(ui, theme, &mut open);
         chosen = picked.filter(|choice| *choice != now && !crate::component::button::key_repeated(ui));

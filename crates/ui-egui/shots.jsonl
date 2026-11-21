@@ -256,20 +256,20 @@
 # someone else's event, read-only (#344).
 {"out": "docs/images/event-new-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "edit_event": "new"}
 {"out": "docs/images/event-new-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "edit_event": "new"}
-{"out": "docs/images/event-edit-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
-{"out": "docs/images/event-edit-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
-{"out": "docs/images/event-read-only-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
-{"out": "docs/images/event-read-only-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
+{"out": "docs/images/event-edit-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
+{"out": "docs/images/event-edit-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
+{"out": "docs/images/event-read-only-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
+{"out": "docs/images/event-read-only-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "event_editor": "small", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
 {"out": "docs/images/event-deleted-light.png", "mode": "light", "sample": "frames", "size": [1200, 820], "calendar_view": "week", "event": "Dentist", "delete_event": true, "motion": "reduced"}
 {"out": "docs/images/event-deleted-dark.png", "mode": "dark", "sample": "frames", "size": [1200, 820], "calendar_view": "week", "event": "Dentist", "delete_event": true, "motion": "reduced"}
 # The event editor full in the calendar's place, the event's day beside it (#370): new, an edit, someone
 # else's event read-only.
 {"out": "docs/images/event-full-new-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "edit_event": "new"}
 {"out": "docs/images/event-full-new-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "edit_event": "new"}
-{"out": "docs/images/event-full-edit-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
-{"out": "docs/images/event-full-edit-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
-{"out": "docs/images/event-full-read-only-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
-{"out": "docs/images/event-full-read-only-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
+{"out": "docs/images/event-full-edit-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
+{"out": "docs/images/event-full-edit-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Thursday workshop", "edit_event": "edit"}
+{"out": "docs/images/event-full-read-only-light.png", "mode": "light", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
+{"out": "docs/images/event-full-read-only-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "event_editor": "full", "calendar_view": "week", "event": "Design review", "edit_event": "edit"}
 # The composer in the reader's place (E2.3): new, written, an address that is none, the suggestions under a
 # half-typed name, the floating panel over the reader, and the Sending page with a signature.
 {"out": "docs/images/compose-new-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "compose": "new"}

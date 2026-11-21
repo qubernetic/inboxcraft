@@ -715,6 +715,8 @@ fn places(app: &mut InboxApp, clock: &FakeClock, shot: &Shot) -> Result<(), UiEr
             // The page under Sending, over the sending sample with its snooze, reminder, send later and alert.
             let scheduled = if frames(shot) { crate::sample::frames::scheduled } else { crate::sample::scheduled };
             scheduled(app.mailbox_mut()).map_err(|error| bad(format!("{}: {error}", shot.out)))?;
+            // The window reads the sends scheduled here as it reads them after a command of its own.
+            app.mailbox_mut().refresh();
             app.open_scheduled();
         } else {
             if crate::settings::Section::named(name) == Some(crate::settings::Section::Privacy) {
@@ -1977,6 +1979,9 @@ fn window(shot: &Shot) -> Result<(InboxApp, FakeClock), UiError> {
         if drafts {
             keep_drafts(&mut app, &clock, &shot.out, FRAMES_WORDS.drafts)?;
         }
+        // What the sample leaves due (the drafts' copies for the server) is done here, as the window's first frame
+        // would do it: that frame's refresh would otherwise settle over what the scene shows, such as an error.
+        app.mailbox_mut().pump(&mut crate::workers::NoWorkers);
     }
     Ok((app, clock))
 }
@@ -2252,3 +2257,7 @@ mod fail_tests;
 #[cfg(test)]
 #[path = "shot_frames_tests.rs"]
 mod frames_tests;
+
+#[cfg(test)]
+#[path = "shot_scenes_tests.rs"]
+mod scenes_tests;
