@@ -61,6 +61,9 @@ mod add_tests;
 #[path = "alert_tests.rs"]
 mod alert_tests;
 #[cfg(test)]
+#[path = "all_day_alert_tests.rs"]
+mod all_day_alert_tests;
+#[cfg(test)]
 #[path = "calendar_sync_tests.rs"]
 mod calendar_sync_tests;
 #[cfg(test)]

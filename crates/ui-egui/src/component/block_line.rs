@@ -40,10 +40,15 @@ pub enum BlockLine<'a> {
 /// The empty line's `text` laid out across a line `width` wide: plain, at most [`super::MOST`] characters of it, on at
 /// most three lines, the last cut with `…`.
 fn empty_galley(ui: &Ui, theme: &Theme, text: &str, width: f32) -> std::sync::Arc<egui::Galley> {
+    super::wrapped(ui, &empty_words(text), theme.fonts.caption, theme.palette.muted, (width - PAD_X * 2.0).max(1.0), EMPTY_LINES, Align::LEFT)
+}
+
+/// The empty line's `text` as it is laid out and heard, in the written order: plain, at most [`super::MOST`]
+/// characters of it, `…` after a cut.
+fn empty_words(text: &str) -> std::borrow::Cow<'_, str> {
     let (kept, cut) = super::capped(text, super::MOST);
     let words = super::plain(kept);
-    let words = if cut { std::borrow::Cow::Owned(format!("{words}…")) } else { words };
-    super::wrapped(ui, &words, theme.fonts.caption, theme.palette.muted, (width - PAD_X * 2.0).max(1.0), EMPTY_LINES, Align::LEFT)
+    if cut { std::borrow::Cow::Owned(format!("{words}…")) } else { words }
 }
 
 /// The height of `line` across `width`, at the theme's text scale: 32 for the more line; for the empty line its text's
@@ -73,7 +78,8 @@ pub fn block_line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, line: &BlockLine<
     match line {
         BlockLine::Empty(text) => {
             let galley = empty_galley(ui, theme, text, width);
-            let spoken = galley.text().to_owned();
+            // Heard in the written order: the galley holds right-to-left words in the order they are drawn.
+            let spoken = empty_words(text).into_owned();
             response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &spoken));
             if ui.is_rect_visible(rect) {
                 let top = (rect.center().y - galley.size().y / 2.0).round();

@@ -472,7 +472,10 @@ fn chip_words(ui: &Ui, theme: &Theme, name: &str, ink: Color32, sides: f32, room
     let font = theme.fonts.body;
     let room = if room.is_finite() { room.max(1.0) } else { WIDEST };
     let most = (WIDEST.min(room) - sides).max(1.0);
-    let whole = galley(ui, name, font, ink);
+    // An address keeps its parts in the written order ([`crate::bidi::address`]); a name is laid out as words.
+    let addressed = name.contains('@');
+    let lay = |text: &str| if addressed { galley(ui, &crate::bidi::address(text), font, ink) } else { galley(ui, text, font, ink) };
+    let whole = lay(name);
     if whole.size().x <= most {
         let width = whole.size().x;
         return ChipWords { words: whole, width, cut: false };
@@ -490,7 +493,7 @@ fn chip_words(ui: &Ui, theme: &Theme, name: &str, ink: Color32, sides: f32, room
         // The most letters of the local part that fit before the ellipsis and the whole domain.
         let fits = |kept: usize| {
             let end = local.char_indices().nth(kept).map_or(local.len(), |(at, _)| at);
-            let words = galley(ui, &format!("{}…{domain}", local.get(..end).unwrap_or_default()), font, ink);
+            let words = lay(&format!("{}…{domain}", local.get(..end).unwrap_or_default()));
             (words.size().x <= most).then_some(words)
         };
         if let Some(words) = most_that_fit(local.chars().count(), fits) {
@@ -501,7 +504,7 @@ fn chip_words(ui: &Ui, theme: &Theme, name: &str, ink: Color32, sides: f32, room
     let count = domain.chars().count();
     let fits = |kept: usize| {
         let start = domain.char_indices().nth(count.saturating_sub(kept)).map_or(domain.len(), |(at, _)| at);
-        let words = galley(ui, &format!("…{}", domain.get(start..).unwrap_or_default()), font, ink);
+        let words = lay(&format!("…{}", domain.get(start..).unwrap_or_default()));
         (words.size().x <= grown).then_some(words)
     };
     let words = most_that_fit(count, fits).unwrap_or_else(|| cut(ui, name, font, ink, grown));

@@ -5098,6 +5098,19 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
+    "url": "https://static.crates.io/crates/unicode-bidi/unicode-bidi-0.3.18.crate",
+    "sha256": "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5",
+    "dest": "cargo/vendor/unicode-bidi-0.3.18"
+  },
+  {
+    "type": "inline",
+    "contents": "{\"package\": \"5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5\", \"files\": {}}",
+    "dest": "cargo/vendor/unicode-bidi-0.3.18",
+    "dest-filename": ".cargo-checksum.json"
+  },
+  {
+    "type": "archive",
+    "archive-type": "tar-gzip",
     "url": "https://static.crates.io/crates/unicode-general-category/unicode-general-category-1.1.0.crate",
     "sha256": "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f",
     "dest": "cargo/vendor/unicode-general-category-1.1.0"

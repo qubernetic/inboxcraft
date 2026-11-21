@@ -22,6 +22,7 @@
 //! - every link's target is exposed ([`Link`]), only `http`, `https` and `mailto` targets are kept,
 //!   and a link whose text names another place than its target is flagged ([`Link::mismatch`]),
 //!   invisible characters and full-stop look-alikes in the text making no difference;
+//! - [`page`] writes a document out again as a page a browser shows, with no address, script or load in it;
 //! - the work is bounded: input over [`MAX_INPUT`] bytes is cut, nesting over [`MAX_DEPTH`] is
 //!   flattened, tables are capped ([`MAX_TABLE_DEPTH`], [`MAX_TABLE_ROWS`], [`MAX_TABLE_COLUMNS`]),
 //!   and so are blocks, links and pictures.
@@ -45,12 +46,14 @@ mod document;
 mod entities;
 mod link;
 mod look;
+mod page;
 mod tokenizer;
 
 pub use document::{
     Align, Block, Cell, Document, Image, ImageSource, Link, LinkTarget, Look, Marker, Options, Paint, RemoteContent, Rgb, Span, TextKind, Width,
 };
 pub use look::{DARK_INK, LEAST_CONTRAST, LIGHT_INK, kept};
+pub use page::{MAX_NESTING, MAX_TITLE, page};
 
 /// Longest input [`display`] reads, in bytes; the rest is cut at a character boundary and
 /// [`Document::truncated`] is set.

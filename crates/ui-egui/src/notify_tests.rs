@@ -69,7 +69,10 @@ fn the_week_rule_is_kept_beside_and_comes_back_at_the_start() {
     use inboxcraft_time::{FirstWeek, WeekRule, Weekday};
     let mut mailbox = mailbox();
     assert_eq!(mailbox.week_rule(), WeekRule::default());
-    assert_eq!(mailbox.kept_week(), serde_json::json!({ "first_day": "monday", "first_week": "first_four_day_week" }));
+    assert_eq!(
+        mailbox.kept_week(),
+        serde_json::json!({ "first_day": "monday", "first_week": "first_four_day_week", "all_day_alert": "day_before_9" })
+    );
     mailbox.run("week.set", &serde_json::json!({ "first_day": "sunday", "first_week": "week_of_1_january" })).unwrap();
     let kept = mailbox.kept_week();
     let mut next = self::mailbox();

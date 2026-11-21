@@ -129,6 +129,8 @@ pub(super) enum Asked {
     Retry(u64, String),
     /// Save an attachment.
     Save(u64, u64),
+    /// Open a cleaned copy of a message in the browser.
+    Original(u64),
     /// Fill the window, or not.
     FullWidth(bool),
     /// Close the reader.

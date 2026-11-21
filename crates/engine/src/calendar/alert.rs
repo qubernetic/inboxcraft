@@ -5,10 +5,13 @@
 //! scheduler fires them and [`crate::notify`] tells the owner.
 //!
 //! - An event's own `DISPLAY` and `AUDIO` alarms (RFC 5545 section 3.6.6) count; an event without any alarm gets the
-//!   defaults: [`DEFAULT_LEAD`] before a timed event and a day before an all-day one. Mail and other alarms are the
-//!   server's business, so an event with only those alerts nothing here.
+//!   defaults: [`DEFAULT_LEAD`] before a timed event, and before an all-day one at the hour the owner chose
+//!   ([`AllDayAlert`]). Mail and other alarms are the server's business, so an event with only those alerts nothing
+//!   here.
 //! - A trigger's days follow the wall clock of the event's zone (the computer's for a floating time or a whole day),
 //!   its hours and minutes do not: a day before noon is noon the day before even when the clock is put back between.
+//!   An all-day event's triggers follow the computer's wall clock whole, hours too, as its days have no zone: `-PT15H`
+//!   is 09:00 the day before, also when the clock is put forward or back that night.
 //! - A cancelled event, and one the owner declined, alerts nothing. An alarm further than [`MAX_LEAD`] from its event
 //!   is left out.
 //! - The store holds an event's alerts of the next [`HORIZON`], at most [`MAX_ALERTS`]: they are worked out again
@@ -25,6 +28,7 @@ use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{CivilDateTime, Offsets, Timestamp};
 
 use crate::EngineError;
+use crate::all_day_alert::AllDayAlert;
 use crate::calendar::{address_of, calendar_by_id, read};
 
 /// How far ahead the store holds alerts.
@@ -62,9 +66,18 @@ pub(crate) struct Ring {
 }
 
 /// The alerts of `calendar` that go off after `from` and no later than `to`, by time; `local` is the computer's
-/// clock, `owner` the address of the account it belongs to, if known.
-pub(crate) fn rings(calendar: &Calendar, from: Timestamp, to: Timestamp, local: &dyn Offsets, owner: Option<&str>) -> Vec<Ring> {
-    let triggers: Vec<Vec<Trigger>> = calendar.events.iter().map(|event| if alerts(event, owner) { triggers(event) } else { Vec::new() }).collect();
+/// clock, `owner` the address of the account it belongs to, if known, `all_day` when an all-day event without alarms
+/// rings.
+pub(crate) fn rings(
+    calendar: &Calendar,
+    from: Timestamp,
+    to: Timestamp,
+    local: &dyn Offsets,
+    owner: Option<&str>,
+    all_day: AllDayAlert,
+) -> Vec<Ring> {
+    let triggers: Vec<Vec<Trigger>> =
+        calendar.events.iter().map(|event| if alerts(event, owner) { triggers(event, all_day) } else { Vec::new() }).collect();
     let (mut before, mut after) = (0_i64, 0_i64);
     for trigger in triggers.iter().flatten() {
         if let Trigger::Start(span) | Trigger::End(span) = trigger {
@@ -81,6 +94,7 @@ pub(crate) fn rings(calendar: &Calendar, from: Timestamp, to: Timestamp, local: 
     for occurrence in calendar.occurrences(look_from, look_to, local).occurrences {
         let (Some(event), Some(triggers)) = (calendar.events.get(occurrence.event), triggers.get(occurrence.event)) else { continue };
         let zone = calendar.zones.offsets(&event.start, local);
+        let shift = if event.all_day() { shift_on_the_clock } else { shift };
         for trigger in triggers {
             let at = match trigger {
                 Trigger::Start(span) => shift(occurrence.start, *span, zone),
@@ -109,9 +123,9 @@ pub(crate) fn rings(calendar: &Calendar, from: Timestamp, to: Timestamp, local: 
 }
 
 /// The times `calendar`'s alerts go off in the [`HORIZON`] after `now`, each once, at most [`MAX_ALERTS`].
-pub(crate) fn upcoming(calendar: &Calendar, now: Timestamp, local: &dyn Offsets, owner: Option<&str>) -> Vec<Timestamp> {
+pub(crate) fn upcoming(calendar: &Calendar, now: Timestamp, local: &dyn Offsets, owner: Option<&str>, all_day: AllDayAlert) -> Vec<Timestamp> {
     let to = now.checked_add(HORIZON).unwrap_or(now);
-    let mut times: Vec<Timestamp> = rings(calendar, now, to, local, owner).into_iter().map(|ring| ring.at).collect();
+    let mut times: Vec<Timestamp> = rings(calendar, now, to, local, owner, all_day).into_iter().map(|ring| ring.at).collect();
     times.dedup();
     times.truncate(MAX_ALERTS);
     times
@@ -125,11 +139,12 @@ fn alerts(event: &Event, owner: Option<&str>) -> bool {
     event.status != Some(Status::Cancelled) && !declined
 }
 
-/// The triggers of `event`'s alerts: its display and sound alarms, or the defaults when it has no alarm.
-fn triggers(event: &Event) -> Vec<Trigger> {
+/// The triggers of `event`'s alerts: its display and sound alarms, or the defaults when it has no alarm (`all_day` for
+/// an all-day event).
+fn triggers(event: &Event, all_day: AllDayAlert) -> Vec<Trigger> {
     if event.alarms.is_empty() {
         let lead = i64::try_from(DEFAULT_LEAD.as_secs()).unwrap_or_default();
-        let span = if event.all_day() { Span::new(-1, 0) } else { Span::new(0, lead.saturating_neg()) };
+        let span = if event.all_day() { all_day.span() } else { Span::new(0, lead.saturating_neg()) };
         return span.map(Trigger::Start).into_iter().collect();
     }
     event
@@ -164,6 +179,20 @@ fn shift(at: Timestamp, span: Span, zone: &dyn Offsets) -> Option<Timestamp> {
     Timestamp::from_unix(moved.unix_seconds().checked_add(span.seconds())?, 0)
 }
 
+/// `at`, the midnight an all-day event's day starts or ends at, moved by `span` on the wall clock of `zone`, days and
+/// seconds alike: an hour named is that hour whatever the clock does between. It counts from 00:00 of `at`'s day, so
+/// on a clock that skips midnight (where the day starts at 01:00, as [`Offsets::resolve`] puts it) 09:00 is still 09:00.
+fn shift_on_the_clock(at: Timestamp, span: Span, zone: &dyn Offsets) -> Option<Timestamp> {
+    seconds(span)?;
+    let date = inboxcraft_ical::Date::of(zone.civil(at)?);
+    let of_day = span.seconds();
+    let days = span.days().checked_add(of_day.div_euclid(86_400))?;
+    let rest = of_day.rem_euclid(86_400);
+    let day = date.add_days(days)?;
+    let (hour, minute, second) = (u8::try_from(rest / 3600).ok()?, u8::try_from(rest % 3600 / 60).ok()?, u8::try_from(rest % 60).ok()?);
+    zone.resolve(CivilDateTime::new(day.year(), day.month(), day.day(), hour, minute, second)?)
+}
+
 /// The ids the next alert and its schedule entry get.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Ids {
@@ -196,12 +225,34 @@ pub(crate) enum Lead {
     None,
     /// This many minutes before the start, at most [`MAX_ALERT_MINUTES`].
     Before(u32),
+    /// The all-day alert the owner chose ([`AllDayAlert`]), written as its trigger from the start.
+    AllDay(AllDayAlert),
 }
 
-/// The lead a new event gets when the owner picks none: [`DEFAULT_LEAD`] before a timed event, a day before an all-day
+/// The lead a new event gets when the owner picks none: [`DEFAULT_LEAD`] before a timed event, `choice` for an all-day
 /// one, as an event without alarms rings here.
-pub(crate) fn default_lead(all_day: bool) -> Lead {
-    if all_day { Lead::Before(1440) } else { Lead::Before(u32::try_from(DEFAULT_LEAD.as_secs() / 60).unwrap_or(10)) }
+pub(crate) fn default_lead(all_day: bool, choice: AllDayAlert) -> Lead {
+    if all_day { Lead::AllDay(choice) } else { timed_default() }
+}
+
+/// The lead a timed event gets when the owner picks none: [`DEFAULT_LEAD`].
+fn timed_default() -> Lead {
+    Lead::Before(u32::try_from(DEFAULT_LEAD.as_secs() / 60).unwrap_or(10))
+}
+
+/// Trades `event`'s default alert for the other kind's when an edit makes it all-day (`to_all_day`) or no longer, and
+/// leaves an alarm the owner set to anything else as it is. A timed event's alarm still at [`DEFAULT_LEAD`] would ring
+/// late the evening before once its start is midnight, so it becomes `choice`; an all-day event's alarm at one of the
+/// hours [`AllDayAlert`] writes would ring hours before a timed start (or after it), so it becomes [`DEFAULT_LEAD`].
+pub(crate) fn follow_switch(event: &mut Event, to_all_day: bool, choice: AllDayAlert) {
+    let Lead::Before(minutes) = timed_default() else { return };
+    let Some(timed) = Span::new(0, -i64::from(minutes) * 60) else { return };
+    let Some(shown) = event.alarms.iter().find(|alarm| timed_ringer(alarm)).map(|alarm| alarm.trigger) else { return };
+    if to_all_day && shown == Trigger::Start(timed) {
+        set_lead(event, Lead::AllDay(choice));
+    } else if !to_all_day && AllDayAlert::ALL.iter().any(|hour| hour.span().is_some_and(|span| shown == Trigger::Start(span))) {
+        set_lead(event, timed_default());
+    }
 }
 
 /// When the `ACTION:NONE` alarm of RFC 9074 section 7 is due: a moment long past, as the RFC's example writes it.
@@ -238,10 +289,16 @@ const MAX_ALARM_TEXT: usize = 200;
 /// when it has none) and leaves every other alarm as it is, a location alarm too; no alert takes every timed display and
 /// sound alarm off, and an event left without any alarm gets the `ACTION:NONE` alarm (RFC 9074) so the default lead does not ring either.
 pub(crate) fn set_lead(event: &mut Event, lead: Lead) {
-    match lead {
+    let span = match lead {
+        Lead::None => None,
         Lead::Before(minutes) => {
             let minutes = i64::from(minutes.min(MAX_ALERT_MINUTES));
-            let span = if minutes > 0 && minutes % 1440 == 0 { Span::new(-(minutes / 1440), 0) } else { Span::new(0, -(minutes * 60)) };
+            if minutes > 0 && minutes % 1440 == 0 { Span::new(-(minutes / 1440), 0) } else { Span::new(0, -(minutes * 60)) }
+        }
+        Lead::AllDay(choice) => choice.span(),
+    };
+    match lead {
+        Lead::Before(_) | Lead::AllDay(_) => {
             let Some(span) = span else { return };
             let trigger = Trigger::Start(span);
             event.alarms.retain(|alarm| !alarm.action.eq_ignore_ascii_case("NONE"));
@@ -365,8 +422,9 @@ fn releaded(component: &Component, lead: Lead) -> Option<Component> {
 }
 
 /// `event`'s alert as `event.list` says it: `null` without any alarm (the default lead rings), `"none"` without a
-/// timed display or sound alarm (a location alarm is not one), the minutes before the start of its one timed display or
-/// sound alarm, or `"custom"` for what the field cannot name (after the start, from the end, at a moment, not in whole minutes, further than [`MAX_LEAD`], or more than one).
+/// timed display or sound alarm (a location alarm is not one), on an all-day event the name of the [`AllDayAlert`]
+/// hour its one alarm rings at (`"on_the_day_9"`), the minutes before the start of its one timed display or sound
+/// alarm, or `"custom"` for what the field cannot name (after the start, from the end, at a moment, not in whole minutes, further than [`MAX_LEAD`], or more than one).
 pub(crate) fn lead_of(event: &Event) -> serde_json::Value {
     if event.alarms.is_empty() {
         return serde_json::Value::Null;
@@ -375,6 +433,11 @@ pub(crate) fn lead_of(event: &Event) -> serde_json::Value {
     let Some(alarm) = ringing.next() else { return "none".into() };
     if ringing.next().is_some() {
         return "custom".into();
+    }
+    if event.all_day()
+        && let Some(hour) = AllDayAlert::ALL.into_iter().find(|hour| hour.span().is_some_and(|span| alarm.trigger == Trigger::Start(span)))
+    {
+        return hour.name().into();
     }
     let minutes = match alarm.trigger {
         Trigger::Start(span) => seconds(span).filter(|seconds| *seconds <= 0 && seconds % 60 == 0).map(|seconds| seconds.unsigned_abs() / 60),
@@ -386,7 +449,14 @@ pub(crate) fn lead_of(event: &Event) -> serde_json::Value {
 /// The changes that keep the alerts of the events `batch` puts in step with them, made after it in the same batch.
 /// An event the batch takes away again (with its calendar or an account) is left alone; one it took away before
 /// putting it back has lost its alerts.
-pub(crate) fn follow(store: &dyn Storage, batch: &Batch, now: Timestamp, local: &dyn Offsets, ids: &mut Ids) -> Result<Vec<Change>, EngineError> {
+pub(crate) fn follow(
+    store: &dyn Storage,
+    batch: &Batch,
+    now: Timestamp,
+    local: &dyn Offsets,
+    all_day: AllDayAlert,
+    ids: &mut Ids,
+) -> Result<Vec<Change>, EngineError> {
     let mut events: BTreeMap<CalendarEventId, (Option<&CalendarEvent>, bool)> = BTreeMap::new();
     let mut calendars: BTreeMap<CalendarId, AccountId> = BTreeMap::new();
     for change in batch.changes() {
@@ -425,20 +495,26 @@ pub(crate) fn follow(store: &dyn Storage, batch: &Batch, now: Timestamp, local: 
         };
         let owner = account.and_then(|id| accounts.iter().find(|account| account.id() == id)).map(|account| account.address().as_str());
         let alerts = if gone { Vec::new() } else { store.alerts(held.id)? };
-        changes.extend(refresh(alerts, held, owner, now, local, ids));
+        changes.extend(refresh(alerts, held, owner, now, (local, all_day), ids));
     }
     Ok(changes)
 }
 
 /// The changes that bring the alerts of every event the store holds in step at `now`.
-pub(crate) fn sweep(store: &dyn Storage, now: Timestamp, local: &dyn Offsets, ids: &mut Ids) -> Result<Vec<Change>, EngineError> {
+pub(crate) fn sweep(
+    store: &dyn Storage,
+    now: Timestamp,
+    local: &dyn Offsets,
+    all_day: AllDayAlert,
+    ids: &mut Ids,
+) -> Result<Vec<Change>, EngineError> {
     let mut changes = Vec::new();
     for account in store.accounts()? {
         let owner = account.address().as_str();
         for calendar in store.calendars(account.id())? {
             for held in store.calendar_events(calendar.id)? {
                 let alerts = store.alerts(held.id)?;
-                changes.extend(refresh(alerts, &held, Some(owner), now, local, ids));
+                changes.extend(refresh(alerts, &held, Some(owner), now, (local, all_day), ids));
             }
         }
     }
@@ -448,8 +524,15 @@ pub(crate) fn sweep(store: &dyn Storage, now: Timestamp, local: &dyn Offsets, id
 /// The changes that make the store hold `held`'s alerts of the [`HORIZON`] after `now`, where it holds `alerts`: an
 /// alert already held at its time stays, one whose time came stays for the scheduler, the others go, and the missing
 /// ones come with their schedule entries. An event whose text cannot be read alerts nothing.
-fn refresh(alerts: Vec<Alert>, held: &CalendarEvent, owner: Option<&str>, now: Timestamp, local: &dyn Offsets, ids: &mut Ids) -> Vec<Change> {
-    let mut wanted = read(held).map(|calendar| upcoming(&calendar, now, local, owner)).unwrap_or_default();
+fn refresh(
+    alerts: Vec<Alert>,
+    held: &CalendarEvent,
+    owner: Option<&str>,
+    now: Timestamp,
+    (local, all_day): (&dyn Offsets, AllDayAlert),
+    ids: &mut Ids,
+) -> Vec<Change> {
+    let mut wanted = read(held).map(|calendar| upcoming(&calendar, now, local, owner, all_day)).unwrap_or_default();
     let mut changes = Vec::new();
     for alert in alerts {
         if alert.at <= now {

@@ -8,6 +8,7 @@ use inboxcraft_ical::Calendar;
 use inboxcraft_time::{CivilDateTime, Offset, OffsetTable, Timestamp};
 
 use super::{HORIZON, Lead, MAX_ALERTS, relead, rings, upcoming};
+use crate::all_day_alert::AllDayAlert;
 use crate::cmd::calendar_tests::{BUDAPEST, object};
 
 fn utc(year: i32, month: u8, day: u8, hour: u8, minute: u8) -> Timestamp {
@@ -37,7 +38,7 @@ fn alarm(trigger: &str, action: &str) -> String {
 
 /// The alert times in the horizon after `now`.
 fn times(calendar: &Calendar, now: Timestamp) -> Vec<Timestamp> {
-    upcoming(calendar, now, &europe(), None)
+    upcoming(calendar, now, &europe(), None, AllDayAlert::default())
 }
 
 #[test]
@@ -47,10 +48,65 @@ fn a_timed_event_without_alarms_alerts_ten_minutes_before() {
 }
 
 #[test]
-fn an_all_day_event_without_alarms_alerts_a_day_before_on_the_wall_clock() {
+fn an_all_day_event_without_alarms_alerts_at_the_hour_chosen_on_the_wall_clock() {
     let off = event("DTSTART;VALUE=DATE:20261110\r\nDTEND;VALUE=DATE:20261112\r\n");
-    // Midnight of the 10th on the computer's clock is 23:00 UTC on the 9th; a day before that.
-    assert_eq!(times(&off, utc(2026, 11, 5, 9, 0)), [utc(2026, 11, 8, 23, 0)]);
+    // Midnight of the 10th on the computer's clock is 23:00 UTC on the 9th; 09:00 the day before is 08:00 UTC.
+    assert_eq!(times(&off, utc(2026, 11, 5, 9, 0)), [utc(2026, 11, 9, 8, 0)]);
+    let now = utc(2026, 11, 5, 9, 0);
+    let hours: Vec<Vec<Timestamp>> = AllDayAlert::ALL.iter().map(|choice| upcoming(&off, now, &europe(), None, *choice)).collect();
+    assert_eq!(hours, [[utc(2026, 11, 9, 8, 0)], [utc(2026, 11, 9, 11, 0)], [utc(2026, 11, 9, 17, 0)], [utc(2026, 11, 10, 8, 0)]]);
+}
+
+/// The alert of an all-day event on `day` (`YYYYMMDD`) with the trigger `trigger`, on `clock`, from `now`.
+fn all_day_rings(day: &str, trigger: &str, clock: &dyn inboxcraft_time::Offsets, now: Timestamp) -> Vec<Timestamp> {
+    let day = event(&format!("DTSTART;VALUE=DATE:{day}\r\n{}", alarm(trigger, "DISPLAY")));
+    upcoming(&day, now, clock, None, AllDayAlert::default())
+}
+
+#[test]
+fn an_all_day_alert_rings_at_its_hour_on_the_owners_clock_wherever_it_is() {
+    let now = utc(2026, 11, 5, 9, 0);
+    // 09:00 the day before the 10th: 08:00 UTC in Budapest, 14:00 UTC at -05:00, 20:00 UTC two days before at +13:00.
+    assert_eq!(all_day_rings("20261110", "TRIGGER:-PT15H", &europe(), now), [utc(2026, 11, 9, 8, 0)]);
+    assert_eq!(all_day_rings("20261110", "TRIGGER:-PT15H", &hours(-5), now), [utc(2026, 11, 9, 14, 0)]);
+    assert_eq!(all_day_rings("20261110", "TRIGGER:-PT15H", &hours(13), now), [utc(2026, 11, 8, 20, 0)]);
+    assert_eq!(all_day_rings("20261110", "TRIGGER:PT9H", &hours(-5), now), [utc(2026, 11, 10, 14, 0)]);
+}
+
+#[test]
+fn an_all_day_alert_keeps_its_hour_on_the_days_the_clock_moves() {
+    // 29 March 2026: the clock goes from 02:00 to 03:00. 09:00 that day is 07:00 UTC, not nine hours after midnight.
+    let spring = utc(2026, 3, 20, 0, 0);
+    assert_eq!(all_day_rings("20260329", "TRIGGER:PT9H", &europe(), spring), [utc(2026, 3, 29, 7, 0)]);
+    // 09:00 the day before the 30th is on the 29th, after the change: 07:00 UTC.
+    assert_eq!(all_day_rings("20260330", "TRIGGER:-PT15H", &europe(), spring), [utc(2026, 3, 29, 7, 0)]);
+    // 25 October 2026: the clock goes from 03:00 back to 02:00. 09:00 that day is 08:00 UTC, not seven.
+    let autumn = utc(2026, 10, 20, 0, 0);
+    assert_eq!(all_day_rings("20261025", "TRIGGER:PT9H", &europe(), autumn), [utc(2026, 10, 25, 8, 0)]);
+    assert_eq!(all_day_rings("20261026", "TRIGGER:-PT6H", &europe(), autumn), [utc(2026, 10, 25, 17, 0)]);
+    // A timed event keeps the exact hours of its trigger: nine hours after 00:00 on the 29th is 10:00 on the clock.
+    let timed = event(&format!("DTSTART:20260329T000000\r\n{}", alarm("TRIGGER:PT9H", "DISPLAY")));
+    assert_eq!(upcoming(&timed, spring, &europe(), None, AllDayAlert::default()), [utc(2026, 3, 29, 8, 0)]);
+}
+
+/// Asunción-like: -04:00, -03:00 from 4 October 2026 04:00 UTC (00:00 becomes 01:00), -04:00 again from 28 March 2027
+/// 03:00 UTC (00:00 goes back to 23:00 the day before).
+fn midnight_jumps() -> OffsetTable {
+    OffsetTable::new(hours(-4)).with_change(utc(2026, 10, 4, 4, 0), hours(-3)).with_change(utc(2027, 3, 28, 3, 0), hours(-4))
+}
+
+#[test]
+fn an_all_day_alert_counts_from_00_00_on_a_clock_that_skips_or_repeats_midnight() {
+    let now = utc(2026, 10, 1, 0, 0);
+    // 4 October has no 00:00: 09:00 that day is 12:00 UTC, not an hour later.
+    assert_eq!(all_day_rings("20261004", "TRIGGER:PT9H", &midnight_jumps(), now), [utc(2026, 10, 4, 12, 0)]);
+    // 09:00 the day before, at -04:00.
+    assert_eq!(all_day_rings("20261004", "TRIGGER:-PT15H", &midnight_jumps(), now), [utc(2026, 10, 3, 13, 0)]);
+    assert_eq!(all_day_rings("20261004", "TRIGGER:-PT6H", &midnight_jumps(), now), [utc(2026, 10, 3, 22, 0)]);
+    // 28 March 2027 has 00:00 twice: 09:00 that day is 13:00 UTC, 09:00 the day before 12:00 UTC.
+    let spring = utc(2027, 3, 20, 0, 0);
+    assert_eq!(all_day_rings("20270328", "TRIGGER:PT9H", &midnight_jumps(), spring), [utc(2027, 3, 28, 13, 0)]);
+    assert_eq!(all_day_rings("20270328", "TRIGGER:-PT15H", &midnight_jumps(), spring), [utc(2027, 3, 27, 12, 0)]);
 }
 
 #[test]
@@ -92,7 +148,7 @@ fn a_day_before_follows_the_wall_clock_so_it_is_25_hours_when_the_clock_goes_bac
     );
     let zoned = calendar(&lines);
     // Noon on Sunday 25th is 11:00 UTC (+01:00); noon on Saturday 24th is 10:00 UTC (+02:00).
-    assert_eq!(upcoming(&zoned, utc(2026, 10, 20, 0, 0), &Offset::UTC, None), [utc(2026, 10, 24, 10, 0)]);
+    assert_eq!(upcoming(&zoned, utc(2026, 10, 20, 0, 0), &Offset::UTC, None, AllDayAlert::default()), [utc(2026, 10, 24, 10, 0)]);
 }
 
 #[test]
@@ -127,8 +183,8 @@ fn a_cancelled_event_and_one_the_owner_declined_alert_nothing() {
     let cancelled = event("DTSTART:20261112T080000Z\r\nSTATUS:CANCELLED\r\n");
     assert!(times(&cancelled, now).is_empty());
     let declined = event("DTSTART:20261112T080000Z\r\nATTENDEE;PARTSTAT=DECLINED:mailto:Anna@Example.org\r\n");
-    assert!(upcoming(&declined, now, &europe(), Some("anna@example.org")).is_empty());
-    assert_eq!(upcoming(&declined, now, &europe(), Some("bob@example.org")), [utc(2026, 11, 12, 7, 50)]);
+    assert!(upcoming(&declined, now, &europe(), Some("anna@example.org"), AllDayAlert::default()).is_empty());
+    assert_eq!(upcoming(&declined, now, &europe(), Some("bob@example.org"), AllDayAlert::default()), [utc(2026, 11, 12, 7, 50)]);
 }
 
 #[test]
@@ -144,7 +200,7 @@ fn a_changed_instance_alerts_at_its_own_time_with_its_own_alarms() {
 #[test]
 fn rings_name_the_occurrence_each_alert_is_for() {
     let daily = event("DTSTART:20261101T090000Z\r\nDURATION:PT1H\r\nRRULE:FREQ=DAILY\r\n");
-    let found = rings(&daily, utc(2026, 11, 6, 8, 49), utc(2026, 11, 6, 8, 50), &europe(), None);
+    let found = rings(&daily, utc(2026, 11, 6, 8, 49), utc(2026, 11, 6, 8, 50), &europe(), None, AllDayAlert::default());
     assert_eq!(found.len(), 1);
     let ring = &found[0];
     assert_eq!((ring.at, ring.start, ring.end, ring.event), (utc(2026, 11, 6, 8, 50), utc(2026, 11, 6, 9, 0), utc(2026, 11, 6, 10, 0), 0));

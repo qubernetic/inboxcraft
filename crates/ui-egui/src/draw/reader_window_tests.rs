@@ -619,3 +619,54 @@ fn a_window_s_picture_is_uploaded_again_in_a_new_context() {
     let named = next.tex_manager().read().meta(texture).map(|meta| meta.name.clone());
     assert_eq!(named.as_deref(), Some(url), "the texture is the new context's own");
 }
+
+/// A desktop that never answers an open of the original leaves every window working: the frames go on, another
+/// reader window opens its menu, and the answer, when it comes, reaches the notice of the window that asked.
+#[test]
+fn an_open_of_the_original_that_hangs_stops_no_window() {
+    const BIKE: &str = "Your bike is due for a service";
+    let ctx = windowing();
+    let (original, free, _) = crate::original::tests::stuck();
+    let mut app = app(&Recorder::default()).with_original(original);
+    settle(&ctx, &mut app);
+    let bike = open(&ctx, &mut app, BIKE);
+    let coast = open(&ctx, &mut app, COAST);
+    let (first, second) = (window_of(&app, bike), window_of(&app, coast));
+    click_in(&ctx, &mut app, first, "More");
+    click_in(&ctx, &mut app, first, "Open the original in the browser");
+    let asking = |app: &InboxApp| app.windows.shown.iter().find(|shown| shown.message == bike).unwrap().reader.notice().map(str::to_owned);
+    assert_eq!(asking(&app).as_deref(), Some("Opening a cleaned copy in the browser\u{2026}"));
+    // The other window works while the desktop says nothing.
+    click_in(&ctx, &mut app, second, "More");
+    assert!(shows(second, "Archive"), "the other window's menu opens: {:?}", seen_in(second));
+    press_in(&ctx, &mut app, second, Key::Escape);
+    free.send(Ok(())).unwrap();
+    for _ in 0..1000 {
+        if asking(&app).as_deref() != Some("Opening a cleaned copy in the browser\u{2026}") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        frame(&ctx, &mut app, Vec::new());
+    }
+    assert_eq!(asking(&app).as_deref(), Some("Opened a cleaned copy in the browser"));
+}
+
+#[test]
+fn a_copied_link_s_notice_in_the_window_reads_in_the_order_it_was_copied() {
+    const LINK: &str = "https://שלום.קום.example.org/rota?week=שלום";
+    let ctx = windowing();
+    let mut app = app(&Recorder::default());
+    settle(&ctx, &mut app);
+    let id = open(&ctx, &mut app, COAST);
+    let window = window_of(&app, id);
+    let html = format!(r#"<p>See <a href="{LINK}">the rota</a> for the week.</p>"#);
+    let document = inboxcraft_html::display(&html, &inboxcraft_html::Options::default());
+    app.windows.shown.first_mut().unwrap().reader.show_as(id, crate::reader::Content::Html(document), false);
+    settle(&ctx, &mut app);
+    click_in(&ctx, &mut app, window, "the rota");
+    // The window's notice draws the link with its right-to-left labels where they are written, as it was copied.
+    let notice = format!("Link copied: {LINK}");
+    let seen = seen_in(window);
+    assert!(seen.iter().any(|(text, _)| *text == notice), "{seen:?}");
+    assert!(!seen.iter().any(|(text, _)| text.contains("קום.שלום")), "no label swapped: {seen:?}");
+}
