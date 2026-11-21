@@ -389,7 +389,7 @@ fn failing(mailbox: &mut Mailbox, refused: u64, away: &mut Vec<u64>) -> Option<F
         if known == Some(inboxcraft_model::ErrorKind::LoginRefused) {
             refusals = refusals.saturating_add(1);
             if names.is_empty() {
-                names.extend(row.get("label").and_then(Value::as_str).map(kept));
+                names.extend(name_of(row));
             }
         }
     }
@@ -440,6 +440,23 @@ pub(crate) fn failing_text(since: Option<&str>, names: &[String], refusals: u64,
         sentences.push(tr!("Nothing is lost.").to_owned());
     }
     sentences.join(" ")
+}
+
+/// The most characters of an account's name in the failing banner's sentence: with the longest name, the sentence's
+/// end ("refused the sign-in") still shows on the banner's two lines, at a 600 point brief and at 130 %.
+pub(crate) const NAME_MOST: usize = 40;
+
+/// An account's name as the failing banner's sentence holds it: its label, or its address where the label is blank;
+/// plain ([`kept`]) and cut at [`NAME_MOST`] characters with one `…`. `None` when both are blank.
+fn name_of(row: &Value) -> Option<String> {
+    ["label", "address"].into_iter().filter_map(|key| row.get(key).and_then(Value::as_str)).map(named).find(|name| !name.is_empty())
+}
+
+/// `text` plain, trimmed and at most [`NAME_MOST`] characters, cut between grapheme clusters with one `…`.
+pub(crate) fn named(text: &str) -> String {
+    let plain = kept(text);
+    let (name, cut) = crate::component::capped(plain.trim(), NAME_MOST);
+    if cut { format!("{}…", name.trim_end()) } else { name.to_owned() }
 }
 
 /// The error kind `account.list` names (`login_refused`), by the engine's own names of every kind: a name it does not

@@ -522,3 +522,15 @@ fn a_reconnect_from_signed_in_with_nothing_on_record_is_not_offline() {
     assert_eq!(kept.current(&mut mailbox, None).failing, None, "a reconnect from signed in is not being offline");
     assert!(kept.builds() > builds, "built again");
 }
+#[test]
+fn a_blank_label_is_named_by_the_address_and_a_long_one_is_cut() {
+    let blank = json!({ "label": "   ", "address": "studio@example.org" });
+    assert_eq!(super::name_of(&blank).as_deref(), Some("studio@example.org"));
+    assert_eq!(super::name_of(&json!({ "label": "", "address": "\u{202e}studio@example.org\r\n" })).as_deref(), Some("studio@example.org"));
+    assert_eq!(super::name_of(&json!({ "label": " ", "address": " " })), None, "both blank: no name");
+    let long = super::name_of(&json!({ "label": "x".repeat(10_000), "address": "studio@example.org" })).unwrap();
+    assert_eq!(long.chars().count(), super::NAME_MOST + 1);
+    assert!(long.ends_with('…'));
+    // Through the banner: "One account" is never said for an account that has an address.
+    assert_eq!(super::failing_text(None, &[super::name_of(&blank).unwrap()], 1, 0, None), "studio@example.org refused the sign-in.");
+}

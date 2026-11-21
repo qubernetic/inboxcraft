@@ -820,3 +820,41 @@ fn the_drafts_block_draws_three_where_its_frame_draws_three() {
     let harness = harness_with(page, Mode::Dark, 100, BODY, Rect::from_min_size(pos2(0.0, 0.0), BODY), None, Level::Off, false);
     assert_eq!(tall(harness.state().drawn.parts.drafts).1, 157.0, "the page draws two of three");
 }
+
+/// Every text the last frame painted inside `within`, joined in the order painted.
+fn painted_in(harness: &Harness<'_, State>, within: Rect) -> String {
+    fn walk(shape: &egui::Shape, within: Rect, found: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, within, found)),
+            egui::Shape::Text(text) if within.expand(1.0).contains_rect(Rect::from_min_size(text.pos, text.galley.size())) => {
+                found.push(text.galley.job.text.clone());
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, within, &mut found));
+    found.join(" ")
+}
+
+/// The longest account name the banner's sentence holds leaves its end in sight: "refused the sign-in" shows on the
+/// banner's two lines at a 600 point brief and at 130 %, alone and after "Offline since …".
+#[test]
+fn a_long_account_name_leaves_refused_the_sign_in_in_sight() {
+    let name = crate::home::named(&"W".repeat(200));
+    assert_eq!(name.chars().count(), crate::home::NAME_MOST + 1, "cut, with one …");
+    for since in [None, Some("14:10")] {
+        for percent in [100, 130] {
+            for width in [600.0, BRIEF] {
+                let mut home = sample("everything-failing").unwrap();
+                let text = crate::home::failing_text(since, std::slice::from_ref(&name), 1, 1, Some("Odette Marchand"));
+                home.failing = Some(Failing { text, account: true, outbox: true });
+                let page = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, BODY.y));
+                let harness = harness_with(home, Mode::Dark, percent, page.size(), page, None, Level::Off, false);
+                let banner = harness.state().drawn.parts.banner.unwrap();
+                let shown = painted_in(&harness, banner);
+                assert!(shown.contains("refused the sign-in"), "{since:?} at {width} and {percent} %: {shown}");
+            }
+        }
+    }
+}
