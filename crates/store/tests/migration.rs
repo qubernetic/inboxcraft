@@ -318,12 +318,28 @@ fn a_version_5_store_gets_the_links_of_its_messages() {
         .with(Change::PutMessage(named(2, "second@example.org", "first@example.org")));
     store.apply(&batch).unwrap();
     drop(store);
-    Connection::open(dir.join(DATABASE_FILE)).unwrap().execute_batch(BACK_TO_VERSION_5).unwrap();
+    let conn = Connection::open(dir.join(DATABASE_FILE)).unwrap();
+    conn.execute_batch(BACK_TO_VERSION_5).unwrap();
+    // A record that does not read back is left out of the index; the store opens.
+    conn.execute(
+        "INSERT INTO message (id, account, folder, uid, from_text, to_text, subject_text, record) VALUES (3, 1, 1, 3, '', '', '', 'damaged')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
     let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
-    let linked = |link: &str| -> Vec<u64> {
+    let linked = |store: &Sqlite, link: &str| -> Vec<u64> {
         store.linked(&inboxcraft_model::MessageRef::new(link).unwrap()).unwrap().iter().map(|entry| entry.message().id().get()).collect()
     };
-    assert_eq!(linked("first@example.org"), [1, 2]);
-    assert_eq!(linked("second@example.org"), [2]);
+    assert_eq!(linked(&store, "first@example.org"), [1, 2]);
+    assert_eq!(linked(&store, "second@example.org"), [2]);
+    drop(store);
+    // A record changed behind the index's back is linked only by what it names now.
+    let conn = Connection::open(dir.join(DATABASE_FILE)).unwrap();
+    conn.execute_batch("DELETE FROM message WHERE id = 3; UPDATE message SET record = (SELECT record FROM message WHERE id = 1) WHERE id = 2;")
+        .unwrap();
+    drop(conn);
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    assert_eq!(linked(&store, "second@example.org"), Vec::<u64>::new());
 }

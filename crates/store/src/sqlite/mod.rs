@@ -491,6 +491,10 @@ fn put_folder(tx: &Transaction<'_>, folder: &Folder) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// The messages that name the link `?1`, by id: those [`Storage::linked`] gives.
+const LINKED: &str = "SELECT record, opened, EXISTS (SELECT 1 FROM body WHERE body.message = message.id) FROM message
+    WHERE id IN (SELECT message FROM message_link WHERE link = ?1) ORDER BY id";
+
 fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError> {
     let folder = message.folder();
     let account = match folder_account(tx, folder)? {
@@ -516,11 +520,11 @@ fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError
         params![id, account, folder_key, uid.get(), fields.date, fields.from, fields.to, fields.subject, json(message)?],
     )?;
     tx.execute("DELETE FROM message_link WHERE message = ?1", [id])?;
-    put_links(tx, id, message)
+    Ok(put_links(tx, id, message)?)
 }
 
 /// The links `message` (row `id`) names, into the index of links: each once.
-pub(super) fn put_links(conn: &Connection, id: i64, message: &Message) -> Result<(), StoreError> {
+pub(super) fn put_links(conn: &Connection, id: i64, message: &Message) -> rusqlite::Result<()> {
     let mut statement = conn.prepare("INSERT OR IGNORE INTO message_link (link, message) VALUES (?1, ?2)")?;
     for link in inboxcraft_model::links(message) {
         statement.execute(params![link.as_str(), id])?;
@@ -632,10 +636,7 @@ impl Storage for Sqlite {
     }
 
     fn linked(&self, link: &MessageRef) -> Result<Vec<Entry>, StoreError> {
-        let mut statement = self.conn.prepare(
-            "SELECT record, opened, EXISTS (SELECT 1 FROM body WHERE body.message = message.id) FROM message
-             WHERE id IN (SELECT message FROM message_link WHERE link = ?1) ORDER BY id",
-        )?;
+        let mut statement = self.conn.prepare(LINKED)?;
         let rows = statement.query_map([link.as_str()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?)))?;
         let mut found = Vec::new();
         for row in rows {

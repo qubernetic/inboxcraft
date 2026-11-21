@@ -153,10 +153,7 @@ fn index_links(conn: &Connection) -> Result<(), StoreError> {
     for row in rows {
         let (id, record) = row.map_err(migration_failed)?;
         if let Ok(message) = serde_json::from_str::<inboxcraft_model::Message>(&record) {
-            super::put_links(conn, id, &message).map_err(|error| match error {
-                StoreError::Database(detail) | StoreError::DatabaseRefused(detail) => StoreError::Migration(detail),
-                kept => kept,
-            })?;
+            super::put_links(conn, id, &message).map_err(migration_failed)?;
         }
     }
     Ok(())
