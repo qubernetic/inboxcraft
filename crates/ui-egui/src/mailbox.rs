@@ -2266,11 +2266,19 @@ impl Mailbox {
 
     /// The search: every message whose subject, sender or recipient holds the query, newest first.
     fn found(&mut self) -> Result<Vec<MessageRow>, UiError> {
+        let query = self.query.clone();
+        self.searched(&query)
+    }
+
+    /// Every message of the accounts shown whose subject, sender or recipient holds `query` (cut as
+    /// [`Mailbox::search`] cuts it), newest first: what the list shows searched for it.
+    pub(crate) fn searched(&mut self, query: &str) -> Result<Vec<MessageRow>, UiError> {
+        let query: String = query.trim().chars().take(MAX_QUERY).collect();
         let mut rows: BTreeMap<u64, MessageRow> = BTreeMap::new();
         for field in ["subject", "from", "to"] {
             let mut params = json!({ "account": self.narrowed, "limit": MAX_LIST });
             if let Value::Object(fields) = &mut params {
-                fields.insert(field.to_owned(), Value::String(self.query.clone()));
+                fields.insert(field.to_owned(), Value::String(query.clone()));
             }
             let answer = self.run("mail.search", &params)?;
             for row in array("mail.search", &answer, "messages")?.iter().map(message_row) {

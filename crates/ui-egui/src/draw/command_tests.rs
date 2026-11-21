@@ -665,3 +665,211 @@ fn over_the_event_editor_the_command_list_offers_only_the_editor_s_and_the_windo
         }
     }
 }
+
+// The frames `command-line/focus`, `typing-search` and `refused` (#397).
+
+/// The names of the results' rows, in their order.
+fn names(harness: &Harness<'static, InboxApp>) -> Vec<String> {
+    rows(harness).into_iter().map(|(name, _)| name).collect()
+}
+
+#[test]
+fn nothing_typed_lists_go_to_and_the_commands_run_from_the_line() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = opened(theme, "");
+        harness.get_by_label("Go to");
+        assert_eq!(names(&harness), ["Inbox", "New senders", "Calendar"], "nothing run from the line yet");
+        assert!(harness.query_by_label("Last commands").is_none());
+        let unread = harness.state().mailbox().views().iter().find(|view| view.role == inboxcraft_model::Role::Inbox).map_or(0, |view| view.unread);
+        assert!(unread > 0 && painted_text(&harness, &format!("{unread} to read")), "the inbox says what it holds to read");
+        let waiting = harness.state().mailbox().waiting().len();
+        assert!(waiting > 0 && painted_text(&harness, &format!("{waiting} waiting")), "New senders how many wait");
+        harness.key_press(Key::Escape);
+        harness.run();
+        type_in(&mut harness, ">dark");
+        harness.key_press(Key::Enter);
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        type_in(&mut harness, ">settings: sending");
+        harness.key_press(Key::Enter);
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        harness.get_by_label("Last commands");
+        let sending = crate::palette::rows("settings: sending").into_iter().next().unwrap().name.into_owned();
+        assert_eq!(names(&harness), ["Inbox", "New senders", "Calendar", sending.as_str(), "Dark mode"], "newest first");
+    }
+}
+
+#[test]
+fn a_go_to_row_goes_there_from_any_place() {
+    // Enter runs the marked row, the inbox; the arrows pick the others.
+    for (steps, place) in [(0, Some(Place::View(inboxcraft_model::Role::Inbox))), (1, Some(Place::Senders)), (2, None)] {
+        let mut harness = harness(egui::Theme::Light);
+        harness.state_mut().show_home();
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        for _ in 0..steps {
+            harness.key_press(Key::ArrowDown);
+            harness.run();
+        }
+        harness.key_press(Key::Enter);
+        harness.run();
+        assert!(!harness.state().command().results(), "{steps}: the line closed");
+        match place {
+            Some(place) => assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (Screen::Mail, place), "{steps}"),
+            None => assert_eq!(harness.state().screen(), Screen::Calendar, "{steps}: the calendar"),
+        }
+    }
+}
+
+#[test]
+fn a_command_that_ran_and_cannot_run_now_says_why_in_last_commands() {
+    let mut harness = opened(egui::Theme::Light, "");
+    harness.state_mut().command_mut().ran(keymap::SNOOZE);
+    harness.run();
+    let snooze = keymap::action(keymap::SNOOZE).unwrap().name;
+    assert!(harness.get_by_role_and_label(egui::accesskit::Role::MenuItem, snooze).accesskit_node().is_disabled());
+    for _ in 0..3 {
+        harness.key_press(Key::ArrowDown);
+        harness.run();
+    }
+    let before = harness.state().mailbox().last_run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().mailbox().last_run(), before, "nothing ran");
+    assert!(harness.state().notice().is_some_and(|said| said.starts_with("Not run: ")), "{:?}", harness.state().notice());
+}
+
+#[test]
+fn plain_text_lists_the_mail_the_people_and_the_mailboxes_found() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let harness = opened(theme, "bakery");
+        let results = harness.ctx.memory(|memory| memory.area_rect(super::command::results_id())).unwrap();
+        for head in ["Mail", "Mailboxes"] {
+            assert!(harness.query_all_by_label(head).any(|node| results.contains_rect(node.rect())), "{head}: a head in the results");
+        }
+        let listed = names(&harness);
+        assert_eq!(listed.last().map(String::as_str), Some("Clients/Harbour Bakery"), "{listed:?}");
+        let found = harness.state().mailbox().messages().len();
+        assert!(found > 0, "the list is searched as it is typed");
+        let people = harness.query_all_by_label("People").filter(|node| results.contains_rect(node.rect())).count();
+        let mail = listed.len() - 1 - usize::from(people > 0);
+        assert_eq!(mail, found.min(3), "at most three messages: {listed:?}");
+        let head = if found > 3 { format!("3 of {found}") } else { found.to_string() };
+        assert!(painted_text(&harness, &head), "the head says how many of how many: {head}");
+    }
+}
+
+#[test]
+fn enter_on_a_search_opens_the_marked_message_in_the_mail_searched() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().show_calendar();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    type_in(&mut harness, "bakery");
+    assert_eq!(harness.state().screen(), Screen::Calendar, "typing keeps the place");
+    harness.key_press(Key::Enter);
+    harness.run();
+    let app = harness.state();
+    assert_eq!((app.screen(), app.search_text()), (Screen::Mail, "bakery"));
+    let first = app.mailbox().messages().first().map(|row| row.id);
+    assert!(first.is_some());
+    assert_eq!(app.reader().open_id(), first, "the newest message found is open");
+}
+
+#[test]
+fn the_arrows_walk_the_mixed_results_and_enter_runs_the_picked_row() {
+    let mut harness = opened(egui::Theme::Light, "bakery");
+    // Round from the first row to the last: the mailbox.
+    harness.key_press(Key::ArrowUp);
+    harness.run();
+    assert_eq!(said_picked(&harness, Role::MenuItem), Some(names(&harness).len() - 1));
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::Folder(15));
+}
+
+#[test]
+fn a_search_that_finds_nothing_says_so_and_enter_shows_the_mail_searched() {
+    let mut harness = opened(egui::Theme::Light, "zzzqx");
+    harness.get_by_label("Nothing matches “zzzqx”.");
+    assert!(names(&harness).is_empty());
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().search_text(), "zzzqx");
+    assert!(!harness.state().command().results());
+}
+
+#[test]
+fn the_results_look_up_nothing_in_a_frame_where_nothing_changed() {
+    for typed in ["", "bakery"] {
+        let mut harness = opened(egui::Theme::Light, typed);
+        harness.run_steps(4);
+        let runs = harness.state().mailbox().runs();
+        harness.run_steps(8);
+        assert_eq!(harness.state().mailbox().runs(), runs, "{typed:?}: no command ran in eight frames");
+    }
+}
+
+#[test]
+fn a_refused_commands_reason_shows_in_the_status_line() {
+    let mut harness = sized(egui::Theme::Light, vec2(1440.0, 900.0));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    type_in(&mut harness, ">snooze");
+    harness.key_press(Key::Enter);
+    harness.run();
+    let snooze = keymap::action(keymap::SNOOZE).unwrap().name;
+    let said = format!("Not run: {snooze} needs an open message. Open one, then try again.");
+    assert_eq!(harness.state().notice(), Some(said.as_str()));
+    // The line cuts it where its room ends (the status line's own rule): its start shows.
+    let shown = flat(&harness).into_iter().any(|shape| {
+        matches!(shape, egui::Shape::Text(text) if text.galley.text().chars().count() > 40 && said.starts_with(text.galley.text().trim_end_matches('…')))
+    });
+    assert!(shown, "the status line shows it under the results");
+}
+
+/// Every shape painted, `Shape::Vec`s opened.
+fn flat(harness: &Harness<'static, InboxApp>) -> Vec<egui::Shape> {
+    fn open(shape: &egui::Shape, into: &mut Vec<egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, into)),
+            shape => into.push(shape.clone()),
+        }
+    }
+    let mut shapes = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, &mut shapes));
+    shapes
+}
+
+/// The frames' results: `surface` with a 1 px `cyan_edge` inside, the one shadow (0, 12, blur 32) under them, and the
+/// prefixes 30 high on `panel` under a `panel_line` hairline, the hints 5 down.
+#[test]
+fn the_results_have_the_cyan_edge_the_shadow_and_the_prefixes_bar_of_the_frames() {
+    for (theme, mode) in [(egui::Theme::Light, crate::theme::Mode::Light), (egui::Theme::Dark, crate::theme::Mode::Dark)] {
+        let p = crate::theme::Palette::of(mode);
+        for typed in ["", "bakery", ">"] {
+            let harness = opened(theme, typed);
+            let results = harness.ctx.memory(|memory| memory.area_rect(super::command::results_id())).unwrap();
+            let shapes = flat(&harness);
+            let edged = shapes.iter().any(|shape| {
+                matches!(shape, egui::Shape::Rect(rect) if rect.rect == results && rect.stroke.color == p.cyan_edge && rect.stroke.width == 1.0)
+            }) && shapes.iter().any(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.rect == results && rect.fill == p.surface));
+            assert!(edged, "{typed:?}: the cyan edge around the surface");
+            let shadow = shapes.iter().any(|shape| matches!(shape, egui::Shape::Mesh(mesh) if mesh.calc_bounds().bottom() > results.bottom() + 12.0));
+            assert!(shadow, "{typed:?}: the shadow reaches 12 and its blur under them");
+            let bar = egui::Rect::from_min_max(egui::pos2(results.left() + 1.0, results.bottom() - 31.0), results.max - vec2(1.0, 1.0));
+            let filled = shapes.iter().any(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.rect == bar && rect.fill == p.panel));
+            assert!(filled, "{typed:?}: the prefixes' bar, 30 high on panel");
+            let line = egui::Rect::from_min_size(bar.left_top() - vec2(0.0, 1.0), vec2(bar.width(), 1.0));
+            let hairline = shapes.iter().any(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.rect == line && rect.fill == p.panel_line));
+            assert!(hairline, "{typed:?}: the panel_line hairline over it");
+            let hint = harness.get_by_label(&crate::component::key_hint::spoken(">", "commands")).rect();
+            assert_eq!(hint.top(), bar.top() + 5.0, "{typed:?}: the hints 5 down in it");
+        }
+    }
+}

@@ -12,6 +12,59 @@
 use egui::{Context, Id};
 
 use crate::compose::Suggestion;
+use crate::iconset::IconId;
+
+/// The most commands run from the line that LAST COMMANDS keeps, newest first.
+pub const LAST: usize = 3;
+
+/// A row a search of the line found: a message or a mailbox, by its id; its name, a short line beside it and its
+/// icon.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hit {
+    /// The message's or the mailbox's id.
+    pub id: u64,
+    /// A message's subject, a mailbox's path.
+    pub name: String,
+    /// A message's sender and date, a mailbox's account.
+    pub caption: String,
+    /// The icon of the mailbox it stands in.
+    pub icon: IconId,
+}
+
+/// What the line looked up for the text typed: for a text, the mail, people and mailboxes found (at most a few of
+/// each, with how many there were); for none, what GO TO says of the inbox, the senders waiting and the next event.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Found {
+    /// The newest messages found.
+    pub mail: Vec<Hit>,
+    /// How many messages were found.
+    pub mail_total: usize,
+    /// The first people found.
+    pub people: Vec<Suggestion>,
+    /// How many people were found.
+    pub people_total: usize,
+    /// The first mailboxes found.
+    pub mailboxes: Vec<Hit>,
+    /// How many mailboxes were found.
+    pub mailboxes_total: usize,
+    /// The inbox's unread messages, when they could be read.
+    pub to_read: Option<u64>,
+    /// The senders the screener holds back.
+    pub waiting: usize,
+    /// The first of today's events left: its title and start.
+    pub next: Option<(String, String)>,
+}
+
+/// What a lookup was made for: the text, whether narrowed, and the window's writes at the time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stamp {
+    /// The text typed.
+    pub text: String,
+    /// Whether the line was narrowed to the mailbox shown.
+    pub narrowed: bool,
+    /// The window's writes ([`crate::mailbox::Mailbox::writes`]).
+    pub writes: u64,
+}
 
 /// The most characters the command line holds.
 pub const MOST: usize = crate::component::command_field::MOST;
@@ -69,6 +122,10 @@ pub struct Command {
     had_focus: bool,
     /// Frames in which a `/` typed is the one that opened the line by its key, not text.
     slash: u8,
+    /// What was looked up, and for what.
+    found: Option<(Stamp, Found)>,
+    /// The commands run from the line, newest first, at most [`LAST`].
+    last: Vec<&'static str>,
 }
 
 impl Default for Command {
@@ -86,6 +143,8 @@ impl Default for Command {
             stepped: false,
             had_focus: false,
             slash: 0,
+            found: None,
+            last: Vec::new(),
         }
     }
 }
@@ -287,6 +346,30 @@ impl Command {
     pub fn set_people(&mut self, people: Vec<Suggestion>) {
         self.people = people;
         self.people_for = Some(self.text.clone());
+    }
+
+    /// What was looked up for `stamp`, if it was.
+    #[must_use]
+    pub fn found(&self, stamp: &Stamp) -> Option<&Found> {
+        self.found.as_ref().filter(|(kept, _)| kept == stamp).map(|(_, found)| found)
+    }
+
+    /// Keeps what was looked up for `stamp`.
+    pub fn set_found(&mut self, stamp: Stamp, found: Found) {
+        self.found = Some((stamp, found));
+    }
+
+    /// The command `id` ran from the line: it heads LAST COMMANDS, once.
+    pub fn ran(&mut self, id: &'static str) {
+        self.last.retain(|known| *known != id);
+        self.last.insert(0, id);
+        self.last.truncate(LAST);
+    }
+
+    /// The commands run from the line, newest first.
+    #[must_use]
+    pub fn last(&self) -> &[&'static str] {
+        &self.last
     }
 }
 

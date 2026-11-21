@@ -3398,15 +3398,14 @@ impl InboxApp {
         }
         let mut lists = command::Lists::default();
         if self.command.results() {
+            let screen = if self.screen == Screen::Calendar { keymap::Scope::Calendar } else { keymap::Scope::Mail };
+            // Over the event editor only what comes over it and the window's look: nothing of the mail or the
+            // calendar under it (until a half-typed event can be kept as a draft).
+            let editing = self.editing_event();
+            let listed =
+                |row: &crate::palette::Row| keymap::scope(row.id).meets(screen) && (!editing || crate::surface::EDITOR_KEYS.contains(&row.id));
             match self.command.mode() {
                 crate::command::Mode::Command => {
-                    let screen = if self.screen == Screen::Calendar { keymap::Scope::Calendar } else { keymap::Scope::Mail };
-                    // Over the event editor only what comes over it and the window's look: nothing of the mail or the
-                    // calendar under it (until a half-typed event can be kept as a draft).
-                    let editing = self.editing_event();
-                    let listed = |row: &crate::palette::Row| {
-                        keymap::scope(row.id).meets(screen) && (!editing || crate::surface::EDITOR_KEYS.contains(&row.id))
-                    };
                     lists.commands = crate::palette::rows(self.command.text())
                         .into_iter()
                         .filter(|row| listed(row))
@@ -3425,6 +3424,29 @@ impl InboxApp {
                 crate::command::Mode::Mailbox => lists.mailboxes = command::mailboxes(&self.mailbox, self.command.text()),
                 // At most six, looked up only when the text changed.
                 crate::command::Mode::Person => lists.people = self.command.people().map(<[_]>::to_vec).unwrap_or_default(),
+                // Not narrowed to the mailbox shown: GO TO and LAST COMMANDS with nothing typed, else the mail, the
+                // people and the mailboxes found, looked up only when the text or the window's data changed.
+                crate::command::Mode::Search if !self.command.narrowed() => {
+                    let text = self.command.text().to_owned();
+                    let stamp = |writes| crate::command::Stamp { text: text.clone(), narrowed: false, writes };
+                    if self.command.found(&stamp(self.mailbox.writes())).is_none() {
+                        let found = command::look_up(&mut self.mailbox, &text);
+                        self.command.set_found(stamp(self.mailbox.writes()), found);
+                    }
+                    lists.found = self.command.found(&stamp(self.mailbox.writes())).cloned().unwrap_or_default();
+                    lists.go_to = text.trim().is_empty();
+                    lists.searched = !lists.go_to;
+                    if lists.go_to {
+                        let all = crate::palette::rows("");
+                        lists.last = self
+                            .command
+                            .last()
+                            .iter()
+                            .filter_map(|id| all.iter().find(|row| row.page.unwrap_or(row.id) == *id && listed(row)))
+                            .map(|row| command::Listed { row: row.clone(), refused: self.refused_on_the_line(&ctx, row.id) })
+                            .collect();
+                    }
+                }
                 crate::command::Mode::Search => {}
             }
         }
@@ -3985,6 +4007,7 @@ impl InboxApp {
             // line runs nothing of an agent's); the keyboard is in the line, not in the composer, so the key's rule
             // ([`InboxApp::can_run`]) is not the one that decides here.
             command::Asked::Run(keymap::SEND) => {
+                self.command.ran(keymap::SEND);
                 self.command.close(ctx);
                 // A draft kept for a reason says it, in its Send's words: the line closed, they may not be in sight.
                 if self.can_run_from_the_line(keymap::SEND) && !soon::blocked(ctx, keymap::SEND) && self.send_drawn() {
@@ -3995,12 +4018,39 @@ impl InboxApp {
                 }
             }
             command::Asked::Run(id) => {
+                self.command.ran(id);
                 self.command.close(ctx);
                 return Some(id);
             }
             command::Asked::Page(page) => {
+                self.command.ran(page);
                 self.command.close(ctx);
                 self.palette_page(page);
+            }
+            command::Asked::Refused(words) => self.say(&words),
+            command::Asked::GoTo(goal) => {
+                self.command.close(ctx);
+                let place = match goal {
+                    command::Goal::Inbox => Place::View(Role::Inbox),
+                    command::Goal::Senders => Place::Senders,
+                    command::Goal::Calendar => return Some(keymap::CALENDAR),
+                };
+                self.show_mail();
+                self.mailbox.open(place);
+                self.search.clear();
+            }
+            command::Asked::Message { id, text } => {
+                // As Enter on the search, then as a press on the message's row in the list.
+                self.command.close_results();
+                self.show_mail();
+                self.search(&text);
+                if !self.open_in_window(id) {
+                    self.mailbox.read_preview(id);
+                    self.mailbox.select(Some(id));
+                    self.reading = true;
+                    self.focus_reader = one_pane(ctx);
+                    self.float_behind();
+                }
             }
             command::Asked::Person(address) => {
                 // Their mail: the search of the mail shown, by their address, read as it is (never as a prefix).

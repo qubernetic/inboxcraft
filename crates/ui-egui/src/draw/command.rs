@@ -14,7 +14,7 @@
 
 use egui::{Area, Context, Id, Key, Modifiers, Order, Rect, Sense, Ui, UiBuilder, pos2};
 
-use crate::command::{Command, Mode, field_id};
+use crate::command::{Command, Found, Hit, Mode, field_id};
 use crate::component::command_field::{self, Scope};
 use crate::component::popup::{self, Item, ItemState};
 use crate::component::{key_hint, soon};
@@ -27,6 +27,12 @@ use crate::tr;
 
 /// The most rows of people or mailboxes listed.
 const MOST_ROWS: usize = 50;
+
+/// The most rows of each kind a search lists (the frame `command-line/typing-search`: "3 of 4").
+const MOST_FOUND: usize = 3;
+
+/// The height of the bar of prefixes under the results.
+const PREFIXES_HIGH: f32 = 30.0;
 
 /// The line past which the results' lines come in together as they unfold at full (M8): the last that fit a window.
 const UNFOLDED: usize = 12;
@@ -41,14 +47,8 @@ struct Lines {
 }
 
 impl Lines {
-    /// The lines of results of `count` rows in `mode`, as far as they have come in.
-    fn of(ctx: &Context, mode: Mode, count: usize, empty: bool) -> Self {
-        let rows = match mode {
-            Mode::Search => 0,
-            // The head and the plugin's row.
-            Mode::Command => count.saturating_add(2),
-            Mode::Person | Mode::Mailbox => count.saturating_add(1),
-        };
+    /// The lines of results of `rows` lines (heads and rows) in `mode`, as far as they have come in.
+    fn of(ctx: &Context, mode: Mode, rows: usize, empty: bool) -> Self {
         // And the line saying nothing matches, and the prefixes.
         let lines = rows.saturating_add(usize::from(empty)).saturating_add(1).min(UNFOLDED);
         let stagger = f64::from(crate::motion::STAGGER);
@@ -93,16 +93,86 @@ pub(super) struct Lists {
     pub(super) mailboxes: Vec<Mailbox>,
     /// How many commands the line lists with nothing typed: the head's "of".
     pub(super) all_commands: usize,
+    /// A search with nothing typed: GO TO and LAST COMMANDS list.
+    pub(super) go_to: bool,
+    /// A search with a text typed whose mail, people and mailboxes were looked up: [`Lists::found`] lists them.
+    pub(super) searched: bool,
+    /// What a search looked up.
+    pub(super) found: Found,
+    /// LAST COMMANDS: the commands run from the line, newest first.
+    pub(super) last: Vec<Listed>,
+}
+
+/// Where a GO TO row goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Goal {
+    Inbox,
+    Senders,
+    Calendar,
+}
+
+/// The GO TO rows, in their order.
+const GOALS: [Goal; 3] = [Goal::Inbox, Goal::Senders, Goal::Calendar];
+
+/// A row of the results, by what it runs.
+enum Entry<'a> {
+    Go(Goal),
+    Command(&'a Listed),
+    Message(&'a Hit),
+    Person(&'a Suggestion),
+    Mailbox(u64),
 }
 
 impl Lists {
     /// How many rows the results hold for `mode`.
     fn count(&self, mode: Mode) -> usize {
         match mode {
+            Mode::Search if self.go_to => GOALS.len().saturating_add(self.last.len()),
+            Mode::Search if self.searched => self.found.mail.len().saturating_add(self.found.people.len()).saturating_add(self.found.mailboxes.len()),
             Mode::Search => 0,
             Mode::Command => self.commands.len(),
             Mode::Person => self.people.len(),
             Mode::Mailbox => self.mailboxes.len(),
+        }
+    }
+
+    /// How many lines the rows of `mode` take, their heads counted.
+    fn lines(&self, mode: Mode) -> usize {
+        let count = self.count(mode);
+        let heads = match mode {
+            Mode::Search if self.go_to => 1 + usize::from(!self.last.is_empty()),
+            Mode::Search => {
+                [self.found.mail.len(), self.found.people.len(), self.found.mailboxes.len()].iter().filter(|rows| self.searched && **rows > 0).count()
+            }
+            // The head and the plugin's row.
+            Mode::Command => 2,
+            Mode::Person | Mode::Mailbox => 1,
+        };
+        count.saturating_add(heads)
+    }
+
+    /// Row `at` of the results of `mode`, from the top.
+    fn entry(&self, mode: Mode, at: usize) -> Option<Entry<'_>> {
+        match mode {
+            Mode::Search if self.go_to => match GOALS.get(at) {
+                Some(goal) => Some(Entry::Go(*goal)),
+                None => self.last.get(at.checked_sub(GOALS.len())?).map(Entry::Command),
+            },
+            Mode::Search if self.searched => {
+                let found = &self.found;
+                let people = at.checked_sub(found.mail.len());
+                let mailboxes = people.and_then(|at| at.checked_sub(found.people.len()));
+                match (found.mail.get(at), people, mailboxes) {
+                    (Some(hit), _, _) => Some(Entry::Message(hit)),
+                    (None, Some(at), None) => found.people.get(at).map(Entry::Person),
+                    (None, _, Some(at)) => found.mailboxes.get(at).map(|hit| Entry::Mailbox(hit.id)),
+                    (None, None, _) => None,
+                }
+            }
+            Mode::Search => None,
+            Mode::Command => self.commands.get(at).map(Entry::Command),
+            Mode::Person => self.people.get(at).map(Entry::Person),
+            Mode::Mailbox => self.mailboxes.get(at).map(|mailbox| Entry::Mailbox(mailbox.id)),
         }
     }
 }
@@ -118,6 +188,12 @@ pub(super) enum Asked {
     Person(String),
     /// Go to the mailbox.
     Mailbox(u64),
+    /// Go where a GO TO row goes.
+    GoTo(Goal),
+    /// Open the message a search found, the mail searched for the text shown.
+    Message { id: u64, text: String },
+    /// A command that cannot run here was chosen: the status line says why, in these words.
+    Refused(String),
     /// The text typed changed: the mail shown, while it is the mail, searched for it as it is typed.
     Searched(String),
     /// Enter on a search: the mail searched for the text, shown from any place.
@@ -178,7 +254,7 @@ pub(super) fn early(ctx: &Context, command: &mut Command) -> Early {
 }
 
 /// The results' id.
-fn results_id() -> Id {
+pub(super) fn results_id() -> Id {
     Id::unique("command-line-results")
 }
 
@@ -264,20 +340,24 @@ pub(super) fn show(
     asked
 }
 
-/// What running row `at` of the results asks for, if it can run.
+/// What running row `at` of the results asks for: a command that cannot run asks for its reason in the status line.
 fn chosen(command: &Command, lists: &Lists, at: usize) -> Option<Asked> {
     // A bare prefix runs nothing, unless the arrows picked a row.
     if command.mode() != Mode::Search && command.text().trim().is_empty() && !command.stepped() {
         return None;
     }
-    match command.mode() {
-        Mode::Search => Some(Asked::Find(command.text().to_owned())),
-        Mode::Command => {
-            let listed = lists.commands.get(at).filter(|listed| listed.refused.is_none())?;
-            Some(listed.row.page.map_or(Asked::Run(listed.row.id), Asked::Page))
-        }
-        Mode::Person => lists.people.get(at).map(|person| Asked::Person(person.address.clone())),
-        Mode::Mailbox => lists.mailboxes.get(at).map(|mailbox| Asked::Mailbox(mailbox.id)),
+    match lists.entry(command.mode(), at) {
+        Some(Entry::Go(goal)) => Some(Asked::GoTo(goal)),
+        Some(Entry::Command(listed)) => Some(match listed.refused {
+            Some(_) => Asked::Refused(refused_words(&listed.row.name, listed.row.page.unwrap_or(listed.row.id))),
+            None => listed.row.page.map_or(Asked::Run(listed.row.id), Asked::Page),
+        }),
+        Some(Entry::Message(hit)) => Some(Asked::Message { id: hit.id, text: command.text().to_owned() }),
+        Some(Entry::Person(person)) => Some(Asked::Person(person.address.clone())),
+        Some(Entry::Mailbox(id)) => Some(Asked::Mailbox(id)),
+        // A search that lists nothing shows the mail searched.
+        None if command.mode() == Mode::Search => Some(Asked::Find(command.text().to_owned())),
+        None => None,
     }
 }
 
@@ -322,6 +402,129 @@ fn said_picked(ui: &Ui, response: &egui::Response, picked: bool, kept: &mut Opti
     }
 }
 
+/// The head over a group of `shown` rows of `total`: "3 of 4", or the count when all show.
+fn group_head(ui: &mut Ui, theme: &Theme, label: &str, shown: usize, total: usize) {
+    let counted = if shown < total { tr!("{shown} of {all}", shown = shown, all = total) } else { total.to_string() };
+    popup::head(ui, theme, label, Some(&counted));
+}
+
+/// A command's row: its id and whether it has a key, or why it cannot run. In the `>` list (`keyed` false) no key chip,
+/// so the row offers no action to the coming-soon gate ([`soon::blocked`]): a command listed there is not a control
+/// that offers it. In LAST COMMANDS (`keyed`) a command that ran and has a key shows its chip, as the frames draw it.
+fn command_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, listed: &Listed, picked: bool, keyed: bool) -> egui::Response {
+    let state = match (listed.refused, picked) {
+        (Some(_), _) => ItemState::Unavailable,
+        (None, true) => ItemState::Chosen,
+        (None, false) => ItemState::Default,
+    };
+    let id = listed.row.page.unwrap_or(listed.row.id);
+    let key = listed.row.page.is_none() && keymap.shortcut(listed.row.id).is_some();
+    let (caption, action) = match listed.refused {
+        Some(reason) => (Some(reason.to_owned()), None),
+        None if keyed && key => (None, Some(listed.row.id)),
+        None if key => (Some(id.to_owned()), None),
+        None => (Some(tr!("{id} · no key", id = id)), None),
+    };
+    let item = Item { icon: Some(listed.row.icon), name: &listed.row.name, caption: caption.as_deref(), action, state };
+    popup::menu_item(ui, theme, keymap, &item)
+}
+
+/// A found message's or mailbox's row.
+fn hit_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, hit: &Hit, picked: bool) -> egui::Response {
+    let state = if picked { ItemState::Chosen } else { ItemState::Default };
+    let item = Item { icon: Some(hit.icon), name: &hit.name, caption: Some(&hit.caption), action: None, state };
+    popup::menu_item(ui, theme, keymap, &item)
+}
+
+/// A GO TO row: its icon, its name and what waits there.
+fn goal_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, found: &Found, goal: Goal, picked: bool) -> egui::Response {
+    let (icon, name, caption) = match goal {
+        Goal::Inbox => (
+            IconId::Inbox,
+            tr!("Inbox"),
+            found.to_read.map(|unread| if unread == 0 { tr!("nothing to read").to_owned() } else { tr!("{n} to read", n = unread) }),
+        ),
+        Goal::Senders => (IconId::People, tr!("New senders"), (found.waiting > 0).then(|| tr!("{n} waiting", n = found.waiting))),
+        Goal::Calendar => {
+            (IconId::Calendar, tr!("Calendar"), found.next.as_ref().map(|(title, time)| tr!("next: {title} {time}", title = title, time = time)))
+        }
+    };
+    let state = if picked { ItemState::Chosen } else { ItemState::Default };
+    let item = Item { icon: Some(icon), name, caption: caption.as_deref(), action: None, state };
+    popup::menu_item(ui, theme, keymap, &item)
+}
+
+/// The walk down the rows of a search: the lines come in as [`Lines`] lets them, rows counted from the top for the pick.
+struct Walk<'a> {
+    lines: &'a mut Lines,
+    at: usize,
+    picked: usize,
+    picked_id: Option<Id>,
+    asked: Option<Asked>,
+}
+
+impl Walk<'_> {
+    /// A head, when its line has come in.
+    fn head(&mut self, add: impl FnOnce()) {
+        if self.lines.next() {
+            add();
+        }
+    }
+
+    /// The next row, drawn by `draw` when its line has come in, and read.
+    fn row(&mut self, ui: &mut Ui, command: &Command, lists: &Lists, draw: impl FnOnce(&mut Ui, bool) -> egui::Response) {
+        let here = self.at;
+        self.at = self.at.saturating_add(1);
+        if !self.lines.next() {
+            return;
+        }
+        let response = draw(ui, here == self.picked);
+        said_picked(ui, &response, here == self.picked, &mut self.picked_id);
+        if response.clicked() {
+            self.asked = chosen(command, lists, here);
+        }
+    }
+}
+
+/// The rows of a search: with nothing typed GO TO and LAST COMMANDS, with a text the mail, the people and the
+/// mailboxes found, each group under its head; what a press asked for, and the picked row's id.
+fn search_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &Command, lists: &Lists, lines: &mut Lines) -> (Option<Asked>, Option<Id>) {
+    let mut walk = Walk { lines, at: 0, picked: command.picked(), picked_id: None, asked: None };
+    let found = &lists.found;
+    if lists.go_to {
+        walk.head(|| popup::head(ui, theme, tr!("Go to"), None));
+        for goal in GOALS {
+            walk.row(ui, command, lists, |ui, picked| goal_row(ui, theme, keymap, found, goal, picked));
+        }
+        if !lists.last.is_empty() {
+            walk.head(|| popup::head(ui, theme, tr!("Last commands"), None));
+            for listed in &lists.last {
+                walk.row(ui, command, lists, |ui, picked| command_row(ui, theme, keymap, listed, picked, true));
+            }
+        }
+    } else if lists.searched {
+        if !found.mail.is_empty() {
+            walk.head(|| group_head(ui, theme, tr!("Mail"), found.mail.len(), found.mail_total));
+            for hit in &found.mail {
+                walk.row(ui, command, lists, |ui, picked| hit_row(ui, theme, keymap, hit, picked));
+            }
+        }
+        if !found.people.is_empty() {
+            walk.head(|| group_head(ui, theme, tr!("People"), found.people.len(), found.people_total));
+            for person in &found.people {
+                walk.row(ui, command, lists, |ui, picked| popup::suggestion_row(ui, theme, &person.name, &person.address, picked));
+            }
+        }
+        if !found.mailboxes.is_empty() {
+            walk.head(|| group_head(ui, theme, tr!("Mailboxes"), found.mailboxes.len(), found.mailboxes_total));
+            for hit in &found.mailboxes {
+                walk.row(ui, command, lists, |ui, picked| hit_row(ui, theme, keymap, hit, picked));
+            }
+        }
+    }
+    (walk.asked, walk.picked_id)
+}
+
 /// The results' rows for the mode typed, and the line of prefixes; what a press asked for, and the picked row's id.
 fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, lists: &Lists, room: f32) -> (Option<Asked>, Option<Id>) {
     let picked = command.picked();
@@ -330,10 +533,10 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
     let mut picked_id = None;
     let count = lists.count(command.mode());
     let counted = count.to_string();
-    let nothing = count == 0 && command.mode() != Mode::Search && !text.is_empty();
-    let mut lines = Lines::of(ui.ctx(), command.mode(), count, nothing);
+    let nothing = count == 0 && !text.is_empty() && (command.mode() != Mode::Search || lists.searched);
+    let mut lines = Lines::of(ui.ctx(), command.mode(), lists.lines(command.mode()), nothing);
     match command.mode() {
-        Mode::Search => {}
+        Mode::Search => (asked, picked_id) = search_rows(ui, theme, keymap, command, lists, &mut lines),
         Mode::Command => {
             if lines.next() {
                 // The frame `command-line/commands`: how many of all the commands show, and what Enter does.
@@ -349,21 +552,7 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
                     if !lines.next() {
                         continue;
                     }
-                    let state = match (listed.refused, at == picked) {
-                        (Some(_), _) => ItemState::Unavailable,
-                        (None, true) => ItemState::Chosen,
-                        (None, false) => ItemState::Default,
-                    };
-                    // Its id and whether it has a key, or why it cannot run; no key chip, so the row offers no action to
-                    // the coming-soon gate ([`soon::blocked`]): a command listed here is not a control that offers it.
-                    let id = listed.row.page.unwrap_or(listed.row.id);
-                    let caption = match listed.refused {
-                        Some(reason) => reason.to_owned(),
-                        None if listed.row.page.is_none() && keymap.shortcut(listed.row.id).is_some() => id.to_owned(),
-                        None => tr!("{id} · no key", id = id),
-                    };
-                    let item = Item { icon: Some(listed.row.icon), name: &listed.row.name, caption: Some(&caption), action: None, state };
-                    let response = popup::menu_item(ui, theme, keymap, &item);
+                    let response = command_row(ui, theme, keymap, listed, at == picked, false);
                     said_picked(ui, &response, at == picked, &mut picked_id);
                     if at == picked && command.stepped() {
                         ui.scroll_to_rect(response.rect, None);
@@ -423,10 +612,20 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
     if !lines.next() {
         return (asked, picked_id);
     }
-    popup::hairline(ui, theme);
-    // The prefixes, each a press away.
-    ui.horizontal(|ui| {
-        ui.add_space(theme.spacing.s3);
+    prefixes(ui, theme, command);
+    (asked, picked_id)
+}
+
+/// The bar of prefixes under the rows, each a press away: a `panel_line` hairline, then 30 high on the `panel` fill,
+/// as the frames draw it.
+fn prefixes(ui: &mut Ui, theme: &Theme, command: &mut Command) {
+    let width = ui.available_width();
+    let (line, _) = ui.allocate_exact_size(egui::vec2(width, 1.0), Sense::hover());
+    ui.painter().rect_filled(line, 0.0, theme.palette.panel_line);
+    let (bar, _) = ui.allocate_exact_size(egui::vec2(width, PREFIXES_HIGH), Sense::hover());
+    ui.painter().rect_filled(bar, 0.0, theme.palette.panel);
+    let inner = bar.shrink2(egui::vec2(theme.spacing.s3, 0.0));
+    ui.scope_builder(UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
         ui.spacing_mut().item_spacing.x = theme.spacing.s4;
         for (key, word, prefix) in [(">", tr!("commands"), '>'), ("@", tr!("people"), '@'), ("#", tr!("mailboxes"), '#')] {
             if key_hint::key_hint(ui, theme, key, word, None).1 {
@@ -436,7 +635,6 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, command: &mut Command, list
             }
         }
     });
-    (asked, picked_id)
 }
 
 /// The `#` results for `text`: every account's mailboxes whose path holds it (case left aside), at most
@@ -451,6 +649,80 @@ pub(super) fn mailboxes(mailbox: &crate::mailbox::Mailbox, text: &str) -> Vec<Ma
         .take(MOST_ROWS)
         .map(|(account, folder)| Mailbox { id: folder.id, name: folder.name.clone(), account: account.name.clone() })
         .collect()
+}
+
+/// What a search of the line finds for `text` (none: what GO TO says), from the mailbox: the messages as the list
+/// searched for it finds them (`mail.search`), the people the mail knows, the mailboxes whose path holds it; at most
+/// [`MOST_FOUND`] of each kept, with how many there were.
+pub(super) fn look_up(mailbox: &mut crate::mailbox::Mailbox, text: &str) -> Found {
+    if text.trim().is_empty() {
+        return Found {
+            to_read: mailbox.views().iter().find(|view| view.role == inboxcraft_model::Role::Inbox).map(|view| view.unread),
+            waiting: mailbox.waiting().len(),
+            next: crate::home::next_event(mailbox).map(|(time, title, _)| (title, time)),
+            ..Found::default()
+        };
+    }
+    let rows = mailbox.searched(text).unwrap_or_default();
+    let roles: std::collections::BTreeMap<u64, Option<inboxcraft_model::Role>> =
+        mailbox.accounts().iter().flat_map(|account| mailbox.folders_of(account.id)).map(|folder| (folder.id, folder.role)).collect();
+    let mail = rows
+        .iter()
+        .take(MOST_FOUND)
+        .map(|row| {
+            let subject = if row.subject.is_empty() { tr!("(no subject)").to_owned() } else { crate::home::kept(&row.subject) };
+            let when = mailbox.when(row);
+            let sender = crate::home::kept(&row.sender);
+            let caption = if when.is_empty() { sender } else { tr!("{sender} · {when}", sender = sender, when = when) };
+            Hit { id: row.id, name: subject, caption, icon: mail_icon(roles.get(&row.folder).copied().flatten()) }
+        })
+        .collect();
+    let mut skip = std::collections::BTreeSet::new();
+    skip.extend(mailbox.accounts().iter().map(|account| account.address.to_lowercase()));
+    let people = crate::compose::people(mailbox, text, skip).unwrap_or_default();
+    let boxes = mailboxes(mailbox, text);
+    Found {
+        mail,
+        mail_total: rows.len(),
+        people_total: people.len(),
+        people: people.into_iter().take(MOST_FOUND).collect(),
+        mailboxes_total: boxes.len(),
+        mailboxes: boxes
+            .into_iter()
+            .take(MOST_FOUND)
+            .map(|mailbox| Hit { id: mailbox.id, name: mailbox.name, caption: mailbox.account, icon: IconId::Move })
+            .collect(),
+        ..Found::default()
+    }
+}
+
+/// The icon of a found message: its mailbox's.
+fn mail_icon(role: Option<inboxcraft_model::Role>) -> IconId {
+    use inboxcraft_model::Role;
+    match role {
+        Some(Role::Inbox) => IconId::Inbox,
+        Some(Role::Sent) => IconId::Send,
+        Some(Role::Trash) => IconId::Delete,
+        Some(Role::Junk) => IconId::Junk,
+        Some(Role::Archive) => IconId::Archive,
+        _ => IconId::Move,
+    }
+}
+
+/// What the status line says when the command `name` (`id`) was chosen where it cannot run: what it needs, and what
+/// to do.
+pub(super) fn refused_words(name: &str, id: &str) -> String {
+    match id {
+        keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => {
+            tr!("Not run: {name} needs a selected message. Select one, then try again.", name = name)
+        }
+        keymap::FULL_WIDTH | keymap::SNOOZE => tr!("Not run: {name} needs an open message. Open one, then try again.", name = name),
+        keymap::UNDO => tr!("Not run: {name}: there is nothing to undo.", name = name),
+        keymap::SEND | keymap::FOLD => tr!("Not run: {name} needs a message being written.", name = name),
+        keymap::COMPOSE => tr!("Not run: {name} needs an account. Add one, then try again.", name = name),
+        keymap::OPEN_HELD => tr!("Not run: {name} needs a message held back.", name = name),
+        _ => tr!("Not run: {name} cannot run here.", name = name),
+    }
 }
 
 /// Why `id` cannot run here, in a few words: what it needs.
