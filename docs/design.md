@@ -213,7 +213,9 @@ Everything is designed at 1440 × 900. Four fixed regions:
   undo 4 s, an error until it is dismissed.
 - **Frame.** With the window's own frame the command line is also the title bar and the drag strip, also while its
   results or the event editor show. The other setting is the system's frame. Both are drawn maximised and without
-  focus as well.
+  focus as well. The window's corners are square in every state; in the own frame a window that is neither
+  maximised nor full screen has a one-pixel outline in `line` inside its edge, and so does a reader, composer or
+  event editor in a window of its own.
 - **Keys.** `D` done (mark as read and archive), `A` archive, `H` snooze, `R` read, `S` flag, `C` write, `J` and
   `K` or the arrows move in a list, `Ctrl Z` undo, `Ctrl Enter` send. Single letters work when the focus is not in
   a text field. `Tab` goes through the regions in reading order. Every key can be changed in Settings.
