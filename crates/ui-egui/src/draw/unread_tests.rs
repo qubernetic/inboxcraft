@@ -7,7 +7,7 @@
 //! its key, its palette row and `ui.list.unread` of an agent turn it as the pill does.
 
 use egui::accesskit::{Role, Toggled};
-use egui::{Key, vec2};
+use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_model::Role as FolderRole;
@@ -16,7 +16,7 @@ use serde_json::json;
 
 use super::super::InboxApp;
 use crate::keymap;
-use crate::mailbox::{Act, InboxView, Mailbox, Place};
+use crate::mailbox::{Act, InboxView, Mailbox, Pile, Place};
 use crate::sample;
 use crate::theme::install_fonts;
 
@@ -233,4 +233,111 @@ fn an_agent_s_ui_list_unread_turns_the_place_shown() {
     harness.state_mut().mailbox_mut().run_for_agent("ui.list.unread", &json!({})).unwrap();
     follow(&mut harness);
     assert!(!harness.state().mailbox().unread_only(), "no `on`: the other of the two");
+}
+
+#[test]
+fn undo_of_an_act_on_the_open_message_brings_it_back_open() {
+    for (key, act) in [(Key::D, "done"), (Key::A, "archive"), (Key::Delete, "delete")] {
+        let (mut harness, first, next) = reading();
+        harness.key_press(key);
+        settle(&mut harness);
+        assert!(!listed(&harness, first), "{act}: it left");
+        assert_eq!(harness.state().mailbox().selected(), Some(next), "{act}: the rule walked on");
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, keymap::UNDO);
+        settle(&mut harness);
+        assert!(listed(&harness, first), "{act}: Undo lists it again, read, in its place");
+        assert_eq!(harness.state().mailbox().selected(), Some(first), "{act}: selected again");
+        assert_eq!(harness.state().reader().open_id(), Some(first), "{act}: open again");
+    }
+}
+
+/// An agent's `ui.list.unread` with `params`, held for the frame's end as the app holds it.
+fn agent_holds(harness: &mut Harness<'static, InboxApp>, params: serde_json::Value) {
+    harness.state_mut().mailbox_mut().run_for_agent("ui.list.unread", &params).unwrap();
+    harness.state_mut().follow_settings_asked();
+}
+
+#[test]
+fn an_agent_s_ask_waits_for_the_frame_s_end_and_yields_to_the_owner() {
+    let mut harness = harness_of(app());
+    agent_holds(&mut harness, json!({ "on": true }));
+    assert!(harness.state().holds_agent_ask(), "held, not applied at once");
+    assert!(!harness.state().mailbox().unread_only(), "the list as it was until the frame's end");
+    // The owner's own key or press changed something in this frame: the agent's ask goes.
+    harness.state_mut().act_on_agent_ask(true);
+    settle(&mut harness);
+    assert!(!harness.state().mailbox().unread_only(), "the owner acted: the ask is dropped");
+    assert!(!harness.state().holds_agent_ask());
+}
+
+#[test]
+fn the_owner_s_own_turn_in_the_frame_wins_over_an_agent_s_ask() {
+    let mut harness = harness_of(app());
+    agent_holds(&mut harness, json!({}));
+    harness.key_press(Key::U);
+    harness.run();
+    assert!(harness.state().mailbox().unread_only(), "the owner's U turned it on");
+    // The app's frame end: nothing of the settings or the place changed, but the owner turned the filter.
+    harness.state_mut().act_on_agent_ask(false);
+    settle(&mut harness);
+    assert!(harness.state().mailbox().unread_only(), "the agent's toggle does not undo the owner's key");
+}
+
+#[test]
+fn an_agent_s_ask_passes_over_the_command_line_s_results() {
+    let mut harness = harness_of(app());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    assert!(harness.state().command().results());
+    agent_holds(&mut harness, json!({ "on": true }));
+    harness.state_mut().act_on_agent_ask(false);
+    harness.run();
+    assert!(!harness.state().mailbox().unread_only(), "the owner holds the keys: passed over");
+    assert!(harness.state().command().results(), "and the results stay");
+}
+
+#[test]
+fn while_a_search_shows_neither_the_key_nor_an_agent_turns_it() {
+    let mut harness = harness_of(app());
+    harness.state_mut().search("Forgehub");
+    settle(&mut harness);
+    assert!(!harness.state().mailbox().query().is_empty());
+    assert!(!harness.state().can_run(keymap::UNREAD), "the key rests and the palette offers it unavailable");
+    harness.key_press(Key::U);
+    settle(&mut harness);
+    agent_holds(&mut harness, json!({ "on": true }));
+    harness.state_mut().act_on_agent_ask(false);
+    settle(&mut harness);
+    harness.state_mut().search("");
+    settle(&mut harness);
+    assert!(!harness.state().mailbox().unread_only(), "nothing turned it behind the search");
+}
+
+#[test]
+fn an_agent_s_ask_on_the_settings_leaves_the_hidden_list_alone() {
+    let mut harness = harness_of(app());
+    harness.state_mut().open_settings_on("appearance");
+    settle(&mut harness);
+    agent_holds(&mut harness, json!({ "on": true }));
+    harness.state_mut().act_on_agent_ask(false);
+    settle(&mut harness);
+    harness.state_mut().leave_settings();
+    settle(&mut harness);
+    assert!(!harness.state().mailbox().unread_only(), "the list the owner did not see is as it was");
+}
+
+#[test]
+fn places_without_it_refuse_the_key_and_the_palette() {
+    // The outbox's own: `draw::outbox_tests`, which can send.
+    for place in [Place::Senders, Place::Later(Pile::Pins), Place::View(FolderRole::Drafts)] {
+        let mut app = app();
+        app.mailbox_mut().open(place);
+        assert_eq!(app.mailbox().place(), place, "the sample shows {place:?}");
+        let mut harness = harness_of(app);
+        assert!(!harness.state().can_run(keymap::UNREAD), "{place:?}: not here");
+        harness.key_press(Key::U);
+        settle(&mut harness);
+        assert!(!harness.state().mailbox().unread_only(), "{place:?}");
+    }
 }

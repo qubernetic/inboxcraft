@@ -711,6 +711,9 @@ pub struct Mailbox {
     /// Under "Unread only", the message the owner moved on from, read: its row leaves once the reader has moved on too
     /// ([`Mailbox::let_read_row_go`]).
     letting_go: Option<u64>,
+    /// The message the next reading of the list keeps in place under "Unread only" instead of the selected one, once:
+    /// the message an Undo selects again.
+    keep_once: Option<u64>,
     /// How many messages of the place shown are on the park pile, from `mail.list`.
     parked: u64,
     /// How many messages each pile of "Later" holds, read while "Later" shows.
@@ -1054,6 +1057,7 @@ impl Mailbox {
             show_done: false,
             unread_only: Vec::new(),
             letting_go: None,
+            keep_once: None,
             parked: 0,
             piles: [0; 3],
             presets: Vec::new(),
@@ -1695,7 +1699,10 @@ impl Mailbox {
             }
         }
         if self.history != before {
+            // Under "Unread only" the message selected again is read: the reading keeps it.
+            self.keep_once = toast.as_ref().filter(|undo| undo.undoable && undo.selected && self.history <= undo.depth).map(|undo| undo.id);
             self.refresh();
+            self.keep_once = None;
             if let Some(undo) = toast.filter(|undo| undo.undoable && undo.selected && self.history <= undo.depth)
                 && self.messages.iter().any(|row| row.id == undo.id)
             {
@@ -2259,6 +2266,8 @@ impl Mailbox {
 
     fn load_list(&mut self, place: Place) -> Result<(), UiError> {
         self.revision = self.revision.wrapping_add(1);
+        // A fresh reading lists what the filter keeps: no row is left to let go.
+        self.letting_go = None;
         // The outbox shows while anything is in it, and gives way to the inbox after.
         let place = if place == Place::Outbox && self.outbox.is_empty() { Place::View(Role::Inbox) } else { place };
         let (rows, found_for) = if self.query.is_empty() {
@@ -2302,8 +2311,9 @@ impl Mailbox {
             }
             if self.unread_only_in(place) {
                 fields.insert("unread".to_owned(), Value::Bool(true));
-                // The message open in the place stays in its row once it is read, until the owner moves on.
-                if let Some(open) = self.selected.filter(|_| place == self.place) {
+                // The message open in the place stays in its row once it is read, until the owner moves on; the one an
+                // Undo selects again comes back read.
+                if let Some(open) = self.keep_once.or(self.selected).filter(|_| place == self.place) {
                     fields.insert("keep".to_owned(), json!(open));
                 }
             }

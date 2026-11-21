@@ -821,3 +821,18 @@ fn a_short_composer_walks_through_every_recipient_and_then_sends() {
         assert_eq!(seen.len(), addresses.len(), "{size:?}: every address was shown before the send; seen {seen:?}");
     }
 }
+
+#[test]
+fn the_outbox_has_no_unread_only() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Dark);
+    send(&mut harness, "Work party on Saturday");
+    harness.state_mut().mailbox_mut().open(Place::Outbox);
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::Outbox);
+    assert!(!harness.state().can_run(crate::keymap::UNREAD), "the key rests and the palette offers it unavailable");
+    harness.key_press(egui::Key::U);
+    harness.run();
+    assert!(!harness.state().mailbox().unread_only());
+    assert!(harness.query_by_label("Unread only").is_none(), "no pill");
+}

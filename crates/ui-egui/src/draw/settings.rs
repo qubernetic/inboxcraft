@@ -1372,6 +1372,8 @@ impl super::InboxApp {
     /// Shows the agent's ask held, unless `owner_acted`: the owner's own key or press on the settings or the place this
     /// frame wins, and the ask goes. At most one agent's ask a frame.
     pub fn act_on_agent_ask(&mut self, owner_acted: bool) {
+        // The owner's own turn of "Unread only" in this frame wins too.
+        let owner_acted = std::mem::take(&mut self.owner_turned_unread) || owner_acted;
         if let Some(asked) = self.mailbox.take_agent_ask()
             && !owner_acted
         {
@@ -1384,8 +1386,13 @@ impl super::InboxApp {
         match asked {
             inboxcraft_engine::shown::Asked::Settings(asked) => self.apply_settings_ask(asked),
             inboxcraft_engine::shown::Asked::Home(asked) => self.apply_home_ask(asked),
-            // Only the list's place changes: nothing is shown in place of what shows.
+            // Only the list's place changes: nothing is shown in place of what shows. An agent's is passed over while the
+            // owner holds the keys, as its `ui.home.open` is; any ask changes nothing where the list does not show a
+            // place that has it (a search, the settings, Home, the calendar, the list hidden), as the key rests there.
             inboxcraft_engine::shown::Asked::Unread(asked) => {
+                if (asked.by_agent && !self.agent_may_move()) || !self.can_run(crate::keymap::UNREAD) {
+                    return;
+                }
                 let on = asked.on.unwrap_or(!self.mailbox.unread_only());
                 self.mailbox.set_unread_only(on);
             }

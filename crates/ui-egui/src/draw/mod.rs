@@ -243,6 +243,9 @@ pub struct InboxApp {
     editor_close_taken: Option<f64>,
     /// At the end of the last frame, a float was open or the composer had the keyboard ([`InboxApp::agent_may_move`]).
     owner_keys: bool,
+    /// The owner turned "Unread only" since the last [`InboxApp::act_on_agent_ask`]: the owner's turn wins over an
+    /// agent's ask held for the frame's end.
+    owner_turned_unread: bool,
     /// The composer's field that takes the keyboard in its window of its own at the window's next pass.
     window_focus: Option<egui::Id>,
     /// In one pane, the reader takes the focus once it is drawn: `Enter` or a press opened a message into it.
@@ -563,6 +566,7 @@ impl InboxApp {
             editor_window_forward: false,
             editor_close_taken: None,
             owner_keys: false,
+            owner_turned_unread: false,
             window_focus: None,
             focus_reader: false,
             focus_walked: false,
@@ -1063,8 +1067,8 @@ impl InboxApp {
             // The list's keys and its views act on the list: hidden, it is not there to act on.
             _ if keymap::LIST_KEYS.contains(&id) => self.screen == Screen::Mail && !self.list_hidden && (self.list_row.is_some() || self.list_keys),
             keymap::VIEW_GROUPED | keymap::VIEW_SMART | keymap::VIEW_LIST => !self.list_hidden,
-            // Where the list shows a place that has it, as its pill.
-            keymap::UNREAD => self.screen == Screen::Mail && !self.list_hidden && self.mailbox.can_unread_only(),
+            // Where the list shows a place that has it, as its pill: not while a search shows its results.
+            keymap::UNREAD => self.screen == Screen::Mail && !self.list_hidden && self.mailbox.can_unread_only() && self.mailbox.query().is_empty(),
             _ => keymap::action(id).is_some(),
         }
     }
@@ -1176,6 +1180,7 @@ impl InboxApp {
             keymap::UNREAD => {
                 let on = !self.mailbox.unread_only();
                 self.mailbox.set_unread_only(on);
+                self.owner_turned_unread = true;
             }
             keymap::OPEN => self.open_from_list(ctx),
             keymap::BACK => {
@@ -3424,6 +3429,7 @@ impl InboxApp {
         }
         if let Some(on) = header.unread_only {
             self.mailbox.set_unread_only(on);
+            self.owner_turned_unread = true;
         }
         let place = if review { Some(Place::Senders) } else { asked.open.or(header.open) };
         if let Some(place) = place {

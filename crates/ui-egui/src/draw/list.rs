@@ -115,8 +115,8 @@ pub(super) fn has_filters(mailbox: &Mailbox) -> bool {
 }
 
 /// The filters' line under the head, 36 high at the text scale, its parts 16 in from the pane's edges and 8 apart:
-/// the piles in "Later"; elsewhere "Show done", "Unread only" where the place has it, and the park pile (after the view switch when the head has no room
-/// for it). While searching, the search's words.
+/// the piles in "Later"; elsewhere "Show done", "Unread only" where the place has it, and the park pile (after the
+/// view switch when the head has no room for it). While searching, the search's words.
 fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header, switch_here: bool) {
     let high = Theme::size(theme, FILTERS);
     let pad = theme.spacing.s4;
