@@ -108,12 +108,14 @@ that is:
 - `ui.settings.open`, which shows the settings in the window: on the page its optional `page` names (`appearance`,
   `accounts`, `notifications`, `triage`, `sending`, `calendar`, `shortcuts`, `privacy` or `about`), also while they
   show; without `page`, or with one that names none (another case, a planned page, junk), on the page last shown.
-  An agent's call opens the settings and never takes the owner off them, and it is passed over while the owner has
-  typed into the account form or a key is being given on the Shortcuts page; at most its newest call acts in a frame,
+  An agent's call opens the settings and never takes the owner off them, and it is passed over while the owner holds
+  the keys: the command line's results, a dialog or a key being given on the Shortcuts page stand in front, a menu or
+  a list is open, the composer has the keyboard (docked or floating), the event editor is open (also under the
+  settings), or the owner has typed into the account form; at most its newest call acts in a frame,
   and the owner's own key or press in that frame wins. The answer is the page asked for (or `null`) and `window`,
   `true` in the app; it is the same whether the window acted or passed over the call;
 - `ui.home.open`, which shows Home in the window; it takes no parameters. An agent's call is passed over as an agent's
-  `ui.settings.open` is, and also while the owner edits an event in the event editor in the window; the owner's own
+  `ui.settings.open` is, while the owner holds the keys; the owner's own
   key or press in that frame wins, and of an agent's calls of the two only the newest acts in a frame. The answer is
   `window`, `true` in the app, the same whether the window acted or passed over the call;
 - snooze, park and pin, as they land.

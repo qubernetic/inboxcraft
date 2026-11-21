@@ -1395,10 +1395,10 @@ impl super::InboxApp {
     /// named, also while the settings show; a page that names none, the page last shown; bare (the key), the settings
     /// on the page last shown or, while they show, the place the owner came from. An agent's takes nothing from the
     /// owner: it never toggles away (bare, it shows the settings on the page last shown, and changes nothing while they
-    /// show), and it is passed over while the account form holds what the owner typed or a key is waited for.
+    /// show), and it is passed over while the owner holds the keys ([`Self::agent_may_move`]).
     pub(super) fn apply_settings_ask(&mut self, asked: SettingsAsked) {
         if asked.by_agent {
-            if self.settings.capturing().is_some() || self.onboarding.holds_typing() {
+            if !self.agent_may_move() {
                 return;
             }
             self.open_settings_page(asked.page);

@@ -27,15 +27,16 @@ pub struct SettingsAsked {
     /// show, the place the owner came from. A `page` that names none is not bare: the settings stay shown.
     pub bare: bool,
     /// An agent asked (the control channel, the CLI in the app): the window never toggles for it and passes over it
-    /// while the owner types in the account form or gives a key. Only the command's caller sets it, never a parameter.
+    /// while the owner holds the keys (the command line's results, a dialog, a key being given, an open menu, the
+    /// composer, the event editor, the account form typed in). Only the command's caller sets it, never a parameter.
     pub by_agent: bool,
 }
 
 /// The window is asked to show Home.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HomeAsked {
-    /// An agent asked: the window passes over it as over an agent's [`SettingsAsked`], and while the owner edits an
-    /// event. Only the command's caller sets it, never a parameter.
+    /// An agent asked: the window passes over it as over an agent's [`SettingsAsked`]. Only the command's caller sets
+    /// it, never a parameter.
     pub by_agent: bool,
 }
 

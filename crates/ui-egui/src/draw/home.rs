@@ -626,14 +626,28 @@ fn steps(ui: &mut Ui, theme: &Theme) -> Rect {
 
 /// `ui.home.open`, whoever ran it.
 impl super::InboxApp {
-    /// One ask of `ui.home.open`: the owner's shows Home; an agent's takes nothing from the owner, as an agent's
-    /// `ui.settings.open` does: it is passed over while the account form holds what the owner typed or a key is waited
-    /// for, and while the owner edits an event in the window's event editor (Home's own key does not run there either).
+    /// One ask of `ui.home.open`: the owner's shows Home; an agent's takes nothing from the owner: it is passed over
+    /// while the owner holds the keys ([`Self::agent_may_move`]).
     pub(super) fn apply_home_ask(&mut self, asked: inboxcraft_engine::shown::HomeAsked) {
-        if asked.by_agent && (self.settings.capturing().is_some() || self.onboarding.holds_typing() || self.editing_event()) {
+        if asked.by_agent && !self.agent_may_move() {
             return;
         }
         self.show_home();
+    }
+
+    /// Whether an agent's `ui.home.open` or `ui.settings.open` may change the place: not while the owner holds the
+    /// keys. They do while the command line's results, a dialog or a key's capture stand in front, a float (a menu,
+    /// a list, a picker) is open, the composer has the keyboard (docked or floating), the event editor is open
+    /// (whether or not the settings are over it), or the account form holds what the owner typed.
+    pub(super) fn agent_may_move(&self) -> bool {
+        let held = self.command.results() || self.settings.confirms(self.onboarding.asking_remove()) || self.settings.capturing().is_some();
+        !(held || self.owner_keys || self.calendar.editor().is_some() || self.onboarding.holds_typing())
+    }
+
+    /// Whether the owner holds the keys in a way only the frame can tell: a float is open, or the keyboard is in the
+    /// composer drawn in the main window. Kept at the frame's end for [`Self::agent_may_move`].
+    pub(super) fn owner_has_keys(&self, ctx: &egui::Context) -> bool {
+        crate::component::popup::any_open(ctx) || (self.composer_drawn() && super::compose::has_keys(ctx))
     }
 }
 
@@ -668,3 +682,7 @@ pub fn drafts_frame(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, re
 #[cfg(test)]
 #[path = "home_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "home_ask_tests.rs"]
+mod ask_tests;
