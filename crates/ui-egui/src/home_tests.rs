@@ -253,8 +253,8 @@ fn only_counts_read_as_0_make_home_quiet_and_an_unread_count_is_left_out_of_the_
 }
 
 #[test]
-fn the_sample_states_are_the_five_frames() {
-    for state in ["today", "nothing-to-do", "overflow-counts", "first-run", "everything-failing"] {
+fn the_sample_states_are_the_five_frames_and_the_drafts_two() {
+    for state in ["today", "nothing-to-do", "overflow-counts", "first-run", "everything-failing", "drafts", "drafts-empty"] {
         assert!(sample(state).is_some(), "{state}");
     }
     assert!(sample("nothing").is_none());

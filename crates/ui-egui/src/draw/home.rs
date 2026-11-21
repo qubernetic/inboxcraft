@@ -44,6 +44,14 @@ const PAD_FOOT: f32 = 24.0;
 /// The room between the brief's parts, in points.
 const GAP: f32 = 20.0;
 
+/// The most drafts the drafts' block draws in its frame of its own, as `home-drafts/default` draws them; on the page it
+/// draws [`DRAFTS`], as the page's frames do.
+pub const BLOCK_DRAFTS: usize = 3;
+
+/// The drafts' frames (`home-drafts/*`): their width and the room round the block, the frame's 1 px edge within it.
+const DRAFTS_FRAME: f32 = 544.0;
+const DRAFTS_FRAME_PAD: f32 = 25.0;
+
 /// The most lines the failing banner's words take, as `home/everything-failing` wraps them.
 const BANNER_LINES: usize = 2;
 
@@ -313,7 +321,7 @@ fn brief_parts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, parts: 
     let (rect, pressed) = agenda(ui, theme, keymap, home);
     parts.agenda = Some(rect);
     asked = asked.or(pressed);
-    let (rect, pressed) = drafts(ui, theme, keymap, home);
+    let (rect, pressed) = drafts(ui, theme, keymap, home, DRAFTS);
     parts.drafts = Some(rect);
     asked = asked.or(pressed);
     let (rect, pressed) = buttons(ui, theme, keymap, home.buttons);
@@ -504,8 +512,8 @@ fn agenda_line(ui: &mut Ui, theme: &Theme, line: &crate::home::AgendaLine) {
     painter.rect_filled(Rect::from_min_max(pos2(rect.left(), line_y), rect.max), 0.0, p.panel_line);
 }
 
-/// The drafts' block: the newest drafts (at most [`DRAFTS`]) and "all drafts (N)", or why there are none.
-fn drafts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home) -> (Rect, Option<Asked>) {
+/// The drafts' block: the newest drafts (at most `most`) and "all drafts (N)", or why there are none.
+fn drafts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, most: usize) -> (Rect, Option<Asked>) {
     let head = Block {
         id: Id::unique("home-drafts"),
         index: "[ 02 ]",
@@ -523,7 +531,7 @@ fn drafts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home) -> (Rect, Op
         let ctx = ui.ctx().clone();
         let keyboard = ctx.memory(|memory| memory.focused()).and_then(|id| ctx.read_response(id)).map(|response| response.rect);
         let shift = ui.input(|input| input.modifiers.shift);
-        for draft in home.drafts.iter().take(DRAFTS) {
+        for draft in home.drafts.iter().take(most) {
             let subject = draft.subject.as_deref().map(crate::home::kept);
             let [to, when] = [&draft.to, &draft.when].map(|text| crate::home::kept(text));
             let spoken = format!("{} {to} {when}", subject.as_deref().unwrap_or(tr!("(no subject)")));
@@ -630,11 +638,31 @@ impl super::InboxApp {
 }
 
 /// The gallery's page of Home in `state` (see [`crate::home::sample`]) across `size`, on a still field with the
-/// emblem and the names where they fit; nothing for a state it does not know.
+/// emblem and the names where they fit; the drafts' states (`drafts`, `drafts-empty`) the drafts' block alone, as
+/// `home-drafts/*` draws it, at the page's top left; nothing for a state it does not know.
 pub fn gallery(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &str, field: &mut Field, size: egui::Vec2) {
     let Some(home) = crate::home::sample(state) else { return };
     let rect = Rect::from_min_size(ui.max_rect().min, size);
+    if matches!(state, "drafts" | "drafts-empty") {
+        drafts_frame(ui, theme, keymap, &home, rect);
+        return;
+    }
     show(ui, theme, keymap, &home, rect, Stage { field, emblem: Some(crate::brand::emblem()), level: Level::Off });
+}
+
+/// The drafts' block of `home` in a frame of its own at the top left of `rect`, as `home-drafts/*` draws it: 544 wide
+/// on `bg` in a 1 px `line` edge, the block 25 in. The block's rect.
+pub fn drafts_frame(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, rect: Rect) -> Rect {
+    ui.painter().rect_filled(rect, 0.0, theme.palette.bg);
+    let inner = Rect::from_min_size(rect.min + vec2(DRAFTS_FRAME_PAD, DRAFTS_FRAME_PAD), vec2(DRAFTS_FRAME - DRAFTS_FRAME_PAD * 2.0, 0.0));
+    let drawn = ui.scope_builder(UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)).id_salt("home-drafts-frame"), |ui| {
+        ui.set_width(inner.width());
+        drafts(ui, theme, keymap, home, BLOCK_DRAFTS).0
+    });
+    let block = drawn.inner;
+    let frame = Rect::from_min_max(rect.min, pos2(rect.left() + DRAFTS_FRAME, block.bottom() + DRAFTS_FRAME_PAD));
+    ui.painter().rect_stroke(frame, 0.0, Stroke::new(1.0, theme.palette.line), StrokeKind::Inside);
+    block
 }
 
 #[cfg(test)]

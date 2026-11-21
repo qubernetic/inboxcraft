@@ -635,7 +635,8 @@ impl Kept {
 }
 
 /// Home as the design file draws it in `state` (`today`, `nothing-to-do`, `overflow-counts`, `first-run`,
-/// `everything-failing`), with the file's invented people: the gallery's page.
+/// `everything-failing`, and for the drafts' block alone `drafts` and `drafts-empty`), with the file's invented people:
+/// the gallery's page.
 #[must_use]
 pub fn sample(state: &str) -> Option<Home> {
     let line =
@@ -700,6 +701,16 @@ pub fn sample(state: &str) -> Option<Home> {
             counts: counts(Some(7), Some(3), Some(2), Some(1), 1),
             ..today
         },
+        "drafts" => Home {
+            drafts: vec![
+                draft(1, Some("Price list for the winter workshops"), "to Sunniva Aalto", "edited 12:10"),
+                draft(2, Some("Re: Kiln service: two dates to choose from"), "to Halvard Engen", "edited yesterday"),
+                draft(3, None, "to Marit Solheim", "edited Fri"),
+            ],
+            drafts_total: 5,
+            ..today
+        },
+        "drafts-empty" => Home { drafts: Vec::new(), drafts_total: 0, ..today },
         _ => return None,
     })
 }

@@ -782,3 +782,41 @@ fn a_key_during_the_headline_ends_it_in_that_frame() {
     harness.step();
     assert_eq!(headline_lines(&harness).0, greeting, "the key acts and the headline reads at once");
 }
+
+/// The drafts' block of the sample `state` in its frame of its own (`home-drafts/*`), in `mode`: the block's rect and
+/// the draft rows the harness holds.
+fn drafts_frame(state: &str, mode: Mode) -> (Rect, usize) {
+    let theme = Theme::new(mode, scale(100));
+    let keymap = crate::component::gallery::keymap();
+    let home = sample(state).unwrap();
+    let mut harness = Harness::builder().with_size(vec2(600.0, 300.0)).with_context_setup(install_fonts).build_ui_state(
+        |ui, block: &mut Rect| {
+            *block = super::drafts_frame(ui, &theme, &keymap, &home, Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 300.0)));
+        },
+        Rect::NOTHING,
+    );
+    harness.run_ok();
+    let rows = ["Price list for the winter workshops", "Re: Kiln service", "to Marit Solheim"]
+        .into_iter()
+        .filter(|words| harness.query_by(|node| node.label().is_some_and(|label| label.contains(words))).is_some())
+        .count();
+    (*harness.state(), rows)
+}
+
+/// `home-drafts/default` draws three drafts of five, the block 494 × 201 25 in its frame; `home-drafts/empty` the empty
+/// line, 79 high; the page's frames draw two, and the page gives the block no more (`today`, `overflow-counts` pinned
+/// above at 157).
+#[test]
+fn the_drafts_block_draws_three_where_its_frame_draws_three() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let (block, rows) = drafts_frame("drafts", mode);
+        assert_eq!(at(Some(block)), (25.0, 25.0, 494.0, 201.0), "{mode:?}: home-drafts/default");
+        assert_eq!(rows, 3, "{mode:?}: three rows");
+        let (block, rows) = drafts_frame("drafts-empty", mode);
+        assert_eq!(at(Some(block)), (25.0, 25.0, 494.0, 79.0), "{mode:?}: home-drafts/empty");
+        assert_eq!(rows, 0, "{mode:?}");
+    }
+    let page = sample("drafts").unwrap();
+    let harness = harness_with(page, Mode::Dark, 100, BODY, Rect::from_min_size(pos2(0.0, 0.0), BODY), None, Level::Off, false);
+    assert_eq!(tall(harness.state().drawn.parts.drafts).1, 157.0, "the page draws two of three");
+}
