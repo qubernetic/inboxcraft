@@ -425,10 +425,10 @@ fn list_place(shown: bool, beside: bool) -> ListPlace {
     }
 }
 
-/// The list's pane at the left: its 440 and the line at its left, no splitter, and a width a person once dragged to is
-/// not read.
+/// The list's pane at the left: its 440 from the body's left (the index's line stands left of the body), no splitter,
+/// and a width a person once dragged to is not read.
 fn list_panel() -> Panel {
-    Panel::left("list").resizable(false).exact_size(LIST_WIDTH + 1.0).show_separator_line(false)
+    Panel::left("list").resizable(false).exact_size(LIST_WIDTH).show_separator_line(false)
 }
 
 /// Where the list stands in a frame.
@@ -3157,17 +3157,14 @@ impl InboxApp {
             let (mailbox, keymap) = (&self.mailbox, &self.keymap);
             let list = |ui: &mut Ui, layers: &mut Panes| {
                 layers.card(ui, Margin::ZERO, |ui| {
-                    // The pane's first column is the line at its left: the header and the rows start right of it.
+                    // The index's line stands left of the body: the header and the rows start at the pane's left.
                     let pad = margin(s.s4);
                     let searched = Panel::top("list-header")
                         .show_separator_line(false)
-                        .frame(Frame::new().inner_margin(Margin { left: pad.left.saturating_add(1), ..pad }))
+                        .frame(Frame::new().inner_margin(pad))
                         .show(ui, |ui| list::header(ui, &theme, mailbox))
                         .inner;
-                    let listed = CentralPanel::no_frame()
-                        .frame(Frame::new().inner_margin(Margin { left: 1, right: 0, top: 0, bottom: 0 }))
-                        .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
-                        .inner;
+                    let listed = CentralPanel::no_frame().frame(Frame::new()).show(ui, |ui| list::rows(ui, &theme, keymap, mailbox)).inner;
                     (searched, listed)
                 })
             };

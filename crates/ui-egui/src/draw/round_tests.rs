@@ -99,16 +99,16 @@ fn with_nothing_open_the_list_stands_440_wide_beside_the_reader_s_empty_state() 
     assert!(harness.state().reader.open_id().is_none());
     let body = regions(&harness).body;
     let list = harness.state().list_rect.unwrap();
-    assert_eq!((list.left(), list.width()), (body.left(), 441.0), "the list's 440 and its line, not the whole body {body:?}");
+    assert_eq!((list.left(), list.width()), (body.left(), 440.0), "the list's 440, not the whole body {body:?}");
     assert!(shows(&harness, "Pick a message."), "the reader says nothing is open");
 
     let filled = drafts(sample_app(), 2);
-    assert_eq!(filled.state().list_rect.map(|list| list.width()), Some(441.0), "drafts: the list 440 wide");
+    assert_eq!(filled.state().list_rect.map(|list| list.width()), Some(440.0), "drafts: the list 440 wide");
     assert!(shows(&filled, "Pick a draft."), "drafts: pick one, it opens in the composer");
     assert!(painted(&filled).iter().any(|(text, _)| text.contains("opens the draft where you left it")));
 
     let empty = drafts(sample_app(), 0);
-    assert_eq!(empty.state().list_rect.map(|list| list.width()), Some(441.0), "no drafts: the list 440 wide");
+    assert_eq!(empty.state().list_rect.map(|list| list.width()), Some(440.0), "no drafts: the list 440 wide");
     assert!(shows(&empty, "Nothing to open."), "no drafts: nothing to open");
     assert!(painted(&empty).iter().any(|(text, _)| text == "A message opens here when the list holds one."));
 
@@ -130,7 +130,7 @@ fn the_docked_composer_is_flush_with_the_body_like_the_list() {
     assert_eq!(composer.top(), body.top(), "flush with the body's top");
     assert_eq!(composer.right(), body.right(), "flush with the body's right");
     assert_eq!(composer.bottom(), body.bottom(), "flush with the body's foot");
-    assert_eq!(composer.left(), body.left() + 441.0, "beside the list's 440 and its line");
+    assert_eq!(composer.left(), body.left() + 440.0, "beside the list's 440, its own line first");
 }
 
 #[test]

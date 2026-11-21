@@ -58,13 +58,42 @@ fn the_list_head_is_one_line_with_the_view_switch_at_its_right_and_the_pills_und
             for (name, rect) in [("place", title), ("what it holds", holds), ("switch", switch)] {
                 assert!((rect.center().y - middle).abs() <= 1.0, "{at}: {name} {rect:?} on the head's line at {middle}");
             }
-            assert!((title.left() - (pane.left() + 1.0 + 16.0)).abs() <= 1.0, "{at}: the place 16 in: {title:?} in {pane:?}");
+            assert!((title.left() - (pane.left() + 16.0)).abs() <= 1.0, "{at}: the place 16 in: {title:?} in {pane:?}");
             assert!((holds.left() - title.right() - 10.0).abs() <= 1.0, "{at}: 10 between: {title:?} {holds:?}");
             assert!((switch.right() - (pane.right() - 16.0)).abs() <= 1.0, "{at}: the switch 16 in from the right: {switch:?} in {pane:?}");
             // The filters' line under the head and its hairline, "Show done" at its start.
             let filters_middle = pane.top() + head + 1.0 + filters / 2.0;
             assert!((done.center().y - filters_middle).abs() <= 1.0, "{at}: Show done {done:?} on the filters' line at {filters_middle}");
-            assert!((done.left() - (pane.left() + 1.0 + 16.0)).abs() <= 1.0, "{at}: Show done 16 in: {done:?}");
+            assert!((done.left() - (pane.left() + 16.0)).abs() <= 1.0, "{at}: Show done 16 in: {done:?}");
+        }
+    }
+}
+
+/// `inbox-grouped/filled`, `shell/reader-open`: the list stands on the frame's pixels, from the index's line (233 in the
+/// 1440 frame) to the reader's (674): 440 wide from the body's left (234), the place and Show done 16 in, the rows
+/// across it, the reader's pane (its line first) from 674.
+#[test]
+fn the_list_stands_440_wide_between_the_index_s_line_and_the_reader_s() {
+    for open in [false, true] {
+        let mut harness = grouped(1440.0, TextScale::default());
+        if open {
+            let first = harness.state().mailbox().messages().first().map(|row| row.id);
+            harness.state_mut().mailbox_mut().select(first);
+            harness.run();
+            harness.run();
+        }
+        let pane = list(&harness);
+        let body = super::super::shell::laid(&harness.ctx).unwrap().body;
+        assert_eq!((pane.left(), pane.width()), (body.left(), 440.0), "open {open}: the list from the body's left, 440 wide: {pane:?}");
+        let left = pane.left();
+        assert_eq!(harness.get_by_label("Inbox").rect().left(), left + 16.0, "open {open}: the place 16 in");
+        assert_eq!(harness.get_by_role_and_label(Role::Button, "Show done").rect().left(), left + 16.0, "open {open}: Show done 16 in");
+        let row = harness.get_all_by_role(Role::ListBoxOption).next().unwrap().rect();
+        assert_eq!((row.left(), row.right()), (left, left + 440.0), "open {open}: a row across the list");
+        if open {
+            let reader = super::super::reader_rect(&harness.ctx).unwrap();
+            // The reader's pane starts at the list's right with its line in its first column (674 in the frame).
+            assert_eq!(reader.left(), left + 440.0, "the reader's line 440 from the list's left");
         }
     }
 }
@@ -164,7 +193,7 @@ fn the_list_head_cuts_whose_mail_before_the_count() {
             let count = harness.state().mailbox().list_count();
             let whose = harness.state().mailbox().subtitle();
             let at = format!("{scale:?} narrowed {narrowed}");
-            assert!((list(&harness).width() - 441.0).abs() <= 1.0, "{at}: the list 440 wide");
+            assert!((list(&harness).width() - 440.0).abs() <= 1.0, "{at}: the list 440 wide");
             let texts = head_texts(&harness, head);
             let shown: String = texts.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" ");
             // Nothing in the words runs under the view switch where it stands in the head (with too little room it

@@ -2319,9 +2319,9 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
     let area = ScrollArea::vertical().id_salt("new-senders").auto_shrink([false, false]);
     crate::component::scroll::show(ui, theme, area, |ui| {
         let pad = if ui.available_width() > CARD_WIDE { QUEUE_PAD.0 } else { theme.spacing.s4 };
-        // From the body's left edge: the list's 1 px line column is already behind the room (#328).
+        // From the body's left edge, where the list's room starts (#328).
         let side = i8::try_from(pad as i32).unwrap_or(16);
-        Frame::new().inner_margin(Margin { left: side.saturating_sub(1), right: side, top: 36, bottom: 36 }).show(ui, |ui| {
+        Frame::new().inner_margin(Margin { left: side, right: side, top: 36, bottom: 36 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, QUEUE_GAP);
             let count = askers.len();
             let word = if count == 1 {
