@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The scenes of `shots.jsonl` show what their names say on the frames' sample: the error scenes keep the error of
-//! the folder they open after the window is drawn.
+//! the folder they open after the window is drawn, and the event editor's scenes pick an event the owner can edit or
+//! one that is someone else's as their names say.
 
 use egui::vec2;
 
@@ -43,5 +44,17 @@ fn the_error_scenes_keep_their_error_once_drawn() {
         sync(&mut app, &shot).unwrap();
         render(&mut app, vec2(1200.0, 760.0), 1.0, Mode::Light).unwrap();
         assert_eq!(app.mailbox().error(), Some("there is no folder 4242"), "{}", shot.out);
+    }
+}
+
+#[test]
+fn the_event_scenes_edit_an_own_event_and_read_someone_else_s() {
+    for shot in scenes(&["event-edit", "event-read-only", "event-full-edit", "event-full-read-only"]) {
+        let (mut app, _) = window(&shot).unwrap();
+        app.show_calendar();
+        super::calendar(&mut app, &shot).unwrap();
+        let editor = app.calendar().editor();
+        let read_only = editor.map(crate::calendar::editor::Editor::read_only);
+        assert_eq!(read_only, Some(shot.out.contains("read-only")), "{}", shot.out);
     }
 }
