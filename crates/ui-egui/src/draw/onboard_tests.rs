@@ -2007,6 +2007,22 @@ fn an_account_s_form_has_the_frame_s_head_and_rows() {
         assert_eq!(link.height(), 16.0, "{theme:?}: {link:?}");
         let title = harness.get_by_label("Account settings · Personal").rect();
         assert_eq!(title.top() - link.top(), 23.0, "{theme:?}: {title:?} under {link:?}");
+        // The account's bar, 3 × 12 in its colour, in the middle of the title's row, the title 15 right of it.
+        let mode = if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light };
+        let colour = crate::theme::Theme::of(mode, &crate::theme::Look::default()).account_colour(0);
+        let bar = harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect)
+                if rect.fill == colour
+                    && rect.rect.size() == vec2(3.0, 12.0)
+                    && rect.rect.left() >= link.left()
+                    && rect.rect.top() > link.bottom() =>
+            {
+                Some(rect.rect)
+            }
+            _ => None,
+        });
+        let bar = bar.unwrap_or_else(|| panic!("{theme:?}: no account bar"));
+        assert_eq!((bar.left(), bar.top()), (title.left() - 15.0, title.top() - 1.0 + 10.0), "{theme:?}: {bar:?} by {title:?}");
         // No note under the stored password at rest: the IMAP server's row stands 12 under the New password box.
         let password = harness.get_by_label("New password").rect();
         assert_eq!(field_top(&harness, "IMAP server") - password.bottom(), 12.0, "{theme:?}");
