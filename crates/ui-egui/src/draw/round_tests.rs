@@ -161,8 +161,10 @@ fn the_status_line_s_separators_stand_4_from_the_facts_beside_them() {
     let harness = frames_window(sample_app());
     let status = regions(&harness).status;
     let dots: Vec<Rect> = harness.query_all_by_label("·").map(|node| node.rect()).filter(|rect| status.contains_rect(*rect)).collect();
-    let facts: Vec<Rect> =
-        ["offline", "showing what is kept on this computer"].iter().filter_map(|text| harness.query_by_label(text).map(|node| node.rect())).collect();
+    let facts: Vec<Rect> = ["offline since ", "showing what is kept on this computer"]
+        .iter()
+        .filter_map(|text| harness.query_by_label_contains(text).map(|node| node.rect()))
+        .collect();
     assert_eq!((dots.len(), facts.len()), (1, 2), "two facts and a separator between them");
     let (dot, before, after) = (dots[0], facts[0], facts[1]);
     assert!((dot.left() - before.right() - 4.0).abs() < 0.5, "4 after the fact: {before:?} {dot:?}");

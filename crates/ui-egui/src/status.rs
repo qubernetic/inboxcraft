@@ -116,6 +116,11 @@ impl Status {
         self.queue.remove(at).map(|waiting| waiting.message.text().to_owned())
     }
 
+    /// Whether an error saying `text` (cleaned) still waits or shows: one a full queue dropped does not.
+    pub(crate) fn holds_error(&self, text: &str) -> bool {
+        self.queue.iter().any(|waiting| matches!(&waiting.message, Message::Error { text: said } if said == text))
+    }
+
     /// The newest notice waiting or shown: what it says.
     pub(crate) fn notice(&self) -> Option<&str> {
         self.queue.iter().rev().find(|waiting| matches!(waiting.message, Message::Notice { .. })).map(|waiting| waiting.message.text())

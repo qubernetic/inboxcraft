@@ -103,7 +103,8 @@ fn the_status_line_says_a_failing_account_s_reason_in_the_frames_few_words() {
     let mut app = app();
     sync(&mut app, &shot).unwrap();
     fail(&mut app, &shot).unwrap();
-    let facts = crate::draw::status::read(app.mailbox_mut());
-    assert_eq!(facts.failures, ["Personal: no connection", "Studio: sign-in refused"]);
-    assert_eq!(facts.failing, 2);
+    let facts = crate::draw::status::read(app.mailbox_mut(), None);
+    // `status-line/everything-failing`: the worst first, what needs the owner before what mends itself.
+    assert_eq!(facts.failures, ["Studio: sign-in refused", "Personal: no connection"]);
+    assert_eq!(facts.problems, 2);
 }

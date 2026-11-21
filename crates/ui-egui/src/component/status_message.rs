@@ -162,6 +162,9 @@ pub fn status_message(ui: &mut Ui, theme: &Theme, keymap: &Keymap, message: &Sta
         _ => heard(message.text),
     };
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &said));
+    // A live region: a screen reader says the message when it comes, an error at once, the rest when it is free.
+    let live = if message.kind == Kind::Error { egui::accesskit::Live::Assertive } else { egui::accesskit::Live::Polite };
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_live(live));
     let clip = rect.intersect(ui.clip_rect());
     let (edge, mark, ink) = message.kind.look(theme);
     let middle = rect.center().y;
