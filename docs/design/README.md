@@ -89,7 +89,8 @@ What the app still owes this file, one line each. The finer differences, with th
   opens in by default is not settled yet.
 
 **Messages**
-- The original cannot be opened in the browser from a cleaned copy. The fitted view draws a mail's tables used for
+- The cleaned copy opens in the browser from the reader's More menu, not from the content bar, and a link in it
+  shows where it goes as a tooltip, not beside its words. The fitted view draws a mail's tables used for
   layout with hairlines (the Messages page draws them without lines), a coloured cell round a link as a band rather
   than the mail's button, and every band 14 above and 16 below its blocks (the receipt's band is 12 and 14).
 - A reply's quote is plain `> ` lines in the body, not the file's quote block.
