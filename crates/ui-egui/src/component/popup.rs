@@ -562,11 +562,22 @@ pub fn menu_item(ui: &mut Ui, theme: &Theme, keymap: &Keymap, item: &Item<'_>) -
 /// [`menu_item`] drawn in `shown` whatever the pointer and the keyboard do (a board of the gallery); `column` keeps
 /// the icon's room when it has none, so its name lines up with the rows that have one.
 pub(crate) fn menu_item_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, item: &Item<'_>, column: bool, shown: Option<Shown>) -> Response {
+    menu_item_offering(ui, theme, keymap, item, (column, shown), true)
+}
+
+/// [`menu_item`] whose key chip offers its action to no one: a row that only recalls a command (the command line's
+/// LAST COMMANDS) never makes a coming-soon action look built ([`soon::blocked`]).
+pub(crate) fn menu_item_unoffered(ui: &mut Ui, theme: &Theme, keymap: &Keymap, item: &Item<'_>) -> Response {
+    menu_item_offering(ui, theme, keymap, item, (false, None), false)
+}
+
+/// [`menu_item_with`], offering its action to the coming-soon gate when `offer`.
+fn menu_item_offering(ui: &mut Ui, theme: &Theme, keymap: &Keymap, item: &Item<'_>, (column, shown): (bool, Option<Shown>), offer: bool) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
     let soon = soon::is_soon(ui);
     let unavailable = item.state == ItemState::Unavailable;
-    if let Some(action) = item.action {
+    if let Some(action) = item.action.filter(|_| offer) {
         soon::offer(ui, action);
     }
     let (response, row) = row_rect(ui, theme, theme.boxes().menu_row, !unavailable && ui.is_enabled(), shown);
