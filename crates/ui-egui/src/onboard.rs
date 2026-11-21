@@ -707,6 +707,15 @@ struct Changes {
     goes_to: Vec<String>,
 }
 
+/// How a removal the engine took went, with what the status line says of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Removed {
+    /// The account and its password are gone from this computer.
+    Done(String),
+    /// The account is gone, but the system's credential store kept its password: it is tried again later.
+    PasswordKept(String),
+}
+
 /// How a step of the check stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepState {
@@ -1800,8 +1809,9 @@ impl Onboarding {
     /// Removes the account whose form is open, on the owner's press of the question's "Remove account": `account.remove`
     /// takes it and what this computer keeps of it out of the store, then its password leaves the system's credential
     /// store ([`Keychain::forget`]; one the store refuses is tried again by [`Self::forget_passwords`]). The form
-    /// closes, nothing of it kept. What the status line says, or `None` when the engine refused, which the form says.
-    pub fn remove(&mut self, mailbox: &mut Mailbox) -> Option<String> {
+    /// closes, nothing of it kept. How it went, with what the status line says, or `None` when the engine refused, which
+    /// the form says.
+    pub fn remove(&mut self, mailbox: &mut Mailbox) -> Option<Removed> {
         let Stage::Edit(id) = self.stage else { return None };
         if !self.asking_remove {
             return None;
@@ -1830,12 +1840,12 @@ impl Onboarding {
         self.stage = Stage::Closed;
         mailbox.refresh();
         Some(match forgotten {
-            Ok(()) => tr!("{name} removed from this computer", name = name),
-            Err(refused) => tr!(
+            Ok(()) => Removed::Done(tr!("{name} removed from this computer", name = name)),
+            Err(refused) => Removed::PasswordKept(tr!(
                 "{name} removed from this computer; the system's credential store did not let its password go: {reason}",
                 name = name,
                 reason = shown(&refused)
-            ),
+            )),
         })
     }
 

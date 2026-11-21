@@ -6,11 +6,12 @@
 //! body, so nothing it says covers a control of the panes.
 //!
 //! A message is something that just happened: an act that can be taken back ([`Message::Undo`], for the `undo` token's
-//! 5 000 ms), a send that can still be taken back ([`Message::Countdown`]), a notice ([`Message::Notice`], 4 000 ms)
-//! or a failure ([`Message::Error`], which stays until dismissed). The window holds the undo and the countdown itself
-//! (they are its acts' and its sends' state) and hands them in each frame; the notices and the errors wait here, in a
-//! queue of at most [`QUEUE`]. The one shown is the most urgent: a countdown, then an undo, then the oldest error,
-//! then the oldest notice. A notice's time starts when it shows.
+//! 5 000 ms), a send that can still be taken back ([`Message::Countdown`]), a notice ([`Message::Notice`], 4 000 ms),
+//! something done ([`Message::Done`], a notice in the done look) or a failure ([`Message::Error`], which stays until
+//! dismissed). The window holds the undo and the countdown itself (they are its acts' and its sends' state) and hands
+//! them in each frame; the notices and the errors wait here, in a queue of at most [`QUEUE`]. The one shown is the
+//! most urgent: a countdown, then an undo, then the oldest error, then the oldest notice. A notice's time starts when
+//! it shows.
 //!
 //! Every text the line shows that comes from outside (an account's name, a server's failure, a subject) goes through
 //! [`clean`] first: one line of at most [`MOST`] characters.
@@ -37,6 +38,8 @@ pub(crate) enum Message {
     Countdown { text: String, until: f64 },
     /// A notice, until `until` once it shows.
     Notice { text: String, until: f64 },
+    /// Something that went through as asked: a notice in the done look, queued and timed as a notice is.
+    Done { text: String, until: f64 },
     /// A failure: it stays until dismissed.
     Error { text: String },
 }
@@ -45,8 +48,15 @@ impl Message {
     /// What it says.
     pub(crate) fn text(&self) -> &str {
         match self {
-            Self::Undo { text, .. } | Self::Countdown { text, .. } | Self::Notice { text, .. } | Self::Error { text } => text,
+            Self::Undo { text, .. } | Self::Countdown { text, .. } | Self::Notice { text, .. } | Self::Done { text, .. } | Self::Error { text } => {
+                text
+            }
         }
+    }
+
+    /// Whether it is a notice, in the notice's look or the done look: queued and timed alike.
+    pub(crate) const fn is_notice(&self) -> bool {
+        matches!(self, Self::Notice { .. } | Self::Done { .. })
     }
 }
 
@@ -70,11 +80,12 @@ impl Status {
     pub(crate) fn push(&mut self, message: Message) {
         let message = match message {
             Message::Notice { text, until } => Message::Notice { text: linked(clean(&text)), until },
+            Message::Done { text, until } => Message::Done { text: linked(clean(&text)), until },
             Message::Error { text } => Message::Error { text: linked(clean(&text)) },
             Message::Undo { .. } | Message::Countdown { .. } => return,
         };
         if self.queue.len() >= QUEUE {
-            let notice = self.queue.iter().position(|waiting| matches!(waiting.message, Message::Notice { .. }));
+            let notice = self.queue.iter().position(|waiting| waiting.message.is_notice());
             self.queue.remove(notice.unwrap_or(0));
         }
         self.queue.push_back(Waiting { message, since: None });
@@ -83,7 +94,7 @@ impl Status {
     /// Queues `message` as [`Status::push`] does, in place of every notice still waiting or shown whose text `earlier`
     /// holds for: a newer word on the same thing (the text size a key changed again) is not kept waiting behind an older.
     pub(crate) fn push_in_place_of(&mut self, message: Message, earlier: impl Fn(&str) -> bool) {
-        self.queue.retain(|waiting| !matches!(&waiting.message, Message::Notice { text, .. } if earlier(text)));
+        self.queue.retain(|waiting| !(waiting.message.is_notice() && earlier(waiting.message.text())));
         self.push(message);
     }
 
@@ -91,7 +102,7 @@ impl Status {
     /// the oldest error, else the oldest notice, whose time starts now if it had not shown. A notice that ran out goes.
     pub(crate) fn shown(&mut self, now: f64, countdown: Option<Message>, undo: Option<Message>) -> Option<Message> {
         self.queue.retain(|waiting| match (&waiting.message, waiting.since) {
-            (Message::Notice { until, .. }, Some(since)) => now - since < *until,
+            (Message::Notice { until, .. } | Message::Done { until, .. }, Some(since)) => now - since < *until,
             _ => true,
         });
         if let Some(over) = countdown.or(undo) {
@@ -106,6 +117,7 @@ impl Status {
         let since = *waiting.since.get_or_insert(now);
         Some(match &waiting.message {
             Message::Notice { text, until } => Message::Notice { text: text.clone(), until: since + until },
+            Message::Done { text, until } => Message::Done { text: text.clone(), until: since + until },
             other => other.clone(),
         })
     }
@@ -128,12 +140,12 @@ impl Status {
 
     /// The newest notice waiting or shown: what it says.
     pub(crate) fn notice(&self) -> Option<&str> {
-        self.queue.iter().rev().find(|waiting| matches!(waiting.message, Message::Notice { .. })).map(|waiting| waiting.message.text())
+        self.queue.iter().rev().find(|waiting| waiting.message.is_notice()).map(|waiting| waiting.message.text())
     }
 
     /// Drops every notice: something newer says what happened.
     pub(crate) fn forget_notices(&mut self) {
-        self.queue.retain(|waiting| !matches!(waiting.message, Message::Notice { .. }));
+        self.queue.retain(|waiting| !waiting.message.is_notice());
     }
 
     /// How many notices and errors wait, the one shown included.

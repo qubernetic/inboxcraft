@@ -3935,7 +3935,7 @@ impl InboxApp {
         // The window's message, when it gave one, is the one drawn: a press on the line's Undo is that one's.
         let shown = self.status.shown(now, None, over);
         match &shown {
-            Some(crate::status::Message::Notice { until, .. }) => {
+            Some(crate::status::Message::Notice { until, .. } | crate::status::Message::Done { until, .. }) => {
                 ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((until - now).clamp(0.0, 3600.0)));
             }
             Some(crate::status::Message::Undo { until, .. } | crate::status::Message::Countdown { until, .. }) => {
@@ -4341,13 +4341,19 @@ impl InboxApp {
             onboard::Asked::Remove => {
                 // The owner's press of the question: the only way the form removes an account.
                 let gone = if let crate::onboard::Stage::Edit(id) = onboarding.stage() { Some(id) } else { None };
-                if let Some(said) = onboarding.remove(mailbox) {
+                if let Some(removed) = onboarding.remove(mailbox) {
                     // The message being written from it goes with its drafts, as the question said: nothing keeps it
                     // into a draft that is gone.
                     if self.composer.as_ref().is_some_and(|composer| gone == Some(composer.account())) {
                         self.composer = None;
                     }
-                    self.say(&said);
+                    // Done when its password left the store too; a password the store kept is a notice with the reason.
+                    match removed {
+                        crate::onboard::Removed::Done(text) => {
+                            self.status.push(crate::status::Message::Done { text, until: crate::status::NOTICE_SECONDS });
+                        }
+                        crate::onboard::Removed::PasswordKept(text) => self.say(&text),
+                    }
                     self.settings.hand_to_nav();
                 }
             }
