@@ -1,6 +1,6 @@
 # The MCP server
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** major
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 An agent (Claude Desktop or Code, Codex, any MCP client) reads InboxCraft's mail through the Model Context Protocol.
 The server is the crate `inboxcraft-mcp` (layer 5); `inboxcraft-cli mcp` runs it in the running app, through the
@@ -135,3 +135,10 @@ a message asks for it, and every tool is `safe`.
 |---|---|---|
 | 2026-11-08 | major | First version: the read-only MCP server, its tools, results and untrusted text (#141) |
 | 2026-11-08 | minor | Without `--store` the MCP server runs its tools in the running app (#142) |
+| 2026-11-21 | minor | The tools are a fixed list (#255) |
+| 2026-11-21 | minor | The tools `week_settings` and `sync_status`; `mail.why` not offered until the owner decides (#273) |
+| 2026-11-21 | minor | The tool `mail_why` (#347) |
+| 2026-11-21 | minor | No tool for `event.all_day_alert.set` (#353) |
+| 2026-11-21 | minor | `ui.layout.set` names where the event editor opens (#370) |
+| 2026-11-21 | patch | No tool for the appearance; the layout is the owner's (#374) |
+| 2026-11-21 | patch | `mail_list` has no group column: worded for the grouped inbox that is there (#425) |

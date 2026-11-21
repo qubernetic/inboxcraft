@@ -1,6 +1,6 @@
 # Privacy
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 ## What the InboxCraft project collects
 Nothing. InboxCraft has no telemetry, no analytics and no crash reporting, and there is no InboxCraft server.
@@ -226,3 +226,4 @@ Changes to this page are listed below. Questions: open an issue, or write to [in
 | 2026-11-08 | minor | Calendars synced at each start; a deleted event goes six seconds later; guests named, not mailed, `SCHEDULE-AGENT=CLIENT`; no query in the address; a new server forgets the old one's calendars and answers (#146) |
 | 2026-11-08 | minor | What an invitation's mark keeps and what an answer sends (#149) |
 | 2026-11-08 | minor | What a calendar alert's notification hands on, which events alert, no switch on the page yet (#150) |
+| 2026-11-21 | minor | "Remove account…" on an account's form removes it and its password (#317) |

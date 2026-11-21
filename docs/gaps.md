@@ -1,6 +1,6 @@
 # Where InboxCraft falls short
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 ## Ranked
 | # | Gap | B | Evidence | Impact | Hours | Doc |
@@ -766,6 +766,818 @@ time from the code as it is, not measured.
   first calendar, with no choice of calendar (#149).
 - An alert notification has no snooze or dismiss button; mail (`EMAIL`) alarms and alarms more than a year from their
   event are left out; the default alert of an all-day event goes off at midnight the day before (#150).
+- A selected icon button and a section label that folds its section have no pressed state in the design; the app
+  borrows the nearest one: the accent edge of a pressed primary on the selected button, the muted edge of a pressed
+  icon button round the label's hover fill (#233)
+- Check boxes, radio buttons, switches, segmented controls, pills and selects have looks the design does not draw yet,
+  and the app chooses them: pressed, a chosen or on control takes the accent wash with the `cyan_edge` edge (a chosen
+  pill's word turns `ink`, a chosen segment keeps its foot bar), an unchosen pill and a select take the `stage` fill
+  and `ink` edge of a pressed secondary button; a chosen radio button and an on switch hovered turn to `ink` as a
+  ticked check box does; a chosen radio button disabled keeps its square in `dim`, a ticked check box disabled its
+  cross in `muted` (#233)
+- The design's quote fold (a `muted` line in a 2 px edge) is not built yet: a small link folds quoted text, and the
+  reader's notice keeps its own layout with a small link (#233)
+- The menu dividers span the menu's content, 4 px in from its edge on each side; the design's run edge to edge
+  (#233)
+- Fields, menus and pickers have looks the design does not draw yet, and the app chooses them: a pressed menu row,
+  choice, suggestion or recipient chip takes the press of a secondary button (`stage` and an `ink` edge), a pressed
+  chosen row or ticked choice the accent wash with the `cyan_edge` edge; a focused empty text field puts its hint
+  after the caret as the typed time does; the caret stands 2 after the character before it, over the next one when
+  it is inside the text (#234)
+- A menu row from a plugin is drawn coming soon, without the plugin's tag; the time picker reads a date that has
+  passed only when it is written with its year (`2026-11-02 09:00`), as `2 nov` always means the next one (#234)
+- A caret moved into the 8 px above or below a scrolling multiline field's text scrolls it into the text's room (#234)
+- While a screen reader listens, egui hands every glyph of a text to it every frame: the composer's message text
+  costs about 2 ms a frame at 256 KiB and 12 ms at 1 MiB at rest, 3 and 18 ms while typing, over the budget of 4 ms
+  near its 1 MiB cap (a field of several lines holds 64 KiB, under 1 ms); without one it costs under 0.5 ms at rest
+  and 3.1 to 4.3 ms a frame typing at 1 MiB (p95 over three runs on a busy machine), at or over the budget (#234)
+- A frame with an undo or a redo in a field copies the field's whole text once more, into the field's own record of
+  the frame's changes, so that a refused frame can be put back; other frames copy nothing of it (#234)
+- egui copies a field's whole text every frame it is drawn, and twice more while it has the keyboard, a password's
+  too, and frees those copies without wiping them; the field wipes its own copies of a password, but egui's are out
+  of its reach (#234)
+- The composer says a refused paste over its message text, and brings that line into view, so a person typing at
+  the end of a long draft sees the page move up to it (#234)
+- A field refuses a frame's input as a whole: when anything in a frame would take the text past its limit, all of
+  that frame's change to the field goes, so a character typed in the same frame as a paste that is too long goes too
+  and is typed again. The limit of a text opened over its cap is the size it opened with until the text changes
+  from outside, drawn or not in between; such a change also clears the field's undo history, so Ctrl Z never brings
+  back the text before it. A change from outside that keeps the length is not seen: the older, larger limit and the
+  history stay. When something else moved the selection inside an unfinished input method word, a
+  refused commit leaves that word in the text (until the next word of the input method takes its place). If egui
+  has already used its second pass in that frame, the "too long" line shows one frame late (#234)
+- The Sending page shows a stored signature whole; the account itself still cuts a signature at 2 000 characters
+  when it is read from the store or saved, so a longer one written into the store by hand is cut there, before any
+  field sees it (#234)
+- Turning typed text into recipient chips, and saving a signature the account tidies (white space at its end),
+  change the field's text from outside, which clears its undo history (#234)
+- A recipient line stops growing at four rows of chips and scrolls; the design's line grows to hold them all, with
+  no limit drawn (#234)
+- A recipient line splits what is typed at every comma and semicolon, inside a quoted name too: where the line has
+  room, `"Doe, Jane" <jane@example.org>` becomes two chips, and where it is full it counts as two (#234)
+- The focused scrolling field's board differs from the field in two ways the field does not follow: the board's text
+  is scrolled by whole lines (154 = 7 × 22) where the field scrolls to the very end of its text (152), so the
+  caret and the text stand 2 px lower than the board's; and the board's thumb is 148 long where the text in
+  proportion gives 140 (#234)
+- Right-aligned mono runs follow the design's rule (the run at the left of a box as wide as the run rounded up,
+  `paint::run_right`) in menus, floats and the recipient line; the list's, the reader's and the settings' dates still
+  put the run's exact right end on the pad until the list (#236), reader (#237) and screens (#238) slices (#234)
+- The real menus are not yet the design's frames: More, Move, From and Templates are 252 or 308 wide where the
+  frames are 288, 256, 360 and 256 (Group is the frame's 256 × 212 since #236); More's Park, Show the full header and Full width have no icon,
+  Move's folders no icon or key and its title no caption, Templates' title no count, and From lists plain choices
+  where the frame draws account rows (colour bar, name, address in mono 11, tick). The reader's menus come with the
+  reader (#237), the composer's with the screens (#238) (#234)
+- The wrapped recipient line's board gives `Studio, everyone` a 106 box although the run is exactly 105.000 wide,
+  kerned, in the design's font too; every other hugged name on the boards is the ceiling of its kerned width. A board
+  artefact, left for the owner: the app's chip is 137 where the board's is 138, and its cross and the caret after it
+  stand 1 px left (#234)
+- The password's dots: the board centres them on y 42.5 in its cell and draws them 4 rows high (41 to 44); the app's
+  glyphs land on whole rows, 0.55 px lower, 3 rows high (42 to 44); x 15 to 104 the same (#234)
+- The composer's subject and message text are plain edits without the field's box until the composer is restyled
+  (#234)
+- A time typed or picked for a date past a change of daylight saving time is read on today's offset, an hour off
+  (#234)
+- A hover action held down has no pressed look in the design; the app gives it the press of a secondary button, the
+  `stage` fill and an `ink` edge (#235)
+- The hover actions stand at the right end of the row's first line, right of its middle (what does not fit gives way
+  from the end of the list's order, Delete first, then Read and Snooze, Done last; beside the reader all four show on
+  a hovered row); a hovered row hides its time, the keyed row keeps it and its actions stand left of it, so at the
+  list's width beside the reader the keyed row gives up Delete (Done, Snooze and Read show, Delete stays on its
+  key); the reader's banners keep their own layout until they move to the banner component (#235)
+- The design draws no flagged or pinned row under the pointer: the app keeps the flag and the pin on the first line,
+  8 left of the hover actions and 8 apart, and cuts the sender 4 short of them (#235)
+- A settings row whose control has the focus shows the row's focus edge and the control's own ring; the design shows
+  the row's edge alone (#235)
+- A banner's link is drawn whole while it fits the banner's room; the design's banner board cuts the second link of
+  the remote-pictures banner (`always for news@brightshelf.example.org`) at 240 wide with an ellipsis, though the
+  room would hold it (#235)
+- egui draws a glyph on whole pixel rows only: a caption line stands 0.30 to 0.40 px above the design's place, whose
+  baseline falls half way between two pixels (it stood 0.60 to 0.70 px under it) (#235)
+- Text drawn by egui's own widgets (`ui.label` and the like: the list pane's screener note and the sidebar's
+  addresses, the settings dialog's lines) keeps egui's baseline, so at 100 % it stands 1 px under caption text drawn
+  through the components, until those views move onto the components in the lists, reader and screens slices (#235)
+- At 125 % the second row of a wrapped run can land about 1 px off the design's line; the whole-pixel baseline is
+  measured at 100 % (#235)
+- The running step of an account's check is the design's `[ .. ]` and stands still; the running mark of a progress
+  line goes round. With motion off (not a level of its own yet) the ring will stand still and the bar give way to
+  its words (#235)
+- Motion has two levels in the app, on and off; "on" plays the design's reduced level: a row leaving by Done,
+  Delete, Archive, Move or Park closes over 180 ms on the design's curve, a snoozed row fades over 125 ms. The full
+  level (Done's words dissolving, Snooze's slide of 24 px and its 300 ms fade) comes with stage I-2.7 (#236)
+- The mail row's paperclip and invitation marks are drawn on the gallery only: the list does not know yet whether a
+  message carries attachments or an invitation (#236)
+- A snoozed message found by a search is a plain row: the engine's search output carries no snoozed time. Listed
+  in its snoozed folder it is the sheet's snoozed row (the clock and "back …" in `warn`), in Later the later row (#236)
+- Bulk select is planned: the mail row's checked states are drawn on the gallery with the check box coming soon, and
+  the list's rows have no check box (#236)
+- A sent message that was not delivered keeps its sender's name in its row; the design writes "To" and the
+  recipient (#236)
+- The screener card's line under it is drawn inside its 64, where the design stands a 1 px line under a card of 64:
+  every line height stays a whole even number of points, so every edge is a whole pixel at 1.5× (#236)
+- A group's head the keyboard is on shows "done all", which the sheet's focus state does not draw, so `Tab` reaches
+  it (#236)
+- A row of Later the keyboard is on shows "bring back now", which the sheet's focus state does not draw, so `Tab`
+  reaches it (#236)
+- A send on its way says "sending…" without the sheet's progress, which the engine does not report (#236)
+- The rows of the pins and the park pile offer no link while hovered: the sheet draws one for a snoozed row only (#236)
+- Drafts' rows have no check boxes and no bulk bar: the way in is drawn as "Select", coming soon (#236)
+- Whether Smart shows all of a group's rows is kept while the app runs, not between runs, and under the group's
+  translated name, so a change of language folds every group again (#236)
+- A screen reader sees only the rows in sight (and two above and below) as items; the rest of the list is there as
+  its size and each row's place in it, not as items it can move to without scrolling (#236)
+- The engine lists at most 1 000 messages of a place; the list says "1000 messages" and shows no more (#236)
+- Showing all of a group's rows or fewer, and changing Later's pile, change at once: the design's motion names none
+  for them (only M5, M6 and M11 touch the lists), so none is played (#236)
+- The queue of New senders plays M11 at the reduced level, the one the app's motion has: the full level (the card
+  leaving 24 px up or down over 300 ms) comes with stage I-2.7. The queue's own head stands under the list's head
+  until the head is the design's, and a card's time stands after its subject, not at the end of the name's line (#236)
+- Back from a held message in one pane, New senders' queue takes no keyboard landing: its cards have no row to
+  land on, so the focus starts over (#236)
+- The rows' cut and `cut_within` (the fields, the floats) measure a line the same way but do not always keep the same
+  letters: right-to-left text is cut at opposite ends (the rows keep its beginning, `cut_within` its end), and
+  `cut_within` can pass its room by a fraction of a point (0.13 pt the most seen) (#236)
+- In one pane, a draft behind the list shows no sign that it waits: `C`, "New message" or a message opened from the
+  list brings the composer back with all it holds (#236)
+- The current card of New senders ends its why-line without the design's "open log →": the app keeps no log of the
+  screener's answers to open (#236)
+- The list's head is not yet the design's: the design draws a head of 48 (the place's name in `strong` mono, how
+  many to read, the view switch at its right), a line, a row of 36 with the pills and a `panel_line`; the app keeps
+  the title, whose mail and how many, and the search field over one line of the view switch and the pills. The
+  design's head comes with stage I-2.2 (#236)
+- A search's line under the list's head does not offer the design's "all mail" and "clear" links at its right; it
+  says what was searched and where, and the search in message text stands there coming soon, which the design does
+  not draw (#236)
+- New senders' "SCREENER" stands about 6 px high beside its mode switch: the design centres the label on the
+  switch's 32 high row (the label 16 high at +8) (#236)
+- A card of New senders puts the time of the newest message after its subject on the second line; the design puts it
+  at the right end of the name's line (the 620 wide line's last 33) (#236)
+- More's second head ("When a message leaves the list") keeps a 1 px line under it, which the design's More menu
+  does not draw (the head 28, the choices straight under it) (#236)
+- At 130 % the current card's why-line cuts the time it was held back since: the answers grow and leave the text less
+  than the design's 620 (#236)
+- Beside the reader at 1300 the keyed row keeps its time, so its hover actions stand left of it and Delete gives way
+  first (Done, Snooze and Read show; Delete stays on its key); the design's hovered row shows all four, 197 wide, at
+  the right end of line one with the time hidden, and its focus state draws none (#236)
+- Beside the lists' 441 at 1024 px the reader is about 279 wide: an attachment box shows no name; at 130 % text
+  "Accept and reply" in the let-in card is cut with `…` inside its button, the subject keeps a word or two a line and
+  a thread's line shows no sender (#237)
+- The epic's "Back to the list" centred on the sender's avatar has no place: the reader's head has no avatar (#237)
+- The reader stands with nothing open only after the server took the open message away; with no message picked since
+  the app started, the list still takes the reader's width (#237)
+- After a message left, the first step from the gap it left follows the list's flat order, not the order the cards
+  show, and can open a row a card keeps hidden behind "Show all"; every step after it follows the cards (#237)
+- The reader's attachments stand as wide as what they hold, where the design draws a lone attachment across the
+  reader (#237)
+- A thread's message and a quote open and fold at once: the design gives the folds no timing (#237)
+- In a narrow content bar, once `open in browser ↗` has given way, the coming-soon tag gives way too when the words
+  need its room (#237)
+- The content bar counts no trackers: the HTML cleaner does not count what it removes, so the bar says only what
+  pictures were held back or loaded; a mailing list's bar and its `unsubscribe` wait for the list headers (#237)
+- An attachment never shows its saving state: the save writes the file at once, in the frame it is asked for (#237)
+- The More menu's Park, Show the full header and Full width rows have no icon: the app's 45 icons hold none for them
+  (#237)
+- The subject the reader holds is cut at 300 characters before it is drawn, so the copy and a screen reader get
+  those 300 (#237)
+- An open line of a thread has a menu with "Show the full header" that the design does not draw: it is the way to
+  an older message's header where its line has no room for `details ▾` (#237)
+- A bounced message's banner has no `open the report` and no `edit and send again` yet (#237)
+- While a message's text is fetched the progress line's bar stands empty and has no size: the fetch does not say
+  how far it is (#237)
+- The invitation card's WHO names only the organiser and its CAL stays empty: what the reader reads of an
+  invitation holds neither the guests nor the calendar; a card never shows a clash yet (#237)
+- The frames draw Reply primary under an invitation card whose Going is primary too; the reader keeps one primary
+  button and makes Reply secondary while the card asks (#237)
+- Keep my answer, beside the three answers while the owner changes an answer, is not drawn by the design (#237)
+- The Note banner of the reader's notice has `dismiss`, which the sheet does not draw: a notice would otherwise stay
+  until the next one (#237)
+- A held sender's invitation card says it cannot be answered in the look of a card that cannot be answered (`line`
+  edge, the reason in `caption` and `muted`): the frames draw no card for a held sender (#237)
+- A picture that is here but whose data could not be drawn says so in the box of a picture not shown (`line` edge,
+  the picture icon): the sheets draw no box for it (#237)
+- A failed picture's box too narrow or too short for `try again` whole leaves the link out; the frames draw no box
+  that small (#237)
+- The box of a remote picture not loaded has the app's dashed edge, 2 on and 2 off, where the frames draw 4 and 4; a
+  picture not shown does not name its kind, and a loading one shows no count of what came (#237)
+- In a fitted HTML message a screen reader hears what lies within a pane's height of what is in sight; the rest comes
+  as the pane scrolls (#237)
+- A fitted table sets every cell in the message's words: the hairline table's figures in mono, right-aligned, are not
+  guessed for a message's columns (#237)
+- A fitted table is no table for a screen reader (each cell is heard alone) (#237)
+- A change of the reader's width lays a fitted message out again whole: for one paragraph of two megabytes that is
+  a frame of about half a second (#237)
+- In a thread whose unfolded HTML messages hold more than four million letters together, a message that does not
+  fit beside the fitted ones kept is shown in the plain view, under a line that says why, until a message folded
+  leaves it room (#237)
+- The fitted and the plain view of a message share the reader's scroll offset, so a switch keeps the offset, not the
+  place (#237)
+- An open quote of a plain text is hashed whole each frame to see that it is the one kept (#237)
+- The composer's frames lay paragraphs 20 apart; the text field lays a blank line as a row of 26, and a blank's mark
+  in the text has no room of 4 beside it (#238).
+- The frames draw no pointer over and no press on the From line, the floating panel's title or its folding: over and
+  open they take the `stage`, pressed the secondary button's press (#238).
+- The floating panel folds by its title: the frames draw no control for it (#238).
+- While the reader shows its answers (Reply, Reply all, Forward), the floating panel stands 16 over them, not 16 over
+  the window's foot where its frames put it, so it never covers them, folded or open (#238).
+- Attaching a file is drawn coming soon in the composer's foot; the drop target for files has no frame and is not
+  drawn. Writing in a window of its own is a setting of the composer's place, drawn with the settings pages (#238).
+- Of the composer's motion the wipe into the reader's place and sending (M10) are built; with reduced motion the
+  wipe is not the design's 125 ms fade but at once, and the floating panel folds at once (the design gives it no
+  timing) (#238).
+- What is typed in the field that fills a template's blank is not kept with the draft: closing the composer,
+  answering, opening another draft, quitting or a crash loses it; keeping it needs a field of the stored draft
+  (#238).
+- While a field of the composer has the keys, the draft is kept once a second on the window's thread: each keep
+  writes the whole draft and waits for SQLite's sync to the disk. Measured at the store on a fast laptop's SSD, a
+  keep costs about 5 ms at 16 KiB of text and about 6 ms at 1 MiB (median; p95 about 8 ms); measured through
+  `compose.update` while other builds ran, a 1 MiB keep took 14 ms (median; p95 15 to 20 ms). Typing shows one
+  long frame a second; the frames' p95 stays under the budget because it is one frame in sixty. On the in-memory
+  store (the sample, the browser) a keep costs under 1 ms at 1 MiB (#243).
+  A minimised or hidden window may draw that keep late, so what is typed stays at risk a little longer than a
+  second, though never more than a second of it (#238).
+- "This event only" for an occurrence of a series is drawn coming soon; an edit changes the whole series (#238).
+- Dragging to create or move an event is not built and has no surface yet; New event and Edit do it (#238).
+- The details of an invitation lack the design's "Your answer" control, "Remove from my calendar" and the organiser's
+  mark: the calendar's data has no answer of the owner's yet (#238).
+- A day picked by the arrows in the month view has no design state; it takes the mini month's picked look (#238).
+- A picked agenda row has no design state; it takes the picked row of the day's float (stage, cyan bar) (#238).
+- The day's float has no `Enter` key chip on its picked row (#238).
+- In the side panel a calendar's name stands 12 points from its box, the check box's own gap; the design has 8 (#238).
+- Week and day show at most 2 lanes of bands and 4 overlapping events side by side, the month the chips a cell holds
+  and the agenda 50 rows a day; the rest are counted in the day's "+N more" (#238).
+- Quitting the app while the event editor holds typing throws the typing away without a word (closing the window
+  hides it to the tray and keeps it) (#238).
+- A description longer than 10 000 characters is cut there, and the details show at most 4 096 wrapped rows of it;
+  an event's title and place longer than 1 000 characters (the engine's own limit; only a server can send one) are
+  cut there, and an Edit that changes such a title saves the cut (#238).
+- While the event editor is open, the view under it does not scroll and shows no hover: the editor's ground takes the
+  wheel and the pointer as well as presses (#238).
+- The app starts on the inbox view Smart, the design on Grouped (#238)
+- Undo send set to Off is a coming-soon row of its own, "Send at once", not an Off option of the hold's choice (#238)
+- About shows its facts as coming soon, without the marks, the lockup and the emblem of the design (#238)
+- What is typed on the settings pages and not saved, a signature or a left account form, lives only while the window is
+  open: quitting loses it; a signature typed for an account that is then removed stays in memory, unseen, until the
+  window closes (#238)
+- A settings page with a row for every account lays out only the rows near the view, and the first and the last: the
+  others have no node for a screen reader, whose browse mode does not reach them; `Tab` and `Shift+Tab` reach every
+  one (#238)
+- The Calendar page's rows differ from the design's: each account's name is `muted` with the coming-soon mark (the
+  design draws a working row, its name in `ink`), and the line under it says where the calendars will come from
+  ("Calendars from the CalDAV address of …"), not the design's count, names and address of the calendars, which are
+  not read yet (#238)
+- Check and add and Detect are drawn enabled when the form is not ready; the frames draw them disabled (#238).
+- A check step has no duration at its right, and the TLS step shows the host and port, not the TLS version: the
+  engine reports neither (#238).
+- The DNS step's line shows the IMAP server only; the frames list the IMAP and SMTP hosts (#238).
+- A guess's other candidates ("proposed, not asked") are not listed in Detect's column (#238).
+- Detect's progress line has no fill and no current query: Detect reports nothing until it ends (#238).
+- The welcome has no character field behind its box (stage I-2) (#238).
+- The "← Accounts" link above the page keeps its old look (#238).
+- An error under a single field stands 6 under it, as the screen frames place it; the text-field sheet says 8 (#238).
+- A port field's hint is the usual port (993, 465); the frames show "optional", or the port as a value (#238).
+- Detect's column has no muted answer line under a question that succeeded ("found: IMAP, SMTP") (#238).
+- A row with both a host and a port error says both, one under the other; the frames draw one error (#238).
+- The note when Detect leaves a server the owner typed out of the form, and the line when it replaced a picked
+  encryption, have no frame; their words are the app's (#238).
+- An account's form kept unsaved opens as it was kept, even if the account was changed elsewhere meanwhile, and
+  saving it writes the form as it was kept, fields left alone too, over that change; nothing changes an account
+  behind the form today (#238).
+- The add-account page lies in the settings sheet's 720 column: the form is at most 436 wide beside Detect's column
+  of 200 at +476 (the frames: 560, and 278 at +600; the design gives the page the whole place), the address 353 (477),
+  the names 212 each (274), the host 184 (308). Three texts wrap that the frames keep on one line: the Mozilla check
+  box's label (+20), the outgoing server's caption (+16; the row's boxes stand level all the same) and the password's
+  caption (+18). So at 1440 × 900 the form's foot, Check and add and Cancel, lies under the fold of the sheet, reached
+  by scrolling, and no picture shows it (#238).
+- A server row's encryption that does not fit its port (STARTTLS on 993, TLS on 587) is said in one caption under
+  the row and does not hold the save back; the connection is then refused, never made without TLS or STARTTLS: no
+  value of the form leads to a login without them (#238).
+- What an earlier Detect found comes back with a kept add form, its column of questions as it was, and nothing says
+  it is from an earlier visit unless the address has changed since (#238).
+- At 125 %, 150 % and 175 % the 1 px edges of a field, a select, a check box, a button, the segmented control, a
+  menu, the palette, a tooltip and a toast still show a half-tone pixel beside their solid one; only the settings
+  sheet's outline stands on whole pixels (#238).
+- The error banner under a failed check is one line, cut with an ellipsis where its words are longer (a screen
+  reader hears them whole); the frames wrap it on two lines (#238).
+- The IMAP sign-in's line names its server, not how many folders it found, the SMTP sign-in's not its encryption, and
+  the calendars' line not how many calendars it found ("sign-in · 6 folders", "· 2 found"): the engine reports none
+  of them (#238).
+- The Shortcuts page's intro says that one key runs one action per screen, and that giving a key takes it from its
+  holder there; the frame's says one action, from the action that had it: the app's keys have a screen each (#238).
+- The Shortcuts page's scroll bar stands in the page's room right of the 720 column, 24 right of the frame's, which
+  lays it over the column's last pixels (712 to 715) with the rows' lines ending at 711 (#238).
+- The Shortcuts page lists the calendar's keys right after "Show the calendar"; the frame goes on with the message
+  keys there (#238).
+- The add form says two things no frame has: that accounts are not kept yet and their passwords leave the store when
+  InboxCraft closes, and "Sign in at the provider", coming soon (#238).
+- In a window narrower than 980 the composer in the reader's place stands in the list's place, as the one pane of the
+  lists has it (Esc in the composer, or Back, brings the list in front of it). From 980 up the list keeps its 440 beside
+  the composer, which has the rest (#312). Closing the composer, or moving it to the floating panel, brings the list back with its scroll place and its pick;
+  when it goes its floats (a row's time picker, a group's menu) close and do not come back with it, and the keyboard in
+  the list or in one of them moves to the composer's text; while it is hidden, and in one pane while the composer
+  stands in front of it, nothing of it takes Tab, and nothing acts on it or its rows: Ctrl F, whose field is the
+  list's, the list's keys, the inbox views, Done, Archive, Read, Flag, Delete, Snooze and Undo cannot run, by their
+  keys or from the palette. Beside the list the composer is never narrower than 391 (405 at 130 %), what its foot and
+  a recipient line with its widest chip, 176, beside "Cc Bcc" need; at 720 the composer is 392 wide (405 at 130 %),
+  and a chip wider than its line's room is cut to it. A folder name too long for the list's 440 still stands over the
+  search field, at every width. In the composer's foot, as the room runs out, attaching a file and its coming-soon tag
+  give way, then Send's key chip (the key still sends), Templates and Discard; from a window of 720 (the app's least)
+  up, Send and its caret are always drawn whole inside the composer, Send's words cut to the room; a control that gave
+  way is not drawn and Tab does not reach it. Discard has no key and no palette command, and
+  Close keeps the draft. In its head, when the draft was kept gives way before the title would be left less than 80,
+  and on the From line the account's tag gives way before the sender would be left less than its name or 80 (#238).
+- The send-later picker offers the engine's time presets still ahead, This evening among them, and Snooze offers the
+  same; its frame offers Later today, Tomorrow morning, This weekend and Next week, without This evening (#238).
+- A template blank's mark in the composer's text is 65 × 22, its wash tight round its words; its frame's is 71 × 26,
+  the line's whole height, the words 4 in and the mark 4 from the words beside it (#238).
+- With the keys in an empty recipient line, the hint "Name or address" stands 2 left of its frame's place: its ink
+  starts at 128 where the frame's starts at 130, 13 after the caret's left edge (#238).
+- The docked composer counts its 1 px edge inside its pads: its head, lines, text and foot stand 39 clear of the edge
+  beside them and 23 above and below, where its frames keep 40 and 24 (#238).
+- In week and day, events that share a day are always drawn compact: the title 3 after the bar and no second line,
+  however wide the event. The design keeps the full look (title 8 after the bar, the times and place under it) on a
+  shared event 294 wide in the day, and goes compact only at 43 wide; at 64 wide it keeps the 8 but drops the second
+  line (#238).
+- In the month, the weekday names over columns 2 to 7 stand 1 point left of the design's, and the design's
+  `panel_line` hairlines between the names (1 × 28) are not drawn (#238).
+- In the gallery's calendar page, the event block's "row" cell shows the agenda's row (its bar at x 114) rather than
+  the design board's row (bar at x 67) (#238).
+- The outbox row's addresses, its Cc and Bcc on its line and "Changed since it was refused: …" before the reply are
+  not drawn by the design file, whose outbox row has To by name and the reply only; with the address the line is
+  cut sooner at the list's width (#245)
+- A composer chip showing an address whose domain is wider than the chip's 176 grows to the line's width, and a
+  recipient line Send has grown shows eight rows of chips before it scrolls; the design file draws neither (its
+  chip stops at 176, its line at four rows). In a composer too short for its lines (the 800 × 480 window, a short
+  floating panel) the lines show fewer rows and the message text goes out of sight under them (#245)
+- The dev container's compile cache holds the dependencies only: the workspace's own crates in the dev profile
+  (built incrementally), binary crates and linking still build in every target dir, the coverage run
+  (`CARGO_INCREMENTAL=1`) does not use the cache at all, and the first build after the cache is emptied is no faster. Only the x86_64 image is built and checked; the aarch64 checksum is the release's
+  own, untried (#246)
+- `docs/design.md` gives the body at 1440 × 900 as 1207 × 828 and the reader as 766 wide; the design file's frame
+  draws the body 1205 × 826 at (234, 46) and the reader 764: the window's own outline takes one point at each side,
+  and one hairline stands under the command line and one over the status line. The frame's regions are measured
+  from the design file (#254).
+- After the server takes away the open message that was the only row of its card, the card goes with it and the
+  keyboard goes to the row under it in the next card (or above it in the card before); the design draws no empty
+  card head to land on (#254).
+- A window narrower than 800 (a tiling window manager can give one) is laid out 800 wide and clipped at its right:
+  what stands there cannot be reached by the pointer, among them the docked composer's Close, the reader toolbar's
+  right end and the window's own Close; the keyboard still reaches them (#254).
+- In an invitation from someone other than the organiser, the organiser's address is cut at a 1024 window and 130 %:
+  beside the index the card's answers have about 116 points beside its date; from about 1100 it stays whole (#254).
+- The calendar's week view at 1200 shows no week number: its toolbar's title takes a short form (2 – 8 Nov) and the
+  number gives way first; the frames draw both at 1440 (#254).
+- A connection that drops under a job is signed in again at once, and `sync.status` reads `offline` (or `failing`
+  beside a signed-in account) for that sign-in: the worker tells the drop and the new attempt, nothing that marks
+  it as brief (#255).
+- A folder that keeps failing but is synced only in whole rounds, not the watched one, reads `synced` again after
+  the second clean resync of the watched folder, until the next round tries it (#255).
+- `mail.why` cannot say when the owner let a sender in or moved a message, nor that a move was the owner's: the
+  engine keeps no date for those decisions and no history of moves. Like `mail.thread`, it reads every message of
+  every account to find the thread. It is a `safe` command, offered through the CLI, the control channel and the
+  read-only MCP tool `mail_why` (#256). So the reader's why
+  line leaves out what the engine cannot say: the date of a let-in ("let in by you on 3 Nov") and "synced 14:02",
+  which the frames `screen-shell--reader-open` and `screen-shell--everything-failing` draw in it, and "moved by
+  you" and "SPF and DKIM pass", which the why-line sheet's `folder` and `screener` states draw (#267).
+- The design file draws a mail row's hover actions four at a time; where the 440 list holds three (130 %, or a
+  keyed row beside its time) the app shows Done, Snooze and Delete, which no frame draws (#259)
+- The add-account form's line that its servers come from an earlier Detect is not drawn in the design file: it is
+  the form's muted caption hint under Detect's note, 18 high (#259)
+- The line under a server row whose encryption is unusual for its port is not drawn in the design file: a muted
+  caption line under the row, after Detect's note on the encryption when both stand (#259)
+- The invitation card's line for an organiser who did not send the message is not drawn in the design file: the
+  same caption line as "Your answer goes to … at once.", other words, or two or three caption lines in a narrow card
+  (#259)
+- Detect's provider domains come from the MX hosts without a public suffix list: one for each MX host, its last two
+  labels, or three under a two-letter country label when the second last is three letters or fewer, at most two in
+  all (`mx1.mail.example.net` gives `example.net`, `mx.example.co.uk` gives `example.co.uk`). So `mx.abc.de` gives
+  `mx.abc.de` and `abc.de` is never tried, and a provider whose mail hosts are not under its MX hosts' domain is not
+  found this way (#260).
+- One of the domain's own common host names (`mail.`, `imap.`, `smtp.`) whose probe timed out is not guessed again in
+  the run, on any port: such a host that drops only its port 993 and answers on 143 is missed, unless the domain
+  names that server (#260).
+- The system's name lookup does not tell a temporary failure (its resolver not answering for a moment) from a name
+  that does not exist: both count as "its name was not found", so a named server whose lookup failed for a moment
+  counts as gone, and the guesses of its kind are tried in its place (#260).
+- On a network that blocks the mail ports, Detect proposes only what the domain names (unchecked) and finds nothing
+  for a domain that names nothing; the account form and its check stay the way to enter it. The probe connects to
+  names made up from the domain and the MX hosts, so the system looks those names up (#260).
+- A domain whose stale autoconfig or SRV records name a host that drops packets gets that host proposed as not
+  checked, and its common host names and MX provider are not tried: the owner types the servers by hand. A network
+  that refuses connections to the mail ports instead of dropping them makes a named server look gone, so a guess
+  that answers may be proposed in its place (#260).
+- Detect's 120 seconds are a deadline every lookup and probe is given, and each probe has 12 seconds of its own for
+  its name lookup, at most four addresses, TLS, the greeting and the capabilities, however slowly a server sends or
+  reads. The system's name lookup of a probe has no timeout of its own: it runs on a thread that is waited for
+  until the deadline and then left to end by itself; at most eight such threads run at once, across runs, and past
+  that a lookup fails as timed out (#260).
+- Detect proposes one IMAP and one submission server, the first that answered, not a list to choose from (#260).
+- Servers named by SRV records and autoconfig files keep the port they name (port 25 is left out); only the hosts
+  Detect makes up from a domain are limited to 993, 143, 465 and 587 (#260).
+- With Saturday as the first day of the week, This weekend and Next week are the same moment on most days; the
+  time picker shows both, as the engine gives them (#265).
+- The why line's reasons stand as plain words: a rule's or group's name does not lead to its settings, and
+  `open log →` is coming soon. A thread's count in it is the one asked when the message opened or last moved; a reply
+  that comes in later does not change it (#267).
+- Choosing for a sender the group its message already shows, or letting InboxCraft sort it into that same group,
+  changes the reason ("you put … in People") but not the message's place in the list, so the open message's why
+  line keeps the old words until the message is opened again (#267).
+- A time in a why line's reason ("back from a snooze, 14:02", "snoozed until Sat 09:00") is worded when the reasons
+  are asked, against the clock of then: while the message stays open past midnight or into another week it can read
+  stale until the message is opened again or moves (#267).
+- Calendar sync line (#271): the time shown is the last read the window heard since it started, as hours and
+  minutes without a date; the engine keeps no last-read time, so after a start the line says "calendars not read
+  yet" until the start's own sync brings a calendar. "open log" under a failure is drawn coming soon without its tag
+  (the 222-point line has no room for it): there is no log to open. A failure names the first account that failed,
+  not how many did. Synced keeps its full bar until the next press, as the frame draws it, without the "sync now"
+  link; the line itself takes the press.
+- Calendar sync line (#271): the window sets no time limit on a sync. A job that is never answered (a window
+  without workers, such as the web app or the bare sample, or a worker that loses a job) keeps the line at "syncing"
+  for as long as the window runs, and while the calendar shows, its ring asks for a frame every 125 ms.
+- The character field is shown on Home only: the first start, the cover and the panes' empty areas do not use it
+  (#275)
+- The field's gallery page shows a plain place holder of the emblem's 76 × 40 cells, not the mark Home draws (#275)
+- At 130 % text the field's cells are 8 × 20 points (the width stays, the height follows the text to the whole
+  point) and the dot keeps its 13.33 point size; the design draws the field at 100 % only (#275)
+- Which of the field's cells flip under the pointer, how long each takes to cool and the glyph it flips to are
+  fixed hashes, not chance: about 45 in 100 of the cells within reach flip, the nearest most often, and about half
+  of the emblem's (#275)
+- At most 4 096 of the field's and the emblem's cells are warm at once: past that no further cell flips until some
+  have cooled, so a fast sweep at a high refresh rate (some 100 new cells a frame at 240 Hz) can leave the cells past
+  the cap unflipped: dots on the field, the emblem's own characters on the emblem (#275)
+- The design file does not draw the add-account form's note for servers guessed from the MX provider
+  (`account-detected/*`): it is the careful note the form shows for a guess, other words (#279).
+- The design file does not draw the line under a server row whose server Detect did not reach
+  (`account-detected/*`): it is the form's muted caption hint under the row, 18 high a line, after the encryption
+  lines when they stand (#279).
+- A Detect run stopped by Cancel ends at its next lookup or probe, or within the wait of the one under way; a name
+  lookup the system runs for a probe is not interrupted and ends by itself, as before (#279).
+- A store failure met outside a command the window runs (the engine's timed work, the workers' events, the account
+  list read while handing out jobs) shows its fixed sentence in the status line and its database words are written
+  nowhere (#284)
+- Leaving the settings by their key gives the keyboard to no control: it is nowhere until a press or Tab (#284)
+- The About page is one column with 24 under it; the frame lays it out in columns 40 apart (#284)
+- The settings' frames are drawn at 1440 wide only: under about 1060 the page's side room and the sections' column
+  give way by the code's own rule (#284)
+- The narrow-window numbers are chosen in the code, not taken from a frame: the room beside the page goes down to
+  24, the sections' column to a quarter of the body, a row stacks under 160. At 800 wide the page is about 375,
+  under its least of 520, and the section names and the head's count are cut with "…"; at 1000 wide and 130 % the
+  segmented controls cut their option labels (#284)
+- Command field (#286): with the focus a text longer than the field scrolls to the caret instead of being cut with
+  `…` at its end as the `long` frame draws it; without the focus it is cut with one `…`. An empty field of commands,
+  people or mailboxes shows no hint (the sheet draws none); an empty field searching all mail shows the general hint
+  "search mail or run a command" (the sheet draws no empty all-mail state). A mailbox's name in the scope mark keeps to a third of
+  the field and is cut with `…` (the sheet gives it no bound). The field keeps the 1 px edge and the 13 points to
+  its text at 130 % text; its mark is 20 high there and the caret 9 × 20.
+- Window controls (#286): the sheet draws no pressed state and no focus ring; a focused cell shows the focus ring
+  inside its 36 × 32 cell. At 130 % text a cell is 36 × 42 and its glyph 20.
+- The status item has no pressed state in the design: a pressable item pressed takes the `stage` fill and `ink`
+  edge of a pressed secondary button; under the pointer its `muted` words turn `ink`, as the hover board's do (#287)
+- The status item's `●` and `○` are drawn in code (IBM Plex Mono holds neither): a disc 0.75 of the text size
+  across, and a 1 px ring of the same size; the waiting ring stands still, as its board draws it (#287)
+- The status message's key chip is the chip of every other place, 20 high and 3 down; the sheet squeezes it to 18
+  high, 4 down (#287)
+- The error message's "open log" stands coming soon, unavailable, without its `coming soon` tag: there is no log to
+  open yet and no room on the line for the tag (#287)
+- A status message narrower than its parts clips them at its edge; it does not yet drop the countdown or the
+  seconds first (#287)
+- Home's sets (#288): the sheets give no pressed state: a
+  pressed count tile keeps its hover fill and a pressed block its `muted` edge. A count tile's label takes at most
+  two lines and a block line's empty text at most three, each cut with `…` after them. At 130 % text a tile, a block
+  head and a more line take the scaled heights (98, 46, 42) while their paddings stay, so the room the scaling
+  adds stands under the text. A count is written as the index writes its counts, groups of three apart by a narrow
+  no-break space.
+- Text in a script that neither the app's fonts nor a font found on the computer holds is drawn as boxes, one per
+  sign, in the window, the reader, the composer and the toasts; it never stops the window (checked for Hebrew,
+  Arabic, Devanagari, Thai, Chinese, Japanese, Korean, emoji sequences, combining marks, private-use, unassigned and
+  non-characters, bidi and control characters, 10 000 of each, at 100 % and 130 %). The app's fonts hold Latin,
+  Greek, Cyrillic, Armenian and Georgian, and since #348 Hebrew, Arabic, Devanagari, Thai and emoji, but no Syriac,
+  Thaana, other Indic scripts, Lao, Tibetan, Myanmar, Khmer, Ethiopic, Cherokee, CJK, Hangul, Bopomofo or IPA
+  letters. The computer is searched for one sign of each of these but IPA (#348); a script with no sign looked for
+  stays boxes even where the computer has a font for it. The mono styles lack U+FFFD
+  (a box is drawn for it). Audiowide, the product-name style, draws a missing sign as blank space, not a box; it
+  draws only the app's own words. egui's test harness panics on a missing sign by default; a test that draws such
+  text says `allow_missing_glyphs()`, as the app's policy is (#290).
+- Home (#299): the counts' fourth tile turns to "not sent" while the server refused a send. "Back today" counts the snoozed mail
+  of one page of `mail.list` (the engine's list limit). An agenda line's detail says where and how long, never "in
+  58 min". The greeting's sentence is written from the counts and the next event, plainer than the file's words.
+- Home (#299): the file's "MISSING UI" note on the drafts' block is not drawn.
+- Home (#299): where the brief does not fit, the emblem's place goes first, then the brief takes the whole width
+  under 600 and scrolls when it is taller than the body; the file draws neither.
+- Home (#299): the greeting names the first word of the account's sending name, so a name written family name first
+  is greeted by the family name; there is no setting for it yet. The date, the greeting and "the rest of today" go by
+  the window's clock, which is UTC like the rest of the app until a front end hands the engine the computer's zone.
+- Home (#303): "Look around with sample mail" on Home before the first account is drawn coming soon and cannot be
+  pressed: the sample is another start of the app (`just run-sample`). The start place with no account is the
+  add-account card, not Home's first-run form. "open account" in the failing banner shows Settings › Accounts, not the failing account.
+- Home (#303): while a discard waits behind its Undo, the draft still shows in the Drafts mailbox on the mail.
+- Command line (#305): the results are an area of their own, not a float of the float module (whose modal layer
+  would take the field's keyboard); while they show they hold the window's keys as the palette did. Tab keeps the
+  keyboard in the field while the results show: the rows are reached by the arrows, not by Tab, and the row picked is said selected, the field's active
+  descendant (the field's role stays a text input, not a combobox).
+- Command line (#305): plain text searches the mail shown, as the list's field did, and only while the mail shows:
+  typed on Home, the calendar or the settings it changes no place until Enter shows the mail. `@` then Enter searches
+  the person's mail. The results' rows are the menu rows (32 high), their head and edge as the float module draws
+  them.
+- Title bar (#305): with the window maximised the frames draw the command line from the window's edge (field 1083
+  wide, controls at 1328); the code keeps the 1 px edge's room there too (field 1081, controls at 1327). The desktop's
+  window menu on a right press of the title bar is not offered.
+- Status line (#309): the frame's "Personal synced 14:02" is "synced 14:02" for all accounts; the syncing note is the share done ("54 %"), not the account's name.
+- Status line (#309): the messages keep the window's words ("Marked as done", where the frames write "done · Draft
+  logo for the bakery"); the error's "open log" and the problems' "open log" are drawn coming soon.
+- Status line (#309): the message shows at once, without the frame's motion; its bar and seconds change once a second.
+- Widths (#312): in one pane a picked event's details bring the whole side panel into the pane (the mini month and
+  the calendars above them), drawn at the pane's width; `Esc` leaves the keyboard on nothing, as it does beside the
+  week. While the event editor is open the week stays in the pane under it.
+- Widths (#312): under 1280 the status line keeps its first three facts whatever they are: with a failing account
+  "open account" or "open log" counts as one of them.
+- Widths (#312): the compact mark in the narrow command line stands 16 in from its left, where the frames centre it
+  in the index's 57.
+- Drafts place (#314): the list holds the drafts kept here. A draft written in another program lives only in the
+  account's Drafts folder on the server: the row "Drafts folder on the server · N messages" opens that folder, where
+  it is mail that opens in the reader, not in the composer; N is the folder's size, the uploaded copies of the
+  drafts kept here included, so the row does not say how many drafts only the server holds. The list reads at most 1 000 drafts (`MAX_LIST`).
+- Drafts place (#314): the list's head is the list's title over the count (the design: "Drafts" and "2 drafts" on
+  one 48-high line). The row has no account mark, as the design's
+  `draft-row` has none. The server folder's row is the index's mailbox row (30 high), which the design does not
+  draw in this place.
+- Templates page (#317): a delete is confirmed in place, where the row stood, not in the frames' dialog over a scrim;
+  it adds "This cannot be undone." because the engine cannot undo `template.delete`.
+- Templates page (#317): the groups follow the engine's order of accounts (Personal before Studio in the sample),
+  where the frames show Studio first; the form's title is "New template" for a new one, "Edit a template" for an
+  edit; the intro and the empty state finish the sentences the frames cut with "…".
+- Scheduled page (#317): a cancel is confirmed in place, where the row stood, not in the frames' 480×250 dialog over
+  a scrim (no "CONFIRM" label); it says "This cannot be undone." first because the engine keeps no undo for
+  `schedule.cancel`, and adds when the entry is due. The intro's second sentence finishes the frames' cut one (a
+  snooze's cancel brings the message back now, through `mail.unsnooze`; a reminder's or an alert's takes only its
+  time off the schedule); the page has no picture of its empty state yet.
+- Scheduled page (#317): times within the coming week are a short weekday (`Fri 11:00`), further on the day and month
+  (`12 Nov 09:00`); the frames show only today and weekdays.
+- Privacy page (#317): a sender's row shows its address alone, in the frames' name column; the frames' name (180 wide,
+  strong) and address (424 wide, mono) need a name the engine does not keep for an allowed sender.
+- Removing an account (#317): the question stands in place of the form's buttons, not in the frames' 480-wide dialog
+  over a scrim (no CONFIRM label, no shadow); the form's title is still "Account settings", without the account's bar
+  and name the frame has; the frame's line about the drafts gives their number, the question does not. A send handed
+  to the account's worker just before the removal may still go out.
+- Triage page (#317): "After an act" is a group of its own, `[ C ]`, before the grouped inbox (now `[ D ]`); the
+  frames have no row for it.
+- Calendar page (#317): the frame's Week group has one row, "Week starts on", whose help says it cannot be changed;
+  the page has two, a select of the seven days (160 wide) and a segmented choice of the first week, with help of
+  their own. The locale's default knows a short list of Sunday regions and no Saturday ones (another Sunday region,
+  such as Colombia or Thailand, gets Monday), and every region off that list counts week 1 by ISO 8601. The headless
+  CLI and MCP count weeks from Monday by ISO 8601 until the owner chooses: the locale's default is the window's only.
+- Motion (#318): the hover scramble (M3) runs on text buttons only; links, index rows, tabs and segmented controls
+  keep their labels. Home's headline resolves at an even pace (the motion frames draw the first word slower at
+  140 ms). A change of place (M12) scrambles what the body painted, icons excepted, and skips a body that painted
+  more than 20 000 shapes; text in a float over the body (a menu, a picker) does not take part. A new row (M4) is
+  told from the rows its list held since it was opened, unread only; past 64 new rows at once the rest are there
+  at once. A row scrolled into sight while it would still move moves for the rest of its time.
+- Motion (#318), a change of place (M12) at full: a text already scrambling (Home's headline, a hovered button)
+  is scrambled again by the change, so its characters change twice; a press in the first 125 ms lands on the new
+  place under the old body still shown; a place changed by the window itself after the frame's commands, or in a
+  frame already drawn again, shows a frame late without the movement.
+- Motion (#318): a message opened while nothing was open wipes in over the ground (nothing was drawn to keep); a
+  draft sent from the floating panel leaves without M10; at full the line that goes into the status line is the
+  composer's head, not a line with the subject and who it goes to; a change of mode the computer makes by itself
+  is there at once, without M14.
+- Motion (#318), send (M10): in the frame of Ctrl Enter the status line's Undo stands 56 pt right of where it stands
+  from the next frame on, so a press aimed in that one frame misses it.
+- Motion (#318), the command line (M8): the line run is not held in cyan for 125 ms at full; the results close in
+  the frame of Enter.
+- Later's heads over the snoozed pile (Back today, Back this week, Later) are the inbox's group heads; the design
+  file draws Later as one page with heads for today, this week, the scheduled sends and the pins, which the app does
+  not have (#323)
+- The focus ring of a wide table that has the keyboard is not drawn in the design file: the usual ring, inside the
+  table's box (#323)
+- At 130 % text the list's view switch stands at the start of the pills' line, where the design keeps it in the
+  head (#325)
+- The index keeps a Blocked row while an account has InboxCraft's Blocked folder; the design draws none, and blocked
+  mail has no other place (#325)
+- The list and all in it stand 1 px right of the design: at 1440 the line between the list and the reader is at
+  x 675, the design's at 674, and the rows' text at 270 (269) (#325)
+- Where the status line has too little room (1000 wide, or one account at 1200) its key hints lose their first ones
+  ("K previous · Enter open · Ctrl K commands": previous without next) (#325)
+- The screener card keeps its 1 px line inside its 64 where the design draws it under (65 in all), so what stands
+  under the card is 1 px higher than the design (#325)
+- The drafts list shows the row of the server's Drafts folder, which the design does not draw (#325)
+- The pills' line shows the planned Select (coming soon) after "Show done" and the park pile; the design draws only
+  those two (#325)
+- No picture of the status line's notice, account-refused and everything-failing states or of the whole window
+  failing: the picture script cannot make an account fail or a notice show (#325)
+- The account picker's head shows no account count; the design shows one with six accounts and none with two, and
+  no rule says from how many (#325)
+- At 125 % the index's rows lie on half pixels: 34 pt rows are 42.5 px (#325)
+- A screen reader is given the full rect of an index row scrolled out of sight, reaching under CALENDAR's row (#325)
+- The why line of a held message says "held back by the screener" alone; the design's says the first mail from the
+  address and its SPF and DKIM result too, which the engine does not keep (#325)
+- At 1024 wide and 130 % text the reader beside the 440 list is about 524 wide: everything fits (acts on one line,
+  subject on two, From cut with …), but the design draws this text size only at 1440; its width there waits for a
+  ruling (#325)
+- The 1 point edges of fields, selects, check boxes, buttons and the segmented control still fall between pixels at
+  175 % (#325)
+- Settings: the sections list has 11 rows, the design's nine and AI and Plugins (coming soon) after them (#325)
+- Settings, Templates: the groups follow the accounts' order (Personal before Studio in the sample); the design
+  draws Studio first and names no rule (#325)
+- Settings, Privacy: a sender's row leaves the design's name column (180) empty: `remote.list` keeps only the
+  address (#325)
+- Settings, Calendar: Week starts on is a select of the seven days and First week of the year a choice; the design
+  draws one fixed row ("Fixed: it cannot be changed yet.") (#325)
+- Settings, Triage: "After an act" has no frame; its look is not measured (#325)
+- Settings, Shortcuts: the intro says a key runs one action per screen; the design's sentence leaves out "per
+  screen" (#325)
+- Settings, Appearance: under 1440 the page's column is narrower than 720 and the Window frame's help wraps (two
+  lines at 1200, three for Motion at 130 %); the design draws 1440 only (#325)
+- The calendar's sync foot's "open log" is coming soon without its tag (#325)
+- In one pane a picked event's details bring the whole calendar side panel (mini month, calendars, details) at the
+  pane's width; the design draws no one-pane calendar with details (#325)
+- The calendars' sync line, failed, draws "open log" coming soon without its tag: the tag does not fit the 222 of
+  the side panel beside "try again"; the frame draws "open log" as a plain link (#328)
+- The why line still gives up its link before it cuts its first reason (a narrow reader at 130 % shows
+  "groupe…" with no link); the frames draw only the 684 wide line, where both fit (#328)
+- The text size slider's names keep 4 apart at least; at 130 % "120 %" and "130 %" stand about 6 apart (#328)
+- Home (#335): the frames draw it only in a window 900 high; in a lower one the emblem and the names under it are
+  pulled up toward the top of the emblem's place, and leave only where even that leaves no room. The frames' line
+  "↳ the field reacts under the pointer here, and only here" under the tagline is a note on the design and is not
+  drawn; the names' box keeps its room.
+- Privacy (#337): `remote.list` keeps no sender name, so each row shows the address at 16 in up to 616 of a 720 row,
+  where the frames draw the name at 16 in 180 and the address at 208 in 424; a row with a name would keep the
+  frames' columns.
+- A draft kept is written behind: a kill (SIGKILL) or a power loss in the few milliseconds of its write loses that
+  keep, and a second close of the window in a row with a draft the disk refused loses its newest text; the disk holds the draft
+  as it was before (#338)
+- A new event's Alert says the default lead it rings with (10 min before, 1 day before an all-day event) where the
+  design's new-event frame says None (#343).
+- The local alerts read an event's first 16 alarms, while `event.list` and the `alert` parameter look at all of them:
+  an event with more than 16 alarms may show or move one that does not ring here (#343).
+- How other calendar programs treat the `ACTION:NONE` alarm (RFC 9074) written for an alert of "none" is not checked
+  yet; one that does not know it may ring for it or show an odd lead (#343).
+- A full `event.update` (more than the alert) writes every alarm again and drops what is nested inside one, such as a
+  location alarm's `VLOCATION`; an update of the alert alone keeps them (#343).
+- The small editor lacks the frames' "more room" link over the description, the "also set" line (place and alert,
+  which it does not show) and the two buttons that move the typing to the full editor or a window (#344).
+- Links in the editor's description are not drawn as links (no cyan underline, no hand pointer, no target on hover);
+  a press with Ctrl held copies one all the same (#344).
+- A description longer than the 10 000 characters the calendar reads opens read-only in the editor, so the cut text
+  never replaces the whole one (#344).
+- `event.update` still changes someone else's event when an owner-class client asks; only the editor holds it
+  read-only (#344).
+- The Flatpak does not install the fonts' licence texts (SIL Open Font Licence 1.1 for Noto, IBM Plex and
+  Audiowide) under `/app/share/licenses/`; the notices travel only in the fonts' own name tables (#348, #335).
+- Home's greeting (#349): no frame of the design file draws the choice of the word Home greets by; it stands on
+  Settings › Sending as a group of its own, "D Your name", in the segmented style of the page's other choices. A
+  name written family name first is greeted by its family name with the first word: the order is not guessed, only
+  a comma turns it round.
+- No frame of the design file draws Settings › Calendar's "All-day alerts ring at" row: it is drawn in the page's
+  own row style, with a select under the alerts switch (#353).
+- An all-day event's alerts ring here at the hour on the clock, also on the two days a year the clock is put forward or
+  back; a device that counts the hours exactly from midnight rings the same alarm an hour earlier or later on those
+  days (#353).
+- When the hour all-day alerts ring at changes after the old or the new hour has passed today, the event without an
+  alarm of its own gets no extra ring and no make-up for that day (#353).
+- The event editor's Alert offers the four all-day hours only as the default; one event cannot pick another of them
+  (#353).
+- A right-to-left word that egui splits across two faces (a Hebrew letter with a point the first face lacks) is
+  shaped face by face, and its parts stand in egui's order, left to right (#356).
+- Two notes a screen reader hears as laid out, not as written: the note beside a calendar head's title and the
+  note under a table left out of a fitted message (`note.text()` of the galley, its words in drawn order and, when
+  wrapped, its rows joined by line breaks). Both are UI text and left to right in English; under a right-to-left
+  translation they would be heard out of order (#356).
+- An address inside a right-to-left line (a translated sentence in a right-to-left language) keeps its parts in
+  order but stands as a run of that line: the app has no isolates in the text it draws yet (#356).
+- The full editor and the event editor's window have no Place field and no buttons at the foot that move the editor
+  to the other two hosts; the small editor has no "more room" link; the `event-editor-full` and `-window` frames draw
+  them (#370).
+- The description in the full editor and the window grows from 96 to 240 high as in the small editor; the frames give
+  it the room left under the fields (314 and 258 high) (#370).
+- The event editor's window has no status line of its own ("not saved yet · into Studio" and the cancel key in the
+  `event-editor-window` frames) (#370).
+- The day beside the full editor shows the events of the days the calendar has read (the view's): a Starts typed far
+  from them shows that day's hours without its events; the draft's own block (`draft-picked` in the frames) is not
+  drawn in it (#370).
+- The event editor's window is not compared with the `event-editor-window` frames pixel for pixel: no picture draws a
+  second window (#370).
+- A quit from the tray while no window is open ends the app without asking: an event typed in the editor and not
+  saved is lost (#370).
+- Sending's Undo send has no Off segment (Send at once is a row of its own, coming soon), so at 1000 with 130 % text
+  its control keeps beside its words where the Sizes page's `settings-1000-130` frame, with five segments 311 wide,
+  stacks it under them (#373).
+- In a narrow window the page's head stays put while the rest of the page scrolls under it; Esc on Templates and
+  Scheduled, which lead back to Sending, does not go back to the list of sections (#373).
+- Appearance › Layout › Write a message offers Pane, Floating and Window, and its help names all three; the
+  `settings-appearance` frames draw two segments, Pane and Window (#379).
+- The composer's window shows Send's key (schedule, with a time picked) at the right end of its status line where
+  the `composer-window` frames show the command line's: the command line, Undo and every key of the list are the main
+  window's and rest in the composer's window (#379).
+- The main window's command line cannot send a composer in its window of its own: its Send row says no message is
+  being written; Send's key and button in the window send it (#379).
+- The composer's window is not compared with the `composer-window` frames pixel for pixel: no picture draws a second
+  window (#379).
+- The reader's window has the subject in its title bar where the design puts the command line, and no status line
+  with key hints at its foot; the hairline over its answers spans the reader's 760 column, not the window's 958
+  (`screen/reader-window/default`, `unfocused`) (#380).
+- In a reader's window Snooze, Move and More are the buttons' only: their keys, the palette and Undo are the main
+  window's (#380).
+- Each reader in a window of its own keeps its own decoded pictures and laid-out letters under the per-reader caps,
+  so the pane and eight windows can hold up to nine readers' worth at once (#380).
+- Where messages open in a window of their own, the pane with nothing open still says "Pick a message. It opens
+  here." (#380).
+- A mail's tables used for layout are drawn as hairline tables, 12 between their columns; the Messages page draws
+  them without lines, as sent (`screen/message-receipt/fitted` "two columns of 280", `screen/message-marketing`
+  "three columns of 192" 12 apart) (#383).
+- A coloured table cell round a link (a common way of drawing a button in mail) is a band round the link's
+  paragraph, not the mail's button (#383).
+- Every band of a kept background stands 14 above, 16 below and 32 in from the sides of its blocks (at most a sixth
+  of a narrow column), 6 between them;
+  the receipt's band is 12 above and 14 below (`screen/message-receipt/fitted`) (#383).
+- The mail's own button shows a 1 px edge in its ink under the pointer and the focus ring; the Messages page has no
+  frame of a hovered mail button. Its target shows in the status float, not in a tooltip of its own (#383).
+- Alignment is not read in list items and preformatted text, and quoted blocks keep no background (#383).
+- The copy keeps no remote picture, even one the owner loaded for the message, and no link can be followed from it
+  (#388).
+- Under the portal, a desktop that has no browser for the file says so in its own way; the status line says only
+  that the copy was handed on. Outside the Flatpak, `xdg-open` is waited for 0.8 s at most (#388).
+- Only Linux opens the original; macOS and Windows do not offer the row (#388).
+- A run that is killed, rather than closed, leaves its cleaned copies in their folder until the next start (#388).
+- One original opens at a time: a press while one is still being handed on is not queued, the status line says to
+  wait (#388).
+- Status line (#396): "try again" when offline is coming soon: no command signs the accounts in before their wait
+  ends. "Offline since" is the time the window first read the accounts offline, not when the connection dropped.
+- Status line (#396): a send the server refused counts as a problem but is never the line's first fact; the line
+  names only failing accounts there.
+- Status line (#396): on the settings in two panes the frames draw `back` (`Esc`) between mail and commands; there
+  `Esc` keeps the settings shown, so the line leaves it out. The sections' list alone in one pane draws it too; the
+  line leaves it out there for the same reason.
+- Command line (#397): a refused command's reason shows in the status line as a notice that goes after its seconds,
+  where the frame `command-line/refused` draws the error state; the words are the window's own ("Not run: Snooze or
+  remind me needs an open message. Open one, then try again."), the row's full name where the frame says "Snooze".
+  LAST COMMANDS holds the commands of this run of the app only, at most three (the frame draws two); GO TO lists the
+  inbox, New senders and the calendar (none of them over the event editor), and with nothing to say leaves a caption
+  out. With the line narrowed to the mailbox shown (`Ctrl F`) it lists no results but the prefixes, as before. The
+  MAIL head's count is of the messages the list's search finds, which reads at most the engine's list limit per field
+  (then "N+"); the PEOPLE count is of at most six people, the most the lookup keeps. The refused state is not among
+  the pictures. Over the event editor Enter on a typed search still shows the mail searched, as it did before, and
+  leaves the calendar.
+- The index shows a Junk row, and a Blocked row while InboxCraft's Blocked folder exists, which the frames do not
+  draw (`index/with-counts`: Inbox, New senders, Drafts, Outbox, Sent, Archive, Bin): their mail has no other place
+  (#398).
+- `sync.status` says whether a sync round runs, not whose: while one account syncs, every account signed in and not
+  failing says syncing, and while another account fails, one in its first round says so only once a worker has told
+  its progress (#398).
+- At 130 % New message is 42 points high, 52.5 pixels at 125 %: the button is not on whole pixels as the index's
+  rows are (#398).
+- Home (#399): the banner says "offline since" only after a sync of this run: before the first one (an account
+  connecting at startup) it says nothing of it, and the status line says offline. Of the failures that stop an
+  account until the owner acts, only a refused sign-in is in the banner; an unanswered sign-in, a missing password or
+  a certificate refused are the status line's.
+- Home (#399): "Offline since" gives the time of the last finished sync, not the moment the connection dropped: a
+  mailbox watched quietly from 08:10 until the network went at 13:00 says "Offline since 08:10". `account.list` does
+  not give when an account went offline.
+- Control channel (#399): an agent's `ui.settings.open` or `ui.home.open`, held for the frame's end, acts after an
+  owner's own call of either that came over the channel in the same tick, and so wins over it.
+- The first start after the update to schema version 6 indexes the links of every message before the window shows,
+  with nothing shown meanwhile: about 1.4 s for 100 000 messages on a fast laptop, more on an ordinary one (#406)
+- Later's snoozed pile has a third head, "Later", for what comes back after this week; the frames (`later/snoozed`)
+  draw "Back today" and "Back this week" only. Scheduled sends are not in Later: no frame of Later draws them, and
+  they stay in the Outbox (#410).
+- The screener card's line is drawn on the first point of the line under it, where the frame gives it a point of its
+  own (a 64 card, its line, then the rows): every line of the list stays on whole pixels at 125 %, 150 % and 200 %,
+  and the lines under the card stand 1 higher than the frame's (#410).
+- A desktop that does not keep to a window's least size (some tiling ones) can still make the window narrower
+  than 800; it is then laid out 800 wide and cut at its right. No frame draws a narrower window (#412)
+- Pictures against frames (`compare.py`'s measure, 125 scenes in both modes): on the frames' sample, with the own
+  window frame, the mean is 0.860 (0.850 on the present sample with the system frame) and 90 scenes stay under 0.90
+  in a mode. The window controls now match (0.98 in that corner, from 0.51); what keeps the scenes there is the
+  status line (0.82 in that strip: the place's hints where the frames say next, previous, done, snooze) and the
+  body's own differences each scene's pair lists. The outbox and Scheduled pictures list the waiting message for
+  Tuesday 08:00, as their frames do, so their status line says "one goes at 17 Nov" where those frames say
+  "outbox 1" (#416).
+- The frames' sample has no mail in the Studio folders Clients (4), Invoices 2026 (1) and Open day (12) the index of
+  the frames counts, and the Drafts place lists the message in the outbox ("Thank-you cards: the proof", written
+  yesterday) beside "Price list for the winter workshops", where the frame lists "Re: Kiln service: two dates to
+  choose from": a message waiting to be sent stays a draft until it goes (the drafts list holds every draft), so
+  the index's "Drafts 2" holds only with one kept draft (#416).
+- The frames' sample's why-line says "grouped as People · a sender you know" where the frames say "let in by you on
+  3 Nov · grouped as People · synced 14:02", and the attachment's size is the file's own (1.2 MB of a blank PDF);
+  the month and agenda frames' events outside the week of 16 November are not in it (#416).
+- Home's emblem first twinkles a quarter second after Home shows, where the motion source starts at once: the
+  headless pictures draw a few frames of Home and must show it at rest (#418).
+- The character field flips as strongly next to Home's text as away from it: the motion source calms its cells
+  near text (to 0.2 of the chance and of the opacity, over 80 points), the field knows nothing of the text above it
+  (#418).
+- At the reduced level Home's field answers within 30 points, as the design says, and with 0.4 of the chance, as
+  the motion source does; the source keeps its full 60 points there, so about a quarter as many cells flip (#418).
+- The account form's note that saving signs in to a moved server with the stored password stands in `warn` in the
+  caption's place, as `account-edit/new-password` draws the note for a new password; no frame draws the stored
+  password's case (#422).
+- When an account is removed but the system's credential store keeps its password, the status line says so only in
+  a notice that goes after 4 seconds; nothing keeps it on screen, and nothing says later whether the password was let
+  go when it is tried again (#422).
+- Short of room, a segmented switch's names keep 4 on each side instead of the design's 12; no frame draws the
+  control in less room than its names and pads want (#427).
+- At 130 % the screener's "Before the inbox" is cut by the 136 the design sets an option's name to, though the room
+  is there; whether that 136 grows with the text size waits for the owner (#427).
+- In New senders the screener's switch stands under its label, 8 below it, where the line has no room for both, as
+  at 130 % in a 1024 window; `screen/new-senders/before-inbox` draws it on the label's line only (#427).
+- Beside the reader the search line shows only the search's words when "in message text" and its mark do not fit
+  after them; `screen/search-results/results` draws the scope line alone (#427).
 
 ## Revision history
 | Date | Change | Summary |
@@ -877,3 +1689,76 @@ time from the code as it is, not measured.
 | 2026-11-08 | minor | The ranked table filled for the daily-use epic; stale lines on the scheduler, alerts and the composer edited (#151) |
 | 2026-11-08 | minor | The solid float: the old float and selection lines are gone (#205) |
 | 2026-11-08 | minor | The add-account form asks for the SMTP server and the CalDAV address (#214) |
+| 2026-11-21 | minor | Presets, custom accent, glass, Inter and Lucide gone from the rough edges (#231) |
+| 2026-11-21 | minor | IBM Plex type, its fallbacks and row height; Phosphor Regular only, its colours as drawn against the design; the tray's cyan flap and its one drawing (#232) |
+| 2026-11-21 | minor | Text IBM Plex does not hold takes the computer's own fonts (#233) |
+| 2026-11-21 | minor | A selected icon button shows the accent, as the design has it (#233) |
+| 2026-11-21 | minor | Pressed states the design does not draw yet (#233) |
+| 2026-11-21 | minor | Looks of the toggles and choices the design does not draw yet (#233) |
+| 2026-11-21 | minor | The quote fold and the menu dividers still to come (#233) |
+| 2026-11-21 | minor | The looks of fields, menus and pickers the design does not draw yet; the hover Snooze opens the time picker (#234) |
+| 2026-11-21 | minor | Shared rows and blocks: pressed hover action, Snooze, old rows, two rings, motion off, a banner link's cut, where the caption's baseline holds (#235) |
+| 2026-11-21 | minor | The rows to the design: a row's act at once, the gaps of the lists' rows (#236) |
+| 2026-11-21 | minor | Lists build only the rows in sight: what a screen reader sees, the folded card's rows, the 1 000 cap (#236) |
+| 2026-11-21 | minor | The reader with nothing open, its why line, content bar, attachments and wipe (#237) |
+| 2026-11-21 | minor | The composer drawn as its frames: what differs and what is not drawn (#238) |
+| 2026-11-21 | minor | The settings sheet's sections and their coming-soon rows; the preview is gone (#238) |
+| 2026-11-21 | minor | The outbox row's addresses and changed note, a grown chip and line are not in the design (#245) |
+| 2026-11-21 | minor | What the dev container's compile cache does not hold (#246) |
+| 2026-11-21 | minor | The keyboard after a server removal of a card's only row; the palette over the event editor; the body's size in design.md; the index and the regions (#254) |
+| 2026-11-21 | minor | The brief `offline` of a reconnect; a failing side folder (#255) |
+| 2026-11-21 | minor | What `mail.why` cannot say yet (#256) |
+| 2026-11-21 | minor | The rulings' new lines the design file does not draw (#259) |
+| 2026-11-21 | minor | Detect probes its candidates; the provider domains of the MX hosts and their limits (#260) |
+| 2026-11-21 | minor | The two presets on the same Saturday (#265) |
+| 2026-11-21 | minor | The why line: no links yet, the thread count and the times as asked (#267) |
+| 2026-11-21 | minor | Calendar sync line: what the time means, the log, synced (#271) |
+| 2026-11-21 | minor | The character field's five rough edges (#275) |
+| 2026-11-21 | patch | Ids above `i64::MAX`: unknown when looked up, refused when kept (#276) |
+| 2026-11-21 | minor | The add form's Detect lines the design file does not draw; how soon a stopped run ends (#279) |
+| 2026-11-21 | minor | A store failure outside a window command leaves its database words unlogged; the settings as a place: the keyboard on leaving, About's columns, narrow windows (#284) |
+| 2026-11-21 | minor | Command field and window controls: what the code does not follow yet (#286) |
+| 2026-11-21 | minor | The status line's sets: pressed item, drawn marks, key chip, log, narrow message (#287) |
+| 2026-11-21 | minor | Home's sets: pressed states, cut labels, the room at 130 % (#288) |
+| 2026-11-21 | minor | Scripts no font holds are boxes; which ones (#290) |
+| 2026-11-21 | minor | A toast with Undo covers the reader's answers and takes the presses on them; a toast's words do not reach a screen reader (#292) |
+| 2026-11-21 | minor | Home: the numbers without a source (#299) |
+| 2026-11-21 | minor | Home: a place now; sample mail, the failing account, the composer's Discard, no control channel (#303) |
+| 2026-11-21 | minor | The command line: what of the frames is not built yet; the palette's line names it; the own frame's title bar is the command line (#305) |
+| 2026-11-21 | minor | The status line: what of the frames is not built yet; the countdown and the late send's note are the line's (#309) |
+| 2026-11-21 | minor | The widths: the index narrows, the lines give up room, the one pane swaps the calendar's side panel (#312) |
+| 2026-11-21 | minor | Motion: the three levels on the Appearance page, what each does until it has its own movements (#313) |
+| 2026-11-21 | minor | Drafts open again from the drafts place; attachments stay a gap (#314) |
+| 2026-11-21 | minor | Templates, Scheduled, the always-load senders and the calendar alerts switch: what of the frames the pages do not follow; removing an account (#317) |
+| 2026-11-21 | minor | Motion: the hover scramble on text buttons only; a change of place, icons excepted (#318) |
+| 2026-11-21 | minor | Later's heads and a wide table's focus ring, which the design file does not draw (#323) |
+| 2026-11-21 | minor | The picture round's remaining differences from the design (#325) |
+| 2026-11-21 | minor | The picture round's leftovers: the sync line's open log, the why line's link, the slider (#328) |
+| 2026-11-21 | minor | Home: the emblem in a window lower than the frames' and the caption under the names (#335) |
+| 2026-11-21 | minor | Privacy rows without a name (#337) |
+| 2026-11-21 | minor | A kill loses a keep in flight (#338) |
+| 2026-11-21 | minor | Text size: the keys that step it (#341) |
+| 2026-11-21 | minor | The Alert field waits for the full editor and the window (#343) |
+| 2026-11-21 | minor | The event editor's hosts, its small editor and its description (#344) |
+| 2026-11-21 | minor | The shipped Noto faces; the computer is searched for 18 more scripts (#348) |
+| 2026-11-21 | minor | Home's greeting has no frame; the name's order is not guessed (#349) |
+| 2026-11-21 | minor | No frame draws the all-day alert row (#353) |
+| 2026-11-21 | minor | Right-to-left words are ordered and cut at their logical end in the app's labels; three rough edges of it (#356) |
+| 2026-11-21 | minor | The event editor's three hosts: what the full editor and the window do not draw yet (#370) |
+| 2026-11-21 | minor | Narrow Settings: Undo send without Off, the head that stays, Esc under Sending (#373) |
+| 2026-11-21 | minor | The composer in a window of its own: the row's three hosts, its key hint, the palette's Send (#379) |
+| 2026-11-21 | minor | A window opened again uploads the reader's pictures again: the #165 clause is gone; the reader's window (#380) |
+| 2026-11-21 | minor | `html` reads a block's alignment, background, widths and button links (#383) |
+| 2026-11-21 | minor | The cleaned copy is the one browser hand-off; what it keeps (#388) |
+| 2026-11-21 | minor | The status line: offline since and try again, the worst first, the place's keys, dismiss by Esc, a live region (#396) |
+| 2026-11-21 | minor | The command line: what of its frames' search, GO TO and refusal is not as drawn (#397) |
+| 2026-11-21 | minor | The index: Blocked and Junk rows, whose sync a row says, New message at 125 % (#398) |
+| 2026-11-21 | minor | Home: when the banner says offline, which failures it names, what "since" means; an agent's held ask after the owner's (#399) |
+| 2026-11-21 | minor | The first start after schema version 6 indexes the links with nothing shown (#406) |
+| 2026-11-21 | minor | Later's third head and scheduled sends; the screener card's line (#410) |
+| 2026-11-21 | minor | A desktop that ignores the least size; the title bar under the results and the editor (#412) |
+| 2026-11-21 | minor | The pictures against the frames on the frames' own sample (#416) |
+| 2026-11-21 | minor | The emblem's first twinkle, the field near text and its reach at reduced (#418) |
+| 2026-11-21 | minor | The account form's note for a moved server; a kept password's removal notice (#422) |
+| 2026-11-21 | minor | Lines checked against the code at the epic's end: the fixed parts of the live tests, IMAP, the fake server, the index, the reader, the composer and the calendar taken out (#425) |
+| 2026-11-21 | minor | Segmented names short of room, the 136 at 130 %, the screener switch and search line beside the reader (#427) |

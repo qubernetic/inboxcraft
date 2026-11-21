@@ -1,6 +1,6 @@
 # Development setup
 
-> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-08 · **Change:** minor
+> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-21 · **Change:** minor
 
 InboxCraft is developed in two layers. The Rust toolchain and every check run in a container; the host only runs the
 binary the container built. The `justfile` is the one command surface over both, and a thin layer over
@@ -683,3 +683,19 @@ image.
 | 2026-11-08 | minor | Making, changing and deleting events on the sample (#148) |
 | 2026-11-08 | minor | The sample's invitations and the fuzz target `engine_invite` (#149) |
 | 2026-11-08 | minor | The fuzz target `engine_alerts` (#150) |
+| 2026-11-21 | patch | The sample's appearance settings without preset, typeface and icons (#231) |
+| 2026-11-21 | minor | Pinned asset files: the manifest, its format and the gate's messages; the dev Flatpak installs the brand's icon theme tree, no more `just icon` (#232) |
+| 2026-11-21 | minor | The frame bench, `just bench-ui`, and the fuzz target `fontconfig_scan` (#233) |
+| 2026-11-21 | minor | `ui_bench --compose`: the composer's scenes (#234) |
+| 2026-11-21 | patch | A leaving row acts at once and its gap closes; a done row shows a tick (#236) |
+| 2026-11-21 | patch | The inbox views are Grouped, Smart and List (#236) |
+| 2026-11-21 | patch | The sample's composer keeps its draft at most once a second while typing (#238, #243) |
+| 2026-11-21 | minor | The compile cache in the dev container: sccache, its wrapper, where it lies, how to look at it and empty it (#246) |
+| 2026-11-21 | minor | `cargo xtask shots` and its place in `ci` (#248) |
+| 2026-11-21 | minor | Acts: Undo in the status line for five seconds (#309) |
+| 2026-11-21 | patch | The sample's composer: Discard with Undo (#340) |
+| 2026-11-21 | minor | The sample's right-to-left mail for the pictures (#356) |
+| 2026-11-21 | minor | The reader's More menu opens the original in the browser (#388) |
+| 2026-11-21 | patch | CI: the `flatpak` job installs its runtime and SDK for the user (#391) |
+| 2026-11-21 | patch | The frame bench names `reader-step-why` (#404) |
+| 2026-11-21 | minor | The coverage floors stand at what the epic holds: 95 to 100 % a crate, 98 % in all (#425) |
