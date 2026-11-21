@@ -486,17 +486,10 @@ fn key_frames(level: Level, on_home: bool, reach: f32) {
     let away = pos2(700.0, 300.0);
     let mut harness = harness(Stage::new(level, Opts { on_home, ..Opts::default() }));
     assert!(warm(&harness).is_empty(), "before: something is warm");
-    // The cells within reach flip at once (at reduced, each with 0.4 of the chance, within 400 ms); none beyond.
+    // The cells within reach flip at once; none beyond.
     harness.hover_at(at);
     harness.step();
-    let mut first = warm(&harness);
-    for _ in 1..MS_200 * 2 {
-        if reach <= 0.0 || level == Level::Full || !first.is_empty() {
-            break;
-        }
-        harness.step();
-        first = warm(&harness);
-    }
+    let first = warm(&harness);
     let spots = field_spots(&first);
     if reach <= 0.0 {
         assert!(first.is_empty(), "{level:?}: the field answered the pointer");
@@ -526,8 +519,7 @@ fn key_frames(level: Level, on_home: bool, reach: f32) {
         ever.extend(spots);
         last = now;
     }
-    // At reduced each cell flips with 0.4 of the chance: the field changes less often.
-    let (most_still, least_flipped) = if level == Level::Full { (20, 45) } else { (45, 25) };
+    let (most_still, least_flipped) = (20, 45);
     assert!(changes + most_still >= 60, "{level:?}: the field changed in {changes} of 60 frames under a still pointer");
     assert!(ever.len() * 100 >= near * least_flipped, "{level:?}: {} of {near} cells within reach flipped in a second", ever.len());
     // The pointer moves on: the cells it left take new glyphs as they go back, each at its own time; some are still
@@ -1051,8 +1043,9 @@ fn quiet_is_a_fifth_inside_a_block_and_comes_back_eased_over_80_points() {
     let other = Rect::from_min_max(pos2(360.0, 100.0), pos2(400.0, 140.0));
     assert_eq!(quiet_at(&[block, other], pos2(380.0, 120.0)), QUIET_IN);
     assert_eq!(quiet_at(&[], pos2(200.0, 120.0)), 1.0);
-    let nan = quiet_at(&[block], pos2(f32::NAN, 120.0));
-    assert!((QUIET_IN..=1.0).contains(&nan), "a point that is not a number: {nan}");
+    for odd in [pos2(f32::NAN, 120.0), pos2(200.0, f32::NAN), pos2(f32::INFINITY, 120.0), pos2(200.0, f32::NEG_INFINITY)] {
+        assert_eq!(quiet_at(&[block], odd), 1.0, "{odd:?}: a point that is not a number lies near no block");
+    }
 }
 
 #[test]
@@ -1076,6 +1069,21 @@ fn m1_near_a_quiet_block_flips_fewer_cells() {
     let quiet = warm_share(Level::Full, REACH_FULL, &[RECT]);
     eprintln!("flipped under a still pointer: {free:.3} away from text, {quiet:.3} inside a quiet block");
     assert!(quiet > 0.0 && quiet * 2.5 < free, "{quiet:.3} flipped inside a quiet block, {free:.3} away from one");
+    // The first roll: inside the block a cell flips with QUIET_IN of the chance it has away from it, so about a fifth
+    // as many flip (each roll's hashes are the same with and without the block).
+    let (mut free_hits, mut quiet_hits) = (0_usize, 0_usize);
+    for at in (0..40).map(|n| pos2(80.0 + (n % 8) as f32 * 110.0, 80.0 + (n / 8) as f32 * 110.0)) {
+        for (blocks, hits) in [(&[][..], &mut free_hits), (&[RECT][..], &mut quiet_hits)] {
+            let mut field = Field::new(7);
+            field.set_quiet(blocks);
+            field.build(RECT, TextScale::default(), None, 1.0);
+            field.update(1.0, 1, Some(at), Level::Full, true);
+            *hits += field.warm.len();
+        }
+    }
+    let ratio = quiet_hits as f64 / free_hits as f64;
+    eprintln!("first roll: {quiet_hits} flipped inside a quiet block, {free_hits} away from one ({ratio:.3})");
+    assert!(free_hits > 400 && (0.16..=0.24).contains(&ratio), "{quiet_hits} of {free_hits}: not a fifth");
 }
 
 /// A flipped cell near a quiet block shows at the quiet share of its opacity; one away from it and the dots at rest at

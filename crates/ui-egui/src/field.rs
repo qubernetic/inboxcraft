@@ -24,8 +24,8 @@
 //! of the cells within reach are flipped at a time (`field_tests`). Near the quiet blocks its caller names (Home's
 //! text, [`Field::set_quiet`]) the field calms, as the source does near text: q is 0.2 inside a block and comes back
 //! to 1 over 80 points, eased ([`quiet_at`]), and a flipped cell shows at q of its opacity (its colour mixed into
-//! `bg` by q, a flat colour); the dots at rest do not change. The emblem's cells (M2) flip with a chance of 0.25 + 0.75 × f and settle back the same way within 60 points, at full and at reduced
-//! alike; at off it is still. While the field is live (full, or reduced on Home) the emblem also twinkles by itself:
+//! `bg` by q, a flat colour); the dots at rest do not change. The emblem's cells (M2) flip with a chance of
+//! 0.25 + 0.75 × f and settle back the same way within 60 points, at full and at reduced alike; at off it is still. While the field is live (full, or reduced on Home) the emblem also twinkles by itself:
 //! in each slot of 1/60 s of input time, with a chance of 1 in 8, one of its cells that is not warm flips for 250 to
 //! 750 ms and flickers as it settles, half of the ink ones in cyan and the cyan ones in cyan; about 7.5 a second at
 //! any frame rate. It starts a quarter second after the field is drawn ([`TWINKLE_SETTLE`]), so the few frames of a
@@ -41,8 +41,8 @@
 //! cells are warm, only the rows that hold one are built again. A repaint is asked for at the time of the next change
 //! (a roll, a glyph, a cell back, a twinkle), never sooner: none at rest; measured in a 60 Hz window that draws only
 //! when asked, about 30 a second while the emblem twinkles with the pointer away (295 in 10 s, the twinkles' new
-//! glyphs as they settle) and about 60 under a still pointer (597 in 10 s); none while the field is not drawn. The field takes no click, no key and no focus,
-//! and shows nothing to a screen reader: it only paints.
+//! glyphs as they settle) and about 60 under a still pointer (597 in 10 s); none while the field is not drawn. The
+//! field takes no click, no key and no focus, and shows nothing to a screen reader: it only paints.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -969,15 +969,18 @@ fn share(hash: u32) -> f32 {
 
 /// The share of the field's effect left at `at` near the `quiet` blocks: [`QUIET_IN`] inside one, coming back to 1 at
 /// [`FADE`] points from it, eased (0.2 + 0.8 × k², k = distance / [`FADE`] up to 1), the least over the blocks; 1 with
-/// none near.
+/// none near, and for a point that is not a number.
 pub(crate) fn quiet_at(quiet: &[Rect], at: Pos2) -> f32 {
+    // A point that is not a number lies near no block.
+    if !(at.x.is_finite() && at.y.is_finite()) {
+        return 1.0;
+    }
     quiet.iter().fold(1.0, |least, block| {
         let dx = (block.left() - at.x).max(at.x - block.right()).max(0.0);
         let dy = (block.top() - at.y).max(at.y - block.bottom()).max(0.0);
         let k = (vec2(dx, dy).length() / FADE).min(1.0);
         let share = QUIET_IN + (1.0 - QUIET_IN) * k * k;
-        // NaN (an `at` that is not a number) keeps what was found.
-        if share < least { share } else { least }
+        share.min(least)
     })
 }
 
