@@ -3,11 +3,11 @@
 
 //! The scenes of `shots.jsonl` show what their names say on the frames' sample: the error scenes keep the error of
 //! the folder they open after the window is drawn, and the event editor's scenes pick an event the owner can edit or
-//! one that is someone else's as their names say.
+//! one that is someone else's as their names say. The Scheduled page's scenes count both sends in the outbox.
 
 use egui::vec2;
 
-use super::{Open, Shot, parse_script, render, sync, window};
+use super::{Open, Shot, parse_script, places, render, sync, window};
 use crate::mailbox::Place;
 use crate::theme::Mode;
 use crate::workers::NoWorkers;
@@ -56,5 +56,15 @@ fn the_event_scenes_edit_an_own_event_and_read_someone_else_s() {
         let editor = app.calendar().editor();
         let read_only = editor.map(crate::calendar::editor::Editor::read_only);
         assert_eq!(read_only, Some(shot.out.contains("read-only")), "{}", shot.out);
+    }
+}
+
+#[test]
+fn the_scheduled_scenes_count_both_sends_in_the_outbox() {
+    for shot in scenes(&["settings-scheduled-list", "settings-1000-130-scheduled"]) {
+        let (mut app, clock) = window(&shot).unwrap();
+        places(&mut app, &clock, &shot).unwrap();
+        let sends: Vec<&str> = app.mailbox().outbox().iter().map(|row| row.subject.as_str()).collect();
+        assert_eq!(sends.len(), 2, "{}: {sends:?}", shot.out);
     }
 }

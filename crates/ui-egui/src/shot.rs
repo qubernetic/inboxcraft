@@ -715,6 +715,8 @@ fn places(app: &mut InboxApp, clock: &FakeClock, shot: &Shot) -> Result<(), UiEr
             // The page under Sending, over the sending sample with its snooze, reminder, send later and alert.
             let scheduled = if frames(shot) { crate::sample::frames::scheduled } else { crate::sample::scheduled };
             scheduled(app.mailbox_mut()).map_err(|error| bad(format!("{}: {error}", shot.out)))?;
+            // The window reads the sends scheduled here as it reads them after a command of its own.
+            app.mailbox_mut().refresh();
             app.open_scheduled();
         } else {
             if crate::settings::Section::named(name) == Some(crate::settings::Section::Privacy) {
