@@ -12,7 +12,10 @@ use std::time::Duration;
 
 use inboxcraft_ui_egui::original::Original as _;
 
-use super::{CACHE_DIR, DIR, Hand, KEEP_FOR, MAX_FILES, Originals, SAMPLE_CACHE_DIR, SAMPLE_DIR, Whose, folder_from, name, sweep_folder, xdg_open};
+use super::{
+    CACHE_DIR, DIR, Hand, KEEP_FOR, MAX_FILES, Originals, SAMPLE_CACHE_DIR, SAMPLE_DIR, Whose, check_private, folder_from, my_uid, name,
+    sweep_folder, xdg_open,
+};
 
 /// What the fake desktop was handed, and whether it refuses (a desktop with no browser).
 #[derive(Clone, Default)]
@@ -148,6 +151,20 @@ fn the_sample_writes_into_a_folder_of_its_own() {
     sweep_folder(&sample);
     assert!(!sample.join(name(4)).exists());
     assert_eq!(fs::read_to_string(owner.join(name(4))).unwrap(), "the owner's", "nor did its sweep take it");
+}
+
+#[test]
+fn a_folder_of_somebody_else_is_refused_before_anything_is_written() {
+    let me = my_uid().unwrap();
+    assert_eq!(check_private(true, me, 0o40700, me), Ok(()));
+    let error = check_private(true, me.wrapping_add(1), 0o40700, me).unwrap_err();
+    assert!(error.contains("not the owner's"), "{error}");
+    assert!(check_private(true, 0, 0o40700, 1000).is_err(), "root's folder is not user 1000's");
+    assert!(check_private(false, me, 0o100600, me).unwrap_err().contains("not a folder"));
+    assert!(check_private(true, me, 0o40750, me).unwrap_err().contains("open to others"));
+    // The process's own user is who owns what it makes.
+    let made = tempfile::tempdir().unwrap();
+    assert_eq!(std::os::unix::fs::MetadataExt::uid(&fs::metadata(made.path()).unwrap()), me);
 }
 
 #[test]

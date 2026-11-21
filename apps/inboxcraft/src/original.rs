@@ -10,7 +10,7 @@
 //! - The folder is [`DIR`] in the owner's runtime folder (`$XDG_RUNTIME_DIR`, a per-user `tmpfs` the session empties at
 //!   logout), else [`CACHE_DIR`] in the owner's cache folder; never the shared `/tmp`. The sample has folders of its
 //!   own ([`SAMPLE_DIR`], [`SAMPLE_CACHE_DIR`]), so neither run touches the other's copies. It is made `0700`; one that
-//!   is a symbolic link, not a folder or open to anybody else is refused, not repaired.
+//!   is a symbolic link, not a folder, somebody else's or open to anybody else is refused, not repaired.
 //! - The file's name comes from the message's number alone ([`name`]), never from anything the message says. It is
 //!   made new (`O_CREAT | O_EXCL`, which follows no symbolic link, a dangling one included) with mode `0600`; whatever
 //!   stood at the name before (an earlier copy, or a link someone planted) is unlinked first, never followed, and a
@@ -170,8 +170,36 @@ impl Original for Originals {
     }
 }
 
-/// Makes `folder` (`0700`) where it is missing and checks that it is a private folder: a real folder, not a symbolic
-/// link, closed to everybody but its owner. Says its owner's user id.
+/// This process's user id: the owner of its `/proc/self` (std has no `getuid`, and no `unsafe` is allowed).
+///
+/// # Errors
+///
+/// `/proc` could not be read.
+fn my_uid() -> Result<u32, String> {
+    fs::metadata("/proc/self").map(|meta| meta.uid()).map_err(|error| format!("the private folder's owner could not be checked: {error}"))
+}
+
+/// Whether a folder is private, from its metadata (as `symlink_metadata` reads it): `is_dir` (a real folder, not a
+/// symbolic link), owned by `uid` that is `me` (this process's user id), and its `mode` closed to everybody else.
+///
+/// # Errors
+///
+/// What makes the folder not private.
+fn check_private(is_dir: bool, uid: u32, mode: u32, me: u32) -> Result<(), String> {
+    if !is_dir {
+        return Err("the private folder is not a folder".to_owned());
+    }
+    if uid != me {
+        return Err("the private folder is not the owner's".to_owned());
+    }
+    if mode & 0o077 != 0 {
+        return Err("the private folder is open to others".to_owned());
+    }
+    Ok(())
+}
+
+/// Makes `folder` (`0700`) where it is missing and checks that it is a private folder ([`check_private`]) before
+/// anything is written into it. Says its owner's user id.
 fn private_folder(folder: &Path) -> Result<u32, String> {
     if let Some(parent) = folder.parent() {
         fs::create_dir_all(parent).map_err(|error| format!("the private folder could not be made: {error}"))?;
@@ -182,12 +210,7 @@ fn private_folder(folder: &Path) -> Result<u32, String> {
         Err(error) => return Err(format!("the private folder could not be made: {error}")),
     }
     let meta = fs::symlink_metadata(folder).map_err(|error| format!("the private folder could not be read: {error}"))?;
-    if !meta.file_type().is_dir() {
-        return Err("the private folder is not a folder".to_owned());
-    }
-    if meta.mode() & 0o077 != 0 {
-        return Err("the private folder is open to others".to_owned());
-    }
+    check_private(meta.file_type().is_dir(), meta.uid(), meta.mode(), my_uid()?)?;
     Ok(meta.uid())
 }
 
