@@ -289,3 +289,108 @@ fn the_headline_greets_by_the_word_the_owner_chose() {
     mailbox.restore_greet_by(GreetBy::Last);
     assert_eq!(kept.current(&mut mailbox, None).name.as_deref(), Some("Holloway"), "the kept Home follows a restored choice");
 }
+
+/// Tells `account` of `mailbox` what its worker would: its connection `state`, and a sync round ended at `synced`.
+fn told(mailbox: &mut Mailbox, account: u64, state: inboxcraft_model::ConnectionState, synced: Option<i64>) {
+    use inboxcraft_model::{AccountId, Event, EventKind};
+    let account = AccountId::new(account);
+    if let Some(at) = synced {
+        mailbox.tell(&Event::new(account, None, EventKind::Connection(inboxcraft_model::ConnectionState::Online))).unwrap();
+        mailbox.tell(&Event::new(account, None, EventKind::SyncFinished { at: Timestamp::from_unix(at, 0).unwrap() })).unwrap();
+    }
+    mailbox.tell(&Event::new(account, None, EventKind::Connection(state))).unwrap();
+}
+
+/// Tells `account` of `mailbox` that its sign-in was refused.
+fn refused(mailbox: &mut Mailbox, account: u64) {
+    use inboxcraft_model::{AccountId, ErrorKind, Event, EventKind};
+    let failed = EventKind::Failed { kind: ErrorKind::LoginRefused, folder: None };
+    mailbox.tell(&Event::new(AccountId::new(account), None, failed)).unwrap();
+}
+
+fn accounts(mailbox: &Mailbox) -> Vec<(u64, String)> {
+    mailbox.accounts().iter().map(|account| (account.id, account.label.clone())).collect()
+}
+
+const OFFLINE: inboxcraft_model::ConnectionState = inboxcraft_model::ConnectionState::Offline;
+const ONLINE: inboxcraft_model::ConnectionState = inboxcraft_model::ConnectionState::Online;
+
+#[test]
+fn offline_says_since_the_last_sync_sync_status_names() {
+    let mut mailbox = mailbox();
+    assert_eq!(build(&mut mailbox).failing, None, "nothing told yet: the status line says offline, the banner nothing");
+    let all = accounts(&mailbox);
+    // Synced at 07:40 and 08:10 today, then every account offline: since the newest sync.
+    for (index, (account, _)) in all.iter().enumerate() {
+        told(&mut mailbox, *account, OFFLINE, Some(NOW - 80 * 60 + 30 * 60 * index as i64));
+    }
+    let failing = build(&mut mailbox).failing.unwrap();
+    let since = mailbox.short_date(Timestamp::from_unix(NOW - 80 * 60 + 30 * 60 * (all.len() as i64 - 1), 0).unwrap());
+    assert_eq!(failing.text, format!("Offline since {since}: what you see is what this computer holds."));
+    assert!(!failing.account && !failing.outbox, "nothing to open for being offline");
+    // One account back online: Home is no longer offline.
+    told(&mut mailbox, all[0].0, ONLINE, None);
+    assert_eq!(build(&mut mailbox).failing, None);
+}
+
+#[test]
+fn a_refused_sign_in_is_named_by_its_account_and_offers_the_account() {
+    let mut mailbox = mailbox();
+    let all = accounts(&mailbox);
+    let (studio, label) = all.last().unwrap().clone();
+    for (account, _) in &all {
+        told(&mut mailbox, *account, ONLINE, Some(NOW - 600));
+    }
+    refused(&mut mailbox, studio);
+    let failing = build(&mut mailbox).failing.unwrap();
+    assert_eq!(failing.text, format!("{label} refused the sign-in."));
+    assert!(failing.account && !failing.outbox);
+    // Every account refused: counted, not listed.
+    for (account, _) in &all {
+        refused(&mut mailbox, *account);
+    }
+    let failing = build(&mut mailbox).failing.unwrap();
+    if all.len() > 1 {
+        assert_eq!(failing.text, format!("{} accounts refused the sign-in.", all.len()));
+    }
+    // Their connections down as well: an account stopped for the owner is refused, not offline.
+    for (account, _) in &all {
+        told(&mut mailbox, *account, OFFLINE, None);
+    }
+    assert!(!build(&mut mailbox).failing.unwrap().text.contains("Offline"), "an account refused is not offline");
+}
+
+#[test]
+fn everything_failing_says_offline_the_refused_sign_in_and_the_send_in_one_banner() {
+    let mut mailbox = mailbox();
+    let all = accounts(&mailbox);
+    assert!(all.len() >= 2, "the sample has two accounts");
+    let (studio, label) = all.last().unwrap().clone();
+    for (account, _) in &all {
+        told(&mut mailbox, *account, OFFLINE, Some(NOW - 50 * 60));
+    }
+    refused(&mut mailbox, studio);
+    let since = mailbox.short_date(Timestamp::from_unix(NOW - 50 * 60, 0).unwrap());
+    let failing = build(&mut mailbox).failing.unwrap();
+    assert_eq!(failing.text, format!("Offline since {since}: what you see is what this computer holds. {label} refused the sign-in."));
+    assert!(failing.account);
+    // The words are the parts in their order, and a refused send joins them.
+    let parts = super::failing_text(Some(&since), std::slice::from_ref(&label), 1, 1, Some("Odette Marchand"));
+    assert_eq!(
+        parts,
+        format!(
+            "Offline since {since}: what you see is what this computer holds. {label} refused the sign-in, and one message to Odette Marchand was not sent. Nothing is lost."
+        )
+    );
+    assert_eq!(super::failing_text(None, &[], 0, 3, None), "3 messages were not sent. Nothing is lost.");
+    assert_eq!(super::failing_text(None, &[], 0, 1, None), "One message was not sent. Nothing is lost.");
+    assert_eq!(super::failing_text(None, &[], 0, 1, Some("Odette")), "One message to Odette was not sent. Nothing is lost.");
+}
+
+#[test]
+fn an_account_s_name_in_the_banner_is_plain_and_capped() {
+    let hostile = format!("\u{202e}Studio\r\n\u{0}{}", "x".repeat(10_000));
+    let text = super::failing_text(None, &[super::kept(&hostile)], 1, 0, None);
+    assert!(text.chars().count() <= MOST + 40, "{}", text.len());
+    assert!(!text.contains('\u{202e}') && !text.contains('\n') && !text.contains('\u{0}'));
+}

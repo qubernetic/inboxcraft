@@ -285,7 +285,8 @@ fn length(minutes: i64) -> String {
 
 /// Home as the mailbox has it now, read through `safe` commands only: the counts from the inbox's unread mail, the
 /// screener's senders, `mail.list` of the snoozed mail and the outbox; the drafts through `compose.list`; the rest of
-/// today through `event.list` of today and tomorrow and `calendar.list`. A refused read leaves its part empty (a count `None`), never made
+/// today through `event.list` of today and tomorrow and `calendar.list`; what is failing through `sync.status` and
+/// `account.list`. A refused read leaves its part empty (a count `None`), never made
 /// up. Runs commands: call it when the mailbox changed, not every frame.
 pub fn build(mailbox: &mut Mailbox) -> Home {
     build_hiding(mailbox, None)
@@ -332,11 +333,7 @@ pub fn build_hiding(mailbox: &mut Mailbox, hidden: Option<u64>) -> Home {
         greeting: Greeting::at(civil.map_or(12, |civil| civil.hour())),
         name,
         lede: String::new(),
-        failing: (refused > 0).then(|| Failing {
-            text: tr!("The server refused {n} of your sends; they are kept in the outbox.", n = crate::component::label::count(refused)),
-            account: false,
-            outbox: true,
-        }),
+        failing: failing(mailbox, refused),
         counts,
         agenda,
         agenda_total,
@@ -350,6 +347,90 @@ pub fn build_hiding(mailbox: &mut Mailbox, hidden: Option<u64>) -> Home {
     home.lede = kept(&lede(read, screen, back, home.agenda.first(), quiet));
     home.buttons = if read.unwrap_or(0) > 0 { Buttons::ReadAndWrite } else { Buttons::WriteAndCalendar };
     home
+}
+
+/// What is failing, read through `sync.status` (the last sync) and `account.list` (each account's connection and its last
+/// failure), with the `refused` sends of the outbox: offline since the last sync when no account is signed in and one
+/// that is not stopped for the owner is offline or backing off; the accounts that refused the sign-in; the sends the
+/// server refused. `None` when none of it holds, also before a first sync: offline with nothing synced yet is the
+/// status line's to say. A refused read leaves its part out. At most one account's name is kept.
+fn failing(mailbox: &mut Mailbox, refused: u64) -> Option<Failing> {
+    let status = mailbox.run("sync.status", &json!({})).ok();
+    let last = status.as_ref().and_then(|status| status.get("last_synced")).and_then(Value::as_str).and_then(crate::mailbox::parse_date);
+    let listed = mailbox.run("account.list", &json!({})).ok();
+    let rows = listed.as_ref().and_then(|listed| listed.get("accounts")).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let (mut signed_in, mut away, mut refusals, mut names) = (false, false, 0_u64, Vec::new());
+    for row in rows {
+        let state = row.get("connection").and_then(|connection| connection.get("state")).and_then(Value::as_str);
+        let kind = row.get("failure").and_then(|failure| failure.get("kind")).and_then(Value::as_str);
+        signed_in |= matches!(state, Some("online" | "watching"));
+        away |=
+            !kind.and_then(error_kind).is_some_and(inboxcraft_model::ErrorKind::needs_the_owner) && matches!(state, Some("offline" | "backing_off"));
+        if kind == Some("login_refused") {
+            refusals = refusals.saturating_add(1);
+            if names.is_empty() {
+                names.extend(row.get("label").and_then(Value::as_str).map(kept));
+            }
+        }
+    }
+    let since = last.filter(|_| !signed_in && away).map(|at| mailbox.short_date(at));
+    let to = mailbox
+        .outbox()
+        .iter()
+        .find(|row| matches!(row.state, SendState::Refused { .. }))
+        .and_then(|row| row.to.first())
+        .map(|to| kept(to))
+        .filter(|to| !to.trim().is_empty());
+    let text = failing_text(since.as_deref(), &names, refusals, refused, to.as_deref());
+    (!text.is_empty()).then_some(Failing { text, account: refusals > 0, outbox: refused > 0 })
+}
+
+/// The failing banner's words: "Offline since 14:10: what you see is what this computer holds." when `since` is given,
+/// then the `refusals` accounts that refused the sign-in (named by the first of `names` when there is one) and the
+/// `not_sent` sends the server refused (the first going `to` someone) in one sentence, and "Nothing is lost." after a
+/// send not sent. Empty when there is nothing to say.
+pub(crate) fn failing_text(since: Option<&str>, names: &[String], refusals: u64, not_sent: u64, to: Option<&str>) -> String {
+    let n = crate::component::label::count;
+    let mut sentences = Vec::new();
+    if let Some(since) = since {
+        sentences.push(tr!("Offline since {when}: what you see is what this computer holds.", when = since));
+    }
+    let refused = match (refusals, names.first()) {
+        (0, _) => None,
+        (1, Some(name)) => Some(tr!("{name} refused the sign-in", name = name)),
+        (1, None) => Some(tr!("One account refused the sign-in").to_owned()),
+        (many, _) => Some(tr!("{n} accounts refused the sign-in", n = n(many))),
+    };
+    let sent = |start: bool| match (not_sent, to) {
+        (0, _) => None,
+        (1, Some(who)) if start => Some(tr!("One message to {who} was not sent", who = who)),
+        (1, Some(who)) => Some(tr!("one message to {who} was not sent", who = who)),
+        (1, None) if start => Some(tr!("One message was not sent").to_owned()),
+        (1, None) => Some(tr!("one message was not sent").to_owned()),
+        (many, _) => Some(tr!("{n} messages were not sent", n = n(many))),
+    };
+    match (refused, sent(false)) {
+        (Some(refused), Some(sent)) => sentences.push(tr!("{refused}, and {sent}.", refused = refused, sent = sent)),
+        (Some(refused), None) => sentences.push(tr!("{refused}.", refused = refused)),
+        (None, Some(_)) => sentences.extend(sent(true).map(|sent| tr!("{sent}.", sent = sent))),
+        (None, None) => {}
+    }
+    if not_sent > 0 {
+        sentences.push(tr!("Nothing is lost.").to_owned());
+    }
+    sentences.join(" ")
+}
+
+/// The error kind `account.list` names in snake case (`login_refused`).
+fn error_kind(name: &str) -> Option<inboxcraft_model::ErrorKind> {
+    let pascal: String = name
+        .split('_')
+        .map(|word| {
+            let mut letters = word.chars();
+            letters.next().map(|first| first.to_uppercase().chain(letters).collect::<String>()).unwrap_or_default()
+        })
+        .collect();
+    serde_json::from_value(Value::String(pascal)).ok()
 }
 
 /// How many snoozed messages come back today, from `mail.list` of the snoozed mail (at most the engine's page of
