@@ -57,7 +57,7 @@ pub(super) fn let_in(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
     let first = theirs().filter_map(|other| other.date).min();
     let waiting = mailbox.waiting().iter().find(|waiting| waiting.address == row.address).map_or(0, |waiting| waiting.messages.len());
     let count = waiting.max(theirs().count());
-    let mut parts = vec![row.address.clone()];
+    let mut parts = vec![crate::bidi::address(&row.address).into_owned()];
     if let Some(first) = first {
         parts.push(tr!("first mail {when}", when = mailbox.short_date(first)));
     }

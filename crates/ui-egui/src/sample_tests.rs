@@ -5,7 +5,7 @@ use inboxcraft_store::Storage;
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
-use super::{FOLDERS, INVITATIONS, MESSAGES, grown, invitations, mailbox, people, session, session_over};
+use super::{FOLDERS, INVITATIONS, MESSAGES, grown, invitations, mailbox, people, right_to_left, session, session_over};
 use crate::component::avatar;
 
 /// 2026-11-05T09:00:00Z.
@@ -284,4 +284,24 @@ fn the_grown_mailbox_holds_as_many_messages_as_asked_all_invented_and_readable()
         assert_eq!(answer["message"]["body"]["readable"], json!(true), "message {id}");
     }
     assert_eq!(grown(now(), 3).unwrap().accounts().unwrap().len(), 2, "never fewer than the sample's own");
+}
+
+/// The right-to-left pictures' mail: a Hebrew and an Arabic message, the newest two in Mira's inbox, from invented
+/// people on `example.org`, their subjects as written.
+#[test]
+fn the_right_to_left_mail_is_the_inbox_s_newest_two() {
+    let mut store = mailbox(now()).unwrap();
+    let mut batch = inboxcraft_store::Batch::new();
+    for change in right_to_left(now()).unwrap() {
+        batch.push(change);
+    }
+    store.apply(&batch).unwrap();
+    let mut session = session_over(store, Box::new(FakeClock::new(now()))).unwrap();
+    let listed = session.run("mail.list", &json!({ "role": "inbox" })).unwrap();
+    let messages = listed["messages"].as_array().unwrap();
+    let subjects: Vec<&str> = messages.iter().take(2).map(|message| message["subject"].as_str().unwrap()).collect();
+    assert_eq!(subjects, ["סיור בגינה ביום שלישי", "موعد ورشة الفخار يوم السبت"]);
+    for message in messages.iter().take(2) {
+        assert!(message["from"].to_string().contains("@example.org"), "{message}");
+    }
 }

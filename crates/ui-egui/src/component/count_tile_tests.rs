@@ -193,7 +193,9 @@ fn a_hostile_label_stays_in_the_tile_on_two_lines_at_most_cut_once() {
         assert!(paint.shapes.iter().all(|shape| !shape.overflows), "nothing leaves the tile");
         for (at, words, _, _) in texts(&harness, &name) {
             assert!(rect.contains_rect(at), "{at:?}");
-            assert!(!words.contains(['\0', '\r', '\n', '\u{202E}']), "no control or bidi character is drawn");
+            // A right-to-left label is broken into its rows by line breaks of the layout's own (egui draws none).
+            let breaks = if crate::bidi::needs(label) { ['\0', '\r', '\u{202E}', '\u{202E}'] } else { ['\0', '\r', '\n', '\u{202E}'] };
+            assert!(!words.contains(breaks), "no control or bidi character is drawn");
             assert!(words.chars().count() <= crate::component::MOST + 2, "at most the cap is laid out");
         }
         let f = theme.fonts;

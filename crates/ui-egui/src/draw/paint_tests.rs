@@ -1202,17 +1202,37 @@ fn a_tracked_label_is_never_measured_narrower_than_drawn_whatever_zero_width_sig
     for percent in [100, 130] {
         let font = Theme::new(Mode::Dark, TextScale::from_percent(percent).unwrap_or_default()).fonts.label;
         for ppp in [1.0, 1.5] {
-            // A joiner or a selector after a letter is counted as a gap egui may not draw (the over-count of
-            // `advances`, one spacing each at most): such a line may be cut a letter before it would have to be. The
-            // Arabic letter mark is one too since a shipped face (Noto Sans Arabic) holds it as a sign of no advance.
-            let over_counted = |fault: &String| {
-                fault.contains("cut although")
-                    && ['\u{200D}', '\u{FE0F}', '\u{FE00}', '\u{061C}'].iter().any(|sign| fault.contains(&sign.escape_unicode().to_string()))
-            };
-            let found: Vec<String> =
-                faults(font, ppp, &texts, &[60.0, 100.0, 150.0, 240.0]).into_iter().filter(|fault| !over_counted(fault)).collect();
+            // No sign is counted as a gap egui does not draw: a line holding one is cut only where it must be.
+            let found = faults(font, ppp, &texts, &[60.0, 100.0, 150.0, 240.0]);
             assert!(found.is_empty(), "{percent} % at ppp {ppp}: {} faults: {:#?}", found.len(), found.iter().take(8).collect::<Vec<_>>());
         }
+    }
+}
+
+#[test]
+fn a_joiner_a_selector_or_an_arabic_letter_mark_takes_no_spacing_it_does_not_draw() {
+    let font = Theme::new(Mode::Dark, TextScale::default()).fonts.label;
+    let spacing = font.tracking * font.size;
+    assert!(spacing > 0.0, "the label style is tracked");
+    let mut found = Vec::new();
+    let shapes = frame_shapes(1.0, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        found = ['\u{200D}', '\u{FE0F}', '\u{061C}']
+            .iter()
+            .map(|sign| {
+                let text: String = format!("A{sign}B{sign}").repeat(10);
+                let mut job = egui::text::LayoutJob::single_section(text, font.format(Color32::WHITE));
+                job.wrap.max_width = f32::INFINITY;
+                ui.painter().layout_job(job)
+            })
+            .collect();
+    });
+    drop(shapes);
+    for galley in &found {
+        let reach = super::reach(galley);
+        let measured = super::measured(galley);
+        // Measured as drawn, give or take egui's rounding of each letter's place: never a spacing more.
+        assert!(measured - reach < spacing, "{:?}: measured {measured}, drawn {reach}", galley.job.text.chars().take(4).collect::<String>());
     }
 }
 
@@ -1236,5 +1256,37 @@ fn a_float_s_edge_stands_on_whole_pixels_at_every_scale() {
             }
             assert!((edge.rect.min - rect.min).length() <= 0.75 / ppp && (edge.rect.max - rect.max).length() <= 0.75 / ppp, "{at}: {:?}", edge.rect);
         }
+    }
+}
+
+/// A galley egui wraps itself onto several rows (more than the bidi pass breaks) has one gap between two clusters of a
+/// row: its text's clusters less one per row. A right-to-left row holds more glyphs than characters (egui gives a letter's
+/// rest a glyph of its own), so a count by glyphs took the next row's characters for this one's.
+#[test]
+fn a_galley_of_several_rows_counts_every_cluster_of_its_text_once() {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let font = Font { tracking: 0.08, ..Theme::new(Mode::Dark, TextScale::default()).fonts.body };
+    let texts = [
+        "שלום עולם ".repeat(12),
+        "שלום\u{200B}עולם ".repeat(12),
+        "שָׁלוֹם עוֹלָם ".repeat(12),
+        "مرحبا يا عالم ".repeat(10),
+        "Kiln rota is out ".repeat(10),
+    ];
+    let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx);
+    let mut found = Vec::new();
+    for _ in 0..2 {
+        let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1200.0, 900.0))), ..egui::RawInput::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            found = texts.iter().map(|text| crate::component::wrapped(ui, text, font, Color32::WHITE, 140.0, 40, egui::Align::LEFT)).collect();
+        });
+        output.textures_delta.clear();
+    }
+    for (text, galley) in texts.iter().zip(&found) {
+        let rows = galley.rows.len();
+        assert!(rows >= 3 && !galley.elided, "{rows} rows");
+        let clusters = text.graphemes(true).count();
+        assert_eq!(super::gaps(galley), clusters - rows, "{:?}…: {clusters} clusters on {rows} rows", text.chars().take(6).collect::<String>());
     }
 }
