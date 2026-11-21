@@ -7,7 +7,7 @@
 use inboxcraft_time::{FakeClock, Offset, Timestamp};
 use serde_json::{Value, json};
 
-use super::{ALERTS, Alert, Editor, alert_text};
+use super::{ALERTS, Alert, Editor, alert_text, all_day_alert_text};
 use crate::calendar::{Calendar, EventRow};
 use crate::mailbox::Mailbox;
 use crate::sample;
@@ -173,4 +173,15 @@ fn a_saved_alert_comes_back_on_the_event_and_into_its_editor() {
     calendar.save(&mut mailbox);
     assert!(mailbox.error().is_none(), "{:?}", mailbox.error());
     assert_eq!(named(&calendar, "Glaze test").unwrap().alert, Alert::None);
+}
+
+#[test]
+fn an_all_day_hour_reads_back_by_its_name_and_is_never_sent() {
+    for choice in AllDayAlert::ALL {
+        let mut editor = Editor::edit(&row(Some(json!(choice.name()))));
+        assert_eq!(editor.form().alert, Alert::AllDay(choice));
+        assert_eq!(alert_text(Alert::AllDay(choice), Some(AllDayAlert::DayBefore18)), all_day_alert_text(choice), "the Settings row's words");
+        editor.form_mut().summary = "Kiln firing".to_owned();
+        assert_eq!(editor.changes(Offset::UTC), Ok(Some(("event.update", json!({ "id": 9, "summary": "Kiln firing" })))));
+    }
 }

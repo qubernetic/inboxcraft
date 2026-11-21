@@ -314,13 +314,16 @@ minutes; for an all-day event a trigger from its midnight at the hour `event.all
 on the day), so other devices ring too. The front end keeps that choice beside the week rule, under
 `all_day_alert`, and hands it back at the start (`Session::set_all_day_alert`); a file without it, or with anything
 else there, is the default. Events already written keep their alarms when it changes, and the alerts of all-day
-events without alarms are worked out again at the next tick. An `event.update` that makes a timed event all-day,
-without an `alert`, moves an alarm still at the timed default (`-PT10M`) to the chosen hour; any other alarm stays. An `event.update` that changes only the alert
+events without alarms are worked out again at the next tick (a choice handed back after the start's sweep too). The
+day an all-day alert counts from starts at 00:00 on the clock, also where the clock skips midnight. An `event.update`
+that makes a timed event all-day, without an `alert`, moves an alarm still at the timed default (`-PT10M`) to the
+chosen hour, and one that makes an all-day event timed moves an alarm at any of the four hours back to `-PT10M`; any
+other alarm stays, and only the series switches, not its changed instances. An `event.update` that changes only the alert
 rewrites only the moved or new `VALARM`: times, `DTSTAMP`, `SEQUENCE`, the scheduling parameters and the other alarms
 stay, and the guests are not told. What stays is byte-identical for text in canonical form; otherwise only its line
 form (the case of names, CRLF, folding) and parameter quoting change. A changed instance that cannot be read is kept
-as it came while the others take the alert. `event.list` says the alert back: `null` without any alarm, `"none"`, the
-minutes, or `"custom"` for what the field cannot show (a trigger it cannot name, or more than one timed display or
+as it came while the others take the alert. `event.list` says the alert back: `null` without any alarm, `"none"`, on
+an all-day event the name of the hour its alarm rings at (`"day_before_9"` … `"on_the_day_9"`), the minutes, or `"custom"` for what the field cannot show (a trigger it cannot name, or more than one timed display or
 sound alarm). A delete is a kept job the session holds back for the undo window
 (`Outcome::with_held_job`, six seconds, as long as the toast with Undo shows): `Session::tick` hands it to the worker
 once the window is over, `history.undo` before then withdraws it from the queue and puts the event back, and a restart

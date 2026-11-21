@@ -422,8 +422,9 @@ fn releaded(component: &Component, lead: Lead) -> Option<Component> {
 }
 
 /// `event`'s alert as `event.list` says it: `null` without any alarm (the default lead rings), `"none"` without a
-/// timed display or sound alarm (a location alarm is not one), the minutes before the start of its one timed display or
-/// sound alarm, or `"custom"` for what the field cannot name (after the start, from the end, at a moment, not in whole minutes, further than [`MAX_LEAD`], or more than one).
+/// timed display or sound alarm (a location alarm is not one), on an all-day event the name of the [`AllDayAlert`]
+/// hour its one alarm rings at (`"on_the_day_9"`), the minutes before the start of its one timed display or sound
+/// alarm, or `"custom"` for what the field cannot name (after the start, from the end, at a moment, not in whole minutes, further than [`MAX_LEAD`], or more than one).
 pub(crate) fn lead_of(event: &Event) -> serde_json::Value {
     if event.alarms.is_empty() {
         return serde_json::Value::Null;
@@ -432,6 +433,11 @@ pub(crate) fn lead_of(event: &Event) -> serde_json::Value {
     let Some(alarm) = ringing.next() else { return "none".into() };
     if ringing.next().is_some() {
         return "custom".into();
+    }
+    if event.all_day()
+        && let Some(hour) = AllDayAlert::ALL.into_iter().find(|hour| hour.span().is_some_and(|span| alarm.trigger == Trigger::Start(span)))
+    {
+        return hour.name().into();
     }
     let minutes = match alarm.trigger {
         Trigger::Start(span) => seconds(span).filter(|seconds| *seconds <= 0 && seconds % 60 == 0).map(|seconds| seconds.unsigned_abs() / 60),

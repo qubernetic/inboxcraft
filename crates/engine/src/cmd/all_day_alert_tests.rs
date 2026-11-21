@@ -185,7 +185,7 @@ fn what_is_written_comes_back_from_the_server_with_its_hour() {
     let rows: Vec<&Value> = list["events"].as_array().unwrap().iter().filter(|row| row["summary"] == json!("Day off")).collect();
     assert_eq!(rows.len(), 2, "{list}");
     for row in rows {
-        assert_eq!(row["alert"], json!(360), "six hours before midnight: {row}");
+        assert_eq!(row["alert"], json!("day_before_18"), "six hours before midnight, named: {row}");
         let copy = row["id"].as_u64().unwrap();
         assert_eq!(alerts(&session, copy), [utc(2026, 11, 9, 17, 0)]);
     }
@@ -325,4 +325,24 @@ fn only_the_series_the_edit_makes_all_day_trades_its_alarm() {
     let written = text(&session, id);
     assert_eq!(written.matches("TRIGGER:-PT15H\r\n").count(), 1, "the series: {written}");
     assert_eq!(written.matches("TRIGGER:-PT10M\r\n").count(), 1, "the day already whole keeps its own: {written}");
+}
+
+#[test]
+fn event_list_names_the_hours_on_an_all_day_event_and_minutes_elsewhere() {
+    let mut session = session();
+    let mut ids = Vec::new();
+    for choice in AllDayAlert::ALL {
+        set(&mut session, choice.name());
+        ids.push((day_off(&mut session), json!(choice.name())));
+    }
+    ids.push((
+        create(&mut session, json!({ "calendar": 1, "summary": "Day off", "start": "2026-11-10", "all_day": true, "alert": 180 })),
+        json!(180),
+    ));
+    ids.push((create(&mut session, json!({ "calendar": 1, "summary": "Day off", "start": "2026-11-10T13:00:00Z", "alert": 900 })), json!(900)));
+    let list = session.run("event.list", &json!({ "from": "2026-11-09", "to": "2026-11-12" })).unwrap();
+    for (id, alert) in ids {
+        let row = list["events"].as_array().unwrap().iter().find(|row| row["id"] == json!(id)).unwrap();
+        assert_eq!(row["alert"], alert, "{row}");
+    }
 }

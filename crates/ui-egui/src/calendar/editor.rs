@@ -30,31 +30,38 @@ pub enum Alert {
     None,
     /// This many minutes before the start.
     Before(u32),
+    /// An all-day event's alarm at one of the hours the setting writes, kept as it is.
+    AllDay(AllDayAlert),
     /// An alarm the field cannot name (after the start, from the end, at a moment), kept as it is.
     Custom,
 }
 
 impl Alert {
-    /// The alert `event.list` gives: `null` or nothing, `"none"`, the minutes, or anything else as custom.
+    /// The alert `event.list` gives: `null` or nothing, `"none"`, an all-day hour's name, the minutes, or anything else
+    /// as custom.
     #[must_use]
     pub fn read(value: Option<&Value>) -> Self {
         match value {
             None | Some(Value::Null) => Self::Default,
             Some(Value::String(word)) if word == "none" => Self::None,
+            Some(Value::String(word)) => AllDayAlert::from_name(word).map_or(Self::Custom, Self::AllDay),
             Some(value) => value.as_u64().and_then(|minutes| u32::try_from(minutes).ok()).map_or(Self::Custom, Self::Before),
         }
     }
 
-    /// What `event.create` and `event.update` take for it; `None` for the default and a custom alarm, which are never
-    /// sent.
+    /// What `event.create` and `event.update` take for it; `None` for the default, an all-day hour and a custom alarm,
+    /// which are never sent.
     fn param(self) -> Option<Value> {
         match self {
             Self::None => Some(json!("none")),
             Self::Before(minutes) => Some(json!(minutes)),
-            Self::Default | Self::Custom => None,
+            Self::Default | Self::AllDay(_) | Self::Custom => None,
         }
     }
 }
+
+/// The minutes a timed event's default alert rings before its start, as the engine writes it.
+const TIMED_DEFAULT: u32 = 10;
 
 /// The alerts the Alert field offers.
 pub const ALERTS: [Alert; 11] = [
@@ -82,11 +89,12 @@ pub fn alert_text(alert: Alert, all_day: Option<AllDayAlert>) -> String {
     match alert {
         Alert::Default => match all_day {
             Some(choice) => all_day_alert_text(choice).to_owned(),
-            None => alert_text(Alert::Before(10), None),
+            None => alert_text(Alert::Before(TIMED_DEFAULT), None),
         },
         Alert::Before(minutes) if all_day.is_some() && minutes > 0 && minutes < DAY && minutes % HOUR == 0 => {
             tr!("{hour}:00 the day before", hour = format!("{:02}", (DAY - minutes) / HOUR))
         }
+        Alert::AllDay(hour) => all_day_alert_text(hour).to_owned(),
         Alert::None => tr!("None").to_owned(),
         Alert::Custom => tr!("Custom").to_owned(),
         Alert::Before(0) => tr!("At the start").to_owned(),
