@@ -102,6 +102,7 @@ fn harness_at(
             move |ui, state: &mut State| {
                 let window = ui.ctx().content_rect();
                 let whole = Rect::from_min_size(window.min, vec2(width, window.height()));
+                super::refresh(ui.ctx(), &mut state.mailbox);
                 let asked = ui
                     .scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| {
                         show(ui, &state.theme, &state.keymap, &state.mailbox, state.at, state.narrow, (true, false))
@@ -558,6 +559,48 @@ fn a_path_is_split_only_at_its_own_delimiter_and_stays_capped() {
     assert!(path(&folder(&long, "", 5_000)).chars().count() <= MOST_NAME);
 }
 
+/// Tells account `id` of `mailbox` what its worker would.
+fn tell(mailbox: &mut Mailbox, id: u64, kind: inboxcraft_model::EventKind) {
+    mailbox.tell(&inboxcraft_model::Event::new(AccountId::new(id), None, kind)).unwrap();
+}
+
+#[test]
+fn an_account_says_how_its_sync_stands() {
+    // screen/index/with-counts: an account syncing says so on its row; offline and a refused sign-in as well (#398).
+    use inboxcraft_model::{ConnectionState, ErrorKind, EventKind};
+    let mut mailbox = two();
+    tell(&mut mailbox, 1, EventKind::Connection(ConnectionState::Online));
+    tell(&mut mailbox, 1, EventKind::SyncProgress { done: 3, of: 10 });
+    tell(&mut mailbox, 2, EventKind::Connection(ConnectionState::Offline));
+    let shown = harness(mailbox, Place::Mail, false, TextScale::default(), 826.0, false);
+    shown.get_by_role_and_label(Role::Button, "Personal, syncing");
+    shown.get_by_role_and_label(Role::Button, "Studio, offline");
+
+    let mut mailbox = two();
+    tell(&mut mailbox, 1, EventKind::Connection(ConnectionState::Online));
+    tell(&mut mailbox, 1, EventKind::SyncProgress { done: 3, of: 10 });
+    tell(&mut mailbox, 2, EventKind::Failed { kind: ErrorKind::LoginRefused, folder: None });
+    let shown = harness(mailbox, Place::Mail, false, TextScale::default(), 826.0, true);
+    shown.get_by_role_and_label(Role::Button, "Personal, open, syncing");
+    shown.get_by_role_and_label(Role::Button, "Studio, open, sign-in refused");
+}
+
+#[test]
+fn an_account_no_worker_spoke_of_is_quiet_and_a_synced_one_too() {
+    use inboxcraft_model::{ConnectionState, EventKind};
+    let shown = harness(two(), Place::Mail, false, TextScale::default(), 826.0, false);
+    shown.get_by_role_and_label(Role::Button, "Personal");
+    let mut mailbox = two();
+    let ago = now().checked_sub(std::time::Duration::from_secs(120)).unwrap();
+    for id in [1, 2] {
+        tell(&mut mailbox, id, EventKind::Connection(ConnectionState::Online));
+        tell(&mut mailbox, id, EventKind::SyncFinished { at: ago });
+    }
+    let shown = harness(mailbox, Place::Mail, false, TextScale::default(), 826.0, false);
+    shown.get_by_role_and_label(Role::Button, "Personal");
+    shown.get_by_role_and_label(Role::Button, "Studio");
+}
+
 #[test]
 fn every_row_stands_on_whole_pixels_at_125() {
     // At 125 % a 34-point row is 42.5 pixels: each row's edges are rounded to whole pixels, so neighbours share
@@ -582,4 +625,37 @@ fn every_row_stands_on_whole_pixels_at_125() {
             assert!(seen > 10, "narrow {narrow}: {seen} rows");
         }
     }
+}
+
+#[test]
+fn in_the_window_the_rows_say_their_sync_and_stand_on_whole_pixels() {
+    // The window reads the accounts' sync for the index before drawing it, and its index's rows stand on whole pixels
+    // at 125 % there as well (#398).
+    use inboxcraft_model::{ConnectionState, EventKind};
+    let mut mailbox = two();
+    tell(&mut mailbox, 1, EventKind::Connection(ConnectionState::Online));
+    tell(&mut mailbox, 1, EventKind::SyncProgress { done: 3, of: 10 });
+    let app = crate::InboxApp::at_mail(mailbox);
+    let mut window = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_pixels_per_point(1.25)
+        .with_context_setup(install_fonts)
+        .build_ui_state(|ui, app: &mut crate::InboxApp| app.ui(ui), app);
+    window.run();
+    window.get_by_role_and_label(Role::Button, "Personal, syncing");
+    // The index and the window's own edge round it; the command line's buttons stand to its right.
+    let index = Rect::from_min_max(egui::pos2(0.0, 40.0), egui::pos2(250.0, 900.0));
+    let mut seen = 0;
+    for node in window.query_all_by_role(Role::Button) {
+        let label = node.accesskit_node().label().unwrap_or_default().to_owned();
+        if label == "New message" || !index.contains_rect(node.rect()) {
+            continue;
+        }
+        let Some(bounds) = node.accesskit_node().bounding_box() else { continue };
+        for edge in [bounds.x0, bounds.y0, bounds.x1, bounds.y1] {
+            assert!((edge - edge.round()).abs() < 1e-3, "{label:?} at {bounds:?}");
+        }
+        seen += 1;
+    }
+    assert!(seen > 10, "{seen} rows");
 }
