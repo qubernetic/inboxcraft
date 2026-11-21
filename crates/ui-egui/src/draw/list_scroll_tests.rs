@@ -86,3 +86,96 @@ fn done_on_the_last_row_in_sight_scrolls_the_least_that_shows_the_next_row() {
         }
     }
 }
+
+/// Turns the wheel over the list by `points` (down when positive) and lets the scrolling settle.
+fn wheel(harness: &mut Harness<'static, InboxApp>, points: f32) {
+    harness.hover_at(egui::pos2(400.0, 400.0));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -points),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(30);
+}
+
+/// Done on a keyed row the owner has scrolled partly out at the top, the list scrolled more than 50: the first message
+/// in sight stays where it stands while the left row's room closes, so nothing in sight jumps down, not even for a
+/// frame (it jumped by the cut in Done's pass);
+/// the row walked on to is the one under the left row, whole in sight, and the keyboard is on it. In List and Grouped,
+/// with motion and without.
+#[test]
+fn done_on_a_keyed_row_cut_at_the_top_never_jumps_the_list() {
+    for view in [InboxView::List, InboxView::Grouped] {
+        for motion in [true, false] {
+            let at = format!("{view:?} motion {motion}");
+            // A short window, so the sample's rows scroll well past the keyed one.
+            let mut harness = moving(view, 440.0);
+            harness.state_mut().set_reduce_motion(!motion);
+            harness.key_press(Key::Home);
+            harness.run_steps(30);
+            // J to the fourth row in the list's order whose next row stands right under it.
+            let order = super::order(&harness.ctx);
+            let mut keyed = 0;
+            for _ in 0..3 {
+                harness.key_press(Key::J);
+                harness.run_steps(30);
+                keyed += 1;
+            }
+            while row(&harness, order[keyed + 1]).unwrap().top() != row(&harness, order[keyed]).unwrap().bottom() {
+                harness.key_press(Key::J);
+                harness.run_steps(30);
+                keyed += 1;
+            }
+            let (left, next) = (order[keyed], order[keyed + 1]);
+            assert_eq!(harness.state().mailbox().selected(), Some(left), "{at}: keyed");
+            // The wheel until the keyed row stands 20 above the viewport's top.
+            let sight = super::view_rect(&harness.ctx).unwrap();
+            for _ in 0..8 {
+                let rect = row(&harness, left).unwrap();
+                let short = rect.top() - sight.top() + 20.0;
+                if short.abs() < 0.01 {
+                    break;
+                }
+                wheel(&mut harness, short);
+            }
+            let rect = row(&harness, left).unwrap();
+            assert!(super::scrolled(&harness.ctx).unwrap() > 50.0, "{at}: the list scrolled more than 50");
+            assert!((sight.top() - rect.top() - 20.0).abs() < 0.01, "{at}: the keyed row cut 20 at the top: {rect:?} in {sight:?}");
+            assert_eq!(harness.state().mailbox().selected(), Some(left), "{at}: still keyed after the wheel");
+            // Every row whole in sight under the keyed one, where it stands.
+            let shown: Vec<(u64, egui::Rect)> = order
+                .iter()
+                .skip(keyed + 1)
+                .filter_map(|id| row(&harness, *id).map(|rect| (*id, rect)))
+                .filter(|(_, rect)| sight.contains_rect(*rect))
+                .collect();
+            assert!(shown.len() >= 3, "{at}: rows in sight under the keyed one");
+            harness.key_press(Key::D);
+            // The left row dissolves, then its room closes: the part of it above the viewport goes with the offset,
+            // the part in sight closes there and the rows under it rise, never down, never in Done's own pass. With
+            // motion off the row goes at once and the rows under it rise in that pass.
+            let mut last = shown.clone();
+            for pass in 0..60 {
+                harness.run_steps(1);
+                for (id, was) in &mut last {
+                    let now = row(&harness, *id).unwrap();
+                    assert!(now.top() <= was.top() + 0.01, "{at}: pass {pass} after Done, row {id} jumped down from {was:?} to {now:?}");
+                    if pass == 0 && motion {
+                        assert!((now.top() - was.top()).abs() < 0.01, "{at}: Done's own pass moved row {id} from {was:?} to {now:?}");
+                    }
+                    *was = now;
+                }
+            }
+            harness.run_steps(60);
+            assert_eq!(harness.state().mailbox().selected(), Some(next), "{at}: the row under the left one is walked on to");
+            let sight = super::view_rect(&harness.ctx).unwrap();
+            let walked = row(&harness, next).unwrap();
+            assert!(sight.expand(0.01).contains_rect(walked), "{at}: the walked-to row whole in sight: {walked:?} in {sight:?}");
+            let focus = harness.ctx.memory(|memory| memory.focused()).and_then(|id| harness.ctx.read_response(id)).map(|response| response.rect);
+            let focus = focus.unwrap_or_else(|| panic!("{at}: the keyboard is on a row"));
+            assert!(sight.expand(0.01).contains_rect(focus), "{at}: the keyboard on a row in sight: {focus:?} in {sight:?}");
+        }
+    }
+}

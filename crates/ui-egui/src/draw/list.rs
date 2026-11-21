@@ -1099,7 +1099,7 @@ fn landing(listing: &Listing<'_>, wanted: u64, top: f32, bottom: f32) -> Option<
     // The row walked on to after an act is whole in sight once the left row's room above it has closed.
     if let Some(index) = at
         && let Some(Line::Mail(message)) = listing.lines.get(index)
-        && listing.settled(index).is_some_and(|(above, below)| above >= top && below <= bottom)
+        && listing.settled(index, top).is_some_and(|(above, below)| above >= top && below <= bottom)
     {
         return Some(message.id);
     }
@@ -1628,14 +1628,18 @@ impl Listing<'_> {
     }
 
     /// The top and bottom of line `index` once the lines above it that are leaving have closed: where the row the
-    /// keyboard walks on to after an act comes to stand, not where it stands while the left row's room still closes.
-    fn settled(&self, index: usize) -> Option<(f32, f32)> {
+    /// keyboard walks on to after an act comes to stand, not where it stands while the left row's room still closes;
+    /// never above `offset`, the viewport's top. While the list is scrolled, the first message in sight stays where it
+    /// stands ([`show_lines`]): a left row's room that closes above the viewport moves the offset with the content, and
+    /// only the part of it in sight closes in the viewport, so the rows under it rise at most to the viewport's top.
+    fn settled(&self, index: usize, offset: f32) -> Option<(f32, f32)> {
         let (top, bottom) = self.span(index)?;
         let closing: f32 = (0..index)
             .filter(|above| matches!(self.lines.get(*above), Some(Line::Leaving(..) | Line::HeadLeaving(..))))
             .filter_map(|above| self.span(above).map(|(from, to)| (to - from).max(0.0)))
             .sum();
-        Some(((top - closing).max(0.0), (bottom - closing).max(0.0)))
+        let rise = closing.min((top - offset).max(0.0));
+        Some((top - rise, bottom - rise))
     }
 
     /// The line of message `id`, or in the drafts place of draft `id`.
@@ -2180,26 +2184,28 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
     let mut scroll_to = None;
     // Where the row will stand once a left row's room above it closed: brought into sight by what it lacks there, not
     // by the room that is closing.
-    if let Some((top, bottom)) = moved.and_then(|id| listing.find(id)).or(line).and_then(|index| listing.settled(index)) {
+    if let Some(index) = moved.and_then(|id| listing.find(id)).or(line) {
         match &kept {
             // The least scroll that shows the row whole, set before the lines are built, so the row is built (and
             // can keep a focus given to it) in this frame.
             Some(kept) if kept.height > 0 => {
                 let view = if room.is_finite() && room > 0.0 { room } else { points(kept.height) };
                 let offset = forced.unwrap_or_else(|| points(kept.offset));
-                let wanted = if top < offset {
-                    top
-                } else if bottom > offset + view {
-                    bottom - view
-                } else {
-                    offset
-                };
-                if forced.is_some() || hundredths(wanted) != kept.offset {
-                    forced = Some(wanted.max(0.0));
+                if let Some((top, bottom)) = listing.settled(index, offset) {
+                    let wanted = if top < offset {
+                        top
+                    } else if bottom > offset + view {
+                        bottom - view
+                    } else {
+                        offset
+                    };
+                    if forced.is_some() || hundredths(wanted) != kept.offset {
+                        forced = Some(wanted.max(0.0));
+                    }
                 }
             }
-            // The list first shown: egui scrolls to it once it knows the viewport.
-            _ => scroll_to = Some((top, bottom)),
+            // The list first shown, at its top: egui scrolls to it once it knows the viewport.
+            _ => scroll_to = listing.settled(index, 0.0),
         }
     }
     land_now(ui, listing, kept.as_ref(), forced);
