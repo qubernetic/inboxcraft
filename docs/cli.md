@@ -106,6 +106,8 @@ database's words only to its own standard error, when the owner's store does not
   with `"window": false`.
 - `ui.home.open` shows Home in the running app; on a store it shows nothing, and its answer says so with
   `"window": false`.
+- `event.all_day_alert.set`, the hour a new all-day event's alert rings, is the owner's: it changes what is written
+  to the server, so the CLI refuses it, as every `owner` command.
 - Headless there are no workers, so `sync.status` on a store with an account answers `offline`, with no progress and
   no last sync; in the app it answers what the workers told.
 

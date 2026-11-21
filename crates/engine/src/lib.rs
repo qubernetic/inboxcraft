@@ -104,6 +104,7 @@
 
 mod act;
 pub mod after;
+pub mod all_day_alert;
 pub mod appearance;
 mod arrive;
 mod calendar;

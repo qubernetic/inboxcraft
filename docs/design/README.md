@@ -89,7 +89,8 @@ What the app still owes this file, one line each. The finer differences, with th
   opens in by default is not settled yet.
 
 **Messages**
-- The original cannot be opened in the browser from a cleaned copy. The fitted view draws a mail's tables used for
+- The cleaned copy opens in the browser from the reader's More menu, not from the content bar, and a link in it
+  shows where it goes as a tooltip, not beside its words. The fitted view draws a mail's tables used for
   layout with hairlines (the Messages page draws them without lines), a coloured cell round a link as a band rather
   than the mail's button, and every band 14 above and 16 below its blocks (the receipt's band is 12 and 14).
 - A reply's quote block says "Odile Brannock <odile@example.org> wrote on 5 Nov 2026 at 08:35:" where the file says
@@ -120,8 +121,8 @@ What the app still owes this file, one line each. The finer differences, with th
   its first failure is the first failing account, not the worst.
 - Every "open log" is coming soon: there is no log to open.
 - On Home, the calendar, the settings and in one pane the status line keeps the mail's key hints.
-- The index keeps Blocked, Junk and Screener rows the file does not draw, names a folder under another by its whole
-  path, and shows every account's sync state as quiet.
+- The index keeps Blocked and Junk rows the file does not draw: their mail has no other place. While one account
+  syncs, every account signed in says syncing.
 
 **Home**
 - No source yet for "offline since" or a refused sign-in: the failing banner names refused sends only, on one line.

@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings pages that are designed and not built whole yet: Calendar (the calendar alerts switch works; each
+//! The settings pages that are designed and not built whole yet: Calendar (the calendar alerts switch and the hour
+//! all-day alerts ring at work; each
 //! account's calendars with "read again" are coming soon; the week's first day and first week and where a new event
 //! opens are the owner's), and the three sections that
 //! are planned whole, with the coming-soon mark on their head: About (the program, its licences, its makers and
@@ -11,6 +12,7 @@
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, pos2, vec2};
 
 use super::{Asked, body, group, head};
+use crate::calendar::all_day_alert_text;
 use crate::component::button::{LinkSize, link_sized};
 use crate::component::segmented::{segmented, segmented_for};
 use crate::component::select::Select;
@@ -23,6 +25,7 @@ use crate::mailbox::{AccountRow, Mailbox};
 use crate::settings::Section;
 use crate::theme::Theme;
 use crate::tr;
+use inboxcraft_engine::all_day_alert::AllDayAlert;
 use inboxcraft_engine::appearance::EventEditorHost;
 use inboxcraft_time::{FirstWeek, Weekday};
 
@@ -45,6 +48,9 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
                 asked = Some(Asked::Alerts(!on));
             }
         });
+        if let Some(choice) = all_day_alert(ui, theme, mailbox.all_day_alert()) {
+            asked = Some(Asked::AllDayAlert(choice));
+        }
         let note = tr!("A calendar comes from its account's CalDAV address. Which of them the calendar shows is chosen in its side panel.");
         group(ui, theme, "B", tr!("Calendars"), Some(note));
         let count = mailbox.accounts().len();
@@ -97,6 +103,33 @@ fn event_editor(ui: &mut Ui, theme: &Theme, now: EventEditorHost) -> Option<Even
         let pressed = segmented_for(ui, theme, &hosts, now, Some(tr!("New event opens")));
         chosen = pressed.filter(|host| *host != now && !crate::component::button::key_repeated(ui));
     });
+    chosen
+}
+
+/// The width of the all-day alert's choice, in points.
+const ALL_DAY_ALERT: f32 = 220.0;
+
+/// "All-day alerts ring at": a select of the hours a new all-day event's alert rings at; another one on the owner's
+/// press, never on a held key's repeat.
+fn all_day_alert(ui: &mut Ui, theme: &Theme, now: AllDayAlert) -> Option<AllDayAlert> {
+    let options = AllDayAlert::ALL.map(|choice| (choice, all_day_alert_text(choice)));
+    let id = ui.make_persistent_id("settings-all-day-alert-open");
+    let mut open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
+    let help = tr!("A new all-day event's alert, and the alert of one that brings none. Events already saved keep theirs.");
+    let mut chosen = None;
+    settings_row(ui, theme, tr!("All-day alerts ring at"), Some(help), |ui| {
+        let select = Select {
+            name: tr!("All-day alerts ring at"),
+            shown: all_day_alert_text(now),
+            options: &options,
+            current: Some(now),
+            icon: IconId::Notify,
+            width: ALL_DAY_ALERT,
+        };
+        let (_, picked) = select.show(ui, theme, &mut open);
+        chosen = picked.filter(|choice| *choice != now && !crate::component::button::key_repeated(ui));
+    });
+    ui.data_mut(|data| data.insert_temp(id, open));
     chosen
 }
 

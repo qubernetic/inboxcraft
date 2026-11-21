@@ -84,6 +84,13 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         if popup::entry(ui, theme, keymap, name, None).clicked() {
             drawn.asked.push(Asked::Details(row.id));
         }
+        // The owner's own press only: a key held on from an earlier row does not open the browser.
+        if reader.offers_original(row.id) {
+            let pressed = popup::entry(ui, theme, keymap, tr!("Open the original in the browser"), None);
+            if crate::component::button::owner_pressed(ui, &pressed) {
+                drawn.asked.push(Asked::Original(row.id));
+            }
+        }
         paint::rule(ui, p.line);
         if row.group.is_some()
             && let Some(act) = crate::draw::list::group_menu(ui, theme, row.group, &row.address, false)

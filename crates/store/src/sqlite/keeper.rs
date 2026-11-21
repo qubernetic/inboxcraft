@@ -82,6 +82,10 @@ struct Queue {
     stop: bool,
     /// How many writes the keeper started (tests).
     tries: u64,
+    /// The end of the store waits until the keeper looked at the queue once after it began (tests).
+    close_after_a_look: bool,
+    /// The keeper looked at the queue since the end of the store began (tests).
+    looked_at_the_end: bool,
 }
 
 struct Shared {
@@ -90,15 +94,10 @@ struct Shared {
     clock: SystemClock,
 }
 
-impl Shared {
-    fn lock(&self) -> MutexGuard<'_, Queue> {
-        self.queue.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
+impl Queue {
     /// Hands each draft of `ids` whose write failed (each failing one with `None`) to the keeper again now.
-    fn retry(&self, ids: Option<&[DraftId]>) {
-        let mut queue = self.lock();
-        let Queue { held, waiting, failing, .. } = &mut *queue;
+    fn retry(&mut self, ids: Option<&[DraftId]>) {
+        let Self { held, waiting, failing, .. } = self;
         for (id, failed) in failing.iter_mut() {
             if ids.is_some_and(|ids| !ids.contains(id)) {
                 continue;
@@ -108,7 +107,17 @@ impl Shared {
                 failed.due = Duration::ZERO;
             }
         }
-        drop(queue);
+    }
+}
+
+impl Shared {
+    fn lock(&self) -> MutexGuard<'_, Queue> {
+        self.queue.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Hands each draft of `ids` whose write failed (each failing one with `None`) to the keeper again now.
+    fn retry(&self, ids: Option<&[DraftId]>) {
+        self.lock().retry(ids);
         self.changed.notify_all();
     }
 }
@@ -294,12 +303,12 @@ impl Keeper {
         self.shared.lock().tries
     }
 
-    /// Ends the keeper's thread as if it had died (tests); waits up to a second for it to end.
+    /// Ends the keeper's thread as if it had died (tests); waits up to 10 s for it to end, a busy computer's time.
     #[cfg(any(test, feature = "test-hooks"))]
     pub(super) fn stop(&self) {
         self.shared.lock().stop = true;
         self.shared.changed.notify_all();
-        for _ in 0..100 {
+        for _ in 0..1000 {
             if self.thread.is_finished() {
                 return;
             }
@@ -331,6 +340,12 @@ impl KeeperHooks {
         self.shared.changed.notify_all();
     }
 
+    /// Makes the end of the store wait, before anything else, until the keeper's thread looked at the queue once
+    /// since the end began (or ended): the order a busy computer may give the two threads.
+    pub fn close_after_a_look(&self) {
+        self.shared.lock().close_after_a_look = true;
+    }
+
     /// Makes every write of draft `id` fail while `refuse` is on; the other drafts land.
     pub fn refuse_draft(&self, id: DraftId, refuse: bool) {
         let mut queue = self.shared.lock();
@@ -352,14 +367,20 @@ impl Drop for Keeper {
         let settled = {
             let mut queue = self.shared.lock();
             queue.closing = true;
+            // The new try is handed over with the end, under one lock: a keeper that sees the end first finds it
+            // waiting, and does not stop with nothing to write.
+            if !queue.settled {
+                queue.retry(None);
+            }
             queue.settled
         };
         self.shared.changed.notify_all();
-        if !settled && !self.is_gone() {
-            self.shared.retry(None);
-            if let Err(error) = self.settle(CLOSE_WAIT) {
-                eprintln!("inboxcraft: a draft kept may not be on the disk: {error}");
-            }
+        self.after_a_look();
+        if !settled
+            && !self.is_gone()
+            && let Err(error) = self.settle(CLOSE_WAIT)
+        {
+            eprintln!("inboxcraft: a draft kept may not be on the disk: {error}");
         }
         for line in self.not_kept() {
             eprintln!("{line}");
@@ -368,6 +389,16 @@ impl Drop for Keeper {
 }
 
 impl Keeper {
+    /// When a test asked for it, waits (at most 5 s) until the keeper's thread looked at the queue since the end of
+    /// the store began, or ended.
+    fn after_a_look(&self) {
+        let queue = self.shared.lock();
+        if queue.close_after_a_look {
+            let waiting = |queue: &mut Queue| !queue.looked_at_the_end && !self.thread.is_finished();
+            drop(self.shared.changed.wait_timeout_while(queue, Duration::from_secs(5), waiting));
+        }
+    }
+
     /// A line for each draft not on the disk: each whose last write failed, and, when the keeper's thread ended, each
     /// it held, written or not; the end of the store says them on the app's standard error.
     pub(super) fn not_kept(&self) -> Vec<String> {
@@ -395,6 +426,10 @@ fn run(shared: &Shared, mut conn: Connection) {
             loop {
                 if queue.stop {
                     return;
+                }
+                if queue.closing && !queue.looked_at_the_end {
+                    queue.looked_at_the_end = true;
+                    shared.changed.notify_all();
                 }
                 let now = shared.clock.monotonic();
                 if queue.paused == 0 || queue.closing {

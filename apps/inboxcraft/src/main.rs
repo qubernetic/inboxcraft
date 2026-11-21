@@ -143,7 +143,11 @@ fn sample() -> ExitCode {
         }
     };
     let (_send, heard) = mpsc::channel();
-    windows(Desktop::new(app, heard).closing_ends(), &shown)
+    // The sample's cleaned copies are in a folder of their own: an earlier sample's go now, this one's at the close.
+    inboxcraft::sweep_originals(inboxcraft::Whose::Sample);
+    let ended = windows(Desktop::new(app, heard).closing_ends(), &shown);
+    inboxcraft::sweep_originals(inboxcraft::Whose::Sample);
+    ended
 }
 
 /// The owner's mailbox, with a window or (`background`) without one.
@@ -156,6 +160,8 @@ fn owner(background: bool) -> ExitCode {
         Ok(instance) => instance,
         Err(code) => return ExitCode::from(code),
     };
+    // The cleaned copies an earlier run opened in the browser go (the sample's are in a folder of their own).
+    inboxcraft::sweep_originals(inboxcraft::Whose::Owner);
     let shown = Shown::default();
     let wake = wake_of(&shown);
     let (send, heard) = mpsc::channel::<Request>();
@@ -208,6 +214,8 @@ fn owner(background: bool) -> ExitCode {
     let ended = windows(desktop, &shown);
     drop(control);
     drop(listening);
+    // A normal close takes this run's copies with it; a kill leaves them till the next start.
+    inboxcraft::sweep_originals(inboxcraft::Whose::Owner);
     ended
 }
 

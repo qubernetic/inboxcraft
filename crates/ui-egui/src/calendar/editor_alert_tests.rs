@@ -7,10 +7,11 @@
 use inboxcraft_time::{FakeClock, Offset, Timestamp};
 use serde_json::{Value, json};
 
-use super::{ALERTS, Alert, Editor, alert_text};
+use super::{ALERTS, Alert, Editor, alert_text, all_day_alert_text};
 use crate::calendar::{Calendar, EventRow};
 use crate::mailbox::Mailbox;
 use crate::sample;
+use inboxcraft_engine::all_day_alert::AllDayAlert;
 
 /// 2026-11-05T09:00:00Z, a Thursday.
 const NOW: i64 = 1_793_869_200;
@@ -53,7 +54,7 @@ fn the_row_reads_the_alert_and_takes_anything_else_as_custom() {
 
 #[test]
 fn the_field_names_its_choices_and_the_default_as_the_lead_it_rings_with() {
-    let names: Vec<String> = ALERTS.iter().map(|alert| alert_text(*alert, false)).collect();
+    let names: Vec<String> = ALERTS.iter().map(|alert| alert_text(*alert, None)).collect();
     assert_eq!(
         names,
         [
@@ -70,12 +71,39 @@ fn the_field_names_its_choices_and_the_default_as_the_lead_it_rings_with() {
             "1 week before"
         ]
     );
-    assert_eq!(alert_text(Alert::Default, false), "10 min before");
-    assert_eq!(alert_text(Alert::Default, true), "1 day before");
-    assert_eq!(alert_text(Alert::Custom, false), "Custom");
-    assert_eq!(alert_text(Alert::Before(90), false), "90 min before");
-    assert_eq!(alert_text(Alert::Before(20_160), false), "2 weeks before");
-    assert_eq!(alert_text(Alert::Before(u32::MAX), false), "4294967295 min before");
+    assert_eq!(alert_text(Alert::Default, None), "10 min before");
+    assert_eq!(alert_text(Alert::Custom, None), "Custom");
+    assert_eq!(alert_text(Alert::Before(90), None), "90 min before");
+    assert_eq!(alert_text(Alert::Before(20_160), None), "2 weeks before");
+    assert_eq!(alert_text(Alert::Before(u32::MAX), None), "4294967295 min before");
+}
+
+#[test]
+fn an_all_day_events_default_alert_says_the_hour_the_setting_chose() {
+    let texts: Vec<String> = AllDayAlert::ALL.iter().map(|choice| alert_text(Alert::Default, Some(*choice))).collect();
+    assert_eq!(texts, ["09:00 the day before", "12:00 the day before", "18:00 the day before", "09:00 on the day"]);
+    // What a saved all-day event reads back: its lead before midnight as the hour the day before.
+    assert_eq!(alert_text(Alert::Before(900), Some(AllDayAlert::DayBefore18)), "09:00 the day before");
+    assert_eq!(alert_text(Alert::Before(360), Some(AllDayAlert::default())), "18:00 the day before");
+    assert_eq!(alert_text(Alert::Before(60), Some(AllDayAlert::default())), "23:00 the day before");
+    // Whole days, minutes that are no whole hour, and a timed event keep their words.
+    assert_eq!(alert_text(Alert::Before(1440), Some(AllDayAlert::default())), "1 day before");
+    assert_eq!(alert_text(Alert::Before(90), Some(AllDayAlert::default())), "90 min before");
+    assert_eq!(alert_text(Alert::Before(0), Some(AllDayAlert::default())), "At the start");
+    assert_eq!(alert_text(Alert::Before(900), None), "15 hours before");
+}
+
+#[test]
+fn a_new_all_day_event_in_the_calendar_says_the_hour_the_session_holds() {
+    let (mut mailbox, mut calendar) = loaded();
+    mailbox.set_all_day_alert(AllDayAlert::DayBefore18);
+    calendar.follow_week(&mut mailbox);
+    calendar.new_event();
+    let editor = calendar.editor().unwrap();
+    assert_eq!(editor.all_day_alert(), AllDayAlert::DayBefore18, "taken when it opens");
+    mailbox.set_all_day_alert(AllDayAlert::OnTheDay9);
+    calendar.follow_week(&mut mailbox);
+    assert_eq!(calendar.editor().unwrap().all_day_alert(), AllDayAlert::OnTheDay9, "and followed while it is open");
 }
 
 #[test]
@@ -145,4 +173,73 @@ fn a_saved_alert_comes_back_on_the_event_and_into_its_editor() {
     calendar.save(&mut mailbox);
     assert!(mailbox.error().is_none(), "{:?}", mailbox.error());
     assert_eq!(named(&calendar, "Glaze test").unwrap().alert, Alert::None);
+}
+
+#[test]
+fn an_all_day_hour_reads_back_by_its_name_and_is_never_sent() {
+    for choice in AllDayAlert::ALL {
+        let mut editor = Editor::edit(&row(Some(json!(choice.name()))));
+        assert_eq!(editor.form().alert, Alert::AllDay(choice));
+        assert_eq!(alert_text(Alert::AllDay(choice), Some(AllDayAlert::DayBefore18)), all_day_alert_text(choice), "the Settings row's words");
+        editor.form_mut().summary = "Kiln firing".to_owned();
+        assert_eq!(editor.changes(Offset::UTC), Ok(Some(("event.update", json!({ "id": 9, "summary": "Kiln firing" })))));
+    }
+}
+
+/// Opens the event named `summary` in the editor and gives it `times` (all-day when the start is a day).
+fn switch(calendar: &mut Calendar, summary: &str, (start, end): (&str, &str)) {
+    let key = named(calendar, summary).unwrap().key();
+    calendar.pick(Some(key));
+    calendar.edit_picked();
+    let form = calendar.editor_mut().unwrap().form_mut();
+    form.all_day = start.len() == 10;
+    form.start = start.to_owned();
+    form.end = end.to_owned();
+}
+
+#[test]
+fn the_alert_field_shows_what_a_switch_to_or_from_all_day_saves() {
+    let (mut mailbox, mut calendar) = loaded();
+    mailbox.set_all_day_alert(AllDayAlert::DayBefore18);
+    calendar.follow_week(&mut mailbox);
+    calendar.new_event();
+    let form = calendar.editor_mut().unwrap().form_mut();
+    form.summary = "Glaze test".to_owned();
+    form.start = "2026-11-06 13:00".to_owned();
+    form.end = "2026-11-06 14:00".to_owned();
+    calendar.save(&mut mailbox);
+    assert_eq!(named(&calendar, "Glaze test").unwrap().alert, Alert::Before(10));
+    // Made all-day, the ten-minute default shows the setting's hour, and that is what is saved.
+    switch(&mut calendar, "Glaze test", ("2026-11-07", "2026-11-07"));
+    let editor = calendar.editor().unwrap();
+    assert_eq!(alert_text(editor.shown_alert(), Some(editor.all_day_alert())), "18:00 the day before");
+    calendar.save(&mut mailbox);
+    assert!(mailbox.error().is_none(), "{:?}", mailbox.error());
+    assert_eq!(named(&calendar, "Glaze test").unwrap().alert, Alert::AllDay(AllDayAlert::DayBefore18));
+    // Made timed again, the hour shows the ten-minute default, and that is what is saved.
+    switch(&mut calendar, "Glaze test", ("2026-11-06 13:00", "2026-11-06 14:00"));
+    let editor = calendar.editor().unwrap();
+    assert_eq!(alert_text(editor.shown_alert(), None), "10 min before");
+    calendar.save(&mut mailbox);
+    assert!(mailbox.error().is_none(), "{:?}", mailbox.error());
+    assert_eq!(named(&calendar, "Glaze test").unwrap().alert, Alert::Before(10));
+}
+
+#[test]
+fn an_alert_of_the_owners_or_one_picked_in_the_edit_stays_through_the_switch() {
+    let all_day = |editor: &mut Editor| {
+        let form = editor.form_mut();
+        (form.all_day, form.start, form.end) = (true, "2026-11-07".to_owned(), "2026-11-07".to_owned());
+    };
+    let mut editor = Editor::edit(&row(Some(json!(30))));
+    all_day(&mut editor);
+    assert_eq!(editor.shown_alert(), Alert::Before(30), "the owner's own alarm is kept");
+    assert_eq!(editor.changes(Offset::UTC).unwrap().unwrap().1.get("alert"), None);
+    let mut editor = Editor::edit(&row(Some(json!(10))));
+    all_day(&mut editor);
+    assert_eq!(editor.shown_alert(), Alert::Default, "the timed default becomes the setting's hour");
+    assert_eq!(editor.changes(Offset::UTC).unwrap().unwrap().1.get("alert"), None);
+    editor.pick_alert(Alert::Before(10));
+    assert_eq!(editor.shown_alert(), Alert::Before(10), "picked in this edit, it is what the field says");
+    assert_eq!(editor.changes(Offset::UTC).unwrap().unwrap().1.get("alert"), Some(&json!(10)), "and what is saved");
 }

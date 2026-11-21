@@ -17,6 +17,7 @@ use serde_json::Value;
 
 use crate::ScreenerMode;
 use crate::act::Effects;
+use crate::all_day_alert::AllDayAlert;
 use crate::appearance::Appearance;
 use crate::calendar::alert;
 use crate::draft;
@@ -58,6 +59,8 @@ pub struct Outcome {
     hold: Option<Hold>,
     /// How weeks are counted from now on.
     week: Option<WeekRule>,
+    /// When an all-day event's alert rings from now on.
+    all_day_alert: Option<AllDayAlert>,
     /// Held jobs withdrawn: their removal from the store's queue is in the batch.
     withdrawn: Vec<JobId>,
     /// The window is asked to show the settings or Home.
@@ -98,6 +101,7 @@ impl Outcome {
             greet_by: None,
             hold: None,
             week: None,
+            all_day_alert: None,
             withdrawn: Vec::new(),
             shown: None,
         }
@@ -228,6 +232,12 @@ impl Outcome {
         self
     }
 
+    /// The outcome ringing all-day events' alerts at `choice` from now on.
+    pub(crate) fn with_all_day_alert(mut self, choice: AllDayAlert) -> Self {
+        self.all_day_alert = Some(choice);
+        self
+    }
+
     /// The outcome removing `account` from the store, and from what the session knows and has queued.
     pub(crate) fn with_removed(mut self, account: AccountId) -> Self {
         self.batch.push(Change::RemoveAccount(account));
@@ -333,6 +343,9 @@ pub(crate) struct State {
     pub(crate) hold: Hold,
     /// How weeks are counted (`week.set`); the front end keeps it on disk and hands it back at the start.
     pub(crate) week: WeekRule,
+    /// When an all-day event's alert rings (`event.all_day_alert.set`); the front end keeps it on disk and hands it
+    /// back at the start.
+    pub(crate) all_day_alert: AllDayAlert,
     /// What to tell the owner, for the front end to take ([`Session::take_notices`]).
     pub(crate) notices: VecDeque<Notice>,
     /// Whether a window takes what commands ask it to show ([`Session::set_window`]); `false` headless.
@@ -681,6 +694,25 @@ impl Session {
         self.state.week = rule;
     }
 
+    /// When an all-day event's alert rings, as `event.all_day_alert.set` left it.
+    #[must_use]
+    pub fn all_day_alert(&self) -> AllDayAlert {
+        self.state.all_day_alert
+    }
+
+    /// Takes the all-day alert kept from an earlier run, read with [`crate::all_day_alert::from_value`]. When it
+    /// changes after the start, the next tick works the alerts out again, so the first sweep's are not kept.
+    pub fn set_all_day_alert(&mut self, choice: AllDayAlert) {
+        if choice == self.state.all_day_alert {
+            return;
+        }
+        self.state.all_day_alert = choice;
+        // The alerts of all-day events without alarms move: the next tick works them out again.
+        if self.state.sweep_at.is_some() {
+            self.state.sweep_at = Some(self.clock.now());
+        }
+    }
+
     /// What to tell the owner since the last call, in order: more than [`notify::MAX_SINGLE`] new messages of one
     /// account as one count.
     pub fn take_notices(&mut self) -> Vec<Notice> {
@@ -751,6 +783,7 @@ impl Session {
             greet_by,
             hold,
             week,
+            all_day_alert,
             withdrawn,
             shown,
         } = outcome;
@@ -806,6 +839,9 @@ impl Session {
         }
         if let Some(rule) = week {
             self.state.week = rule;
+        }
+        if let Some(choice) = all_day_alert {
+            self.set_all_day_alert(choice);
         }
         if let Some(asked) = shown {
             if self.state.asked.len() >= crate::shown::MAX_ASKED {
@@ -898,7 +934,14 @@ impl Session {
         let started = self.started;
         let planned = catch_unwind(AssertUnwindSafe(|| {
             let plan = schedule::due(&context, started)?;
-            let notices = notify::fired(context.store, &context.state.notify, &plan.fired, &plan.sent, context.offsets, context.now)?;
+            let notices = notify::fired(
+                context.store,
+                &context.state.notify,
+                &plan.fired,
+                &plan.sent,
+                (context.offsets, context.state.all_day_alert),
+                context.now,
+            )?;
             Ok::<_, EngineError>((plan, notices))
         }));
         let (plan, notices) = planned.map_err(|_| EngineError::Panicked("schedule"))??;
@@ -972,10 +1015,10 @@ impl Session {
     /// Works out the alerts of every event held again, and when to do it next.
     fn sweep(&mut self) -> Result<(), EngineError> {
         let now = self.clock.now();
-        let (store, offsets) = (&*self.store, &*self.offsets);
+        let (store, offsets, all_day) = (&*self.store, &*self.offsets, self.state.all_day_alert);
         let mut ids = alert::Ids { alert: self.state.next_alert, schedule: self.state.next_schedule };
-        let changes =
-            catch_unwind(AssertUnwindSafe(|| alert::sweep(store, now, offsets, &mut ids))).map_err(|_| EngineError::Panicked("alerts"))??;
+        let changes = catch_unwind(AssertUnwindSafe(|| alert::sweep(store, now, offsets, all_day, &mut ids)))
+            .map_err(|_| EngineError::Panicked("alerts"))??;
         let batch = changes.into_iter().fold(Batch::new(), Batch::with);
         self.commit("alerts", None, &batch, Vec::new())?;
         self.state.sweep_at = now.checked_add(alert::SWEEP);
@@ -1046,10 +1089,11 @@ impl Session {
         let with_kept;
         // The alerts of the events the batch puts come in the same batch.
         let ids = state.as_ref().unwrap_or(&self.state);
+        let all_day = ids.all_day_alert;
         let mut ids = alert::Ids::past(ids.next_alert, ids.next_schedule, batch);
         let (store, offsets, now) = (&*self.store, &*self.offsets, self.clock.now());
-        let alerts =
-            catch_unwind(AssertUnwindSafe(|| alert::follow(store, batch, now, offsets, &mut ids))).map_err(|_| EngineError::Panicked(what))??;
+        let alerts = catch_unwind(AssertUnwindSafe(|| alert::follow(store, batch, now, offsets, all_day, &mut ids)))
+            .map_err(|_| EngineError::Panicked(what))??;
         let batch = if kept.is_empty() && alerts.is_empty() {
             batch
         } else {
