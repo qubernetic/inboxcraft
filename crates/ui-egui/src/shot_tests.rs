@@ -9,6 +9,7 @@ use egui::{Color32, ColorImage, Rect, TextureOptions, pos2, vec2};
 
 use super::{Canvas, Open, Picture, Shot, Texture, apply_textures, fill, parse_script, render, shoot};
 use crate::theme::{Mode, TextScale, Theme};
+use egui_kittest::kittest::Queryable as _;
 
 fn shot(json: &str) -> Shot {
     parse_script(json).unwrap().remove(0)
@@ -977,5 +978,66 @@ fn home_is_drawn_in_the_body_of_a_1440_window_in_its_states_and_no_other_page() 
     for bad in [r#""home": "nowhere""#, r#""home": "today@99""#, r#""home": "today", "home_sets": true"#, r#""home": "today", "text_scale": 130"#] {
         let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", {bad}}}"#))).unwrap_err();
         assert!(error.to_string().contains("x.png:"), "{bad}: {error}");
+    }
+}
+
+fn clock() -> Box<inboxcraft_time::FakeClock> {
+    Box::new(inboxcraft_time::FakeClock::new(inboxcraft_time::Timestamp::from_unix(1_793_869_200, 0).unwrap()))
+}
+
+/// At 1.5× the line between the list and the pane beside it is 2 pixels (a point rounded to whole pixels), and the
+/// pane's content stands a point (1.5 pixels) right of the list: nothing the open reader or the docked composer paints
+/// covers the line's second pixel, down the panes' heads and bodies.
+#[test]
+fn at_150_nothing_beside_the_list_covers_the_second_pixel_of_its_line() {
+    let scale = 1.5;
+    let lines = [Mode::Light, Mode::Dark].map(|mode| Theme::new(mode, TextScale::default()).palette.line);
+    for scene in ["reader", "composer"] {
+        let mut mailbox = crate::mailbox::Mailbox::new(crate::sample::session(clock()).unwrap(), clock());
+        if scene == "reader" {
+            let first = mailbox.messages().first().map(|row| row.id);
+            mailbox.select(first);
+        }
+        let mut app = crate::InboxApp::at_mail(mailbox);
+        if scene == "composer" {
+            app.compose();
+        }
+        let size = vec2(1440.0, 900.0);
+        let mut harness = crate::component::tests::builder()
+            .with_size(size)
+            .with_pixels_per_point(scale)
+            .build_ui_state(|ui, app: &mut crate::InboxApp| app.ui(ui), app);
+        harness.run();
+        // A row of the list: its right is the list's; the line is looked at from the list's head (its place's name 8
+        // lower) to 400 under the row's top, beside the reader's or the composer's head and body.
+        let row = harness.get_all_by_role(egui::accesskit::Role::ListBoxOption).next().unwrap().rect();
+        let head = harness.get_by_label("Inbox").rect();
+        let list = egui::Rect::from_min_max(egui::pos2(row.left(), head.top() - 8.0), egui::pos2(row.right(), row.top() + 400.0));
+        let output = harness.output().clone();
+        let primitives = harness.ctx.tessellate(output.shapes, scale);
+        let (width, height) = ((size.x * scale).round() as usize, (size.y * scale).round() as usize);
+        let picture = fill(&primitives, &white(), width, height, scale);
+        // The line stands in the first point right of the list, from the pixel that point starts on.
+        let first = (list.right() * scale).round() as usize;
+        let top = (list.top() * scale).ceil() as usize + 2;
+        let bottom = (list.bottom() * scale).floor() as usize - 2;
+        let mut wrong = Vec::new();
+        for y in top..bottom {
+            for x in [first, first + 1] {
+                let got = picture.pixel(x, y).unwrap();
+                if !lines.contains(&got) {
+                    wrong.push((x, y, got));
+                }
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "{scene}: {} pixels of the line at {first} and {} not the line's, e.g. {:?}",
+            wrong.len(),
+            first + 1,
+            &wrong[..wrong.len().min(6)]
+        );
+        // The pixel right of the line is not the line's: the line is 2 pixels, not wider.
+        assert!(!lines.contains(&picture.pixel(first + 2, (top + bottom) / 2).unwrap()), "{scene}: the line is 2 pixels wide");
     }
 }

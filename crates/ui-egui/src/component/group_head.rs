@@ -37,6 +37,9 @@ pub struct GroupHead<'a> {
     pub name: &'a str,
     /// Its unread messages.
     pub unread: u64,
+    /// The messages it holds, counted at its right instead of the unread ones where a place counts what it holds
+    /// (Later's heads, `later/snoozed`).
+    pub held: Option<u64>,
     /// How many of its rows show, "3 of 6 ·", when it shows some of them.
     pub shown: Option<&'a str>,
     /// The small link that stays ("show all", "show fewer").
@@ -76,7 +79,11 @@ pub fn group_head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, head: &GroupHead<
     // link must be there to take it.
     let had_focus = ui.memory(|memory| memory.has_focus(head.id));
     let row = row_with(ui, theme, head.id, HEIGHT, RowGround::Panel, false, false, shown);
-    let spoken = spoken(head.name, head.unread);
+    let spoken = match head.held {
+        Some(1) => crate::tr!("{name}, 1 message", name = super::spoken(head.name)),
+        Some(held) => crate::tr!("{name}, {count} messages", name = super::spoken(head.name), count = held),
+        None => spoken(head.name, head.unread),
+    };
     row.response.widget_info(|| WidgetInfo::labeled(Role::Heading, true, &spoken));
     let rect = row.rect;
     if !ui.is_rect_visible(rect) {
@@ -90,7 +97,7 @@ pub fn group_head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, head: &GroupHead<
     let top = rect.top() + ((rect.height() - line) / 2.0).round();
     let mut right = rect.right() - PAD;
     // The count, or "nothing to read".
-    let count = if head.unread == 0 { crate::tr!("nothing to read").to_owned() } else { head.unread.to_string() };
+    let count = count_words(head);
     let galley = super::galley(ui, &count, f.mono_s, p.muted);
     right = paint::run_right(ui.painter(), right, top + ((line - f.mono_s.line) / 2.0).round(), galley, p.muted);
     let mut pressed = Pressed::default();
@@ -136,6 +143,15 @@ pub fn group_head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, head: &GroupHead<
     pressed
 }
 
+/// What `head` counts at its right: the messages it holds where it says, else the unread ones or "nothing to read".
+fn count_words(head: &GroupHead<'_>) -> String {
+    match head.held {
+        Some(held) => held.to_string(),
+        None if head.unread == 0 => crate::tr!("nothing to read").to_owned(),
+        None => head.unread.to_string(),
+    }
+}
+
 /// The narrowest `head` stands whole in, its hover link shown: its pads, its index and name, how many show, its links
 /// and its count with the gaps between them, as [`group_head`] lays them out.
 #[must_use]
@@ -143,7 +159,7 @@ pub fn least_width(ui: &Ui, theme: &Theme, head: &GroupHead<'_>) -> f32 {
     let p = &theme.palette;
     let f = &theme.fonts;
     let wide = |text: &str, font| super::galley(ui, text, font, p.muted).size().x;
-    let count = if head.unread == 0 { crate::tr!("nothing to read").to_owned() } else { head.unread.to_string() };
+    let count = count_words(head);
     let parts = [head.link, head.hover_link].into_iter().flatten().map(|words| GAP + wide(words, f.mono_s).ceil()).sum::<f32>()
         + head.shown.map_or(0.0, |words| GAP + paint::run_box(wide(words, f.mono_s)));
     (PAD * 2.0

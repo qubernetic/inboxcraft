@@ -148,8 +148,16 @@ fn a_head_without_a_link_shows_none_hovered_or_keyed() {
         |p| p.surface,
         vec2(ROW_WIDTH + 48.0, 100.0),
         move |ui, theme| {
-            let head =
-                GroupHead { id: egui::Id::unique("bare"), index: "[ A ]", name: "Empty", unread: 0, shown: None, link: None, hover_link: None };
+            let head = GroupHead {
+                id: egui::Id::unique("bare"),
+                index: "[ A ]",
+                name: "Empty",
+                unread: 0,
+                held: None,
+                shown: None,
+                link: None,
+                hover_link: None,
+            };
             ui.set_width(ROW_WIDTH);
             group_head(ui, theme, &keymap, &head, None);
         },

@@ -401,17 +401,21 @@ fn the_reader_has_480_at_980() {
         let list = harness.state().list_rect.unwrap();
         let reader = super::reader_rect(&harness.ctx).unwrap();
         let body = super::shell::laid(&harness.ctx).unwrap().body;
-        assert_eq!(list.width(), super::LIST_WIDTH + 1.0, "{width}: the list keeps its 440 and its line");
-        // The test's window stands in a margin; the app's fills the window: its reader's pane is the frames' 480 at a
-        // 980 window, 980 − 56 − 441 − 1 less the window's outline, a hairline at each side.
-        assert_eq!(body.right() - list.right(), body.width() - 441.0, "{width}: the reader's pane");
+        assert_eq!(list.width(), super::LIST_WIDTH, "{width}: the list keeps its 440 (the index's line stands left of it)");
+        // The test's window stands in a margin; the app's fills the window: its reader's pane is its line and the
+        // frames' 480 at a 980 window, 980 − 56 (the index) − 1 (the index's line) − 440 (the list) − 2 (the window's
+        // outline, a hairline at each side) = 481.
+        assert_eq!(body.right() - list.right(), body.width() - 440.0, "{width}: the reader's pane");
         let whole = super::shell::regions(
             vec2(width, 900.0),
             &crate::theme::Theme::new(crate::theme::Mode::Light, crate::theme::TextScale::from_percent(100).unwrap()),
             1.0,
         )
         .body;
-        assert_eq!(whole.width() - 441.0, width - 56.0 - 441.0 - 1.0 - 2.0, "{width}: in the app's window");
+        assert_eq!(whole.width() - 440.0, width - 56.0 - 1.0 - 440.0 - 2.0, "{width}: in the app's window");
+        if width == 980.0 {
+            assert_eq!(whole.width() - 440.0, 1.0 + 480.0, "980: the reader's line and the frames' 480");
+        }
         assert!(reader.left() >= list.right() && reader.right() <= body.right(), "{width}: the reader {reader:?} in its pane");
     }
     let mut harness = window(979.0, 100);
@@ -423,7 +427,7 @@ fn the_reader_has_480_at_980() {
 fn under_980_the_composer_takes_the_list_s_place_and_beside_it_the_list_keeps_440() {
     for percent in [100, 130] {
         let harness = composing(980.0, percent);
-        assert_eq!(harness.state().list_rect.map(|list| list.width()), Some(super::LIST_WIDTH + 1.0), "{percent}: 980");
+        assert_eq!(harness.state().list_rect.map(|list| list.width()), Some(super::LIST_WIDTH), "{percent}: 980");
         let composer = super::compose::drawn_rect(&harness.ctx).unwrap();
         assert!(composer.width() >= 400.0, "{percent}: the composer beside it {composer:?}");
         let harness = composing(979.0, percent);
