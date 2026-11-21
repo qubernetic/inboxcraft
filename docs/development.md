@@ -169,8 +169,11 @@ sample window takes to build a frame (its `ui` and the tessellation, on the CPU;
 sample grown to 10 000 invented messages (`sample::grown`), of which the list shows the engine's 1 000 newest; the
 header says both. Four scenes of 300 frames each, after 30 to warm up: `inbox-default-rest` (the inbox in the view a
 new owner sees, today the cards), `inbox-list-rest` and `inbox-list-scroll` (the grouped list, which lays out every
-listed row, scrolling 40 points a frame: the stress case) and `reader-html` (the reader open on an HTML message).
-For each it prints `median_ms`, `p95_ms`, the `shapes` and the list's `rows_built` of the last frame, and it starts
+listed row, scrolling 40 points a frame: the stress case) and `reader-html` (the reader open on an HTML message);
+with them `home-window-sweep` and `reader-step-why`, the first row of the grouped list pressed and then J every
+frame, so each frame opens the next message and asks `mail.why` for its why line (alone with `--why`; under it a
+line gives the median of each part a step runs, alone: `mail.why`, `mail.thread`, `mail.open` and the list read
+again). For each it prints `median_ms`, `p95_ms`, the `shapes` and the list's `rows_built` of the last frame, and it starts
 with the CPU's model, its core count and the first core's frequency governor, so numbers from two machines are never
 mixed up. It runs twice: with every core free, where the budget is a p95 of at most 4 ms, and pinned to one core with
 `taskset -c 0`, where it is one frame at 60 Hz, 16.6 ms; a scene that misses either is a miss. The pinned run pins
