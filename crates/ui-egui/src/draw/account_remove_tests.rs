@@ -293,8 +293,8 @@ fn painted(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<egui::R
 #[test]
 fn the_dialog_stands_where_the_frame_draws_it() {
     // The frame `account-remove/confirm`: "Remove account…" has no room under it, so the card (328 high) stands 12
-    // over it, centred across the window. The frame's button is at 602, so its card at 480, 262; the form here draws
-    // the button lower (the design README's gaps), and the card keeps the rule.
+    // over it, centred across the window. The frame's button is at 602, so its card at 480, 262, as the picture has
+    // them; this window's fonts are egui's own, so here the button stands elsewhere, and the card keeps the rule.
     let mut harness = on_studio(&Kept::default());
     press(&mut harness, "Remove account…");
     let label = painted(&harness, "CONFIRM").expect("the card's label is drawn");
