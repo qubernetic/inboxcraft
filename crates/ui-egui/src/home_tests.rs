@@ -394,3 +394,28 @@ fn an_account_s_name_in_the_banner_is_plain_and_capped() {
     assert!(text.chars().count() <= MOST + 40, "{}", text.len());
     assert!(!text.contains('\u{202e}') && !text.contains('\n') && !text.contains('\u{0}'));
 }
+
+
+#[test]
+fn of_every_error_kind_only_a_refused_sign_in_is_read_as_refused() {
+    use inboxcraft_model::ErrorKind;
+    for kind in ErrorKind::ALL {
+        let mut mailbox = mailbox();
+        let all = accounts(&mailbox);
+        for (account, _) in &all {
+            told(&mut mailbox, *account, ONLINE, Some(NOW - 600));
+        }
+        let (studio, _) = all.last().unwrap().clone();
+        let failed = inboxcraft_model::EventKind::Failed { kind, folder: None };
+        mailbox.tell(&inboxcraft_model::Event::new(inboxcraft_model::AccountId::new(studio), None, failed)).unwrap();
+        // The name `account.list` gives the kind is read back as that kind.
+        let listed = mailbox.run("account.list", &json!({})).unwrap();
+        let row = listed["accounts"].as_array().unwrap().iter().find(|row| row["id"] == json!(studio)).unwrap().clone();
+        let name = row["failure"]["kind"].as_str().unwrap();
+        assert_eq!(super::error_kind(name), Some(kind), "{name}");
+        let refused = build(&mut mailbox).failing.is_some_and(|failing| failing.account);
+        assert_eq!(refused, kind == ErrorKind::LoginRefused, "{kind:?}");
+    }
+    assert_eq!(super::error_kind("LoginRefused"), None, "only the names the answers give");
+    assert_eq!(super::error_kind(""), None);
+}

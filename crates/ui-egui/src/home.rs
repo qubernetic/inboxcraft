@@ -421,16 +421,10 @@ pub(crate) fn failing_text(since: Option<&str>, names: &[String], refusals: u64,
     sentences.join(" ")
 }
 
-/// The error kind `account.list` names in snake case (`login_refused`).
+/// The error kind `account.list` names (`login_refused`), by the engine's own names of every kind: a name it does not
+/// give is no kind.
 fn error_kind(name: &str) -> Option<inboxcraft_model::ErrorKind> {
-    let pascal: String = name
-        .split('_')
-        .map(|word| {
-            let mut letters = word.chars();
-            letters.next().map(|first| first.to_uppercase().chain(letters).collect::<String>()).unwrap_or_default()
-        })
-        .collect();
-    serde_json::from_value(Value::String(pascal)).ok()
+    inboxcraft_model::ErrorKind::ALL.into_iter().find(|kind| inboxcraft_engine::error_kind_name(*kind) == name)
 }
 
 /// How many snoozed messages come back today, from `mail.list` of the snoozed mail (at most the engine's page of
