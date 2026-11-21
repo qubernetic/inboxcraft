@@ -56,8 +56,12 @@
 //! the start place; synced, as its frames are, unless `sync` says otherwise), `fail` makes accounts fail after the
 //! sync (`refused` the last one's sign-in, `everything` every account), `notice` says its text in the status line,
 //! `command_sets` set to `true` the page of the command line's sets ([`crate::component::gallery_commands`]).
+//! `sample` set to `frames` shows the design file's own sample mailbox ([`sample::frames`]) at its time, Monday
+//! 16 November 2026, 14:04 UTC, with its mail put away and one message in the outbox (none with `drafts` `empty`);
+//! every scene then writes, selects and sends with the frames' people (`invitations` and `put_away` are part of it and
+//! refused there).
 //! The typeface and the icons are fixed, so a script that names a
-//! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`own`; the older `strip` and `top_row` read as it); `pointer` rests the pointer
+//! `font` or an `icon_set` is refused like any unknown key. Every window draws its frame as the native app does: the own frame, or `frame` names it (`own`, the older `strip` and `top_row` read as it, or `system`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
 //! before the picture, so what that opens (a menu, a list) is in it; `put_away` set to `true` snoozes, pins, parks and marks
 //! done some of the sample's mail first ([`sample::put_away`]), `later` opens a pile of "Later" (`snoozed`, `pins`
@@ -83,7 +87,7 @@ use egui::epaint::{ClippedPrimitive, ImageData, Mesh, Primitive, TextureId};
 use egui::{Color32, Pos2, RawInput, Rect, Vec2, pos2, vec2};
 use inboxcraft_engine::appearance::{EventEditorHost, WindowFrame};
 use inboxcraft_model::{CheckStep, ErrorKind, Role, StepStatus};
-use inboxcraft_time::{FakeClock, Timestamp};
+use inboxcraft_time::{Clock, FakeClock, Timestamp};
 use serde::Deserialize;
 
 use crate::calendar::{EventRow, View};
@@ -228,6 +232,10 @@ pub struct Shot {
     /// Whether the sample's inbox holds Odile's two invitations to lunch (`sample::invitations`).
     #[serde(default)]
     pub invitations: Option<bool>,
+    /// The sample the window shows: `present` (when left out, the one `--sample` opens) or `frames`, the design
+    /// file's own ([`sample::frames`]).
+    #[serde(default)]
+    pub sample: Option<String>,
     /// Whether the sample's inbox holds a Hebrew and an Arabic message, newest (`sample::right_to_left`).
     #[serde(default)]
     pub right_to_left: Option<bool>,
@@ -243,8 +251,8 @@ pub struct Shot {
     #[serde(default)]
     pub act: Option<String>,
     /// How the sample's accounts sync, as their workers would tell it: `synced` (signed in, the last round two minutes
-    /// ago) or `syncing` (signed in, 27 of 50 folders done); the sample is offline without it (Home in the window:
-    /// synced).
+    /// ago), `syncing` (signed in, 27 of 50 folders done) or `offline`; the sample is offline without it (Home in the
+    /// window and the frames' sample: synced).
     #[serde(default)]
     pub sync: Option<String>,
     /// Accounts failing, as their workers would tell it, after `sync`: `refused` the last account's sign-in refused,
@@ -305,8 +313,8 @@ pub struct Shot {
     /// `drafts` and `drafts-empty` its drafts' block alone, at the body's top left.
     #[serde(default)]
     pub home: Option<String>,
-    /// The app's own window frame, as a native window draws it: `own` (the older `strip` and `top_row` read as it); none
-    /// when left out.
+    /// The window's frame: `own` (the older `strip` and `top_row` read as it) or `system`; left out, the mailbox's own
+    /// setting, which is the own frame unless it was changed. The app draws the frame as a native window does.
     #[serde(default)]
     pub frame: Option<String>,
     /// Where the event editor opens: `small`, `full` (the default) or `window` (which the pictures, drawing no second
@@ -587,18 +595,18 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
 }
 
 /// With `shot.sync`, every account of `app` signed in, and synced two minutes ago or `syncing` 27 of 50 folders, as
-/// their workers would tell it. Home in the window (`home_place`) is synced unless the shot names a sync: its frames
-/// carry the synced status line.
+/// their workers would tell it. Home in the window (`home_place`) and the frames' sample are synced unless the shot
+/// names a sync (`offline` leaves them offline): the frames carry the synced status line.
 fn sync(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     use inboxcraft_model::{ConnectionState, Event, EventKind};
-    let home = (shot.home_place == Some(true)).then_some("synced");
-    let Some(state) = shot.sync.as_deref().or(home) else { return Ok(()) };
+    let synced = (shot.home_place == Some(true) || frames(shot)).then_some("synced");
+    let Some(state) = shot.sync.as_deref().or(synced).filter(|state| *state != "offline") else { return Ok(()) };
     let out = &shot.out;
     let ago = app.mailbox().now().checked_sub(std::time::Duration::from_secs(120)).ok_or_else(|| bad(format!("{out}: no time two minutes ago")))?;
     let told = match state {
         "synced" => EventKind::SyncFinished { at: ago },
         "syncing" => EventKind::SyncProgress { done: 27, of: 50 },
-        other => return Err(bad(format!("{out}: sync {other:?} is not synced or syncing"))),
+        other => return Err(bad(format!("{out}: sync {other:?} is not synced, syncing or offline"))),
     };
     let accounts: Vec<u64> = app.mailbox().accounts().iter().map(|account| account.id).collect();
     for account in accounts {
@@ -671,12 +679,12 @@ fn calendar(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
 
 /// Shows the places of `shot` beyond the mail: the calendar, the Shortcuts page with an action waiting for a key, the
 /// command line with its text.
-fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+fn places(app: &mut InboxApp, clock: &FakeClock, shot: &Shot) -> Result<(), UiError> {
     if let Some(scene) = &shot.drafts {
-        drafts(app, &shot.out, scene)?;
+        drafts(app, clock, shot, scene)?;
     }
     if let Some(scene) = &shot.compose {
-        compose(app, &shot.out, scene)?;
+        compose(app, &shot.out, scene, words(shot))?;
     }
     if shot.calendar == Some(true) || shot.calendar_view.is_some() || shot.event.is_some() || shot.edit_event.is_some() || shot.delete_event.is_some()
     {
@@ -692,7 +700,7 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
         app.settings_mut().open_at(crate::settings::Section::Notifications);
     }
     if shot.sending == Some(true) {
-        sign(app);
+        sign(app, words(shot));
         app.settings_mut().open_at(crate::settings::Section::Sending);
     }
     if shot.shortcuts == Some(true) {
@@ -705,7 +713,8 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
             app.open_templates();
         } else if crate::settings::Under::named(name) == Some(crate::settings::Under::Scheduled) {
             // The page under Sending, over the sending sample with its snooze, reminder, send later and alert.
-            crate::sample::scheduled(app.mailbox_mut()).map_err(|error| bad(format!("{}: {error}", shot.out)))?;
+            let scheduled = if frames(shot) { crate::sample::frames::scheduled } else { crate::sample::scheduled };
+            scheduled(app.mailbox_mut()).map_err(|error| bad(format!("{}: {error}", shot.out)))?;
             app.open_scheduled();
         } else {
             if crate::settings::Section::named(name) == Some(crate::settings::Section::Privacy) {
@@ -757,10 +766,113 @@ impl crate::desk::Desk for PicturedDesk {
     }
 }
 
-/// Signs the first account's messages with an invented signature.
-fn sign(app: &mut InboxApp) {
-    // The sample takes every signature; a refusal would only leave the picture without one.
-    let _ = app.mailbox_mut().run("compose.signature", &serde_json::json!({ "account": 1, "signature": "Mira\nPlot 14" }));
+/// What a scene writes, selects and sends in a sample: the people, subjects and lines it types.
+struct Words {
+    /// The signature, and the accounts that sign with it.
+    signature: &'static str,
+    signed: &'static [u64],
+    /// The recipients typed in a written message, half a name typed after them for the suggestions, and an address
+    /// that is none.
+    to: &'static str,
+    suggest: &'static str,
+    bad: &'static str,
+    /// A written message's subject and its text above the signature.
+    subject: &'static str,
+    text: &'static str,
+    /// The template scene's recipients, and the template: name, subject and text with a blank.
+    template_to: &'static str,
+    template: (&'static str, &'static str, &'static str),
+    /// The subject replied to, the line written over the quote, and the subject a floating composer floats over.
+    reply_to: &'static str,
+    reply: &'static str,
+    floating: &'static str,
+    /// The send the server refuses, the reply it refuses it with, the one sent later (days from now and the hour),
+    /// the one counting down its hold, and the Bcc an agent adds to the refused one.
+    refused: (&'static str, &'static str),
+    refusal: &'static str,
+    later: (&'static str, &'static str, i64, i64),
+    countdown: (&'static str, &'static str),
+    bcc: &'static str,
+    /// The kept drafts, the newer last: recipient, subject and how many minutes before the picture's time each was
+    /// last edited.
+    drafts: &'static [(&'static str, &'static str, u64)],
+}
+
+/// The present sample's words.
+const PRESENT_WORDS: Words = Words {
+    signature: "Mira\nPlot 14",
+    signed: &[1],
+    to: "Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,",
+    suggest: "Odile Brannock <odile@example.org>, te",
+    bad: "ansel.example.org,",
+    subject: "Work party on Saturday",
+    text: "Hi both,\n\nWe meet at the plot at ten and finish by noon. Bring gloves; the shed has spades and the wheelbarrow.",
+    template_to: "Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,",
+    template: (
+        "Work party",
+        "Work party on Saturday",
+        "Hi both,\n\nWe meet at the plot at {?time} and finish by noon. Bring gloves; the shed has spades and the wheelbarrow.\n",
+    ),
+    reply_to: "Allotment rota for November",
+    reply: "The second week works for me. I can bring the hose.",
+    floating: "Draft logo for the bakery",
+    refused: ("Hollis Fenwick <hollis@example.org>,", "Plot 14 handover"),
+    refusal: REFUSAL,
+    later: ("Petra Harbour <petra@example.org>,", "Re: Draft logo for the bakery", 1, 8),
+    countdown: ("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,", "Work party on Saturday"),
+    bcc: "Petra Harbour <petra@example.org>",
+    drafts: &[
+        ("Halvard Engen <halvard@example.org>", "Re: Kiln service: two dates to choose from", 22 * 60),
+        ("Sunniva Aalto <sunniva@example.org>", "Price list for the winter workshops", 114),
+    ],
+};
+
+/// The frames' words.
+const FRAMES_WORDS: Words = Words {
+    signature: "Odile",
+    // The reply to Teodor goes from the Studio account.
+    signed: &[1, 2],
+    to: "Cosima Reuter <cosima@example.org>,",
+    suggest: "Cosima Reuter <cosima@example.org>, an",
+    bad: "anders.example.org,",
+    subject: "Quote for the shop front",
+    text: "Hi Cosima,\n\nthank you for asking. The shop front in painted lettering, both windows and the door, comes to 1,400 \
+           euros with the paint.\n\nIf that suits you, send me the measurements of the fascia and I will draw it to scale.",
+    template_to: "Marit Solheim <marit@example.org>, Pavel Hruska <pavel@example.org>,",
+    template: (
+        "Workshop invitation",
+        "Thursday workshop",
+        "Hello,\n\nthe next workshop is on Thursday in Room 3. We start at {?time} and end by six.\n",
+    ),
+    reply_to: "Draft logo for the bakery",
+    reply: "Hi Teodor,\n\nthe second one. It reads from across the street and the wheat still says bakery. Could you try it \
+            in two colours?",
+    floating: "Draft logo for the bakery",
+    refused: ("Odette Marchand <odette@example.org>,", "Re: Estimate for the window lettering"),
+    refusal: "550 5.1.1 The address odette@example.org does not exist.",
+    later: ("Tobias Wren <tobias@example.org>,", "Reminder: the studio is closed on the 24th", 4, 9),
+    countdown: ("Dmitri Vale <dmitri@example.org>,", "Re: Kiln rota for December"),
+    bcc: "Rosalind Thackeray <rosalind@example.org>",
+    // With the message in the outbox, written yesterday ([`sample::frames::prepare`]): the frames' two drafts.
+    drafts: &[("Sunniva Aalto <sunniva@example.org>", "Price list for the winter workshops", 114)],
+};
+
+/// Whether `shot` shows the frames' sample.
+fn frames(shot: &Shot) -> bool {
+    shot.sample.as_deref() == Some("frames")
+}
+
+/// The words of `shot`'s sample.
+fn words(shot: &Shot) -> &'static Words {
+    if frames(shot) { &FRAMES_WORDS } else { &PRESENT_WORDS }
+}
+
+/// Signs the messages of the accounts of `words` with its invented signature.
+fn sign(app: &mut InboxApp, words: &Words) {
+    for account in words.signed {
+        // The sample takes every signature; a refusal would only leave the picture without one.
+        let _ = app.mailbox_mut().run("compose.signature", &serde_json::json!({ "account": account, "signature": words.signature }));
+    }
     app.mailbox_mut().refresh();
 }
 
@@ -774,27 +886,27 @@ fn event_editor(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
 }
 
 /// Opens the composer as `scene` asks.
-fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
+fn compose(app: &mut InboxApp, out: &str, scene: &str, words: &Words) -> Result<(), UiError> {
     if !["new", "written", "bad", "suggest", "floating", "folded", "reply", "reply-floating", "template", "discarded"].contains(&scene) {
         return Err(bad(format!(
             "{out}: compose {scene:?} is not new, written, bad, suggest, floating, folded, reply, reply-floating, template or discarded"
         )));
     }
-    sign(app);
+    sign(app, words);
     if scene == "reply" || scene == "reply-floating" {
         // Not selected first: a message selected before the first frame counts as pressed and floats the composer.
-        let id = app.mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id);
+        let id = app.mailbox().messages().iter().find(|row| row.subject == words.reply_to).map(|row| row.id);
         if id.is_none_or(|id| !app.answer(id, crate::compose::Answer::Reply)) {
             return Err(bad(format!("{out}: the reply did not open")));
         }
         let (Some(composer), mailbox) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
-        let text = format!("The second week works for me. I can bring the hose.{}", composer.text());
+        let text = format!("{}{}", words.reply, composer.text());
         *composer.text_mut() = text;
         composer.edited();
         composer.save(mailbox)?;
         if scene == "reply-floating" {
             // As `floating`: a message selected before the first frame floats the reply over it.
-            let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").map(|row| row.id);
+            let id = app.mailbox().messages().iter().find(|row| row.subject == words.floating).map(|row| row.id);
             app.mailbox_mut().select(id);
         }
         return Ok(());
@@ -808,33 +920,25 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
         composer.typed(mailbox, Line::To)
     };
     match scene {
-        "written" | "bad" | "floating" | "folded" | "template" | "discarded" => {
-            to("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,")?
-        }
-        "suggest" => to("Odile Brannock <odile@example.org>, te")?,
+        "written" | "bad" | "floating" | "folded" | "discarded" => to(words.to)?,
+        "template" => to(words.template_to)?,
+        "suggest" => to(words.suggest)?,
         _ => {}
     }
     if scene == "bad" {
-        to("ansel.example.org,")?;
+        to(words.bad)?;
     }
     if scene == "template" {
-        let params = serde_json::json!({
-            "account": composer.account(),
-            "name": "Work party",
-            "subject": "Work party on Saturday",
-            "text": "Hi both,\n\nWe meet at the plot at {?time} and finish by noon. Bring gloves; the shed has spades and the wheelbarrow.\n",
-        });
+        let (name, subject, text) = words.template;
+        let params = serde_json::json!({ "account": composer.account(), "name": name, "subject": subject, "text": text });
         mailbox.run("template.save", &params)?;
         // The menu of templates knows the one just saved.
         composer.load_templates(mailbox);
-        return composer.use_template(mailbox, "Work party");
+        return composer.use_template(mailbox, name);
     }
     if scene != "new" {
-        "Work party on Saturday".clone_into(composer.subject_mut());
-        let text = format!(
-            "Hi both,\n\nWe meet at the plot at ten and finish by noon. Bring gloves; the shed has spades and the wheelbarrow.{}",
-            composer.text()
-        );
+        words.subject.clone_into(composer.subject_mut());
+        let text = format!("{}{}", words.text, composer.text());
         *composer.text_mut() = text;
         composer.edited();
         composer.save(mailbox)?;
@@ -846,7 +950,7 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
         composer.toggle_fold();
     }
     if scene == "floating" || scene == "folded" {
-        let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").map(|row| row.id);
+        let id = app.mailbox().messages().iter().find(|row| row.subject == words.floating).map(|row| row.id);
         app.mailbox_mut().select(id);
     }
     if scene == "discarded" {
@@ -883,42 +987,47 @@ fn send(app: &mut InboxApp, out: &str, to: &str, subject: &str, later: Option<Ti
     Ok(())
 }
 
-/// Tomorrow morning, 08:00 in UTC, from the picture's time.
-fn tomorrow_morning() -> Result<Timestamp, UiError> {
-    Timestamp::from_unix(SHOT_TIME + 23 * 3_600, 0).ok_or_else(|| bad("no time"))
+/// `hour`:00 in UTC `days` after the day of the picture's time on `clock`: tomorrow morning is `(1, 8)`.
+fn morning(clock: &FakeClock, days: i64, hour: i64) -> Result<Timestamp, UiError> {
+    let day = clock.now().unix_seconds().div_euclid(86_400).saturating_add(days);
+    Timestamp::from_unix(day.saturating_mul(86_400).saturating_add(hour.saturating_mul(3_600)), 0).ok_or_else(|| bad("no time"))
 }
 
-/// Puts the sending sample in `scene`, on `clock`.
-fn outbox(app: &mut InboxApp, clock: &FakeClock, out: &str, scene: &str) -> Result<(), UiError> {
+/// Puts the sending sample in `scene`, on `clock`, with the people of `words`.
+fn outbox(app: &mut InboxApp, clock: &FakeClock, out: &str, scene: &str, words: &Words) -> Result<(), UiError> {
+    let (refused_to, refused) = words.refused;
+    let (countdown_to, countdown) = words.countdown;
     match scene {
         "waiting" => {
-            send(app, out, "Hollis Fenwick <hollis@example.org>,", "Plot 14 handover", None)?;
+            send(app, out, refused_to, refused, None)?;
             clock.advance(std::time::Duration::from_secs(6));
-            app.mailbox_mut().pump(&mut Scripted::default().refusing(REFUSAL));
-            send(app, out, "Petra Harbour <petra@example.org>,", "Re: Draft logo for the bakery", Some(tomorrow_morning()?))?;
-            send(app, out, "Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,", "Work party on Saturday", None)?;
+            app.mailbox_mut().pump(&mut Scripted::default().refusing(words.refusal));
+            let (to, subject, days, hour) = words.later;
+            send(app, out, to, subject, Some(morning(clock, days, hour)?))?;
+            send(app, out, countdown_to, countdown, None)?;
             clock.advance(std::time::Duration::from_secs(1));
             app.mailbox_mut().open(Place::Outbox);
         }
         "changed" => {
             // A refused send whose Bcc an agent changed since: its row offers only Edit and says what changed.
-            send(app, out, "Hollis Fenwick <hollis@example.org>,", "Plot 14 handover", None)?;
+            send(app, out, refused_to, refused, None)?;
             clock.advance(std::time::Duration::from_secs(6));
-            app.mailbox_mut().pump(&mut Scripted::default().refusing(REFUSAL));
-            let draft = app.mailbox().outbox().first().map(|row| row.draft).ok_or_else(|| bad(format!("{out}: nothing refused")))?;
-            let change = serde_json::json!({ "id": draft, "bcc": ["Petra Harbour <petra@example.org>"] });
+            app.mailbox_mut().pump(&mut Scripted::default().refusing(words.refusal));
+            let draft = app.mailbox().outbox().iter().find(|row| row.subject == refused).map(|row| row.draft);
+            let draft = draft.ok_or_else(|| bad(format!("{out}: nothing refused")))?;
+            let change = serde_json::json!({ "id": draft, "bcc": [words.bcc] });
             // Changed as an agent changes it, through the control channel; the outbox is read again.
             app.mailbox_mut().run_for_agent("compose.update", &change).map_err(|error| bad(format!("{out}: {error}")))?;
             app.mailbox_mut().open(Place::Outbox);
         }
         "countdown" => {
-            send(app, out, "Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,", "Work party on Saturday", None)?;
+            send(app, out, countdown_to, countdown, None)?;
             clock.advance(std::time::Duration::from_secs(1));
         }
         "schedule" => {
-            compose(app, out, "written")?;
+            compose(app, out, "written", words)?;
             let (Some(composer), _) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
-            composer.set_later(Some(tomorrow_morning()?));
+            composer.set_later(Some(morning(clock, 1, 8)?));
             app.open_send_later();
         }
         "bounce" => {
@@ -932,24 +1041,34 @@ fn outbox(app: &mut InboxApp, clock: &FakeClock, out: &str, scene: &str) -> Resu
     Ok(())
 }
 
-/// Opens the drafts place: `empty`, or `filled` with two kept drafts of the first account, the newer on top.
-fn drafts(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
-    let kept: &[(&str, &str)] = match scene {
-        "empty" => &[],
-        "filled" => &[
-            ("Halvard Engen <halvard@example.org>", "Re: Kiln service: two dates to choose from"),
-            ("Sunniva Aalto <sunniva@example.org>", "Price list for the winter workshops"),
-        ],
+/// Opens the drafts place: `empty`, or `filled` with the two kept drafts of `words` ([`keep_drafts`]); the frames'
+/// sample keeps them from the start ([`shoot`]), unless the place is to be empty.
+fn drafts(app: &mut InboxApp, clock: &FakeClock, shot: &Shot, scene: &str) -> Result<(), UiError> {
+    let out = &shot.out;
+    match scene {
+        "empty" => {}
+        "filled" if frames(shot) => {}
+        "filled" => keep_drafts(app, clock, out, words(shot).drafts)?,
         other => return Err(bad(format!("{out}: drafts {other:?} is not empty or filled"))),
-    };
+    }
+    app.mailbox_mut().open(Place::View(Role::Drafts));
+    Ok(())
+}
+
+/// Keeps the drafts `kept` on the first account, each edited at its own time on `clock`, which then comes back to the
+/// picture's time.
+fn keep_drafts(app: &mut InboxApp, clock: &FakeClock, out: &str, kept: &[(&str, &str, u64)]) -> Result<(), UiError> {
+    let now = clock.now();
     let mailbox = app.mailbox_mut();
     let account = mailbox.accounts().first().map(|account| account.id).ok_or_else(|| bad(format!("{out}: no account")))?;
-    for (to, subject) in kept {
+    for (to, subject, minutes) in kept {
+        let edited = now.checked_sub(std::time::Duration::from_secs(minutes.saturating_mul(60))).ok_or_else(|| bad(format!("{out}: no time")))?;
+        clock.set(edited);
         let id = mailbox.run("compose.new", &serde_json::json!({ "account": account }))?.get("id").and_then(serde_json::Value::as_u64);
         let id = id.ok_or_else(|| bad(format!("{out}: no draft")))?;
         mailbox.run("compose.update", &serde_json::json!({ "id": id, "to": [to], "subject": subject }))?;
     }
-    mailbox.open(Place::View(Role::Drafts));
+    clock.set(now);
     Ok(())
 }
 
@@ -1804,6 +1923,76 @@ fn added_mail(shot: &Shot, time: Timestamp) -> Result<Option<Vec<inboxcraft_stor
     Ok(None)
 }
 
+/// The window of `shot` over its sample at its time, and the clock both run on: the present sample (`sending` for
+/// the outbox and the Scheduled page, with mail added where the shot asks), the frames' set as they show it, or no
+/// account at all (`first`).
+fn window(shot: &Shot) -> Result<(InboxApp, FakeClock), UiError> {
+    let frames = match shot.sample.as_deref() {
+        None | Some("present") => false,
+        Some("frames") => true,
+        Some(other) => return Err(bad(format!("{}: sample {other:?} is not present or frames", shot.out))),
+    };
+    // The frames' sample is put away and holds its invitations already: a key that would change that is refused.
+    for (key, given) in [("put_away", shot.put_away.is_some()), ("invitations", shot.invitations.is_some())] {
+        if frames && given {
+            return Err(bad(format!("{}: {key} is part of the frames' sample", shot.out)));
+        }
+    }
+    let time = Timestamp::from_unix(if frames { sample::frames::TIME } else { SHOT_TIME }, 0).ok_or_else(|| bad("no time"))?;
+    // One clock for the session and the list, so a scene can let time pass.
+    let clock = FakeClock::new(time);
+    let session = if frames && shot.first != Some(true) {
+        if shot.right_to_left == Some(true) {
+            sample::frames::right_to_left(Box::new(clock.clone()))?
+        } else {
+            sample::frames::session(Box::new(clock.clone()))?
+        }
+    } else if shot.first == Some(true) {
+        let store = inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default());
+        inboxcraft_engine::Session::new(Box::new(store), Box::new(clock.clone())).map_err(UiError::Engine)?
+    } else if shot.outbox.is_some() || shot.section.as_deref() == Some(crate::settings::Under::Scheduled.id()) {
+        sample::sending(Box::new(clock.clone()))?
+    } else if let Some(added) = added_mail(shot, time)? {
+        let mut store = sample::mailbox(time)?;
+        let batch = added.into_iter().fold(inboxcraft_store::Batch::new(), inboxcraft_store::Batch::with);
+        inboxcraft_store::Storage::apply(&mut store, &batch).map_err(UiError::sample)?;
+        sample::session_over(store, Box::new(clock.clone()))?
+    } else {
+        sample::session(Box::new(clock.clone()))?
+    };
+    let mailbox = Mailbox::new(session, Box::new(clock.clone()));
+    let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
+    if frames && shot.first != Some(true) {
+        // The frames' two drafts, kept from the start, the index counts them everywhere: the message in the outbox
+        // (a send is a draft until it goes) and one kept. A scene with no drafts has neither.
+        let drafts = shot.drafts.as_deref() != Some("empty");
+        // The outbox and the Scheduled page list the message with its time, as their frames do.
+        let listed = shot.outbox.is_some() || shot.section.as_deref() == Some(crate::settings::Under::Scheduled.id());
+        let outbox = match (drafts, listed) {
+            (false, _) => sample::frames::Outbox::Empty,
+            (true, true) => sample::frames::Outbox::Scheduled,
+            (true, false) => sample::frames::Outbox::Waiting,
+        };
+        sample::frames::prepare(app.mailbox_mut(), &clock, outbox)?;
+        if drafts {
+            keep_drafts(&mut app, &clock, &shot.out, FRAMES_WORDS.drafts)?;
+        }
+    }
+    Ok((app, clock))
+}
+
+/// Draws the window's frame as the app does: the app may always draw it (a native window), and the mailbox's
+/// appearance picks the own frame unless `shot.frame` names one: `own` (the older `strip` and `top_row` read as it) or
+/// `system`, the desktop's title bar, where the app draws none.
+fn frame(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    if let Some(name) = &shot.frame {
+        let frame = WindowFrame::read(name).ok_or_else(|| bad(format!("{}: frame {name} is not own or system", shot.out)))?;
+        app.set_frame(frame);
+    }
+    app.set_own_frame(true);
+    Ok(())
+}
+
 /// The sample window as `shot` asks for it.
 ///
 /// # Errors
@@ -1857,24 +2046,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if shot.icons == Some(true) {
         return icon_sheet(shot, mode);
     }
-    let time = Timestamp::from_unix(SHOT_TIME, 0).ok_or_else(|| bad("no time"))?;
-    // One clock for the session and the list, so a scene can let time pass.
-    let clock = FakeClock::new(time);
-    let session = if shot.first == Some(true) {
-        let store = inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default());
-        inboxcraft_engine::Session::new(Box::new(store), Box::new(clock.clone())).map_err(UiError::Engine)?
-    } else if shot.outbox.is_some() || shot.section.as_deref() == Some(crate::settings::Under::Scheduled.id()) {
-        sample::sending(Box::new(clock.clone()))?
-    } else if let Some(added) = added_mail(shot, time)? {
-        let mut store = sample::mailbox(time)?;
-        let batch = added.into_iter().fold(inboxcraft_store::Batch::new(), inboxcraft_store::Batch::with);
-        inboxcraft_store::Storage::apply(&mut store, &batch).map_err(UiError::sample)?;
-        sample::session_over(store, Box::new(clock.clone()))?
-    } else {
-        sample::session(Box::new(clock.clone()))?
-    };
-    let mailbox = Mailbox::new(session, Box::new(clock.clone()));
-    let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
+    let (mut app, clock) = window(shot)?;
     // The window starts on Home; a scene shows it only when it asks, every other one is about the place it names.
     if shot.home_place == Some(true) {
         app.show_home();
@@ -1891,13 +2063,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     };
     app.set_motion_level(level);
     event_editor(&mut app, shot)?;
-    if let Some(name) = &shot.frame {
-        let frame = WindowFrame::read(name)
-            .filter(|frame| *frame != WindowFrame::System)
-            .ok_or_else(|| bad(format!("{}: frame {name} is not own", shot.out)))?;
-        app.set_frame(frame);
-        app.set_own_frame(true);
-    }
+    frame(&mut app, shot)?;
     if let Some(percent) = shot.text_scale {
         let scale =
             TextScale::from_percent(percent).ok_or_else(|| bad(format!("{}: text scale {percent} is not 90, 100, 110, 120 or 130", shot.out)))?;
@@ -1939,7 +2105,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         app.search(text);
     }
     if shot.showcase == Some(true) {
-        let showcase = sample::showcase(app.mailbox());
+        let showcase = if frames(shot) { sample::frames::showcase(app.mailbox()) } else { sample::showcase(app.mailbox()) };
         app.mailbox_mut().set_showcase(showcase);
         *app.keymap_mut() = gallery::keymap();
     }
@@ -2010,9 +2176,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     {
         return Err(bad(format!("{}: there is no account {account} to remove", shot.out)));
     }
-    places(&mut app, shot)?;
+    places(&mut app, &clock, shot)?;
     if let Some(scene) = &shot.outbox {
-        outbox(&mut app, &clock, &shot.out, scene)?;
+        outbox(&mut app, &clock, &shot.out, scene, words(shot))?;
     }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
     for (key, at) in [("pointer", shot.pointer), ("click", shot.click)] {
@@ -2082,3 +2248,7 @@ mod steps_tests;
 #[cfg(test)]
 #[path = "shot_fail_tests.rs"]
 mod fail_tests;
+
+#[cfg(test)]
+#[path = "shot_frames_tests.rs"]
+mod frames_tests;
