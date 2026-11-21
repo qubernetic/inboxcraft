@@ -13,7 +13,7 @@ use inboxcraft_model::{Account, AccountId, EmailAddress, Folder, FolderId, Folde
 use inboxcraft_store::{Batch, Change, Storage as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 
-use super::{Asked, MOST_NAME, Place, clean, open_id, show};
+use super::{Asked, MOST_NAME, Place, clean, open_id, path, show};
 use crate::component::tests::{keyboard_walk, rests};
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
@@ -73,12 +73,24 @@ fn harness(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, height: 
 
 /// [`harness`] with `beside` points of window on the index's right, where its floats may reach.
 fn harness_in(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, height: f32, open: bool, beside: f32) -> Harness<'static, State> {
+    harness_at(mailbox, (at, narrow, scale), (height, beside), open, 1.0)
+}
+
+/// [`harness_in`] at `ppp` physical pixels per point.
+fn harness_at(
+    mailbox: Mailbox,
+    (at, narrow, scale): (Place, bool, TextScale),
+    (height, beside): (f32, f32),
+    open: bool,
+    ppp: f32,
+) -> Harness<'static, State> {
     let theme = Theme::new(Mode::Dark, scale);
     let width = if narrow { 56.0 } else { 232.0 };
     let ids: BTreeSet<u64> = mailbox.accounts().iter().map(|account| account.id).collect();
     let state = State { mailbox, at, narrow, asked: Asked::default(), keymap: Keymap::default(), theme };
     let mut harness = Harness::builder()
         .with_size(vec2(width + beside, height))
+        .with_pixels_per_point(ppp)
         .with_context_setup(move |ctx| {
             install_fonts(ctx);
             crate::motion::set_reduced(ctx, true);
@@ -90,6 +102,7 @@ fn harness_in(mailbox: Mailbox, at: Place, narrow: bool, scale: TextScale, heigh
             move |ui, state: &mut State| {
                 let window = ui.ctx().content_rect();
                 let whole = Rect::from_min_size(window.min, vec2(width, window.height()));
+                super::refresh(ui.ctx(), &mut state.mailbox);
                 let asked = ui
                     .scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| {
                         show(ui, &state.theme, &state.keymap, &state.mailbox, state.at, state.narrow, (true, false))
@@ -506,4 +519,143 @@ fn drafts_has_a_glyph_of_its_own_wide_and_narrow() {
         assert!(in_row.iter().any(|text| text.as_str() == "\u{e704}"), "narrow {narrow}: {in_row:?}");
         assert!(!in_row.iter().any(|text| text.contains('\u{ebc6}')), "narrow {narrow}: no pencil: {in_row:?}");
     }
+}
+
+/// The labels of the index's buttons, whole.
+fn labels(harness: &Harness<'_, State>) -> Vec<String> {
+    harness.query_all_by_role(Role::Button).map(|node| node.accesskit_node().label().unwrap_or_default().to_owned()).collect()
+}
+
+#[test]
+fn a_sub_folder_is_named_by_its_path_as_the_frame_draws_it() {
+    // screen/index/many-accounts: "Clients / Bakery", the whole path with spaced slashes, 70 in as every folder: no
+    // indent (#398).
+    let harness = harness(two(), Place::Mail, false, TextScale::default(), 1200.0, true);
+    let labels = labels(&harness);
+    assert!(labels.iter().any(|label| label.starts_with("Clients / Harbour Bakery in Studio")), "{labels:?}");
+    assert!(labels.iter().any(|label| label.starts_with("Travel / 2026 in Personal")), "{labels:?}");
+    assert!(!labels.iter().any(|label| label.contains("Clients/")), "{labels:?}");
+}
+
+#[test]
+fn a_path_is_split_only_at_its_own_delimiter_and_stays_capped() {
+    let folder = |name: &str, leaf: &str, depth: usize| crate::mailbox::FolderRow {
+        id: 1,
+        account: 1,
+        name: name.to_owned(),
+        leaf: leaf.to_owned(),
+        depth,
+        role: None,
+        unread: 0,
+        messages: None,
+        selectable: true,
+    };
+    assert_eq!(path(&folder("a/b/c", "c", 2)), "a / b / c");
+    assert_eq!(path(&folder("INBOX.Clients", "Clients", 1)), "INBOX / Clients");
+    assert_eq!(path(&folder("a/b", "b", 0)), "a/b", "at the top a delimiter in a name is the name's");
+    assert_eq!(path(&folder("a/b", "x", 1)), "a/b", "a leaf that is not the path's end leaves the path as it is");
+    assert_eq!(path(&folder("é", "é", 1)), "é", "no delimiter before the leaf");
+    let long = "x/".repeat(5_000);
+    assert!(path(&folder(&long, "", 5_000)).chars().count() <= MOST_NAME);
+}
+
+/// Tells account `id` of `mailbox` what its worker would.
+fn tell(mailbox: &mut Mailbox, id: u64, kind: inboxcraft_model::EventKind) {
+    mailbox.tell(&inboxcraft_model::Event::new(AccountId::new(id), None, kind)).unwrap();
+}
+
+#[test]
+fn an_account_says_how_its_sync_stands() {
+    // screen/index/with-counts: an account syncing says so on its row; offline and a refused sign-in as well (#398).
+    use inboxcraft_model::{ConnectionState, ErrorKind, EventKind};
+    let mut mailbox = two();
+    tell(&mut mailbox, 1, EventKind::Connection(ConnectionState::Online));
+    tell(&mut mailbox, 1, EventKind::SyncProgress { done: 3, of: 10 });
+    tell(&mut mailbox, 2, EventKind::Connection(ConnectionState::Offline));
+    let shown = harness(mailbox, Place::Mail, false, TextScale::default(), 826.0, false);
+    shown.get_by_role_and_label(Role::Button, "Personal, syncing");
+    shown.get_by_role_and_label(Role::Button, "Studio, offline");
+
+    let mut mailbox = two();
+    tell(&mut mailbox, 1, EventKind::Connection(ConnectionState::Online));
+    tell(&mut mailbox, 1, EventKind::SyncProgress { done: 3, of: 10 });
+    tell(&mut mailbox, 2, EventKind::Failed { kind: ErrorKind::LoginRefused, folder: None });
+    let shown = harness(mailbox, Place::Mail, false, TextScale::default(), 826.0, true);
+    shown.get_by_role_and_label(Role::Button, "Personal, open, syncing");
+    shown.get_by_role_and_label(Role::Button, "Studio, open, sign-in refused");
+}
+
+#[test]
+fn an_account_no_worker_spoke_of_is_quiet_and_a_synced_one_too() {
+    use inboxcraft_model::{ConnectionState, EventKind};
+    let shown = harness(two(), Place::Mail, false, TextScale::default(), 826.0, false);
+    shown.get_by_role_and_label(Role::Button, "Personal");
+    let mut mailbox = two();
+    let ago = now().checked_sub(std::time::Duration::from_secs(120)).unwrap();
+    for id in [1, 2] {
+        tell(&mut mailbox, id, EventKind::Connection(ConnectionState::Online));
+        tell(&mut mailbox, id, EventKind::SyncFinished { at: ago });
+    }
+    let shown = harness(mailbox, Place::Mail, false, TextScale::default(), 826.0, false);
+    shown.get_by_role_and_label(Role::Button, "Personal");
+    shown.get_by_role_and_label(Role::Button, "Studio");
+}
+
+#[test]
+fn every_row_stands_on_whole_pixels_at_125() {
+    // At 125 % a 34-point row is 42.5 pixels: each row's edges are rounded to whole pixels, so neighbours share
+    // theirs and no fill, bar or focus edge is smeared over half a pixel (#398, pixel round 3.5).
+    for narrow in [false, true] {
+        for scale in [TextScale::default(), TextScale::from_percent(130).unwrap()] {
+            let mut harness = harness_at(two(), (Place::Calendar, narrow, scale), (826.0, 0.0), true, 1.25);
+            harness.run();
+            let mut seen = 0;
+            for node in harness.query_all_by_role(Role::Button) {
+                let label = node.accesskit_node().label().unwrap_or_default().to_owned();
+                // New message is a button of its own (`component/button.rs`), as high as every control: not a row.
+                if label == "New message" {
+                    continue;
+                }
+                let Some(bounds) = node.accesskit_node().bounding_box() else { continue };
+                for edge in [bounds.x0, bounds.y0, bounds.x1, bounds.y1] {
+                    assert!((edge - edge.round()).abs() < 1e-3, "narrow {narrow}, {scale:?}: {label:?} at {bounds:?}");
+                }
+                seen += 1;
+            }
+            assert!(seen > 10, "narrow {narrow}: {seen} rows");
+        }
+    }
+}
+
+#[test]
+fn in_the_window_the_rows_say_their_sync_and_stand_on_whole_pixels() {
+    // The window reads the accounts' sync for the index before drawing it, and its index's rows stand on whole pixels
+    // at 125 % there as well (#398).
+    use inboxcraft_model::{ConnectionState, EventKind};
+    let mut mailbox = two();
+    tell(&mut mailbox, 1, EventKind::Connection(ConnectionState::Online));
+    tell(&mut mailbox, 1, EventKind::SyncProgress { done: 3, of: 10 });
+    let app = crate::InboxApp::at_mail(mailbox);
+    let mut window = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_pixels_per_point(1.25)
+        .with_context_setup(install_fonts)
+        .build_ui_state(|ui, app: &mut crate::InboxApp| app.ui(ui), app);
+    window.run();
+    window.get_by_role_and_label(Role::Button, "Personal, syncing");
+    // The index and the window's own edge round it; the command line's buttons stand to its right.
+    let index = Rect::from_min_max(egui::pos2(0.0, 40.0), egui::pos2(250.0, 900.0));
+    let mut seen = 0;
+    for node in window.query_all_by_role(Role::Button) {
+        let label = node.accesskit_node().label().unwrap_or_default().to_owned();
+        if label == "New message" || !index.contains_rect(node.rect()) {
+            continue;
+        }
+        let Some(bounds) = node.accesskit_node().bounding_box() else { continue };
+        for edge in [bounds.x0, bounds.y0, bounds.x1, bounds.y1] {
+            assert!((edge - edge.round()).abs() < 1e-3, "{label:?} at {bounds:?}");
+        }
+        seen += 1;
+    }
+    assert!(seen > 10, "{seen} rows");
 }

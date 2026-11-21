@@ -5,7 +5,8 @@
 //! secondary button as wide as the column less 12 at each side (narrow, its glyph alone in a 32 square), 8 over the
 //! places; then the five places `[ 00 ] HOME` … `[ 04 ] SETTINGS`, and under MAIL the mailboxes: the shared ones
 //! (Inbox, New senders, Drafts, the Outbox while anything is in it, Sent, Archive, Junk, Bin), 8 apart, then one row
-//! per account that opens to its own folders. Only the mailboxes scroll: when they do not fit, they take the room the places and the owner's row leave,
+//! per account that opens to its own folders (one under another named by its path, "Clients / Bakery", not indented),
+//! saying whether it syncs, cannot reach its server or had its sign-in refused ([`refresh`]). Only the mailboxes scroll: when they do not fit, they take the room the places and the owner's row leave,
 //! between two hairlines, and the rest stay where they are. At the foot, over a hairline, the owner's row (avatar and
 //! address) opens the account picker, a float that narrows the mail to one account or shows them all.
 //!
@@ -14,10 +15,12 @@
 //! mailboxes' viewport are built and laid out (a screen above and below it, so Tab walks on into rows out of sight
 //! and the row it lands on is scrolled into sight): 40 000 folders cost their offsets, not their rows.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use egui::{Id, Rect, Response, Role as AxRole, ScrollArea, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use inboxcraft_model::Role;
+use serde_json::{Value, json};
 
 use crate::component::account_row::{self, AccountRow, Sync};
 use crate::component::button::TextButton;
@@ -95,8 +98,8 @@ enum Line<'a> {
     Shared(mailbox::Place, &'a str, char, u64),
     /// The room between the shared mailboxes and the accounts.
     Gap,
-    /// An account, open or not.
-    Account(&'a mailbox::AccountRow, bool),
+    /// An account, open or not, and how its sync stands.
+    Account(&'a mailbox::AccountRow, bool, Sync),
     /// A folder of an account, and the account's label, which a screen reader hears with it.
     Folder(&'a mailbox::FolderRow, &'a str),
 }
@@ -116,6 +119,72 @@ impl Line<'_> {
 pub(crate) fn clean(name: &str) -> String {
     let (kept, _) = crate::component::capped(name, MOST_NAME);
     crate::component::plain(kept).into_owned()
+}
+
+/// A folder's name as its row shows it: the parts of its path joined with " / ", as `index/many-accounts` draws a
+/// folder under another ("Clients / Bakery", 70 in as every folder: no indent), cleaned and capped as [`clean`]. The
+/// delimiter is the character before the leaf, so a folder at the top keeps its name whole.
+fn path(folder: &mailbox::FolderRow) -> String {
+    let delimiter = (folder.depth > 0 && !folder.leaf.is_empty())
+        .then(|| folder.name.strip_suffix(folder.leaf.as_str()))
+        .flatten()
+        .and_then(|parents| parents.chars().next_back());
+    let (kept, _) = crate::component::capped(&folder.name, MOST_NAME);
+    match delimiter {
+        Some(delimiter) => clean(&kept.split(delimiter).collect::<Vec<_>>().join(" / ")),
+        None => clean(kept),
+    }
+}
+
+/// How each account's sync stands as its row says it, and the mailbox's revision and writes and the time it was read.
+#[derive(Debug, Clone, Default)]
+struct Syncs {
+    read: Option<(u64, u64, f64)>,
+    of: Arc<BTreeMap<u64, Sync>>,
+}
+
+/// Where [`Syncs`] are kept between frames.
+fn syncs_id() -> Id {
+    Id::unique("index-syncs")
+}
+
+/// Reads again how each account's sync stands ([`syncs`]) when the mailbox changed or a second has passed, as the
+/// status line reads its facts: call it before [`show`], with the mailbox the index draws.
+pub(crate) fn refresh(ctx: &egui::Context, mailbox: &mut Mailbox) {
+    let now = ctx.input(|input| input.time);
+    let stamp = (mailbox.revision(), mailbox.writes());
+    let read = ctx.data(|data| data.get_temp::<Syncs>(syncs_id())).and_then(|held| held.read);
+    if read.is_some_and(|(revision, writes, at)| (revision, writes) == stamp && (0.0..1.0).contains(&(now - at))) {
+        return;
+    }
+    // The reads are the index's own: they count as seen.
+    let of = mailbox.quietly(syncs);
+    let read = Some((mailbox.revision(), mailbox.writes(), now));
+    ctx.data_mut(|data| data.insert_temp(syncs_id(), Syncs { read, of: Arc::new(of) }));
+}
+
+/// How each account's sync stands, from `sync.status` and `account.list`; a refused read says nothing. `sync.status`
+/// says whether a round runs, not whose: while one runs, every account signed in and not failing says syncing.
+fn syncs(mailbox: &mut Mailbox) -> BTreeMap<u64, Sync> {
+    let status = mailbox.run("sync.status", &json!({})).unwrap_or(Value::Null);
+    let busy = status.get("state").and_then(Value::as_str) == Some("syncing") || status.get("of").and_then(Value::as_u64).is_some_and(|of| of > 0);
+    let Ok(answer) = mailbox.run("account.list", &json!({})) else { return BTreeMap::new() };
+    let accounts = answer.get("accounts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    accounts.iter().filter_map(|account| Some((account.get("id")?.as_u64()?, sync_of(account, busy)))).collect()
+}
+
+/// How `account` of `account.list` stands: its sign-in refused, its server out of reach (its connection or its
+/// failure says so), syncing while `busy` and signed in, or quiet.
+fn sync_of(account: &Value, busy: bool) -> Sync {
+    let failure = account.get("failure").and_then(|failure| failure.get("kind")).and_then(Value::as_str);
+    let connection = account.get("connection").and_then(|connection| connection.get("state")).and_then(Value::as_str);
+    match (failure, connection) {
+        (Some("login_refused"), _) => Sync::Refused,
+        (Some("host_not_found" | "connection_refused" | "timed_out" | "port_timed_out" | "mail_ports_blocked" | "connection_dropped"), _)
+        | (_, Some("offline" | "backing_off")) => Sync::Offline,
+        (None, Some("online" | "watching")) if busy => Sync::Syncing,
+        _ => Sync::Quiet,
+    }
 }
 
 /// The icon of a shared mailbox or folder of `role`.
@@ -141,7 +210,7 @@ fn open_id() -> Id {
 /// The mailboxes' rows, in order: the shared ones, the gap, each account and, open, its folders. The screener's and the
 /// snoozed mail have no row of their own: New senders and Later show what is in them. Blocked mail has no other place,
 /// so its folder keeps its row.
-fn lines<'a>(mailbox: &'a Mailbox, open: &BTreeSet<u64>) -> Vec<Line<'a>> {
+fn lines<'a>(mailbox: &'a Mailbox, open: &BTreeSet<u64>, syncs: &BTreeMap<u64, Sync>) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
     let sends = u64::try_from(mailbox.outbox().len()).unwrap_or(u64::MAX);
     for view in mailbox.views().iter().filter(|view| !matches!(view.role, Role::Screener | Role::Snoozed)) {
@@ -163,7 +232,7 @@ fn lines<'a>(mailbox: &'a Mailbox, open: &BTreeSet<u64>) -> Vec<Line<'a>> {
     lines.push(Line::Gap);
     for account in mailbox.accounts() {
         let opened = open.contains(&account.id);
-        lines.push(Line::Account(account, opened));
+        lines.push(Line::Account(account, opened, syncs.get(&account.id).copied().unwrap_or(Sync::Quiet)));
         if opened {
             lines.extend(
                 mailbox.folders_of(account.id).into_iter().filter(|folder| folder.role.is_none()).map(|folder| Line::Folder(folder, &account.label)),
@@ -211,18 +280,21 @@ fn line(ui: &mut Ui, theme: &Theme, line: &Line<'_>, active: Option<mailbox::Pla
             ui.allocate_space(vec2(ui.available_width().max(0.0), GAP));
             return;
         }
-        Line::Account(account, open) => {
+        Line::Account(account, open, sync) => {
             let name = clean(&account.label);
             let spoken = if open { tr!("{name}, open", name = name) } else { name.clone() };
-            let index = u64::try_from(account.index).unwrap_or(0);
-            let row = AccountRow {
-                id: Id::unique("index-account").with(account.id),
-                spoken: &spoken,
-                name: &name,
-                account: index,
-                open,
-                sync: Sync::Quiet,
+            let state = match sync {
+                Sync::Quiet => None,
+                Sync::Syncing => Some(tr!("syncing")),
+                Sync::Offline => Some(tr!("offline")),
+                Sync::Refused => Some(tr!("sign-in refused")),
             };
+            let spoken = match state {
+                Some(state) => tr!("{row}, {state}", row = spoken, state = state),
+                None => spoken,
+            };
+            let index = u64::try_from(account.index).unwrap_or(0);
+            let row = AccountRow { id: Id::unique("index-account").with(account.id), spoken: &spoken, name: &name, account: index, open, sync };
             let response = account_row::account_row(ui, theme, &row, narrow, None);
             if response.clicked() {
                 *toggled = Some(account.id);
@@ -230,7 +302,7 @@ fn line(ui: &mut Ui, theme: &Theme, line: &Line<'_>, active: Option<mailbox::Pla
             response
         }
         Line::Folder(folder, account) => {
-            let name = clean(&folder.name);
+            let name = path(folder);
             let spoken = spoken(&name, Some(&clean(account)), folder.unread);
             let place = mailbox::Place::Folder(folder.id);
             let row = MailboxRow {
@@ -340,7 +412,8 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     // The room the mailboxes may take: what New message, the places, the owner's row and the hairlines leave.
     let room = (rect.height() - TOP - new_high - place_high * 5.0 - owner_high - 3.0).max(0.0);
     let open: BTreeSet<u64> = ui.data(|data| data.get_temp::<BTreeSet<u64>>(open_id())).unwrap_or_default();
-    let lines = lines(mailbox, &open);
+    let syncs = ui.data(|data| data.get_temp::<Syncs>(syncs_id())).unwrap_or_default();
+    let lines = lines(mailbox, &open, &syncs.of);
     let whole: f32 = lines.iter().map(|line| line.height(theme)).sum();
     let active = shown(mailbox, at);
     let mail_count = mailbox.views().iter().find(|view| view.role == Role::Inbox).map_or(0, |view| view.unread);

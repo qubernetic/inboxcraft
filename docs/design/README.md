@@ -121,8 +121,8 @@ What the app still owes this file, one line each. The finer differences, with th
   its first failure is the first failing account, not the worst.
 - Every "open log" is coming soon: there is no log to open.
 - On Home, the calendar, the settings and in one pane the status line keeps the mail's key hints.
-- The index keeps Blocked, Junk and Screener rows the file does not draw, names a folder under another by its whole
-  path, and shows every account's sync state as quiet.
+- The index keeps Blocked and Junk rows the file does not draw: their mail has no other place. While one account
+  syncs, every account signed in says syncing.
 
 **Home**
 - No source yet for "offline since" or a refused sign-in: the failing banner names refused sends only, on one line.

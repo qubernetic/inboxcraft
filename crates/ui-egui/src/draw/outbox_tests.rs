@@ -143,6 +143,8 @@ fn type_in_the_command_line(harness: &mut Harness<'static, InboxApp>) {
     for typed in [">", "z", "z"] {
         harness.event(egui::Event::Text(typed.to_owned()));
         harness.run();
+        // The field's undo keeps a text once it has stood a second (egui's own rule): each `z` is an edit of its own.
+        harness.run_steps(6);
     }
     assert_eq!(harness.state().command().text(), "zz", "typed");
     assert!(harness.state().command().results(), "the results show");

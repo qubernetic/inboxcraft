@@ -258,10 +258,47 @@ fn span(out: &mut String, document: &Document, span: &Span, preformatted: bool) 
 /// could follow.
 fn goes_to(link: &Link) -> Option<String> {
     match &link.target {
-        LinkTarget::Web { host, .. } => Some(host.clone()),
-        LinkTarget::Mail { address, .. } => Some(address.clone()),
+        LinkTarget::Web { host, .. } => Some(in_order(host)),
+        LinkTarget::Mail { address, .. } => Some(in_order(address)),
         LinkTarget::Refused => None,
     }
+}
+
+/// The left-to-right mark (U+200E): a strong letter of no width.
+const LEFT_TO_RIGHT_MARK: char = '\u{200E}';
+
+/// `target` (a host or a mail address) as a browser should lay a tooltip of it out: left to right, its labels where
+/// they are written, as a click would copy them. The bidi algorithm would take `שלום.קום` as one right-to-left run and
+/// turn it round, so the labels would seem swapped; a left-to-right mark leads the text and stands at each edge of a
+/// run of right-to-left letters, so each run keeps its place and only its own letters read right to left. Nothing
+/// else changes: the marks have no width and say nothing. A target of no right-to-left letter is as it was.
+fn in_order(target: &str) -> String {
+    if !target.chars().any(right_to_left) {
+        return target.to_owned();
+    }
+    let mut out = String::with_capacity(target.len().saturating_add(16));
+    out.push(LEFT_TO_RIGHT_MARK);
+    let mut inside = false;
+    for c in target.chars() {
+        let turned = right_to_left(c);
+        if turned != inside {
+            if !out.ends_with(LEFT_TO_RIGHT_MARK) {
+                out.push(LEFT_TO_RIGHT_MARK);
+            }
+            inside = turned;
+        }
+        out.push(c);
+    }
+    if inside {
+        out.push(LEFT_TO_RIGHT_MARK);
+    }
+    out
+}
+
+/// Whether `c` is a letter of a script written right to left: the blocks of Hebrew, Arabic, Syriac, Thaana, N'Ko,
+/// Samaritan and Mandaic, their presentation forms, and the right-to-left blocks of the planes above.
+fn right_to_left(c: char) -> bool {
+    matches!(c, '\u{0590}'..='\u{08FF}' | '\u{FB1D}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFC}' | '\u{10800}'..='\u{10FFF}' | '\u{1E800}'..='\u{1EFFF}')
 }
 
 /// A picture as a box with its alternative text, as large as its tag says (at most [`MAX_SIDE`]).

@@ -69,8 +69,8 @@ impl Status {
     /// is the window's, handed in to [`Status::shown`], and is not queued.
     pub(crate) fn push(&mut self, message: Message) {
         let message = match message {
-            Message::Notice { text, until } => Message::Notice { text: clean(&text), until },
-            Message::Error { text } => Message::Error { text: clean(&text) },
+            Message::Notice { text, until } => Message::Notice { text: linked(clean(&text)), until },
+            Message::Error { text } => Message::Error { text: linked(clean(&text)) },
             Message::Undo { .. } | Message::Countdown { .. } => return,
         };
         if self.queue.len() >= QUEUE {
@@ -187,6 +187,17 @@ pub(crate) fn clean(text: &str) -> String {
         out.push('…');
     }
     out
+}
+
+/// `text` (one [`clean`] line) with each link in it (a word that holds `://` or starts `mailto:`) drawn left to right,
+/// its parts in the order a click copies them ([`crate::bidi::address`]): the marks [`clean`] left out are put back
+/// where only they keep a right-to-left host's labels in place. A line of no right-to-left letter is as it was.
+fn linked(text: String) -> String {
+    if !crate::bidi::needs(&text) {
+        return text;
+    }
+    let link = |word: &str| word.contains("://") || word.starts_with("mailto:");
+    text.split(' ').map(|word| if link(word) { crate::bidi::address(word) } else { std::borrow::Cow::Borrowed(word) }).collect::<Vec<_>>().join(" ")
 }
 
 /// Whether `c` is a bidi control: an embedding, override or isolate, or a direction mark.

@@ -1933,3 +1933,19 @@ fn a_server_detect_left_out_for_the_owners_says_in_its_note_that_it_was_not_chec
     harness.get_by_label("Detect found imap.example.org but did not check it: it refused the connection from here. The IMAP server you typed stays.");
     assert!(harness.query_by_label_contains("Not checked:").is_none(), "nothing under the owner's row");
 }
+
+#[test]
+fn a_bare_enter_in_the_command_line_leaves_the_form_as_typed() {
+    // Ctrl K, then Enter at once (#397b): GO TO does not run, the settings stay, and the password typed is kept.
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
+    open_form(&mut harness);
+    type_in(&mut harness);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    assert!(harness.state().command().results(), "the line opened over the settings");
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(harness.state().settings().is_open(), "the settings stay");
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form, "and the form on them");
+    assert!(!harness.state().onboarding().form().password.is_empty(), "nothing typed is dropped");
+}

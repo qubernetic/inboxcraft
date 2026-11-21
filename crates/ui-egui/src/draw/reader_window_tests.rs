@@ -650,3 +650,23 @@ fn an_open_of_the_original_that_hangs_stops_no_window() {
     }
     assert_eq!(asking(&app).as_deref(), Some("Opened a cleaned copy in the browser"));
 }
+
+#[test]
+fn a_copied_link_s_notice_in_the_window_reads_in_the_order_it_was_copied() {
+    const LINK: &str = "https://שלום.קום.example.org/rota?week=שלום";
+    let ctx = windowing();
+    let mut app = app(&Recorder::default());
+    settle(&ctx, &mut app);
+    let id = open(&ctx, &mut app, COAST);
+    let window = window_of(&app, id);
+    let html = format!(r#"<p>See <a href="{LINK}">the rota</a> for the week.</p>"#);
+    let document = inboxcraft_html::display(&html, &inboxcraft_html::Options::default());
+    app.windows.shown.first_mut().unwrap().reader.show_as(id, crate::reader::Content::Html(document), false);
+    settle(&ctx, &mut app);
+    click_in(&ctx, &mut app, window, "the rota");
+    // The window's notice draws the link with its right-to-left labels where they are written, as it was copied.
+    let notice = format!("Link copied: {LINK}");
+    let seen = seen_in(window);
+    assert!(seen.iter().any(|(text, _)| *text == notice), "{seen:?}");
+    assert!(!seen.iter().any(|(text, _)| text.contains("קום.שלום")), "no label swapped: {seen:?}");
+}

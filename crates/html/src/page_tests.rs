@@ -145,3 +145,17 @@ fn a_document_nested_past_any_cap_is_written_flat_and_bounded() {
     // Dropping a nested block by hand would overflow the stack the same way; leak it.
     std::mem::forget(document);
 }
+
+#[test]
+fn a_link_s_tooltip_reads_its_right_to_left_labels_in_the_written_order() {
+    let html =
+        r#"<a href="https://שלום.קום.example.org/a?q=1">w</a> <a href="mailto:rota@שלום.example.org">m</a> <a href="https://example.org/b">p</a>"#;
+    let page = page(&display(html, &allowed()), "Subject");
+    // A left-to-right mark leads the tooltip and stands at each edge of a right-to-left run: a browser lays it out left
+    // to right and each label stays where it is written, as a click would copy it.
+    let mark = '\u{200E}';
+    assert!(page.contains(&format!("title=\"{mark}שלום{mark}.{mark}קום{mark}.example.org\"")), "{page}");
+    assert!(page.contains(&format!("title=\"{mark}rota@{mark}שלום{mark}.example.org\"")), "{page}");
+    // What it says is the same: a host of no right-to-left letter is as it was.
+    assert!(page.contains("title=\"example.org\""), "{page}");
+}

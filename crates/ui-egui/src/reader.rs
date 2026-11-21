@@ -196,17 +196,35 @@ pub fn inline_key(id: u64, content_id: &str) -> String {
 }
 
 /// What the line under the reader says while the pointer is on `link`: where it goes, and a warning when its text
-/// names another place.
+/// names another place. The target and its host are drawn left to right ([`target`]).
 #[must_use]
 pub fn link_status(link: &Link) -> String {
     match &link.target {
         LinkTarget::Web { url, host } if link.mismatch => {
-            tr!("Careful: the text says “{text}”, but the link goes to {host}: {url}", text = shown(&link.text), host = shown(host), url = shown(url))
+            tr!(
+                "Careful: the text says “{text}”, but the link goes to {host}: {url}",
+                text = shown(&link.text),
+                host = target(host),
+                url = target(url)
+            )
         }
-        LinkTarget::Web { url, .. } => shown(url),
-        LinkTarget::Mail { address, .. } => tr!("Write to {address}", address = shown(address)),
+        LinkTarget::Web { url, .. } => target(url),
+        LinkTarget::Mail { address, .. } => tr!("Write to {address}", address = target(address)),
         LinkTarget::Refused => tr!("This link is not followed: it does not go to a web page or a mail address.").to_owned(),
     }
+}
+
+/// What the reader's notice says once a click copied the link `url`, the link as [`target`] draws it.
+#[must_use]
+pub fn link_copied(url: &str) -> String {
+    tr!("Link copied: {url}", url = target(url))
+}
+
+/// A link's target, host or mail address as it is drawn: made fit for one line ([`shown`]) and left to right, its
+/// parts in the order a click copies them ([`crate::bidi::address`]). Only marks of no width are added: what is copied
+/// or opened is the link itself, never this.
+fn target(text: &str) -> String {
+    crate::bidi::address(&shown(text)).into_owned()
 }
 
 /// A size as the attachment tile shows it.
