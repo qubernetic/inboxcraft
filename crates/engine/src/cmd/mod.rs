@@ -153,3 +153,6 @@ mod triage_tests;
 #[cfg(test)]
 #[path = "ui_tests.rs"]
 mod ui_tests;
+#[cfg(test)]
+#[path = "unread_tests.rs"]
+mod unread_tests;

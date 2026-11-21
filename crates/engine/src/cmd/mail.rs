@@ -25,7 +25,7 @@ pub(crate) const COMMANDS: &[CommandSpec] = &[ATTACHMENT, LIST, READ, ROW, SEARC
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["account", "folder", "role", "group", "done", "parked", "limit", "offset", "id", "index", "content_id", "from", "to", "subject", "text", "since", "before"];
+pub(crate) const FIELDS: &[&str] = &["account", "folder", "role", "group", "done", "parked", "unread", "keep", "limit", "offset", "id", "index", "content_id", "from", "to", "subject", "text", "since", "before"];
 
 /// The most messages one answer lists.
 pub const MAX_LIST: u64 = 1000;
@@ -36,6 +36,8 @@ const DEFAULT_LIST: u64 = 100;
 /// `mail.list`: the messages of one folder, or of one role across every account (the unified view), newest first.
 /// The park pile is left out (counted in `parked`) unless asked for; "show done" (`done`) lists the done mail in the
 /// place it was done from, besides the mail there. A message back from a snooze is listed as if it arrived then.
+/// "Unread only" (`unread`) lists the unread messages alone, but the one `keep` names where it would be listed (the
+/// message the owner has open stays in its place once it is read); `total` counts what is listed so.
 pub(crate) const LIST: CommandSpec = CommandSpec {
     id: "mail.list",
     class: Some(AgentClass::Safe),
@@ -59,6 +61,10 @@ struct ListParams {
     done: Option<bool>,
     /// The park pile is listed too.
     parked: Option<bool>,
+    /// Only the unread messages.
+    unread: Option<bool>,
+    /// With `unread`: this message too, read or not, where it would be listed.
+    keep: Option<u64>,
     /// At most this many, 1 to [`MAX_LIST`].
     limit: Option<u64>,
     /// Skip this many first.
@@ -113,6 +119,10 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let parked = entries.iter().filter(|entry| is_parked(entry)).count();
     if params.parked != Some(true) {
         entries.retain(|entry| !is_parked(entry));
+    }
+    if params.unread == Some(true) {
+        let keep = params.keep.map(MessageId::new);
+        entries.retain(|entry| !entry.message().summary().flags().is_seen() || Some(entry.message().id()) == keep);
     }
     let limit = limit(params.limit);
     let offset = usize::try_from(params.offset.unwrap_or(0)).unwrap_or(usize::MAX);
