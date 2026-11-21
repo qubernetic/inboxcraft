@@ -403,7 +403,8 @@ fn the_reader_has_480_at_980() {
         let body = super::shell::laid(&harness.ctx).unwrap().body;
         assert_eq!(list.width(), super::LIST_WIDTH, "{width}: the list keeps its 440 (the index's line stands left of it)");
         // The test's window stands in a margin; the app's fills the window: its reader's pane is its line and the
-        // frames' 480 at a 980 window, 980 − 56 − 441 − 1 less the window's outline, a hairline at each side.
+        // frames' 480 at a 980 window, 980 − 56 (the index) − 1 (the index's line) − 440 (the list) − 2 (the window's
+        // outline, a hairline at each side) = 481.
         assert_eq!(body.right() - list.right(), body.width() - 440.0, "{width}: the reader's pane");
         let whole = super::shell::regions(
             vec2(width, 900.0),
@@ -411,7 +412,10 @@ fn the_reader_has_480_at_980() {
             1.0,
         )
         .body;
-        assert_eq!(whole.width() - 441.0, width - 56.0 - 441.0 - 1.0 - 2.0, "{width}: in the app's window");
+        assert_eq!(whole.width() - 440.0, width - 56.0 - 1.0 - 440.0 - 2.0, "{width}: in the app's window");
+        if width == 980.0 {
+            assert_eq!(whole.width() - 440.0, 1.0 + 480.0, "980: the reader's line and the frames' 480");
+        }
         assert!(reader.left() >= list.right() && reader.right() <= body.right(), "{width}: the reader {reader:?} in its pane");
     }
     let mut harness = window(979.0, 100);
