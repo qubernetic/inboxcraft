@@ -505,3 +505,50 @@ fn close_closes_over_the_command_line_s_results_a_menu_and_the_event_editor() {
         }
     }
 }
+
+/// Opens the command line's results (commands, none found).
+fn open_results(harness: &mut Harness<'static, InboxApp>) {
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::PALETTE);
+    harness.run();
+    harness.state_mut().command_mut().set_text(">zz");
+    harness.run();
+    assert!(harness.state().command().results(), "the results show");
+}
+
+/// The title bar's free points: the mark's column at the line's middle and under the field, and the gap before the
+/// controls.
+fn free_points(harness: &Harness<'_, InboxApp>) -> [Pos2; 3] {
+    let (line, field, first) = (line(harness), field(harness), controls(harness)[0]);
+    let mark = free(harness);
+    [mark, pos2(mark.x, ((field.bottom() + line.bottom()) / 2.0).round()), pos2((field.right() + first.left()) / 2.0, line.center().y)]
+}
+
+#[test]
+fn under_the_command_line_s_results_the_title_bar_stays_the_title_bar() {
+    // #412 (#305 m4): the frames' scrim under the results starts at the command line's foot, so the whole title bar
+    // stays one, the mark's column under the field too: a drag there moves the window and the results stay.
+    let at = free_points(&self::harness(true, WindowFrame::Own));
+    for at in at {
+        let mut harness = self::harness(true, WindowFrame::Own);
+        open_results(&mut harness);
+        let seen = drag_from(&mut harness, at);
+        assert!(seen.contains(&ViewportCommand::StartDrag), "{at:?}: {seen:?}");
+        assert!(harness.state().command().results(), "{at:?}: the results stay");
+    }
+    // The scrim (the command line's dim ground) starts at the line's foot, as the frames draw it (the window's y 45),
+    // not at the field's (37): a press on the title bar under the field is the title bar's, and the results stay.
+    let mut harness = self::harness(true, WindowFrame::Own);
+    open_results(&mut harness);
+    let dim = harness.ctx.memory(|memory| memory.area_rect(egui::Id::unique("command-line-dim"))).unwrap();
+    assert_eq!(dim.top(), line(&harness).bottom(), "the scrim {dim:?} under the line");
+    let [_, under_field, _] = free_points(&harness);
+    click_at(&mut harness, under_field);
+    harness.run();
+    assert!(harness.state().command().results(), "a press on the title bar under the field keeps the results");
+    // Under the line a press lands on the scrim: it closes the results and moves nothing.
+    let under = pos2(free(&harness).x, line(&harness).bottom() + 20.0);
+    let seen = click_at(&mut harness, under);
+    assert!(!seen.contains(&ViewportCommand::StartDrag), "{seen:?}");
+    assert!(!harness.state().command().results(), "a press under the line closes the results");
+}
