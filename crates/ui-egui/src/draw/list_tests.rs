@@ -1432,7 +1432,10 @@ fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale
                 if let super::list::Line::Mail(_) = line {
                     assert_eq!(bottom - top, theme.size(56.0), "{percent} {view:?}: the mail row's fixed height");
                 }
-                for ppp in [1.0_f32, 1.5] {
+                // At 100 % every line is a multiple of 4 points high, the screener card's too, so whole at 1.25× as
+                // well; the text scales' even sizes promise 1×, 1.5× and 2×.
+                let scales: &[f32] = if percent == 100 { &[1.0, 1.25, 1.5, 2.0] } else { &[1.0, 1.5, 2.0] };
+                for ppp in scales.iter().copied() {
                     for at in [top, bottom] {
                         assert_eq!((at * ppp).fract(), 0.0, "{percent} {view:?} at {ppp}: {at} on a whole pixel");
                     }
@@ -1444,8 +1447,8 @@ fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale
                 assert_eq!(spans.last().unwrap().1, listing.height, "the last row's bottom is the content's height");
                 assert_eq!(
                     listing.height,
-                    // The card's 64 and its line under it, on the next even height.
-                    theme.size(56.0) * 10_000.0 + theme.size(64.0) + 2.0,
+                    // The card's 64, its line drawn on the first row's first point.
+                    theme.size(56.0) * 10_000.0 + theme.size(64.0),
                     "{percent}: no point lost over 10 000 rows and the screener card"
                 );
             }

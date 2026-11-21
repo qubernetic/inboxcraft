@@ -1435,25 +1435,21 @@ impl Rows<'_> {
     }
 }
 
-/// The screener card's height at 100 % text, in points: the design's 64. Its line stands under it; the card and its
-/// line take the next even height (66), so that every line of the list ends on a whole pixel at 1.5× too: the card's
-/// panel is a point taller than the design's, under its parts, which keep to its 64.
+/// The screener card's height at 100 % text, in points: the design's 64, its panel. Its line is drawn on the first
+/// point of the line under it ([`show_lines`]), not in a point of its own, so that every line of the list stays a
+/// multiple of 4 points high at 100 % and ends on a whole pixel at 1.25×, 1.5× and 2×; the lines under the card stand
+/// 1 point higher than the design's, which gives the line a point of its own (65).
 const SCREENER_HEIGHT: f32 = 64.0;
 
 /// The screener card across `ui`'s line, as the design draws it on top of the inbox: the people mark, how many new
-/// senders wait and that they are held back, the first three's avatars and Review, which opens New senders; the line
-/// under it. Whether Review was pressed.
+/// senders wait and that they are held back, the first three's avatars and Review, which opens New senders. Its line
+/// is drawn over the next line ([`card_line`]). Whether Review was pressed.
 fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, waiting: &[Waiting]) -> bool {
     let p = &theme.palette;
     let f = &theme.fonts;
-    // The card's panel down to its line at the bottom; its parts keep to the top 64 (at the text scale), as the design
-    // draws them.
-    let line = ui.max_rect();
-    let under = (line.bottom() - 1.0).max(line.top());
+    let rect = ui.max_rect();
     let painter = ui.painter().clone();
-    painter.rect_filled(Rect::from_min_max(line.min, pos2(line.right(), under)), 0.0, p.panel);
-    super::paint::hairline(&painter, pos2(line.left(), under), pos2(line.right(), under), p.line);
-    let rect = Rect::from_min_size(line.min, vec2(line.width(), Theme::size(theme, SCREENER_HEIGHT).min(line.height())));
+    painter.rect_filled(rect, 0.0, p.panel);
     const PAD: f32 = 16.0;
     const GAP: f32 = 12.0;
     let icon = theme.boxes().icon;
@@ -1501,6 +1497,12 @@ fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, waiting: &[Waiting]) ->
     let note = crate::component::fitted(ui, note, f.caption, p.muted, room);
     super::paint::run_at(&painter, pos2(left, top + f.strong.line + 2.0), note, p.muted);
     review
+}
+
+/// The line under the screener card `card`, across it on the point below its bottom: the first point of the line under
+/// the card, painted after that line, so it stands over the line's fills.
+fn card_line(ui: &Ui, theme: &Theme, card: Rect) {
+    super::paint::hairline(ui.painter(), card.left_bottom(), card.right_bottom(), theme.palette.line);
 }
 
 /// One line of a list. A list is its lines one under another, each as high as [`line_height`] says for its kind, so
@@ -1591,7 +1593,7 @@ pub(super) fn line_height(theme: &Theme, line: &Line<'_>) -> f32 {
         Line::Leaving(_, gone) => even(boxes.mail_row * open(gone)),
         Line::Send(row) if matches!(row.state, SendState::Refused { .. }) => Theme::size(theme, crate::component::outbox_row::REFUSED_HEIGHT),
         Line::Send(_) => Theme::size(theme, crate::component::outbox_row::HEIGHT),
-        Line::Card(_) => even(Theme::size(theme, SCREENER_HEIGHT) + 1.0),
+        Line::Card(_) => Theme::size(theme, SCREENER_HEIGHT),
     }
 }
 
@@ -2244,6 +2246,12 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
                 ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
                 draw_line(ui, rows, line, slot);
             });
+        }
+        // The screener card's line, on the first point of the line under it, over what that line drew there.
+        if let Some(index) = (from..to).find(|index| matches!(listing.lines.get(*index), Some(Line::Card(_))))
+            && let Some((top, bottom)) = listing.span(index)
+        {
+            card_line(&listed, theme, at(top, bottom));
         }
         if let Some((top, bottom)) = scroll_to {
             ui.scroll_to_rect(at(top, bottom), None);
