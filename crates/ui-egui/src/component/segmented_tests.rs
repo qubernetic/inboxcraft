@@ -95,6 +95,40 @@ fn in_too_little_room_the_options_share_it_and_stay_inside() {
     }
 }
 
+/// A little short of the room the options' full names and pads want, the pads give way first: every option still
+/// holds its whole name (a share of the room each would cut "Before the inbox"), and the track fills the room.
+#[test]
+fn a_little_short_of_room_the_pads_give_way_and_the_names_stay_whole() {
+    let theme = theme();
+    let font = theme.fonts.button;
+    let names = ["Before the inbox", "Inside, marked", "Off"];
+    let measured = std::rc::Rc::new(std::cell::Cell::new((0.0_f32, 0.0_f32, [0.0_f32; 3])));
+    let out = measured.clone();
+    let mut harness = builder().with_size(vec2(600.0, 80.0)).build_ui(move |ui| {
+        let options = names.map(|name| (name, name, font));
+        let full = width(ui, &theme, &options);
+        let least = super::least_width(ui, &theme, &options);
+        let words = names.map(|name| crate::component::galley(ui, name, font, theme.palette.ink).size().x);
+        out.set((full, least, words));
+        // Between the least the whole names need and the full width.
+        let room = ((full + least) / 2.0).floor();
+        ui.scope(|ui| {
+            ui.set_max_width(room);
+            segmented(ui, &theme, &options, "Off");
+        });
+    });
+    harness.run();
+    let (full, least, words) = measured.get();
+    assert!(least < full - 20.0, "the pads leave {} to give", full - least);
+    let room = ((full + least) / 2.0).floor();
+    let rects: Vec<Rect> = names.iter().map(|name| harness.get_by_role_and_label(Role::RadioButton, name).rect()).collect();
+    for ((name, word), rect) in names.iter().zip(words).zip(&rects) {
+        assert!(rect.width() >= word + 2.0 * theme.spacing.s1, "{name}: {} for {word}", rect.width());
+    }
+    let (first, last) = (rects[0], rects[2]);
+    assert!(last.right() - first.left() <= room, "{first:?} {last:?} in {room}");
+}
+
 #[test]
 fn no_options_draw_nothing() {
     let theme = theme();
