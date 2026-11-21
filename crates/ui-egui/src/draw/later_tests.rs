@@ -417,3 +417,27 @@ fn later_s_snoozed_pile_stands_under_its_heads_which_offer_no_done_all() {
     settle(&mut harness);
     assert!(harness.query_by_label("done all").is_none(), "a head of Later marks nothing done");
 }
+
+/// `later/snoozed`: the head says how much Later holds across its piles ("9 put aside"), and each head of the snoozed
+/// pile counts the messages under it, not the unread ones.
+#[test]
+fn later_s_head_counts_what_is_put_aside_and_its_heads_count_their_rows() {
+    let mut app = app();
+    let ids: Vec<u64> = app.mailbox().messages().iter().take(3).map(|row| row.id).collect();
+    // Thursday 09:00: two today (16:00, 17:00), one on Monday.
+    for (id, hours) in ids.iter().zip([7, 8, 96]) {
+        app.mailbox_mut().act(*id, Act::Snooze(Timestamp::from_unix(NOW + hours * 3_600, 0).unwrap()));
+    }
+    app.mailbox_mut().open(Place::Later(Pile::Snoozed));
+    app.mailbox_mut().forget_undo();
+    let mut harness = harness_of(app);
+    settle(&mut harness);
+    let mailbox = harness.state().mailbox();
+    let aside: u64 = Pile::ALL.iter().map(|pile| mailbox.pile_count(*pile)).sum();
+    assert!(aside >= 3, "the three snoozed and the sample's pins and parked: {aside}");
+    harness.get_by_label(&format!("{aside} put aside"));
+    assert!(harness.query_by_label_contains("All accounts").is_none(), "the head says what it holds, as the frame");
+    harness.get_by_role_and_label(Role::Heading, "Back today, 2 messages");
+    harness.get_by_role_and_label(Role::Heading, "Later, 1 message");
+    assert!(harness.query_by_label_contains("nothing to read").is_none(), "no head counts unread mail");
+}

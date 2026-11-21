@@ -264,6 +264,7 @@ pub(crate) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &HeadStat
         index: "[ B ]",
         name: HEAD_NAME,
         unread: state.unread,
+        held: None,
         shown: state.shown_rows,
         link: state.link,
         hover_link: Some(tr!("done all")),

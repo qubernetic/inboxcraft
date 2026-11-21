@@ -283,6 +283,11 @@ fn subtitle(mailbox: &Mailbox) -> (Option<String>, String) {
         let count = mailbox.messages().iter().filter(|row| !row.seen).count();
         return (None, tr!("{count} to read", count = count));
     }
+    // Later holds what was put aside on all its piles, as the design words it; whose mail only when narrowed.
+    if matches!(mailbox.place(), Place::Later(_)) && mailbox.query().is_empty() {
+        let aside = Pile::ALL.iter().fold(0_u64, |sum, pile| sum.saturating_add(mailbox.pile_count(*pile)));
+        return (mailbox.narrowed().map(|_| mailbox.subtitle()), tr!("{count} put aside", count = aside));
+    }
     match mailbox.outbox_summary().filter(|_| mailbox.place() == Place::Outbox && mailbox.query().is_empty()) {
         Some(summary) => (None, summary),
         None => (Some(mailbox.subtitle()), mailbox.list_count()),
@@ -1877,9 +1882,10 @@ struct HeadPressed {
     fold: bool,
 }
 
-/// A group's head across `ui`, the design's group head: its index, name and unread count; in Smart, while it has more
-/// rows than it shows, how many show and "show all" or "show fewer"; "done all" while it is hovered or keyed.
-fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState, done_all: bool) -> HeadPressed {
+/// A group's head across `ui`, the design's group head: its index, name and unread count (with `held`, Later's heads,
+/// the messages it holds); in Smart, while it has more rows than it shows, how many show and "show all" or "show
+/// fewer"; "done all" while it is hovered or keyed.
+fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState, done_all: bool, held: bool) -> HeadPressed {
     let letter = char::from(b'A'.saturating_add(u8::try_from(state.index % 26).unwrap_or(0)));
     let index = format!("[ {letter} ]");
     let shown = state.folds.then(|| {
@@ -1892,6 +1898,7 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadS
         index: &index,
         name: &group.name,
         unread: state.unread,
+        held: held.then(|| u64::try_from(state.count).unwrap_or(u64::MAX)),
         shown: shown.as_deref(),
         link,
         // A head over no message left (its last row leaving) offers nothing to mark done.
@@ -1903,7 +1910,7 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadS
 
 /// The head of a group whose last row is leaving, in the line `ui` gives it: drawn whole from the line's top, cut to
 /// the line as it closes and faded as the row is; it takes no pointer or focus.
-fn leaving_head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState, gone: Gone) {
+fn leaving_head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState, gone: Gone, held: bool) {
     let line = ui.max_rect();
     let whole = Rect::from_min_size(line.min, vec2(line.width(), theme.boxes().group_head));
     let mut face = ui.new_child(UiBuilder::new().max_rect(whole).id_salt("leaving-head"));
@@ -1918,6 +1925,7 @@ fn leaving_head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, stat
         index: &index,
         name: &group.name,
         unread: 0,
+        held: held.then(|| u64::try_from(state.count).unwrap_or(u64::MAX)),
         shown: None,
         link: None,
         hover_link: None,
@@ -1944,9 +1952,10 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, slot: Slot) {
     let (theme, keymap, mailbox) = (rows.theme, rows.keymap, rows.mailbox);
     match line {
         Line::Head(group, state) => {
-            // Later's heads sort the snoozed pile by when it comes back: they mark nothing done.
-            let done_all = !matches!(mailbox.place(), Place::Later(_));
-            let pressed = head(ui, theme, keymap, group, *state, done_all);
+            // Later's heads sort the snoozed pile by when it comes back: they mark nothing done, and count the
+            // messages they hold, not the unread ones.
+            let later = matches!(mailbox.place(), Place::Later(_));
+            let pressed = head(ui, theme, keymap, group, *state, !later, later);
             if pressed.done_all {
                 let all = mailbox.messages().iter().filter(|message| group.messages.contains(&message.id)).map(|message| message.id);
                 rows.done_all.set(Some(all.collect()));
@@ -1955,7 +1964,9 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, slot: Slot) {
                 ui.data_mut(|data| data.insert_temp(group_open_id(&group.name), !state.open));
             }
         }
-        Line::HeadLeaving(group, state, gone) => leaving_head(ui, theme, keymap, group, *state, *gone),
+        Line::HeadLeaving(group, state, gone) => {
+            leaving_head(ui, theme, keymap, group, *state, *gone, matches!(mailbox.place(), Place::Later(_)));
+        }
         Line::Mail(message) => rows.mail(ui, message, slot),
         Line::Draft(draft) => {
             if let Some(pressed) = kept_draft(ui, theme, keymap, mailbox, draft) {
