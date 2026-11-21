@@ -20,7 +20,7 @@ fn app() -> (InboxApp, FakeClock) {
     let clock = FakeClock::new(Timestamp::from_unix(sample::frames::TIME, 0).unwrap());
     let session = sample::frames::session(Box::new(clock.clone())).unwrap();
     let mut app = InboxApp::with_outside(Mailbox::new(session, Box::new(clock.clone())), Box::new(sample::Pictures::default()), Box::new(NoSave));
-    sample::frames::prepare(app.mailbox_mut(), &clock).unwrap();
+    sample::frames::prepare(app.mailbox_mut(), &clock, sample::frames::Outbox::Waiting).unwrap();
     (app, clock)
 }
 

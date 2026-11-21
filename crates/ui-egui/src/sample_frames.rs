@@ -5,8 +5,8 @@
 //! Personal and Studio accounts on Monday 16 November 2026 at 14:04 (UTC), synced at 14:02, with the people,
 //! subjects, times and counts the frames show. Seven to read in the inbox (two from people, four notifications, one
 //! newsletter), three first-time senders in the screener, four snoozed (two back today), three pinned, two parked,
-//! three done, one message waiting in the outbox for Tuesday 08:00, a sent message that bounced, and the week of
-//! 16 November in four calendars, the design review at 15:00 next.
+//! three done, one message in the outbox waiting to go (no time of its own), a sent message that bounced, and the
+//! week of 16 November in four calendars, the design review at 15:00 next.
 //!
 //! As the present sample, every name, address, subject and text is invented for InboxCraft (the senders are on
 //! `example.org` and its subdomains), nothing connects anywhere, and it is built afresh at every start; `just
@@ -337,7 +337,7 @@ const REVIEW: Meeting = Meeting {
 const INVITATIONS: [Invited; 2] = [
     Invited {
         folder: 12,
-        subject: "Invitation: Design review, Mon 16 Nov 14:00",
+        subject: "Invitation: Design review, {when}",
         minutes_ago: at(3, 16, 0),
         message_id: "review.1@example.org",
         follows: None,
@@ -348,7 +348,7 @@ const INVITATIONS: [Invited; 2] = [
     },
     Invited {
         folder: 10,
-        subject: "Updated invitation: Design review, Mon 16 Nov 15:00",
+        subject: "Updated invitation: Design review, {when}",
         minutes_ago: at(0, 10, 2),
         message_id: "review.2@example.org",
         follows: Some("review.1@example.org"),
@@ -363,8 +363,8 @@ const INVITATIONS: [Invited; 2] = [
 const CALENDARS: [(u64, u64, &str, &str); 4] =
     [(1, 1, "Personal", "#3b82f6ff"), (2, 2, "Studio", "#8b5cf6ff"), (3, 1, "Birthdays", "#e11d74ff"), (4, 2, "Kiln rota", "#f59e0bff")];
 
-/// The week's events: `(calendar, uid, day after Monday, lines)`; `{day}` is that day (`20261116`), `{next}` the day
-/// after.
+/// The week's events: `(calendar, uid, day after Monday, lines)`; `{day}` is that day (`20261116`), `{after}` two
+/// days after it, the `DTEND` of a two-day all-day event (the open day, Saturday and Sunday).
 const EVENTS: [(u64, &str, i64, &str); 12] = [
     (2, "workshop-prep", 0, "DTSTART:{day}T100000Z\r\nDTEND:{day}T110000Z\r\nSUMMARY:Workshop prep\r\nLOCATION:Room 3\r\n"),
     (
@@ -448,8 +448,7 @@ pub fn mailbox(now: Timestamp) -> Result<Memory, UiError> {
     let first_id = u64::try_from(MESSAGES.len()).unwrap_or(u64::MAX).saturating_add(1);
     for (index, invited) in INVITATIONS.iter().enumerate() {
         let n = u32::try_from(index).unwrap_or(0);
-        let uid = u32::try_from(MESSAGES.iter().filter(|sample| sample.folder == invited.folder).count()).unwrap_or(u32::MAX).saturating_add(1);
-        for change in invitation(first_id.saturating_add(u64::from(n)), uid, &REVIEW, invited, now)? {
+        for change in invitation(first_id.saturating_add(u64::from(n)), invitation_uid(&INVITATIONS, index), &REVIEW, invited, now)? {
             batch.push(change);
         }
     }
@@ -465,6 +464,15 @@ pub fn mailbox(now: Timestamp) -> Result<Memory, UiError> {
     let report = id_in(MESSAGES, "Your order KC-20418")?;
     bounce_of(&mut store, id_in(MESSAGES, BOUNCED)?, report, "ansel@example.org: 550 5.1.1 The address ansel@example.org does not exist.")?;
     Ok(store)
+}
+
+/// The UID of the invitation at `index` of `invitations` in its folder: after the folder's messages and the
+/// invitations before it in the same folder, so no two meet.
+fn invitation_uid(invitations: &[Invited], index: usize) -> u32 {
+    let Some(invited) = invitations.get(index) else { return u32::MAX };
+    let earlier = invitations.iter().take(index).filter(|other| other.folder == invited.folder).count();
+    let messages = MESSAGES.iter().filter(|sample| sample.folder == invited.folder).count();
+    u32::try_from(messages.saturating_add(earlier)).unwrap_or(u32::MAX).saturating_add(1)
 }
 
 /// The sent message the report says did not arrive.
@@ -516,35 +524,60 @@ const AWAY: Away = Away {
     returned: None,
 };
 
-/// The message waiting in the outbox: Greta's proof, to go on Tuesday at 08:00 from the Studio account.
+/// The message in the outbox: Greta's proof, from the Studio account.
 const WAITING_SEND: (&str, &str, &str) = ("Greta Lindqvist <greta@example.org>", "Thank-you cards: the proof", "The proof is attached.");
 
-/// Sets the window's `mailbox` on `clock` as the frames show it: [`AWAY`] put away, and one message, written
-/// yesterday, scheduled in the outbox for tomorrow 08:00; nothing to undo. The clock comes back to its time.
+/// What the frames' outbox holds when the window is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outbox {
+    /// Nothing: a window with no drafts.
+    Empty,
+    /// [`WAITING_SEND`], sent yesterday and on its way since, with no time of its own: the status line's "outbox 1".
+    Waiting,
+    /// [`WAITING_SEND`] to go on Tuesday at 08:00, as the Scheduled page lists it.
+    Scheduled,
+}
+
+/// Sets the window's `mailbox` on `clock` as the frames show it: [`AWAY`] put away and the message `outbox` asks for;
+/// nothing to undo. The clock comes back to its time.
 ///
 /// # Errors
 ///
 /// [`UiError`] when the session refuses one of the acts or commands.
-pub fn prepare(mailbox: &mut crate::mailbox::Mailbox, clock: &FakeClock) -> Result<(), UiError> {
+pub fn prepare(mailbox: &mut crate::mailbox::Mailbox, clock: &FakeClock, outbox: Outbox) -> Result<(), UiError> {
     put_away_of(mailbox, &AWAY, MESSAGES)?;
-    let now = clock.now();
-    let at = morning(now, 1).ok_or_else(|| UiError::sample("no morning"))?;
-    clock.set(now.checked_sub(std::time::Duration::from_secs(WRITTEN * 60)).ok_or_else(|| UiError::sample("no time"))?);
-    let (to, subject, text) = WAITING_SEND;
-    let queued = (|| {
-        let draft = mailbox.run("compose.new", &serde_json::json!({ "account": 2 }))?;
-        let id = draft.get("id").and_then(serde_json::Value::as_u64).ok_or_else(|| UiError::sample("compose.new gave no draft"))?;
-        mailbox.run("compose.update", &serde_json::json!({ "id": id, "to": [to], "subject": subject, "text": text }))?;
-        mailbox.run("mail.send_later", &serde_json::json!({ "id": id, "at": at }))
-    })();
-    clock.set(now);
-    queued?;
+    if outbox != Outbox::Empty {
+        let now = clock.now();
+        let queued = queue(mailbox, clock, now, outbox);
+        clock.set(now);
+        queued?;
+    }
     mailbox.forget_undo();
     Ok(())
 }
 
-/// How long before the frames' time the message in the outbox was written, in minutes: yesterday.
-const WRITTEN: u64 = 22 * 60;
+/// Writes [`WAITING_SEND`] yesterday and sends it: then, so when its hold is over the engine hands it to the account's
+/// worker and, as nothing connects in a picture, it stays on its way with no time to go at (the status line says
+/// "outbox 1", no "one goes at"); or, [`Outbox::Scheduled`], later, tomorrow at 08:00.
+fn queue(mailbox: &mut crate::mailbox::Mailbox, clock: &FakeClock, now: Timestamp, outbox: Outbox) -> Result<(), UiError> {
+    let written = now.checked_sub(std::time::Duration::from_secs(WRITTEN * 60)).ok_or_else(|| UiError::sample("no time"))?;
+    clock.set(written);
+    let (to, subject, text) = WAITING_SEND;
+    let draft = mailbox.run("compose.new", &serde_json::json!({ "account": 2 }))?;
+    let id = draft.get("id").and_then(serde_json::Value::as_u64).ok_or_else(|| UiError::sample("compose.new gave no draft"))?;
+    mailbox.run("compose.update", &serde_json::json!({ "id": id, "to": [to], "subject": subject, "text": text }))?;
+    if outbox == Outbox::Scheduled {
+        let at = morning(now, 1).ok_or_else(|| UiError::sample("no morning"))?;
+        mailbox.run("mail.send_later", &serde_json::json!({ "id": id, "at": at }))?;
+        return Ok(());
+    }
+    mailbox.run("mail.send", &serde_json::json!({ "id": id }))?;
+    // Past the hold (5 s unless chosen otherwise) and well before the engine counts the send late (a minute): it
+    // goes on time, so no "sent late" notice follows.
+    clock.set(written.checked_add(std::time::Duration::from_secs(HELD)).ok_or_else(|| UiError::sample("no time"))?);
+    mailbox.pump(&mut crate::workers::NoWorkers);
+    Ok(())
+}
 
 /// 08:00 UTC `days` after the day of `now`, as RFC 3339.
 fn morning(now: Timestamp, days: i64) -> Option<String> {
@@ -552,6 +585,12 @@ fn morning(now: Timestamp, days: i64) -> Option<String> {
     let civil = Timestamp::from_unix(day.checked_mul(86_400)?.checked_add(8 * 3_600)?, 0)?.to_civil(inboxcraft_time::Offset::UTC)?;
     Some(format!("{:04}-{:02}-{:02}T08:00:00Z", civil.year(), civil.month(), civil.day()))
 }
+
+/// How long before the frames' time the message in the outbox was written and sent, in minutes: yesterday.
+const WRITTEN: u64 = 22 * 60;
+
+/// How many seconds after it was sent the message's hold is looked at: past the default hold of five.
+const HELD: u64 = 20;
 
 /// The screener's senders and the groups of the frames' showcase: three waiting, People and Notifications.
 const WAITING: [Person; 3] = [LUCIAN, DEALS, NORA];

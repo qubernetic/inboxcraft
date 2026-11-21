@@ -852,7 +852,7 @@ const FRAMES_WORDS: Words = Words {
     later: ("Tobias Wren <tobias@example.org>,", "Reminder: the studio is closed on the 24th", 4, 9),
     countdown: ("Dmitri Vale <dmitri@example.org>,", "Re: Kiln rota for December"),
     bcc: "Rosalind Thackeray <rosalind@example.org>",
-    // With the message waiting in the outbox, edited yesterday ([`sample::frames::prepare`]): the frames' two drafts.
+    // With the message in the outbox, written yesterday ([`sample::frames::prepare`]): the frames' two drafts.
     drafts: &[("Sunniva Aalto <sunniva@example.org>", "Price list for the winter workshops", 114)],
 };
 
@@ -1956,9 +1956,18 @@ fn window(shot: &Shot) -> Result<(InboxApp, FakeClock), UiError> {
     let mailbox = Mailbox::new(session, Box::new(clock.clone()));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
     if frames && shot.first != Some(true) {
-        sample::frames::prepare(app.mailbox_mut(), &clock)?;
-        // The frames' two drafts, kept from the start: the index counts them everywhere.
-        if shot.drafts.as_deref() != Some("empty") {
+        // The frames' two drafts, kept from the start, the index counts them everywhere: the message in the outbox
+        // (a send is a draft until it goes) and one kept. A scene with no drafts has neither.
+        let drafts = shot.drafts.as_deref() != Some("empty");
+        // The outbox and the Scheduled page list the message with its time, as their frames do.
+        let listed = shot.outbox.is_some() || shot.section.as_deref() == Some(crate::settings::Under::Scheduled.id());
+        let outbox = match (drafts, listed) {
+            (false, _) => sample::frames::Outbox::Empty,
+            (true, true) => sample::frames::Outbox::Scheduled,
+            (true, false) => sample::frames::Outbox::Waiting,
+        };
+        sample::frames::prepare(app.mailbox_mut(), &clock, outbox)?;
+        if drafts {
             keep_drafts(&mut app, &clock, &shot.out, FRAMES_WORDS.drafts)?;
         }
     }

@@ -381,6 +381,7 @@ const MESSAGES: &[Sample] = &[
 /// whether it was read.
 struct Invited {
     folder: u64,
+    /// The subject; `{when}` in it is the start as [`short_when`] writes it.
     subject: &'static str,
     minutes_ago: u64,
     message_id: &'static str,
@@ -458,6 +459,17 @@ fn ical_time(at: Timestamp) -> String {
     })
 }
 
+/// `at` as an invitation's subject names its start, in UTC: `Mon 16 Nov 15:00`.
+fn short_when(at: Timestamp) -> String {
+    const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    at.to_civil(inboxcraft_time::Offset::UTC).map_or_else(String::new, |civil| {
+        let day = usize::try_from(civil.weekday().days_from_monday()).ok().and_then(|day| DAYS.get(day)).copied().unwrap_or_default();
+        let month = usize::from(civil.month()).checked_sub(1).and_then(|month| MONTHS.get(month)).copied().unwrap_or_default();
+        format!("{day} {} {month} {:02}:{:02}", civil.day(), civil.hour(), civil.minute())
+    })
+}
+
 /// The invitation `invited` as Odile's calendar would send it (iMIP, RFC 6047), its message and its mark: what the
 /// sync reads from a kept body.
 fn invitation(id: u64, uid: u32, meeting: &Meeting, invited: &Invited, now: Timestamp) -> Result<Vec<Change>, UiError> {
@@ -482,14 +494,15 @@ fn invitation(id: u64, uid: u32, meeting: &Meeting, invited: &Invited, now: Time
         attendee.address,
     );
     let text = meeting.text;
+    let subject = invited.subject.replace("{when}", &short_when(start));
     let mut builder = MessageBuilder::new()
         .from(Sender::named(organiser.name, organiser.address))
         .to(Sender::named(attendee.name, attendee.address))
-        .subject(invited.subject)
+        .subject(&subject)
         .message_id(invited.message_id)
         .text(text)
         .calendar("REQUEST", &calendar);
-    let mut envelope = Envelope::new(invited.subject)
+    let mut envelope = Envelope::new(&subject)
         .with_date(received)
         .with_from(vec![address(organiser)?])
         .with_to(vec![address(attendee)?])
