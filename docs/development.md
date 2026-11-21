@@ -500,7 +500,7 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 | `changes` | decides whether `flatpak` runs: always on a push to `develop` or `main` and on a manual run, never on a push to `epic/**`; on a PR only when `git diff` of GitHub's merge commit against its first parent, the base tip, touches a Flatpak input | read |
 | `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml`, both from the `cov` gate, as the `reports` artifact; restores the dependency cache; on a push to `develop`, `main` or `epic/**` that did not create the branch, prunes `target/` and saves it | read |
 | `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
-| `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache) and keeps it as the `flatpak` artifact for 7 days | read |
+| `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache; the runtime, SDK and Rust extension come fresh from Flathub into the user installation) and keeps it as the `flatpak` artifact for 7 days | read |
 | `ci` | the gate: succeeds only when `changes`, `test` and `codecov` did, and `flatpak` did or was skipped because `changes` said so (no Flatpak input in the PR, or a push to `epic/**`) | read |
 
 - **A draft starts no job.** Every job is skipped on a draft PR, so a push to a draft bills nothing; the draft cannot
