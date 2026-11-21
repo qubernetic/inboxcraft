@@ -707,6 +707,17 @@ struct Changes {
     goes_to: Vec<String>,
 }
 
+/// What the form of an account says of its Save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveSummary {
+    /// Something to save: a setting, the CalDAV address or a new password typed.
+    pub changed: bool,
+    /// Saving starts the account's check.
+    pub checks: bool,
+    /// Where the sign-in will go when it goes anywhere new, or that the new password will be checked.
+    pub note: Option<String>,
+}
+
 /// How a removal the engine took went, with what the status line says of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Removed {
@@ -1252,11 +1263,13 @@ impl Onboarding {
         self.checks_with(&self.changes())
     }
 
-    /// [`Self::save_checks`] and [`Self::sign_in_note`] from one look at what changed: for the page, each frame.
+    /// Whether anything changed, [`Self::save_checks`] and [`Self::sign_in_note`], from one look at what changed: for
+    /// the page, each frame.
     #[must_use]
-    pub fn save_summary(&self) -> (bool, Option<String>) {
+    pub fn save_summary(&self) -> SaveSummary {
         let changes = self.changes();
-        (self.checks_with(&changes), self.note_with(changes))
+        let changed = changes.settings || changes.caldav || !self.form.password.is_empty();
+        SaveSummary { changed, checks: self.checks_with(&changes), note: self.note_with(changes) }
     }
 
     fn checks_with(&self, changes: &Changes) -> bool {

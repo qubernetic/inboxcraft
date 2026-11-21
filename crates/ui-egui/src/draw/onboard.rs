@@ -640,8 +640,9 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
 }
 
 /// The form of an account already there: the add form's fields, the address read-only, a new password instead of the
-/// password, and where the sign-in will go when it would go anywhere new. `bar` is the account's colour; `writing`: a
-/// message is being written from this account.
+/// password, and where the sign-in will go when it would go anywhere new. Save waits, disabled, until something changed;
+/// beside the buttons a word says whether anything did. `bar` is the account's colour; `writing`: a message is being
+/// written from this account.
 fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding, (bar, writing): (Color32, bool)) -> Option<Asked> {
     let f = &theme.fonts;
     let p = &theme.palette;
@@ -652,8 +653,14 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     head(ui, theme, (&title, Some(bar)), None, width);
     ui.add_space(HEAD_BELOW - HEAD_GAP);
     let faults = Faults::of(onboarding);
-    let (checks, note) = onboarding.save_summary();
-    let label = if checks { tr!("Save and check") } else { tr!("Save") };
+    let summary = onboarding.save_summary();
+    let label = if summary.checks { tr!("Save and check") } else { tr!("Save") };
+    // The note says what saving does; without one, a word says whether there is anything to save.
+    let state = match (&summary.note, summary.changed) {
+        (Some(_), _) => None,
+        (None, true) => Some(tr!("changed, not saved yet")),
+        (None, false) => Some(tr!("nothing changed")),
+    };
     let mut edited = Vec::new();
     let asking = onboarding.asking_remove();
     let hand = onboarding.take_remove_hand();
@@ -669,18 +676,24 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
         });
         edited.extend(names(ui, theme, &faults, form, width, (tr!("New password"), tr!("empty keeps the stored one"))));
         edited.extend(servers(ui, theme, &faults, form, (width, false), ([None, None], &[None, None])));
-        words(ui, tr!("A new password goes into your system's credential store. The stored one is never shown."), f.caption, p.muted, width);
-        if let Some(text) = &note {
-            words(ui, text, f.caption, p.ink, width);
-        }
+        // Once saving would sign in anew, the note stands in the caption's place, in `warn`.
+        let caption = tr!("A new password goes into your system's credential store. The stored one is never shown.");
+        let (caption, colour) = summary.note.as_deref().map_or((caption, p.muted), |note| (note, p.warn));
+        words(ui, caption, f.caption, colour, width);
         page_error(ui, theme, keymap, onboarding);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
-            if TextButton::new(label).primary().show(ui, theme, keymap).clicked() {
+            let save = if summary.changed { TextButton::new(label).primary() } else { TextButton::new(label).secondary().enabled(false) };
+            if save.show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Save);
             }
             if TextButton::new(tr!("Cancel")).plain().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Cancel);
+            }
+            if let Some(state) = state {
+                let galley = component::galley(ui, state, f.mono_s, p.muted);
+                let (rect, _) = ui.allocate_exact_size(vec2(galley.size().x, f.mono_s.line), Sense::hover());
+                said(ui, rect.min, rect.width(), galley, p.muted, state);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let ask = TextButton::new(tr!("Remove account…")).danger().show(ui, theme, keymap);

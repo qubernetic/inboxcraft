@@ -1967,6 +1967,38 @@ fn on_sample_account(theme: egui::Theme, id: u64) -> Harness<'static, InboxApp> 
 }
 
 #[test]
+fn an_account_s_form_holds_save_back_until_something_changes_and_says_so() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        // `account-edit/default`: Save disabled, "nothing changed" after Cancel.
+        let mut harness = on_sample_account(theme, 1);
+        assert!(harness.get_by_role_and_label(Role::Button, "Save").accesskit_node().is_disabled(), "{theme:?}: nothing to save");
+        harness.get_by_label("nothing changed");
+        assert!(harness.query_by_label("changed, not saved yet").is_none(), "{theme:?}");
+        // `account-edit/changed`: a new name, and Save is the primary, the words say it is not saved yet.
+        harness.state_mut().onboarding_mut().0.form_mut().label = "Home".to_owned();
+        harness.run();
+        assert!(!harness.get_by_role_and_label(Role::Button, "Save").accesskit_node().is_disabled(), "{theme:?}: a change to save");
+        harness.get_by_label("changed, not saved yet");
+        assert!(harness.query_by_label("nothing changed").is_none(), "{theme:?}");
+        // `account-edit/new-password`: "Save and check", and the note in `warn` where the caption stood.
+        harness.state_mut().onboarding_mut().0.form_mut().label = "Personal".to_owned();
+        harness.state_mut().onboarding_mut().0.form_mut().password = Secret::new("new-Lantern-9");
+        harness.run();
+        assert!(!harness.get_by_role_and_label(Role::Button, "Save and check").accesskit_node().is_disabled(), "{theme:?}");
+        let warn = crate::theme::Theme::of(
+            if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light },
+            &crate::theme::Look::default(),
+        )
+        .palette
+        .warn;
+        let note = crate::component::field::tests::drawn(&harness).into_iter().find(|drawn| drawn.text.starts_with("Saving signs in to ")).unwrap();
+        assert_eq!(note.colour, warn, "{theme:?}: the note in warn");
+        assert!(harness.query_by_label_contains("A new password goes into").is_none(), "{theme:?}: the note in the caption's place");
+        assert!(harness.query_by_label_contains("changed").is_none(), "{theme:?}: the note says it, no words beside the buttons");
+    }
+}
+
+#[test]
 fn an_account_s_form_has_the_frame_s_head_and_rows() {
     for theme in [egui::Theme::Dark, egui::Theme::Light] {
         let harness = on_sample_account(theme, 1);
