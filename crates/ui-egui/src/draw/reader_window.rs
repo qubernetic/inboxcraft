@@ -271,7 +271,7 @@ impl Windows {
             reader::Asked::Original(id) => reader.open_original(id, ctx),
             reader::Asked::After(after) => mailbox.set_after(after),
             reader::Asked::Copy(url) => {
-                reader.set_notice(tr!("Link copied: {url}", url = crate::mailbox::shown(&url)));
+                reader.set_notice(crate::reader::link_copied(&url));
                 ctx.copy_text(url);
             }
             reader::Asked::CopySubject(subject) => {

@@ -3052,3 +3052,80 @@ fn at_1024_and_130_percent_the_acts_keep_one_line_and_a_long_subject_wraps_under
     assert!((line("More").right() - subject.right()).abs() < 0.5, "More ends at the head's right edge: {subject:?}");
     assert!((subject.height() - 2.0 * theme.fonts.title.line).abs() < 0.5, "the subject on two lines: {subject:?}");
 }
+
+/// A link target with right-to-left host labels, a path and a query: drawn, it reads in the order a click copies it.
+const RIGHT_TO_LEFT: &str = "https://שלום.קום.example.org/rota?week=שלום";
+
+/// The HTML message `html` open in the reader of a window 2400 wide (no line of the link status is cut), the
+/// pointer on what is named `on` (the first box, 8 in): the harness.
+fn hovered_in(html: &str, on: &str) -> Harness<'static, InboxApp> {
+    let mut harness = shown_in(html);
+    let at = harness.get_by_label(on).rect();
+    harness.hover_at(at.left_center() + vec2(8.0, 0.0));
+    settle(&mut harness);
+    harness
+}
+
+/// The HTML message `html` open in the reader of a window 2400 wide.
+fn shown_in(html: &str) -> Harness<'static, InboxApp> {
+    let mut harness = opened_at(&Recorder::default(), "Photos from the coast walk", 2400.0, crate::theme::TextScale::default());
+    let id = harness.state().reader().open_id().unwrap();
+    let document = inboxcraft_html::display(html, &inboxcraft_html::Options::default());
+    harness.state_mut().reader_mut().0.show_as(id, crate::reader::Content::Html(document), false);
+    settle(&mut harness);
+    harness
+}
+
+/// Whether the last frame painted `text` as a line of its own, its parts in the order it is written (a line's job holds
+/// its pieces in the order they are drawn, left to right; a right-to-left word in the order it is written).
+fn painted_line(harness: &Harness<'static, InboxApp>, text: &str) -> bool {
+    painted_texts(harness).iter().any(|(_, painted)| painted == text)
+}
+
+#[test]
+fn a_link_s_target_on_the_status_float_reads_in_the_order_a_click_copies() {
+    let harness = hovered_in(&format!(r#"<p>See <a href="{RIGHT_TO_LEFT}">the rota</a> for the week.</p>"#), "the rota");
+    assert!(painted_line(&harness, RIGHT_TO_LEFT), "the labels stay where they are written: {:?}", painted_texts(&harness));
+}
+
+#[test]
+fn a_button_link_s_target_on_the_status_float_reads_in_the_order_a_click_copies() {
+    let html = format!(r#"<p><a role="button" href="{RIGHT_TO_LEFT}">Book a slot</a></p>"#);
+    let harness = hovered_in(&html, "Book a slot");
+    assert!(painted_line(&harness, RIGHT_TO_LEFT), "the labels stay where they are written: {:?}", painted_texts(&harness));
+}
+
+#[test]
+fn a_picture_link_s_target_on_the_status_float_reads_in_the_order_a_click_copies() {
+    let html = format!(r#"<p><a href="{RIGHT_TO_LEFT}"><img src="cid:none" alt="The rota board" width=200 height=80></a></p>"#);
+    let mut harness = shown_in(&html);
+    let at = harness.get_by_role(Role::Link).rect();
+    harness.hover_at(at.center());
+    settle(&mut harness);
+    assert!(painted_line(&harness, RIGHT_TO_LEFT), "the labels stay where they are written: {:?}", painted_texts(&harness));
+}
+
+#[test]
+fn a_careful_link_s_host_and_target_read_in_the_order_a_click_copies() {
+    let html = format!(r#"<p><a href="{RIGHT_TO_LEFT}">https://bank.example.org/login</a></p>"#);
+    let harness = hovered_in(&html, "https://bank.example.org/login");
+    // The address whole on its own line, and the host in the words above it.
+    assert!(painted_line(&harness, RIGHT_TO_LEFT), "the target: {:?}", painted_texts(&harness));
+    let said = "The text says “https://bank.example.org/login”, but the link goes to שלום.קום.example.org:";
+    assert!(painted_line(&harness, said), "the host: {:?}", painted_texts(&harness));
+}
+
+#[test]
+fn a_mail_link_s_address_on_the_status_float_reads_in_the_order_a_click_copies() {
+    let harness = hovered_in(r#"<p>Or <a href="mailto:rota@שלום.קום.example.org">write to the rota</a>.</p>"#, "write to the rota");
+    assert!(painted_line(&harness, "Write to rota@שלום.קום.example.org"), "the labels stay: {:?}", painted_texts(&harness));
+}
+
+#[test]
+fn a_copied_link_s_notice_reads_in_the_order_it_was_copied() {
+    let mut harness = hovered_in(&format!(r#"<p>See <a href="{RIGHT_TO_LEFT}">the rota</a> for the week.</p>"#), "the rota");
+    harness.get_by_label("the rota").click();
+    settle(&mut harness);
+    let notice = format!("Link copied: {RIGHT_TO_LEFT}");
+    assert!(painted_line(&harness, &notice), "the notice: {:?}", painted_texts(&harness));
+}

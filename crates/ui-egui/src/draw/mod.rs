@@ -1716,7 +1716,7 @@ impl InboxApp {
             }
         }
         if let Some(url) = copied {
-            self.say(&tr!("Link copied: {url}", url = crate::mailbox::shown(&url)));
+            self.say(&crate::reader::link_copied(&url));
         }
         if delete_refused {
             self.say(tr!("Not deleted: the event is being edited in its window. Save or throw away the typing there first"));
@@ -4184,7 +4184,7 @@ impl InboxApp {
             reader::Asked::Close => mailbox.select(None),
             reader::Asked::After(after) => mailbox.set_after(after),
             reader::Asked::Copy(url) => {
-                reader.set_notice(tr!("Link copied: {url}", url = crate::mailbox::shown(&url)));
+                reader.set_notice(crate::reader::link_copied(&url));
                 ui.ctx().copy_text(url);
             }
             reader::Asked::CopySubject(subject) => {

@@ -409,3 +409,39 @@ fn ctrl_and_a_press_on_a_link_in_the_description_copies_it() {
     assert_eq!(harness.state().notice(), Some("Link copied: https://files.example.org/boards"));
     assert!(editing(&harness), "the editor stays open");
 }
+
+#[test]
+fn a_copied_link_s_notice_reads_in_the_order_it_was_copied() {
+    use egui::{Event, PointerButton};
+    const LINK: &str = "https://שלום.קום.example.org/boards?week=שלום";
+    let mut harness = on_calendar(egui::Theme::Light);
+    pick(&mut harness, "Call with Petra about the logo");
+    press(&mut harness, "Edit");
+    harness.state_mut().calendar_mut().0.editor_mut().unwrap().form_mut().description = LINK.to_owned();
+    harness.run();
+    let rect = harness.get_by_role_and_label(Role::MultilineTextInput, "Description").rect();
+    let at = egui::pos2(rect.left() + 40.0, rect.top() + 18.0);
+    harness.event(Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event_modifiers(
+            Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::COMMAND },
+            Modifiers::COMMAND,
+        );
+        harness.run();
+    }
+    harness.run();
+    fn walk(shape: &egui::Shape, found: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Text(text) => found.push(text.galley.job.text.clone()),
+            _ => {}
+        }
+    }
+    let mut painted = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut painted));
+    // The status line draws the link with its right-to-left labels where they are written, as it was copied.
+    let notice = format!("Link copied: {LINK}");
+    assert!(painted.contains(&notice), "{painted:?}");
+    assert_eq!(harness.state().notice().map(|said| said.replace('\u{200E}', "")), Some(notice), "only marks of no width are added");
+}
