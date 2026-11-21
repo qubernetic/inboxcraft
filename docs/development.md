@@ -252,9 +252,11 @@ The floors live in one file, `.config/coverage.toml`:
 
 | Floor | Crates |
 |---|---|
-| 95 % | the workspace total |
-| 98 % | `charset`, `dav`, `engine`, `ical`, `mime`, `model`, `proto`, `store`, `testkit`, `time`, `vcard` |
-| 80 % | `net`, `ui-egui` |
+| 100 % | `charset`, `mime`, `vcard` |
+| 99 % | `dav`, `engine`, `ical`, `mcp`, `model`, `proto`, `testkit`, `time` |
+| 98 % | the workspace total; `store` |
+| 97 % | `ui-egui` |
+| 95 % | `net` |
 
 - A line is an lcov `DA` record (llvm-cov already leaves out the test files); it is covered when its count is not 0.
   A file belongs to the member whose directory holds it most closely.
