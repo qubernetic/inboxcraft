@@ -317,6 +317,8 @@ pub struct Reader {
     full_width: bool,
     fetch: Box<dyn Fetch>,
     save: Box<dyn Save>,
+    /// Where the original goes to the browser; none in a window that cannot open one.
+    original: Option<crate::original::Shared>,
     pictures: BTreeMap<String, PictureState>,
     owners: BTreeMap<String, u64>,
     notice: Option<String>,
@@ -361,6 +363,7 @@ impl Reader {
             full_width: false,
             fetch,
             save,
+            original: None,
             pictures: BTreeMap::new(),
             owners: BTreeMap::new(),
             notice: None,
@@ -716,6 +719,36 @@ impl Reader {
             Err(why) => Err(tr!("not saved: {why}", why = shown(&why))),
         };
         self.saves.insert((id, index), said);
+    }
+
+    /// Opens the originals through `original` from now on.
+    pub(crate) fn set_original(&mut self, original: crate::original::Shared) {
+        self.original = Some(original);
+    }
+
+    /// Whether the original of message `id` can go to the browser: the window can open one, and the message is open
+    /// here as HTML.
+    #[must_use]
+    pub fn offers_original(&self, id: u64) -> bool {
+        self.original.is_some() && self.opened(id).is_some_and(|opened| matches!(opened.content, Content::Html(_)))
+    }
+
+    /// Opens a cleaned copy of message `id` in the browser: the document the reader shows, written out again with no
+    /// script and no address in it ([`inboxcraft_html::page`]); the notice says that it went, or why not.
+    pub fn open_original(&mut self, id: u64) {
+        let page = self.opened(id).and_then(|opened| match &opened.content {
+            Content::Html(document) => Some(inboxcraft_html::page(document, &opened.header.subject)),
+            _ => None,
+        });
+        let opened = match (&self.original, page) {
+            (Some(original), Some(page)) => original.open(id, &page),
+            (None, _) => Err(tr!("This window cannot open the browser.").to_owned()),
+            (_, None) => Err(tr!("Only an HTML message has an original to open.").to_owned()),
+        };
+        match opened {
+            Ok(()) => self.set_notice(tr!("Opened a cleaned copy in the browser").to_owned()),
+            Err(why) => self.fail(tr!("The original could not be opened: {why}", why = shown(&why))),
+        }
     }
 
     /// How saving attachment `index` of message `id` went, as its box says it: where it went, or why not; `None`
