@@ -19,6 +19,10 @@ id = "qubernetic-brand"
 version = "v0.3.0"
 
 [[source]]
+id = "qubernetic-brand-0.3.3"
+version = "v0.3.3"
+
+[[source]]
 id = "noto-hebrew"
 url = "https://github.com/notofonts/hebrew"
 version = "NotoSansHebrew-v3.001"
@@ -101,63 +105,63 @@ sha256 = "37784b44044a4ffd9256702b7c0982c37e5c8887ba90c6dca0479aea93dc898d"
 
 [[file]]
 path = "assets/brand/inboxcraft/linux/hicolor/128x128/apps/io.github.qubernetic.inboxcraft.png"
-source = "qubernetic-brand"
+source = "qubernetic-brand-0.3.3"
 from = "products/inboxcraft/linux/hicolor/128x128/apps/io.github.qubernetic.inboxcraft.png"
-sha256 = "46408695a321ce5e09adc5935a6fd56f423cbd44cb514cae66ac6089c70a7242"
+sha256 = "054e199f24bb2aaadc1c5b1c65e4dad7c33bf64e9ebe20382b713b2ad93e85ff"
 
 [[file]]
 path = "assets/brand/inboxcraft/linux/hicolor/16x16/apps/io.github.qubernetic.inboxcraft.png"
-source = "qubernetic-brand"
+source = "qubernetic-brand-0.3.3"
 from = "products/inboxcraft/linux/hicolor/16x16/apps/io.github.qubernetic.inboxcraft.png"
-sha256 = "d87409597ae54394a0ab599ae953eeac5e76614aec084727b878ffc3a1009373"
+sha256 = "e51773ea671a98aa3a7aa016b48d31dc52c94d288f253b404584f54a935ad3c1"
 
 [[file]]
 path = "assets/brand/inboxcraft/linux/hicolor/22x22/apps/io.github.qubernetic.inboxcraft.png"
-source = "qubernetic-brand"
+source = "qubernetic-brand-0.3.3"
 from = "products/inboxcraft/linux/hicolor/22x22/apps/io.github.qubernetic.inboxcraft.png"
-sha256 = "3a140df99c7471e8cff3f3dc36c146927002d50be7b23427ebd9de06de16a71c"
+sha256 = "6be2165a0256913de4b507d537561b3ba2e4867c0bafe56c51022ba2f7748ec2"
 
 [[file]]
 path = "assets/brand/inboxcraft/linux/hicolor/24x24/apps/io.github.qubernetic.inboxcraft.png"
-source = "qubernetic-brand"
+source = "qubernetic-brand-0.3.3"
 from = "products/inboxcraft/linux/hicolor/24x24/apps/io.github.qubernetic.inboxcraft.png"
-sha256 = "6b6b81879f9e33601fcbc2e034e290057f02dc162471aa2b038c6bbac3d63015"
+sha256 = "38cc9dd743c70ba5fdb542baa9ee586b75e33efa55a862ec139f20beab557aa0"
 
 [[file]]
 path = "assets/brand/inboxcraft/linux/hicolor/256x256/apps/io.github.qubernetic.inboxcraft.png"
-source = "qubernetic-brand"
+source = "qubernetic-brand-0.3.3"
 from = "products/inboxcraft/linux/hicolor/256x256/apps/io.github.qubernetic.inboxcraft.png"
-sha256 = "19d9c3bd1a0ff30d2d3b39cc9bb36b878a6267501dabedcd0305d8703be453e6"
+sha256 = "b79f6e78073bd7941a6efe9ce8269a77923d0c542364e40006ed648a274d0d15"
 
 [[file]]
 path = "assets/brand/inboxcraft/linux/hicolor/32x32/apps/io.github.qubernetic.inboxcraft.png"
-source = "qubernetic-brand"
+source = "qubernetic-brand-0.3.3"
 from = "products/inboxcraft/linux/hicolor/32x32/apps/io.github.qubernetic.inboxcraft.png"
-sha256 = "b9634c967f402e5a0146b5d9df485acc8fec4725e5f40ca86b8a2188c9a7ffb4"
+sha256 = "d6f81be9b8df3633bd20fdef654ac850871e1f787828f27254e25764020c4512"
 
 [[file]]
 path = "assets/brand/inboxcraft/linux/hicolor/48x48/apps/io.github.qubernetic.inboxcraft.png"
-source = "qubernetic-brand"
+source = "qubernetic-brand-0.3.3"
 from = "products/inboxcraft/linux/hicolor/48x48/apps/io.github.qubernetic.inboxcraft.png"
-sha256 = "0d090680e6d7528d0e0bd2b5da143945aab02e6c9da89e8a383a94f564cf963e"
+sha256 = "2a8f71de0abf0698564ac5dd5a085fea8cb76b4a8a93774a39191f6346328a60"
 
 [[file]]
 path = "assets/brand/inboxcraft/linux/hicolor/512x512/apps/io.github.qubernetic.inboxcraft.png"
-source = "qubernetic-brand"
+source = "qubernetic-brand-0.3.3"
 from = "products/inboxcraft/linux/hicolor/512x512/apps/io.github.qubernetic.inboxcraft.png"
-sha256 = "6bbf05a10eac1b7ecafb06c33170a50f03630d63f45acb5ebd3a9fa4bbbd3a4f"
+sha256 = "aa8c99315337dba849b4d8c4455e7f5fb21153cbfc75035e181821e6fe1ec2f3"
 
 [[file]]
 path = "assets/brand/inboxcraft/linux/hicolor/64x64/apps/io.github.qubernetic.inboxcraft.png"
-source = "qubernetic-brand"
+source = "qubernetic-brand-0.3.3"
 from = "products/inboxcraft/linux/hicolor/64x64/apps/io.github.qubernetic.inboxcraft.png"
-sha256 = "c527a5066bc083248b9d10ac0cea59ed3e73c06086784ac8b45f9cb0b59eff60"
+sha256 = "f4020cdb3507e0f366492b4a9d781bec98d9123bac3abc5f2c06c724f556f3f1"
 
 [[file]]
 path = "assets/brand/inboxcraft/linux/hicolor/scalable/apps/io.github.qubernetic.inboxcraft.svg"
-source = "qubernetic-brand"
+source = "qubernetic-brand-0.3.3"
 from = "products/inboxcraft/linux/hicolor/scalable/apps/io.github.qubernetic.inboxcraft.svg"
-sha256 = "793c50d4d11c7d95564ffff492beef877300cad56d337bbc82dc44e479938c46"
+sha256 = "5af6a6aede262c8f5f645c97f70cc74c527683bbca02c69865e441dfe503e93a"
 
 [[file]]
 path = "assets/brand/inboxcraft/png/icon-128.png"

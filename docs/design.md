@@ -398,7 +398,8 @@ event's details, the sync control. "+N more" in a month cell opens a list of tha
   icons shows it in one colour. The menu has two entries, Open InboxCraft and Quit InboxCraft.
 - **Notifications:** the desktop owns their look, the app their text. The text is who wrote and the subject, never
   the message's text, and nothing at all for a sender who has not been let in.
-- **The marks.** The InboxCraft mark stands in the command line, the tray and the app icon (on a dark tile); the
+- **The marks.** The InboxCraft mark stands in the command line, the tray and the app icon (the dark-theme mark
+  with a mid-grey frame on a clear ground, no tile, so it reads on light and dark panels); the
   Qubernetic emblem only on Home and About.
 
 ## Motion

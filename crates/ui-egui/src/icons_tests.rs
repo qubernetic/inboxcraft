@@ -16,6 +16,15 @@ fn the_window_icon_is_the_brand_s_256_px_mark() {
 }
 
 #[test]
+fn the_window_icon_has_no_tile() {
+    let icon = window_icon().unwrap();
+    let (pixels, _) = icon.rgba.as_chunks::<4>();
+    for corner in [0, 255, 256 * 255, 256 * 256 - 1] {
+        assert_eq!(pixels[corner][3], 0, "corner pixel {corner} is clear");
+    }
+}
+
+#[test]
 fn a_tray_size_that_is_not_shipped_is_an_error() {
     for ink in [TrayInk::Light, TrayInk::Dark] {
         for unread in [false, true] {

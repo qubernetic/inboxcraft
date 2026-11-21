@@ -19,8 +19,9 @@ pub const WINDOW_ICON_SIDE: u32 = 256;
 /// The sides, in pixels, the tray icon ships at.
 pub const TRAY_SIDES: [u32; 3] = [16, 22, 24];
 
-/// The window icon: the mark on its tile.
-const WINDOW_ICON: &[u8] = include_bytes!("../../../assets/brand/inboxcraft/png/icon-256.png");
+/// The window icon: the app icon of the icon theme, the mark on a clear ground with no tile, as the desktop shows it
+/// on Wayland through the app id.
+const WINDOW_ICON: &[u8] = include_bytes!("../../../assets/brand/inboxcraft/linux/hicolor/256x256/apps/io.github.qubernetic.inboxcraft.png");
 
 /// Which panel a tray icon is drawn for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
