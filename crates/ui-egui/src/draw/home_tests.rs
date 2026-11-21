@@ -155,13 +155,12 @@ fn each_frame_stands_where_its_sheet_puts_it_in_dark_and_light() {
     }
 }
 
-/// The failing state as the page draws it now, its banner one line of text (54 high, where `home/everything-failing`
-/// wraps it onto two, 72 high, and the tiles stand at 280): pinned so that a banner that wraps is seen here and its
-/// gaps line goes with it.
+/// The failing state as `home/everything-failing` draws it: the banner's words on two lines, 72 high, the tiles at 280
+/// and the buttons at 724; at 130 % the lines grow with the text and stay two.
 #[test]
-fn the_failing_state_stands_with_its_one_line_banner_at_100_and_130_percent() {
+fn the_failing_state_stands_with_its_two_line_banner_at_100_and_130_percent() {
     for mode in [Mode::Dark, Mode::Light] {
-        for (percent, banner, counts, buttons) in [(100, (188.0, 54.0), 262.0, 706.0), (130, (222.0, 64.0), 306.0, 864.0)] {
+        for (percent, banner, counts, buttons) in [(100, (188.0, 72.0), 280.0, 724.0), (130, (222.0, 86.0), 328.0, 886.0)] {
             let p = harness("everything-failing", mode, percent).state().drawn.parts;
             let at = format!("{mode:?} {percent}: {:?} {:?} {:?}", p.banner, p.counts, p.buttons);
             assert_eq!(tall(p.banner), banner, "{at}");
@@ -169,6 +168,20 @@ fn the_failing_state_stands_with_its_one_line_banner_at_100_and_130_percent() {
             assert_eq!(tall(p.buttons).0, buttons, "{at}");
         }
     }
+}
+
+/// A banner of any length takes at most two lines: 10 000 characters stand as high as the frame's sentence.
+#[test]
+fn a_failing_banner_of_any_length_takes_two_lines_at_most() {
+    let mut home = sample("everything-failing").unwrap();
+    let frame = harness("everything-failing", Mode::Dark, 100).state().drawn.parts.banner;
+    home.failing = Some(crate::home::Failing { text: "Offline since 14:10 ".repeat(500), account: true, outbox: true });
+    let long = harness_with(home, Mode::Dark, 100, BODY, Rect::from_min_size(pos2(0.0, 0.0), BODY), None, Level::Off, false);
+    assert_eq!(tall(long.state().drawn.parts.banner), tall(frame));
+    let mut home = sample("everything-failing").unwrap();
+    home.failing = Some(crate::home::Failing { text: "Offline since 14:10.".into(), account: false, outbox: true });
+    let short = harness_with(home, Mode::Dark, 100, BODY, Rect::from_min_size(pos2(0.0, 0.0), BODY), None, Level::Off, false);
+    assert_eq!(tall(short.state().drawn.parts.banner), (188.0, 54.0), "words of one line take one");
 }
 
 #[test]

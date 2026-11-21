@@ -3,7 +3,7 @@
 
 //! Home, the page (`docs/design.md`, "Home"): at the left the brief of today, 600 wide, 56 in, 36 down and 24 above
 //! its foot, its parts 20 apart (the section label, the headline in `display` on two lines, the lede in `read` on at
-//! most two lines or the failing banner in its place, the row of four count tiles of one height, the agenda's block,
+//! most two lines or the failing banner in its place, its words on at most two lines, the row of four count tiles of one height, the agenda's block,
 //! the drafts' block, two buttons); before the first account the label, the headline, the lede on three lines, the two
 //! buttons and the block of what adding one does. At the right the emblem's place: the character field (the ground of
 //! Home), and on it the emblem with the names under it (the Qubernetic and the InboxCraft wordmarks and the tagline)
@@ -17,7 +17,7 @@
 
 use egui::{Align, Id, Layout, Rect, Response, Role, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
-use crate::component::banner::{BannerKind, BannerLink, banner};
+use crate::component::banner::{BannerKind, BannerLink, banner_lines};
 use crate::component::block::{Block, Inset, block};
 use crate::component::block_line::{BlockLine, block_line};
 use crate::component::button::TextButton;
@@ -43,6 +43,9 @@ const PAD_FOOT: f32 = 24.0;
 
 /// The room between the brief's parts, in points.
 const GAP: f32 = 20.0;
+
+/// The most lines the failing banner's words take, as `home/everything-failing` wraps them.
+const BANNER_LINES: usize = 2;
 
 /// The room between the two buttons, in points.
 const BUTTON_GAP: f32 = 8.0;
@@ -290,7 +293,7 @@ fn brief_parts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, parts: 
         }
         let top = ui.cursor().min.y;
         let text = crate::home::kept(&failing.text);
-        if let Some(id) = banner(ui, theme, keymap, BannerKind::Failing, &text, &links) {
+        if let Some(id) = banner_lines(ui, theme, keymap, BannerKind::Failing, &text, &links, BANNER_LINES) {
             asked = Some(if id == "account" { Asked::OpenAccount } else { Asked::OpenOutbox });
         }
         parts.banner = Some(Rect::from_min_max(pos2(ui.min_rect().left(), top), pos2(ui.min_rect().right(), ui.min_rect().bottom())));
