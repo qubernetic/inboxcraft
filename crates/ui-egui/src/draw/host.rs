@@ -96,6 +96,7 @@ pub(crate) fn show_with<R>(
     mut add: impl FnMut(&mut Ui, &Surfaces) -> R,
 ) -> Hosted<R> {
     let Host::Window(id) = host.usable(ctx) else { return Hosted::Here(host.usable(ctx)) };
+    forget_when_reopened(ctx, id);
     let title = clean_title(title);
     let own = frame::drawn(true, look.frame);
     let builder = ViewportBuilder::default()
@@ -119,6 +120,18 @@ pub(crate) fn show_with<R>(
         }
         Hosted::Window(Windowed { inner, closed: escaped || asked })
     })
+}
+
+/// Forgets the float note of the window `id` when it did not show in the main window's pass before: it stopped
+/// showing, and egui counts the passes of a window shown again from 0, so a note of a list it showed before (a pass
+/// number of its last life) would hold its `Esc` for as many passes. Every window of its own gets it here, once.
+fn forget_when_reopened(ctx: &Context, id: ViewportId) {
+    let shown = egui::Id::unique("inboxcraft-host-shown").with(id);
+    let pass = ctx.cumulative_pass_nr();
+    if ctx.data(|data| data.get_temp::<u64>(shown)).is_none_or(|last| last.saturating_add(1) < pass) {
+        crate::component::popup::forget_viewport(ctx, id);
+    }
+    ctx.data_mut(|data| data.insert_temp(shown, pass));
 }
 
 /// The window's background and, in the own frame, its title bar over the content: the mark, the title, the handle that

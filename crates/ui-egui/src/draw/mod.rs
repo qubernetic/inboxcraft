@@ -62,7 +62,7 @@ pub use list::rows_built;
 use std::sync::Arc;
 
 use egui::{CentralPanel, Frame, Key, Margin, Panel, Rect, Ui, pos2};
-use inboxcraft_engine::appearance::{Appearance, ComposerHost, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, ComposerHost, EventEditorHost, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
@@ -228,6 +228,18 @@ pub struct InboxApp {
     window_typing: bool,
     /// Why the composer shows docked though the layout asks for a window of its own has been said.
     window_refused_said: bool,
+    /// Where the event editor shows this frame, as the layout says and the window can show it.
+    editor_room: calendar::Room,
+    /// Why the event editor shows full though the layout asks for a window of its own has been said.
+    editor_window_refused_said: bool,
+    /// The event editor's window of its own was asked to close this frame: it stays when the editor stays.
+    editor_window_closed: bool,
+    /// The opening of the event editor the last frame placed ([`Calendar::editor_opened`]).
+    editor_opened: u64,
+    /// The event editor's window is to come forward at the end of the frame: the main window asked for what it holds.
+    editor_window_forward: bool,
+    /// When a close of the main window was last taken back for an event's typing, in input seconds.
+    editor_close_taken: Option<f64>,
     /// The composer's field that takes the keyboard in its window of its own at the window's next pass.
     window_focus: Option<egui::Id>,
     /// In one pane, the reader takes the focus once it is drawn: `Enter` or a press opened a message into it.
@@ -529,6 +541,12 @@ impl InboxApp {
             composer_window: false,
             window_typing: false,
             window_refused_said: false,
+            editor_room: calendar::Room::Full,
+            editor_window_refused_said: false,
+            editor_window_closed: false,
+            editor_opened: 0,
+            editor_window_forward: false,
+            editor_close_taken: None,
             window_focus: None,
             focus_reader: false,
             focus_walked: false,
@@ -988,6 +1006,7 @@ impl InboxApp {
             // may take back an act on such a row, rests too.
             keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => !self.list_hidden && self.row_act(id).is_some(),
             // Under the event editor Undo rests too: it would take back the event being edited ([`Surfaces::undo_rests`]).
+            // Off the calendar, and in the main window while the editor is in its window of its own, it runs.
             keymap::UNDO => !self.list_hidden && !self.editing_event() && self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
             // The held-back message opens as a press on its row does (it floats a docked composer); with the list
@@ -1423,9 +1442,109 @@ impl InboxApp {
         self.list_row.filter(|row| (self.list_in_front() || self.owner_ring == Some(*row)) && !self.list_hidden)
     }
 
-    /// Whether the calendar shows its event editor ([`Surface::Editor`]).
+    /// Whether the calendar shows its event editor in the main window ([`Surface::Editor`]): small or full, not in a
+    /// window of its own, whose keys are its own.
     fn editing_event(&self) -> bool {
-        self.screen == Screen::Calendar && !self.settings.is_open() && self.calendar.editor().is_some()
+        self.screen == Screen::Calendar && !self.settings.is_open() && self.calendar.editor().is_some() && self.editor_room != calendar::Room::Window
+    }
+
+    /// Where the event editor shows this frame, as the layout says, for a new event and an edit alike: small, full, or
+    /// in a window of its own where one can open; where none can (the web app, a headless context), full, and the
+    /// status line says why, once. The full editor and the window give the keyboard to the title when the editor opens
+    /// in them, or moves there.
+    fn place_event_editor(&mut self, ctx: &egui::Context) {
+        let open = self.calendar.editor().is_some();
+        self.editor_room = match self.mailbox.appearance().layout.event_editor {
+            EventEditorHost::Small => calendar::Room::Small,
+            EventEditorHost::Full => calendar::Room::Full,
+            EventEditorHost::Window if matches!(Host::Window(event_editor_window()).usable(ctx), Host::Window(_)) => calendar::Room::Window,
+            EventEditorHost::Window => {
+                if open && !self.editor_window_refused_said {
+                    self.editor_window_refused_said = true;
+                    self.say(tr!("No window of its own can open here: the event is edited in the calendar's place"));
+                }
+                calendar::Room::Full
+            }
+        };
+        // An editor opened in the place of another (one with nothing typed) is met as new: its title takes the keyboard.
+        let opened = self.calendar.editor_opened();
+        if std::mem::replace(&mut self.editor_opened, opened) != opened {
+            calendar::forget_editor_opened(ctx, None);
+        }
+        calendar::forget_editor_opened(ctx, open.then_some(self.editor_room));
+    }
+
+    /// The event editor in its window of its own while it shows there ([`InboxApp::place_event_editor`]), on every
+    /// screen; what was asked in it. The window's `Esc` is the editor's: it closes with nothing typed, else warns, and a
+    /// second one throws the typing away, as in the main window. The desktop's close and the frame's Close are a press
+    /// outside: they close the editor with nothing typed and otherwise only say how to keep or throw away the typing,
+    /// and the window stays ([`InboxApp::keep_editor_window`]). The look keys run from it; nothing else of the main
+    /// window does.
+    fn event_editor_in_window(&mut self, ctx: &egui::Context, theme: &Theme) -> Vec<calendar::Asked> {
+        self.editor_window_closed = false;
+        if self.editor_room != calendar::Room::Window {
+            return Vec::new();
+        }
+        let (keymap, frame) = (&self.keymap, self.mailbox.appearance().frame);
+        let Some(editor) = self.calendar.editor_mut() else { return Vec::new() };
+        let title = if editor.form().summary.trim().is_empty() { editor.title().to_owned() } else { editor.form().summary.clone() };
+        let look = host::Look { theme, frame, size: calendar::EDITOR_WINDOW };
+        let (mut escaped, mut ran) = (false, Vec::new());
+        let hosted = host::show(ctx, Host::Window(event_editor_window()), &title, look, |ui, surfaces| {
+            // The desktop's close in the same pass wins: it never counts as a second Esc that throws the typing away.
+            let asked = ui.input(|input| input.viewport().close_requested());
+            escaped = surfaces.escape(ui.ctx()) == Some(Surface::Window) && !asked;
+            ran.extend(crate::surface::WINDOW_KEYS.into_iter().filter(|id| surfaces.allows(id, keymap) && keymap.pressed(ui.ctx(), id)));
+            calendar::editor_window(ui, theme, keymap, editor)
+        });
+        let host::Hosted::Window(host::Windowed { mut inner, closed }) = hosted else { return Vec::new() };
+        for id in ran {
+            self.run_action(ctx, id);
+        }
+        if closed {
+            self.editor_window_closed = true;
+            let leave = if escaped { crate::component::popup::Leave::Escape } else { crate::component::popup::Leave::Beside };
+            inner.push(calendar::Asked::Leave(leave));
+        }
+        inner
+    }
+
+    /// After what was asked this frame: a window of its own asked to close while its editor stays (typing not thrown
+    /// away) is kept open.
+    fn keep_editor_window(&mut self, ctx: &egui::Context) {
+        if std::mem::take(&mut self.editor_window_closed) && self.calendar.editor().is_some() {
+            ctx.send_viewport_cmd_to(event_editor_window(), egui::ViewportCommand::CancelClose);
+        }
+        if std::mem::take(&mut self.editor_window_forward) && self.editor_room == calendar::Room::Window {
+            ctx.send_viewport_cmd_to(event_editor_window(), egui::ViewportCommand::Focus);
+        }
+    }
+
+    /// A close of the main window (the app's end, or its way to the tray) while the event editor holds typing, in any
+    /// host: the close is taken back once, as for a draft not kept ([`InboxApp::close_with_keeps`]), and the editor
+    /// says the event is not saved, in sight (the calendar shown, or its window brought forward). A second close in a
+    /// row, with nothing typed since, within [`CLOSE_IN_A_ROW`], goes through and the typing is lost.
+    fn close_with_event(&mut self, ctx: &egui::Context) {
+        if !ctx.input(|input| input.viewport().close_requested()) {
+            return;
+        }
+        let now = ctx.input(|input| input.time);
+        let in_a_row = self.editor_close_taken.is_some_and(|at| (0.0..=CLOSE_IN_A_ROW).contains(&(now - at)));
+        let Some(editor) = self.calendar.editor_mut().filter(|editor| editor.edited()) else { return };
+        if in_a_row && editor.warned() {
+            return;
+        }
+        editor.warn(false);
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        self.keeps_end.took_back = true;
+        self.editor_close_taken = Some(now);
+        if self.editor_room == calendar::Room::Window {
+            ctx.send_viewport_cmd_to(event_editor_window(), egui::ViewportCommand::Focus);
+        } else if self.screen != Screen::Calendar || self.settings.is_open() {
+            self.leave_settings();
+            self.show_calendar();
+        }
+        self.say(tr!("The event being edited is not saved: save it, or close again to quit without it"));
     }
 
     /// What stands in front this frame, read before its keys ([`Surfaces`]).
@@ -1548,8 +1667,14 @@ impl InboxApp {
     fn apply_calendar(&mut self, asked: Vec<calendar::Asked>) {
         let accounts = asked.contains(&calendar::Asked::Accounts);
         let mut copied = None;
+        let (mut kept_apart, mut delete_refused) = (false, false);
+        let windowed = self.editor_room == calendar::Room::Window;
         let (calendar, mailbox) = (&mut self.calendar, &mut self.mailbox);
         for asked in asked {
+            // The event editor's window holds typing that New event or Edit in the main window would replace: it stays,
+            // and comes forward to say so.
+            let typed = calendar.editor().is_some_and(crate::calendar::Editor::edited);
+            kept_apart |= windowed && typed && matches!(asked, calendar::Asked::New | calendar::Asked::Edit);
             match asked {
                 calendar::Asked::Accounts => {}
                 calendar::Asked::View(view) => calendar.set_view(mailbox, view),
@@ -1562,6 +1687,12 @@ impl InboxApp {
                 calendar::Asked::Pick(picked) => calendar.pick(picked),
                 calendar::Asked::New => calendar.new_event(),
                 calendar::Asked::Edit => calendar.edit_picked(),
+                // The event the editor holds typing for is not deleted under it (the window's, beside the main one).
+                calendar::Asked::Delete
+                    if typed && calendar.picked().map(|event| event.id) == calendar.editor().and_then(crate::calendar::Editor::id) =>
+                {
+                    delete_refused = true;
+                }
                 calendar::Asked::Delete => calendar.delete_picked(mailbox),
                 calendar::Asked::Save => calendar.save(mailbox),
                 calendar::Asked::Cancel => calendar.close_editor(),
@@ -1576,6 +1707,13 @@ impl InboxApp {
         }
         if let Some(url) = copied {
             self.say(&tr!("Link copied: {url}", url = crate::mailbox::shown(&url)));
+        }
+        if delete_refused {
+            self.say(tr!("Not deleted: the event is being edited in its window. Save or throw away the typing there first"));
+        }
+        if kept_apart {
+            self.editor_window_forward = true;
+            self.say(tr!("The event editor's window holds typing: save or throw it away there first"));
         }
         // Every press that opens or ends the editor (New event, Edit, Save, Cancel, Esc, Delete) comes through here.
         self.tell_editing(true);
@@ -2809,6 +2947,12 @@ impl InboxApp {
         self.appear("ui.layout.set", &json!({ "composer": host.id() }));
     }
 
+    /// Where the event editor opens, for a new event and an edit, from the next frame (`ui.layout.set`): small, full or
+    /// in a window of its own.
+    pub fn set_event_editor_host(&mut self, host: EventEditorHost) {
+        self.appear("ui.layout.set", &json!({ "event_editor": host.id() }));
+    }
+
     /// Lets the app draw the window's frame: the native window calls it, so the title bar, the window controls and the
     /// resizing edges show when the appearance asks for the app's own frame. Pictures and the web build leave it off.
     pub fn set_own_frame(&mut self, own: bool) {
@@ -2892,6 +3036,7 @@ impl InboxApp {
         self.show_picker(ui.ctx());
         self.frame = ui.ctx().cumulative_frame_nr();
         self.place_composer(ui.ctx());
+        self.place_event_editor(ui.ctx());
         // The list's rows as this frame draws them: a command of the frame that changes them draws the frame again.
         let rows_drawn = self.mailbox.rows_serial();
         // And the reader's place and the mode: a command of the frame that changes them draws it again (M7, M10, M14).
@@ -3056,13 +3201,15 @@ impl InboxApp {
         if self.screen == Screen::Calendar && !setting {
             // The command line's results lie over the editor: they have the keys and the pointer.
             let over = self.command.results();
-            on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, over));
+            on_calendar.extend(calendar::editor(ui, &theme, &self.keymap, &mut self.calendar, (over, self.editor_room)));
         }
         if !setting {
             composed.extend(self.floating_composer(ui, &theme, docked, regions.body));
         }
         // The composer's window lies under no modal surface of the main window: what is asked in it passes the gate.
         let windowed = self.composer_in_window(ui.ctx(), &theme);
+        // So does the event editor's window: what is typed or pressed in it passes the gate.
+        let edited_apart = self.event_editor_in_window(ui.ctx(), &theme);
         // The status line, a strip of its own at the window's foot: it covers nothing of the panes.
         let (mut line, mut undid) = self.status_line(ui, &theme, &surfaces, (quiet, undo_taken), regions.status);
         // The one gate for the place under a modal surface ([`Surfaces::modal`]): whatever pressed it (the pointer, a key,
@@ -3085,6 +3232,7 @@ impl InboxApp {
             dismiss = false;
         }
         composed.extend(windowed);
+        on_calendar.extend(edited_apart);
         let (undone, dismissed) = self.apply_line(&line, undid);
         dismiss |= dismissed;
         ran.extend(line.hint);
@@ -3136,6 +3284,8 @@ impl InboxApp {
             self.mailbox.done_all(&ids);
         }
         self.apply_calendar(on_calendar);
+        self.keep_editor_window(ui.ctx());
+        self.close_with_event(ui.ctx());
         ran.extend(self.settle_home(ui.ctx(), on_home));
         for asked in drawn.asked {
             self.apply(ui, asked);
@@ -3442,7 +3592,8 @@ impl InboxApp {
         }
         // The command line's results lie over the screen's floats: they have the keys.
         let over = self.command.results();
-        calendar::screen(ui, theme, &self.keymap, &self.calendar, layers, over)
+        let full = self.calendar.editor().is_some() && self.editor_room == calendar::Room::Full;
+        calendar::screen(ui, theme, &self.keymap, &self.calendar, layers, (over, full))
     }
 
     /// Home in the body: the model kept ([`crate::home::Kept`], built again only when what it shows changed), the
@@ -3575,7 +3726,9 @@ impl InboxApp {
 
     /// Takes the toast's act back, or the newest act of the history; the calendar is read again when it shows.
     fn undo(&mut self) {
-        // Every owner's way to Undo ends here: while the event editor is open it rests, whatever the frame began with.
+        // Every owner's way to Undo ends here: while the event editor is open under the owner's hand it rests, whatever
+        // the frame began with. Off the calendar, and in the main window while the editor is in its window of its own,
+        // it runs as everywhere: the status line offers it there ([`Surfaces::undo_rests`]).
         if self.editing_event() {
             return;
         }
@@ -3893,6 +4046,7 @@ impl InboxApp {
             settings::Asked::Frame(frame) => self.set_frame(frame),
             settings::Asked::Composer(host) => self.set_composer_host(host),
             settings::Asked::ReaderHost(host) => self.appear("ui.layout.set", &json!({ "reader": host.id() })),
+            settings::Asked::EventEditor(host) => self.appear("ui.layout.set", &json!({ "event_editor": host.id() })),
             settings::Asked::Section(section) => self.settings.show(section),
             settings::Asked::Sections => self.settings.to_list(false),
             settings::Asked::Add => self.onboarding.open(),
@@ -4049,6 +4203,11 @@ fn start(reader: &mut Reader, mailbox: &mut Mailbox, id: u64, act: Act) {
 /// The composer's window of its own.
 fn composer_window() -> egui::ViewportId {
     egui::ViewportId::from_hash_of("inboxcraft-composer-window")
+}
+
+/// The event editor's window of its own.
+fn event_editor_window() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("inboxcraft-event-editor-window")
 }
 
 /// Gives the keyboard to the composer's field `id`: at the next pass of its window of its own when it shows there

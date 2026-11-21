@@ -378,15 +378,19 @@ fn a_mismatched_link_is_called_out_on_hover() {
         target: LinkTarget::Web { url: "https://cycles.example.org/book".to_owned(), host: "cycles.example.org".to_owned() },
         text: "Book".to_owned(),
         mismatch: false,
+        button: false,
+        fill: None,
     };
     assert_eq!(link_status(&web), "https://cycles.example.org/book");
     let mail = Link {
         target: LinkTarget::Mail { url: "mailto:a@example.org".to_owned(), address: "a@example.org".to_owned() },
         text: String::new(),
         mismatch: false,
+        button: false,
+        fill: None,
     };
     assert_eq!(link_status(&mail), "Write to a@example.org");
-    let refused = Link { target: LinkTarget::Refused, text: "x".to_owned(), mismatch: false };
+    let refused = Link { target: LinkTarget::Refused, text: "x".to_owned(), mismatch: false, button: false, fill: None };
     assert!(link_status(&refused).starts_with("This link is not followed"));
 }
 

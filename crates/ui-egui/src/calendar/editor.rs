@@ -178,6 +178,8 @@ pub enum Menu {
     Repeat,
     /// The calendars, where they do not fit side by side.
     Calendar,
+    /// The alerts, in the full editor and the window.
+    Alert,
 }
 
 impl Editor {
@@ -244,6 +246,12 @@ impl Editor {
             menu: None,
             warned: None,
         }
+    }
+
+    /// The day its Starts names, while it names one (`2026-11-06`, with a time after it or not).
+    #[must_use]
+    pub fn day(&self) -> Option<Day> {
+        self.form.start.trim().get(..10).and_then(Day::parse)
     }
 
     /// The list of choices open in the form, when one is.

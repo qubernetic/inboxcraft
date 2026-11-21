@@ -47,13 +47,19 @@ fn both() -> Harness<'static, InboxApp> {
 }
 
 /// [`both`] in a window of `size`.
+/// `app` with the small event editor, whose place beside the floating composer these tests check.
+fn small_editor(mut app: InboxApp) -> InboxApp {
+    app.set_event_editor_host(inboxcraft_engine::appearance::EventEditorHost::Small);
+    app
+}
+
 fn both_at(size: egui::Vec2) -> Harness<'static, InboxApp> {
     let mut harness = Harness::builder()
         .with_size(size)
         .with_theme(egui::Theme::Dark)
         .with_max_steps(40)
         .with_step_dt(1.0 / 60.0)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(sending()));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), small_editor(InboxApp::at_mail(sending())));
     harness.run();
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);

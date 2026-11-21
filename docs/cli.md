@@ -100,7 +100,7 @@ database's words only to its own standard error, when the owner's store does not
   or checking an account, is not run; `mail.read` answers with what the store holds. In the app, the app runs it.
 - The appearance commands (`ui.*.set`) change the session, not the store, so headless they last for the one command
   only.
-- `ui.layout.set`, where the reader and the composer show, is the owner's: the CLI refuses it, as every `owner`
+- `ui.layout.set`, where the reader, the composer and the event editor show, is the owner's: the CLI refuses it, as every `owner`
   command; the appearance the other `ui.*.set` commands answer has its `layout`.
 - `ui.settings.open` shows the settings of the running app; on a store it shows nothing, and its answer says so
   with `"window": false`.

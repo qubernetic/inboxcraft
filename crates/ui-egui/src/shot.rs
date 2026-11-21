@@ -26,7 +26,7 @@
 //! typed (`">"` for every command), and `calendar` set to `true` shows the calendar screen (with `first`, its empty
 //! state), `calendar_view` shows it in a view (`day`, `week`, `month` or `agenda`) and `event` picks the event with
 //! that summary, whose details show in the side panel; `edit_event` opens the event editor on a `new` event or, with
-//! `edit`, on the picked one, and `delete_event` set to `true` deletes the picked event, so its toast shows. `compose`
+//! `edit`, on the picked one (where `event_editor` says: `small`, `full` or `window`, the last drawn full), and `delete_event` set to `true` deletes the picked event, so its toast shows. `compose`
 //! opens the
 //! composer: `new`, `written`, `bad` (a recipient that is no address), `suggest` (the people a half-typed name could
 //! be), `floating` (a message opened over it), `folded` (the same, the floating panel folded), `reply` (a reply to Odile's rota, a line written over the quote), `reply-floating` (the same, a message opened over it) or
@@ -81,7 +81,7 @@ use std::sync::Arc;
 
 use egui::epaint::{ClippedPrimitive, ImageData, Mesh, Primitive, TextureId};
 use egui::{Color32, Pos2, RawInput, Rect, Vec2, pos2, vec2};
-use inboxcraft_engine::appearance::WindowFrame;
+use inboxcraft_engine::appearance::{EventEditorHost, WindowFrame};
 use inboxcraft_model::{CheckStep, ErrorKind, Role, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde::Deserialize;
@@ -305,6 +305,10 @@ pub struct Shot {
     /// when left out.
     #[serde(default)]
     pub frame: Option<String>,
+    /// Where the event editor opens: `small`, `full` (the default) or `window` (which the pictures, drawing no second
+    /// window, show full).
+    #[serde(default)]
+    pub event_editor: Option<String>,
     /// Where the pointer rests, in points, so what lies under it shows its hover; nowhere when left out.
     #[serde(default)]
     pub pointer: Option<[f32; 2]>,
@@ -754,6 +758,15 @@ fn sign(app: &mut InboxApp) {
     // The sample takes every signature; a refusal would only leave the picture without one.
     let _ = app.mailbox_mut().run("compose.signature", &serde_json::json!({ "account": 1, "signature": "Mira\nPlot 14" }));
     app.mailbox_mut().refresh();
+}
+
+/// Opens the event editor where `shot`'s `event_editor` says, when it says.
+fn event_editor(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    if let Some(name) = &shot.event_editor {
+        let host = EventEditorHost::named(name).ok_or_else(|| bad(format!("{}: event_editor {name} is not small, full or window", shot.out)))?;
+        app.set_event_editor_host(host);
+    }
+    Ok(())
 }
 
 /// Opens the composer as `scene` asks.
@@ -1862,6 +1875,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         Some(other) => return Err(bad(format!("{}: motion {other} is not reduced or off", shot.out))),
     };
     app.set_motion_level(level);
+    event_editor(&mut app, shot)?;
     if let Some(name) = &shot.frame {
         let frame = WindowFrame::read(name)
             .filter(|frame| *frame != WindowFrame::System)

@@ -10,8 +10,12 @@
 //!
 //! - nothing runs: scripts, style sheets, frames, objects, SVG and event attributes are dropped; the
 //!   only attributes read are a link's `href`, a picture's `src` and `alt`, an ordered list's
-//!   `start`, and `hidden` and `style` for whether an element is hidden (`display: none`,
-//!   `visibility: hidden`), which is all of the style that is read;
+//!   `start`, `hidden` and `style` for whether an element is hidden (`display: none`,
+//!   `visibility: hidden`), and the few that make a block's [`Look`]: `align`, `bgcolor`, `width`,
+//!   `role` and the inline `text-align`, `background`, `width`, `margin`, `padding` and `display`
+//!   (see `look.rs`), which is all of the style that is read;
+//! - a background is kept only when it is coloured and a near black or white ink reaches 4.5:1 on
+//!   it ([`Paint`]); a link styled as a button stays a link ([`Link::button`]);
 //! - forms keep their visible text and lose everything that could submit;
 //! - remote pictures are [`ImageSource::Blocked`] until the owner gives consent
 //!   ([`Options::remote_content`]); `cid:` pictures point at the message's own parts;
@@ -40,9 +44,13 @@ mod build;
 mod document;
 mod entities;
 mod link;
+mod look;
 mod tokenizer;
 
-pub use document::{Block, Cell, Document, Image, ImageSource, Link, LinkTarget, Marker, Options, RemoteContent, Span, TextKind};
+pub use document::{
+    Align, Block, Cell, Document, Image, ImageSource, Link, LinkTarget, Look, Marker, Options, Paint, RemoteContent, Rgb, Span, TextKind, Width,
+};
+pub use look::{DARK_INK, LEAST_CONTRAST, LIGHT_INK, kept};
 
 /// Longest input [`display`] reads, in bytes; the rest is cut at a character boundary and
 /// [`Document::truncated`] is set.

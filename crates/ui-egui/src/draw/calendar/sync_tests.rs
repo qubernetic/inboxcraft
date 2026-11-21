@@ -120,8 +120,10 @@ fn on_calendar_named(theme: egui::Theme, feed: &Feed, label: Option<&str>) -> Ha
         session.run("account.update", &json!({ "account": 1, "label": label })).unwrap();
     }
     let keychain = Arc::new(crate::onboard::NoKeychain);
-    let app =
+    let mut app =
         InboxApp::at_mail(Mailbox::new(session, clock())).with_accounts(keychain, Box::<crate::onboard::NoDetect>::default(), Box::new(feed.clone()));
+    // The side panel stays beside the small editor only.
+    app.set_event_editor_host(inboxcraft_engine::appearance::EventEditorHost::Small);
     let mut harness = Harness::builder().with_size(vec2(1200.0, 820.0)).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness.get_by_role_and_label(Role::Button, "Calendar").click();

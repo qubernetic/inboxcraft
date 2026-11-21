@@ -20,6 +20,8 @@ fn clock() -> Box<FakeClock> {
 
 fn window() -> Harness<'static, InboxApp> {
     let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    // The small editor's Esc: the full editor's and the window's are in `hosts_tests.rs`.
+    app.set_event_editor_host(inboxcraft_engine::appearance::EventEditorHost::Small);
     app.show_calendar();
     let (calendar, mailbox) = app.calendar_mut();
     calendar.set_view(mailbox, View::Week);
