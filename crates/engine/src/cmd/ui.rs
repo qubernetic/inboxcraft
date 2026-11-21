@@ -18,9 +18,10 @@
 //! agent's ask is guarded as an agent's `ui.settings.open` is ([`crate::shown::HomeAsked`]).
 //!
 //! `ui.list.unread` (`safe`) asks the window to list the unread messages of the place it shows alone (`on: true`), all
-//! of them again (`on: false`), or the other of the two (no `on`). It changes nothing in the store; its answer's
-//! `window` says whether a window takes the ask (`false` headless). An agent's ask is guarded as an agent's
-//! `ui.settings.open` is ([`crate::shown::UnreadAsked`]).
+//! of them again (`on: false`), or the other of the two (no `on`). It changes nothing in the store. Its answer is `on`
+//! as given (`null` for the other of the two) and `window`, whether a window takes the ask (`false` headless); it is
+//! the same whether the window turned the filter or not (the engine does not know the window's state). An agent's ask
+//! is guarded as an agent's `ui.settings.open` is ([`crate::shown::UnreadAsked`]).
 //!
 //! `ui.motion.set` takes `level` (`full`, `reduced` or `off`); the older `reduce` (`on`, `off` or `system`) still
 //! answers for one release, and `level` wins when both are given.
