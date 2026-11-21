@@ -107,7 +107,7 @@ fn sender_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &SenderRow, ends
             ui.add_space(NAME_GAP);
         }
         let room = (ui.available_width() - link - 12.0).max(1.0);
-        let shown = crate::component::cut(ui, &row.shown, theme.fonts.mono, p.muted, room);
+        let shown = crate::component::cut(ui, &crate::bidi::address(&row.shown), theme.fonts.mono, p.muted, room);
         let (place, _) = ui.allocate_exact_size(vec2(room, high), egui::Sense::hover());
         ui.painter().galley(pos2(place.left(), place.center().y - shown.size().y / 2.0), shown, p.muted);
         ui.add_space(12.0);

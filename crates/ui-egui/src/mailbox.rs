@@ -33,6 +33,7 @@
 
 use std::collections::BTreeMap;
 
+use inboxcraft_engine::all_day_alert::AllDayAlert;
 use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::notify::{Level, Notice, Settings as NotifySettings};
 use inboxcraft_engine::{Applied, Caller, EngineError, Hold, MAX_HISTORY, MAX_LIST, ScreenerMode, Session};
@@ -875,7 +876,8 @@ fn named(value: &Value, key: &str) -> (Vec<(String, String)>, usize) {
 /// One recipient as the outbox row lists it: always its address, after its name where it has one that differs, so
 /// the row says where it goes and not only what it is called ("Odile Brannock <odile@example.org>").
 fn with_address((name, address): &(String, String)) -> String {
-    if name == address { address.clone() } else { tr!("{name} <{address}>", name = name, address = address) }
+    let shown = crate::bidi::address(address);
+    if name == address { shown.into_owned() } else { crate::bidi::left_to_right(tr!("{name} <{address}>", name = name, address = shown)) }
 }
 
 /// The outbox row's one line of recipients: To, then Cc and Bcc where they hold any, each at most [`MAX_LISTED`]
@@ -2891,10 +2893,22 @@ impl Mailbox {
         self.session.week_rule()
     }
 
-    /// The week rule as it is kept between runs ([`inboxcraft_engine::week::to_value`]).
+    /// When an all-day event's alert rings (`event.all_day_alert.set`): a new all-day event's alarm, and the alert of
+    /// one without alarms.
+    #[must_use]
+    pub fn all_day_alert(&self) -> AllDayAlert {
+        self.session.all_day_alert()
+    }
+
+    /// The week rule as it is kept between runs ([`inboxcraft_engine::week::to_value`]), with the all-day alert beside
+    /// it ([`inboxcraft_engine::all_day_alert::KEY`]).
     #[must_use]
     pub(crate) fn kept_week(&self) -> Value {
-        inboxcraft_engine::week::to_value(self.session.week_rule())
+        let mut kept = inboxcraft_engine::week::to_value(self.session.week_rule());
+        if let Value::Object(fields) = &mut kept {
+            fields.insert(inboxcraft_engine::all_day_alert::KEY.into(), json!(self.session.all_day_alert().name()));
+        }
+        kept
     }
 
     /// Takes the week rule kept from an earlier run, read as outside data: what cannot be read is the default, never
@@ -2903,12 +2917,14 @@ impl Mailbox {
     #[cfg(test)]
     pub(crate) fn restore_week(&mut self, kept: &Value) {
         self.session.set_week_rule(inboxcraft_engine::week::from_value(kept));
+        self.session.set_all_day_alert(inboxcraft_engine::all_day_alert::from_value(kept));
     }
 
     /// Takes the week rule kept from an earlier run as [`Mailbox::restore_week`] does, with `default` for what cannot
-    /// be read.
+    /// be read, and the all-day alert kept beside it (the default where a file has none).
     pub(crate) fn restore_week_or(&mut self, kept: &Value, default: WeekRule) {
         self.session.set_week_rule(inboxcraft_engine::week::from_value_or(kept, default));
+        self.session.set_all_day_alert(inboxcraft_engine::all_day_alert::from_value(kept));
     }
 
     /// Counts weeks by `rule`, which nobody chose: the locale's at the start.
@@ -2927,6 +2943,13 @@ impl Mailbox {
             params.insert("first_week".into(), json!(inboxcraft_engine::week::first_week_name(first)));
         }
         if let Err(error) = self.run("week.set", &Value::Object(params)) {
+            self.fail(error);
+        }
+    }
+
+    /// Changes when an all-day event's alert rings through `event.all_day_alert.set`, as the owner.
+    pub fn set_all_day_alert(&mut self, choice: AllDayAlert) {
+        if let Err(error) = self.run("event.all_day_alert.set", &json!({ "at": choice.name() })) {
             self.fail(error);
         }
     }

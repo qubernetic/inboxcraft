@@ -34,6 +34,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod bidi;
 mod brand;
 pub mod calendar;
 pub mod command;
@@ -55,6 +56,7 @@ pub mod keymap;
 pub mod mailbox;
 pub mod motion;
 pub mod onboard;
+pub mod original;
 pub mod palette;
 pub mod picture;
 pub mod privacy;

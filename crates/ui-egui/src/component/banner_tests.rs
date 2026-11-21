@@ -203,13 +203,17 @@ fn hostile_words_keep_the_banner_at_its_sheet_size_cut_once_at_a_character() {
         }
         let shown = shown_words(text);
         assert_eq!(shown.matches('…').count(), 1, "one ellipsis: {:?}", shown.chars().rev().take(12).collect::<String>());
-        assert!(shown.ends_with('…'), "it ends the line");
+        // Right-to-left words are laid out in the order they are drawn: the cut is checked in the written order, as
+        // the words before it put in that order.
         assert!(
-            whole_prefix(&crate::component::plain(text), &shown),
-            "cut between grapheme clusters, nothing else changed: {:?}",
+            cut_in_the_written_order(&crate::component::plain(text), &shown),
+            "it ends the line, cut between grapheme clusters, nothing else changed: {:?}",
             shown.chars().rev().take(12).collect::<String>()
         );
     }
+    // The order itself, against a fixed line: a right-to-left phrase is laid out last word first, each word and the
+    // comma's run handed to the shaper as it turns them round, so it reads "שלום, עולם רב" from the right.
+    assert_eq!(shown_words("שלום, עולם רב"), "רב עולם ,שלום");
 }
 
 #[test]
@@ -242,6 +246,19 @@ fn a_banner_is_as_high_as_its_lines_at_130_percent() {
 }
 
 /// Whether `kept`, without a closing ellipsis, ends at a grapheme boundary of `full` and is its logical prefix.
+/// Whether `shown` (laid out, right-to-left words in visual order) is a beginning of `full` cut between grapheme
+/// clusters with `…` at its logical end: for a line of no right-to-left words, [`whole_prefix`] ending in `…`.
+fn cut_in_the_written_order(full: &str, shown: &str) -> bool {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    if !crate::bidi::needs(full) {
+        return shown.ends_with('…') && whole_prefix(full, shown);
+    }
+    full.grapheme_indices(true)
+        .map(|(at, grapheme)| at + grapheme.len())
+        .filter(|end| full.get(..*end).is_some_and(|kept| kept.chars().count() < shown.chars().count() + 4))
+        .any(|end| crate::bidi::seen_text(&format!("{}…", full.get(..end).unwrap_or_default().trim_end())) == shown)
+}
+
 fn whole_prefix(full: &str, kept: &str) -> bool {
     use unicode_segmentation::UnicodeSegmentation as _;
     let kept = kept.strip_suffix('…').unwrap_or(kept).trim_end();

@@ -75,11 +75,11 @@ pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> A
 /// egui puts each letter on a rounded place, so the galley's own width can be a fraction under the added-up advances,
 /// or over them; the larger of the two is taken. egui adds the spacing before every shaped cluster but a section's
 /// first, never after the last letter, so a run of `n` clusters has `n - 1` gaps. Its clusters are not in the galley:
-/// they are counted as the more of the grapheme clusters and the letters with an advance (a flag or Thai sara am is
-/// two shaped clusters in one grapheme). A shaped cluster of no advance inside a grapheme (a zero-width non-joiner) is
-/// not counted, and the drawn reach covers it. The count is over for a letter with marks of their own advance or an
-/// emoji selector: at most one spacing (0.88 pt in the label style at 100 %) per such mark or selector. A galley of
-/// several sections is counted with its widest spacing; a tightened style (a negative spacing) by its advances alone.
+/// they are counted as the more of the grapheme clusters of its text and the letters with an advance (a flag or Thai
+/// sara am is two shaped clusters in one grapheme). A shaped cluster of no advance inside a grapheme (a zero-width non-joiner) is
+/// not counted, and the drawn reach covers it. The count is over for a letter with marks of their own advance: at most
+/// one spacing (0.88 pt in the label style at 100 %) per such mark. A galley of several sections is counted with its
+/// widest spacing; a tightened style (a negative spacing) by its advances alone.
 /// So a run is never measured narrower than it is drawn. A run of no added spacing is not counted.
 fn advances(galley: &Galley) -> f32 {
     let letters: f32 = galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum();
@@ -100,19 +100,43 @@ pub(crate) fn measured(galley: &Galley) -> f32 {
     advances(galley)
 }
 
-/// How many gaps between clusters a galley's rows may show: per row, the more of its grapheme clusters and its letters
-/// with an advance, less one. A row's glyphs are at most one line, so this is bounded by what a line holds.
+/// How many gaps between clusters a galley's rows may show. The galley's text is taken a paragraph at a time (the text
+/// between two line breaks the rows end at), with the rows it was laid out on: its grapheme clusters, or its letters with
+/// an advance where those are more, less one per row. A paragraph cut short (the last of a cut galley) counts the
+/// letters before its ellipsis, by its glyphs, and the ellipsis. The clusters are counted in the text, not in the
+/// glyphs: egui gives a joiner, a variation selector or a right-to-left letter's rest a glyph of no width of its own that
+/// carries a letter's character again, and counting those took a spacing each that is never drawn; and a right-to-left
+/// row holds more glyphs than characters, so a row's glyphs never say where the next row's text begins. A paragraph's
+/// rows are at most what the galley holds, so this is bounded by what it lays out.
 fn gaps(galley: &Galley) -> usize {
     use unicode_segmentation::UnicodeSegmentation as _;
-    galley
-        .rows
-        .iter()
-        .map(|row| {
-            let shown: String = row.glyphs.iter().map(|glyph| glyph.chr).collect();
-            let advancing = row.glyphs.iter().filter(|glyph| glyph.advance_width > 0.0).count();
-            shown.graphemes(true).count().max(advancing).saturating_sub(1)
-        })
-        .sum()
+    let text = galley.job.text.as_str();
+    let mut paragraphs: Box<dyn Iterator<Item = &str>> =
+        if galley.job.break_on_newline { Box::new(text.split('\n')) } else { Box::new(std::iter::once(text)) };
+    let mut rows = galley.rows.iter().peekable();
+    let mut gaps = 0_usize;
+    while rows.peek().is_some() {
+        let paragraph = paragraphs.next().unwrap_or_default();
+        let (mut count, mut advancing, mut glyphs) = (0_usize, 0_usize, 0_usize);
+        for row in rows.by_ref() {
+            count = count.saturating_add(1);
+            advancing = advancing.saturating_add(row.glyphs.iter().filter(|glyph| glyph.advance_width > 0.0).count());
+            glyphs = glyphs.saturating_add(row.glyphs.len());
+            if row.ends_with_newline {
+                break;
+            }
+        }
+        let cut = galley.elided && rows.peek().is_none();
+        let clusters = if cut {
+            // The letters before the ellipsis, by the glyphs that show them, and the ellipsis.
+            let shown: String = paragraph.chars().take(glyphs.saturating_sub(1)).collect();
+            shown.graphemes(true).count().saturating_add(1)
+        } else {
+            paragraph.graphemes(true).count()
+        };
+        gaps = gaps.saturating_add(clusters.max(advancing).saturating_sub(count));
+    }
+    gaps
 }
 
 /// How far a run's added-up advances may pass its box and still fit: what adding up the advances in `f32` drifts by.
@@ -126,8 +150,13 @@ pub(crate) fn within(galley: &Galley, width: f32) -> bool {
 
 /// `job` (one line, cut with an ellipsis) laid out and cut as the design cuts it ([`tight_cut`]), its letters' advances
 /// never above `width`: egui fits the letters by their rounded places and can keep one that reaches past the box (a
-/// comma, a sixteenth mono letter); then it is laid out again narrower, at most a few times, a letter fewer each.
+/// comma, a sixteenth mono letter); then it is laid out again narrower, at most a few times, a letter fewer each. A job
+/// with right-to-left text is put in visual order and cut at its logical end instead ([`crate::bidi::cut_line`]).
 pub(crate) fn cut_within(painter: &Painter, job: LayoutJob, width: f32) -> Arc<Galley> {
+    // Right-to-left text is put in visual order and cut at its logical end, not where egui cuts (the visual right).
+    if crate::bidi::needs(&job.text) {
+        return crate::bidi::cut_line(painter, job, width);
+    }
     let mut job = job;
     let mut galley = tight_cut(painter, painter.layout_job(job.clone()));
     for _ in 0..8 {

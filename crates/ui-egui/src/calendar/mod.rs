@@ -27,7 +27,7 @@ use inboxcraft_time::{Offset, Timestamp, WeekRule};
 use serde_json::{Value, json};
 
 pub use self::day::Day;
-pub use self::editor::{Alert, Editor};
+pub use self::editor::{Alert, Editor, all_day_alert_text};
 
 use crate::mailbox::{Mailbox, shown};
 use crate::tr;
@@ -383,6 +383,8 @@ pub struct Calendar {
     second: u8,
     /// How the owner's weeks are counted, as the session said at the last read ([`Calendar::follow_week`]).
     week: WeekRule,
+    /// When an all-day event's alert rings by default, as the session said last ([`Calendar::follow_week`]).
+    all_day_alert: inboxcraft_engine::all_day_alert::AllDayAlert,
     /// Whether the calendars were read once ([`Calendar::refresh`]): a calendar never read follows no week rule.
     read: bool,
     /// Changes whenever the events shown change (a read, a calendar shown or hidden): what the views laid out of the
@@ -714,10 +716,15 @@ impl Calendar {
 
     /// Takes the week rule from the session, once a frame: when it changed (`week.set`), the days shown are read again
     /// for the new week, the view staying on its day and the picked day and event staying picked; otherwise nothing
-    /// happens. A calendar not read yet reads nothing: its first read takes the rule.
+    /// happens. A calendar not read yet reads nothing: its first read takes the rule. An open editor takes when an
+    /// all-day event's alert rings, for what a new all-day event's Alert says.
     pub fn follow_week(&mut self, mailbox: &mut Mailbox) {
         if self.read && mailbox.week_rule() != self.week {
             self.refresh(mailbox);
+        }
+        self.all_day_alert = mailbox.all_day_alert();
+        if let Some(editor) = &mut self.editor {
+            editor.set_all_day_alert(self.all_day_alert);
         }
     }
 
@@ -727,6 +734,7 @@ impl Calendar {
         let (now, offset) = (mailbox.now(), mailbox.offset());
         self.tick(now, offset);
         self.week = mailbox.week_rule();
+        self.all_day_alert = mailbox.all_day_alert();
         self.read = true;
         self.sync = mailbox.calendar_sync();
         self.accounts = mailbox.accounts().iter().map(|account| (account.id, account.index, account.label.clone())).collect();
@@ -874,7 +882,9 @@ impl Calendar {
         }
         let Some(first) = self.calendars.iter().find(|row| self.is_shown(row.id)).or_else(|| self.calendars.first()) else { return };
         let choices = self.calendars.iter().map(|row| (row.id, row.name.clone())).collect();
-        self.editor = Some(Editor::new_event(first.id, self.focus(), choices));
+        let mut editor = Editor::new_event(first.id, self.focus(), choices);
+        editor.set_all_day_alert(self.all_day_alert);
+        self.editor = Some(editor);
         self.opened = next_serial();
     }
 
@@ -884,7 +894,9 @@ impl Calendar {
             return;
         }
         if let Some(event) = self.picked() {
-            self.editor = Some(Editor::edit(event));
+            let mut editor = Editor::edit(event);
+            editor.set_all_day_alert(self.all_day_alert);
+            self.editor = Some(editor);
             self.opened = next_serial();
         }
     }

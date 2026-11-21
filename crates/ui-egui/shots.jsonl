@@ -327,6 +327,11 @@
 {"out": "docs/images/follow-up-picker-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}
 # The invitation card (E4.6): Odile's lunch moved from 11:00 to 12:30, its update with what changed and the answer
 # given before, and the first invitation as the strip a later one replaced.
+# Right-to-left words (#356): a Hebrew and an Arabic sender and subject in the list, the Hebrew one open in the reader.
+{"out": "docs/images/rtl-list-light.png", "mode": "light", "size": [1400, 860], "right_to_left": true, "select": "סיור בגינה ביום שלישי"}
+{"out": "docs/images/rtl-list-dark.png", "mode": "dark", "size": [1400, 860], "right_to_left": true, "select": "סיור בגינה ביום שלישי"}
+{"out": "docs/images/rtl-reader-light.png", "mode": "light", "size": [1400, 860], "right_to_left": true, "select": "موعد ورشة الفخار يوم السبت", "full_width": true}
+{"out": "docs/images/rtl-reader-dark.png", "mode": "dark", "size": [1400, 860], "right_to_left": true, "select": "موعد ورشة الفخار يوم السبت", "full_width": true}
 {"out": "docs/images/invite-update-light.png", "mode": "light", "size": [1400, 860], "invitations": true, "select": "Updated invitation: Lunch with Odile"}
 {"out": "docs/images/invite-update-dark.png", "mode": "dark", "size": [1400, 860], "invitations": true, "select": "Updated invitation: Lunch with Odile"}
 {"out": "docs/images/invite-outdated-light.png", "mode": "light", "size": [1400, 860], "invitations": true, "select": "Invitation: Lunch with Odile"}

@@ -89,7 +89,7 @@ fn about(context: &Context<'_>, entry: &Scheduled) -> Result<Map<String, Value>,
         },
         Due::Alert(alert) => {
             let mut fields = Map::new();
-            let about = notify::alert_about(store, alert, context.offsets(), context.now())?;
+            let about = notify::alert_about(store, alert, (context.offsets(), context.state().all_day_alert), context.now())?;
             let before = about.as_ref().and_then(|about| about.start.duration_since(entry.due)).map(|lead| lead.as_secs() / 60);
             fields.insert("account".to_owned(), json!(about.as_ref().map(|about| about.account.get())));
             fields.insert("subject".to_owned(), json!(about.as_ref().map(|about| about.summary.as_str()).unwrap_or_default()));

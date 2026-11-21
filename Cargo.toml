@@ -80,6 +80,11 @@ skrifa = { version = "0.44", default-features = false, features = ["std"] }
 # ui-egui only (already in the graph through egui): the grapheme clusters of text from mail, so a cut never splits a
 # letter from its marks or an emoji sequence
 unicode-segmentation = { version = "1.13", default-features = false }
+# ui-egui only: the Unicode bidirectional algorithm (UAX #9), so a right-to-left phrase stands in its words' order and
+# is cut at its logical end. Its own tables, no dependencies.
+unicode-bidi = { version = "0.3", default-features = false, features = ["std", "hardcoded-data"] }
+# ui-egui only (already in the graph through egui): the shaper egui lays text out with, asked which way it shapes a run
+harfrust = { version = "0.12", default-features = false, features = ["std"] }
 # the desktop app only, native only: reads the names and style of the computer's own fonts found for the scripts IBM
 # Plex lacks (pure Rust, no C library). Without its own folder walk (`fontconfig`), which loops over a collection
 # claiming billions of faces, and without `memmap`: files are read, not mapped.

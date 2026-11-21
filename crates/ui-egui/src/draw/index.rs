@@ -543,7 +543,13 @@ fn owner(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, rect: Rect, (narrow, liv
         avatar::paint(ui.painter(), theme, face, &name, &address);
         if !narrow {
             let ink = if drawn.hovered { p.ink } else { p.muted };
-            let words = crate::component::fitted(ui, &address, f.mono_s, ink, (at.right() - 16.0 - (at.left() + ADDRESS_LEFT)).max(0.0));
+            let words = crate::component::fitted(
+                ui,
+                &crate::bidi::address(&address),
+                f.mono_s,
+                ink,
+                (at.right() - 16.0 - (at.left() + ADDRESS_LEFT)).max(0.0),
+            );
             paint::run_at(ui.painter(), pos2(at.left() + ADDRESS_LEFT, drawn.middle(f.mono_s.line)), words, ink);
         }
         drawn.finish(ui, theme);

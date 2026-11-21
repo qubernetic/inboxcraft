@@ -228,6 +228,9 @@ pub struct Shot {
     /// Whether the sample's inbox holds Odile's two invitations to lunch (`sample::invitations`).
     #[serde(default)]
     pub invitations: Option<bool>,
+    /// Whether the sample's inbox holds a Hebrew and an Arabic message, newest (`sample::right_to_left`).
+    #[serde(default)]
+    pub right_to_left: Option<bool>,
     /// The invented screener, groups and hover actions in the list, with keys for their actions.
     #[serde(default)]
     pub showcase: Option<bool>,
@@ -1789,6 +1792,17 @@ impl Run {
     }
 }
 
+/// The mail a scene adds to the sample's inbox: the Hebrew and Arabic messages or Odile's two invitations.
+fn added_mail(shot: &Shot, time: Timestamp) -> Result<Option<Vec<inboxcraft_store::Change>>, UiError> {
+    if shot.right_to_left == Some(true) {
+        return sample::right_to_left(time).map(Some);
+    }
+    if shot.invitations == Some(true) {
+        return sample::invitations(time).map(Some);
+    }
+    Ok(None)
+}
+
 /// The sample window as `shot` asks for it.
 ///
 /// # Errors
@@ -1850,9 +1864,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         inboxcraft_engine::Session::new(Box::new(store), Box::new(clock.clone())).map_err(UiError::Engine)?
     } else if shot.outbox.is_some() || shot.section.as_deref() == Some(crate::settings::Under::Scheduled.id()) {
         sample::sending(Box::new(clock.clone()))?
-    } else if shot.invitations == Some(true) {
+    } else if let Some(added) = added_mail(shot, time)? {
         let mut store = sample::mailbox(time)?;
-        let batch = sample::invitations(time)?.into_iter().fold(inboxcraft_store::Batch::new(), inboxcraft_store::Batch::with);
+        let batch = added.into_iter().fold(inboxcraft_store::Batch::new(), inboxcraft_store::Batch::with);
         inboxcraft_store::Storage::apply(&mut store, &batch).map_err(UiError::sample)?;
         sample::session_over(store, Box::new(clock.clone()))?
     } else {
