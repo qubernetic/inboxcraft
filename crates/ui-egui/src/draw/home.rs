@@ -5,13 +5,14 @@
 //! its foot, its parts 20 apart (the section label, the headline in `display` on two lines, the lede in `read` on at
 //! most two lines or the failing banner in its place, its words on at most two lines, the row of four count tiles of one height, the agenda's block,
 //! the drafts' block, two buttons); before the first account the label, the headline, the lede on three lines, the two
-//! buttons and the block of what adding one does. At the right the emblem's place: the character field (the ground of
-//! Home), and on it the emblem with the names under it (the Qubernetic and the InboxCraft wordmarks and the tagline)
-//! only where they fit whole (never cut, never smaller).
+//! buttons and the block of what adding one does. At the right the emblem's place: the emblem with the names under it
+//! (the Qubernetic and the InboxCraft wordmarks and the tagline) only where they fit whole (never cut, never smaller).
+//! Under the whole page lies the character field, the ground of Home: it answers the pointer across the page, and
+//! calms near the brief's parts and the names' box (as they were drawn the frame before) so the text stays readable.
 //!
 //! The page takes what it shows as data ([`crate::home::Home`]) and gives back what was asked ([`Asked`]): it runs
 //! no command, reads no mailbox and opens nothing. Where the body is narrower than the brief and its place, the
-//! emblem's place goes first (the emblem whole, then the field); under 600 the brief takes the whole width; a brief
+//! emblem's place goes first (the emblem whole, then its room); under 600 the brief takes the whole width; a brief
 //! taller than the body scrolls. Every pressable part takes Tab in the drawn order: the banner's links, the four
 //! tiles, the agenda's link, the draft rows, the drafts' link, the two buttons; the rest is information and takes none.
 
@@ -175,12 +176,12 @@ pub struct Stage<'a> {
 }
 
 /// Where `emblem` stands in `stage` at `ppp` with `under` points of names below it: centred across, and down with the
-/// names as one block, at its one size, on the whole pixel the field draws it on, and only if it and the names fit
-/// whole.
+/// names as one block, at its one size, on the whole pixel a field over `page` (Home's, under the whole page) draws it
+/// on, and only if it and the names fit whole.
 #[must_use]
-pub fn emblem_place(stage: Rect, emblem: &Emblem, under: f32, ppp: f32) -> Option<Rect> {
+pub fn emblem_place(page: Rect, stage: Rect, emblem: &Emblem, under: f32, ppp: f32) -> Option<Rect> {
     let band = emblem_band(stage, emblem, under, ppp)?;
-    field::emblem_corner(emblem, band, stage, ppp).map(|corner| Rect::from_min_size(corner, emblem.size()))
+    field::emblem_corner(emblem, band, page, ppp).map(|corner| Rect::from_min_size(corner, emblem.size()))
 }
 
 /// The band the emblem is centred in, as wide as `stage`: the emblem's height where the emblem and `under` points of
@@ -240,25 +241,23 @@ pub fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, rect: Rect
     ui.painter().rect_filled(rect, 0.0, theme.palette.bg);
     let brief = Rect::from_min_size(rect.min, vec2(rect.width().min(BRIEF), rect.height()));
     parts.brief = Some(brief);
-    if rect.width() > BRIEF {
-        let place = Rect::from_min_max(pos2(brief.right(), rect.top()), rect.max);
-        let under = NAMES_GAP + names_high(theme);
-        if stage.field.emblem() != stage.emblem {
-            stage.field.set_emblem(stage.emblem);
-        }
-        // The field centres the emblem in its band itself, from the place's own corner: a place moving by parts of a
-        // pixel keeps the emblem on the same cells, and the names are placed from the same pixel.
-        let ppp = ui.ctx().pixels_per_point();
-        let emblem = stage.emblem.and_then(|emblem| emblem_place(place, emblem, under, ppp));
-        let area = stage.emblem.zip(emblem).and_then(|(emblem, _)| emblem_band(place, emblem, under, ppp));
-        field::show(ui, theme, stage.field, place, stage.level, Opts { on_home: true, on_pane: false, emblem: area });
-        parts.stage = Some(place);
-        parts.emblem = emblem;
-        if let Some(emblem) = emblem {
-            let (names, wordmarks) = names(ui, theme, place, emblem);
-            parts.names = Some(names);
-            parts.wordmarks = Some(wordmarks);
-        }
+    if stage.field.emblem() != stage.emblem {
+        stage.field.set_emblem(stage.emblem);
+    }
+    let place = (rect.width() > BRIEF).then(|| Rect::from_min_max(pos2(brief.right(), rect.top()), rect.max));
+    let under = NAMES_GAP + names_high(theme);
+    // The field lies under the whole page and centres the emblem in its band itself, from the page's own corner: a
+    // page moving by parts of a pixel keeps the emblem on the same cells, and the names are placed from the same pixel.
+    let ppp = ui.ctx().pixels_per_point();
+    let emblem = place.zip(stage.emblem).and_then(|(place, emblem)| emblem_place(rect, place, emblem, under, ppp));
+    let area = place.zip(stage.emblem).filter(|_| emblem.is_some()).and_then(|(place, emblem)| emblem_band(place, emblem, under, ppp));
+    field::show(ui, theme, stage.field, rect, stage.level, Opts { on_home: true, on_pane: false, emblem: area });
+    parts.stage = place;
+    parts.emblem = emblem;
+    if let (Some(place), Some(emblem)) = (place, emblem) {
+        let (names, wordmarks) = names(ui, theme, place, emblem);
+        parts.names = Some(names);
+        parts.wordmarks = Some(wordmarks);
     }
     let mut asked = None;
     ui.scope_builder(UiBuilder::new().max_rect(brief).id_salt("home"), |ui| {
@@ -274,7 +273,16 @@ pub fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, home: &Home, rect: Rect
             });
         });
     });
+    // The field calms near the text drawn this frame from the next one on: the brief scrolls, and it is drawn over the
+    // field.
+    stage.field.set_quiet(&quiet_blocks(&parts));
     Drawn { asked, parts }
+}
+
+/// The blocks of `parts` the field keeps quiet near: the brief's parts and the names' box.
+fn quiet_blocks(parts: &Parts) -> [Rect; 10] {
+    [parts.label, parts.headline, parts.lede, parts.banner, parts.counts, parts.agenda, parts.drafts, parts.steps, parts.buttons, parts.names]
+        .map(|part| part.unwrap_or(Rect::NOTHING))
 }
 
 /// The brief's parts, top down, in `ui` (as wide as the brief's content).

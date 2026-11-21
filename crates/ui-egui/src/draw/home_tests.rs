@@ -296,7 +296,7 @@ fn the_emblem_leaves_whole_at_a_1381_window_and_under_and_stays_from_1382() {
         }
     }
     let stage = Rect::from_min_size(pos2(600.0, 0.0), vec2(547.0, 499.0));
-    assert_eq!(emblem_place(stage, &emblem, 0.0, 1.0), None, "a stage one point too low leaves no emblem");
+    assert_eq!(emblem_place(stage, stage, &emblem, 0.0, 1.0), None, "a stage one point too low leaves no emblem");
 }
 
 /// The rects of the pictures (meshes with a texture of their own) painted this frame.
@@ -731,7 +731,9 @@ fn headline_harness(level: crate::motion::Level) -> Harness<'static, (Home, bool
 /// The headline's two lines as painted, the greeting and the name.
 fn headline_lines(harness: &Harness<'static, (Home, bool)>) -> (String, String) {
     let (first, second) = harness.state().0.headline();
-    let texts = crate::component::tests::texts(harness);
+    // The field's rows at rest (dots and spaces) lie under the brief too: not the headline.
+    let texts: Vec<String> =
+        crate::component::tests::texts(harness).into_iter().filter(|text| !text.chars().all(|ch| ch == '·' || ch == ' ')).collect();
     let width = |text: &str| text.chars().count();
     let first = texts.iter().find(|text| width(text) == width(first) && !text.starts_with('[')).cloned().unwrap_or_default();
     let name = format!("{}.", second.unwrap_or_default());
@@ -863,4 +865,36 @@ fn a_long_account_name_leaves_refused_the_sign_in_in_sight() {
             }
         }
     }
+}
+
+/// The field lies under the whole page, the brief's area too, and Home names the brief's parts and the names' box as
+/// the blocks it keeps quiet near.
+#[test]
+fn home_s_field_covers_the_brief_and_is_quiet_near_its_parts() {
+    for state in ["today", "first-run", "everything-failing"] {
+        let page = Rect::from_min_size(pos2(0.0, 0.0), BODY);
+        let mut harness = harness_with(sample(state).unwrap(), Mode::Dark, 100, BODY, page, Some(crate::brand::emblem().clone()), Level::Off, false);
+        harness.run_steps(2);
+        let field = &harness.state().field;
+        assert_eq!(field.covers(), Some(page), "{state}: the field lies under the whole page");
+        let p = harness.state().drawn.parts;
+        let named: Vec<Rect> =
+            [p.label, p.headline, p.lede, p.banner, p.counts, p.agenda, p.drafts, p.steps, p.buttons, p.names].into_iter().flatten().collect();
+        assert!(named.len() >= 5 && p.names.is_some(), "{state}: {p:?}");
+        assert_eq!(field.quiet(), named.as_slice(), "{state}: the quiet blocks");
+    }
+}
+
+/// At the reduced level, the fresh install's, the pointer over the brief's margin flips the field's cells there.
+#[test]
+fn at_reduced_the_pointer_over_the_brief_flips_the_field_there() {
+    let page = Rect::from_min_size(pos2(0.0, 0.0), BODY);
+    let mut harness = harness_with(sample("today").unwrap(), Mode::Dark, 100, BODY, page, None, Level::Reduced, false);
+    let mut seen = 0;
+    for step in 0..60 {
+        harness.hover_at(pos2(20.0, 300.0 + step as f32));
+        harness.step();
+        seen += harness.state().field.warm_centres().iter().filter(|centre| centre.x < BRIEF).count();
+    }
+    assert!(seen > 0, "no cell of the field under the brief flipped");
 }
