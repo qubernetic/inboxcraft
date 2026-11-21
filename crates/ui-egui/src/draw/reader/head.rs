@@ -109,7 +109,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         drawn.asked.push(Asked::Close);
     }
     paint::rule(ui, p.line);
-    popup::title(ui, theme, tr!("When a message leaves the list"), None);
+    popup::head(ui, theme, tr!("When a message leaves the list"), None);
     for after in After::ALL {
         let response = popup::choice(ui, theme, after_text(after), mailbox.after() == after);
         if response.clicked() {

@@ -1321,6 +1321,32 @@ fn more_and_move_keep_the_design_s_width_at_every_text_size() {
     }
 }
 
+#[test]
+fn the_more_menu_s_second_head_has_its_choices_straight_under_it() {
+    // The design's More menu: the "When a message leaves the list" head, then its choices with no hairline between,
+    // as the group menu's head above it.
+    let fetch = Recorder::default();
+    let mut harness = opened_at(&fetch, "Photos from the coast walk", 1440.0, crate::theme::TextScale::default());
+    harness.get_by_role_and_label(Role::Button, "More").click();
+    harness.run();
+    let look = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    let head = harness.get_by_role_and_label(Role::Label, "When a message leaves the list").rect();
+    let first = harness.get_by_role_and_label(Role::MenuItemRadio, "Show the next message").rect();
+    assert!((first.top() - head.bottom()).abs() <= 0.5, "the first choice starts at the head's bottom: {head:?} {first:?}");
+    fn lines(shape: &egui::Shape, colour: egui::Color32, found: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| lines(shape, colour, found)),
+            egui::Shape::Rect(rect) if rect.fill == colour && (rect.rect.height() - 1.0).abs() <= 0.01 => found.push(rect.rect),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| lines(&clipped.shape, look.palette.line, &mut found));
+    let under: Vec<_> =
+        found.iter().filter(|rect| (rect.top() - head.bottom()).abs() <= 0.5 && rect.left() < head.right() && rect.right() > head.left()).collect();
+    assert!(under.is_empty(), "no hairline under the head: {under:?}");
+}
+
 /// The app with `subject` open in a window `width` wide, its text at `scale`.
 fn opened_at(fetch: &Recorder, subject: &str, width: f32, scale: crate::theme::TextScale) -> Harness<'static, InboxApp> {
     let mut app = app_with(fetch);
