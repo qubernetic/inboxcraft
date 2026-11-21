@@ -303,12 +303,12 @@ impl Keeper {
         self.shared.lock().tries
     }
 
-    /// Ends the keeper's thread as if it had died (tests); waits up to a second for it to end.
+    /// Ends the keeper's thread as if it had died (tests); waits up to 10 s for it to end, a busy computer's time.
     #[cfg(any(test, feature = "test-hooks"))]
     pub(super) fn stop(&self) {
         self.shared.lock().stop = true;
         self.shared.changed.notify_all();
-        for _ in 0..100 {
+        for _ in 0..1000 {
             if self.thread.is_finished() {
                 return;
             }

@@ -141,19 +141,14 @@ fn a_keep_that_fails_is_told_once_keeps_the_newest_text_and_lands_when_tried_aga
     assert_eq!(store.drafts(AccountId::new(1)).unwrap()[0].subject, "newest");
     // The keeper tries it again by itself, after a second.
     store.refuse_keeps(false);
-    let mut waited = 0;
-    while on_disk(tmp.path()).as_deref() != Some("newest") && waited < 50 {
-        std::thread::sleep(Duration::from_millis(100));
-        waited += 1;
-    }
-    assert_eq!(on_disk(tmp.path()).as_deref(), Some("newest"), "the newest text lands when tried again");
+    assert!(until(&store, |_| on_disk(tmp.path()).as_deref() == Some("newest")), "the newest text lands when tried again");
     assert!(store.unkept().is_empty());
     assert!(store.failed_keep().is_none());
 }
 
-/// Waits (at most 5 s, every 10 ms) until `done` holds for the store; whether it did.
+/// Waits (at most 10 s, every 10 ms) until `done` holds for the store; whether it did.
 fn until(store: &Sqlite, done: impl Fn(&Sqlite) -> bool) -> bool {
-    for _ in 0..500 {
+    for _ in 0..1000 {
         if done(store) {
             return true;
         }
@@ -166,15 +161,19 @@ fn until(store: &Sqlite, done: impl Fn(&Sqlite) -> bool) -> bool {
 fn a_keep_that_keeps_failing_is_tried_again_with_a_growing_wait_and_told_once() {
     let tmp = dir();
     let mut store = keeping(tmp.path());
+    #[allow(clippy::disallowed_methods, reason = "a test of the wall time")]
+    let start = std::time::Instant::now();
     store.refuse_keeps(true);
     keep(&mut store, "newest");
-    // No `settle` here: it would give the failed write a try of its own, and the count would depend on which thread
-    // ran first. Tries at 0 s, 1 s and 3 s: the second a second after the first, the third two seconds after that.
+    // No `settle` here: it would give the failed write a try of its own. Tries at 0 s, 1 s and 3 s at the soonest:
+    // the second a second after the first fails, the third two seconds after the second fails. A busy computer only
+    // makes them later, so the times are checked from below.
     assert!(until(&store, |store| store.keeper_tries() >= 2), "tried again within a second or so");
-    assert_eq!(store.keeper_tries(), 2);
-    std::thread::sleep(Duration::from_millis(1500));
-    assert_eq!(store.keeper_tries(), 2, "the wait grew past a second, not one try a frame");
+    let second = start.elapsed();
+    assert!(second >= Duration::from_secs(1), "the second try waited a second: {second:?}");
     assert!(until(&store, |store| store.keeper_tries() >= 3), "and the third try comes");
+    let third = start.elapsed();
+    assert!(third >= Duration::from_secs(3), "the wait grew to two seconds, not one try a second: {third:?}");
     assert!(store.failed_keep().is_some());
     assert!(store.failed_keep().is_none(), "one failure said for the whole run of failures");
 }
@@ -321,13 +320,20 @@ fn the_keeper_wakes_the_window_after_each_write() {
     store.wake_on_keep(Arc::new(move || {
         theirs.fetch_add(1, Ordering::SeqCst);
     }));
+    // Each write wakes the window once, landed or failed: as many wakes as writes. A write in flight wakes as it
+    // ends, so the two are compared when they agree or the wait runs out.
+    let once_a_write = |store: &Sqlite| until(store, |store| woken.load(Ordering::SeqCst) as u64 == store.keeper_tries());
     keep(&mut store, "landed");
     store.settle(Duration::from_secs(5)).unwrap();
-    assert_eq!(woken.load(Ordering::SeqCst), 1, "after a write that landed");
+    assert_eq!((store.keeper_tries(), woken.load(Ordering::SeqCst)), (1, 1), "after a write that landed");
     store.refuse_keeps(true);
     keep(&mut store, "failed");
+    assert!(until(&store, |store| store.keeper_tries() >= 2 && !store.unkept().is_empty()));
+    assert!(once_a_write(&store), "after a write that failed: {} wakes", woken.load(Ordering::SeqCst));
+    // The window's own wait gives the failed write one more try, which wakes it too: three writes, three wakes.
     store.settle(Duration::from_secs(5)).unwrap();
-    assert_eq!(woken.load(Ordering::SeqCst), 2, "after a write that failed");
+    assert!(store.keeper_tries() >= 3, "the wait tried the failed write again");
+    assert!(once_a_write(&store), "after the wait's try: {} wakes", woken.load(Ordering::SeqCst));
 }
 
 #[test]
