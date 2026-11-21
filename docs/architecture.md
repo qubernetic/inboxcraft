@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 ## Layers
 <table L0–L6 + apps, the rule: a crate depends only on lower layers; enforced by `cargo xtask layers`>
@@ -661,3 +661,23 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-08 | minor | Invitations: the mark, `invite.show`, `invite.answer` and `invite.remove` (#149) |
 | 2026-11-08 | minor | Event alerts: the store's alerts, the sweep, the notice and its click (#150) |
 | 2026-11-08 | minor | `account.update` and a new password (#214) |
+| 2026-11-21 | minor | The appearance commands without accent, typeface and icon set (#231) |
+| 2026-11-21 | minor | A draft's typed recipient text: kept here, never sent or uploaded, never a recipient unseen (#234) |
+| 2026-11-21 | minor | An invitation from a held sender cannot be answered (#237) |
+| 2026-11-21 | patch | What holds of typed recipient text: a line laid out, not always in sight whole (#238) |
+| 2026-11-21 | minor | A draft kept at most once a second while typing; a blank's text not kept (#238, #243) |
+| 2026-11-21 | minor | The in-memory store copies only the tables a batch changes (#243) |
+| 2026-11-21 | minor | Send again goes only for a refused send that did not change; Edit for the rest (#245) |
+| 2026-11-21 | minor | `mail.why`: the reasons, their kinds, keys and caps (#256) |
+| 2026-11-21 | minor | The this weekend and next week presets; the week rule and `week.settings` / `week.set` (#257) |
+| 2026-11-21 | minor | Detect's stages, its candidate list, its probe and its deadlines (#260) |
+| 2026-11-21 | minor | The store reads the newest drafts and their count through an index (#301) |
+| 2026-11-21 | minor | `schedule.list` says what each entry is about and skips one it cannot read; `after.set`, what follows an act; the week's default from the locale; `mail.unsnooze` leaves a message moved on where it is (#317) |
+| 2026-11-21 | minor | Drafts kept are written behind on the store's draft keeper (#338) |
+| 2026-11-21 | minor | The `alert` of the event commands and of `event.list`; location alarms stay (#343) |
+| 2026-11-21 | minor | `event.list` names the organiser and whether the event is the owner's own (#344) |
+| 2026-11-21 | minor | `greeting.set` and how a name's word is read (#349) |
+| 2026-11-21 | patch | An edit keeps a series in UTC and writes the times it does not change as they came (#351) |
+| 2026-11-21 | minor | The hour an all-day event's alert rings, `event.all_day_alert.set` (#353) |
+| 2026-11-21 | minor | `mail.row`: one message as a list shows it, by its id (#380) |
+| 2026-11-21 | minor | Both stores index the links of the messages; one thread is found link by link (#406) |

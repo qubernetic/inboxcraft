@@ -1,6 +1,6 @@
 # The control channel
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** major
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 The running app takes commands from the CLI and the MCP server through a local socket: `inboxcraft-cli mail.list`
 without `--store` runs in the app ([cli.md](cli.md)), and so do the tools of `inboxcraft-cli mcp` ([mcp.md](mcp.md)).
@@ -118,7 +118,10 @@ that is:
   `ui.settings.open` is, while the owner holds the keys; the owner's own
   key or press in that frame wins, and of an agent's calls of the two only the newest acts in a frame. The answer is
   `window`, `true` in the app, the same whether the window acted or passed over the call;
-- snooze, park and pin, as they land.
+- putting mail aside: `mail.snooze`, `mail.unsnooze`, `mail.park`, `mail.pin`, `mail.follow_up` and
+  `mail.cancel_follow_up`. `mail.done`, the screener's and the groups' choices (`screener.accept`, `screener.block`,
+  `screener.mode`, `group.set`, `group.account`), `pin.set` and `after.set` are the owner's and refused with
+  `not_allowed`; `screener.list` reads the queue and runs as `safe`.
 
 `sync.status` reads how syncing stands in the app, from what its workers told: the state, the folder syncs done of
 all in the rounds under way, the last sync and the number of failing accounts. The state is the first that holds:
@@ -152,3 +155,11 @@ Everything a client sends is hostile. `cargo +nightly fuzz run control_lines` ru
 | 2026-11-08 | patch | `account.check` signs in to the servers (#119) |
 | 2026-11-08 | patch | The reply, forward and template commands over the channel (#120) |
 | 2026-11-08 | major | First version: the socket, the token and its revocation, the lines and their codes (#142) |
+| 2026-11-21 | minor | `sync.status` over the channel and what its states mean (#255) |
+| 2026-11-21 | minor | `ui.motion.set` takes a level (#258) |
+| 2026-11-21 | minor | `ui.settings.open` and its `page` over the channel; what an agent's call does not do (#284) |
+| 2026-11-21 | minor | `history.undo` is refused with `editing` while the owner edits an event (#367) |
+| 2026-11-21 | minor | `ui.layout.set` names where the event editor opens (#370) |
+| 2026-11-21 | minor | `ui.layout.set` is the owner's; the appearance answers have `layout` (#374) |
+| 2026-11-21 | minor | `ui.home.open` over the control channel; an agent's call waits while the owner holds the keys (#399) |
+| 2026-11-21 | minor | Putting mail aside over the channel: the snooze, park, pin and follow-up commands that run and the triage choices that are the owner's (#425) |

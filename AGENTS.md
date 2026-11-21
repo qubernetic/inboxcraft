@@ -7,7 +7,7 @@ InboxCraft is owned and maintained by Qubernetic. In this file, "the project own
 or "the person" means whoever the mailbox belongs to. This file is for people as much as for agents. `CLAUDE.md` is a
 link to this file.
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 ## Start every session here
 1. Read `plan/STATUS.md` (current milestone, next task), then the task in `plan/execution-plan.md`. `plan/` is
@@ -145,3 +145,5 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
 | 2026-11-08 | minor | The headless CLI (#140) |
 | 2026-11-08 | minor | `inboxcraft-cli mcp` (#141) |
 | 2026-11-08 | minor | The control channel is a socket in `$XDG_RUNTIME_DIR`; the CLI and MCP run in the app without `--store` (#142) |
+| 2026-11-21 | minor | Art drawn in code points at the sample, no longer at the app icon (#232) |
+| 2026-11-21 | minor | `shots` joins the gates of `just ci` (#248) |

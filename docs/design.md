@@ -1,6 +1,6 @@
 # InboxCraft design
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-17 · **Change:** major
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 InboxCraft's look in words: the Qubernetic design, its tokens, its rules and its screens. The source of truth is
 the FigCraft design file [`docs/design/inboxcraft.figcraft`](design/README.md): 23 pages, 64 component sets, every
@@ -526,3 +526,12 @@ each feature's behaviour is decided when it is designed. Two things on it are id
 | 2026-11-08 | minor | The list's header, stripe and row spacing, the view switch, the toast and the time picker (#208) |
 | 2026-11-08 | minor | The add form's outgoing server and CalDAV address; an account's settings (#214) |
 | 2026-11-17 | major | Rewritten for the Qubernetic design file (#226) |
+| 2026-11-21 | minor | The invitation's one primary and Keep my answer, the add form's buttons, Save until a change, the focus edge beside the thumb; 23 pages (#327) |
+| 2026-11-21 | minor | The app follows most of this design; what it does not is in the file's README (#332) |
+| 2026-11-21 | minor | The invitation card's described state: the event's description inside the card (#342) |
+| 2026-11-21 | minor | Home greets by the word of the sending name the owner chose (#349) |
+| 2026-11-21 | minor | New message at the top of the index; the text-button set's icon-and-key and icon-only states (#354) |
+| 2026-11-21 | minor | Drafts has a glyph of its own in the index (#354) |
+| 2026-11-21 | minor | Settings in a narrow window (#368) |
+| 2026-11-21 | minor | The least width cannot be made narrower; the title bar under the results and the editor (#412) |
+| 2026-11-21 | minor | M1 and M2: the field flips under a still pointer, the emblem twinkles by itself (#418) |

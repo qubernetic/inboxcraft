@@ -1,6 +1,6 @@
 # InboxCraft design file
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-17 · **Change:** major · **Status:** draft
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor · **Status:** draft
 
 `inboxcraft.figcraft` is the design file of the whole app, made in
 [FigCraft](https://getartcraft.com/apps/figcraft): InboxCraft in the form language of the Qubernetic brand. **It is
@@ -79,14 +79,8 @@ What the app still owes this file, one line each. The finer differences, with th
 [`docs/gaps.md`](../gaps.md).
 
 **Windows**
-- The reader and the composer in a window of their own (Reader, Composer) are not built: Appearance › Layout shows
-  both rows coming soon.
 - With the own window frame the desktop's window menu is not offered on a right press of the command line.
 - A window narrower than 800 is laid out 800 wide and clipped at its right.
-
-**Where the composer lives**
-- The composer is docked in the reader's place or floats; its window of its own is not built, and which place it
-  opens in by default is not settled yet.
 
 **Messages**
 - The cleaned copy opens in the browser from the reader's More menu, not from the content bar, and a link in it
@@ -117,15 +111,14 @@ What the app still owes this file, one line each. The finer differences, with th
   state show undo, its key, the bar and the seconds only. It is built once a frame draws it.
 
 **Frame, command line and status line**
-- The command line's search of all mail, its GO TO and LAST COMMANDS groups and mixed results are not built; plain
-  text searches the mail shown.
+- The command line shows one kind of result at a time (plain text the mail, `>` the commands, `@` the people, `#`
+  the mailboxes); its mixed results are not built.
 - The send countdown has no "send now" (the file draws none yet, above); the offline "try again" is coming soon.
 - Every "open log" is coming soon: there is no log to open.
 - The index keeps Blocked and Junk rows the file does not draw: their mail has no other place. While one account
   syncs, every account signed in says syncing.
 
 **Home**
-- No source yet for "offline since" or a refused sign-in: the failing banner names refused sends only, on one line.
 - "Look around with sample mail" is coming soon; Home shows two drafts where one frame draws three.
 
 **Lists and the reader**
@@ -180,3 +173,22 @@ What the app still owes this file, one line each. The finer differences, with th
 | 2026-11-17 | minor | The Qubernetic design file, first part, beside the present one (#222) |
 | 2026-11-17 | minor | The Qubernetic design file, second part: the frame and the main screens (#224) |
 | 2026-11-17 | major | The Qubernetic design file takes the place of the earlier one (#226) |
+| 2026-11-21 | minor | 23 pages: Event drafts and Event editor, both PLANNED (#327) |
+| 2026-11-21 | minor | Not in the code yet: what the app still owes the file after the frame, Home and the missing screens (#332) |
+| 2026-11-21 | minor | The marks are CC BY-ND 4.0 and drawn; Home's emblem in a low window (#335) |
+| 2026-11-21 | minor | The confirmations follow the file's dialog and stand by what they ask; where they still differ (#336) |
+| 2026-11-21 | minor | Not in the code yet: Privacy rows show the address at 16 (#337) |
+| 2026-11-21 | minor | Not in the code yet: New message and the Drafts glyph in the index are built (#339) |
+| 2026-11-21 | minor | Not in the code yet: Sending's "Your name" has no frame (#349) |
+| 2026-11-21 | minor | Not in the code yet: New message at the top of the index (#354) |
+| 2026-11-21 | minor | Not in the code yet: the index's Drafts glyph (#354) |
+| 2026-11-21 | minor | Sizes holds Settings at 800 and 1000; not in the code yet: narrow Settings (#368) |
+| 2026-11-21 | minor | Not in the code yet: Settings in a narrow window is built (#373) |
+| 2026-11-21 | minor | The fitted view draws backgrounds, buttons, alignment and widths; what is left (#383) |
+| 2026-11-21 | minor | The cleaned copy opens from the reader's More menu (#388) |
+| 2026-11-21 | minor | A reply's quote is the file's quote block; the line over it and the room above it differ (#389) |
+| 2026-11-21 | minor | The send countdown's "send now" waits for a frame; the status line's offline since, worst first and key sets are built (#396) |
+| 2026-11-21 | minor | The index: account sync states and folder paths as drawn; Blocked and Junk kept (#398) |
+| 2026-11-21 | minor | Later as the file's page; the screener card's line (#410) |
+| 2026-11-21 | minor | The account form's "Remove account…" and its question stand where the frames have them (#422) |
+| 2026-11-21 | minor | Not in the code yet: the reader's and the composer's windows, the command line's groups and Home's banner are built (#425) |

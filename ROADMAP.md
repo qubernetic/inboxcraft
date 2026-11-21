@@ -3,7 +3,7 @@
 **Stage: pre-alpha** · next: beta, after the three blocking gaps of [docs/gaps.md](docs/gaps.md) (about 14 hours)
 and the owner's daily use on both mailboxes (E3.11)
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-17 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [docs/architecture.md](docs/architecture.md).
 
@@ -136,6 +136,25 @@ Not planned for now; the model keeps room for them.
 | 2026-11-17 | Qubernetic look: foundations, components and the InboxCraft mark drawn and approved (#222) |
 | 2026-11-17 | Qubernetic look: the frame and the main screens drawn and approved (#224) |
 | 2026-11-17 | Qubernetic look: the design file is complete and approved; the app does not follow it yet (#226) |
+| 2026-11-21 | Qubernetic look: one fixed palette in two modes; presets, custom colours, gradient, glass and the typeface and icon-set choices removed with their three commands (#231) |
+| 2026-11-21 | Qubernetic look: the mail lists' rows, group heads, keys and the one pane under 980 are drawn to the design file (what differs: `docs/gaps.md`) (#236) |
+| 2026-11-21 | `sync.status`: the sync state, progress and last sync for the status line (#255) |
+| 2026-11-21 | Qubernetic look: `mail.why`, the reasons for the reader's why line, from the triage's own decisions (#256) |
+| 2026-11-21 | Qubernetic look: the reader's why line says the engine's reasons (#267) |
+| 2026-11-21 | Qubernetic look: `week.settings` and `sync.status` as MCP tools (#273) |
+| 2026-11-21 | Qubernetic look: the character field and the emblem as a module, with its gallery page and bench (#275) |
+| 2026-11-21 | Qubernetic look: the command line takes over the palette and the list's search, and is the window's title bar (#305) |
+| 2026-11-21 | Qubernetic look: the status line takes the toasts and the error banner (#309) |
+| 2026-11-21 | Qubernetic look: the index narrows under 1280, and the status line, the why line and the calendar give up room under 1280 and 980 (#312) |
+| 2026-11-21 | Qubernetic look: the Templates page under Sending (#317) |
+| 2026-11-21 | Qubernetic look: the Scheduled page under Sending (#317) |
+| 2026-11-21 | Qubernetic look: the senders whose pictures always load on Settings, Privacy (#317) |
+| 2026-11-21 | Qubernetic look: the calendar alerts switch on Settings, Calendar (#317) |
+| 2026-11-21 | Qubernetic look: removing an account from its form (#317) |
+| 2026-11-21 | Qubernetic look: what follows an act, a choice on Settings, Triage, with Stay (#317) |
+| 2026-11-21 | Qubernetic look: the week's first day and first week on Settings, Calendar (#317) |
+| 2026-11-21 | Calendar: an alert of its own on an event, written as its alarm over CalDAV (#343) |
+| 2026-11-21 | Qubernetic look: `mail.why` as an MCP tool (#347) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -232,3 +251,16 @@ Not planned for now; the model keeps room for them.
 | 2026-11-17 | minor | Progress log: the first part of the Qubernetic design file (#222) |
 | 2026-11-17 | minor | Progress log: the second part of the Qubernetic design file (#224) |
 | 2026-11-17 | minor | Progress log: the Qubernetic design file is complete (#226) |
+| 2026-11-21 | minor | Progress log: one fixed palette, the appearance choices that went (#231) |
+| 2026-11-21 | minor | Progress log: the mail lists of the Qubernetic look (#236) |
+| 2026-11-21 | minor | Progress log: `sync.status` (#255) |
+| 2026-11-21 | minor | Progress log: `mail.why` (#256) |
+| 2026-11-21 | minor | Progress log: the reader's why line says the engine's reasons (#267) |
+| 2026-11-21 | minor | Progress log: `week.settings` and `sync.status` as MCP tools (#273) |
+| 2026-11-21 | minor | Progress log: the character field and the emblem as a module (#275) |
+| 2026-11-21 | minor | Progress log: the command line takes over the palette and the search (#305) |
+| 2026-11-21 | minor | Progress log: the status line takes the toasts and the error banner (#309) |
+| 2026-11-21 | minor | Progress log: the widths (#312) |
+| 2026-11-21 | minor | Progress log: the Templates and Scheduled pages under Sending, the always-load senders, the calendar alerts switch, removing an account (#317) |
+| 2026-11-21 | minor | Progress log: an alert of its own on an event (#343) |
+| 2026-11-21 | minor | Progress log: `mail.why` as an MCP tool (#347) |
