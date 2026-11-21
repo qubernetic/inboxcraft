@@ -665,3 +665,493 @@ fn over_the_event_editor_the_command_list_offers_only_the_editor_s_and_the_windo
         }
     }
 }
+
+// The frames `command-line/focus`, `typing-search` and `refused` (#397).
+
+/// The names of the results' rows, in their order.
+fn names(harness: &Harness<'static, InboxApp>) -> Vec<String> {
+    rows(harness).into_iter().map(|(name, _)| name).collect()
+}
+
+#[test]
+fn nothing_typed_lists_go_to_and_the_commands_run_from_the_line() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = opened(theme, "");
+        harness.get_by_label("Go to");
+        assert_eq!(names(&harness), ["Inbox", "New senders", "Calendar"], "nothing run from the line yet");
+        assert!(harness.query_by_label("Last commands").is_none());
+        let unread = harness.state().mailbox().views().iter().find(|view| view.role == inboxcraft_model::Role::Inbox).map_or(0, |view| view.unread);
+        assert!(unread > 0 && painted_text(&harness, &format!("{unread} to read")), "the inbox says what it holds to read");
+        let waiting = harness.state().mailbox().waiting().len();
+        assert!(waiting > 0 && painted_text(&harness, &format!("{waiting} waiting")), "New senders how many wait");
+        harness.key_press(Key::Escape);
+        harness.run();
+        type_in(&mut harness, ">dark");
+        harness.key_press(Key::Enter);
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        type_in(&mut harness, ">settings: sending");
+        harness.key_press(Key::Enter);
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        harness.get_by_label("Last commands");
+        let sending = crate::palette::rows("settings: sending").into_iter().next().unwrap().name.into_owned();
+        assert_eq!(names(&harness), ["Inbox", "New senders", "Calendar", sending.as_str(), "Dark mode"], "newest first");
+    }
+}
+
+#[test]
+fn a_go_to_row_goes_there_from_any_place() {
+    // Enter runs the row the arrows picked: the inbox (down and back up), New senders, the calendar.
+    for (steps, place) in [
+        (&[Key::ArrowDown, Key::ArrowUp][..], Some(Place::View(inboxcraft_model::Role::Inbox))),
+        (&[Key::ArrowDown][..], Some(Place::Senders)),
+        (&[Key::ArrowDown; 2][..], None),
+    ] {
+        let mut harness = harness(egui::Theme::Light);
+        harness.state_mut().show_home();
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        for key in steps {
+            harness.key_press(*key);
+            harness.run();
+        }
+        harness.key_press(Key::Enter);
+        harness.run();
+        assert!(!harness.state().command().results(), "{steps:?}: the line closed");
+        match place {
+            Some(place) => assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (Screen::Mail, place), "{steps:?}"),
+            None => assert_eq!(harness.state().screen(), Screen::Calendar, "{steps:?}: the calendar"),
+        }
+    }
+}
+
+#[test]
+fn a_command_that_ran_and_cannot_run_now_says_why_in_last_commands() {
+    let mut harness = opened(egui::Theme::Light, "");
+    harness.state_mut().command_mut().ran(keymap::SNOOZE);
+    harness.run();
+    let snooze = keymap::action(keymap::SNOOZE).unwrap().name;
+    assert!(harness.get_by_role_and_label(egui::accesskit::Role::MenuItem, snooze).accesskit_node().is_disabled());
+    for _ in 0..3 {
+        harness.key_press(Key::ArrowDown);
+        harness.run();
+    }
+    let before = harness.state().mailbox().last_run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().mailbox().last_run(), before, "nothing ran");
+    assert!(harness.state().notice().is_some_and(|said| said.starts_with("Not run: ")), "{:?}", harness.state().notice());
+}
+
+#[test]
+fn plain_text_lists_the_mail_the_people_and_the_mailboxes_found() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let harness = opened(theme, "bakery");
+        let results = harness.ctx.memory(|memory| memory.area_rect(super::command::results_id())).unwrap();
+        for head in ["Mail", "Mailboxes"] {
+            assert!(harness.query_all_by_label(head).any(|node| results.contains_rect(node.rect())), "{head}: a head in the results");
+        }
+        let listed = names(&harness);
+        assert_eq!(listed.last().map(String::as_str), Some("Clients/Harbour Bakery"), "{listed:?}");
+        let found = harness.state().mailbox().messages().len();
+        assert!(found > 0, "the list is searched as it is typed");
+        let people = harness.query_all_by_label("People").filter(|node| results.contains_rect(node.rect())).count();
+        let mail = listed.len() - 1 - usize::from(people > 0);
+        assert_eq!(mail, found.min(3), "at most three messages: {listed:?}");
+        let head = if found > 3 { format!("3 of {found}") } else { found.to_string() };
+        assert!(painted_text(&harness, &head), "the head says how many of how many: {head}");
+    }
+}
+
+#[test]
+fn enter_on_a_search_opens_the_marked_message_in_the_mail_searched() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().show_calendar();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    type_in(&mut harness, "bakery");
+    assert_eq!(harness.state().screen(), Screen::Calendar, "typing keeps the place");
+    harness.key_press(Key::Enter);
+    harness.run();
+    let app = harness.state();
+    assert_eq!((app.screen(), app.search_text()), (Screen::Mail, "bakery"));
+    let first = app.mailbox().messages().first().map(|row| row.id);
+    assert!(first.is_some());
+    assert_eq!(app.reader().open_id(), first, "the newest message found is open");
+}
+
+#[test]
+fn the_arrows_walk_the_mixed_results_and_enter_runs_the_picked_row() {
+    let mut harness = opened(egui::Theme::Light, "bakery");
+    // Round from the first row to the last: the mailbox.
+    harness.key_press(Key::ArrowUp);
+    harness.run();
+    assert_eq!(said_picked(&harness, Role::MenuItem), Some(names(&harness).len() - 1));
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::Folder(15));
+}
+
+#[test]
+fn a_search_that_finds_nothing_says_so_and_enter_shows_the_mail_searched() {
+    let mut harness = opened(egui::Theme::Light, "zzzqx");
+    harness.get_by_label("Nothing matches “zzzqx”.");
+    assert!(names(&harness).is_empty());
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().search_text(), "zzzqx");
+    assert!(!harness.state().command().results());
+}
+
+#[test]
+fn the_results_look_up_nothing_in_a_frame_where_nothing_changed() {
+    for typed in ["", "bakery"] {
+        let mut harness = opened(egui::Theme::Light, typed);
+        harness.run_steps(4);
+        let (runs, lookups) = (harness.state().mailbox().runs(), harness.state().command().lookups());
+        harness.run_steps(8);
+        assert_eq!(harness.state().mailbox().runs(), runs, "{typed:?}: no command ran in eight frames");
+        assert_eq!(harness.state().command().lookups(), lookups, "{typed:?}: nothing looked up in eight frames");
+    }
+}
+
+#[test]
+fn a_refused_commands_reason_shows_in_the_status_line() {
+    let mut harness = sized(egui::Theme::Light, vec2(1440.0, 900.0));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    type_in(&mut harness, ">snooze");
+    harness.key_press(Key::Enter);
+    harness.run();
+    let snooze = keymap::action(keymap::SNOOZE).unwrap().name;
+    let said = format!("Not run: {snooze} needs an open message. Open one, then try again.");
+    assert_eq!(harness.state().notice(), Some(said.as_str()));
+    // The line cuts it where its room ends (the status line's own rule): its start shows.
+    let shown = flat(&harness).into_iter().any(|shape| {
+        matches!(shape, egui::Shape::Text(text) if text.galley.text().chars().count() > 40 && said.starts_with(text.galley.text().trim_end_matches('…')))
+    });
+    assert!(shown, "the status line shows it under the results");
+}
+
+/// Every shape painted, `Shape::Vec`s opened.
+fn flat(harness: &Harness<'static, InboxApp>) -> Vec<egui::Shape> {
+    fn open(shape: &egui::Shape, into: &mut Vec<egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, into)),
+            shape => into.push(shape.clone()),
+        }
+    }
+    let mut shapes = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, &mut shapes));
+    shapes
+}
+
+/// The frames' results: `surface` with a 1 px `cyan_edge` inside, the one shadow (0, 12, blur 32) under them, and the
+/// prefixes 30 high on `panel` under a `panel_line` hairline, the hints 5 down.
+#[test]
+fn the_results_have_the_cyan_edge_the_shadow_and_the_prefixes_bar_of_the_frames() {
+    for (theme, mode) in [(egui::Theme::Light, crate::theme::Mode::Light), (egui::Theme::Dark, crate::theme::Mode::Dark)] {
+        let p = crate::theme::Palette::of(mode);
+        for typed in ["", "bakery", ">"] {
+            let harness = opened(theme, typed);
+            let results = harness.ctx.memory(|memory| memory.area_rect(super::command::results_id())).unwrap();
+            let shapes = flat(&harness);
+            let edged = shapes.iter().any(|shape| {
+                matches!(shape, egui::Shape::Rect(rect) if rect.rect == results && rect.stroke.color == p.cyan_edge && rect.stroke.width == 1.0)
+            }) && shapes.iter().any(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.rect == results && rect.fill == p.surface));
+            assert!(edged, "{typed:?}: the cyan edge around the surface");
+            let shadow = shapes.iter().any(|shape| matches!(shape, egui::Shape::Mesh(mesh) if mesh.calc_bounds().bottom() > results.bottom() + 12.0));
+            assert!(shadow, "{typed:?}: the shadow reaches 12 and its blur under them");
+            let bar = egui::Rect::from_min_max(egui::pos2(results.left() + 1.0, results.bottom() - 31.0), results.max - vec2(1.0, 1.0));
+            let filled = shapes.iter().any(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.rect == bar && rect.fill == p.panel));
+            assert!(filled, "{typed:?}: the prefixes' bar, 30 high on panel");
+            let line = egui::Rect::from_min_size(bar.left_top() - vec2(0.0, 1.0), vec2(bar.width(), 1.0));
+            let hairline = shapes.iter().any(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.rect == line && rect.fill == p.panel_line));
+            assert!(hairline, "{typed:?}: the panel_line hairline over it");
+            let hint = harness.get_by_label(&crate::component::key_hint::spoken(">", "commands")).rect();
+            assert_eq!(hint.top(), bar.top() + 5.0, "{typed:?}: the hints 5 down in it");
+        }
+    }
+}
+
+// #397b: the rulings on the review.
+
+/// Opens the line with `Ctrl K` and presses Enter at once, nothing typed.
+fn bare_enter(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+}
+
+#[test]
+fn a_bare_enter_from_the_calendar_or_home_goes_nowhere() {
+    for (screen, home) in [(Screen::Calendar, false), (Screen::Home, true)] {
+        let mut harness = harness(egui::Theme::Light);
+        if home {
+            harness.state_mut().show_home();
+        } else {
+            harness.state_mut().show_calendar();
+        }
+        harness.run();
+        let place = harness.state().mailbox().place();
+        bare_enter(&mut harness);
+        assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (screen, place), "nothing moved");
+        assert!(!harness.state().command().results(), "the results closed, as Enter on a search did");
+    }
+}
+
+#[test]
+fn over_the_event_editor_the_line_offers_nothing_that_leaves_the_calendar() {
+    let mut harness = harness(egui::Theme::Light);
+    let ctx = harness.ctx.clone();
+    harness.state_mut().command_mut().ran(keymap::SHORTCUTS);
+    harness.state_mut().command_mut().ran(keymap::FIND);
+    harness.state_mut().run_action(&ctx, keymap::CALENDAR);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "New event").click();
+    harness.run();
+    assert!(harness.state().calendar().editor().is_some(), "the editor shows");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    // GO TO: no row (each leaves the calendar); LAST COMMANDS: only what the `>` list offers over the editor.
+    assert!(harness.query_by_label("Go to").is_none(), "no GO TO head");
+    let shortcuts = keymap::action(keymap::SHORTCUTS).unwrap().name;
+    assert_eq!(names(&harness), [shortcuts], "LAST: the shortcuts, not the search of the mail");
+    // A search: no mail, people or mailboxes found, and no "nothing" either.
+    type_in(&mut harness, "bakery");
+    assert!(names(&harness).is_empty(), "{:?}", names(&harness));
+    for head in ["Mail", "People", "Mailboxes"] {
+        let results = harness.ctx.memory(|memory| memory.area_rect(super::command::results_id())).unwrap();
+        assert!(!harness.query_all_by_label(head).any(|node| results.contains_rect(node.rect())), "{head}");
+    }
+    assert!(!painted_text(&harness, "Nothing matches “bakery”."));
+    assert_eq!(harness.state().screen(), Screen::Calendar);
+    assert!(harness.state().calendar().editor().is_some(), "the editor is still open");
+}
+
+/// The window over the sample mailbox, its clock kept to move it.
+fn timed(theme: egui::Theme) -> (Harness<'static, InboxApp>, FakeClock) {
+    let clock = *self::clock();
+    let app = InboxApp::at_mail(Mailbox::new(sample::session(Box::new(clock.clone())).unwrap(), Box::new(clock.clone())));
+    let mut harness = Harness::builder()
+        .with_size(vec2(1200.0, 820.0))
+        .with_theme(theme)
+        .with_max_steps(12)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    (harness, clock)
+}
+
+/// The inbox's unread count GO TO's Inbox row says.
+fn to_read(harness: &Harness<'static, InboxApp>) -> u64 {
+    harness.state().mailbox().views().iter().find(|view| view.role == inboxcraft_model::Role::Inbox).map_or(0, |view| view.unread)
+}
+
+#[test]
+fn an_agent_write_a_sync_a_narrowing_and_the_clock_give_fresh_results() {
+    let (mut harness, clock) = timed(egui::Theme::Light);
+    let unread = to_read(&harness);
+    assert!(unread > 1 && painted_text(&harness, &format!("{unread} to read")));
+    // An agent marks an inbox message read, over the control channel: not one of the window's writes.
+    let id = harness.state().mailbox().messages().iter().find(|row| !row.seen).map(|row| row.id).unwrap();
+    let writes = harness.state().mailbox().writes();
+    harness.state_mut().mailbox_mut().run_for_agent("mail.seen", &serde_json::json!({ "id": id, "seen": true })).unwrap();
+    assert_eq!(harness.state().mailbox().writes(), writes, "not the window's write");
+    harness.run();
+    assert!(painted_text(&harness, &format!("{} to read", unread - 1)), "the agent's write is seen");
+    // A sync's refresh reads the list again: looked up again.
+    let lookups = harness.state().command().lookups();
+    harness.state_mut().mailbox_mut().refresh();
+    harness.run();
+    assert_eq!(harness.state().command().lookups(), lookups + 1, "a sync's refresh");
+    // A narrowing to one account: its inbox alone.
+    let account = harness.state().mailbox().accounts().first().map(|account| account.id).unwrap();
+    harness.state_mut().mailbox_mut().narrow(Some(account));
+    harness.run();
+    assert_eq!(harness.state().command().lookups(), lookups + 2, "a narrowing");
+    assert!(painted_text(&harness, &format!("{} to read", to_read(&harness))), "the narrowed inbox's count");
+    // A minute later the captions that say when are made again; within it nothing is.
+    clock.advance(std::time::Duration::from_secs(20));
+    harness.run();
+    let lookups = harness.state().command().lookups();
+    clock.advance(std::time::Duration::from_secs(60));
+    harness.run();
+    assert_eq!(harness.state().command().lookups(), lookups + 1, "the next minute");
+}
+
+#[test]
+fn reopening_the_line_looks_up_again() {
+    let mut harness = opened(egui::Theme::Light, "");
+    let lookups = harness.state().command().lookups();
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    assert_eq!(harness.state().command().lookups(), lookups + 1, "the cache goes as the line opens");
+}
+
+/// `typed` and Enter in one frame (a paste and Enter, fast typing, a slow frame): straight into the frame's input, as
+/// the harness's own queue gives each event a frame of its own.
+fn typed_and_entered(harness: &mut Harness<'static, InboxApp>, typed: &[&str]) {
+    let events = &mut harness.input_mut().events;
+    events.extend(typed.iter().map(|text| Event::Text((*text).to_owned())));
+    events.push(Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+    events.push(Event::Key { key: Key::Enter, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE });
+    harness.run();
+}
+
+/// The newest message whose subject, sender or recipient holds `text`, as the engine searches.
+fn first_found(harness: &mut Harness<'static, InboxApp>, text: &str) -> u64 {
+    harness.state_mut().mailbox_mut().searched(text).unwrap().0.first().map(|row| row.id).unwrap()
+}
+
+#[test]
+fn enter_typed_in_the_same_frame_opens_the_first_match_of_the_whole_text() {
+    for typed in [&["invoice"][..], &["invoic", "e"][..]] {
+        let mut harness = harness(egui::Theme::Light);
+        harness.state_mut().show_calendar();
+        harness.run();
+        let invoice = first_found(&mut harness, "invoice");
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        if typed.len() > 1 {
+            type_in(&mut harness, typed[0]);
+            typed_and_entered(&mut harness, &typed[1..]);
+        } else {
+            typed_and_entered(&mut harness, typed);
+        }
+        let app = harness.state();
+        assert_eq!((app.screen(), app.search_text()), (Screen::Mail, "invoice"), "{typed:?}");
+        assert_eq!(app.reader().open_id(), Some(invoice), "{typed:?}: the first match of invoice is open");
+    }
+}
+
+#[test]
+fn a_command_typed_with_enter_in_one_frame_runs_the_row_of_that_text() {
+    let mut harness = opened(egui::Theme::Light, ">");
+    typed_and_entered(&mut harness, &["dark"]);
+    assert_eq!(harness.state().appearance().theme, ThemeMode::Dark, "the row of >dark, not the first of all");
+}
+
+#[test]
+fn enter_on_a_typed_search_opens_the_first_match() {
+    let mut harness = harness(egui::Theme::Light);
+    let first = first_found(&mut harness, "bakery");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    type_in(&mut harness, "bakery");
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().reader().open_id(), Some(first));
+}
+
+#[test]
+fn the_lookup_reads_the_lists_own_search_when_it_shows_that_text() {
+    let mut harness = harness(egui::Theme::Light);
+    let mailbox = harness.state_mut().mailbox_mut();
+    mailbox.search("bakery");
+    let runs = mailbox.runs();
+    let (found, _) = mailbox.searched(" bakery ").unwrap();
+    assert_eq!(mailbox.runs(), runs, "the list's rows, no search run again");
+    assert_eq!(found, mailbox.messages(), "the same rows");
+    let _ = mailbox.searched("baker").unwrap();
+    assert_eq!(mailbox.runs(), runs + 3, "another text: a search per field");
+}
+
+#[test]
+fn looking_up_runs_quietly() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().show_calendar();
+    harness.run();
+    let before = harness.state().mailbox().last_run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    type_in(&mut harness, "bakery");
+    assert!(harness.state().command().lookups() >= 2, "looked up for the empty line and for bakery");
+    assert_eq!(harness.state().mailbox().last_run(), before, "the lookups are not the last command run");
+}
+
+#[test]
+fn a_store_error_says_the_search_failed() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().show_calendar();
+    harness.state_mut().mailbox_mut().narrow_stale(9_999);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    type_in(&mut harness, "bakery");
+    let said = flat(&harness).into_iter().any(|shape| matches!(shape, egui::Shape::Text(text) if text.galley.text().starts_with("Search failed: ")));
+    assert!(said, "the failure says so");
+    assert!(!painted_text(&harness, "Nothing matches “bakery”."), "not that nothing matched");
+}
+
+#[test]
+fn a_folder_name_with_a_bidi_override_is_listed_clean() {
+    use inboxcraft_model::{AccountId, Folder, FolderId, FolderListing, FolderPath};
+    use inboxcraft_store::{Batch, Change, Storage as _};
+    let mut store = sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap();
+    let mut batch = Batch::new();
+    let listing = FolderListing::new(FolderPath::new("Evil\u{202e}gol", Some('/')).unwrap(), Vec::new(), true);
+    batch.push(Change::PutFolder(Folder::new(FolderId::new(40), AccountId::new(2), listing)));
+    store.apply(&batch).unwrap();
+    let app = InboxApp::at_mail(Mailbox::new(inboxcraft_engine::Session::new(Box::new(store), clock()).unwrap(), clock()));
+    let mut harness = Harness::builder()
+        .with_size(vec2(1200.0, 820.0))
+        .with_theme(egui::Theme::Light)
+        .with_max_steps(12)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    // The engine already takes the override out of a folder's name and cuts it at 300 characters; the line cleans
+    // the name again as it lists it (`home::kept`), so this pins the outcome, whichever does it.
+    for typed in ["evil", "#evil"] {
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        type_in(&mut harness, typed);
+        let listed = names(&harness);
+        assert!(listed.iter().any(|name| name.starts_with("Evil")), "{typed}: {listed:?}");
+        assert!(listed.iter().all(|name| !name.contains('\u{202e}')), "{typed}: no override listed {listed:?}");
+        harness.key_press(Key::Escape);
+        harness.run();
+        harness.key_press(Key::Escape);
+        harness.run();
+    }
+}
+
+#[test]
+fn a_mail_count_that_reached_the_limit_says_there_may_be_more() {
+    let mut harness = opened(egui::Theme::Light, "bakery");
+    let app = harness.state_mut();
+    let stamp = app.line_stamp("bakery", false);
+    let mut found = app.command.take_found(&stamp).unwrap();
+    found.mail_more = true;
+    let total = found.mail_total;
+    app.command.set_found(stamp, found);
+    harness.run();
+    let head = if total > 3 { format!("3 of {total}+") } else { format!("{total}+") };
+    assert!(painted_text(&harness, &head), "{head}");
+}
+
+#[test]
+fn a_send_that_did_not_send_is_not_a_last_command() {
+    let mut harness = harness(egui::Theme::Light);
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::COMPOSE);
+    harness.run();
+    assert!(harness.state().composer().is_some(), "a draft with no recipient");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    let _ = harness.state_mut().apply_command(&ctx, super::command::Asked::Run(keymap::SEND));
+    harness.run();
+    assert!(harness.state().composer().is_some(), "not sent");
+    assert!(!harness.state().command().last().contains(&keymap::SEND), "{:?}", harness.state().command().last());
+}
