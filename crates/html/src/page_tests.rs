@@ -64,6 +64,14 @@ fn no_remote_address_is_written_even_with_pictures_allowed() {
 }
 
 #[test]
+fn a_link_s_tooltip_holds_no_address_even_one_the_message_hid_in_a_mail_address() {
+    let html = r#"<a href="mailto:&quot;x://y(z&quot;@example.org">q</a> <a href="https://example.org:8443/a">w</a>"#;
+    let page = page(&display(html, &allowed()), "Subject");
+    assert!(!page.contains("://") && !page.contains("url("), "{page}");
+    assert!(page.contains("title=\"&quot;x&#58;//y&#40;z&quot;@example.org\""), "the words stay, as references: {page}");
+}
+
+#[test]
 fn the_page_forbids_every_load_itself() {
     let page = page(&Document::default(), "");
     assert!(page.contains("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'"), "{page}");

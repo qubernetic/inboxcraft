@@ -66,6 +66,18 @@ fn escape_into(out: &mut String, text: &str) {
     }
 }
 
+/// `text` escaped for an attribute's value ([`escape_into`]), with `:` and `(` written as references as well, so not
+/// even an inert tooltip holds anything that reads as an address (`://`) or a CSS `url(`.
+fn escape_attribute_into(out: &mut String, text: &str) {
+    for c in text.chars().filter(|c| kept_char(*c)) {
+        match c {
+            ':' => out.push_str("&#58;"),
+            '(' => out.push_str("&#40;"),
+            c => escape_into(out, c.encode_utf8(&mut [0; 4])),
+        }
+    }
+}
+
 /// Writes `list`, inside `nesting` tables.
 fn blocks(out: &mut String, document: &Document, list: &[Block], nesting: usize) {
     for block in list {
@@ -211,7 +223,7 @@ fn span(out: &mut String, document: &Document, span: &Span, preformatted: bool) 
         out.push_str("<span class=\"link\"");
         if let Some(goes) = goes_to(link) {
             out.push_str(" title=\"");
-            escape_into(out, &goes);
+            escape_attribute_into(out, &goes);
             out.push('"');
         }
         out.push('>');
