@@ -22,7 +22,7 @@ struct Fake {
 }
 
 impl Hand for Fake {
-    fn hand(&mut self, file: &Path) -> Result<(), String> {
+    fn hand(&self, file: &Path) -> Result<(), String> {
         if self.refuses {
             return Err("no browser is set up".to_owned());
         }
@@ -51,7 +51,7 @@ fn hostile_page() -> String {
 fn the_copy_is_a_private_file_named_from_the_message_number_alone() {
     let (_home, folder) = place();
     let fake = Fake::default();
-    let mut originals = Originals::new(Some(folder.clone()), Box::new(fake.clone()));
+    let originals = Originals::new(Some(folder.clone()), Box::new(fake.clone()));
     let page = hostile_page();
     originals.open(7, &page).unwrap();
     let handed = fake.handed.lock().unwrap().clone();
@@ -67,7 +67,7 @@ fn the_copy_is_a_private_file_named_from_the_message_number_alone() {
 #[test]
 fn opening_it_again_writes_it_afresh() {
     let (_home, folder) = place();
-    let mut originals = Originals::new(Some(folder.clone()), Box::new(Fake::default()));
+    let originals = Originals::new(Some(folder.clone()), Box::new(Fake::default()));
     originals.open(3, "first").unwrap();
     originals.open(3, "second").unwrap();
     assert_eq!(fs::read_to_string(folder.join(name(3))).unwrap(), "second");
@@ -81,7 +81,7 @@ fn a_planted_symlink_at_the_name_is_not_followed() {
     let target = home.path().join("elsewhere");
     fs::write(&target, "the owner's own file").unwrap();
     symlink(&target, folder.join(name(5))).unwrap();
-    let mut originals = Originals::new(Some(folder.clone()), Box::new(Fake::default()));
+    let originals = Originals::new(Some(folder.clone()), Box::new(Fake::default()));
     originals.open(5, "<p>copy</p>").unwrap();
     assert_eq!(fs::read_to_string(&target).unwrap(), "the owner's own file", "the link's target is untouched");
     let written = folder.join(name(5));
@@ -97,7 +97,7 @@ fn a_folder_that_is_a_link_or_open_to_others_is_refused() {
     fs::set_permissions(&real, fs::Permissions::from_mode(0o700)).unwrap();
     symlink(&real, &folder).unwrap();
     let fake = Fake::default();
-    let mut originals = Originals::new(Some(folder.clone()), Box::new(fake.clone()));
+    let originals = Originals::new(Some(folder.clone()), Box::new(fake.clone()));
     let error = originals.open(1, "page").unwrap_err();
     assert!(error.contains("not a folder"), "{error}");
     assert_eq!(fs::read_dir(&real).unwrap().count(), 0, "nothing written through the link");
@@ -105,7 +105,7 @@ fn a_folder_that_is_a_link_or_open_to_others_is_refused() {
     let open = home.path().join("open");
     fs::create_dir(&open).unwrap();
     fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
-    let mut originals = Originals::new(Some(open.clone()), Box::new(fake.clone()));
+    let originals = Originals::new(Some(open.clone()), Box::new(fake.clone()));
     let error = originals.open(1, "page").unwrap_err();
     assert!(error.contains("open to others"), "{error}");
     assert_eq!(fs::read_dir(&open).unwrap().count(), 0);
@@ -120,7 +120,7 @@ fn without_a_place_to_write_it_says_so_and_hands_nothing_on() {
     assert_eq!(folder_from(None, Some("/c".into()), Some("/h".into())), Some(Path::new("/c").join(CACHE_DIR)));
     assert_eq!(folder_from(None, None, Some("/h".into())), Some(Path::new("/h/.cache").join(CACHE_DIR)));
     let fake = Fake::default();
-    let mut originals = Originals::new(None, Box::new(fake.clone()));
+    let originals = Originals::new(None, Box::new(fake.clone()));
     let error = originals.open(1, "page").unwrap_err();
     assert!(error.contains("no private folder"), "{error}");
     assert!(fake.handed.lock().unwrap().is_empty());
@@ -129,14 +129,14 @@ fn without_a_place_to_write_it_says_so_and_hands_nothing_on() {
 #[test]
 fn a_desktop_with_no_browser_is_an_error_with_its_reason() {
     let (_home, folder) = place();
-    let mut originals = Originals::new(Some(folder), Box::new(Fake { refuses: true, ..Fake::default() }));
+    let originals = Originals::new(Some(folder), Box::new(Fake { refuses: true, ..Fake::default() }));
     assert_eq!(originals.open(1, "page").unwrap_err(), "no browser is set up");
 }
 
 #[test]
 fn old_copies_go_and_no_more_than_the_most_are_kept() {
     let (_home, folder) = place();
-    let mut originals = Originals::new(Some(folder.clone()), Box::new(Fake::default()));
+    let originals = Originals::new(Some(folder.clone()), Box::new(Fake::default()));
     originals.open(1, "page").unwrap();
     let old = super::wall_now() - KEEP_FOR - Duration::from_secs(1);
     fs::File::options().write(true).open(folder.join(name(1))).unwrap().set_modified(old).unwrap();

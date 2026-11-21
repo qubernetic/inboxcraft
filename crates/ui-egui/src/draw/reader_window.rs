@@ -268,7 +268,7 @@ impl Windows {
             reader::Asked::Retry(id, key) => reader.retry(mailbox, id, &key),
             reader::Asked::Always(id) => reader.allow_always(mailbox, id),
             reader::Asked::Save(id, index) => reader.save(mailbox, id, index),
-            reader::Asked::Original(id) => reader.open_original(id),
+            reader::Asked::Original(id) => reader.open_original(id, ctx),
             reader::Asked::After(after) => mailbox.set_after(after),
             reader::Asked::Copy(url) => {
                 reader.set_notice(tr!("Link copied: {url}", url = crate::mailbox::shown(&url)));

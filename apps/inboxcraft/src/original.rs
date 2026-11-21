@@ -18,7 +18,8 @@
 //!   then the oldest beyond [`MAX_FILES`]. Only names of the [`name`] pattern are touched.
 //! - The hand-off ([`Hand`]) asks the desktop portal's `OpenURI.OpenFile` with the file opened read-only, so the
 //!   browser gets the file even when it runs in a sandbox of its own; without a portal, outside the Flatpak,
-//!   `xdg-open` is run on the path (no shell, the path its one argument).
+//!   `xdg-open` is run on the path (no shell, the path its one argument). The bus call gives up after
+//!   [`BUS_PATIENCE`]. The whole open runs on a thread of its own, never on the frame.
 
 use std::ffi::OsString;
 use std::fs::{self, DirBuilder, OpenOptions};
@@ -76,13 +77,13 @@ pub fn folder() -> Option<PathBuf> {
 }
 
 /// Hands a written copy to the desktop, which opens it in the browser.
-pub trait Hand: Send {
-    /// Opens `file` in the browser.
+pub trait Hand: Send + Sync {
+    /// Opens `file` in the browser. Called on the open's own thread: it may wait.
     ///
     /// # Errors
     ///
     /// Why the desktop did not take it, as the owner reads it.
-    fn hand(&mut self, file: &Path) -> Result<(), String>;
+    fn hand(&self, file: &Path) -> Result<(), String>;
 }
 
 /// Writes the copies into a private folder and hands them to the desktop.
@@ -136,7 +137,7 @@ impl Originals {
 }
 
 impl Original for Originals {
-    fn open(&mut self, id: u64, page: &str) -> Result<(), String> {
+    fn open(&self, id: u64, page: &str) -> Result<(), String> {
         let path = self.write(id, page)?;
         self.hand.hand(&path)
     }
@@ -216,8 +217,10 @@ pub struct Desktop {
 
 #[cfg(target_os = "linux")]
 impl Hand for Desktop {
-    fn hand(&mut self, file: &Path) -> Result<(), String> {
-        let portal = zbus::blocking::Connection::session()
+    fn hand(&self, file: &Path) -> Result<(), String> {
+        let portal = zbus::blocking::connection::Builder::session()
+            .map(|builder| builder.method_timeout(BUS_PATIENCE))
+            .and_then(zbus::blocking::connection::Builder::build)
             .map_err(|error| format!("the desktop portal could not be reached: {error}"))
             .and_then(|bus| portal::open_file(&bus, file));
         match portal {
@@ -227,6 +230,9 @@ impl Hand for Desktop {
         }
     }
 }
+
+/// How long a call on the session bus (the portal) is waited for.
+pub const BUS_PATIENCE: Duration = Duration::from_secs(4);
 
 /// How long `xdg-open` is waited for: one that ends at once with a failure says why; one still running after this
 /// has started the browser.

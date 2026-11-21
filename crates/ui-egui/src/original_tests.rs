@@ -28,7 +28,7 @@ struct Desktop {
 }
 
 impl Original for Desktop {
-    fn open(&mut self, id: u64, page: &str) -> Result<(), String> {
+    fn open(&self, id: u64, page: &str) -> Result<(), String> {
         if self.refuses {
             return Err("no browser is set up\0 here".to_owned());
         }
@@ -61,6 +61,19 @@ fn opened(desktop: Option<&Desktop>, subject: &str) -> (Harness<'static, InboxAp
 /// An HTML message of the sample with remote pictures.
 const HTML: &str = "Your bike is due for a service";
 
+/// Frames until the open the pane's reader started has its answer in the notice (the open runs on a thread).
+fn answered(harness: &mut Harness<'static, InboxApp>) {
+    for _ in 0..1000 {
+        if !harness.state().reader().opening_original() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        harness.step();
+    }
+    assert!(!harness.state().reader().opening_original(), "the open never answered");
+    harness.run();
+}
+
 fn more(harness: &mut Harness<'static, InboxApp>) {
     harness.get_by_label("More").click();
     harness.run();
@@ -86,6 +99,7 @@ fn the_row_hands_a_cleaned_copy_of_the_open_message_to_the_desktop() {
     more(&mut harness);
     harness.get_by_role_and_label(Role::MenuItem, ROW).click();
     harness.run();
+    answered(&mut harness);
     let handed = desktop.handed.lock().unwrap().clone();
     assert_eq!(handed.len(), 1, "one press, one page");
     let (handed_id, page) = handed.first().unwrap();
@@ -108,6 +122,7 @@ fn a_desktop_with_no_browser_says_why_in_the_status() {
     more(&mut harness);
     harness.get_by_role_and_label(Role::MenuItem, ROW).click();
     harness.run();
+    answered(&mut harness);
     let reader = harness.state().reader();
     assert!(reader.notice_failed(), "{:?}", reader.notice());
     let notice = reader.notice().unwrap();
@@ -133,7 +148,7 @@ fn a_plain_text_message_offers_no_row() {
                 text += 1;
                 assert!(!reader.offers_original(id), "{id}");
                 // Asked all the same, it says why not and hands nothing on.
-                reader.open_original(id);
+                reader.open_original(id, &egui::Context::default());
                 assert!(reader.notice_failed());
             }
             None => {}
@@ -164,5 +179,72 @@ fn a_held_key_s_repeat_does_not_open_the_browser() {
     harness.run();
     harness.key_up(egui::Key::Enter);
     harness.run();
+    answered(&mut harness);
     assert_eq!(desktop.handed.lock().unwrap().len(), 1, "a fresh press opens it");
+}
+
+/// A desktop that answers only when the test says so: its hand-off blocks on `gate` till then (10 s at most).
+struct Stuck {
+    gate: Mutex<std::sync::mpsc::Receiver<Result<(), String>>>,
+    asked: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Original for Stuck {
+    fn open(&self, _id: u64, _page: &str) -> Result<(), String> {
+        self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Bounded, so a hand-off run on the frame by mistake fails the test rather than hanging it.
+        self.gate.lock().unwrap().recv_timeout(std::time::Duration::from_secs(10)).unwrap_or_else(|_| Err("never answered".to_owned()))
+    }
+}
+
+/// What frees a [`Stuck`] desktop: the answer it gives.
+pub(crate) type Free = std::sync::mpsc::Sender<Result<(), String>>;
+
+/// A stuck desktop, the sender that frees it and how often it was asked.
+pub(crate) fn stuck() -> (Box<dyn Original>, Free, Arc<std::sync::atomic::AtomicUsize>) {
+    let (sender, gate) = std::sync::mpsc::channel();
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    (Box::new(Stuck { gate: Mutex::new(gate), asked: Arc::clone(&asked) }), sender, asked)
+}
+
+#[test]
+fn a_desktop_that_does_not_answer_stops_no_frame_and_its_answer_comes_later() {
+    let (original, free, asked) = stuck();
+    let mut app = InboxApp::with_outside_at_mail(
+        Mailbox::new(sample::session(clock()).unwrap(), clock()),
+        Box::new(sample::Pictures::default()),
+        Box::new(NoSave),
+    )
+    .with_original(original);
+    let id = app.mailbox().messages().iter().find(|row| row.subject == HTML).unwrap().id;
+    app.mailbox_mut().select(Some(id));
+    let mut harness = Harness::builder().with_size(vec2(1280.0, 800.0)).with_max_steps(12).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    more(&mut harness);
+    harness.get_by_role_and_label(Role::MenuItem, ROW).click();
+    // The frames go on while the desktop says nothing: each of these returns.
+    for _ in 0..5 {
+        harness.run();
+    }
+    let reader = harness.state().reader();
+    assert!(reader.opening_original());
+    assert_eq!(reader.notice(), Some("Opening a cleaned copy in the browser\u{2026}"));
+    // A second press while it runs is ignored: the desktop is not asked again.
+    more(&mut harness);
+    harness.get_by_role_and_label(Role::MenuItem, ROW).click();
+    harness.run();
+    assert_eq!(harness.state().reader().notice(), Some("An original is still being opened; wait for it."));
+    assert!(harness.state().reader().opening_original(), "the first one still runs");
+    // The rest of the window works: the list moves to another message.
+    let other = harness.state().mailbox().messages().iter().find(|row| row.id != id).unwrap().id;
+    harness.state_mut().mailbox_mut().select(Some(other));
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), Some(other));
+    // The desktop answers at last; the answer reaches the notice on a later frame.
+    free.send(Err("no browser\0at all".to_owned())).unwrap();
+    answered(&mut harness);
+    let reader = harness.state().reader();
+    assert!(reader.notice_failed());
+    assert_eq!(reader.notice(), Some("The original could not be opened: no browser at all"));
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1, "asked once");
 }

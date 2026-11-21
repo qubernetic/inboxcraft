@@ -319,6 +319,8 @@ pub struct Reader {
     save: Box<dyn Save>,
     /// Where the original goes to the browser; none in a window that cannot open one.
     original: Option<crate::original::Shared>,
+    /// The open of an original this reader started, until its answer is in the notice.
+    opening: Option<crate::original::Opening>,
     pictures: BTreeMap<String, PictureState>,
     owners: BTreeMap<String, u64>,
     notice: Option<String>,
@@ -364,6 +366,7 @@ impl Reader {
             fetch,
             save,
             original: None,
+            opening: None,
             pictures: BTreeMap::new(),
             owners: BTreeMap::new(),
             notice: None,
@@ -734,21 +737,44 @@ impl Reader {
     }
 
     /// Opens a cleaned copy of message `id` in the browser: the document the reader shows, written out again with no
-    /// script and no address in it ([`inboxcraft_html::page`]); the notice says that it went, or why not.
-    pub fn open_original(&mut self, id: u64) {
+    /// script and no address in it ([`inboxcraft_html::page`]). The page is made here; writing and handing it on run on
+    /// a thread of their own, which draws `ctx` again when it is done, and [`Reader::poll`] puts the answer in the
+    /// notice: that it went, or why not. A press while an open still runs is ignored, and the notice says so.
+    pub fn open_original(&mut self, id: u64, ctx: &egui::Context) {
         let page = self.opened(id).and_then(|opened| match &opened.content {
             Content::Html(document) => Some(inboxcraft_html::page(document, &opened.header.subject)),
             _ => None,
         });
-        let opened = match (&self.original, page) {
-            (Some(original), Some(page)) => original.open(id, &page),
-            (None, _) => Err(tr!("This window cannot open the browser.").to_owned()),
-            (_, None) => Err(tr!("Only an HTML message has an original to open.").to_owned()),
+        let started = match (&self.original, page) {
+            (Some(original), Some(page)) => {
+                let ctx = ctx.clone();
+                original.start(id, page, move || ctx.request_repaint_of(egui::ViewportId::ROOT))
+            }
+            (None, _) => crate::original::Started::Failed(tr!("This window cannot open the browser.").to_owned()),
+            (_, None) => crate::original::Started::Failed(tr!("Only an HTML message has an original to open.").to_owned()),
         };
+        match started {
+            crate::original::Started::Running(opening) => {
+                self.opening = Some(opening);
+                self.set_notice(tr!("Opening a cleaned copy in the browser…").to_owned());
+            }
+            crate::original::Started::Busy => self.set_notice(tr!("An original is still being opened; wait for it.").to_owned()),
+            crate::original::Started::Failed(why) => self.opened_original(Err(why)),
+        }
+    }
+
+    /// Puts how opening an original went into the notice.
+    fn opened_original(&mut self, opened: Result<(), String>) {
         match opened {
             Ok(()) => self.set_notice(tr!("Opened a cleaned copy in the browser").to_owned()),
             Err(why) => self.fail(tr!("The original could not be opened: {why}", why = shown(&why))),
         }
+    }
+
+    /// Whether an open of an original this reader started still runs.
+    #[must_use]
+    pub fn opening_original(&self) -> bool {
+        self.opening.is_some()
     }
 
     /// How saving attachment `index` of message `id` went, as its box says it: where it went, or why not; `None`
@@ -760,8 +786,9 @@ impl Reader {
 
     /// Takes in the pictures the fetch brought since the last call; `true` when there were any.
     pub fn poll(&mut self) -> bool {
+        let opened = self.poll_original();
         let done = self.fetch.finished();
-        let any = !done.is_empty();
+        let any = opened | !done.is_empty();
         for (url, answer) in done {
             // An answer for a picture nobody asked for (any more) is dropped.
             let Some(owner) = self.owners.get(&url).copied().filter(|_| self.pictures.contains_key(&url)) else { continue };
@@ -775,6 +802,19 @@ impl Reader {
             }
         }
         any
+    }
+
+    /// Takes in the answer of the open of an original this reader started, when it came; `true` then.
+    fn poll_original(&mut self) -> bool {
+        let Some(opening) = &self.opening else { return false };
+        let answer = match opening.try_recv() {
+            Ok(answer) => answer,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(tr!("the hand-off to the desktop stopped").to_owned()),
+        };
+        self.opening = None;
+        self.opened_original(answer);
+        true
     }
 
     /// The bytes of the decoded pictures kept: those of message `owner`, or all of them.

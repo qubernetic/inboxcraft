@@ -4178,7 +4178,7 @@ impl InboxApp {
             reader::Asked::Retry(id, key) => reader.retry(mailbox, id, &key),
             reader::Asked::Always(id) => reader.allow_always(mailbox, id),
             reader::Asked::Save(id, index) => reader.save(mailbox, id, index),
-            reader::Asked::Original(id) => reader.open_original(id),
+            reader::Asked::Original(id) => reader.open_original(id, ui.ctx()),
             reader::Asked::FullWidth(full) => reader.set_full_width(full),
             reader::Asked::Close => mailbox.select(None),
             reader::Asked::After(after) => mailbox.set_after(after),
