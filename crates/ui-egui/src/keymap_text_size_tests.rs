@@ -84,7 +84,8 @@ fn ctrl_0_no_longer_shows_home_and_home_has_no_key_at_the_start() {
     assert_eq!(percent(&harness), 100);
     // Home is still a press on the index's HOME away.
     harness.get_by_role_and_label(Role::Button, "Home").click();
-    harness.run();
+    // Home's emblem twinkles on by itself (#418): the window does not rest there.
+    harness.run_steps(4);
     assert_eq!(harness.state().screen(), Screen::Home);
 }
 

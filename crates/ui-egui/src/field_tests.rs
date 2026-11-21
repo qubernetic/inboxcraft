@@ -4,6 +4,8 @@
 //! The character field and the emblem: the fixed pattern, whole pixels, built once, hostile sizes, M1 and M2 at their
 //! key frames at every level, rest, and that the field takes no click, key or focus.
 
+use std::collections::BTreeSet;
+
 use egui::epaint::TextShape;
 use egui::{Event, Key, Pos2, Rect, Shape, Vec2, pos2, vec2};
 use egui_kittest::Harness;
@@ -306,28 +308,37 @@ fn warm_by_place(harness: &Harness<'static, Stage>) -> Vec<((usize, usize), char
 
 #[test]
 fn a_rect_drifting_by_parts_of_a_pixel_builds_once_and_keeps_its_warm_glyphs() {
-    // 964 points wide: 120 columns wherever within a pixel the rect starts.
+    // 964 points wide: 120 columns wherever within a pixel the rect starts. The cells under a still pointer keep
+    // flipping, so the drifting field is held against one that stands still, the pointer at the same place on both.
     let rect = |left: f32| Rect::from_min_size(pos2(left, 0.0), vec2(964.0, 600.0));
     let mut stage = Stage::new(Level::Full, Opts::default());
     stage.rect = rect(0.0);
     let mut harness = harness(stage);
-    harness.hover_at(pos2(300.0, 300.0));
-    harness.step();
+    let mut still = Stage::new(Level::Full, Opts::default());
+    still.rect = rect(0.0);
+    let mut still = self::harness(still);
+    for one in [&mut harness, &mut still] {
+        one.hover_at(pos2(300.0, 300.0));
+        one.step();
+    }
     let first = warm_by_place(&harness);
     assert!(!first.is_empty() && first.iter().all(|(.., cooling)| !cooling));
+    assert_eq!(first, warm_by_place(&still));
     // 0.3 points a frame for 30 frames, the pointer kept where it stands on the cells.
     for frame in 1..=30 {
         let left = frame as f32 * 0.3;
         harness.state_mut().rect = rect(left);
         harness.hover_at(pos2(300.0 + left.ceil(), 300.0));
         harness.step();
-        assert_eq!(warm_by_place(&harness), first, "frame {frame}: the warm cells changed as the rect moved");
+        still.step();
+        assert_eq!(warm_by_place(&harness), warm_by_place(&still), "frame {frame}: the warm cells changed as the rect moved");
     }
     // The pointer still, the rect's right edge jittering by a hundredth of a point.
     for frame in 0..30 {
         harness.state_mut().rect.max.x = 973.0 + if frame % 2 == 0 { 0.01 } else { 0.0 };
         harness.step();
-        assert_eq!(warm_by_place(&harness), first, "frame {frame}: the warm cells changed as the rect jittered");
+        still.step();
+        assert_eq!(warm_by_place(&harness), warm_by_place(&still), "frame {frame}: the warm cells changed as the rect jittered");
     }
     assert_eq!(harness.state().field.builds, 1, "a rect that only moved built the cells again");
 }
@@ -491,31 +502,51 @@ fn key_frames(level: Level, on_home: bool, reach: f32) {
     }
     assert!(first.iter().all(|(.., cooling)| !cooling));
     assert!(first.iter().any(|(_, glyph, _)| *glyph != '·'));
-    // The pointer stays: the cells hold their glyphs and nothing asks for a frame.
-    harness.step();
-    assert_eq!(warm(&harness), first, "{level:?}: a held cell changed");
-    assert!(rests(&mut harness, 3), "{level:?}: the field under a still pointer does not rest");
-    // The pointer moves on: the cells it left cool, each at its own time, keeping their glyphs.
+    // The pointer stays for a second: the cells within reach keep flipping, a frame is asked for each time, never a
+    // cell beyond reach is warm, and only some of those within it are warm at a time.
+    let (mut changes, mut held) = (0, 0);
+    let mut ever = BTreeSet::new();
+    let mut last = first.clone();
+    for _ in 0..60 {
+        harness.step();
+        assert!(repaints(&harness), "{level:?}: no frame asked for under a still pointer");
+        let now = warm(&harness);
+        let spots = field_spots(&now);
+        assert!(spots.iter().all(|spot| centre(&harness, *spot).distance(at) <= reach), "{level:?}: a cell beyond reach is warm");
+        assert!(!spots.is_empty() && spots.len() < near, "{level:?}: {} of {near} warm under a still pointer", spots.len());
+        held += spots.len();
+        changes += usize::from(now != last);
+        ever.extend(spots);
+        last = now;
+    }
+    // Our chance to flip (0.9 × (1 - distance²)) is higher than the source's, so more of them are warm at a time.
+    assert!(held * 100 <= near * 60 * 85, "{level:?}: on average {} of {near} warm under a still pointer", held / 60);
+    assert!(changes >= 40, "{level:?}: the field changed in {changes} of 60 frames under a still pointer");
+    assert!(ever.len() * 10 >= near * 7, "{level:?}: {} of {near} cells within reach flipped in a second", ever.len());
+    // The pointer moves on: the cells it left cool, each at its own time.
+    let before = field_spots(&warm(&harness));
     harness.hover_at(away);
     harness.step();
     assert!(repaints(&harness), "{level:?}: no frame asked for while cells cool");
     harness.run_steps(MS_100 - 1);
-    assert!(repaints(&harness), "{level:?}: no frame asked for while the trail cools, the pointer still");
+    assert!(repaints(&harness), "{level:?}: no frame asked for while the trail cools");
     let mid = warm(&harness);
-    let left: Vec<_> = mid.iter().filter(|(spot, ..)| spots.contains(spot)).collect();
+    let left: Vec<_> = mid.iter().filter(|(spot, ..)| before.contains(spot)).collect();
     assert!(left.iter().all(|(.., cooling)| *cooling));
-    for (spot, glyph, _) in &left {
-        assert_eq!(first.iter().find(|(was, ..)| was == spot).map(|(_, glyph, _)| glyph), Some(glyph), "{spot:?} changed its glyph");
-    }
-    assert!(left.len() * 4 >= spots.len() && left.len() * 4 <= spots.len() * 3, "{level:?}: {} of {} still warm at 100 ms", left.len(), spots.len());
+    assert!(
+        left.len() * 8 >= before.len() && left.len() * 4 <= before.len() * 3,
+        "{level:?}: {} of {} still warm at 100 ms",
+        left.len(),
+        before.len()
+    );
     let held = field_spots(&warm(&harness).into_iter().filter(|(.., cooling)| !cooling).collect::<Vec<_>>());
     assert!(!held.is_empty() && held.iter().all(|spot| centre(&harness, *spot).distance(away) <= reach));
-    let glyphs: Vec<_> = warm(&harness).into_iter().filter(|(.., cooling)| !cooling).collect();
-    // 200 ms after it moved on: the trail has cooled; the cells under the still pointer are the same glyphs.
+    // 200 ms after it moved on the trail has cooled; once the pointer has left the window too, the field rests.
     harness.run_steps(MS_200 - MS_100 + 1);
-    let last = warm(&harness);
-    assert!(last.iter().all(|(spot, ..)| !spots.contains(spot)), "{level:?}: the trail is still warm at 200 ms");
-    assert_eq!(last, glyphs, "{level:?}: the cells under the still pointer changed");
+    assert!(warm(&harness).iter().all(|(spot, ..)| !before.contains(spot)), "{level:?}: the trail is still warm at 200 ms");
+    harness.event(Event::PointerGone);
+    harness.run_steps(MS_200 + 1);
+    assert!(warm(&harness).is_empty(), "{level:?}: warm 200 ms after the pointer left the window");
     assert!(rests(&mut harness, 3), "{level:?}: the field does not rest once the trail has cooled");
 }
 
@@ -537,7 +568,7 @@ fn m1_at_reduced_elsewhere_and_at_off_is_still_dots() {
 }
 
 #[test]
-fn the_pointer_leaving_the_window_cools_everything_and_the_field_rests() {
+fn the_pointer_leaving_the_window_cools_everything_it_warmed() {
     for level in [Level::Full, Level::Reduced] {
         let mut stage = with_emblem(level);
         stage.opts.on_home = true;
@@ -547,11 +578,14 @@ fn the_pointer_leaving_the_window_cools_everything_and_the_field_rests() {
         assert!(!warm(&harness).is_empty());
         harness.event(Event::PointerGone);
         harness.step();
-        assert!(warm(&harness).iter().all(|(.., cooling)| *cooling));
+        let before = warm(&harness);
+        assert!(before.iter().all(|(.., cooling)| *cooling));
         assert!(repaints(&harness));
         harness.run_steps(MS_200);
-        assert!(warm(&harness).is_empty(), "{level:?}: still warm after the pointer left");
-        assert!(rests(&mut harness, 3), "{level:?}: no rest after the pointer left");
+        // The emblem twinkles on by itself: only the cells warm when the pointer left are cold.
+        let stale = warm(&harness).into_iter().filter(|(spot, ..)| before.iter().any(|(was, ..)| was == spot)).count();
+        assert_eq!(stale, 0, "{level:?}: still warm after the pointer left");
+        assert!(field_spots(&warm(&harness)).is_empty(), "{level:?}: a cell of the field is warm with the pointer gone");
     }
 }
 
@@ -653,10 +687,12 @@ fn m2_the_emblems_cells_flip_under_the_pointer_and_settle_back_at_full_and_reduc
         }
         harness.hover_at(corner + vec2(-200.0, 250.0));
         harness.step();
-        assert!(emblem_spots(&harness).iter().all(|(.., cooling)| *cooling));
+        let before = emblem_spots(&harness);
+        assert!(before.iter().all(|(.., cooling)| *cooling));
         harness.run_steps(MS_200);
-        assert!(emblem_spots(&harness).is_empty(), "{level:?}: the mark did not settle back in 200 ms");
-        assert!(rests(&mut harness, 3));
+        // The emblem twinkles on by itself: only the cells the pointer warmed have settled.
+        let stale = emblem_spots(&harness).into_iter().filter(|(spot, _)| before.iter().any(|(was, _)| was == spot)).count();
+        assert_eq!(stale, 0, "{level:?}: the mark did not settle back in 200 ms");
         seen.push(first);
     }
     assert_eq!(seen[0], seen[1], "the emblem answers differently at full and at reduced");
@@ -778,4 +814,134 @@ fn after_the_fonts_change_every_row_is_drawn_with_the_new_atlas() {
         let meshes = |galley: &egui::Galley| galley.rows.iter().map(|row| row.visuals.mesh.clone()).collect::<Vec<_>>();
         assert_eq!(meshes(&text.galley), meshes(&fresh), "a row drawn with glyphs of the old atlas");
     }
+}
+
+/// A field over [`RECT`] with the block emblem where [`with_emblem`] puts it, its cells built at one pixel a point.
+fn emblem_field() -> Field {
+    let area = Rect::from_min_max(pos2(380.0, 40.0), pos2(960.0, 580.0));
+    let mut field = Field::new(7).with_emblem(block());
+    field.build(RECT, TextScale::default(), Some(area), 1.0);
+    assert!(field.emblem_at().is_some());
+    field
+}
+
+/// A twinkle started: its spot, whether it took the other colour, when it started and how long it lasts.
+type Twinkle = (Spot, bool, f64, f64);
+
+/// The twinkles `field` starts in `seconds` from input time 1, updated `hz` times a second at `level` with the pointer
+/// away, and the glyphs each of them showed.
+fn run_away(field: &mut Field, hz: f64, seconds: f64, level: Level, on_home: bool) -> (Vec<Twinkle>, Vec<BTreeSet<u8>>) {
+    let mut started: Vec<Twinkle> = Vec::new();
+    let mut glyphs: Vec<BTreeSet<u8>> = Vec::new();
+    let mut known: BTreeMap<(Spot, u64), usize> = BTreeMap::new();
+    for step in 0..=(seconds * hz).round() as u64 {
+        field.update(1.0 + step as f64 / hz, step + 1, None, level, on_home);
+        for (spot, warm) in &field.warm {
+            let Some(left) = warm.left else { continue };
+            let at = *known.entry((*spot, left.to_bits())).or_insert_with(|| {
+                started.push((*spot, warm.tint, left, warm.cool));
+                glyphs.push(BTreeSet::new());
+                glyphs.len() - 1
+            });
+            glyphs[at].insert(warm.glyph);
+        }
+    }
+    (started, glyphs)
+}
+
+#[test]
+fn m2_the_emblem_twinkles_by_itself_about_7_5_times_a_second_at_any_frame_rate() {
+    for hz in [60.0, 20.0, 144.0] {
+        let mut field = emblem_field();
+        let (started, _) = run_away(&mut field, hz, 20.0, Level::Full, true);
+        assert!((120..=180).contains(&started.len()), "{hz} Hz: {} twinkles in 20 s", started.len());
+        assert!(started.iter().all(|(spot, ..)| matches!(spot, Spot::Emblem(_))), "{hz} Hz: a cell of the field twinkled");
+        let first = started.iter().map(|(_, _, at, _)| *at).fold(f64::MAX, f64::min);
+        assert!(first >= 1.25, "{hz} Hz: a twinkle at {first} s, before the field had settled");
+        for (spot, _, _, life) in &started {
+            assert!((TWINKLE_LIFE.0..=TWINKLE_LIFE.1).contains(life), "{hz} Hz: {spot:?} twinkles {life} s");
+        }
+    }
+}
+
+#[test]
+fn m2_half_of_the_ink_cells_twinkle_in_cyan_and_each_twinkle_flickers() {
+    let mut field = emblem_field();
+    let (started, glyphs) = run_away(&mut field, 60.0, 40.0, Level::Full, true);
+    let emblem = block();
+    let cyan = |spot: Spot| {
+        let index = spot_index(spot) as usize;
+        emblem.cell(index % 76, index / 76).1
+    };
+    let (on_cyan, on_ink): (Vec<&Twinkle>, Vec<&Twinkle>) = started.iter().partition(|(spot, ..)| cyan(*spot));
+    assert!(on_ink.len() >= 200 && !on_cyan.is_empty(), "{} twinkles on ink, {} on cyan in 40 s", on_ink.len(), on_cyan.len());
+    assert!(on_cyan.iter().all(|(_, tint, ..)| !tint), "a cyan cell twinkled in ink");
+    let other = on_ink.iter().filter(|(_, tint, ..)| *tint).count();
+    assert!(other * 100 >= on_ink.len() * 35 && other * 100 <= on_ink.len() * 65, "{other} of {} ink twinkles in cyan", on_ink.len());
+    let flickered = glyphs.iter().filter(|glyphs| glyphs.len() > 1).count();
+    assert!(flickered * 100 >= glyphs.len() * 85, "{flickered} of {} twinkles took a second glyph", glyphs.len());
+}
+
+#[test]
+fn m2_the_emblem_twinkles_only_while_the_field_is_live() {
+    for (level, on_home, live) in [(Level::Off, true, false), (Level::Reduced, false, false), (Level::Reduced, true, true), (Level::Full, true, true)]
+    {
+        let mut field = emblem_field();
+        let (started, _) = run_away(&mut field, 60.0, 4.0, level, on_home);
+        assert_eq!(!started.is_empty(), live, "{level:?}, on Home {on_home}: {} twinkles", started.len());
+    }
+}
+
+/// How many frames a 60 Hz window that draws only when asked draws in `seconds` from input time 1, `field` shown on
+/// Home at `level` with the pointer at `pointer`.
+pub(crate) fn frames_drawn(field: &mut Field, seconds: f64, pointer: Option<Pos2>, level: Level) -> usize {
+    let (mut drawn, mut next, mut pass): (usize, Option<f64>, u64) = (0, Some(1.0), 0);
+    for tick in 0..(seconds * 60.0).round() as u64 {
+        let now = 1.0 + tick as f64 * FRAME;
+        if next.is_some_and(|next| next <= now + 1e-9) {
+            pass += 1;
+            field.update(now, pass, pointer, level, true);
+            next = field.next_change(now);
+            drawn += 1;
+        }
+    }
+    drawn
+}
+
+#[test]
+fn the_field_asks_for_a_frame_only_when_something_is_due() {
+    // No emblem and the pointer away: the first frame, then none.
+    let mut bare = Field::new(7);
+    bare.build(RECT, TextScale::default(), None, 1.0);
+    assert_eq!(frames_drawn(&mut bare, 10.0, None, Level::Full), 1);
+    // At off, nothing moves.
+    assert_eq!(frames_drawn(&mut emblem_field(), 10.0, None, Level::Off), 1);
+    // The emblem twinkling, the pointer away: the frames its twinkles need, well below the display's 60.
+    for level in [Level::Full, Level::Reduced] {
+        let drawn = frames_drawn(&mut emblem_field(), 10.0, None, level);
+        eprintln!("{level:?}: {drawn} frames in 10 s with the pointer away");
+        assert!((200..=400).contains(&drawn), "{level:?}: {drawn} frames in 10 s with the pointer away");
+    }
+    // The pointer still on the field: about as many frames as the display gives, since some cell is always due.
+    let drawn = frames_drawn(&mut emblem_field(), 10.0, Some(pos2(200.0, 300.0)), Level::Full);
+    eprintln!("still pointer: {drawn} frames in 10 s");
+    assert!(drawn >= 300, "{drawn} frames in 10 s under a still pointer");
+}
+
+#[test]
+fn m2_the_emblem_does_not_twinkle_in_its_first_quarter_second_so_a_picture_rests() {
+    // A quarter second, by its number: over 40 seeds a twinkle in it would be all but certain; none starts in it, and some
+    // start soon after it.
+    let mut after = 0;
+    for seed in 0..40 {
+        let mut field = Field::new(seed).with_emblem(block());
+        let area = Rect::from_min_max(pos2(380.0, 40.0), pos2(960.0, 580.0));
+        field.build(RECT, TextScale::default(), Some(area), 1.0);
+        let (started, _) = run_away(&mut field, 60.0, 0.5, Level::Full, true);
+        for (spot, _, at, _) in &started {
+            assert!(*at >= 1.25, "seed {seed}: {spot:?} twinkled at {at} s, before the field had settled");
+        }
+        after += started.len();
+    }
+    assert!(after >= 40, "{after} twinkles in the quarter second after the settling, over 40 seeds");
 }

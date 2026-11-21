@@ -15,20 +15,28 @@
 //! never smaller. The field's cells it covers stay empty.
 //!
 //! Under the pointer (M1) the field's cells within 60 points flip to code glyphs, one in four tinted `cyan_text`, the
-//! rest `dim`; at the reduced level only Home's field answers, within 30 points; at off the field is still dots. A
-//! cell flips at once, holds its glyph while the pointer stays near it, and cools back to what it was within 200 ms
-//! of the pointer leaving it (each cell at a time of its own, so the trail thins out). The emblem's cells (M2) flip
-//! and settle back the same way within 60 points, at full and at reduced alike; at off it is still. Which cells flip,
-//! how long each cools and the glyph each flips to are hashes too, chosen once per flip: a flipped cell never
-//! changes its glyph until it has cooled.
+//! rest `dim`; at the reduced level only Home's field answers, within 30 points; at off the field is still dots. The
+//! cells within reach roll again and again while the pointer stays, moving or not: a cell that flipped may flip again
+//! 50 to 190 ms later ([`REFLIP`]), one that did not tries again after 60 ms ([`RETRY`]), and a warm cell whose roll
+//! misses starts to cool. A cooling cell takes a new glyph every 70 to 230 ms ([`FLICKER`]) and is back to what it was
+//! within 200 ms of its roll missing or of the pointer leaving it (each cell at a time of its own, so the trail thins
+//! out). The emblem's cells (M2) flip, cool and settle back the same way within 60 points, at full and at reduced
+//! alike; at off it is still. While the field is live (full, or reduced on Home) the emblem also twinkles by itself:
+//! in each slot of 1/60 s of input time, with a chance of 1 in 8, one of its cells that is not warm flips for 250 to
+//! 750 ms and flickers as it cools, half of the ink ones in cyan; about 7.5 a second at any frame rate. It starts a
+//! quarter second after the field is drawn ([`TWINKLE_SETTLE`]), so the few frames of a picture are at rest. Which
+//! cells flip, how long each cools, the glyph each takes and which cell twinkles are hashes of the cell, the seed and a
+//! count or a slot: the same input times give the same frames on every machine.
 //!
 //! The cells are built once, at the first [`show`], for as many whole cells as the rect holds, the seed, the text
 //! scale, the pixels per point and where the emblem stands on them, and again only when one of these changes: a rect
 //! that moves moves the cells and builds nothing, and the cells warm under the pointer keep their glyphs (when the
 //! cells are built again, the warm ones still there keep theirs); the row texts are built once for the theme's mode.
 //! A frame at rest paints them (one text a row, each found again in egui's galley cache) and builds nothing; while
-//! cells are warm, only the rows that hold one are built again, and a repaint is asked for only while a cell cools. The field
-//! takes no click, no key and no focus, and shows nothing to a screen reader: it only paints.
+//! cells are warm, only the rows that hold one are built again. A repaint is asked for at the time of the next change
+//! (a roll, a glyph, a cell cooled, a twinkle), never sooner: none at rest, about 30 a second while the emblem twinkles
+//! with the pointer away, about one a display frame under the pointer. The field takes no click, no key and no focus,
+//! and shows nothing to a screen reader: it only paints.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -59,6 +67,29 @@ pub const EMBLEM_REACH: f32 = 60.0;
 
 /// The `field_trail` token: the longest a cell takes to cool down once the pointer has left it, in seconds.
 pub const TRAIL: f64 = 0.2;
+
+/// How long a cell within reach that did not flip waits before it may flip again, in seconds.
+pub const RETRY: f64 = 0.06;
+
+/// The shortest and the longest wait, in seconds, before a cell within reach that flipped may flip again.
+pub const REFLIP: (f64, f64) = (0.05, 0.19);
+
+/// The shortest and the longest wait, in seconds, before a cooling cell takes a new glyph.
+pub const FLICKER: (f64, f64) = (0.07, 0.23);
+
+/// How long a slot of the emblem's twinkle lasts: a frame at 60 Hz. In each slot one of its cells starts to twinkle
+/// with a chance of 1 in 8: about 7.5 a second, whatever the frame rate.
+pub const TWINKLE_SLOT: f64 = 1.0 / 60.0;
+
+/// The shortest and the longest a cell twinkles, in seconds.
+pub const TWINKLE_LIFE: (f64, f64) = (0.25, 0.75);
+
+/// How long after a twinkle starts its cell takes its next glyph, in seconds.
+pub const TWINKLE_NEXT: f64 = 0.09;
+
+/// How long after the field is drawn (first, or again after it was not drawn) the emblem starts to twinkle, in
+/// seconds: unseen, and the few frames of a picture stay at rest.
+pub const TWINKLE_SETTLE: f64 = 0.25;
 
 /// The code glyphs a cell flips to.
 pub const CODE: &[u8] = b"01<>/\\[]{}()#$%&*+=-_:;!?|~^";
@@ -118,6 +149,8 @@ pub struct Emblem {
     rows: usize,
     /// Row by row: 0 off, 1 to 9 an ink cell of that density, 11 to 19 a cyan cell of density 1 to 9.
     cells: Vec<u8>,
+    /// The indexes of the cells that are on, the ones that twinkle.
+    marks: Vec<u32>,
 }
 
 /// What a cell of [`Emblem::cells`] holds above this is cyan.
@@ -143,7 +176,9 @@ impl Emblem {
                 }
             }
         }
-        Self { columns, rows: rows.len(), cells }
+        // At most 160 × 80 cells: the indexes fit a u32.
+        let marks = cells.iter().enumerate().filter(|(_, held)| **held != 0).filter_map(|(index, _)| u32::try_from(index).ok()).collect();
+        Self { columns, rows: rows.len(), cells, marks }
     }
 
     /// Its columns and rows.
@@ -189,6 +224,9 @@ struct Warm {
     cool: f64,
     /// The update it was last within reach in.
     seen: u64,
+    /// When it may change next, an input time in seconds: within reach it may flip again, cooling it takes a new
+    /// glyph.
+    next: f64,
 }
 
 /// What a field's cell holds.
@@ -255,6 +293,10 @@ pub struct Field {
     cells: Option<Cells>,
     look: Option<Look>,
     warm: BTreeMap<Spot, Warm>,
+    /// The cells within reach that did not flip, and when each may try again: at most [`MAX_WARM`].
+    waiting: BTreeMap<Spot, f64>,
+    /// From when the emblem twinkles (its slots before this are done with); `None` while it does not.
+    twinkled: Option<f64>,
     /// Updates so far.
     frame: u64,
     /// The input time, in seconds, and egui's pass number of the last update. If the field missed passes since (it
@@ -274,7 +316,20 @@ impl Field {
     /// that [`show`] is given.
     #[must_use]
     pub fn new(seed: u32) -> Self {
-        Self { seed, emblem: None, cells: None, look: None, warm: BTreeMap::new(), frame: 0, last: None, flips: 0, builds: 0, layouts: 0 }
+        Self {
+            seed,
+            emblem: None,
+            cells: None,
+            look: None,
+            warm: BTreeMap::new(),
+            waiting: BTreeMap::new(),
+            twinkled: None,
+            frame: 0,
+            last: None,
+            flips: 0,
+            builds: 0,
+            layouts: 0,
+        }
     }
 
     /// The same field with `emblem` on it, where [`Opts::emblem`] puts it.
@@ -329,6 +384,8 @@ impl Field {
         let before = self.cells.as_ref().map_or(0, |cells| cells.columns);
         let warm = std::mem::take(&mut self.warm);
         self.warm = warm.into_iter().filter_map(|(spot, warm)| Some((still_there(spot, before, &placed)?, warm))).collect();
+        let waiting = std::mem::take(&mut self.waiting);
+        self.waiting = waiting.into_iter().filter_map(|(spot, next)| Some((still_there(spot, before, &placed)?, next))).collect();
         self.cells = Some(placed);
         self.look = None;
         self.builds = self.builds.saturating_add(1);
@@ -364,9 +421,12 @@ impl Field {
         self.look = Some(Look { mode: theme.mode, build: self.builds, rows, emblem_rows });
     }
 
-    /// Flips the cells within the level's reach of `pointer` and cools those it has left, at input time `now` in egui's
-    /// pass `pass`.
+    /// Rolls the cells within the level's reach of `pointer` (again and again while it stays there), cools those it has
+    /// left, lets the cooling ones flicker and twinkles the emblem, at input time `now` in egui's pass `pass`.
     fn update(&mut self, now: f64, pass: u64, pointer: Option<Pos2>, level: Level, on_home: bool) {
+        if !now.is_finite() {
+            return;
+        }
         self.frame = self.frame.wrapping_add(1);
         let field_reach = match level {
             Level::Full => REACH_FULL,
@@ -377,23 +437,33 @@ impl Field {
         // A level without motion changes everything at once.
         if field_reach <= 0.0 {
             self.warm.retain(|spot, _| matches!(spot, Spot::Emblem(_)));
+            self.waiting.retain(|spot, _| matches!(spot, Spot::Emblem(_)));
         }
         if emblem_reach <= 0.0 {
             self.warm.retain(|spot, _| matches!(spot, Spot::Field(_)));
+            self.waiting.retain(|spot, _| matches!(spot, Spot::Field(_)));
         }
+        // A cell waits until its time comes, or the clock went back.
+        self.waiting.retain(|_, next| *next > now && *next - now <= RETRY);
         let pointer = pointer.filter(|at| at.x.is_finite() && at.y.is_finite());
+        if pointer.is_none() {
+            self.waiting.clear();
+        }
         if let (Some(at), Some(cells)) = (pointer, &self.cells) {
+            // Each update rolls afresh; the first rolls with the cells' own hashes.
+            // The low half of the count: the cast keeps what it is meant to.
+            let key = self.frame.wrapping_sub(1) as u32;
             let mut near = Vec::new();
             if field_reach > 0.0 {
-                field_near(cells, at, field_reach, self.seed, &mut near);
+                field_near(cells, at, field_reach, self.seed, key, &mut near);
             }
             if let (Some(emblem), Some(corner)) = (&self.emblem, cells.emblem_at)
                 && emblem_reach > 0.0
             {
-                emblem_near(emblem, corner, at, emblem_reach, self.seed, &mut near);
+                emblem_near(emblem, corner, at, emblem_reach, self.seed, key, &mut near);
             }
-            for spot in near {
-                self.touch(spot);
+            for (spot, hit) in near {
+                self.roll(spot, hit, now);
             }
         }
         // A cell the pointer has left was left now, unless the field missed passes: then it was left after the last
@@ -409,35 +479,105 @@ impl Field {
                 warm.left = Some(left);
             }
         }
+        // A cooling cell takes a new glyph from time to time until it has cooled.
+        for (spot, warm) in &mut self.warm {
+            if warm.left.is_some() && due(now, warm.next, FLICKER.1) {
+                self.flips = self.flips.wrapping_add(1);
+                let (index, salt) = salted(*spot);
+                warm.glyph = code(mix(index, self.flips, self.seed, salt));
+                warm.next = now + between(FLICKER, mix(index, self.flips, self.seed, salt ^ 0xF11C));
+            }
+        }
+        let live = level == Level::Full || (level == Level::Reduced && on_home);
+        self.twinkle(now, live, missed);
         // A cell left in the future (the clock went back) has cooled.
         self.warm.retain(|_, warm| warm.left.is_none_or(|left| (0.0..warm.cool).contains(&(now - left))));
         self.last = Some((now, pass));
     }
 
-    /// `spot` is within reach: it stays warm, or flips if it was not.
-    fn touch(&mut self, spot: Spot) {
+    /// `spot` is within reach and, if it is due, flips when `hit`: a warm cell that flips takes a new glyph and holds,
+    /// one that does not cools; a cold cell that flips turns warm, one that does not waits [`RETRY`].
+    fn roll(&mut self, spot: Spot, hit: bool, now: f64) {
+        let (index, salt) = salted(spot);
         if let Some(warm) = self.warm.get_mut(&spot) {
             warm.seen = self.frame;
-            warm.left = None;
+            if !due(now, warm.next, REFLIP.1) {
+                return;
+            }
+            if hit {
+                self.flips = self.flips.wrapping_add(1);
+                *warm = flipped(index, self.flips, self.seed, salt, now, self.frame);
+            } else {
+                warm.left.get_or_insert(now);
+                warm.next = now + RETRY;
+            }
+            return;
+        }
+        if self.waiting.contains_key(&spot) {
+            return;
+        }
+        if !hit {
+            if self.waiting.len() < MAX_WARM {
+                self.waiting.insert(spot, now + RETRY);
+            }
             return;
         }
         if self.warm.len() >= MAX_WARM {
             return;
         }
         self.flips = self.flips.wrapping_add(1);
-        let (index, salt) = match spot {
-            Spot::Field(index) => (index, 0x5EED),
-            Spot::Emblem(index) => (index, 0xE3B1),
-        };
-        let hash = mix(index, self.flips, self.seed, salt);
-        // The remainders are below 28, 4 and 1 001: the casts lose nothing.
-        let glyph = (hash % CODE.len() as u32) as u8;
-        let tint = (hash >> 8).is_multiple_of(4);
-        let cool = TRAIL * f64::from((hash >> 16) % 1000 + 1) / 1000.0;
-        self.warm.insert(spot, Warm { glyph, tint, left: None, cool, seen: self.frame });
+        self.warm.insert(spot, flipped(index, self.flips, self.seed, salt, now, self.frame));
     }
 
-    /// Whether a cell is cooling down, so the next frame changes something.
+    /// Starts the emblem's twinkles of the slots up to `now`, if the field is `live` and the emblem drawn: in each slot
+    /// one of its cells that is not warm, with a chance of 1 in 8. After the field `missed` passes it starts again
+    /// [`TWINKLE_SETTLE`] on.
+    fn twinkle(&mut self, now: f64, live: bool, missed: bool) {
+        let drawn = self.cells.as_ref().is_some_and(|cells| cells.emblem_at.is_some());
+        let Some(emblem) = self.emblem.as_ref().filter(|emblem| live && drawn && !emblem.marks.is_empty()) else {
+            self.twinkled = None;
+            return;
+        };
+        let from = match self.twinkled {
+            // Later than the settling allows: the clock went back.
+            Some(from) if !missed && from <= now + TWINKLE_SETTLE => from,
+            _ => now + TWINKLE_SETTLE,
+        };
+        self.twinkled = Some(from.max(now));
+        // A twinkle that would have settled by now is not started.
+        let first = slot_of(from.max(now - TWINKLE_LIFE.1)).saturating_add(1);
+        for slot in first..first.saturating_add(MOST_SLOTS) {
+            let at = slot_time(slot);
+            if at > now {
+                break;
+            }
+            let Some(index) = twinkle_in(&emblem.marks, self.seed, slot) else { continue };
+            let spot = Spot::Emblem(index);
+            if self.warm.contains_key(&spot) || self.warm.len() >= MAX_WARM {
+                continue;
+            }
+            self.flips = self.flips.wrapping_add(1);
+            let hash = mix(index, self.flips, self.seed, 0x7B1E);
+            let cyan = usize::try_from(index).ok().and_then(|index| emblem.cells.get(index)).is_some_and(|held| *held > CYAN);
+            // Half of them in cyan: an ink cell takes the other colour, a cyan one keeps its own.
+            let tint = !cyan && (hash >> 8).is_multiple_of(2);
+            let cool = between(TWINKLE_LIFE, mix(index, self.flips, self.seed, 0x7C1E));
+            self.warm.insert(spot, Warm { glyph: code(hash), tint, left: Some(at), cool, seen: self.frame, next: at + TWINKLE_NEXT });
+        }
+    }
+
+    /// When the field next changes by itself, an input time in seconds: `None` while it rests.
+    fn next_change(&self, now: f64) -> Option<f64> {
+        let warm = self.warm.values().map(|warm| warm.left.map_or(warm.next, |left| (left + warm.cool).min(warm.next)));
+        let twinkle = self.twinkled.zip(self.emblem.as_ref()).and_then(|(from, emblem)| {
+            let first = slot_of(from.max(now)).saturating_add(1);
+            (first..first.saturating_add(LOOK_AHEAD)).find(|slot| twinkle_in(&emblem.marks, self.seed, *slot).is_some()).map(slot_time)
+        });
+        warm.chain(self.waiting.values().copied()).chain(twinkle).reduce(f64::min)
+    }
+
+    /// Whether a cell is cooling down, so a coming frame changes something.
+    #[cfg(test)]
     fn cooling(&self) -> bool {
         self.warm.values().any(|warm| warm.left.is_some())
     }
@@ -496,8 +636,8 @@ impl Field {
 }
 
 /// Paints `field` over `rect` in `theme` at `level`, as `opts` says: builds its cells if they are not built for this
-/// rect, text scale and emblem area yet, flips and cools the cells under the pointer, and asks for a repaint while a
-/// cell cools. It takes no input and adds nothing a screen reader or the keyboard lands on.
+/// rect, text scale and emblem area yet, flips, cools and twinkles the cells, and asks for a repaint at the time of
+/// the next change, never sooner. It takes no input and adds nothing a screen reader or the keyboard lands on.
 pub fn show(ui: &mut Ui, theme: &Theme, field: &mut Field, rect: Rect, level: Level, opts: Opts) {
     let ctx = ui.ctx().clone();
     let ppp = ctx.pixels_per_point();
@@ -505,10 +645,79 @@ pub fn show(ui: &mut Ui, theme: &Theme, field: &mut Field, rect: Rect, level: Le
     field.lay_out(theme);
     let (now, pointer) = ui.input(|input| (input.time, input.pointer.hover_pos()));
     field.update(now, ctx.cumulative_pass_nr(), pointer, level, opts.on_home);
-    if field.cooling() {
-        ctx.request_repaint();
+    // NaN clamps to NaN, which no wait is made of.
+    if let Some(wait) = field.next_change(now).map(|next| (next - now).clamp(0.0, LONGEST_WAIT))
+        && let Ok(wait) = std::time::Duration::try_from_secs_f64(wait)
+    {
+        ctx.request_repaint_after(wait);
     }
     field.paint(ui, theme, opts);
+}
+
+/// The longest wait a field asks for before its next frame, in seconds.
+const LONGEST_WAIT: f64 = 4.0;
+
+/// The most twinkle slots an update goes through: those of the longest twinkle, and one.
+const MOST_SLOTS: u64 = 47;
+
+/// How many twinkle slots ahead the next twinkle is looked for: four seconds.
+const LOOK_AHEAD: u64 = 240;
+
+/// Whether a change planned for `next` is due at `now`: it is, or it lies more than `longest` ahead (the clock went
+/// back).
+fn due(now: f64, next: f64, longest: f64) -> bool {
+    now >= next || next - now > longest
+}
+
+/// A spot's index and the salt of its flips.
+const fn salted(spot: Spot) -> (u32, u32) {
+    match spot {
+        Spot::Field(index) => (index, 0x5EED),
+        Spot::Emblem(index) => (index, 0xE3B1),
+    }
+}
+
+/// The code glyph of a hash, as an index into [`CODE`].
+fn code(hash: u32) -> u8 {
+    // The remainder is below 28: the cast loses nothing.
+    (hash % CODE.len() as u32) as u8
+}
+
+/// A cell flipped `flips` at input time `now` in update `frame`: its glyph, tint and cooling time are hashes of its
+/// `index`, the flips and the `seed`.
+fn flipped(index: u32, flips: u32, seed: u32, salt: u32, now: f64, frame: u64) -> Warm {
+    let hash = mix(index, flips, seed, salt);
+    let tint = (hash >> 8).is_multiple_of(4);
+    let cool = TRAIL * f64::from((hash >> 16) % 1000 + 1) / 1000.0;
+    let next = now + between(REFLIP, mix(index, flips, seed, salt ^ 0x4E58));
+    Warm { glyph: code(hash), tint, left: None, cool, seen: frame, next }
+}
+
+/// A time between the two of `range`, by a hash.
+fn between((least, most): (f64, f64), hash: u32) -> f64 {
+    least + (most - least) * f64::from(share(hash))
+}
+
+/// The twinkle slot `at` lies in.
+fn slot_of(at: f64) -> u64 {
+    // Clamped to 0 and 2^52 first: the cast loses nothing a slot needs.
+    (at / TWINKLE_SLOT).floor().clamp(0.0, 4.5e15) as u64
+}
+
+/// When twinkle slot `slot` starts.
+fn slot_time(slot: u64) -> f64 {
+    // At most 2^52 + 288: an f64 holds it whole.
+    slot as f64 * TWINKLE_SLOT
+}
+
+/// Which of the emblem's cells `marks` starts to twinkle in `slot`, if one does: 1 slot in 8.
+fn twinkle_in(marks: &[u32], seed: u32, slot: u64) -> Option<u32> {
+    // The slot's two halves: the casts keep what they are meant to.
+    let hash = mix(slot as u32, (slot >> 32) as u32, seed, 0x7A1E);
+    if !hash.is_multiple_of(8) || marks.is_empty() {
+        return None;
+    }
+    marks.get((hash >> 3) as usize % marks.len()).copied()
 }
 
 /// A cell's height at `scale`: 15 points × the scale, to the whole point.
@@ -691,15 +900,20 @@ fn mix(a: u32, b: u32, c: u32, d: u32) -> u32 {
     (x >> 32) as u32
 }
 
+/// The salt of the roll of `key`: `salt` itself for the first.
+const fn rolled(salt: u32, key: u32) -> u32 {
+    salt.wrapping_add(key.wrapping_mul(0x9E37_79B9))
+}
+
 /// A share of 0 to 1 from a hash.
 fn share(hash: u32) -> f32 {
     // The top 24 bits fit an f32 whole.
     (hash >> 8) as f32 / (1_u32 << 24) as f32
 }
 
-/// The field's cells near `at` that flip within `reach`: each cell has a reach of its own, so the cells nearest the
-/// pointer flip most often and about 45 in 100 of those within `reach` flip.
-fn field_near(cells: &Cells, at: Pos2, reach: f32, seed: u32, near: &mut Vec<Spot>) {
+/// The field's cells within `reach` of `at`, each with whether it flips in the roll of `key`: the cells nearest the
+/// pointer flip most often, and about 45 in 100 of those within `reach` flip in a roll.
+fn field_near(cells: &Cells, at: Pos2, reach: f32, seed: u32, key: u32, near: &mut Vec<(Spot, bool)>) {
     let (first_column, end_column) = span(at.x - reach - cells.origin.x, at.x + reach - cells.origin.x, CELL_WIDTH, cells.columns);
     let (first_row, end_row) = span(at.y - reach - cells.origin.y, at.y + reach - cells.origin.y, cells.height, cells.rows);
     for row in first_row..end_row {
@@ -711,18 +925,19 @@ fn field_near(cells: &Cells, at: Pos2, reach: f32, seed: u32, near: &mut Vec<Spo
             }
             // At most 1 024 columns: the casts lose nothing.
             let centre = pos2(cells.origin.x + (column as f32 + 0.5) * CELL_WIDTH, top + cells.height / 2.0);
-            let own = share(mix(column as u32, row as u32, seed, 0xF1E1));
+            let own = share(mix(column as u32, row as u32, seed, rolled(0xF1E1, key)));
             let distance = centre.distance(at) / reach;
-            // Within reach while the share is under 0.9 × (1 - distance²).
-            if distance <= 1.0 && own < 0.9 * (1.0 - distance * distance) {
-                near.push(Spot::Field(index as u32));
+            // It flips while the share is under 0.9 × (1 - distance²).
+            if distance <= 1.0 {
+                near.push((Spot::Field(index as u32), own < 0.9 * (1.0 - distance * distance)));
             }
         }
     }
 }
 
-/// The emblem's cells near `at` that flip within `reach`: about half of those within it, the nearest most often.
-fn emblem_near(emblem: &Emblem, corner: Pos2, at: Pos2, reach: f32, seed: u32, near: &mut Vec<Spot>) {
+/// The emblem's cells within `reach` of `at`, each with whether it flips in the roll of `key`: about half of those
+/// within it flip in a roll, the nearest most often.
+fn emblem_near(emblem: &Emblem, corner: Pos2, at: Pos2, reach: f32, seed: u32, key: u32, near: &mut Vec<(Spot, bool)>) {
     let (first_column, end_column) = span(at.x - reach - corner.x, at.x + reach - corner.x, EMBLEM_CELL.x, emblem.columns);
     let (first_row, end_row) = span(at.y - reach - corner.y, at.y + reach - corner.y, EMBLEM_CELL.y, emblem.rows);
     for row in first_row..end_row {
@@ -732,10 +947,10 @@ fn emblem_near(emblem: &Emblem, corner: Pos2, at: Pos2, reach: f32, seed: u32, n
             }
             // At most 160 columns and 80 rows: the casts lose nothing.
             let centre = corner + vec2((column as f32 + 0.5) * EMBLEM_CELL.x, (row as f32 + 0.5) * EMBLEM_CELL.y);
-            let own = share(mix(column as u32, row as u32, seed, 0xE1B1));
+            let own = share(mix(column as u32, row as u32, seed, rolled(0xE1B1, key)));
             let distance = centre.distance(at) / reach;
-            if distance <= 1.0 && own < 0.25 + 0.75 * (1.0 - distance) {
-                near.push(Spot::Emblem((row * emblem.columns + column) as u32));
+            if distance <= 1.0 {
+                near.push((Spot::Emblem((row * emblem.columns + column) as u32), own < 0.25 + 0.75 * (1.0 - distance)));
             }
         }
     }
@@ -842,4 +1057,4 @@ impl Runs {
 
 #[cfg(test)]
 #[path = "field_tests.rs"]
-mod tests;
+pub(crate) mod tests;

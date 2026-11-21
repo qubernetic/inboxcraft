@@ -665,13 +665,20 @@ fn tab_goes_through_the_page_in_the_drawn_order_and_enter_and_space_press() {
     }
 }
 
+/// With the pointer away Home rests at off; at full and reduced its emblem twinkles on by itself, and the frames that
+/// asks for are bounded: those its twinkles need, about 30 a second, well below the display's 60.
 #[test]
-fn home_rests_at_every_level_with_the_pointer_away() {
+fn home_with_the_pointer_away_rests_at_off_and_twinkles_at_a_bounded_pace() {
     for level in [Level::Off, Level::Reduced, Level::Full] {
         for state in ["today", "first-run", "everything-failing"] {
             let page = Rect::from_min_size(pos2(0.0, 0.0), BODY);
             let mut harness = harness_with(sample(state).unwrap(), Mode::Dark, 100, BODY, page, Some(placeholder(20, 10)), level, false);
-            assert!(rests(&mut harness, 8), "{state} at {level:?} keeps asking for frames");
+            let rests = rests(&mut harness, 8);
+            assert_eq!(rests, level == Level::Off, "{state} at {level:?}: rests {rests}");
+            let mut field = harness.state().field.clone();
+            let drawn = crate::field::tests::frames_drawn(&mut field, 10.0, None, level);
+            let most = if level == Level::Off { 1 } else { 400 };
+            assert!(drawn <= most, "{state} at {level:?}: {drawn} frames in 10 s with the pointer away");
         }
     }
 }
