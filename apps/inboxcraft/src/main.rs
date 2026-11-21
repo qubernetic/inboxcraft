@@ -156,6 +156,9 @@ fn owner(background: bool) -> ExitCode {
         Ok(instance) => instance,
         Err(code) => return ExitCode::from(code),
     };
+    // The cleaned copies an earlier run opened in the browser go; a sample window's go with them, or with their age.
+    #[cfg(unix)]
+    inboxcraft::original::sweep_at_start();
     let shown = Shown::default();
     let wake = wake_of(&shown);
     let (send, heard) = mpsc::channel::<Request>();

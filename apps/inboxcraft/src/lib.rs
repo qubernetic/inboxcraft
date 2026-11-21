@@ -45,6 +45,8 @@ pub mod fontconfig;
 pub mod fonts;
 pub mod instance;
 pub mod notify;
+#[cfg(unix)]
+pub mod original;
 pub mod store;
 #[cfg(target_os = "linux")]
 pub mod tray;
@@ -146,6 +148,7 @@ pub const PICTURE_TIMEOUT: Duration = Duration::from_secs(20);
 /// allowed is fetched by `net`'s picture client (HTTPS only, a fixed user agent, no cookies, no referrer, public
 /// addresses only) on threads of its own, and the window adds accounts: passwords into the OS credential store,
 /// Detect on a thread, one `net` worker per account. Attachments are saved into the owner's downloads folder, never over a file.
+/// On Linux a message's cleaned copy opens in the owner's browser ([`original`]).
 ///
 /// # Errors
 ///
@@ -158,7 +161,7 @@ pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, k
     let owned = match mail {
         Mail::Sample => {
             let mailbox = Mailbox::new(sample::session(clock())?, clock());
-            return Ok(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save).with_keep(keep));
+            return Ok(with_originals(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save).with_keep(keep)));
         }
         Mail::Store(owned) => owned,
     };
@@ -177,10 +180,24 @@ pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, k
     let run: Run = accounts::run(move || accounts::system(&detecting));
     let detect = Box::new(onboard::Threaded::new(run, wake.clone()));
     let workers = Box::new(accounts::NetWorkers::new(WorkerSettings::new(Connector::new(tls)), Arc::clone(&keychain) as Arc<dyn Credentials>, wake));
-    Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save)
-        .with_accounts(keychain, detect, workers)
-        .with_week_default(inboxcraft_engine::week::for_locale(&locale()))
-        .with_keep(keep))
+    Ok(with_originals(
+        InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save)
+            .with_accounts(keychain, detect, workers)
+            .with_week_default(inboxcraft_engine::week::for_locale(&locale()))
+            .with_keep(keep),
+    ))
+}
+
+/// `app`, opening a message's cleaned copy in the owner's browser ([`original::Originals::of_owner`]).
+#[cfg(target_os = "linux")]
+fn with_originals(app: InboxApp) -> InboxApp {
+    app.with_original(Box::new(original::Originals::of_owner()))
+}
+
+/// `app` as it is: here no copy goes to a browser, and the reader does not offer it.
+#[cfg(not(target_os = "linux"))]
+fn with_originals(app: InboxApp) -> InboxApp {
+    app
 }
 
 /// The owner's locale for dates, as the system names it (`LC_ALL`, else `LC_TIME`, else `LANG`), or nothing.
