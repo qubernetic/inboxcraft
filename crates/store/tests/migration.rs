@@ -348,3 +348,75 @@ fn a_version_5_store_gets_the_links_of_its_messages() {
     let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
     assert_eq!(linked(&store, "second@example.org"), Vec::<u64>::new());
 }
+
+/// An open killed half-way through indexing the links of a version 5 store leaves it at version 5 with no index, and
+/// the next open does the whole of it again.
+#[test]
+fn a_link_indexing_stopped_half_way_is_done_again_at_the_next_open() {
+    let tmp = dir();
+    let dir = tmp.path();
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let mut batch = Batch::new().with(Change::PutAccount(account(1))).with(Change::PutFolder(folder(1, 1, "INBOX")));
+    for id in 1..=4u64 {
+        let message = message(id, 1, 1, u32::try_from(id).unwrap(), "Linked", Some(1));
+        let envelope = message.summary().envelope().clone().with_message_id(inboxcraft_model::MessageRef::new(&format!("m{id}@example.org")));
+        let summary = inboxcraft_model::Summary::new(message.summary().uid(), envelope);
+        batch.push(Change::PutMessage(inboxcraft_model::Message::new(message.id(), message.account(), message.folder(), summary)));
+    }
+    store.apply(&batch).unwrap();
+    drop(store);
+    Connection::open(dir.join(DATABASE_FILE)).unwrap().execute_batch(BACK_TO_VERSION_5).unwrap();
+    Sqlite::stop_link_indexing_after(Some(2));
+    let stopped = Sqlite::open(dir, StoreConfig::default());
+    Sqlite::stop_link_indexing_after(None);
+    assert!(matches!(stopped, Err(inboxcraft_store::StoreError::Migration(_))), "{stopped:?}");
+    let conn = Connection::open(dir.join(DATABASE_FILE)).unwrap();
+    let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+    let tables: u32 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE name = 'message_link'", [], |row| row.get(0)).unwrap();
+    assert_eq!((version, tables), (5, 0));
+    drop(conn);
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    for id in 1..=4u64 {
+        let link = inboxcraft_model::MessageRef::new(&format!("m{id}@example.org")).unwrap();
+        let found: Vec<u64> =
+            store.linked(&link, &std::collections::BTreeSet::new()).unwrap().iter().map(|entry| entry.message().id().get()).collect();
+        assert_eq!(found, [id]);
+    }
+}
+
+/// How long the first open after the update takes to index the links of 100 000 messages, each with a Message-ID,
+/// an In-Reply-To and 10 References: a timing, run by hand in release
+/// (`cargo test --release -p inboxcraft-store --test migration link_indexing_timing -- --ignored --nocapture`).
+#[test]
+#[ignore = "a timing, run by hand in release"]
+#[allow(clippy::disallowed_methods, reason = "a measurement of the wall time")]
+fn link_indexing_timing() {
+    const MESSAGES: u64 = 100_000;
+    let tmp = dir();
+    let dir = tmp.path();
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let mut batch = Batch::new().with(Change::PutAccount(account(1))).with(Change::PutFolder(folder(1, 1, "INBOX")));
+    let named = |n: u64| inboxcraft_model::MessageRef::new(&format!("m{n}@example.org")).unwrap();
+    for id in 1..=MESSAGES {
+        let message = message(id, 1, 1, u32::try_from(id).unwrap(), "A subject of a usual length, said once", Some(1));
+        let envelope = message
+            .summary()
+            .envelope()
+            .clone()
+            .with_message_id(Some(named(id)))
+            .with_in_reply_to(vec![named(id.saturating_sub(1))])
+            .with_references((1..=10).map(|back| named(id.saturating_sub(back))).collect());
+        let summary = inboxcraft_model::Summary::new(message.summary().uid(), envelope);
+        batch.push(Change::PutMessage(inboxcraft_model::Message::new(message.id(), message.account(), message.folder(), summary)));
+    }
+    store.apply(&batch).unwrap();
+    drop(store);
+    Connection::open(dir.join(DATABASE_FILE)).unwrap().execute_batch(BACK_TO_VERSION_5).unwrap();
+    let start = std::time::Instant::now();
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let took = start.elapsed();
+    let rows: i64 = Connection::open(dir.join(DATABASE_FILE)).unwrap().query_row("SELECT count(*) FROM message_link", [], |row| row.get(0)).unwrap();
+    drop(store);
+    println!("indexing the links of {MESSAGES} messages ({rows} rows) on open: {:.3} s", took.as_secs_f64());
+}

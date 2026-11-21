@@ -142,18 +142,31 @@ pub(crate) const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [
     CREATE INDEX message_link_message ON message_link (message);",
 ];
 
+#[cfg(any(test, feature = "test-hooks"))]
+thread_local! {
+    /// On this thread, the indexing of links fails after this many messages (tests): a migration stopped half-way.
+    pub(super) static FAIL_LINKS_AFTER: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
 /// The version that added the index of links: a store older than it has its messages indexed as it migrates.
 const LINKS_VERSION: u32 = 6;
 
 /// Indexes the links of every message already there. A record that does not read back is left out, as reading it
 /// fails anyway.
 fn index_links(conn: &Connection) -> Result<(), StoreError> {
+    let mut put = conn.prepare(super::PUT_LINK)?;
     let mut statement = conn.prepare("SELECT id, record FROM message")?;
     let rows = statement.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
-    for row in rows {
+    for (done, row) in rows.enumerate() {
+        #[cfg(any(test, feature = "test-hooks"))]
+        if FAIL_LINKS_AFTER.with(std::cell::Cell::get).is_some_and(|after| done >= after) {
+            return Err(StoreError::Migration("the indexing of links was stopped (test)".to_owned()));
+        }
+        #[cfg(not(any(test, feature = "test-hooks")))]
+        let _ = done;
         let (id, record) = row.map_err(migration_failed)?;
         if let Ok(message) = serde_json::from_str::<inboxcraft_model::Message>(&record) {
-            super::put_links(conn, id, &message).map_err(migration_failed)?;
+            super::put_links(&mut put, id, &message).map_err(migration_failed)?;
         }
     }
     Ok(())
@@ -170,11 +183,12 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
     if found > SCHEMA_VERSION {
         return Err(StoreError::NewerSchema { found, known: SCHEMA_VERSION });
     }
-    for migration in MIGRATIONS.iter().skip(usize::try_from(found).unwrap_or(usize::MAX)) {
+    for (version, migration) in (1..).zip(MIGRATIONS).skip(usize::try_from(found).unwrap_or(usize::MAX)) {
         tx.execute_batch(migration).map_err(migration_failed)?;
-    }
-    if found < LINKS_VERSION {
-        index_links(&tx)?;
+        // The rows a step needs filled from the records, right after the step, against the schema it made.
+        if version == LINKS_VERSION {
+            index_links(&tx)?;
+        }
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION).map_err(migration_failed)?;
     tx.commit()?;

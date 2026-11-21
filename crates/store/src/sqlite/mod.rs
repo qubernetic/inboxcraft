@@ -185,6 +185,13 @@ impl Sqlite {
         self.keeper.as_ref().map_or(0, Keeper::tries)
     }
 
+    /// Makes an open on this thread fail after indexing the links of `after` messages, as a kill half-way through
+    /// the migration would; `None` lets it finish (tests).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn stop_link_indexing_after(after: Option<usize>) {
+        schema::FAIL_LINKS_AFTER.with(|stop| stop.set(after));
+    }
+
     /// Ends the draft keeper's thread as if it had died (tests).
     #[cfg(any(test, feature = "test-hooks"))]
     pub fn stop_keeper(&self) {
@@ -520,12 +527,15 @@ fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError
         params![id, account, folder_key, uid.get(), fields.date, fields.from, fields.to, fields.subject, json(message)?],
     )?;
     tx.execute("DELETE FROM message_link WHERE message = ?1", [id])?;
-    Ok(put_links(tx, id, message)?)
+    Ok(put_links(&mut tx.prepare(PUT_LINK)?, id, message)?)
 }
 
-/// The links `message` (row `id`) names, into the index of links: each once.
-pub(super) fn put_links(conn: &Connection, id: i64, message: &Message) -> rusqlite::Result<()> {
-    let mut statement = conn.prepare("INSERT OR IGNORE INTO message_link (link, message) VALUES (?1, ?2)")?;
+/// One link of a message into the index of links, prepared once for all the links of a message, or of every message
+/// a migration indexes.
+pub(super) const PUT_LINK: &str = "INSERT OR IGNORE INTO message_link (link, message) VALUES (?1, ?2)";
+
+/// The links `message` (row `id`) names, into the index of links by `statement` ([`PUT_LINK`]): each once.
+pub(super) fn put_links(statement: &mut rusqlite::Statement<'_>, id: i64, message: &Message) -> rusqlite::Result<()> {
     for link in inboxcraft_model::links(message) {
         statement.execute(params![link.as_str(), id])?;
     }
