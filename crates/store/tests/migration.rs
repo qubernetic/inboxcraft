@@ -226,6 +226,7 @@ fn the_local_tables_are_the_ones_the_epic_needs() {
             "folder",
             "job",
             "message",
+            "message_link",
             "message_state",
             "meta",
             "outbox",
@@ -235,8 +236,9 @@ fn the_local_tables_are_the_ones_the_epic_needs() {
     );
 }
 
-/// What version 5 added, taken off again: a store as version 4 left it, with its rows.
-const BACK_TO_VERSION_4: &str = "DROP INDEX draft_newest;
+/// What versions 5 and 6 added, taken off again: a store as version 4 left it, with its rows.
+const BACK_TO_VERSION_4: &str = "DROP TABLE message_link;
+    DROP INDEX draft_newest;
     ALTER TABLE draft DROP COLUMN saved;
     ALTER TABLE draft DROP COLUMN saved_nanos;
     PRAGMA user_version = 4;";
@@ -287,4 +289,41 @@ fn a_version_4_store_with_a_damaged_draft_opens() {
     kept.sort_by(|a, b| b.saved.cmp(&a.saved).then(b.id.cmp(&a.id)));
     // The damaged two sort oldest, below the 48 the backfill could read.
     assert_eq!(store.newest_drafts(AccountId::new(1), 48).unwrap(), (50, kept));
+}
+
+/// What version 6 added, taken off again: a store as version 5 left it, with its messages.
+const BACK_TO_VERSION_5: &str = "DROP TABLE message_link;
+    PRAGMA user_version = 5;";
+
+#[test]
+fn a_version_5_store_gets_the_links_of_its_messages() {
+    let tmp = dir();
+    let dir = tmp.path();
+    let named = |id: u64, own: &str, answers: &str| {
+        let message = message(id, 1, 1, u32::try_from(id).unwrap(), "Linked", Some(1));
+        let envelope = message
+            .summary()
+            .envelope()
+            .clone()
+            .with_message_id(inboxcraft_model::MessageRef::new(own))
+            .with_in_reply_to(inboxcraft_model::MessageRef::new(answers).into_iter().collect());
+        let summary = inboxcraft_model::Summary::new(message.summary().uid(), envelope);
+        inboxcraft_model::Message::new(message.id(), message.account(), message.folder(), summary)
+    };
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let batch = Batch::new()
+        .with(Change::PutAccount(account(1)))
+        .with(Change::PutFolder(folder(1, 1, "INBOX")))
+        .with(Change::PutMessage(named(1, "first@example.org", "")))
+        .with(Change::PutMessage(named(2, "second@example.org", "first@example.org")));
+    store.apply(&batch).unwrap();
+    drop(store);
+    Connection::open(dir.join(DATABASE_FILE)).unwrap().execute_batch(BACK_TO_VERSION_5).unwrap();
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    let linked = |link: &str| -> Vec<u64> {
+        store.linked(&inboxcraft_model::MessageRef::new(link).unwrap()).unwrap().iter().map(|entry| entry.message().id().get()).collect()
+    };
+    assert_eq!(linked("first@example.org"), [1, 2]);
+    assert_eq!(linked("second@example.org"), [2]);
 }

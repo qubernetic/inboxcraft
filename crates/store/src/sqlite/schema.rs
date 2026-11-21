@@ -8,7 +8,7 @@ use rusqlite::{Connection, TransactionBehavior};
 use crate::StoreError;
 
 /// The schema version this build writes: the number of [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// Migration `n` (from 0) takes a database from version `n` to `n + 1`. A released migration never changes; a new
 /// schema is a new migration at the end.
@@ -131,7 +131,36 @@ pub(crate) const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [
         saved_nanos = coalesce(CAST(json_extract(record, '$.saved[1]') AS INTEGER), 0)
       WHERE typeof(record) = 'text' AND json_valid(record);
     CREATE INDEX draft_newest ON draft (account, saved DESC, saved_nanos DESC, id DESC);",
+    // 6: the links each message names (its Message-ID, In-Reply-To and References), so one message's thread is found
+    // by its links, not by reading every message. The rows already there are indexed from their records by
+    // [`index_links`] in the same transaction.
+    "CREATE TABLE message_link (
+        link TEXT NOT NULL,
+        message INTEGER NOT NULL REFERENCES message (id) ON DELETE CASCADE,
+        PRIMARY KEY (link, message)
+    ) WITHOUT ROWID;
+    CREATE INDEX message_link_message ON message_link (message);",
 ];
+
+/// The version that added the index of links: a store older than it has its messages indexed as it migrates.
+const LINKS_VERSION: u32 = 6;
+
+/// Indexes the links of every message already there. A record that does not read back is left out, as reading it
+/// fails anyway.
+fn index_links(conn: &Connection) -> Result<(), StoreError> {
+    let mut statement = conn.prepare("SELECT id, record FROM message")?;
+    let rows = statement.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
+    for row in rows {
+        let (id, record) = row.map_err(migration_failed)?;
+        if let Ok(message) = serde_json::from_str::<inboxcraft_model::Message>(&record) {
+            super::put_links(conn, id, &message).map_err(|error| match error {
+                StoreError::Database(detail) | StoreError::DatabaseRefused(detail) => StoreError::Migration(detail),
+                kept => kept,
+            })?;
+        }
+    }
+    Ok(())
+}
 
 /// Brings `conn` to [`SCHEMA_VERSION`] in one transaction.
 ///
@@ -146,6 +175,9 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
     }
     for migration in MIGRATIONS.iter().skip(usize::try_from(found).unwrap_or(usize::MAX)) {
         tx.execute_batch(migration).map_err(migration_failed)?;
+    }
+    if found < LINKS_VERSION {
+        index_links(&tx)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION).map_err(migration_failed)?;
     tx.commit()?;
