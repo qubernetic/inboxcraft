@@ -295,3 +295,27 @@ fn a_page_taller_than_the_body_scrolls_under_a_bar_at_the_body_s_right_edge() {
     let after = painted(&harness, "Undo send").map_or(f32::NEG_INFINITY, |rect| rect.top());
     assert!(after < before.top() - 50.0, "the wheel at the body's edge scrolls the page: {} → {after}", before.top());
 }
+
+/// Whether the text painted in the last frame that starts with `wanted` ends with an ellipsis (egui keeps the whole
+/// text in a cut galley and marks it `elided`).
+fn cut_short(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<bool> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<bool> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text().starts_with(wanted) => Some(text.galley.elided),
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn the_all_day_alert_choice_reads_whole_at_1000_and_130_percent() {
+    // `settings-1000-130-calendar` read "09:00 the day be…": the field kept its 220 at any text size.
+    let harness = window(1000.0, 130, Section::Calendar);
+    assert_eq!(cut_short(&harness, "09:00 the day before"), Some(false), "the chosen hour reads whole");
+    let whole = painted(&harness, "09:00 the day before").unwrap();
+    let field = harness.get_by_role_and_label(Role::ComboBox, "All-day alerts ring at").rect();
+    assert!(field.contains_rect(whole), "{whole:?} inside the field {field:?}");
+    assert!(field.right() <= body(&harness).right(), "the field stays in the body");
+}
