@@ -1648,3 +1648,33 @@ fn an_account_s_name_in_the_remove_question_is_one_plain_capped_line() {
     onboarding.form_mut().address = "studio@example.org".to_owned();
     assert_eq!(onboarding.removed_name(), "studio@example.org", "a short name stays whole");
 }
+
+#[test]
+fn the_save_summary_sees_a_calendar_a_server_or_a_port_and_not_a_change_undone() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    assert!(!onboarding.save_summary().changed, "nothing typed");
+    onboarding.form_mut().caldav = "https://dav.example.org/".to_owned();
+    let summary = onboarding.save_summary();
+    assert!(summary.changed, "the CalDAV address alone is something to save");
+    assert!(summary.checks);
+    onboarding.form_mut().caldav.clear();
+    onboarding.form_mut().host = "moved.example.org".to_owned();
+    assert!(onboarding.save_summary().changed, "a server");
+    onboarding.form_mut().host = "imap.example.org".to_owned();
+    onboarding.form_mut().port = "143".to_owned();
+    assert!(onboarding.save_summary().changed, "a port");
+    onboarding.form_mut().port = "993".to_owned();
+    onboarding.form_mut().label = "Allotment".to_owned();
+    assert!(onboarding.save_summary().changed, "a name");
+    let held = listed(&mut mailbox)["label"].as_str().unwrap_or_default().to_owned();
+    onboarding.form_mut().label = format!("  {held} ");
+    assert!(!onboarding.save_summary().changed, "a name set back, with spaces round it");
+    onboarding.form_mut().password = Secret::new("new-Lantern-9");
+    assert!(onboarding.save_summary().changed, "a new password");
+    onboarding.form_mut().password.clear();
+    let summary = onboarding.save_summary();
+    assert!(!summary.changed, "a password typed then cleared");
+    assert_eq!(summary.note, None);
+}
