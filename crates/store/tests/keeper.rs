@@ -193,6 +193,21 @@ fn the_end_of_the_store_tries_a_failed_keep_again_when_the_disk_came_back() {
 }
 
 #[test]
+fn the_end_of_the_store_tries_a_failed_keep_again_whichever_thread_runs_first() {
+    let tmp = dir();
+    let mut store = keeping(tmp.path());
+    store.refuse_keeps(true);
+    keep(&mut store, "newest");
+    assert!(until(&store, |store| !store.unkept().is_empty()));
+    store.refuse_keeps(false);
+    // The keeper's thread looks at the queue as soon as the end begins, before the end does anything else: it must
+    // not find nothing to write and stop before the failed keep is handed to it again.
+    store.keeper_hooks().unwrap().close_after_a_look();
+    drop(store);
+    assert_eq!(on_disk(tmp.path()).as_deref(), Some("newest"), "the keeper stopped before the end's own try");
+}
+
+#[test]
 fn removing_the_account_of_a_draft_whose_keep_failed_ends_the_draft() {
     let tmp = dir();
     let mut store = keeping(tmp.path());
