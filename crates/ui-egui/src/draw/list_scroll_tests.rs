@@ -179,3 +179,47 @@ fn done_on_a_keyed_row_cut_at_the_top_never_jumps_the_list() {
         }
     }
 }
+
+/// Done on the last row wholly in sight, and the window made 40 shorter while the left row's room still closes: the
+/// row walked on to, still sliding up into the left row's place, counts as whole in the last viewport, so the shorter
+/// one brings it into sight, and it ends whole, not cut at the bottom. In List and Grouped (where the row walked on to
+/// may stand in another group).
+#[test]
+fn a_window_made_shorter_while_done_closes_keeps_the_walked_to_row_whole() {
+    for view in [InboxView::List, InboxView::Grouped] {
+        let height = 640.0;
+        let mut harness = moving(view, height);
+        harness.key_press(Key::Home);
+        harness.run_steps(30);
+        let sight = super::view_rect(&harness.ctx).unwrap();
+        // J until the next row lies past the viewport's bottom and stands right under the keyed one.
+        let order = super::order(&harness.ctx);
+        let mut at = 0;
+        loop {
+            let next = *order.get(at + 1).unwrap();
+            let (keyed, below) = (row(&harness, order[at]), row(&harness, next));
+            let under = keyed.zip(below).is_some_and(|(keyed, below)| (below.top() - keyed.bottom()).abs() < 0.01);
+            if below.is_none_or(|rect| rect.bottom() > sight.bottom() + 0.01) && under {
+                break;
+            }
+            harness.key_press(Key::J);
+            harness.run_steps(30);
+            at += 1;
+        }
+        let (left, next) = (order[at], order[at + 1]);
+        let rect = row(&harness, left).unwrap();
+        assert!(sight.bottom() - rect.bottom() < 40.0, "{view:?}: the keyed row ends less than 40 above the bottom: {rect:?} in {sight:?}");
+        harness.key_press(Key::D);
+        harness.run_steps(8);
+        harness.set_size(vec2(1300.0, height - 40.0));
+        harness.run_steps(120);
+        // In Grouped the next-message rule may walk on to a row of another group.
+        let walked = harness.state().mailbox().selected().unwrap();
+        if view == InboxView::List {
+            assert_eq!(walked, next, "{view:?}: the row under the left one is walked on to");
+        }
+        let sight = super::view_rect(&harness.ctx).unwrap();
+        let walked = row(&harness, walked).unwrap();
+        assert!(sight.expand(0.01).contains_rect(walked), "{view:?}: the walked-to row whole in the shorter list: {walked:?} in {sight:?}");
+    }
+}

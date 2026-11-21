@@ -2165,8 +2165,12 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
     let room = ui.available_rect_before_wrap().height();
     // A keyed row whole in the last pass's viewport stays whole when the viewport changes height (a window made
     // shorter in the pass after a step): it is brought into sight by this pass's viewport, not the last one's.
+    // Whole there is judged where the row comes to stand ([`Listing::settled`]) under the offset this pass shows (the
+    // first message in sight kept in place), so a row still sliding up after Done counts, and one the owner scrolled
+    // partly out does not.
     let resized = keyed.filter(|keyed| {
         kept.as_ref().is_some_and(|kept| {
+            let (top, view) = (forced.unwrap_or_else(|| points(kept.offset)), points(kept.height));
             kept.keyed == Some(*keyed)
                 && kept.pass.saturating_add(1) >= ui.ctx().cumulative_pass_nr()
                 && kept.height > 0
@@ -2174,8 +2178,8 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
                 && hundredths(room) != kept.height
                 && listing
                     .find(*keyed)
-                    .and_then(|index| listing.span(index))
-                    .is_some_and(|(top, bottom)| hundredths(top) >= kept.offset && hundredths(bottom) <= kept.offset.saturating_add(kept.height))
+                    .and_then(|index| listing.settled(index, top))
+                    .is_some_and(|(above, below)| hundredths(above) >= hundredths(top) && hundredths(below) <= hundredths(top + view))
         })
     });
     let moved = keyed.filter(|keyed| kept.as_ref().is_none_or(|kept| kept.keyed != Some(*keyed))).or(bring).or(resized);
