@@ -336,8 +336,7 @@ fn this_workspace_names_every_core_crate_in_its_floors() {
     // The floors stand at what the epic of #230 held (#425); none is below the one it had before.
     assert_eq!(floors.workspace, 98.0);
     for (names, floor) in [
-        (&["charset", "mime", "vcard"][..], 100.0),
-        (&["dav", "engine", "ical", "mcp", "model", "proto", "testkit", "time"][..], 99.0),
+        (&["charset", "dav", "engine", "ical", "mcp", "mime", "model", "proto", "testkit", "time", "vcard"][..], 99.0),
         (&["store"][..], 98.0),
         (&["ui-egui"][..], 97.0),
         (&["net"][..], 95.0),

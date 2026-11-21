@@ -252,8 +252,7 @@ The floors live in one file, `.config/coverage.toml`:
 
 | Floor | Crates |
 |---|---|
-| 100 % | `charset`, `mime`, `vcard` |
-| 99 % | `dav`, `engine`, `ical`, `mcp`, `model`, `proto`, `testkit`, `time` |
+| 99 % | `charset`, `dav`, `engine`, `ical`, `mcp`, `mime`, `model`, `proto`, `testkit`, `time`, `vcard` |
 | 98 % | the workspace total; `store` |
 | 97 % | `ui-egui` |
 | 95 % | `net` |
