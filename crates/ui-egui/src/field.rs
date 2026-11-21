@@ -15,16 +15,17 @@
 //! never smaller. The field's cells it covers stay empty.
 //!
 //! Under the pointer (M1) the field's cells within 60 points flip to code glyphs, one in four tinted `cyan_text`, the
-//! rest `dim`; at the reduced level only Home's field answers, within 30 points and with 0.4 of the chance
-//! ([`STRENGTH_REDUCED`]); at off the field is still dots. As in the motion source, the cells within reach roll again
-//! and again while the pointer stays, moving or not: a cell flips with a chance of 0.8 × f², f = 1 at the pointer and
-//! 0 at the edge of its reach; one that flipped may flip again 50 to 190 ms later ([`REFLIP`]), one that did not tries
-//! again after 60 ms ([`RETRY`]). A flipped cell is back to what it was 80 to 200 ms after its flip ([`HOT`]), the
-//! pointer there or not; out of reach it takes a new glyph every 70 to 230 ms ([`FLICKER`]) until then, so the trail
-//! thins out. Under a still pointer about 22 in 100 of the cells within reach are flipped at a time at full, 10 in 100
-//! at reduced (`field_tests`). Unlike the source, a cell near Home's text flips as often as any. The emblem's cells
-//! (M2) flip with a chance of 0.25 + 0.75 × f and settle back the same way within 60 points, at full and at reduced
-//! alike; at off it is still. While the field is live (full, or reduced on Home) the emblem also twinkles by itself:
+//! rest `dim`; at the reduced level only Home's field answers, and as at full; at off the field is still dots. As in
+//! the motion source, the cells within reach roll again and again while the pointer stays, moving or not: a cell flips
+//! with a chance of 0.8 × f² × q, f = 1 at the pointer and 0 at the edge of its reach; one that flipped may flip again
+//! 50 to 190 ms later ([`REFLIP`]), one that did not tries again after 60 ms ([`RETRY`]). A flipped cell is back to
+//! what it was 80 to 200 ms after its flip ([`HOT`]), the pointer there or not; out of reach it takes a new glyph every
+//! 70 to 230 ms ([`FLICKER`]) until then, so the trail thins out. Under a still pointer away from text about 22 in 100
+//! of the cells within reach are flipped at a time (`field_tests`). Near the quiet blocks its caller names (Home's
+//! text, [`Field::set_quiet`]) the field calms, as the source does near text: q is 0.2 inside a block and comes back
+//! to 1 over 80 points, eased ([`quiet_at`]), and a flipped cell shows at q of its opacity (its colour mixed into
+//! `bg` by q, a flat colour); the dots at rest do not change. The emblem's cells (M2) flip with a chance of
+//! 0.25 + 0.75 × f and settle back the same way within 60 points, at full and at reduced alike; at off it is still. While the field is live (full, or reduced on Home) the emblem also twinkles by itself:
 //! in each slot of 1/60 s of input time, with a chance of 1 in 8, one of its cells that is not warm flips for 250 to
 //! 750 ms and flickers as it settles, half of the ink ones in cyan and the cyan ones in cyan; about 7.5 a second at
 //! any frame rate. It starts a quarter second after the field is drawn ([`TWINKLE_SETTLE`]), so the few frames of a
@@ -40,8 +41,8 @@
 //! cells are warm, only the rows that hold one are built again. A repaint is asked for at the time of the next change
 //! (a roll, a glyph, a cell back, a twinkle), never sooner: none at rest; measured in a 60 Hz window that draws only
 //! when asked, about 30 a second while the emblem twinkles with the pointer away (295 in 10 s, the twinkles' new
-//! glyphs as they settle) and about 60 under a still pointer (597 in 10 s); none while the field is not drawn. The field takes no click, no key and no focus,
-//! and shows nothing to a screen reader: it only paints.
+//! glyphs as they settle) and about 60 under a still pointer (597 in 10 s); none while the field is not drawn. The
+//! field takes no click, no key and no focus, and shows nothing to a screen reader: it only paints.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -64,15 +65,18 @@ pub const DOTS_IN_100: u32 = 5;
 /// How far from the pointer the field's cells flip at the full level, in points.
 pub const REACH_FULL: f32 = 60.0;
 
-/// How far from the pointer Home's field's cells flip at the reduced level, in points.
-pub const REACH_REDUCED: f32 = 30.0;
-
 /// How far from the pointer the emblem's cells flip at the full and the reduced level, in points.
 pub const EMBLEM_REACH: f32 = 60.0;
 
-/// How strongly Home's field answers the pointer at the reduced level: its cells flip with this share of the chance
-/// they have at full.
-pub const STRENGTH_REDUCED: f32 = 0.4;
+/// The share of a field cell's chance to flip, and of a flipped cell's opacity, left inside a quiet block (one of
+/// Home's text blocks, [`Field::set_quiet`]).
+pub const QUIET_IN: f32 = 0.2;
+
+/// How far from a quiet block the share comes back to 1, eased, in points.
+pub const FADE: f32 = 80.0;
+
+/// The most quiet blocks a field keeps; those handed in past it are left out.
+pub const MAX_QUIET: usize = 32;
 
 /// The `field_trail` token: the longest a cell stays flipped, in seconds.
 pub const TRAIL: f64 = 0.2;
@@ -307,6 +311,8 @@ pub struct Field {
     cells: Option<Cells>,
     look: Option<Look>,
     warm: BTreeMap<Spot, Warm>,
+    /// The quiet blocks, as [`Field::set_quiet`] was last told: at most [`MAX_QUIET`].
+    quiet: Vec<Rect>,
     /// The cells within reach that did not flip, when each may try again and the update it was last within reach in:
     /// at most [`MAX_WARM`].
     waiting: BTreeMap<Spot, (f64, u64)>,
@@ -336,6 +342,7 @@ impl Field {
             cells: None,
             look: None,
             warm: BTreeMap::new(),
+            quiet: Vec::new(),
             waiting: BTreeMap::new(),
             twinkled: None,
             frame: 0,
@@ -369,10 +376,44 @@ impl Field {
         self.look = None;
     }
 
+    /// The blocks the field keeps quiet near from now on (Home's text, as it was drawn last frame): within one a field
+    /// cell flips with [`QUIET_IN`] of its chance and a flipped one shows at that opacity, coming back to the whole
+    /// over [`FADE`] points eased ([`quiet_at`]). The emblem's cells and the dots at rest are not quietened. Blocks that
+    /// are empty or not a number are left out, and those past [`MAX_QUIET`]; the list is kept, so this builds nothing
+    /// once it has grown.
+    pub fn set_quiet(&mut self, blocks: &[Rect]) {
+        self.quiet.clear();
+        let usable = blocks.iter().filter(|block| block.is_finite() && block.is_positive()).map(|block| within_reach(*block));
+        self.quiet.extend(usable.take(MAX_QUIET));
+    }
+
     /// Where the emblem's top left corner was drawn at the last build, if it was.
     #[cfg(test)]
     pub(crate) fn emblem_at(&self) -> Option<Pos2> {
         self.cells.as_ref().and_then(|cells| cells.emblem_at)
+    }
+
+    /// The rect the cells were last placed over.
+    #[cfg(test)]
+    pub(crate) fn covers(&self) -> Option<Rect> {
+        self.cells.as_ref().map(|cells| cells.rect)
+    }
+
+    /// The quiet blocks it keeps.
+    #[cfg(test)]
+    pub(crate) fn quiet(&self) -> &[Rect] {
+        &self.quiet
+    }
+
+    /// The centres of the field's warm cells (not the emblem's).
+    #[cfg(test)]
+    pub(crate) fn warm_centres(&self) -> Vec<Pos2> {
+        let Some(cells) = &self.cells else { return Vec::new() };
+        let centre = |index: usize| {
+            let (row, column) = (index / cells.columns, index % cells.columns);
+            pos2(cells.origin.x + (column as f32 + 0.5) * CELL_WIDTH, row_top(cells, row) + cells.height / 2.0)
+        };
+        self.warm.keys().filter_map(|spot| if let Spot::Field(index) = spot { Some(centre(*index as usize)) } else { None }).collect()
     }
 
     /// How many times the cells were built (what the page tests of a screen with a field count).
@@ -416,7 +457,7 @@ impl Field {
         let mut layouts = 0_u64;
         let rows = (0..cells.rows)
             .map(|row| {
-                let job = field_row(cells, row, &[], theme)?;
+                let job = field_row(cells, row, &[], &[], theme)?;
                 layouts = layouts.saturating_add(1);
                 Some(job)
             })
@@ -445,8 +486,9 @@ impl Field {
         }
         self.frame = self.frame.wrapping_add(1);
         let (field_reach, strength) = match level {
+            // Home's field answers at the reduced level as at full; every other field is still there.
             Level::Full => (REACH_FULL, 1.0),
-            Level::Reduced if on_home => (REACH_REDUCED, STRENGTH_REDUCED),
+            Level::Reduced if on_home => (REACH_FULL, 1.0),
             Level::Reduced | Level::Off => (0.0, 0.0),
         };
         let emblem_reach = if level == Level::Off { 0.0 } else { EMBLEM_REACH };
@@ -468,7 +510,7 @@ impl Field {
             let key = self.frame.wrapping_sub(1) as u32;
             let mut near = Vec::new();
             if field_reach > 0.0 {
-                field_near(cells, at, field_reach, strength, self.seed, key, &mut near);
+                field_near(cells, at, (field_reach, strength), &self.quiet, self.seed, key, &mut near);
             }
             if let (Some(emblem), Some(corner)) = (&self.emblem, cells.emblem_at)
                 && emblem_reach > 0.0
@@ -612,7 +654,7 @@ impl Field {
                 if let Some(Some(job)) = look.rows.get(row) {
                     text(at, painter.layout_job(job.clone()));
                 }
-            } else if let Some(job) = field_row(cells, row, &warm, theme) {
+            } else if let Some(job) = field_row(cells, row, &warm, &self.quiet, theme) {
                 layouts = layouts.saturating_add(1);
                 text(at, painter.layout_job(job));
             }
@@ -925,10 +967,27 @@ fn share(hash: u32) -> f32 {
     (hash >> 8) as f32 / (1_u32 << 24) as f32
 }
 
-/// The field's cells within `reach` of `at`, each with whether it flips in the roll of `key`: with a chance of
-/// 0.8 × f² × `strength`, f = 1 - distance / `reach`, so the cells nearest the pointer flip most often and about 13 in
-/// 100 of those within `reach` flip in a roll at full strength.
-fn field_near(cells: &Cells, at: Pos2, reach: f32, strength: f32, seed: u32, key: u32, near: &mut Vec<(Spot, bool)>) {
+/// The share of the field's effect left at `at` near the `quiet` blocks: [`QUIET_IN`] inside one, coming back to 1 at
+/// [`FADE`] points from it, eased (0.2 + 0.8 × k², k = distance / [`FADE`] up to 1), the least over the blocks; 1 with
+/// none near, and for a point that is not a number.
+pub(crate) fn quiet_at(quiet: &[Rect], at: Pos2) -> f32 {
+    // A point that is not a number lies near no block.
+    if !(at.x.is_finite() && at.y.is_finite()) {
+        return 1.0;
+    }
+    quiet.iter().fold(1.0, |least, block| {
+        let dx = (block.left() - at.x).max(at.x - block.right()).max(0.0);
+        let dy = (block.top() - at.y).max(at.y - block.bottom()).max(0.0);
+        let k = (vec2(dx, dy).length() / FADE).min(1.0);
+        let share = QUIET_IN + (1.0 - QUIET_IN) * k * k;
+        share.min(least)
+    })
+}
+
+/// The field's cells within `reach` of `at` (with `strength`), each with whether it flips in the roll of `key`: with a chance of
+/// 0.8 × f² × `strength` × the [`quiet_at`] the cell, f = 1 - distance / `reach`, so the cells nearest the pointer flip
+/// most often and about 13 in 100 of those within `reach` flip in a roll at full strength away from any text.
+fn field_near(cells: &Cells, at: Pos2, (reach, strength): (f32, f32), quiet: &[Rect], seed: u32, key: u32, near: &mut Vec<(Spot, bool)>) {
     let (first_column, end_column) = span(at.x - reach - cells.origin.x, at.x + reach - cells.origin.x, CELL_WIDTH, cells.columns);
     let (first_row, end_row) = span(at.y - reach - cells.origin.y, at.y + reach - cells.origin.y, cells.height, cells.rows);
     for row in first_row..end_row {
@@ -944,7 +1003,7 @@ fn field_near(cells: &Cells, at: Pos2, reach: f32, strength: f32, seed: u32, key
             let distance = centre.distance(at) / reach;
             let f = 1.0 - distance;
             if distance <= 1.0 {
-                near.push((Spot::Field(index as u32), own < 0.8 * f * f * strength));
+                near.push((Spot::Field(index as u32), own < 0.8 * f * f * strength * quiet_at(quiet, centre)));
             }
         }
     }
@@ -971,17 +1030,28 @@ fn emblem_near(emblem: &Emblem, corner: Pos2, at: Pos2, reach: f32, seed: u32, k
     }
 }
 
-/// The text of the field's row `row`, `warm` cells (by column) flipped: `None` for a row with nothing to show.
-fn field_row(cells: &Cells, row: usize, warm: &[(u32, Warm)], theme: &Theme) -> Option<LayoutJob> {
+/// The text of the field's row `row`, `warm` cells (by column) flipped, each at the share [`quiet_at`] its centre
+/// near the `quiet` blocks of its colour mixed into `bg` (a flat colour that looks as that opacity does on the page's
+/// ground): `None` for a row with nothing to show.
+fn field_row(cells: &Cells, row: usize, warm: &[(u32, Warm)], quiet: &[Rect], theme: &Theme) -> Option<LayoutJob> {
     let held = cells.held.get(row * cells.columns..(row + 1) * cells.columns)?;
     let p = &theme.palette;
+    let middle = row_top(cells, row) + cells.height / 2.0;
     let mut runs = Runs::new(theme.fonts.field(), cells.height, CELL_WIDTH);
     let mut warm = warm.iter().peekable();
     for (column, cell) in held.iter().enumerate() {
         // At most 1 024 columns: the cast loses nothing.
         let flipped = warm.next_if(|(at, _)| *at == column as u32).map(|(_, warm)| *warm);
         match flipped {
-            Some(warm) => runs.push(glyph(warm.glyph), if warm.tint { p.cyan_text } else { p.dim }),
+            Some(warm) => {
+                // At most 1 024 columns: the cast loses nothing.
+                let centre = pos2(cells.origin.x + (column as f32 + 0.5) * CELL_WIDTH, middle);
+                let colour = if warm.tint { p.cyan_text } else { p.dim };
+                // Near a quiet block a flat colour: the glyph's mixed into the page's ground, as the source's opacity
+                // shows on it.
+                let q = quiet_at(quiet, centre);
+                runs.push(glyph(warm.glyph), if q < 1.0 { crate::theme::mix(p.bg, colour, q) } else { colour });
+            }
             None if *cell == DOT => runs.push('·', p.faint),
             None => runs.push(' ', p.faint),
         }

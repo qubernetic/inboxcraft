@@ -101,6 +101,13 @@ What the app still owes this file, one line each. The finer differences, with th
   they cannot fit whole. The line "↳ the field reacts under the pointer here, and only here" is a note on the
   design, not drawn, and the names' box keeps no room for it: 70 high where the file's is 96. The frames
   `screen/home/*` (and `screen/event-draft-past/home`) still stand the emblem at 95 and the box at 96.
+- The file lays Home's character field only right of the brief and says it reacts "here, and only here"; the code
+  lays it under the whole page, the brief too, calmer near the text (0.2 of the chance and the opacity inside a text
+  block, the whole again 80 px off), as the motion source does. At the reduced level the file has Home's field react
+  within 30 px at quiet strength; the code answers there as at full (60 px). The frames `screen/home/*`,
+  `screen/event-draft-past/home`, `motion/motion-m1/reduced`, `motion/motion-flow-home/reduced`,
+  `foundations/character-field/default` ("never behind text a person reads", "reach 30 px") and
+  `foundations/motion-levels/default` ("at quiet strength") no longer match.
 
 **Sample content**
 - The sample mailbox and the pictures in `docs/images/` use their own people, subjects, times and counts, not the

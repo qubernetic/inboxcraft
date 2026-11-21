@@ -296,7 +296,7 @@ fn the_emblem_leaves_whole_at_a_1381_window_and_under_and_stays_from_1382() {
         }
     }
     let stage = Rect::from_min_size(pos2(600.0, 0.0), vec2(547.0, 499.0));
-    assert_eq!(emblem_place(stage, &emblem, 0.0, 1.0), None, "a stage one point too low leaves no emblem");
+    assert_eq!(emblem_place(stage, stage, &emblem, 0.0, 1.0), None, "a stage one point too low leaves no emblem");
 }
 
 /// The rects of the pictures (meshes with a texture of their own) painted this frame.
@@ -731,7 +731,9 @@ fn headline_harness(level: crate::motion::Level) -> Harness<'static, (Home, bool
 /// The headline's two lines as painted, the greeting and the name.
 fn headline_lines(harness: &Harness<'static, (Home, bool)>) -> (String, String) {
     let (first, second) = harness.state().0.headline();
-    let texts = crate::component::tests::texts(harness);
+    // The field's rows at rest (dots and spaces) lie under the brief too: not the headline.
+    let texts: Vec<String> =
+        crate::component::tests::texts(harness).into_iter().filter(|text| !text.chars().all(|ch| ch == '·' || ch == ' ')).collect();
     let width = |text: &str| text.chars().count();
     let first = texts.iter().find(|text| width(text) == width(first) && !text.starts_with('[')).cloned().unwrap_or_default();
     let name = format!("{}.", second.unwrap_or_default());
@@ -863,4 +865,96 @@ fn a_long_account_name_leaves_refused_the_sign_in_in_sight() {
             }
         }
     }
+}
+
+/// The blocks Home names to its field: the brief's parts and the names' box, as drawn.
+fn named(parts: &super::Parts) -> Vec<Rect> {
+    let p = parts;
+    [p.label, p.headline, p.lede, p.banner, p.counts, p.agenda, p.drafts, p.steps, p.buttons, p.names].into_iter().flatten().collect()
+}
+
+/// The field lies under the whole page, the brief's area too, in a wide window and in one under 600 (no emblem there),
+/// and Home names the brief's parts (and the names' box where it stands) as the blocks it keeps quiet near.
+#[test]
+fn home_s_field_covers_the_brief_and_is_quiet_near_its_parts() {
+    for state in ["today", "first-run", "everything-failing", "overflow-counts"] {
+        for size in [BODY, vec2(560.0, BODY.y)] {
+            let page = Rect::from_min_size(pos2(0.0, 0.0), size);
+            let emblem = Some(crate::brand::emblem().clone());
+            let mut harness = harness_with(sample(state).unwrap(), Mode::Dark, 100, size, page, emblem, Level::Off, false);
+            harness.run_steps(2);
+            let field = &harness.state().field;
+            let p = harness.state().drawn.parts;
+            assert_eq!(field.covers(), Some(page), "{state} at {size:?}: the field lies under the whole page");
+            assert_eq!(p.names.is_some(), size.x > BRIEF, "{state} at {size:?}: the names where the emblem stands");
+            assert!(named(&p).len() >= 4 && p.headline.is_some(), "{state} at {size:?}: {p:?}");
+            // Each block lies on the page, over the brief or the place, not off at the window's corner.
+            for block in field.quiet() {
+                assert!(page.contains_rect(*block) || page.intersects(*block), "{state} at {size:?}: {block:?} off the page");
+            }
+            assert_eq!(field.quiet(), named(&p).as_slice(), "{state} at {size:?}: the quiet blocks");
+        }
+    }
+}
+
+/// The brief scrolled: the quiet blocks move with its parts, in the frame that draws them there.
+#[test]
+fn home_s_quiet_blocks_follow_the_scrolled_brief() {
+    let size = vec2(BODY.x, 420.0);
+    let page = Rect::from_min_size(pos2(0.0, 0.0), size);
+    let mut harness = harness_with(sample("today").unwrap(), Mode::Dark, 100, size, page, None, Level::Off, false);
+    let before = harness.state().field.quiet().to_vec();
+    let headline = harness.state().drawn.parts.headline.unwrap();
+    assert_eq!(before, named(&harness.state().drawn.parts));
+    harness.event(egui::Event::PointerMoved(pos2(300.0, 300.0)));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -120.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+    });
+    for _ in 0..30 {
+        harness.step();
+        // Never more than a frame behind: the blocks set at the end of a frame are that frame's parts.
+        assert_eq!(harness.state().field.quiet(), named(&harness.state().drawn.parts).as_slice());
+    }
+    let scrolled = harness.state().drawn.parts.headline.unwrap();
+    assert!(scrolled.top() < headline.top() - 50.0, "the brief did not scroll: {headline:?} then {scrolled:?}");
+    assert!(harness.state().field.quiet().contains(&scrolled) && !harness.state().field.quiet().contains(&headline));
+}
+
+/// On Home a still pointer over the brief's text flips fewer of the field's cells than the same pointer over the
+/// empty place: the same reach, the same frames.
+#[test]
+fn on_home_a_pointer_over_the_text_flips_fewer_cells_than_over_the_empty_place() {
+    let page = Rect::from_min_size(pos2(0.0, 0.0), BODY);
+    let flipped = |at: egui::Pos2| {
+        let mut harness = harness_with(sample("today").unwrap(), Mode::Dark, 100, BODY, page, None, Level::Reduced, false);
+        let mut warm = 0;
+        for _ in 0..60 {
+            harness.hover_at(at);
+            harness.step();
+            warm += harness.state().field.warm_centres().iter().filter(|centre| centre.distance(at) <= crate::field::REACH_FULL).count();
+        }
+        warm
+    };
+    // The headline's middle, and a place as far down, 300 into the empty place.
+    let headline = harness_with(sample("today").unwrap(), Mode::Dark, 100, BODY, page, None, Level::Off, false).state().drawn.parts.headline.unwrap();
+    let (text, empty) = (flipped(headline.center()), flipped(pos2(BRIEF + 300.0, headline.center().y)));
+    assert!(empty > 100 && text * 3 < empty, "{text} flipped over the headline, {empty} over the empty place");
+}
+
+/// At the reduced level, the fresh install's, the pointer over the brief's margin flips the field's cells there.
+#[test]
+fn at_reduced_the_pointer_over_the_brief_flips_the_field_there() {
+    let page = Rect::from_min_size(pos2(0.0, 0.0), BODY);
+    let mut harness = harness_with(sample("today").unwrap(), Mode::Dark, 100, BODY, page, None, Level::Reduced, false);
+    let mut seen = 0;
+    for step in 0..60 {
+        harness.hover_at(pos2(20.0, 300.0 + step as f32));
+        harness.step();
+        seen += harness.state().field.warm_centres().iter().filter(|centre| centre.x < BRIEF).count();
+    }
+    assert!(seen > 0, "no cell of the field under the brief flipped");
 }

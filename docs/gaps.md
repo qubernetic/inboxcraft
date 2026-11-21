@@ -1560,11 +1560,6 @@ time from the code as it is, not measured.
   the month and agenda frames' events outside the week of 16 November are not in it (#416).
 - Home's emblem first twinkles a quarter second after Home shows, where the motion source starts at once: the
   headless pictures draw a few frames of Home and must show it at rest (#418).
-- The character field flips as strongly next to Home's text as away from it: the motion source calms its cells
-  near text (to 0.2 of the chance and of the opacity, over 80 points), the field knows nothing of the text above it
-  (#418).
-- At the reduced level Home's field answers within 30 points, as the design says, and with 0.4 of the chance, as
-  the motion source does; the source keeps its full 60 points there, so about a quarter as many cells flip (#418).
 - The account form's note that saving signs in to a moved server with the stored password stands in `warn` in the
   caption's place, as `account-edit/new-password` draws the note for a new password; no frame draws the stored
   password's case (#422).

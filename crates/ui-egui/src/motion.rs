@@ -64,7 +64,7 @@ pub const LONGEST: f32 = 0.25;
 pub enum Level {
     /// Every movement.
     Full,
-    /// The calm ones: the character field answers only on Home, and nearer; the emblem as at full.
+    /// The calm ones: the character field answers only on Home, as at full; the emblem as at full.
     Reduced,
     /// None: still dots and a still emblem.
     Off,
