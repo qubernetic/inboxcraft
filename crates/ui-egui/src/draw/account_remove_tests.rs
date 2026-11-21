@@ -389,5 +389,9 @@ fn a_removal_that_went_through_is_a_done_message_and_one_the_store_refused_is_no
     harness.get_by_label_contains("did not let its password go");
     let lines = top_lines(&harness);
     assert!(!lines.is_empty() && lines.iter().all(|(_, fill)| *fill != p.plus), "{lines:?}");
+    assert!(lines.iter().any(|(_, fill)| *fill == p.muted), "the notice's line: {lines:?}");
     assert!(!crate::component::field::tests::drawn(&harness).iter().any(|text| text.text == check), "no check");
+    let status = &harness.state().status;
+    assert!(status.notice().is_some_and(|text| text.contains("did not let its password go")), "a notice");
+    assert!(!status.has_error(), "not an error");
 }
