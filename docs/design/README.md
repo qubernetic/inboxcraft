@@ -129,7 +129,9 @@ What the app still owes this file, one line each. The finer differences, with th
 - "Look around with sample mail" is coming soon; Home shows two drafts where one frame draws three.
 
 **Lists and the reader**
-- Later is the inbox's group heads over the snoozed mail, not the file's page with scheduled sends and pins.
+- Later is the file's page (Snoozed, Pins, Parked); its snoozed pile has a third head, "Later", that the frames do
+  not draw, and scheduled sends stay in the Outbox, as no frame of Later draws them.
+- The screener card and its line take 66 where the frame draws 65: the rows under it stand 1 lower than the frame's.
 - The why line leaves out what the engine does not keep: when a sender was let in, a move by the owner, SPF and
   DKIM.
 - At 130 % text the list's view switch stands on the pills' line, not in the head.
