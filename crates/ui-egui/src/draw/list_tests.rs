@@ -3945,3 +3945,138 @@ fn beside_the_reader_a_row_with_room_for_three_acts_offers_done_snooze_and_delet
         assert_eq!(walked, now, "{percent} %: Tab walks the acts in the drawn order");
     }
 }
+
+/// The window over the frames' sample at its time (as the pictures take it), `size` wide and high at `percent`, in
+/// `place` with the message called `subject` open beside the list, if one is named.
+fn frames_window(size: egui::Vec2, percent: u16, place: Place, subject: Option<&str>) -> Harness<'static, InboxApp> {
+    let clock = FakeClock::new(Timestamp::from_unix(sample::frames::TIME, 0).unwrap());
+    let session = sample::frames::session(Box::new(clock.clone())).unwrap();
+    let mut app = InboxApp::at_mail(Mailbox::new(session, Box::new(clock.clone())));
+    sample::frames::prepare(app.mailbox_mut(), &clock, sample::frames::Outbox::Waiting).unwrap();
+    app.set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+    app.mailbox_mut().open(place);
+    if let Some(subject) = subject {
+        let id = app.mailbox().messages().iter().find(|row| row.subject == subject).map(|row| row.id).unwrap();
+        app.mailbox_mut().select(Some(id));
+    }
+    let mut harness = Harness::builder().with_size(size).with_context_setup(install_fonts).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness
+}
+
+/// The width `text` takes in `font` at the window's text scale.
+fn text_width(harness: &Harness<'static, InboxApp>, text: &str, font: impl Fn(&crate::theme::Theme) -> crate::theme::Font) -> f32 {
+    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    let font = font(&theme);
+    let job = egui::text::LayoutJob::single_section(font.text(text), font.format(theme.palette.ink));
+    harness.ctx.fonts_mut(|fonts| fonts.layout_job(job)).size().x
+}
+
+/// The parts of the list pane between `top` and `bottom` that run past `right`, the pane's edge.
+fn past_the_pane<State>(harness: &Harness<'_, State>, left: f32, right: f32, top: f32, bottom: f32) -> Vec<String> {
+    harness
+        .root()
+        .children_recursive()
+        .filter_map(|node| {
+            let bounds = node.accesskit_node().bounding_box()?;
+            let rect = egui::Rect::from_min_max(egui::pos2(bounds.x0 as f32, bounds.y0 as f32), egui::pos2(bounds.x1 as f32, bounds.y1 as f32));
+            let past = rect.left() >= left && rect.left() < right && rect.top() >= top && rect.bottom() <= bottom && rect.right() > right + 0.5;
+            past.then(|| format!("{:?} {:?} {rect:?}", node.accesskit_node().role(), node.accesskit_node().label()))
+        })
+        .collect()
+}
+
+/// The screener's choices in New senders read whole: at the pictures' sizes, with the queue's scroll bar taking its
+/// room, as the design's queue shows them, each option holds its whole name; at 130 % in a narrow window the switch
+/// goes under its label and a name is cut only by the 136 the design sets.
+#[test]
+fn the_screener_s_choices_read_whole_beside_the_reader_and_at_130_percent() {
+    for (size, percent) in [(vec2(1400.0, 860.0), 100), (vec2(1440.0, 900.0), 100), (vec2(1024.0, 800.0), 130)] {
+        let harness = frames_window(size, percent, Place::Senders, Some("Prices for the sign, oak or steel"));
+        let reader = super::reader_rect(&harness.ctx).unwrap();
+        for name in ["Before the inbox", "Inside, marked", "Off"] {
+            let option = harness.get_by_role_and_label(Role::RadioButton, &format!("{name} for the screener")).rect();
+            // Whole, or cut only at the 136 the design sets a name's box to (at 130 % "Before the inbox" is wider).
+            let word = text_width(&harness, name, |theme| theme.fonts.button).min(136.0);
+            assert!(option.width() >= word + 8.0, "{size:?} {percent} %: {name} in {} for {word}", option.width());
+            assert!(option.right() <= reader.left(), "{size:?} {percent} %: {name} at {option:?}, the reader at {reader:?}");
+        }
+    }
+}
+
+/// A held sender's card stays inside the list pane at 130 % in a narrow window: its subject gives way (an ellipsis) to
+/// how many more and the time after it, so nothing after the subject, and no line under it, runs past the pane.
+#[test]
+fn a_sender_s_card_stays_inside_the_list_pane_at_130_percent() {
+    let harness = frames_window(vec2(1024.0, 800.0), 130, Place::Senders, Some("Prices for the sign, oak or steel"));
+    let reader = super::reader_rect(&harness.ctx).unwrap();
+    let title = harness.get_by_label("Who gets in?").rect();
+    let past = past_the_pane(&harness, title.left() - 24.0, reader.left(), title.top(), 760.0);
+    assert!(past.is_empty(), "past the pane's edge at {}: {past:#?}", reader.left());
+    assert!(harness.query_by_label_contains("and 1 more").is_some_and(|more| more.rect().right() <= reader.left()));
+}
+
+/// The search's words in the filters' line keep inside the list pane beside the reader: the planned search in the
+/// text of messages and its coming-soon mark are left out whole where they do not fit after the words.
+#[test]
+fn the_search_line_s_planned_part_is_whole_or_left_out_beside_the_reader() {
+    let mut harness = frames_window(vec2(1200.0, 760.0), 100, Place::View(inboxcraft_model::Role::Inbox), None);
+    harness.state_mut().search("bak");
+    harness.run();
+    let pane = super::list::view_rect(&harness.ctx).unwrap();
+    let said = harness.get_by_label_contains("in subjects, senders and recipients").rect();
+    let planned = harness.query_by_label("in message text").map(|link| link.rect());
+    let soon = harness
+        .query_all_by_label("coming soon")
+        .map(|tag| tag.rect())
+        .find(|tag| tag.top() < said.bottom() + 12.0 && tag.bottom() > said.top() - 12.0);
+    assert_eq!(planned.is_some(), soon.is_some(), "the link and its mark come together or not at all");
+    for part in [Some(said), planned, soon].into_iter().flatten() {
+        assert!(part.right() <= pane.right() + 0.5, "{part:?} past the pane's edge at {}", pane.right());
+    }
+}
+
+/// A hostile sender's name, long and with no room to break, ends with an ellipsis in a card: the account's bar and
+/// the address after it, and the lines under it, stay inside the card's room.
+#[test]
+fn a_long_sender_name_gives_way_inside_its_card() {
+    use crate::theme::{Mode, TextScale, Theme};
+    let theme = Theme::new(Mode::Light, TextScale::from_percent(130).unwrap());
+    let keymap = crate::keymap::Keymap::default();
+    let clock = FakeClock::new(Timestamp::from_unix(sample::frames::TIME, 0).unwrap());
+    let mut mailbox = Mailbox::new(sample::frames::session(Box::new(clock.clone())).unwrap(), Box::new(clock));
+    mailbox.open(Place::Senders);
+    let room = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), vec2(420.0, 500.0));
+    let mut harness = Harness::builder().with_size(vec2(700.0, 600.0)).with_context_setup(install_fonts).build_ui_state(
+        move |ui, mailbox: &mut Mailbox| {
+            crate::motion::set_reduced(ui.ctx(), true);
+            ui.set_style(theme.style());
+            let mut newest = mailbox.messages().first().cloned().unwrap();
+            newest.sender = "Wolfeschlegelsteinhausenbergerdorff-Kalbsfleischwurstbrotaufstrichfabrik".repeat(3);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(room), |ui| {
+                let _ = super::list::sender_card_of(ui, &theme, &keymap, mailbox, &newest);
+            });
+        },
+        mailbox,
+    );
+    harness.run();
+    let past = past_the_pane(&harness, room.left(), room.right(), room.top(), room.bottom());
+    assert!(past.is_empty(), "past the card's room at {}: {past:#?}", room.right());
+}
+
+/// The current sender's card keeps even pads in the queue at 100 %, as the pictures take it: the queue's scroll bar
+/// stands over its right pad, not beside it, so the card is as far from the pane's right edge as from its left one, and
+/// the first card's subject reads whole.
+#[test]
+fn a_sender_s_card_has_even_pads_in_the_queue_at_100_percent() {
+    for size in [vec2(1400.0, 860.0), vec2(1440.0, 900.0)] {
+        let harness = frames_window(size, 100, Place::Senders, Some("Prices for the sign, oak or steel"));
+        let (room, card) = super::list::senders_card(&harness.ctx).unwrap();
+        let (left, right) = (card.left() - room.left(), room.right() - card.right());
+        assert!((left - right).abs() <= 0.5, "{size:?}: the card {card:?} in {room:?}, {left} left and {right} right");
+        let subject = "Prices for the sign, oak or steel";
+        let drawn = harness.get_by_label(subject).rect().width();
+        let whole = text_width(&harness, subject, |theme| theme.fonts.body);
+        assert!(drawn >= whole - 0.5, "{size:?}: the subject drawn {drawn} wide of its {whole}");
+    }
+}
