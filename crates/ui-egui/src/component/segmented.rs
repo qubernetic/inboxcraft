@@ -7,9 +7,10 @@
 //! `ink` and takes no fill (a fill says chosen); pressed, the option is the accent wash with its word in `cyan_text`.
 //! The control is one stop for Tab with one ring round it, and the arrow keys move the choice. Disabled: a dashed edge,
 //! no `term` ground, every word `muted`, the chosen option keeping its fill with its bar in `muted`. An option's name is
-//! cut with an ellipsis at 136; where the room is too small the options share it equally. Each option is a radio button
-//! inside the group for a screen reader, selected or not, which its own click chooses; it is no Tab stop. Nothing moves
-//! (the design gives it no transition).
+//! cut with an ellipsis at 136; where the room is too small the pads give way first, down to 4, the names kept whole,
+//! and only where even the whole names do not fit do the options share the room equally. Each option is a radio
+//! button inside the group for a screen reader, selected or not, which its own click chooses; it is no Tab stop.
+//! Nothing moves (the design gives it no transition).
 
 use egui::{Color32, EventFilter, Key, Rect, Response, Role, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
@@ -42,6 +43,18 @@ fn natural<T>(ui: &Ui, theme: &Theme, (_, name, font): &(T, &str, Font)) -> f32 
 #[must_use]
 pub fn width<T>(ui: &Ui, theme: &Theme, options: &[(T, &str, Font)]) -> f32 {
     options.iter().map(|option| natural(ui, theme, option)).sum::<f32>() + chrome(options.len())
+}
+
+/// The least width the options take with their names whole (cut at [`WIDEST`]), the pads down to [`tight`]: less
+/// room than this cuts the names.
+#[must_use]
+pub fn least_width<T>(ui: &Ui, theme: &Theme, options: &[(T, &str, Font)]) -> f32 {
+    options.iter().map(|option| natural(ui, theme, option) - PAD * 2.0 + tight(theme) * 2.0).sum::<f32>() + chrome(options.len())
+}
+
+/// The room left and right of an option's name where the room is short, in points.
+fn tight(theme: &Theme) -> f32 {
+    theme.spacing.s1
 }
 
 /// The `options`, `current` on the selection, each name in its own font; the option pressed or moved to.
@@ -112,10 +125,23 @@ fn segmented_core<T: Copy + PartialEq>(
     let p = &theme.palette;
     let enabled = ui.is_enabled() && !soon::is_soon(ui);
     let room = ui.available_width();
-    let full = width(ui, theme, options);
+    let naturals: Vec<f32> = options.iter().map(|option| natural(ui, theme, option)).collect();
+    let full = naturals.iter().sum::<f32>() + chrome(options.len());
     // Half a point of leeway: a row sized from this very control must not count as too small.
     let squeezed = full > room + 0.5;
-    let shared = ((room - chrome(options.len())) / options.len() as f32).floor().max(1.0);
+    let count = options.len() as f32;
+    // Short of room, the pads give way first, evenly, down to the tight ones; only in less room than the whole names
+    // need do the options share it equally, their names cut.
+    let least = full - count * (PAD - tight(theme)) * 2.0;
+    let widths: Vec<f32> = if !squeezed {
+        naturals
+    } else if least <= room + 0.5 {
+        let spare = ((room - least) / count).floor().max(0.0);
+        naturals.iter().map(|wide| wide - PAD * 2.0 + tight(theme) * 2.0 + spare).collect()
+    } else {
+        let shared = ((room - chrome(options.len())) / count).floor().max(1.0);
+        vec![shared; options.len()]
+    };
     let high = theme.boxes().button;
     let size = vec2(if squeezed { room.max(1.0) } else { full }, high);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
@@ -132,8 +158,8 @@ fn segmented_core<T: Copy + PartialEq>(
     // The options' rects, left to right.
     let mut rects = Vec::with_capacity(options.len());
     let mut left = track.left() + 1.0;
-    for option in options {
-        let wide = if squeezed { shared } else { natural(ui, theme, option) };
+    for wide in &widths {
+        let wide = *wide;
         rects.push(Rect::from_min_size(pos2(left, track.top() + 1.0), vec2(wide, high - 2.0)));
         left += wide + 1.0;
     }
@@ -222,7 +248,7 @@ fn segmented_core<T: Copy + PartialEq>(
                 p.line,
             );
         }
-        let pad = if squeezed { theme.spacing.s1 } else { PAD };
+        let pad = if squeezed { tight(theme) } else { PAD };
         // A point more than the name needs, so that rounding never cuts a name that fits.
         let text = cut(ui, name, *font, ink, (rect.width() - pad * 2.0 + 1.0).min(WIDEST));
         // The design's text box hugs the name (rounded up to a whole point) and is at most the room, 136 at most; it
