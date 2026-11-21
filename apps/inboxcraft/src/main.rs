@@ -143,6 +143,8 @@ fn sample() -> ExitCode {
         }
     };
     let (_send, heard) = mpsc::channel();
+    // The sample's cleaned copies are in a folder of their own: an earlier sample's go now.
+    inboxcraft::sweep_originals(inboxcraft::Whose::Sample);
     windows(Desktop::new(app, heard).closing_ends(), &shown)
 }
 
@@ -156,9 +158,8 @@ fn owner(background: bool) -> ExitCode {
         Ok(instance) => instance,
         Err(code) => return ExitCode::from(code),
     };
-    // The cleaned copies an earlier run opened in the browser go; a sample window's go with them, or with their age.
-    #[cfg(unix)]
-    inboxcraft::original::sweep_at_start();
+    // The cleaned copies an earlier run opened in the browser go (the sample's are in a folder of their own).
+    inboxcraft::sweep_originals(inboxcraft::Whose::Owner);
     let shown = Shown::default();
     let wake = wake_of(&shown);
     let (send, heard) = mpsc::channel::<Request>();

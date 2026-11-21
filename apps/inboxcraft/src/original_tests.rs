@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use inboxcraft_ui_egui::original::Original as _;
 
-use super::{CACHE_DIR, DIR, Hand, KEEP_FOR, MAX_FILES, Originals, folder_from, name, sweep_folder, xdg_open};
+use super::{CACHE_DIR, DIR, Hand, KEEP_FOR, MAX_FILES, Originals, SAMPLE_CACHE_DIR, SAMPLE_DIR, Whose, folder_from, name, sweep_folder, xdg_open};
 
 /// What the fake desktop was handed, and whether it refuses (a desktop with no browser).
 #[derive(Clone, Default)]
@@ -114,16 +114,40 @@ fn a_folder_that_is_a_link_or_open_to_others_is_refused() {
 
 #[test]
 fn without_a_place_to_write_it_says_so_and_hands_nothing_on() {
-    assert_eq!(folder_from(None, None, None), None);
-    assert_eq!(folder_from(Some("relative".into()), Some("also/relative".into()), Some("".into())), None, "only absolute folders");
-    assert_eq!(folder_from(Some("/run/user/1000".into()), None, None), Some(Path::new("/run/user/1000").join(DIR)));
-    assert_eq!(folder_from(None, Some("/c".into()), Some("/h".into())), Some(Path::new("/c").join(CACHE_DIR)));
-    assert_eq!(folder_from(None, None, Some("/h".into())), Some(Path::new("/h/.cache").join(CACHE_DIR)));
+    assert_eq!(folder_from(Whose::Owner, None, None, None), None);
+    assert_eq!(folder_from(Whose::Owner, Some("relative".into()), Some("also/relative".into()), Some("".into())), None, "only absolute folders");
+    assert_eq!(folder_from(Whose::Owner, Some("/run/user/1000".into()), None, None), Some(Path::new("/run/user/1000").join(DIR)));
+    assert_eq!(folder_from(Whose::Owner, None, Some("/c".into()), Some("/h".into())), Some(Path::new("/c").join(CACHE_DIR)));
+    assert_eq!(folder_from(Whose::Owner, None, None, Some("/h".into())), Some(Path::new("/h/.cache").join(CACHE_DIR)));
     let fake = Fake::default();
     let originals = Originals::new(None, Box::new(fake.clone()));
     let error = originals.open(1, "page").unwrap_err();
     assert!(error.contains("no private folder"), "{error}");
     assert!(fake.handed.lock().unwrap().is_empty());
+}
+
+#[test]
+fn the_sample_writes_into_a_folder_of_its_own() {
+    let runtime = || Some("/run/user/1000".into());
+    assert_eq!(folder_from(Whose::Sample, runtime(), None, None), Some(Path::new("/run/user/1000").join(SAMPLE_DIR)));
+    assert_eq!(folder_from(Whose::Sample, None, Some("/c".into()), None), Some(Path::new("/c").join(SAMPLE_CACHE_DIR)));
+    assert_eq!(folder_from(Whose::Sample, None, None, Some("/h".into())), Some(Path::new("/h/.cache").join(SAMPLE_CACHE_DIR)));
+    for (owner, sample) in [
+        (folder_from(Whose::Owner, runtime(), None, None), folder_from(Whose::Sample, runtime(), None, None)),
+        (folder_from(Whose::Owner, None, Some("/c".into()), None), folder_from(Whose::Sample, None, Some("/c".into()), None)),
+    ] {
+        assert_ne!(owner, sample);
+    }
+    // Message 4 opened in each run: two copies, and the sample's close sweeps only its own.
+    let home = tempfile::tempdir().unwrap();
+    let folder_of = |run| folder_from(run, Some(home.path().into()), None, None).unwrap();
+    let (owner, sample) = (folder_of(Whose::Owner), folder_of(Whose::Sample));
+    Originals::new(Some(owner.clone()), Box::new(Fake::default())).open(4, "the owner's").unwrap();
+    Originals::new(Some(sample.clone()), Box::new(Fake::default())).open(4, "the sample's").unwrap();
+    assert_eq!(fs::read_to_string(owner.join(name(4))).unwrap(), "the owner's", "the sample did not write over it");
+    sweep_folder(&sample);
+    assert!(!sample.join(name(4)).exists());
+    assert_eq!(fs::read_to_string(owner.join(name(4))).unwrap(), "the owner's", "nor did its sweep take it");
 }
 
 #[test]

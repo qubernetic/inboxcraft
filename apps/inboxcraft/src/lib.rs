@@ -161,7 +161,7 @@ pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, k
     let owned = match mail {
         Mail::Sample => {
             let mailbox = Mailbox::new(sample::session(clock())?, clock());
-            return Ok(with_originals(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save).with_keep(keep)));
+            return Ok(with_originals(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save).with_keep(keep), Whose::Sample));
         }
         Mail::Store(owned) => owned,
     };
@@ -185,19 +185,42 @@ pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, k
             .with_accounts(keychain, detect, workers)
             .with_week_default(inboxcraft_engine::week::for_locale(&locale()))
             .with_keep(keep),
+        Whose::Owner,
     ))
 }
 
-/// `app`, opening a message's cleaned copy in the owner's browser ([`original::Originals::of_owner`]).
+/// Whose cleaned copies a window writes: the owner's mailbox's or the sample's, each in a folder of its own.
+#[cfg(unix)]
+pub use original::Whose;
+
+/// Whose cleaned copies a window writes; here none are.
+#[cfg(not(unix))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Whose {
+    /// The owner's mailbox.
+    Owner,
+    /// The sample mailbox.
+    Sample,
+}
+
+/// `app`, opening a message's cleaned copy in the owner's browser, in `whose`'s folder ([`original::Originals::of`]).
 #[cfg(target_os = "linux")]
-fn with_originals(app: InboxApp) -> InboxApp {
-    app.with_original(Box::new(original::Originals::of_owner()))
+fn with_originals(app: InboxApp, whose: Whose) -> InboxApp {
+    app.with_original(Box::new(original::Originals::of(whose)))
 }
 
 /// `app` as it is: here no copy goes to a browser, and the reader does not offer it.
 #[cfg(not(target_os = "linux"))]
-fn with_originals(app: InboxApp) -> InboxApp {
+fn with_originals(app: InboxApp, _whose: Whose) -> InboxApp {
     app
+}
+
+/// Removes the cleaned copies `whose` window opened in the browser: at the start, those of an earlier run.
+pub fn sweep_originals(whose: Whose) {
+    #[cfg(unix)]
+    original::sweep_all(whose);
+    #[cfg(not(unix))]
+    let _ = whose;
 }
 
 /// The owner's locale for dates, as the system names it (`LC_ALL`, else `LC_TIME`, else `LANG`), or nothing.

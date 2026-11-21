@@ -8,14 +8,15 @@
 //! to a private file, then handed to the desktop:
 //!
 //! - The folder is [`DIR`] in the owner's runtime folder (`$XDG_RUNTIME_DIR`, a per-user `tmpfs` the session empties at
-//!   logout), else [`CACHE_DIR`] in the owner's cache folder; never the shared `/tmp`. It is made `0700`; one that is
-//!   a symbolic link, not a folder, or open to anybody else is refused, not repaired.
+//!   logout), else [`CACHE_DIR`] in the owner's cache folder; never the shared `/tmp`. The sample has folders of its
+//!   own ([`SAMPLE_DIR`], [`SAMPLE_CACHE_DIR`]), so neither run touches the other's copies. It is made `0700`; one that
+//!   is a symbolic link, not a folder or open to anybody else is refused, not repaired.
 //! - The file's name comes from the message's number alone ([`name`]), never from anything the message says. It is
 //!   made new (`O_CREAT | O_EXCL`, which follows no symbolic link, a dangling one included) with mode `0600`; whatever
 //!   stood at the name before (an earlier copy, or a link someone planted) is unlinked first, never followed, and a
 //!   file that then turns out not to be the owner's is removed again.
-//! - Old copies go: every copy at the start ([`sweep_at_start`]), and at each open those older than [`KEEP_FOR`],
-//!   then the oldest beyond [`MAX_FILES`]. Only names of the [`name`] pattern are touched.
+//! - Old copies go: every copy at the start ([`sweep_all`]), and at each open those older than [`KEEP_FOR`], then the
+//!   oldest beyond [`MAX_FILES`]. Only names of the [`name`] pattern are touched.
 //! - The hand-off ([`Hand`]) asks the desktop portal's `OpenURI.OpenFile` with the file opened read-only, so the
 //!   browser gets the file even when it runs in a sandbox of its own; without a portal, outside the Flatpak,
 //!   `xdg-open` is run on the path (no shell, the path its one argument). The bus call gives up after
@@ -36,6 +37,31 @@ pub const DIR: &str = "inboxcraft-originals";
 
 /// The private folder's place in the owner's cache folder, where there is no runtime folder.
 pub const CACHE_DIR: &str = "inboxcraft/originals";
+
+/// The sample's private folder in the owner's runtime folder.
+pub const SAMPLE_DIR: &str = "inboxcraft-sample-originals";
+
+/// The sample's private folder in the owner's cache folder.
+pub const SAMPLE_CACHE_DIR: &str = "inboxcraft/sample-originals";
+
+/// Whose copies: the owner's mailbox's, or the sample's. Each has a folder of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Whose {
+    /// The owner's mailbox.
+    Owner,
+    /// The sample mailbox.
+    Sample,
+}
+
+impl Whose {
+    /// The folder's name in the runtime folder, and its place in the cache folder.
+    const fn names(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Owner => (DIR, CACHE_DIR),
+            Self::Sample => (SAMPLE_DIR, SAMPLE_CACHE_DIR),
+        }
+    }
+}
 
 /// How long a copy is kept after it was written: long enough for the browser to read it, and to reload it.
 pub const KEEP_FOR: Duration = Duration::from_secs(10 * 60);
@@ -59,21 +85,22 @@ fn is_copy(file: &str) -> bool {
         .is_some_and(|number| !number.is_empty() && number.len() <= 20 && number.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// The private folder from the owner's runtime folder `runtime`, cache folder `cache` and home `home` (each taken only
-/// when absolute): `None` where there is none of them.
+/// The private folder of `whose` from the owner's runtime folder `runtime`, cache folder `cache` and home `home` (each
+/// taken only when absolute): `None` where there is none of them.
 #[must_use]
-pub fn folder_from(runtime: Option<OsString>, cache: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
+pub fn folder_from(whose: Whose, runtime: Option<OsString>, cache: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
+    let (dir, cache_dir) = whose.names();
     let absolute = |dir: Option<OsString>| dir.map(PathBuf::from).filter(|dir| dir.is_absolute());
     absolute(runtime)
-        .map(|runtime| runtime.join(DIR))
-        .or_else(|| absolute(cache).map(|cache| cache.join(CACHE_DIR)))
-        .or_else(|| absolute(home).map(|home| home.join(".cache").join(CACHE_DIR)))
+        .map(|runtime| runtime.join(dir))
+        .or_else(|| absolute(cache).map(|cache| cache.join(cache_dir)))
+        .or_else(|| absolute(home).map(|home| home.join(".cache").join(cache_dir)))
 }
 
-/// The private folder of this run ([`folder_from`] over its environment).
+/// The private folder of `whose` in this process ([`folder_from`] over its environment).
 #[must_use]
-pub fn folder() -> Option<PathBuf> {
-    folder_from(std::env::var_os("XDG_RUNTIME_DIR"), std::env::var_os("XDG_CACHE_HOME"), std::env::var_os("HOME"))
+pub fn folder(whose: Whose) -> Option<PathBuf> {
+    folder_from(whose, std::env::var_os("XDG_RUNTIME_DIR"), std::env::var_os("XDG_CACHE_HOME"), std::env::var_os("HOME"))
 }
 
 /// Hands a written copy to the desktop, which opens it in the browser.
@@ -99,11 +126,11 @@ impl Originals {
         Self { folder, hand }
     }
 
-    /// The owner's: [`folder`], handed to the desktop's portal or `xdg-open` ([`Desktop`]).
+    /// `whose`'s: its [`folder`], handed to the desktop's portal or `xdg-open` ([`Desktop`]).
     #[cfg(target_os = "linux")]
     #[must_use]
-    pub fn of_owner() -> Self {
-        Self::new(folder(), Box::new(Desktop { sandboxed: crate::autostart::sandboxed() }))
+    pub fn of(whose: Whose) -> Self {
+        Self::new(folder(whose), Box::new(Desktop { sandboxed: crate::autostart::sandboxed() }))
     }
 
     /// Writes `page` as message `id`'s copy and says where; old copies go first.
@@ -201,9 +228,9 @@ pub fn sweep_folder(folder: &Path) {
     sweep(folder, Duration::ZERO, 0);
 }
 
-/// Removes every copy an earlier run left in this run's [`folder`].
-pub fn sweep_at_start() {
-    if let Some(folder) = folder() {
+/// Removes every copy in `whose`'s [`folder`]: at the start, what an earlier run left.
+pub fn sweep_all(whose: Whose) {
+    if let Some(folder) = folder(whose) {
         sweep_folder(&folder);
     }
 }
