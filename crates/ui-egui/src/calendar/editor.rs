@@ -199,6 +199,9 @@ pub struct Editor {
     /// When an all-day event's alert rings by default, as the calendar last took it from the session: what a new
     /// all-day event's Alert says it rings with.
     all_day_alert: AllDayAlert,
+    /// Whether the owner picked an alert in this edit ([`Editor::pick_alert`]): then it is what is saved, whatever
+    /// the switch between timed and all-day would trade it for.
+    alert_picked: bool,
 }
 
 /// A list of choices of the form that opens over it.
@@ -243,6 +246,7 @@ impl Editor {
             menu: None,
             warned: None,
             all_day_alert: AllDayAlert::default(),
+            alert_picked: false,
         }
     }
 
@@ -277,6 +281,7 @@ impl Editor {
             menu: None,
             warned: None,
             all_day_alert: AllDayAlert::default(),
+            alert_picked: false,
         }
     }
 
@@ -295,6 +300,28 @@ impl Editor {
     /// Takes when an all-day event's alert rings by default, from the session.
     pub fn set_all_day_alert(&mut self, choice: AllDayAlert) {
         self.all_day_alert = choice;
+    }
+
+    /// The alert the field shows: the one the owner picked in this edit, or else what a save writes. An event the edit
+    /// makes all-day trades an alarm still at the timed default (ten minutes) for the setting's hour, and one it makes
+    /// timed trades an alarm at one of the setting's hours for the timed default, as the engine does.
+    #[must_use]
+    pub fn shown_alert(&self) -> Alert {
+        let (form, was) = (&self.form, &self.was);
+        if self.alert_picked || form.alert != was.alert || form.all_day == was.all_day {
+            return form.alert;
+        }
+        match form.alert {
+            Alert::Before(TIMED_DEFAULT) if form.all_day => Alert::Default,
+            Alert::AllDay(_) if !form.all_day => Alert::Before(TIMED_DEFAULT),
+            alert => alert,
+        }
+    }
+
+    /// The owner picks `alert` in the Alert field: it is saved as it is.
+    pub fn pick_alert(&mut self, alert: Alert) {
+        self.form.alert = alert;
+        self.alert_picked = true;
     }
 
     /// The list of choices open in the form, when one is.
@@ -535,7 +562,7 @@ impl Editor {
         if form.repeat != was.repeat && REPEATS.contains(&form.repeat.as_str()) {
             params.insert("repeat".to_owned(), json!(form.repeat));
         }
-        if form.alert != was.alert
+        if (form.alert != was.alert || (self.alert_picked && form.all_day != was.all_day))
             && let Some(alert) = form.alert.param()
         {
             params.insert("alert".to_owned(), alert);

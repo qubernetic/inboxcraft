@@ -407,7 +407,7 @@ fn alert_choice(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f32) {
     let all_day = editor.form().all_day.then_some(editor.all_day_alert());
     let names = ALERTS.map(|alert| alert_text(alert, all_day));
     let options: Vec<(usize, &str)> = names.iter().map(String::as_str).enumerate().collect();
-    let now = editor.form().alert;
+    let now = editor.shown_alert();
     let current = ALERTS.iter().position(|alert| *alert == now);
     let shown = alert_text(now, all_day);
     let mut open = editor.menu() == Some(Menu::Alert);
@@ -418,7 +418,7 @@ fn alert_choice(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f32) {
     });
     keep_menu(editor, Menu::Alert, open);
     if let Some(alert) = chosen.and_then(|index| ALERTS.get(index)) {
-        editor.form_mut().alert = *alert;
+        editor.pick_alert(*alert);
     }
 }
 

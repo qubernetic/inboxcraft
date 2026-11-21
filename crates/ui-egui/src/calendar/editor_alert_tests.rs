@@ -185,3 +185,61 @@ fn an_all_day_hour_reads_back_by_its_name_and_is_never_sent() {
         assert_eq!(editor.changes(Offset::UTC), Ok(Some(("event.update", json!({ "id": 9, "summary": "Kiln firing" })))));
     }
 }
+
+/// Opens the event named `summary` in the editor and gives it `times` (all-day when the start is a day).
+fn switch(calendar: &mut Calendar, summary: &str, (start, end): (&str, &str)) {
+    let key = named(calendar, summary).unwrap().key();
+    calendar.pick(Some(key));
+    calendar.edit_picked();
+    let form = calendar.editor_mut().unwrap().form_mut();
+    form.all_day = start.len() == 10;
+    form.start = start.to_owned();
+    form.end = end.to_owned();
+}
+
+#[test]
+fn the_alert_field_shows_what_a_switch_to_or_from_all_day_saves() {
+    let (mut mailbox, mut calendar) = loaded();
+    mailbox.set_all_day_alert(AllDayAlert::DayBefore18);
+    calendar.follow_week(&mut mailbox);
+    calendar.new_event();
+    let form = calendar.editor_mut().unwrap().form_mut();
+    form.summary = "Glaze test".to_owned();
+    form.start = "2026-11-06 13:00".to_owned();
+    form.end = "2026-11-06 14:00".to_owned();
+    calendar.save(&mut mailbox);
+    assert_eq!(named(&calendar, "Glaze test").unwrap().alert, Alert::Before(10));
+    // Made all-day, the ten-minute default shows the setting's hour, and that is what is saved.
+    switch(&mut calendar, "Glaze test", ("2026-11-07", "2026-11-07"));
+    let editor = calendar.editor().unwrap();
+    assert_eq!(alert_text(editor.shown_alert(), Some(editor.all_day_alert())), "18:00 the day before");
+    calendar.save(&mut mailbox);
+    assert!(mailbox.error().is_none(), "{:?}", mailbox.error());
+    assert_eq!(named(&calendar, "Glaze test").unwrap().alert, Alert::AllDay(AllDayAlert::DayBefore18));
+    // Made timed again, the hour shows the ten-minute default, and that is what is saved.
+    switch(&mut calendar, "Glaze test", ("2026-11-06 13:00", "2026-11-06 14:00"));
+    let editor = calendar.editor().unwrap();
+    assert_eq!(alert_text(editor.shown_alert(), None), "10 min before");
+    calendar.save(&mut mailbox);
+    assert!(mailbox.error().is_none(), "{:?}", mailbox.error());
+    assert_eq!(named(&calendar, "Glaze test").unwrap().alert, Alert::Before(10));
+}
+
+#[test]
+fn an_alert_of_the_owners_or_one_picked_in_the_edit_stays_through_the_switch() {
+    let all_day = |editor: &mut Editor| {
+        let form = editor.form_mut();
+        (form.all_day, form.start, form.end) = (true, "2026-11-07".to_owned(), "2026-11-07".to_owned());
+    };
+    let mut editor = Editor::edit(&row(Some(json!(30))));
+    all_day(&mut editor);
+    assert_eq!(editor.shown_alert(), Alert::Before(30), "the owner's own alarm is kept");
+    assert_eq!(editor.changes(Offset::UTC).unwrap().unwrap().1.get("alert"), None);
+    let mut editor = Editor::edit(&row(Some(json!(10))));
+    all_day(&mut editor);
+    assert_eq!(editor.shown_alert(), Alert::Default, "the timed default becomes the setting's hour");
+    assert_eq!(editor.changes(Offset::UTC).unwrap().unwrap().1.get("alert"), None);
+    editor.pick_alert(Alert::Before(10));
+    assert_eq!(editor.shown_alert(), Alert::Before(10), "picked in this edit, it is what the field says");
+    assert_eq!(editor.changes(Offset::UTC).unwrap().unwrap().1.get("alert"), Some(&json!(10)), "and what is saved");
+}
