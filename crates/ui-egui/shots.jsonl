@@ -2,6 +2,9 @@
 # palette of each mode.
 {"out": "docs/images/list-light.png", "mode": "light", "sample": "frames", "select": "Draft logo for the bakery"}
 {"out": "docs/images/list-dark.png", "mode": "dark", "sample": "frames", "select": "Draft logo for the bakery"}
+# The same window on the present sample (`just run-sample`), so its window path still has a picture of its own.
+{"out": "docs/images/mail-present-sample-light.png", "mode": "light", "select": "Photos from the coast walk"}
+{"out": "docs/images/mail-present-sample-dark.png", "mode": "dark", "select": "Photos from the coast walk"}
 {"out": "docs/images/narrowed-light.png", "mode": "light", "sample": "frames", "narrow": 2}
 {"out": "docs/images/narrowed-dark.png", "mode": "dark", "sample": "frames", "narrow": 2}
 {"out": "docs/images/search-light.png", "mode": "light", "sample": "frames", "search": "bak"}
@@ -29,9 +32,9 @@
 {"out": "docs/images/reader-move-dark.png", "mode": "dark", "sample": "frames", "size": [1440, 900], "select": "Draft logo for the bakery", "menu": "move"}
 {"out": "docs/images/reader-narrow-130-light.png", "mode": "light", "sample": "frames", "size": [1024, 800], "text_scale": 130, "select": "Draft logo for the bakery"}
 {"out": "docs/images/reader-narrow-130-dark.png", "mode": "dark", "sample": "frames", "size": [1024, 800], "text_scale": 130, "select": "Draft logo for the bakery"}
-# The error banner over the panes, one line between them (#233).
-{"out": "docs/images/error-banner-light.png", "mode": "light", "sample": "frames", "open": {"folder": 4242}}
-{"out": "docs/images/error-banner-dark.png", "mode": "dark", "sample": "frames", "open": {"folder": 4242}}
+# The error banner over the panes, one line between them (#233), under the desktop's title bar.
+{"out": "docs/images/error-banner-light.png", "mode": "light", "sample": "frames", "frame": "system", "open": {"folder": 4242}}
+{"out": "docs/images/error-banner-dark.png", "mode": "dark", "sample": "frames", "frame": "system", "open": {"folder": 4242}}
 # The error banner in the app's own frame: under the title strip, beside the rail (#233).
 {"out": "docs/images/error-banner-strip-light.png", "mode": "light", "sample": "frames", "frame": "own", "open": {"folder": 4242}}
 {"out": "docs/images/error-banner-strip-dark.png", "mode": "dark", "sample": "frames", "frame": "own", "open": {"folder": 4242}}

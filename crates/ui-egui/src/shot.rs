@@ -57,10 +57,11 @@
 //! sync (`refused` the last one's sign-in, `everything` every account), `notice` says its text in the status line,
 //! `command_sets` set to `true` the page of the command line's sets ([`crate::component::gallery_commands`]).
 //! `sample` set to `frames` shows the design file's own sample mailbox ([`sample::frames`]) at its time, Monday
-//! 16 November 2026, 14:04 UTC, with its mail put away and one message in the outbox; every scene then writes, selects
-//! and sends with the frames' people (`invitations` and `put_away` are already in it).
+//! 16 November 2026, 14:04 UTC, with its mail put away and one message in the outbox (none with `drafts` `empty`);
+//! every scene then writes, selects and sends with the frames' people (`invitations` and `put_away` are part of it and
+//! refused there).
 //! The typeface and the icons are fixed, so a script that names a
-//! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`own`; the older `strip` and `top_row` read as it); `pointer` rests the pointer
+//! `font` or an `icon_set` is refused like any unknown key. Every window draws its frame as the native app does: the own frame, or `frame` names it (`own`, the older `strip` and `top_row` read as it, or `system`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
 //! before the picture, so what that opens (a menu, a list) is in it; `put_away` set to `true` snoozes, pins, parks and marks
 //! done some of the sample's mail first ([`sample::put_away`]), `later` opens a pile of "Later" (`snoozed`, `pins`
@@ -312,8 +313,8 @@ pub struct Shot {
     /// `drafts` and `drafts-empty` its drafts' block alone, at the body's top left.
     #[serde(default)]
     pub home: Option<String>,
-    /// The app's own window frame, as a native window draws it: `own` (the older `strip` and `top_row` read as it); none
-    /// when left out.
+    /// The window's frame: `own` (the older `strip` and `top_row` read as it) or `system`; left out, the mailbox's own
+    /// setting, which is the own frame unless it was changed. The app draws the frame as a native window does.
     #[serde(default)]
     pub frame: Option<String>,
     /// Where the event editor opens: `small`, `full` (the default) or `window` (which the pictures, drawing no second
@@ -1931,6 +1932,12 @@ fn window(shot: &Shot) -> Result<(InboxApp, FakeClock), UiError> {
         Some("frames") => true,
         Some(other) => return Err(bad(format!("{}: sample {other:?} is not present or frames", shot.out))),
     };
+    // The frames' sample is put away and holds its invitations already: a key that would change that is refused.
+    for (key, given) in [("put_away", shot.put_away.is_some()), ("invitations", shot.invitations.is_some())] {
+        if frames && given {
+            return Err(bad(format!("{}: {key} is part of the frames' sample", shot.out)));
+        }
+    }
     let time = Timestamp::from_unix(if frames { sample::frames::TIME } else { SHOT_TIME }, 0).ok_or_else(|| bad("no time"))?;
     // One clock for the session and the list, so a scene can let time pass.
     let clock = FakeClock::new(time);
@@ -1972,6 +1979,18 @@ fn window(shot: &Shot) -> Result<(InboxApp, FakeClock), UiError> {
         }
     }
     Ok((app, clock))
+}
+
+/// Draws the window's frame as the app does: the app may always draw it (a native window), and the mailbox's
+/// appearance picks the own frame unless `shot.frame` names one: `own` (the older `strip` and `top_row` read as it) or
+/// `system`, the desktop's title bar, where the app draws none.
+fn frame(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    if let Some(name) = &shot.frame {
+        let frame = WindowFrame::read(name).ok_or_else(|| bad(format!("{}: frame {name} is not own or system", shot.out)))?;
+        app.set_frame(frame);
+    }
+    app.set_own_frame(true);
+    Ok(())
 }
 
 /// The sample window as `shot` asks for it.
@@ -2044,13 +2063,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     };
     app.set_motion_level(level);
     event_editor(&mut app, shot)?;
-    if let Some(name) = &shot.frame {
-        let frame = WindowFrame::read(name)
-            .filter(|frame| *frame != WindowFrame::System)
-            .ok_or_else(|| bad(format!("{}: frame {name} is not own", shot.out)))?;
-        app.set_frame(frame);
-        app.set_own_frame(true);
-    }
+    frame(&mut app, shot)?;
     if let Some(percent) = shot.text_scale {
         let scale =
             TextScale::from_percent(percent).ok_or_else(|| bad(format!("{}: text scale {percent} is not 90, 100, 110, 120 or 130", shot.out)))?;
@@ -2066,7 +2079,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
             .ok_or_else(|| bad(format!("{}: view {name:?} is not grouped, smart or list", shot.out)))?;
         app.mailbox_mut().set_inbox_view(view);
     }
-    if shot.put_away == Some(true) && !frames(shot) {
+    if shot.put_away == Some(true) {
         sample::put_away(app.mailbox_mut())?;
     }
     if shot.show_done == Some(true) {
