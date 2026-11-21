@@ -425,8 +425,8 @@ time from the code as it is, not measured.
   reader. `ui_shot` cannot hover a link, so a hovered link has no picture; the UI tests cover it. The thread's earlier messages fold
   to one line, but the open message is the selected one, not always the latest of the thread.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
-  popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader since #90. The keymap knows the window's actions, the list's and the calendar's keys among them; the keys are changed on the Shortcuts page
-  (#130). The motion level is set with
+  popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader since #90. The keymap knows the window's actions, the list's and the calendar's keys among them; Escape is still read directly and cannot be changed; the other keys are
+  changed on the Shortcuts page (#130). The motion level is set with
   `ui.motion.set` (full, reduced or off) and kept on disk; the Appearance page offers the three (#313). Until each
   level has movements of its own, reduced and off both land every movement at its end at once and only full runs
   today's motion, so the window starts still. The desktop cannot read the system's wish for less motion (GNOME and

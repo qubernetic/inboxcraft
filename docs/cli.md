@@ -48,7 +48,7 @@ Every command has an agent class. Nobody is there to approve anything, in the ap
 | Class | In the CLI |
 |---|---|
 | `safe` | runs: reading, listing, searching, the reader's own changes (a message opened is kept) |
-| `owner` | refused with a plain error and exit code 1: adding, changing or removing an account, sending, moving, deleting, events and answers to invitations, the screener's and the groups' choices, and the settings but the appearance's (`ui.*.set` other than `ui.layout.set`) |
+| `owner` | refused with a plain error and exit code 1: adding, changing or removing an account, sending (sending later, retrying, unsending, cancelling a scheduled send), moving, archiving, marking done, deleting, events, answers to invitations and removing them, the screener's and the groups' choices, templates and the signature, allowing or forgetting remote pictures, and the settings but the appearance's (`ui.*.set` other than `ui.layout.set`) |
 | `never` | refused the same way |
 
 A refused command changes nothing.

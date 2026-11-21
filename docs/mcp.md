@@ -41,7 +41,7 @@ files away: a message the running app has not finished writing can be lost.
 
 ## The tools
 
-A tool's name is its command id with an underscore for the dot: the model APIs the clients pass tools to take
+A tool's name is its command id with an underscore for the dot (`thread_read` is `mail.thread`'s): the model APIs the clients pass tools to take
 letters, digits, `_` and `-` only.
 
 | Tool | Command | Arguments |
