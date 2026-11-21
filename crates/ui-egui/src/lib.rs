@@ -56,6 +56,7 @@ pub mod keymap;
 pub mod mailbox;
 pub mod motion;
 pub mod onboard;
+pub mod original;
 pub mod palette;
 pub mod picture;
 pub mod privacy;

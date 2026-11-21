@@ -712,6 +712,16 @@ impl InboxApp {
         self
     }
 
+    /// The same window, offering in the reader's More menu to open a message's original in the browser through
+    /// `original` (a cleaned copy: see [`crate::original`]). A window without one does not offer it.
+    #[must_use]
+    pub fn with_original(mut self, original: Box<dyn crate::original::Original>) -> Self {
+        let original = crate::original::Shared::new(original);
+        self.reader.set_original(original.clone());
+        self.windows.set_original(&original);
+        self
+    }
+
     /// Shows and changes what `desk` lets the owner choose from now on, as [`InboxApp::with_desk`].
     pub fn set_desk(&mut self, desk: Box<dyn Desk>) {
         self.desk = Some(desk);
@@ -4169,6 +4179,7 @@ impl InboxApp {
             reader::Asked::Retry(id, key) => reader.retry(mailbox, id, &key),
             reader::Asked::Always(id) => reader.allow_always(mailbox, id),
             reader::Asked::Save(id, index) => reader.save(mailbox, id, index),
+            reader::Asked::Original(id) => reader.open_original(id, ui.ctx()),
             reader::Asked::FullWidth(full) => reader.set_full_width(full),
             reader::Asked::Close => mailbox.select(None),
             reader::Asked::After(after) => mailbox.set_after(after),
