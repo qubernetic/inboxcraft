@@ -129,6 +129,38 @@ fn notice() {
 }
 
 #[test]
+fn done_is_a_notice_in_the_done_look_timed_from_when_it_shows_and_cleaned() {
+    let mut status = Status::default();
+    status.push(Message::Done { text: "Studio removed\u{202e} from this computer\n".to_owned(), until: 4.0 });
+    let shown = Message::Done { text: "Studio removed from this computer".to_owned(), until: 14.0 };
+    assert_eq!(status.shown(10.0, None, None), Some(shown));
+    assert_eq!(status.notice(), Some("Studio removed from this computer"), "a notice to the rest of the window");
+    assert!(status.shown(13.9, None, None).is_some(), "still within its time");
+    assert_eq!(status.shown(14.0, None, None), None, "gone when its time ends");
+    // A full queue makes room with a done message as with a notice, before an error.
+    let mut status = Status::default();
+    status.push(Message::Error { text: "first".to_owned() });
+    status.push(Message::Done { text: "done".to_owned(), until: 4.0 });
+    for at in 0..super::QUEUE - 1 {
+        status.push(Message::Error { text: format!("error {at}") });
+    }
+    assert!(status.holds_error("first"), "the done message went first");
+    assert!(status.notice().is_none());
+}
+
+#[test]
+fn a_newer_line_drops_a_done_message_as_it_drops_a_notice_and_keeps_an_error() {
+    // On purpose: a discard's Undo bar, which forgets the notices, takes the line of an account's removal too.
+    let mut status = Status::default();
+    status.push(Message::Error { text: "Not sent".to_owned() });
+    status.push(Message::Done { text: "Studio removed from this computer".to_owned(), until: 4.0 });
+    status.push(Message::Notice { text: "Text size 110 %".to_owned(), until: 4.0 });
+    status.forget_notices();
+    assert_eq!(status.waiting(), 1, "the done message went with the notice");
+    assert!(status.holds_error("Not sent"));
+}
+
+#[test]
 fn error() {
     let error = Message::Error { text: "Not moved: the message is still in Inbox.".to_owned() };
     assert_eq!(with_message(None, Some(error.clone())), (Some(error), vec![item("synced 14:02", Kind::Ok)]));

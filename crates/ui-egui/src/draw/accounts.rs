@@ -12,19 +12,21 @@
 use egui::{CursorIcon, Rect, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
 use super::onboard;
-use super::paint::{self, Ring, focus_ring, line};
+use super::paint::{self, Ring, focus_ring};
 use super::settings::{Asked, body, group, head, inset};
 use crate::component::button::TextButton;
 use crate::component::button::{LinkSize, link_sized};
 use crate::component::label::count;
 use crate::component::settings_row::settings_row_soon_with;
-use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::mailbox::{AccountRow, Mailbox};
 use crate::onboard::{Onboarding, Stage};
 use crate::settings::Section;
 use crate::theme::Theme;
 use crate::tr;
+
+/// The room between "← Accounts" and the title of the form under it, in points.
+const BACK_GAP: f32 = 6.0;
 
 /// The height of an account's row, in points (at 100 %).
 const ROW: f32 = 48.0;
@@ -150,26 +152,14 @@ fn none_yet(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool) -> bool 
     TextButton::new(tr!("Add account")).primary().arrow().show(&mut child, theme, keymap).clicked()
 }
 
-/// "Accounts" with the back arrow before it, as a link to the list.
-fn back(ui: &mut Ui, theme: &Theme) -> bool {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let name = tr!("Accounts");
-    let galley = line(ui, &[(name, theme.fonts.button, p.cyan_text)], f32::INFINITY);
-    let icon = theme.fonts.body.size * 1.1;
-    let (rect, response) = ui.allocate_exact_size(vec2(icon + s.s1 + galley.size().x + s.s2, galley.size().y + s.s1 * 2.0), Sense::click());
-    response.widget_info(|| WidgetInfo::labeled(Role::Link, true, tr!("Back to the accounts")));
-    if ui.is_rect_visible(rect) {
-        if response.hovered() {
-            ui.painter().rect_filled(rect, 0.0, p.stage);
-        }
-        let at = Rect::from_center_size(pos2(rect.left() + icon / 2.0, rect.center().y), vec2(icon, icon));
-        crate::iconset::paint(ui.painter(), at, IconId::Back, p.cyan_text);
-        ui.painter().galley(pos2(at.right() + s.s1, rect.center().y - galley.size().y / 2.0), galley, p.cyan_text);
-        if response.has_focus() {
-            focus_ring(ui.painter(), theme, response.rect, Ring::Outside);
-        }
-    }
+/// "← Accounts", the small link back to the list over the form's title (`link-button size=s`, 16 high), read as the
+/// link back to the accounts. Whether it was pressed.
+fn back(ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> bool {
+    let response = link_sized(ui, theme, keymap, tr!("← Accounts"), LinkSize::Small);
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(Role::Link);
+        node.set_label(tr!("Back to the accounts"));
+    });
     response.clicked()
 }
 
@@ -184,8 +174,9 @@ pub(super) fn page(
     (can_add, writing): (bool, Option<u64>),
 ) -> Option<Asked> {
     if onboarding.stage() != Stage::Closed {
-        let went_back = inset(ui, |ui| back(ui, theme));
-        ui.add_space(theme.spacing.s2);
+        let went_back = inset(ui, |ui| back(ui, theme, keymap));
+        // The title's row 6 under the link, as the frame's head stands them.
+        ui.add_space(BACK_GAP);
         let asked = inset(ui, |ui| onboard::show(ui, theme, keymap, mailbox, onboarding, writing).map(Asked::Page));
         return if went_back { Some(Asked::Back) } else { asked };
     }

@@ -140,8 +140,7 @@ What the app still owes this file, one line each. The finer differences, with th
 **Settings and the calendar**
 - The confirmation dialogs stand by what they ask about as the file's rule says, but what they ask about stands
   elsewhere: the Templates page lists Personal before Studio and the Scheduled page the sample's four entries, so
-  the row asked about is not where the frames have it and the cards stand off the frames' y 423 and 441 of 900; the
-  account form draws "Remove account…" at 664 where the frame has 602, so its card is at 324, not 262. A
+  the row asked about is not where the frames have it and the cards stand off the frames' y 423 and 441 of 900. A
   scheduled send's says "“…” will not go at its time, Tue 08:00." where the frame says "on Tuesday at 08:00", and an
   account's says "its drafts" where the frame counts them.
 - Privacy keeps no sender name, so a row shows the address at 16 where the frames draw a name column; About is one

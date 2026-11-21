@@ -293,8 +293,8 @@ fn painted(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<egui::R
 #[test]
 fn the_dialog_stands_where_the_frame_draws_it() {
     // The frame `account-remove/confirm`: "Remove account…" has no room under it, so the card (328 high) stands 12
-    // over it, centred across the window. The frame's button is at 602, so its card at 480, 262; the form here draws
-    // the button lower (the design README's gaps), and the card keeps the rule.
+    // over it, centred across the window. The frame's button is at 602, so its card at 480, 262, as the picture has
+    // them; this window's fonts are egui's own, so here the button stands elsewhere, and the card keeps the rule.
     let mut harness = on_studio(&Kept::default());
     press(&mut harness, "Remove account…");
     let label = painted(&harness, "CONFIRM").expect("the card's label is drawn");
@@ -349,4 +349,49 @@ fn in_the_least_window_at_130_the_dialog_s_buttons_stay_in_reach() {
         harness.run();
     }
     assert_eq!(accounts(&harness), [1], "the owner's press of Remove account removes");
+}
+
+/// The status line's 2-high top lines the last frame painted: their rects and colours.
+fn top_lines(harness: &Harness<'static, InboxApp>) -> Vec<(egui::Rect, egui::Color32)> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<(egui::Rect, egui::Color32)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Rect(rect) if rect.rect.height() == 2.0 => found.push((rect.rect, rect.fill)),
+            _ => {}
+        }
+    }
+    let line = super::shell::laid(&harness.ctx).unwrap().status;
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+    found.retain(|(rect, _)| rect.top() == line.top() || rect.top() == line.top() + 1.0);
+    found
+}
+
+#[test]
+fn a_removal_that_went_through_is_a_done_message_and_one_the_store_refused_is_not() {
+    let p = crate::theme::Theme::of(crate::theme::Mode::Dark, &crate::theme::Look::default()).palette;
+    let check = crate::iconset::glyph(crate::iconset::IconId::Check).to_string();
+    // `account-remove/removed`: the line's message 560 wide, a 2-high `plus` edge on top, the check in `plus`.
+    let mut harness = on_studio(&Kept::default());
+    assert!(harness.state_mut().remove_account_as_owner(2));
+    harness.run();
+    harness.get_by_label_contains("Studio removed from this computer");
+    let lines = top_lines(&harness);
+    assert!(lines.iter().any(|(rect, fill)| *fill == p.plus && rect.width() == 560.0), "{lines:?}");
+    let drawn = crate::component::field::tests::drawn(&harness);
+    assert!(drawn.iter().any(|text| text.text == check && text.colour == p.plus), "the check in plus");
+    // The store kept the password: the removal is not done, the line keeps the notice's look.
+    let kept = Kept::default();
+    kept.refuse_forget.store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut harness = on_studio(&kept);
+    assert!(harness.state_mut().remove_account_as_owner(2));
+    harness.run();
+    harness.get_by_label_contains("did not let its password go");
+    let lines = top_lines(&harness);
+    assert!(!lines.is_empty() && lines.iter().all(|(_, fill)| *fill != p.plus), "{lines:?}");
+    assert!(lines.iter().any(|(_, fill)| *fill == p.muted), "the notice's line: {lines:?}");
+    assert!(!crate::component::field::tests::drawn(&harness).iter().any(|text| text.text == check), "no check");
+    let status = &harness.state().status;
+    assert!(status.notice().is_some_and(|text| text.contains("did not let its password go")), "a notice");
+    assert!(!status.has_error(), "not an error");
 }

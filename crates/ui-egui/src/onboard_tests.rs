@@ -304,7 +304,8 @@ fn when_the_credential_store_refuses_nothing_changes() {
     let error = onboarding_over.error().unwrap();
     assert!(error.contains("nothing was changed"), "{error}");
     assert!(!error.contains("new-Lantern-9"), "{error}");
-    assert!(onboarding_over.form().password.is_empty());
+    assert_eq!(onboarding_over.form().password.expose(), "new-Lantern-9", "kept in the form to try again");
+    assert!(onboarding_over.save_summary().changed, "Save stays on");
     assert_eq!(listed(&mut mailbox)["imap"]["host"], json!("imap.example.org"));
     assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some(PASSWORD));
 }
@@ -1647,4 +1648,102 @@ fn an_account_s_name_in_the_remove_question_is_one_plain_capped_line() {
     assert!(name.ends_with('…') && name.chars().count() <= 61, "cut with one ellipsis: {}", name.chars().count());
     onboarding.form_mut().address = "studio@example.org".to_owned();
     assert_eq!(onboarding.removed_name(), "studio@example.org", "a short name stays whole");
+}
+
+#[test]
+fn the_save_summary_sees_a_calendar_a_server_or_a_port_and_not_a_change_undone() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    assert!(!onboarding.save_summary().changed, "nothing typed");
+    onboarding.form_mut().caldav = "https://dav.example.org/".to_owned();
+    let summary = onboarding.save_summary();
+    assert!(summary.changed, "the CalDAV address alone is something to save");
+    assert!(summary.checks);
+    onboarding.form_mut().caldav.clear();
+    onboarding.form_mut().host = "moved.example.org".to_owned();
+    assert!(onboarding.save_summary().changed, "a server");
+    onboarding.form_mut().host = "imap.example.org".to_owned();
+    onboarding.form_mut().port = "143".to_owned();
+    assert!(onboarding.save_summary().changed, "a port");
+    onboarding.form_mut().port = "993".to_owned();
+    onboarding.form_mut().label = "Allotment".to_owned();
+    assert!(onboarding.save_summary().changed, "a name");
+    let held = listed(&mut mailbox)["label"].as_str().unwrap_or_default().to_owned();
+    onboarding.form_mut().label = format!("  {held} ");
+    assert!(!onboarding.save_summary().changed, "a name set back, with spaces round it");
+    onboarding.form_mut().password = Secret::new("new-Lantern-9");
+    assert!(onboarding.save_summary().changed, "a new password");
+    onboarding.form_mut().password.clear();
+    let summary = onboarding.save_summary();
+    assert!(!summary.changed, "a password typed then cleared");
+    assert_eq!(summary.note, None);
+}
+
+/// A store over [`Memory`] that refuses every write while `refuse` is on.
+#[derive(Debug)]
+struct Refusing(Memory, Arc<AtomicBool>);
+
+#[rustfmt::skip]
+impl Storage for Refusing {
+    fn config(&self) -> StoreConfig { self.0.config() }
+    fn apply(&mut self, batch: &inboxcraft_store::Batch) -> Result<(), inboxcraft_store::StoreError> {
+        if self.1.load(Ordering::SeqCst) { return Err(inboxcraft_store::StoreError::UnknownAccount(AccountId::new(1))); }
+        self.0.apply(batch)
+    }
+    fn accounts(&self) -> Result<Vec<Account>, inboxcraft_store::StoreError> { self.0.accounts() }
+    fn folders(&self, a: AccountId) -> Result<Vec<inboxcraft_model::Folder>, inboxcraft_store::StoreError> { self.0.folders(a) }
+    fn folder_state(&self, f: inboxcraft_model::FolderId) -> Result<Option<inboxcraft_model::FolderState>, inboxcraft_store::StoreError> { self.0.folder_state(f) }
+    fn messages(&self, f: inboxcraft_model::FolderId) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.0.messages(f) }
+    fn message(&self, m: inboxcraft_model::MessageId) -> Result<Option<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.0.message(m) }
+    fn linked(&self, l: &inboxcraft_model::MessageRef, k: &std::collections::BTreeSet<inboxcraft_model::MessageId>) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { self.0.linked(l, k) }
+    fn body(&self, m: inboxcraft_model::MessageId) -> Result<Option<inboxcraft_store::Body>, inboxcraft_store::StoreError> { self.0.body(m) }
+    fn search(&self, s: &inboxcraft_store::Search) -> Result<Vec<inboxcraft_model::MessageId>, inboxcraft_store::StoreError> { self.0.search(s) }
+    fn queued_jobs(&self) -> Result<Vec<Job>, inboxcraft_store::StoreError> { self.0.queued_jobs() }
+    fn drafts(&self, a: AccountId) -> Result<Vec<inboxcraft_model::Draft>, inboxcraft_store::StoreError> { self.0.drafts(a) }
+    fn newest_drafts(&self, a: AccountId, n: usize) -> Result<(u64, Vec<inboxcraft_model::Draft>), inboxcraft_store::StoreError> { self.0.newest_drafts(a, n) }
+    fn draft(&self, d: inboxcraft_model::DraftId) -> Result<Option<inboxcraft_model::Draft>, inboxcraft_store::StoreError> { self.0.draft(d) }
+    fn outbox(&self) -> Result<Vec<inboxcraft_model::Outgoing>, inboxcraft_store::StoreError> { self.0.outbox() }
+    fn schedule(&self) -> Result<Vec<inboxcraft_model::Scheduled>, inboxcraft_store::StoreError> { self.0.schedule() }
+    fn sender(&self, e: &inboxcraft_model::EmailAddress) -> Result<Option<inboxcraft_model::Sender>, inboxcraft_store::StoreError> { self.0.sender(e) }
+    fn senders(&self) -> Result<Vec<inboxcraft_model::Sender>, inboxcraft_store::StoreError> { self.0.senders() }
+    fn message_state(&self, m: inboxcraft_model::MessageId) -> Result<inboxcraft_model::MessageState, inboxcraft_store::StoreError> { self.0.message_state(m) }
+    fn message_states(&self) -> Result<Vec<(inboxcraft_model::MessageId, inboxcraft_model::MessageState)>, inboxcraft_store::StoreError> { self.0.message_states() }
+    fn calendars(&self, a: AccountId) -> Result<Vec<inboxcraft_model::Calendar>, inboxcraft_store::StoreError> { self.0.calendars(a) }
+    fn sync_token(&self, c: inboxcraft_model::CalendarId) -> Result<Option<String>, inboxcraft_store::StoreError> { self.0.sync_token(c) }
+    fn calendar_events(&self, c: inboxcraft_model::CalendarId) -> Result<Vec<inboxcraft_model::CalendarEvent>, inboxcraft_store::StoreError> { self.0.calendar_events(c) }
+    fn calendar_event(&self, e: inboxcraft_model::CalendarEventId) -> Result<Option<inboxcraft_model::CalendarEvent>, inboxcraft_store::StoreError> { self.0.calendar_event(e) }
+    fn alerts(&self, e: inboxcraft_model::CalendarEventId) -> Result<Vec<inboxcraft_model::Alert>, inboxcraft_store::StoreError> { self.0.alerts(e) }
+    fn alert(&self, a: inboxcraft_model::AlertId) -> Result<Option<inboxcraft_model::Alert>, inboxcraft_store::StoreError> { self.0.alert(a) }
+    fn stale_bodies(&self, t: Timestamp) -> Result<Vec<inboxcraft_model::MessageId>, inboxcraft_store::StoreError> { self.0.stale_bodies(t) }
+    fn missing_bodies(&self, f: inboxcraft_model::FolderId, t: Timestamp) -> Result<Vec<inboxcraft_model::MessageId>, inboxcraft_store::StoreError> { self.0.missing_bodies(f, t) }
+}
+
+#[test]
+fn a_save_the_store_refuses_keeps_the_new_password_typed_and_can_be_tried_again() {
+    let kept = Kept::default();
+    let refuse = Arc::new(AtomicBool::new(false));
+    let mut mailbox = mailbox_over(Box::new(Refusing(Memory::new(StoreConfig::default()), Arc::clone(&refuse))));
+    let mut onboarding = onboarding(&kept);
+    filled(onboarding.form_mut());
+    onboarding.add(&mut mailbox);
+    assert_eq!(onboarding.error(), None);
+    mailbox.pump(&mut Scripted::passing());
+    onboarding.close();
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().password = Secret::new("new-Lantern-9");
+    refuse.store(true, Ordering::SeqCst);
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Edit(1));
+    let error = onboarding.error().unwrap();
+    assert!(error.contains("were not saved"), "{error}");
+    assert!(!error.contains("new-Lantern-9"), "{error}");
+    assert_eq!(onboarding.form().password.expose(), "new-Lantern-9", "kept in the form to try again");
+    assert!(onboarding.save_summary().changed, "Save stays on");
+    refuse.store(false, Ordering::SeqCst);
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.error(), None);
+    assert_eq!(onboarding.stage(), Stage::Checking(1));
+    assert!(onboarding.form().password.is_empty(), "forgotten in the window once saved");
+    assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some("new-Lantern-9"));
 }

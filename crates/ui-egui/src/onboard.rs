@@ -707,6 +707,26 @@ struct Changes {
     goes_to: Vec<String>,
 }
 
+/// What the form of an account says of its Save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveSummary {
+    /// Something to save: a setting, the CalDAV address or a new password typed.
+    pub changed: bool,
+    /// Saving starts the account's check.
+    pub checks: bool,
+    /// Where the sign-in will go when it goes anywhere new, or that the new password will be checked.
+    pub note: Option<String>,
+}
+
+/// How a removal the engine took went, with what the status line says of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Removed {
+    /// The account and its password are gone from this computer.
+    Done(String),
+    /// The account is gone, but the system's credential store kept its password: it is tried again later.
+    PasswordKept(String),
+}
+
 /// How a step of the check stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepState {
@@ -1243,11 +1263,13 @@ impl Onboarding {
         self.checks_with(&self.changes())
     }
 
-    /// [`Self::save_checks`] and [`Self::sign_in_note`] from one look at what changed: for the page, each frame.
+    /// Whether anything changed, [`Self::save_checks`] and [`Self::sign_in_note`], from one look at what changed: for
+    /// the page, each frame.
     #[must_use]
-    pub fn save_summary(&self) -> (bool, Option<String>) {
+    pub fn save_summary(&self) -> SaveSummary {
         let changes = self.changes();
-        (self.checks_with(&changes), self.note_with(changes))
+        let changed = changes.settings || changes.caldav || !self.form.password.is_empty();
+        SaveSummary { changed, checks: self.checks_with(&changes), note: self.note_with(changes) }
     }
 
     fn checks_with(&self, changes: &Changes) -> bool {
@@ -1315,9 +1337,10 @@ impl Onboarding {
             self.error = Some(error.to_string());
             return;
         }
+        // A save that fails keeps what the owner typed, the new password too (in memory, while the form is open), so
+        // Save stays on and the owner can try again from the form.
         if password {
             let stored = self.keychain.store(id, self.form.password.expose());
-            self.form.password.clear();
             if let Err(refused) = stored {
                 self.error = Some(tr!(
                     "The system's credential store did not take the new password, so nothing was changed: {reason}",
@@ -1337,6 +1360,7 @@ impl Onboarding {
             mailbox.refresh();
             return;
         }
+        self.form.password.clear();
         if changes.caldav
             && let Err(error) = mailbox.run("calendar.server", &json!({ "account": id, "url": optional(&self.form.caldav) }))
         {
@@ -1788,8 +1812,8 @@ impl Onboarding {
         self.remove_hand.take()
     }
 
-    /// The account's name in the question and the status line: its name as it stood when the form opened, else its
-    /// address; one plain line.
+    /// The account's name in the form's title, the question and the status line: its name as it stood when the form
+    /// opened, else its address; one plain line.
     #[must_use]
     pub fn removed_name(&self) -> String {
         let label = self.held.as_ref().map(|held| held.label.trim()).filter(|label| !label.is_empty());
@@ -1800,8 +1824,9 @@ impl Onboarding {
     /// Removes the account whose form is open, on the owner's press of the question's "Remove account": `account.remove`
     /// takes it and what this computer keeps of it out of the store, then its password leaves the system's credential
     /// store ([`Keychain::forget`]; one the store refuses is tried again by [`Self::forget_passwords`]). The form
-    /// closes, nothing of it kept. What the status line says, or `None` when the engine refused, which the form says.
-    pub fn remove(&mut self, mailbox: &mut Mailbox) -> Option<String> {
+    /// closes, nothing of it kept. How it went, with what the status line says, or `None` when the engine refused, which
+    /// the form says.
+    pub fn remove(&mut self, mailbox: &mut Mailbox) -> Option<Removed> {
         let Stage::Edit(id) = self.stage else { return None };
         if !self.asking_remove {
             return None;
@@ -1830,12 +1855,12 @@ impl Onboarding {
         self.stage = Stage::Closed;
         mailbox.refresh();
         Some(match forgotten {
-            Ok(()) => tr!("{name} removed from this computer", name = name),
-            Err(refused) => tr!(
+            Ok(()) => Removed::Done(tr!("{name} removed from this computer", name = name)),
+            Err(refused) => Removed::PasswordKept(tr!(
                 "{name} removed from this computer; the system's credential store did not let its password go: {reason}",
                 name = name,
                 reason = shown(&refused)
-            ),
+            )),
         })
     }
 

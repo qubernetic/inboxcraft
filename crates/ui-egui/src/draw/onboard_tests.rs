@@ -319,7 +319,7 @@ fn an_accounts_row_opens_its_settings_and_a_new_password_is_saved_and_checked() 
     harness.get_by_label("carol@example.org, carol@example.org").click();
     harness.run();
     assert_eq!(harness.state().onboarding().stage(), Stage::Edit(1));
-    harness.get_by_label("Account settings");
+    harness.get_by_label("Account settings · carol@example.org");
     harness.get_by_label("New password");
     harness.get_by_label("CalDAV address, for calendars");
     harness.get_by_label("Save");
@@ -1472,7 +1472,7 @@ fn an_account_s_form_starts_16_under_its_title_s_row() {
     onboarding.edit(mailbox, 1);
     harness.run();
     harness.run();
-    let title = harness.get_by_label("Account settings").rect();
+    let title = harness.get_by_label("Account settings · carol@example.org").rect();
     assert_eq!(field_top(&harness, "Address") - title.top(), 47.0, "1 down in a 32-high row, then 16");
 }
 
@@ -1948,4 +1948,89 @@ fn a_bare_enter_in_the_command_line_leaves_the_form_as_typed() {
     assert!(harness.state().settings().is_open(), "the settings stay");
     assert_eq!(harness.state().onboarding().stage(), Stage::Form, "and the form on them");
     assert!(!harness.state().onboarding().form().password.is_empty(), "nothing typed is dropped");
+}
+
+/// The sample window in `theme`, its passwords in a fresh store, on the form of the account `id` (1 is Personal).
+fn on_sample_account(theme: egui::Theme, id: u64) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())).with_accounts(
+        Arc::new(Kept::default()),
+        Box::new(crate::onboard::NoDetect::default()),
+        Box::new(crate::workers::NoWorkers),
+    );
+    app.set_reduce_motion(true);
+    app.open_accounts();
+    let (onboarding, mailbox) = app.onboarding_mut();
+    onboarding.edit(mailbox, id);
+    let mut harness = Harness::builder().with_size(vec2(1440.0, 900.0)).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness
+}
+
+#[test]
+fn an_account_s_form_holds_save_back_until_something_changes_and_says_so() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        // `account-edit/default`: Save disabled, "nothing changed" after Cancel.
+        let mut harness = on_sample_account(theme, 1);
+        assert!(harness.get_by_role_and_label(Role::Button, "Save").accesskit_node().is_disabled(), "{theme:?}: nothing to save");
+        harness.get_by_label("nothing changed");
+        assert!(harness.query_by_label("changed, not saved yet").is_none(), "{theme:?}");
+        // `account-edit/changed`: a new name, and Save is the primary, the words say it is not saved yet.
+        harness.state_mut().onboarding_mut().0.form_mut().label = "Home".to_owned();
+        harness.run();
+        assert!(!harness.get_by_role_and_label(Role::Button, "Save").accesskit_node().is_disabled(), "{theme:?}: a change to save");
+        harness.get_by_label("changed, not saved yet");
+        assert!(harness.query_by_label("nothing changed").is_none(), "{theme:?}");
+        // `account-edit/new-password`: "Save and check", and the note in `warn` where the caption stood.
+        harness.state_mut().onboarding_mut().0.form_mut().label = "Personal".to_owned();
+        harness.state_mut().onboarding_mut().0.form_mut().password = Secret::new("new-Lantern-9");
+        harness.run();
+        assert!(!harness.get_by_role_and_label(Role::Button, "Save and check").accesskit_node().is_disabled(), "{theme:?}");
+        let warn = crate::theme::Theme::of(
+            if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light },
+            &crate::theme::Look::default(),
+        )
+        .palette
+        .warn;
+        let note = crate::component::field::tests::drawn(&harness).into_iter().find(|drawn| drawn.text.starts_with("Saving signs in to ")).unwrap();
+        assert_eq!(note.colour, warn, "{theme:?}: the note in warn");
+        assert!(harness.query_by_label_contains("A new password goes into").is_none(), "{theme:?}: the note in the caption's place");
+        assert!(harness.query_by_label_contains("changed").is_none(), "{theme:?}: the note says it, no words beside the buttons");
+    }
+}
+
+#[test]
+fn an_account_s_form_has_the_frame_s_head_and_rows() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        let harness = on_sample_account(theme, 1);
+        // `account-edit/default`: the link 16 high, the title's 32-high row 6 under it (its text 1 down in the row).
+        let link = harness.get_by_label("Back to the accounts").rect();
+        assert_eq!(link.height(), 16.0, "{theme:?}: {link:?}");
+        let title = harness.get_by_label("Account settings · Personal").rect();
+        assert_eq!(title.top() - link.top(), 23.0, "{theme:?}: {title:?} under {link:?}");
+        // The account's bar, 3 × 12 in its colour, in the middle of the title's row, the title 15 right of it.
+        let mode = if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light };
+        let colour = crate::theme::Theme::of(mode, &crate::theme::Look::default()).account_colour(0);
+        let bar = harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect)
+                if rect.fill == colour
+                    && rect.rect.size() == vec2(3.0, 12.0)
+                    && rect.rect.left() >= link.left()
+                    && rect.rect.top() > link.bottom() =>
+            {
+                Some(rect.rect)
+            }
+            _ => None,
+        });
+        let bar = bar.unwrap_or_else(|| panic!("{theme:?}: no account bar"));
+        assert_eq!((bar.left(), bar.top()), (title.left() - 15.0, title.top() - 1.0 + 10.0), "{theme:?}: {bar:?} by {title:?}");
+        // No note under the stored password at rest: the IMAP server's row stands 12 under the New password box.
+        let password = harness.get_by_label("New password").rect();
+        assert_eq!(field_top(&harness, "IMAP server") - password.bottom(), 12.0, "{theme:?}");
+        assert!(harness.query_by_label_contains("The stored password is in").is_none(), "{theme:?}");
+    }
+    // The add form uses the same link.
+    let harness = form_open(egui::Theme::Dark, FakeWorkers::passing());
+    let link = harness.get_by_label("Back to the accounts").rect();
+    let title = harness.get_by_label("Add an account").rect();
+    assert_eq!((link.height(), title.top() - link.top()), (16.0, 23.0), "{title:?} under {link:?}");
 }

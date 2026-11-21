@@ -106,6 +106,10 @@ const TITLE_DOWN: f32 = 1.0;
 const HEAD_GAP: f32 = 6.0;
 const HEAD_BELOW: f32 = 16.0;
 
+/// The account bar before an account's title, and how far right of the row's left the title starts: the bar and 12.
+const BAR: egui::Vec2 = egui::vec2(3.0, 12.0);
+const BAR_ROOM: f32 = 15.0;
+
 /// The widest the check gets, and the room between its parts, in points.
 const CHECK: f32 = 640.0;
 const CHECK_GAP: f32 = 16.0;
@@ -142,16 +146,24 @@ fn words(ui: &mut Ui, text: &str, font: Font, colour: Color32, width: f32) -> Re
     rect
 }
 
-/// The page's head: its title on one line, 1 down in a 32-high row, and, when there are any, the words under it in
-/// `muted`.
-fn head(ui: &mut Ui, theme: &Theme, title: &str, under: Option<&str>, width: f32) {
+/// The page's head: its title on one line, 1 down in a 32-high row, after the account `bar` of that colour when one is
+/// given (3 × 12 in the middle of the row, the title [`BAR_ROOM`] from the row's left), and, when there are any, the
+/// words under it in `muted`.
+fn head(ui: &mut Ui, theme: &Theme, (title, bar): (&str, Option<Color32>), under: Option<&str>, width: f32) {
     let f = &theme.fonts;
     ui.spacing_mut().item_spacing.y = HEAD_GAP;
     let width = width.max(1.0);
+    let indent = if bar.is_some() { BAR_ROOM } else { 0.0 };
     let shown = component::plain(title);
-    let galley = component::cut(ui, &shown, f.title, theme.palette.ink, width);
+    let galley = component::cut(ui, &shown, f.title, theme.palette.ink, (width - indent).max(1.0));
     let (rect, _) = ui.allocate_exact_size(vec2(width, TITLE_ROW.max(f.title.line + TITLE_DOWN)), Sense::hover());
-    said(ui, rect.min + vec2(0.0, TITLE_DOWN), width, galley, theme.palette.ink, &shown);
+    if let Some(colour) = bar
+        && ui.is_rect_visible(rect)
+    {
+        let at = pos2(rect.left(), rect.top() + ((rect.height() - BAR.y) / 2.0).round());
+        ui.painter().rect_filled(Rect::from_min_size(at, BAR), 0.0, colour);
+    }
+    said(ui, rect.min + vec2(indent, TITLE_DOWN), (width - indent).max(1.0), galley, theme.palette.ink, &shown);
     if let Some(under) = under {
         words(ui, under, f.body, theme.palette.muted, width);
     }
@@ -239,7 +251,10 @@ fn password(ui: &mut Ui, theme: &Theme, (caption, hint): (&str, &str), secret: &
     part(ui, width, |ui| {
         let kept = if hint.is_empty() { field::Secret::Typed } else { field::Secret::Stored };
         let id = ui.make_persistent_id("account-password");
-        field::quietly(ui, |ui| field::password_field(ui, theme, id, secret.expose_mut(), &Field { error, ..Field::new(caption, hint) }, kept))
+        // The form says in its own words where the password goes: nothing under the box.
+        field::quietly(ui, |ui| {
+            field::password_field_unnoted(ui, theme, id, secret.expose_mut(), &Field { error, ..Field::new(caption, hint) }, kept)
+        })
     })
 }
 
@@ -557,7 +572,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
     head(
         ui,
         theme,
-        tr!("Add an account"),
+        (tr!("Add an account"), None),
         Some(tr!("IMAP for the mail. Detect proposes the servers from the address; nothing is sent until you have seen them.")),
         width,
     );
@@ -625,19 +640,27 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
 }
 
 /// The form of an account already there: the add form's fields, the address read-only, a new password instead of the
-/// password, and where the sign-in will go when it would go anywhere new. `writing`: a message is being written from
-/// this account.
-fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding, writing: bool) -> Option<Asked> {
+/// password, and where the sign-in will go when it would go anywhere new. Save waits, disabled, until something changed;
+/// beside the buttons a word says whether anything did. `bar` is the account's colour; `writing`: a message is being
+/// written from this account.
+fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding, (bar, writing): (Color32, bool)) -> Option<Asked> {
     let f = &theme.fonts;
     let p = &theme.palette;
     let mut asked = None;
     let mut remove_at = None;
     let width = ui.available_width().min(FORM);
-    head(ui, theme, tr!("Account settings"), None, width);
+    let title = tr!("Account settings · {name}", name = onboarding.removed_name());
+    head(ui, theme, (&title, Some(bar)), None, width);
     ui.add_space(HEAD_BELOW - HEAD_GAP);
     let faults = Faults::of(onboarding);
-    let (checks, note) = onboarding.save_summary();
-    let label = if checks { tr!("Save and check") } else { tr!("Save") };
+    let summary = onboarding.save_summary();
+    let label = if summary.checks { tr!("Save and check") } else { tr!("Save") };
+    // The note says what saving does; without one, a word says whether there is anything to save.
+    let state = match (&summary.note, summary.changed) {
+        (Some(_), _) => None,
+        (None, true) => Some(tr!("changed, not saved yet")),
+        (None, false) => Some(tr!("nothing changed")),
+    };
     let mut edited = Vec::new();
     let asking = onboarding.asking_remove();
     let hand = onboarding.take_remove_hand();
@@ -653,18 +676,24 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
         });
         edited.extend(names(ui, theme, &faults, form, width, (tr!("New password"), tr!("empty keeps the stored one"))));
         edited.extend(servers(ui, theme, &faults, form, (width, false), ([None, None], &[None, None])));
-        words(ui, tr!("A new password goes into your system's credential store. The stored one is never shown."), f.caption, p.muted, width);
-        if let Some(text) = &note {
-            words(ui, text, f.caption, p.ink, width);
-        }
+        // Once saving would sign in anew, the note stands in the caption's place, in `warn`.
+        let caption = tr!("A new password goes into your system's credential store. The stored one is never shown.");
+        let (caption, colour) = summary.note.as_deref().map_or((caption, p.muted), |note| (note, p.warn));
+        words(ui, caption, f.caption, colour, width);
         page_error(ui, theme, keymap, onboarding);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
-            if TextButton::new(label).primary().show(ui, theme, keymap).clicked() {
+            let save = if summary.changed { TextButton::new(label).primary() } else { TextButton::new(label).secondary().enabled(false) };
+            if save.show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Save);
             }
             if TextButton::new(tr!("Cancel")).plain().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Cancel);
+            }
+            if let Some(state) = state {
+                let galley = component::galley(ui, state, f.mono_s, p.muted);
+                let (rect, _) = ui.allocate_exact_size(vec2(galley.size().x, f.mono_s.line), Sense::hover());
+                said(ui, rect.min, rect.width(), galley, p.muted, state);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let ask = TextButton::new(tr!("Remove account…")).danger().show(ui, theme, keymap);
@@ -935,7 +964,7 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
         Outcome::Running => tr!("Checking {address}", address = address),
         Outcome::Passed | Outcome::Failed => tr!("Checked {address}", address = address),
     };
-    head(ui, theme, &title, None, width);
+    head(ui, theme, (&title, None), None, width);
     ui.add_space(CHECK_GAP - HEAD_GAP);
     part(ui, width, |ui| {
         ui.spacing_mut().item_spacing.y = CHECK_GAP;
@@ -1067,7 +1096,11 @@ pub(super) fn show(
     component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         asked = match onboarding.stage() {
             Stage::Form => form(ui, theme, keymap, onboarding),
-            Stage::Edit(account) => edit_form(ui, theme, keymap, onboarding, writing == Some(account)),
+            Stage::Edit(account) => {
+                // The account's colour, by its place among the accounts.
+                let index = mailbox.accounts().iter().find(|row| row.id == account).map_or(0, |row| u64::try_from(row.index).unwrap_or(0));
+                edit_form(ui, theme, keymap, onboarding, (theme.account_colour(index), writing == Some(account)))
+            }
             Stage::Checking(account) => checking(ui, theme, keymap, mailbox, onboarding, account),
             Stage::Closed => None,
         };

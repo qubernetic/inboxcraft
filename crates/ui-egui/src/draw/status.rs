@@ -527,6 +527,7 @@ fn message_in(ui: &mut Ui, theme: &Theme, keymap: &Keymap, message: &Message, sh
         Message::Undo { until, .. } => (status_message::Kind::Undo { key: key.as_deref(), left: left(*until, !still) }, true),
         Message::Countdown { until, .. } => (status_message::Kind::Countdown { key: key.as_deref(), left: left(*until, true) }, true),
         Message::Notice { .. } => (status_message::Kind::Notice, false),
+        Message::Done { .. } => (status_message::Kind::Done, false),
         Message::Error { .. } => (status_message::Kind::Error, false),
     };
     let drawn = StatusMessage { kind, text: message.text() };
