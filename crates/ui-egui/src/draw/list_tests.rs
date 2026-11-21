@@ -1444,7 +1444,8 @@ fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale
                 assert_eq!(spans.last().unwrap().1, listing.height, "the last row's bottom is the content's height");
                 assert_eq!(
                     listing.height,
-                    theme.size(56.0) * 10_000.0 + theme.size(64.0),
+                    // The card's 64 and its line under it, on the next even height.
+                    theme.size(56.0) * 10_000.0 + theme.size(64.0) + 2.0,
                     "{percent}: no point lost over 10 000 rows and the screener card"
                 );
             }

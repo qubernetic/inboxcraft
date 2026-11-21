@@ -1430,8 +1430,9 @@ impl Rows<'_> {
     }
 }
 
-/// The screener card's height at 100 % text, in points: the design's 64, its line under it inside (the design draws
-/// the line under the 64; a line's height stays even, for whole pixels at 1.5×).
+/// The screener card's height at 100 % text, in points: the design's 64. Its line stands under it; the card and its
+/// line take the next even height (66), so that every line of the list ends on a whole pixel at 1.5× too: the card's
+/// panel is a point taller than the design's, under its parts, which keep to its 64.
 const SCREENER_HEIGHT: f32 = 64.0;
 
 /// The screener card across `ui`'s line, as the design draws it on top of the inbox: the people mark, how many new
@@ -1440,14 +1441,18 @@ const SCREENER_HEIGHT: f32 = 64.0;
 fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, waiting: &[Waiting]) -> bool {
     let p = &theme.palette;
     let f = &theme.fonts;
-    let rect = ui.max_rect();
+    // The card's panel down to its line at the bottom; its parts keep to the top 64 (at the text scale), as the design
+    // draws them.
+    let line = ui.max_rect();
+    let under = (line.bottom() - 1.0).max(line.top());
     let painter = ui.painter().clone();
-    painter.rect_filled(rect, 0.0, p.panel);
-    super::paint::hairline(&painter, pos2(rect.left(), rect.bottom() - 1.0), pos2(rect.right(), rect.bottom() - 1.0), p.line);
+    painter.rect_filled(Rect::from_min_max(line.min, pos2(line.right(), under)), 0.0, p.panel);
+    super::paint::hairline(&painter, pos2(line.left(), under), pos2(line.right(), under), p.line);
+    let rect = Rect::from_min_size(line.min, vec2(line.width(), Theme::size(theme, SCREENER_HEIGHT).min(line.height())));
     const PAD: f32 = 16.0;
     const GAP: f32 = 12.0;
     let icon = theme.boxes().icon;
-    let mark = Rect::from_min_size(pos2(rect.left() + PAD, rect.top() + ((rect.height() - 1.0 - icon) / 2.0).round()), vec2(icon, icon));
+    let mark = Rect::from_min_size(pos2(rect.left() + PAD, rect.top() + ((rect.height() - icon) / 2.0).round()), vec2(icon, icon));
     crate::iconset::paint(&painter, mark, IconId::People, p.cyan_text);
     // Review at the right end, the avatars before it, the two lines in what is left.
     let face = Theme::size(theme, 24.0);
@@ -1476,7 +1481,7 @@ fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, waiting: &[Waiting]) ->
     let count = waiting.len();
     let title = if count == 1 { tr!("1 new sender").to_owned() } else { tr!("{count} new senders", count = count) };
     let lines = f.strong.line + 2.0 + f.caption.line;
-    let top = rect.top() + ((rect.height() - 1.0 - lines) / 2.0).round();
+    let top = rect.top() + ((rect.height() - lines) / 2.0).round();
     let words = Rect::from_min_size(pos2(left, top), vec2(room, lines));
     let note = tr!("Held back until you let them in");
     // A screen reader reads the two lines as they are written.
@@ -1581,7 +1586,7 @@ pub(super) fn line_height(theme: &Theme, line: &Line<'_>) -> f32 {
         Line::Leaving(_, gone) => even(boxes.mail_row * open(gone)),
         Line::Send(row) if matches!(row.state, SendState::Refused { .. }) => Theme::size(theme, crate::component::outbox_row::REFUSED_HEIGHT),
         Line::Send(_) => Theme::size(theme, crate::component::outbox_row::HEIGHT),
-        Line::Card(_) => Theme::size(theme, SCREENER_HEIGHT),
+        Line::Card(_) => even(Theme::size(theme, SCREENER_HEIGHT) + 1.0),
     }
 }
 
