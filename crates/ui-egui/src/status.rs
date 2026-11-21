@@ -143,7 +143,8 @@ impl Status {
         self.queue.iter().rev().find(|waiting| waiting.message.is_notice()).map(|waiting| waiting.message.text())
     }
 
-    /// Drops every notice: something newer says what happened.
+    /// Drops every notice: something newer says what happened. A done message counts as one and goes too, on purpose:
+    /// the newer line (a discard's Undo bar) takes its place, as it would take a notice's.
     pub(crate) fn forget_notices(&mut self) {
         self.queue.retain(|waiting| !waiting.message.is_notice());
     }
