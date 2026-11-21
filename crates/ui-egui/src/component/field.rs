@@ -484,7 +484,8 @@ enum Line {
     Text,
     /// A line the app reads, in `mono` (the typed time).
     Mono,
-    Password(Secret),
+    /// A password field, and whether a stored one says under its box where the password is kept.
+    Password(Secret, bool),
 }
 
 /// A one-line text field filling the width `ui` offers: its label, a box 36 high and the error under it (see the
@@ -516,7 +517,12 @@ pub(crate) fn mono_field(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, 
 /// sheet's "empty keeps the stored one") in it, the lock at the right end and under it the sentence that the stored
 /// password is kept in the credential store and never shown. Disabled it is an empty box.
 pub fn password_field(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, secret: Secret) -> Response {
-    one_line(ui, theme, id, text, field, Line::Password(secret), MAX_SECRET, None)
+    one_line(ui, theme, id, text, field, Line::Password(secret, true), MAX_SECRET, None)
+}
+
+/// [`password_field`] without the sentence under a stored password's box: for a form that says it in its own words.
+pub(crate) fn password_field_unnoted(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, secret: Secret) -> Response {
+    one_line(ui, theme, id, text, field, Line::Password(secret, false), MAX_SECRET, None)
 }
 
 /// [`password_field`] drawn in `shown`: a board of the gallery.
@@ -529,7 +535,7 @@ pub(crate) fn password_field_with(
     secret: Secret,
     shown: Option<Shown>,
 ) -> Response {
-    one_line(ui, theme, id, text, field, Line::Password(secret), MAX_SECRET, shown)
+    one_line(ui, theme, id, text, field, Line::Password(secret, true), MAX_SECRET, shown)
 }
 
 /// What a field shows of the pointer and the keyboard.
@@ -718,13 +724,14 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
     let p = &theme.palette;
     let width = if ui.available_width().is_finite() { ui.available_width().max(theme.boxes().field) } else { theme.boxes().field };
     let height = theme.boxes().field;
-    let stored = kind == Line::Password(Secret::Stored);
+    let stored = matches!(kind, Line::Password(Secret::Stored, _));
+    let noted = matches!(kind, Line::Password(Secret::Stored, true));
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = theme.spacing.s2;
         label_row(ui, theme, field.label, width);
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         let cap = Cap::Chars(limit.min(MAX_LINE));
-        let password = matches!(kind, Line::Password(_));
+        let password = matches!(kind, Line::Password(..));
         let guarded = guard(ui, id, text, cap);
         let said = guarded.said;
         let refusal = said.map(|_| cap.sentence());
@@ -742,11 +749,11 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
         let disabled_password = password && !(field.enabled && ui.is_enabled() && !soon::is_soon(ui));
         let mark = match kind {
             // Disabled, a password field of either kind is the sheet's empty box with the password mark.
-            Line::Password(_) if disabled_password => Some(PASSWORD),
+            Line::Password(..) if disabled_password => Some(PASSWORD),
             _ if field.read_only || stored => Some(LOCK),
-            Line::Password(Secret::Typed) => Some(PASSWORD),
+            Line::Password(Secret::Typed, _) => Some(PASSWORD),
             Line::Text | Line::Mono => None,
-            Line::Password(Secret::Stored) => Some(LOCK),
+            Line::Password(Secret::Stored, _) => Some(LOCK),
         };
         let pad = inset(theme);
         let side = theme.boxes().icon;
@@ -807,7 +814,7 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
             let ink = if !seen.enabled && password { p.dim } else { p.muted };
             crate::iconset::paint_glyph(&painter, at, glyph, ink);
         }
-        let note = (stored && !disabled_password).then_some(tr!("The stored password is in your system's credential store and is never shown."));
+        let note = (noted && !disabled_password).then_some(tr!("The stored password is in your system's credential store and is never shown."));
         under(ui, theme, if quiet { refusal.as_deref() } else { field.error }, note, width, bring);
         response
     })

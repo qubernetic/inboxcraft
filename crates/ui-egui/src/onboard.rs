@@ -1797,8 +1797,8 @@ impl Onboarding {
         self.remove_hand.take()
     }
 
-    /// The account's name in the question and the status line: its name as it stood when the form opened, else its
-    /// address; one plain line.
+    /// The account's name in the form's title, the question and the status line: its name as it stood when the form
+    /// opened, else its address; one plain line.
     #[must_use]
     pub fn removed_name(&self) -> String {
         let label = self.held.as_ref().map(|held| held.label.trim()).filter(|label| !label.is_empty());
