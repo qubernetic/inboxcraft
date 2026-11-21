@@ -11,7 +11,8 @@
 //! triage choices (the screener's mode, the inbox view, whether a pin outlasts done, how long a send is held, what follows an act, and which word of the sending name Home greets by) into [`TRIAGE_FILE`] ([`Triage::from_value`]), and the
 //! notification choices (each account's level, returned snoozes and reminders) into [`NOTIFY_FILE`]
 //! ([`NotifySettings::from_value`]); that file names accounts by their number only. The week rule (`week.set`) goes into
-//! [`WEEK_FILE`], read as outside data by the session ([`inboxcraft_engine::week::from_value`]). A window without a
+//! [`WEEK_FILE`], read as outside data by the session ([`inboxcraft_engine::week::from_value`]), with the hour an
+//! all-day event's alert rings (`event.all_day_alert.set`) beside it ([`inboxcraft_engine::all_day_alert::from_value`]). A window without a
 //! config folder gets [`NoKeep`].
 
 use std::io::{Read, Write};

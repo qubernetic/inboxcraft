@@ -166,6 +166,8 @@ pub(super) enum Asked {
     FirstDay(inboxcraft_time::Weekday),
     /// The first week of the year (`week.set`).
     FirstWeek(inboxcraft_time::FirstWeek),
+    /// When an all-day event's alert rings (`event.all_day_alert.set`).
+    AllDayAlert(inboxcraft_engine::all_day_alert::AllDayAlert),
     /// Whether closing the window leaves InboxCraft running.
     Background(bool),
     /// Whether InboxCraft starts with the computer.

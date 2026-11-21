@@ -274,8 +274,8 @@ pub struct InboxApp {
     /// The notification choices the keep holds; `None` for the sample, which keeps none: its accounts are not the
     /// owner's.
     kept_notify: Option<NotifySettings>,
-    /// The week rule the keep holds; `None` for the sample, which keeps none.
-    kept_week: Option<inboxcraft_time::WeekRule>,
+    /// The week rule and the all-day alert the keep holds; `None` for the sample, which keeps none.
+    kept_week: Option<(inboxcraft_time::WeekRule, inboxcraft_engine::all_day_alert::AllDayAlert)>,
     /// How weeks are counted where the owner chose nothing: the locale's ([`InboxApp::with_week_default`]).
     week_default: inboxcraft_time::WeekRule,
     /// The app's side of running without a window, when it has one.
@@ -698,7 +698,7 @@ impl InboxApp {
                 Some(kept) => self.mailbox.restore_week_or(&kept, self.week_default),
                 None => self.mailbox.restore_week_rule(self.week_default),
             }
-            self.kept_week = Some(self.mailbox.week_rule());
+            self.kept_week = Some((self.mailbox.week_rule(), self.mailbox.all_day_alert()));
         }
         self.keep = keep;
         self
@@ -836,10 +836,10 @@ impl InboxApp {
         }
     }
 
-    /// Keeps the week rule when it changed; the sample keeps none.
+    /// Keeps the week rule and the all-day alert beside it when either changed; the sample keeps none.
     fn keep_week(&mut self) {
         let Some(kept) = self.kept_week else { return };
-        let now = self.mailbox.week_rule();
+        let now = (self.mailbox.week_rule(), self.mailbox.all_day_alert());
         if now == kept {
             return;
         }
@@ -4073,6 +4073,7 @@ impl InboxApp {
             settings::Asked::Alerts(on) => self.mailbox.set_notify_alerts(on),
             settings::Asked::FirstDay(day) => self.mailbox.set_week(Some(day), None),
             settings::Asked::FirstWeek(first) => self.mailbox.set_week(None, Some(first)),
+            settings::Asked::AllDayAlert(choice) => self.mailbox.set_all_day_alert(choice),
             settings::Asked::Background(on) => self.set_background(on),
             settings::Asked::Login(on) => self.set_login(on),
             asked @ (settings::Asked::Templates
