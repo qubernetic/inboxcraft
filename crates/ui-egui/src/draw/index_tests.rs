@@ -13,7 +13,7 @@ use inboxcraft_model::{Account, AccountId, EmailAddress, Folder, FolderId, Folde
 use inboxcraft_store::{Batch, Change, Storage as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 
-use super::{Asked, MOST_NAME, Place, clean, open_id, show};
+use super::{Asked, MOST_NAME, Place, clean, open_id, path, show};
 use crate::component::tests::{keyboard_walk, rests};
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
@@ -518,6 +518,44 @@ fn drafts_has_a_glyph_of_its_own_wide_and_narrow() {
         assert!(in_row.iter().any(|text| text.as_str() == "\u{e704}"), "narrow {narrow}: {in_row:?}");
         assert!(!in_row.iter().any(|text| text.contains('\u{ebc6}')), "narrow {narrow}: no pencil: {in_row:?}");
     }
+}
+
+/// The labels of the index's buttons, whole.
+fn labels(harness: &Harness<'_, State>) -> Vec<String> {
+    harness.query_all_by_role(Role::Button).map(|node| node.accesskit_node().label().unwrap_or_default().to_owned()).collect()
+}
+
+#[test]
+fn a_sub_folder_is_named_by_its_path_as_the_frame_draws_it() {
+    // screen/index/many-accounts: "Clients / Bakery", the whole path with spaced slashes, 70 in as every folder: no
+    // indent (#398).
+    let harness = harness(two(), Place::Mail, false, TextScale::default(), 1200.0, true);
+    let labels = labels(&harness);
+    assert!(labels.iter().any(|label| label.starts_with("Clients / Harbour Bakery in Studio")), "{labels:?}");
+    assert!(labels.iter().any(|label| label.starts_with("Travel / 2026 in Personal")), "{labels:?}");
+    assert!(!labels.iter().any(|label| label.contains("Clients/")), "{labels:?}");
+}
+
+#[test]
+fn a_path_is_split_only_at_its_own_delimiter_and_stays_capped() {
+    let folder = |name: &str, leaf: &str, depth: usize| crate::mailbox::FolderRow {
+        id: 1,
+        account: 1,
+        name: name.to_owned(),
+        leaf: leaf.to_owned(),
+        depth,
+        role: None,
+        unread: 0,
+        messages: None,
+        selectable: true,
+    };
+    assert_eq!(path(&folder("a/b/c", "c", 2)), "a / b / c");
+    assert_eq!(path(&folder("INBOX.Clients", "Clients", 1)), "INBOX / Clients");
+    assert_eq!(path(&folder("a/b", "b", 0)), "a/b", "at the top a delimiter in a name is the name's");
+    assert_eq!(path(&folder("a/b", "x", 1)), "a/b", "a leaf that is not the path's end leaves the path as it is");
+    assert_eq!(path(&folder("é", "é", 1)), "é", "no delimiter before the leaf");
+    let long = "x/".repeat(5_000);
+    assert!(path(&folder(&long, "", 5_000)).chars().count() <= MOST_NAME);
 }
 
 #[test]

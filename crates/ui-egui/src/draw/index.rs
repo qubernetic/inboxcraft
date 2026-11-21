@@ -118,6 +118,21 @@ pub(crate) fn clean(name: &str) -> String {
     crate::component::plain(kept).into_owned()
 }
 
+/// A folder's name as its row shows it: the parts of its path joined with " / ", as `index/many-accounts` draws a
+/// folder under another ("Clients / Bakery", 70 in as every folder: no indent), cleaned and capped as [`clean`]. The
+/// delimiter is the character before the leaf, so a folder at the top keeps its name whole.
+fn path(folder: &mailbox::FolderRow) -> String {
+    let delimiter = (folder.depth > 0 && !folder.leaf.is_empty())
+        .then(|| folder.name.strip_suffix(folder.leaf.as_str()))
+        .flatten()
+        .and_then(|parents| parents.chars().next_back());
+    let (kept, _) = crate::component::capped(&folder.name, MOST_NAME);
+    match delimiter {
+        Some(delimiter) => clean(&kept.split(delimiter).collect::<Vec<_>>().join(" / ")),
+        None => clean(kept),
+    }
+}
+
 /// The icon of a shared mailbox or folder of `role`.
 fn icon(role: Option<Role>) -> char {
     if role == Some(Role::Drafts) {
@@ -230,7 +245,7 @@ fn line(ui: &mut Ui, theme: &Theme, line: &Line<'_>, active: Option<mailbox::Pla
             response
         }
         Line::Folder(folder, account) => {
-            let name = clean(&folder.name);
+            let name = path(folder);
             let spoken = spoken(&name, Some(&clean(account)), folder.unread);
             let place = mailbox::Place::Folder(folder.id);
             let row = MailboxRow {
