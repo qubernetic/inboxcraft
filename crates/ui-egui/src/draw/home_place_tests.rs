@@ -32,15 +32,16 @@ fn sample_app(clock: &FakeClock) -> InboxApp {
     InboxApp::new(Mailbox::new(sample::session(Box::new(clock.clone())).unwrap(), Box::new(clock.clone())))
 }
 
+/// The frames a step of these tests runs: as many as `Harness::run` runs at most. Home's emblem twinkles on by itself
+/// (#418), so the window never rests there and `run` would not end.
+const STEPS: usize = 4;
+
 /// `app` in a window of `size`, in the app's own frame, run once.
 fn window_of(mut app: InboxApp, size: egui::Vec2) -> Harness<'static, InboxApp> {
     app.set_own_frame(true);
     app.set_frame(inboxcraft_engine::appearance::WindowFrame::Own);
-    // Home's emblem twinkles on by itself while motion is on (#418), so the window would never rest: these tests are
-    // about places and keys, and run with motion off.
-    app.set_motion_level(crate::motion::Level::Off);
     let mut harness = Harness::builder().with_size(size).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
-    harness.run();
+    harness.run_steps(STEPS);
     harness
 }
 
@@ -53,14 +54,14 @@ fn press_ending(harness: &mut Harness<'static, InboxApp>, end: &str) {
     let node = harness.query_all_by_role(Role::Button).find(|node| node.accesskit_node().label().is_some_and(|label| label.ends_with(end)));
     let Some(node) = node else { panic!("no button ending {end:?}") };
     node.click();
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
 }
 
 fn press(harness: &mut Harness<'static, InboxApp>, label: &str) {
     harness.get_by_label(label).click();
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
 }
 
 /// A kept draft of the first account with `subject`; its id.
@@ -84,8 +85,8 @@ fn press_draft(harness: &mut Harness<'static, InboxApp>, subject: &str) {
     let row = harness.query_all_by_role(Role::ListItem).find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with(subject)));
     let Some(row) = row else { panic!("no draft row {subject:?}") };
     row.click();
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
 }
 
 fn drafts_total(app: &mut InboxApp) -> u64 {
@@ -101,13 +102,13 @@ fn subject_of(app: &mut InboxApp, id: u64) -> String {
 fn home(harness: &mut Harness<'static, InboxApp>) {
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, keymap::HOME);
-    harness.run();
+    harness.run_steps(STEPS);
 }
 
 /// Ctrl and `key`.
 fn command(harness: &mut Harness<'static, InboxApp>, key: Key) {
     harness.key_press_modifiers(Modifiers::COMMAND, key);
-    harness.run();
+    harness.run_steps(STEPS);
 }
 
 #[test]
@@ -131,23 +132,23 @@ fn home_s_key_its_row_and_the_palette_show_it_and_mail_s_key_leaves_it() {
     command(&mut harness, Key::Num1);
     assert_eq!(harness.state().screen(), Screen::Mail, "Command 1 shows the mail");
     harness.get_by_role_and_label(Role::Button, "Home").click();
-    harness.run();
+    harness.run_steps(STEPS);
     assert_eq!(harness.state().screen(), Screen::Home, "the index's HOME shows it");
     command(&mut harness, Key::Num2);
     assert_eq!(harness.state().screen(), Screen::Calendar);
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, keymap::PALETTE);
-    harness.run();
+    harness.run_steps(STEPS);
     assert!(harness.state().command().results());
     harness.state_mut().command_mut().set_text(">Show Home");
-    harness.run();
+    harness.run_steps(STEPS);
     harness.key_press(Key::Enter);
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
     assert_eq!(harness.state().screen(), Screen::Home, "the palette lists and runs it");
     // From the settings too: Home leaves them.
     super::tests::at_settings(harness.state_mut(), crate::settings::Section::Appearance);
-    harness.run();
+    harness.run_steps(STEPS);
     command(&mut harness, Key::Num9);
     assert!(!harness.state().settings().is_open());
     assert_eq!(harness.state().screen(), Screen::Home);
@@ -158,13 +159,13 @@ fn home_is_built_once_at_rest_and_again_only_while_it_shows_when_what_it_shows_c
     let clock = clock();
     let mut harness = window(sample_app(&clock));
     for _ in 0..12 {
-        harness.run();
+        harness.run_steps(STEPS);
     }
     assert_eq!(harness.state().home.builds(), 1, "frames at rest build nothing more");
     // A draft kept while Home shows: once more.
     draft(harness.state_mut(), "Glaze order");
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
     assert_eq!(harness.state().home.builds(), 2, "a draft kept");
     assert!(
         harness.query_all_by_role(Role::ListItem).any(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("Glaze order")))
@@ -174,27 +175,27 @@ fn home_is_built_once_at_rest_and_again_only_while_it_shows_when_what_it_shows_c
     let start = harness.state().mailbox().now().checked_add(std::time::Duration::from_secs(1_800)).unwrap();
     let event = json!({ "calendar": calendar, "summary": "Kiln check", "start": crate::mailbox::engine_date(start) });
     harness.state_mut().mailbox_mut().run("event.create", &event).unwrap();
-    harness.run();
+    harness.run_steps(STEPS);
     assert_eq!(harness.state().home.builds(), 3, "an event saved");
     // The hour turns: once more.
     clock.advance(std::time::Duration::from_secs(3_600));
-    harness.run();
+    harness.run_steps(STEPS);
     assert_eq!(harness.state().home.builds(), 4, "the hour turned");
     // Away and back with nothing changed: once on return, as on every return.
     command(&mut harness, Key::Num1);
     home(&mut harness);
-    harness.run();
+    harness.run_steps(STEPS);
     assert_eq!(harness.state().home.builds(), 5, "once on a return with nothing changed");
     // Nothing while another place shows, whatever changes there.
     command(&mut harness, Key::Num1);
     draft(harness.state_mut(), "Clay invoice");
     clock.advance(std::time::Duration::from_secs(3_600));
     for _ in 0..4 {
-        harness.run();
+        harness.run_steps(STEPS);
     }
     assert_eq!(harness.state().home.builds(), 5, "nothing is built while the mail shows");
     home(&mut harness);
-    harness.run();
+    harness.run_steps(STEPS);
     assert_eq!(harness.state().home.builds(), 6, "once on return");
 }
 
@@ -211,11 +212,11 @@ fn home_is_built_again_when_the_first_event_left_today_ends() {
     let built = harness.state().home.builds();
     assert!(harness.query_all_by_label_contains("Short call").count() > 0, "the event is the rest of today");
     clock.advance(std::time::Duration::from_secs(300));
-    harness.run();
+    harness.run_steps(STEPS);
     assert_eq!(harness.state().home.builds(), built, "not before it ends");
     clock.advance(std::time::Duration::from_secs(301));
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
     assert_eq!(harness.state().home.builds(), built + 1, "once it ended");
     assert_eq!(harness.query_all_by_label_contains("Short call").count(), 0, "an event that ended is not the rest of today");
 }
@@ -246,7 +247,7 @@ fn each_count_tile_and_link_goes_to_its_place() {
         assert!(end != " In the outbox" || !harness.state().mailbox().outbox().is_empty(), "sends wait in the outbox");
         // From another mailbox, so that each press is seen to open its own.
         harness.state_mut().mailbox_mut().open(Place::View(Folder::Archive));
-        harness.run();
+        harness.run_steps(STEPS);
         // A count of 0 says "Nothing …" on its tile, which presses the same.
         let nothing = match end {
             " To screen" => "Nobody to screen",
@@ -266,8 +267,8 @@ fn each_count_tile_and_link_goes_to_its_place() {
         true => harness.get_by_label("open the week →").click(),
         false => harness.query_all_by_label_contains("more today →").next().unwrap().click(),
     }
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
     assert_eq!(harness.state().screen(), Screen::Calendar);
     let view = if week { crate::calendar::View::Week } else { crate::calendar::View::Day };
     assert_eq!(harness.state().calendar().view(), view);
@@ -279,7 +280,7 @@ fn the_buttons_do_what_they_say() {
     let read = harness.query_by_label("Read mail").is_some();
     if read {
         harness.state_mut().mailbox_mut().open(Place::View(Folder::Sent));
-        harness.run();
+        harness.run_steps(STEPS);
         press(&mut harness, "Read mail");
         assert_eq!((harness.state().screen(), harness.state().mailbox().place()), (Screen::Mail, Place::View(Folder::Inbox)), "Read mail");
     } else {
@@ -298,11 +299,11 @@ fn the_buttons_do_what_they_say() {
 fn press_discard(harness: &mut Harness<'static, InboxApp>, subject: &str) {
     let row = draft_row(harness, subject);
     harness.hover_at(row.center());
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
     harness.get_by_label("discard").click();
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
 }
 
 /// The draft rows Home shows, top to bottom, by the start of their names.
@@ -325,7 +326,7 @@ fn wait_out_the_toast(harness: &mut Harness<'static, InboxApp>) {
     while harness.ctx.input(|input| input.time) < later {
         harness.step();
     }
-    harness.run();
+    harness.run_steps(STEPS);
 }
 
 fn exists(app: &mut InboxApp, id: u64) -> bool {
@@ -382,8 +383,8 @@ fn undo_brings_the_discarded_draft_back_where_it_was_by_button_and_by_key() {
         press_discard(&mut harness, "Workshop dates");
         if by_key {
             harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
-            harness.run();
-            harness.run();
+            harness.run_steps(STEPS);
+            harness.run_steps(STEPS);
         } else {
             press(&mut harness, "undo");
         }
@@ -420,7 +421,7 @@ fn leaving_home_does_not_cancel_the_wait_and_a_closing_window_carries_it_out() {
     let mut harness = window(app);
     press_discard(&mut harness, "Workshop dates");
     harness.state_mut().show_mail();
-    harness.run();
+    harness.run_steps(STEPS);
     assert!(exists(harness.state_mut(), older), "still waiting on the mail");
     harness.get_by_label("Draft discarded");
     wait_out_the_toast(&mut harness);
@@ -444,7 +445,7 @@ fn discarding_the_draft_being_written_keeps_and_closes_it_first() {
     press_draft(&mut harness, "Workshop dates");
     harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
     harness.get_by_role_and_label(Role::TextInput, "Subject").type_text(" and kilns");
-    harness.run();
+    harness.run_steps(STEPS);
     home(&mut harness);
     assert_eq!(harness.state().screen(), Screen::Home);
     press_discard(&mut harness, "Workshop dates");
@@ -486,10 +487,10 @@ fn a_draft_row_pressed_over_a_draft_being_written_keeps_what_was_typed() {
     let mut harness = window(app);
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);
-    harness.run();
+    harness.run_steps(STEPS);
     harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
     harness.get_by_role_and_label(Role::TextInput, "Subject").type_text("Typed before Home");
-    harness.run();
+    harness.run_steps(STEPS);
     let typing = harness.state().composer().map(crate::compose::Composer::draft).unwrap();
     home(&mut harness);
     assert_eq!(harness.state().screen(), Screen::Home);
@@ -530,7 +531,7 @@ fn nothing_of_the_mail_runs_on_home_and_the_window_s_own_runs_as_off_it() {
     harness.state_mut().mailbox_mut().act(last, crate::mailbox::Act::Archive);
     let first = harness.state().mailbox().messages().first().map(|row| row.id);
     harness.state_mut().mailbox_mut().select(first);
-    harness.run();
+    harness.run_steps(STEPS);
     assert!(harness.state().can_run(keymap::UNDO), "Undo could run off Home");
     let before: Vec<(&str, bool)> = keymap::actions().into_iter().map(|action| (action.id, harness.state().can_run(action.id))).collect();
     home(&mut harness);
@@ -546,12 +547,12 @@ fn nothing_of_the_mail_runs_on_home_and_the_window_s_own_runs_as_off_it() {
     // A row act's bare key does nothing to the selected message.
     let row = harness.state().mailbox().selected().unwrap();
     harness.key_press(Key::D);
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
     assert!(harness.state().mailbox().messages().iter().any(|listed| listed.id == row && !listed.done), "D rests on Home");
     // The window's bare key runs: C begins a message.
     harness.key_press(Key::C);
-    harness.run();
+    harness.run_steps(STEPS);
     assert!(harness.state().composer().is_some(), "C, the window's own, runs on Home");
 }
 
@@ -559,18 +560,18 @@ fn nothing_of_the_mail_runs_on_home_and_the_window_s_own_runs_as_off_it() {
 fn on_home_esc_closes_a_float_and_otherwise_nothing() {
     let mut harness = window(sample_app(&clock()));
     harness.key_press(Key::Escape);
-    harness.run();
+    harness.run_steps(STEPS);
     assert_eq!(harness.state().screen(), Screen::Home, "Esc does not leave Home");
     // The account picker, a float of the index, over Home: one Esc closes it, Home stays.
     let owner =
         harness.query_all_by_role(Role::Button).find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("Show mail of")));
     let Some(owner) = owner else { panic!("no owner row") };
     owner.click();
-    harness.run();
+    harness.run_steps(STEPS);
     assert!(crate::component::popup::any_open(&harness.ctx), "the picker is open");
     harness.key_press(Key::Escape);
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
     assert!(!crate::component::popup::any_open(&harness.ctx), "one Esc closes it");
     assert_eq!(harness.state().screen(), Screen::Home, "and Home stays");
 }
@@ -582,7 +583,7 @@ fn home_stands_in_the_body_at_every_width_and_text_size() {
             let mut app = sample_app(&clock());
             app.set_text_scale(TextScale::from_percent(percent).unwrap());
             let mut harness = window_of(app, vec2(width, 900.0));
-            harness.run();
+            harness.run_steps(STEPS);
             // The body the window laid out this frame: the window less the index (232, 56 under 1280), its hairline
             // and the window's two edges.
             let regions = super::shell::laid(&harness.ctx).unwrap();
@@ -618,9 +619,9 @@ fn home_stands_in_the_body_at_every_width_and_text_size() {
 
 fn type_into(harness: &mut Harness<'static, InboxApp>, field: &str, text: &str) {
     harness.get_by_role_and_label(Role::TextInput, field).focus();
-    harness.run();
+    harness.run_steps(STEPS);
     harness.get_by_role_and_label(Role::TextInput, field).type_text(text);
-    harness.run();
+    harness.run_steps(STEPS);
 }
 
 fn folded(harness: &Harness<'static, InboxApp>) -> bool {
@@ -635,7 +636,7 @@ fn on_home_the_floating_composer_s_send_and_fold_act_by_key_and_by_button() {
     harness.state_mut().keymap_mut().bind(keymap::FOLD, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::F9));
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);
-    harness.run();
+    harness.run_steps(STEPS);
     if harness.state().screen() != Screen::Home {
         home(&mut harness);
     }
@@ -644,23 +645,23 @@ fn on_home_the_floating_composer_s_send_and_fold_act_by_key_and_by_button() {
     type_into(&mut harness, "Subject", "Kiln report");
     for round in 0..2 {
         command(&mut harness, Key::F9);
-        harness.run();
+        harness.run_steps(STEPS);
         assert_eq!(folded(&harness), round == 0, "fold by its key, round {round}");
     }
     for (round, words) in ["Fold the draft", "Open the draft"].into_iter().enumerate() {
         harness.query_all_by_label_contains(words).next().unwrap_or_else(|| panic!("no {words:?}")).click();
-        harness.run();
-        harness.run();
+        harness.run_steps(STEPS);
+        harness.run_steps(STEPS);
         assert_eq!(folded(&harness), round == 0, "fold by its button: {words}");
     }
     assert_eq!(harness.state().screen(), Screen::Home, "folding leaves Home where it is");
     type_into(&mut harness, "To", "odile@example.org");
     harness.key_press(Key::Enter);
-    harness.run();
+    harness.run_steps(STEPS);
     harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
-    harness.run();
+    harness.run_steps(STEPS);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
-    harness.run();
+    harness.run_steps(STEPS);
     // The sample account has no submission server: the engine refuses the send, which shows it was asked for.
     let refused = harness.state().mailbox().error().is_some_and(|error| error.contains("mail.send"));
     assert!(refused, "Send by its key sends from Home");
@@ -671,22 +672,22 @@ fn on_the_settings_the_composer_kept_open_neither_sends_nor_folds() {
     let mut harness = window(sample_app(&clock()));
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);
-    harness.run();
+    harness.run_steps(STEPS);
     if harness.state().screen() != Screen::Home {
         home(&mut harness);
     }
     type_into(&mut harness, "To", "odile@example.org");
     harness.key_press(Key::Enter);
-    harness.run();
+    harness.run_steps(STEPS);
     type_into(&mut harness, "Subject", "Kiln report");
     assert!(harness.state().can_run(keymap::FOLD) && harness.state().can_run(keymap::SEND), "both run over Home");
     super::tests::at_settings(harness.state_mut(), crate::settings::Section::Appearance);
-    harness.run();
+    harness.run_steps(STEPS);
     for id in super::place_tests::OF_THE_COMPOSER {
         assert!(!harness.state().can_run(id), "{id}: the settings draw no composer");
     }
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
-    harness.run();
+    harness.run_steps(STEPS);
     assert!(harness.state().composer().is_some_and(|composer| !composer.folded()), "nothing sent, nothing folded");
     let asked = harness.state().mailbox().error().is_some_and(|error| error.contains("mail.send"));
     assert!(!asked, "Send rests on the settings");
@@ -703,19 +704,19 @@ fn the_zoom_keys_zoom_nothing_and_ctrl_0_resets_the_text_size_at_a_zoom_of_one()
         .with_size(vec2(1440.0, 900.0))
         .with_context_setup(|ctx| ctx.set_zoom_factor(1.5))
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
-    harness.run();
-    harness.run();
+    harness.run_steps(STEPS);
+    harness.run_steps(STEPS);
     assert_eq!(harness.ctx.zoom_factor(), 1.0, "a kept zoom is set back to 1 at the start");
     assert!(!harness.ctx.options(|options| options.zoom_with_keyboard), "egui's keyboard zoom is off");
     for key in [Key::Plus, Key::Equals, Key::Minus, Key::Plus] {
         command(&mut harness, key);
-        harness.run();
+        harness.run_steps(STEPS);
         assert_eq!(harness.ctx.zoom_factor(), 1.0, "{key:?} zooms nothing");
         assert_eq!(harness.state().screen(), Screen::Mail, "{key:?} moves nothing");
     }
     assert_eq!(harness.state().text_scale().percent(), 120, "the keys stepped the text size, not the zoom");
     command(&mut harness, Key::Num0);
-    harness.run();
+    harness.run_steps(STEPS);
     assert_eq!(harness.ctx.zoom_factor(), 1.0, "Ctrl+0 zooms nothing");
     assert_eq!(harness.state().screen(), Screen::Mail, "Ctrl+0 moves nothing");
     assert_eq!(harness.state().text_scale(), TextScale::default(), "Ctrl+0 is the text size at 100 %");
@@ -731,12 +732,12 @@ fn a_switch_to_another_draft_is_refused_while_the_one_being_written_cannot_be_ke
     let mut harness = window(app);
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);
-    harness.run();
+    harness.run_steps(STEPS);
     if harness.state().screen() != Screen::Home {
         home(&mut harness);
     }
     harness.get_by_role_and_label(Role::TextInput, "Subject").focus();
-    harness.run();
+    harness.run_steps(STEPS);
     let typing = harness.state().composer().map(crate::compose::Composer::draft).unwrap();
     let subject = harness.ctx.memory(|memory| memory.focused());
     // No frame between: what was typed is not kept yet, and keeping it is refused.
@@ -767,16 +768,16 @@ fn off_home_ctrl_z_brings_the_discarded_draft_back_and_not_an_older_act() {
         assert!(harness.state().mailbox().can_undo() && harness.state().mailbox().undoable().is_none(), "{name}");
         press_discard(&mut harness, "Workshop dates");
         place(harness.state_mut());
-        harness.run();
+        harness.run_steps(STEPS);
         harness.get_by_label("Draft discarded");
         command(&mut harness, Key::Z);
-        harness.run();
+        harness.run_steps(STEPS);
         assert_eq!(harness.state().discarding(), None, "{name}: Ctrl+Z took back the discard");
         assert!(harness.state().mailbox().can_undo(), "{name}: the older act is still in the history");
         wait_out_the_toast(&mut harness);
         assert!(exists(harness.state_mut(), older), "{name}: the draft is kept");
         harness.state_mut().show_mail();
-        harness.run();
+        harness.run_steps(STEPS);
         assert!(harness.state().mailbox().messages().iter().all(|row| row.id != archived), "{name}: still archived");
     }
 }
@@ -834,7 +835,66 @@ fn every_ask_of_home_changes_what_the_owner_sees() {
         if let Some(action) = harness.state_mut().apply_home(&ctx, ask) {
             harness.state_mut().run_action(&ctx, action);
         }
-        harness.run();
+        harness.run_steps(STEPS);
         assert_ne!(seen(harness.state()), before, "{ask:?} changes nothing the owner sees");
     }
+}
+
+/// The sample window at `level`.
+fn window_at(clock: &FakeClock, level: crate::motion::Level) -> Harness<'static, InboxApp> {
+    let mut app = sample_app(clock);
+    app.set_motion_level(level);
+    window(app)
+}
+
+/// The soonest repaint the window asks for, in seconds.
+fn repaint_delay(harness: &Harness<'static, InboxApp>) -> f64 {
+    harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap_or(std::time::Duration::MAX).as_secs_f64()
+}
+
+#[test]
+fn at_full_motion_a_second_of_twinkles_on_home_builds_it_no_more() {
+    let clock = clock();
+    let mut harness = window_at(&clock, crate::motion::Level::Full);
+    assert_eq!(harness.state().screen(), Screen::Home);
+    harness.run_steps(60);
+    assert!(repaint_delay(&harness) < 1.0, "Home's emblem does not twinkle at full");
+    assert_eq!(harness.state().home.builds(), 1, "a frame the emblem asked for built Home again");
+}
+
+#[test]
+fn at_full_motion_home_asks_for_its_next_frame_when_the_field_next_changes() {
+    let clock = clock();
+    let mut harness = window_at(&clock, crate::motion::Level::Full);
+    let mut waited = 0;
+    for _ in 0..120 {
+        harness.step();
+        let now = harness.ctx.input(|input| input.time);
+        let Some(next) = harness.state().field.next_change(now) else { continue };
+        let delay = repaint_delay(&harness);
+        assert!(delay <= (next - now).max(0.0) + 2e-3, "the window waits {delay} s, the field changes in {} s", next - now);
+        // A frame asked for sooner than the field changes is one too many.
+        if next - now > 1e-3 {
+            assert!(delay >= next - now - 1e-3, "a frame asked for in {delay} s, the field changes in {} s", next - now);
+            waited += 1;
+        }
+    }
+    assert!(waited >= 100, "the field waited in only {waited} of 120 frames");
+}
+
+#[test]
+fn at_full_motion_the_window_rests_once_home_does_not_show() {
+    let clock = clock();
+    // The mail shows: nothing twinkles.
+    let mut harness = window_at(&clock, crate::motion::Level::Full);
+    assert!(repaint_delay(&harness) < 1.0, "Home's emblem does not twinkle at full");
+    command(&mut harness, Key::Num1);
+    assert_ne!(harness.state().screen(), Screen::Home);
+    assert!(crate::component::tests::rests(&mut harness, 30), "the mail keeps asking for frames");
+    // The settings over Home: Home's stage is not shown, as in the source, where the field is live on Home's own view.
+    let mut harness = window_at(&clock, crate::motion::Level::Full);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run_steps(STEPS);
+    assert!(harness.state().settings().is_open());
+    assert!(crate::component::tests::rests(&mut harness, 30), "Home under the settings keeps asking for frames");
 }
