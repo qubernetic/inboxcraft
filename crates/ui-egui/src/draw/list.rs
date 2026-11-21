@@ -2350,6 +2350,8 @@ const QUEUE_PAD: (f32, f32) = (56.0, 36.0);
 const QUEUE_GAP: f32 = 20.0;
 const CARD_GAP: f32 = 12.0;
 const CARD_WIDE: f32 = 900.0;
+/// How far, in points, a card's subject line may run into the card's right padding before the subject is cut.
+const SUBJECT_SLACK: f32 = 2.0;
 
 /// "New senders", the design's queue: its label, "Who gets in?", what it is for, the screener's mode, then a card for
 /// each sender who waits (their avatar, name, account and address, their newest message and how many more, its first
@@ -2363,7 +2365,11 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
     let room = ui.available_rect_before_wrap();
     ui.painter().rect_filled(room, 0.0, p.bg);
     let area = ScrollArea::vertical().id_salt("new-senders").auto_shrink([false, false]);
-    crate::component::scroll::show(ui, theme, area, |ui| {
+    #[cfg(test)]
+    ui.ctx().data_mut(|data| data.insert_temp(Id::unique("senders-room"), room));
+    // The bar over the queue's right pad, not beside it: the queue keeps the pane's whole width, its pads even, as the
+    // list's rows do; the 12 of the bar stand in the 16 of the pad, clear of the cards.
+    crate::component::scroll::show_over(ui, theme, area, |ui| {
         let pad = if ui.available_width() > CARD_WIDE { QUEUE_PAD.0 } else { theme.spacing.s4 };
         // From the body's left edge, where the list's room starts (#328).
         let side = i8::try_from(pad as i32).unwrap_or(16);
@@ -2559,7 +2565,13 @@ fn sender_card(
     // The card's own id, not one counted from what was drawn before it: an answered card above changes its form as it
     // leaves (in its slot, then only room, then nothing), and a press held on this card across that keeps its widget.
     let id = Id::unique("new-sender-card").with(message.address.to_lowercase()).with(salt);
-    let inner = ui.scope_builder(UiBuilder::new().scope_id(if live { id } else { id.with("leaving") }), |ui| {
+    // Drawn in a room of its own, `wide` across, and only the card's rect taken from `ui`: a subject line let into the
+    // card's padding (SUBJECT_SLACK) widens neither the card nor the room of the cards after it.
+    let at = ui.available_rect_before_wrap();
+    let room = Rect::from_min_max(at.min, pos2(at.left() + wide.max(0.0), at.bottom().max(at.top())));
+    let builder = UiBuilder::new().max_rect(room).layout(*ui.layout()).scope_id(if live { id } else { id.with("leaving") });
+    let mut card_ui = ui.new_child(builder);
+    let inner = card_ui.scope(|ui| {
         ui.set_max_width(wide);
         let slot = ui.painter().add(egui::Shape::Noop);
         // The design's 20 and 16 inside the card's 1 px edge.
@@ -2609,7 +2621,10 @@ fn sender_card(
                                 .chain(std::iter::once(&date))
                                 .map(|words| crate::component::galley(ui, words, theme.fonts.mono_s, p.muted).size().x.ceil() + 10.0)
                                 .sum();
-                            let subject_most = (ui.available_width() - after).max(0.0);
+                            // A subject at most SUBJECT_SLACK too long stays whole, the line's end that much into the
+                            // card's 20 of padding: the frames' "Prices for the sign, oak or steel" is 1.2 too long
+                            // for the 440 pane.
+                            let subject_most = (ui.available_width() - after + SUBJECT_SLACK).max(0.0);
                             let opened = ui
                                 .scope(|ui| {
                                     ui.set_max_width(subject_most);
@@ -2669,18 +2684,24 @@ fn sender_card(
             });
         });
         let rect = shown.response.rect;
+        let rect = rect.with_max_x(rect.right().min(rect.left() + wide));
+        #[cfg(test)]
+        if live && current {
+            ui.ctx().data_mut(|data| data.insert_temp(Id::unique("sender-card-rect"), rect));
+        }
         let edge = edge.unwrap_or(if current { p.cyan_edge } else { p.line });
         let card = vec![
             egui::Shape::rect_filled(rect, 0.0, p.surface),
             egui::Shape::rect_stroke(rect, 0.0, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside),
         ];
         ui.painter().set(slot, egui::Shape::Vec(card));
-        rect.height()
+        rect
     });
+    ui.advance_cursor_after_rect(inner.inner);
     if opened && live {
         ui.data_mut(|data| data.insert_temp(Id::unique("new-sender-opened"), message.id));
     }
-    (answer, inner.inner)
+    (answer, inner.inner.height())
 }
 
 /// The line that says why a message waits, as the design's why-line: `WHY HERE` in the accent and `text`, on the panel
@@ -2755,6 +2776,12 @@ fn focused_row_id() -> Id {
 #[cfg(test)]
 pub(super) fn view_rect(ctx: &egui::Context) -> Option<Rect> {
     ctx.data(|data| data.get_temp::<Rect>(Id::unique("list-view-rect")))
+}
+
+/// The room of the New senders queue and the current sender's card, in the last frame that drew them.
+#[cfg(test)]
+pub(super) fn senders_card(ctx: &egui::Context) -> Option<(Rect, Rect)> {
+    ctx.data(|data| Some((data.get_temp::<Rect>(Id::unique("senders-room"))?, data.get_temp::<Rect>(Id::unique("sender-card-rect"))?)))
 }
 
 /// How far the list was scrolled down, in points, in the last frame that drew one.

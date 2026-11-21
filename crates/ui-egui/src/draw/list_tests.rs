@@ -4063,3 +4063,20 @@ fn a_long_sender_name_gives_way_inside_its_card() {
     let past = past_the_pane(&harness, room.left(), room.right(), room.top(), room.bottom());
     assert!(past.is_empty(), "past the card's room at {}: {past:#?}", room.right());
 }
+
+/// The current sender's card keeps even pads in the queue at 100 %, as the pictures take it: the queue's scroll bar
+/// stands over its right pad, not beside it, so the card is as far from the pane's right edge as from its left one, and
+/// the first card's subject reads whole.
+#[test]
+fn a_sender_s_card_has_even_pads_in_the_queue_at_100_percent() {
+    for size in [vec2(1400.0, 860.0), vec2(1440.0, 900.0)] {
+        let harness = frames_window(size, 100, Place::Senders, Some("Prices for the sign, oak or steel"));
+        let (room, card) = super::list::senders_card(&harness.ctx).unwrap();
+        let (left, right) = (card.left() - room.left(), room.right() - card.right());
+        assert!((left - right).abs() <= 0.5, "{size:?}: the card {card:?} in {room:?}, {left} left and {right} right");
+        let subject = "Prices for the sign, oak or steel";
+        let drawn = harness.get_by_label(subject).rect().width();
+        let whole = text_width(&harness, subject, |theme| theme.fonts.body);
+        assert!(drawn >= whole - 0.5, "{size:?}: the subject drawn {drawn} wide of its {whole}");
+    }
+}
