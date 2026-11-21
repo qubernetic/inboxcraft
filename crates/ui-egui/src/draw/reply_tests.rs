@@ -260,3 +260,134 @@ fn with_no_message_open_the_floating_panel_stands_where_it_did() {
     let corner = egui::pos2(body.right() - 16.0, (body.bottom() - 16.0).floor());
     assert_eq!(panel(&harness), egui::Rect::from_min_max(corner - egui::vec2(520.0, 560.0), corner));
 }
+
+/// The reply to Odile's rota, open in the composer, its text with the keys.
+fn replying(theme: egui::Theme) -> Harness<'static, InboxApp> {
+    let mut harness = reading(theme);
+    press(&mut harness, "Reply");
+    harness.run();
+    harness
+}
+
+/// The composer's text now.
+fn written(harness: &Harness<'static, InboxApp>) -> String {
+    harness.state().composer().unwrap().text().to_owned()
+}
+
+/// Puts the caret of the composer's text before the character at byte `at` of `text`.
+fn caret_at(harness: &mut Harness<'static, InboxApp>, text: &str, at: usize) {
+    let id = super::compose::text_id();
+    let mut state = egui::text_edit::TextEditState::load(&harness.ctx, id).unwrap_or_default();
+    let chars = text[..at].chars().count();
+    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(chars))));
+    state.store(&harness.ctx, id);
+    harness.run();
+}
+
+/// `text` with `put` in place of the bytes `range`.
+fn spliced(text: &str, range: std::ops::Range<usize>, put: &str) -> String {
+    format!("{}{put}{}", &text[..range.start], &text[range.end..])
+}
+
+/// The text the engine keeps for the open draft: what Send sends.
+fn kept(harness: &mut Harness<'static, InboxApp>) -> String {
+    let id = harness.state().composer().unwrap().draft();
+    let shown = harness.state_mut().mailbox_mut().run("compose.show", &json!({ "id": id })).unwrap();
+    shown["text"].as_str().unwrap().to_owned()
+}
+
+#[test]
+fn a_reply_draws_its_quote_as_the_block_in_light_and_dark() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let harness = replying(theme);
+        let text = written(&harness);
+        assert!(text.contains(" wrote on ") && text.contains("\n> Hi all"), "{text:?}");
+        let field = harness.get_by_label("Message text").rect();
+        let bars = super::compose::quote_bars(&harness.ctx);
+        assert_eq!(bars.len(), 1, "one block for the one quote");
+        let bar = bars[0];
+        assert_eq!(bar.width(), super::compose::quote::BAR);
+        assert!(bar.height() >= 22.0 * 3.0, "from the line over it to its last line: {bar:?}");
+        assert!((bar.left() - field.left()).abs() < 8.0 && bar.top() > field.top(), "at the text's left edge: {bar:?} in {field:?}");
+    }
+}
+
+#[test]
+fn a_new_message_draws_no_block() {
+    let mut harness = harness(egui::Theme::Light);
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
+    assert!(super::compose::quote_bars(&harness.ctx).is_empty());
+}
+
+#[test]
+fn typing_and_deleting_at_the_block_s_edges_keeps_the_text_exact() {
+    let mut harness = replying(egui::Theme::Light);
+    let start = written(&harness);
+    assert_eq!(kept(&mut harness), start, "the draft holds the text the composer shows");
+    // At the end of the quote's last line.
+    let last = start.rfind("\n> ").unwrap() + 1;
+    let end = last + start[last..].find('\n').unwrap_or(start.len() - last);
+    caret_at(&mut harness, &start, end);
+    harness.event(egui::Event::Text("!".to_owned()));
+    harness.run();
+    let after_end = spliced(&start, end..end, "!");
+    assert_eq!(written(&harness), after_end, "typed at the end of the quote's last line");
+    // Before the `>` of the quote's first line: the line is the owner's now, the rest is untouched.
+    let first = start.find("\n> Hi all").unwrap() + 1;
+    caret_at(&mut harness, &after_end, first);
+    harness.event(egui::Event::Text("Yes. ".to_owned()));
+    harness.run();
+    let before_mark = spliced(&after_end, first..first, "Yes. ");
+    assert_eq!(written(&harness), before_mark, "typed before the quote mark");
+    // Inside the quote, after its hidden `> `.
+    let inside = before_mark.find("> Hi all").unwrap() + 2;
+    caret_at(&mut harness, &before_mark, inside);
+    harness.event(egui::Event::Text("Dear ".to_owned()));
+    harness.run();
+    let in_quote = spliced(&before_mark, inside..inside, "Dear ");
+    assert_eq!(written(&harness), in_quote, "typed after the hidden quote mark");
+    // Backspace at the start of the quote's first line deletes into the line over it.
+    let line = in_quote.find("Yes. > Dear").unwrap();
+    caret_at(&mut harness, &in_quote, line);
+    harness.key_press(Key::Backspace);
+    harness.run();
+    let deleted = spliced(&in_quote, line - 1..line, "");
+    assert_eq!(written(&harness), deleted, "one line break deleted, nothing else");
+    // The draft kept is the text, byte for byte.
+    press(&mut harness, "Close; the draft is kept");
+    let id = {
+        let drafts = harness.state_mut().mailbox_mut().run("compose.list", &json!({})).unwrap();
+        drafts["drafts"][0]["id"].as_u64().unwrap()
+    };
+    let ctx = harness.ctx.clone();
+    harness.state_mut().open_draft(&ctx, id);
+    harness.run();
+    assert_eq!(written(&harness), deleted, "reopened as it was");
+    assert_eq!(kept(&mut harness), deleted, "kept, and so sent, as it was");
+    assert_eq!(super::compose::quote_bars(&harness.ctx).len(), 1, "the block is drawn again");
+}
+
+#[test]
+fn undo_in_the_quote_brings_the_text_back_exactly() {
+    let mut harness = replying(egui::Theme::Light);
+    let start = written(&harness);
+    let inside = start.find("> Hi all").unwrap() + 2;
+    caret_at(&mut harness, &start, inside);
+    harness.event(egui::Event::Text("x".to_owned()));
+    harness.run();
+    let typed = spliced(&start, inside..inside, "x");
+    assert_eq!(written(&harness), typed);
+    assert_eq!(drawn(&harness), typed, "the block shows what was typed");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(written(&harness), start);
+    assert_eq!(drawn(&harness), start, "and what Undo brought back");
+    harness.run();
+    assert_eq!(kept(&mut harness), start, "the draft is the text from before");
+}
+
+/// The text the composer's last layout with a quote block holds.
+fn drawn(harness: &Harness<'static, InboxApp>) -> String {
+    super::compose::quote::last_laid(&harness.ctx).unwrap().text().to_owned()
+}

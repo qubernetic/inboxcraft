@@ -29,7 +29,7 @@
 //! `edit`, on the picked one (where `event_editor` says: `small`, `full` or `window`, the last drawn full), and `delete_event` set to `true` deletes the picked event, so its toast shows. `compose`
 //! opens the
 //! composer: `new`, `written`, `bad` (a recipient that is no address), `suggest` (the people a half-typed name could
-//! be), `floating` (a message opened over it), `folded` (the same, the floating panel folded), `reply` (a reply to Odile's rota, a line written over the quote) or
+//! be), `floating` (a message opened over it), `folded` (the same, the floating panel folded), `reply` (a reply to Odile's rota, a line written over the quote), `reply-floating` (the same, a message opened over it) or
 //! `template` (two people and a template with a blank); the first account then has an invented signature.
 //! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts.
 //! `open` takes `{"role": "senders"}` for "New senders", and `view` shows the inbox's groups as `cards` (when left
@@ -771,11 +771,13 @@ fn event_editor(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
 
 /// Opens the composer as `scene` asks.
 fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
-    if !["new", "written", "bad", "suggest", "floating", "folded", "reply", "template", "discarded"].contains(&scene) {
-        return Err(bad(format!("{out}: compose {scene:?} is not new, written, bad, suggest, floating, folded, reply, template or discarded")));
+    if !["new", "written", "bad", "suggest", "floating", "folded", "reply", "reply-floating", "template", "discarded"].contains(&scene) {
+        return Err(bad(format!(
+            "{out}: compose {scene:?} is not new, written, bad, suggest, floating, folded, reply, reply-floating, template or discarded"
+        )));
     }
     sign(app);
-    if scene == "reply" {
+    if scene == "reply" || scene == "reply-floating" {
         // Not selected first: a message selected before the first frame counts as pressed and floats the composer.
         let id = app.mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id);
         if id.is_none_or(|id| !app.answer(id, crate::compose::Answer::Reply)) {
@@ -785,7 +787,13 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
         let text = format!("The second week works for me. I can bring the hose.{}", composer.text());
         *composer.text_mut() = text;
         composer.edited();
-        return composer.save(mailbox);
+        composer.save(mailbox)?;
+        if scene == "reply-floating" {
+            // As `floating`: a message selected before the first frame floats the reply over it.
+            let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").map(|row| row.id);
+            app.mailbox_mut().select(id);
+        }
+        return Ok(());
     }
     app.compose();
     let (Some(composer), mailbox) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
