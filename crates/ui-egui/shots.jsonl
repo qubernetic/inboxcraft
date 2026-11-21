@@ -329,6 +329,9 @@
 {"out": "docs/images/later-snoozed-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "later": "snoozed", "select": "Kiln service: two dates to choose from"}
 {"out": "docs/images/show-done-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "show_done": true, "view": "list"}
 {"out": "docs/images/show-done-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "show_done": true, "view": "list"}
+{"out": "docs/images/unread-only-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "unread_only": true, "view": "list"}
+{"out": "docs/images/unread-only-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "unread_only": true, "view": "list"}
+{"out": "docs/images/unread-only-empty-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "open": {"role": "archive"}, "unread_only": true}
 {"out": "docs/images/snooze-picker-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "picker": "sat 9"}
 {"out": "docs/images/snooze-picker-dark.png", "mode": "dark", "sample": "frames", "size": [1400, 860], "select": "Draft logo for the bakery", "picker": "sat 9"}
 {"out": "docs/images/follow-up-picker-light.png", "mode": "light", "sample": "frames", "size": [1400, 860], "open": {"role": "sent"}, "select": "Shelving for the store room: two options", "picker": "mon 9"}
