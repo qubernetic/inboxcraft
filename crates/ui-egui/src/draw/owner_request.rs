@@ -19,17 +19,18 @@ use egui::{Id, Ui};
 use inboxcraft_engine::AgentClass;
 use serde_json::Value;
 
-use super::InboxApp;
+use super::{InboxApp, Screen};
 use crate::component::dialog::{self, Answer, Dialog, Tone};
-use crate::owner_request::{ARM_SECONDS, Fitted, MOST_WAITING, MayRun, Quoted, Said, Settled, Ticket};
+use crate::owner_request::{ARM_SECONDS, Fitted, MOST_WAITING, MayRun, Quoted, Said, Settled, Ticket, asks_with_own_question};
 use crate::theme::Theme;
 use crate::tr;
 
 impl InboxApp {
     /// Queues an agent's request to run the `owner` command `command` with `params`, from the client that named
     /// itself `client`, for the owner to answer. `None` when [`MOST_WAITING`](crate::owner_request::MOST_WAITING)
-    /// wait already, or when `command` is no `owner` command (a `safe` one needs no asking, a `never` one is never
-    /// offered, an unknown one is none).
+    /// wait already, when `command` is no `owner` command (a `safe` one needs no asking, a `never` one is never
+    /// offered, an unknown one is none), or when it is one whose question the app does not build
+    /// ([`asks_with_own_question`]).
     pub fn ask_owner(&mut self, client: Option<&str>, command: &str, params: &Value) -> Option<Ticket> {
         self.ask_owner_if(client, command, params, Box::new(|| true))
     }
@@ -39,7 +40,7 @@ impl InboxApp {
     /// answers nobody. `may_run` is asked once, right before the command would run.
     pub fn ask_owner_if(&mut self, client: Option<&str>, command: &str, params: &Value, may_run: Box<dyn Fn() -> bool + Send>) -> Option<Ticket> {
         let (command, class) = self.mailbox.class_of(command)?;
-        if class != AgentClass::Owner {
+        if class != AgentClass::Owner || !asks_with_own_question(command) {
             return None;
         }
         self.owner_requests.push_if(client, command, params.clone(), MayRun::new(may_run))
@@ -54,7 +55,11 @@ impl InboxApp {
     /// The owner's answer to the request in front: with `allow`, its command runs for the owner, one step of the
     /// window's undo, and is settled with its answer or refusal; without, it is settled [`Settled::Denied`] and
     /// nothing runs. A request whose two minutes are over is settled [`Settled::TimedOut`] instead, and the answer
-    /// goes to no other request: the one behind it was not what the owner saw.
+    /// goes to no other request: the one behind it was not what the owner saw. Once it ran, the calendar is read again
+    /// when it shows, as after an undo, and Home with it.
+    ///
+    /// Only the question's own Allow and Deny call this, and tests: a call with `allow` is the owner's approval, so no
+    /// other way in (a notification's button, a key of the window's own, a command) may call it.
     pub fn answer_owner_request(&mut self, allow: bool) {
         let Some(asked) = self.owner_requests.front().map(|front| front.ticket) else { return };
         self.expire_owner_requests();
@@ -84,7 +89,11 @@ impl InboxApp {
             Some(preview) => preview.done(answer),
             None => tr!("An agent ran {command}", command = command),
         });
+        let changed = ran.is_ok();
         self.owner_requests.settle_front(Settled::Ran(ran));
+        if changed && self.screen == Screen::Calendar {
+            self.calendar.refresh(&mut self.mailbox);
+        }
     }
 
     /// Builds the app's words for the request in front when it has none yet ([`crate::owner_request::preview`]); one
@@ -140,9 +149,15 @@ impl InboxApp {
         if self.owner_keyboard.is_none() {
             self.owner_keyboard = Some(ui.ctx().memory(|memory| memory.focused()));
         }
+        // The window comes to the front: the press that raised it, or a key on its way, lands on no armed Allow.
+        let (focused, raised) =
+            ui.input(|input| (input.focused, input.raw.events.iter().any(|event| matches!(event, egui::Event::WindowFocused(true)))));
+        let gained_focus = raised || (focused && !self.owner_focused);
+        self.owner_focused = focused;
         let Some(front) = self.owner_requests.front_mut() else { return };
         // A clock that went back (a window opened again) starts the arming second again; it never shortens it.
-        let shown_at = *front.shown_at.insert(front.shown_at.filter(|at| *at <= now).unwrap_or(now));
+        let kept = front.shown_at.filter(|at| *at <= now && !gained_focus);
+        let shown_at = *front.shown_at.insert(kept.unwrap_or(now));
         let Some(preview) = front.preview.as_mut() else { return };
         // Fitted to the card once for its width and its type: no quoted data stands on a row apart from its quote.
         let key = (dialog::text_width(ui.ctx(), theme), ui.ctx().pixels_per_point(), theme.fonts.body, theme.fonts.heading);
@@ -169,7 +184,7 @@ impl InboxApp {
         let armed = shown_for >= ARM_SECONDS;
         // The arming second and the two minutes pass without input.
         if !armed {
-            ui.ctx().request_repaint_after(Duration::from_secs_f64((ARM_SECONDS - shown_for).clamp(0.0, ARM_SECONDS)));
+            ui.ctx().request_repaint_after(arming_left(shown_for));
         }
         // (One not dated yet is dated by the desktop's next look, which asks for its own frame.)
         if let Some(left) = self.owner_request_due_in().filter(|left| !left.is_zero()) {
@@ -228,6 +243,12 @@ impl InboxApp {
     pub fn asks_owner(&self) -> bool {
         self.owner_requests.waiting()
     }
+}
+
+/// How long the question in front, shown `shown_for` seconds ago, waits to be armed: at most [`ARM_SECONDS`], none
+/// once armed, and none for a time that is no number.
+pub(super) fn arming_left(shown_for: f64) -> Duration {
+    Duration::try_from_secs_f64((ARM_SECONDS - shown_for).clamp(0.0, ARM_SECONDS)).unwrap_or_default()
 }
 
 /// `said` as the card draws it in `font`, on at most `rows` rows of `width`: its quoted data with no-break spaces, cut

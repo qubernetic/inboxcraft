@@ -368,6 +368,9 @@ pub struct InboxApp {
     /// Where the keyboard was when the first of the owner's questions showed (`None` while none shows), so it goes
     /// back there when none is left.
     owner_keyboard: Option<Option<egui::Id>>,
+    /// Whether the window had the focus when the owner's question was last drawn: the arming second starts again when
+    /// it gains it.
+    owner_focused: bool,
 }
 
 /// While the person types in the composer, its draft is kept at most once in this many seconds: keeping it runs
@@ -628,6 +631,7 @@ impl InboxApp {
             field: crate::field::Field::new(HOME_FIELD_SEED),
             owner_requests: crate::owner_request::OwnerRequests::default(),
             owner_keyboard: None,
+            owner_focused: false,
         }
     }
 

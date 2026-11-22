@@ -987,6 +987,26 @@ fn an_asking_call_for_a_never_or_unknown_command_is_refused_as_today() {
 }
 
 #[test]
+fn an_asking_call_for_an_owner_command_without_the_app_s_own_question_is_not_allowed_at_once() {
+    let (mut desktop, calls, _clock, _send) = asking();
+    // Eight fields: the account's servers and user name are among them.
+    let update = json!({
+        "account": 1, "display_name": "Ada", "dry_run": false, "imap": { "host": "imap.example.org" }, "label": "Work",
+        "recheck": false, "submission": { "host": "smtp.example.org" }, "username": "ada@example.org"
+    });
+    let answers = [ask(&calls, "account.update", update), ask(&calls, "mail.send", json!({ "id": 7 }))];
+    tick(&mut desktop, &egui::Context::default(), false);
+    for (answer, command) in answers.iter().zip(["account.update", "mail.send"]) {
+        let refused = failure(answer);
+        assert_eq!(refused.code, "not_allowed", "{command}");
+        assert!(refused.message.contains(command) && refused.message.contains("calendar.import"), "{command}: {}", refused.message);
+    }
+    assert!(!desktop.app().asks_owner(), "nothing is queued");
+    assert!(desktop.app_mut().take_settled().is_empty(), "nobody was asked");
+    assert!(!desktop.app().mailbox().can_undo(), "nothing ran");
+}
+
+#[test]
 fn a_plain_call_for_an_owner_command_is_still_not_allowed() {
     let (mut desktop, calls, _clock, _send) = asking();
     let held = events(&mut desktop);
@@ -1121,13 +1141,13 @@ fn a_question_while_the_window_is_not_focused_or_minimised_is_told_once() {
         assert_eq!(shown[0].title, "An agent asks for permission");
         assert!(shown[0].body.starts_with("Add 2 events to “") && shown[0].body.ends_with("”?"), "the app's question: {:?}", shown[0].body);
         // The next request in front is told of again.
-        let _next = ask(&calls, "event.delete", json!({ "id": 1 }));
+        let _next = ask(&calls, "calendar.import", json!({ "calendar": 2, "ics": import()["ics"].as_str().unwrap().replacen("desk-", "next-", 2) }));
         desktop.app_mut().answer_owner_request(false);
         tick_seen(&mut desktop, &ctx, focused, minimized);
         tick_seen(&mut desktop, &ctx, focused, minimized);
         let shown = questions(&told);
         assert_eq!(shown.len(), 2, "{focused:?} {minimized:?}");
-        assert_eq!(shown[1].body, "Let a program run event.delete?");
+        assert!(shown[1].body.starts_with("Add 2 events to “"), "the next one's question: {:?}", shown[1].body);
     }
 }
 

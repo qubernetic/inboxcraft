@@ -176,11 +176,11 @@ fn an_allowed_request_is_one_step_of_the_window_s_undo() {
 #[test]
 fn an_allowed_request_is_one_step_of_the_window_s_undo_when_the_history_is_full() {
     let (mut app, _clock) = window();
-    // An agent's acts fill the engine's history and end the window's undo for the acts before them.
+    // An agent's acts fill the engine's history: none of them is the owner's to undo.
     for turn in 0..inboxcraft_engine::MAX_HISTORY {
         app.mailbox_mut().run_for_agent("mail.flag", &json!({ "id": 1, "flagged": turn % 2 == 0 })).unwrap();
     }
-    assert!(!app.mailbox().can_undo());
+    assert!(!app.mailbox().can_undo(), "the window's Undo never takes only an agent's act back");
     let held = events(&mut app);
     asked(&mut app);
     app.answer_owner_request(true);
@@ -189,6 +189,48 @@ fn an_allowed_request_is_one_step_of_the_window_s_undo_when_the_history_is_full(
     assert!(app.mailbox().undoable().unwrap().undoable);
     app.mailbox_mut().undo();
     assert_eq!(events(&mut app), held, "Undo in the window takes the import back");
+}
+
+/// Whether message 1 is flagged, as the list holds it.
+fn flagged(app: &InboxApp) -> Option<bool> {
+    app.mailbox().messages().iter().find(|row| row.id == 1).map(|row| row.flagged)
+}
+
+#[test]
+fn the_owner_s_undo_of_an_allowed_import_survives_the_agent_s_next_act() {
+    let (mut app, _clock) = window();
+    let held = events(&mut app);
+    let was = flagged(&app);
+    asked(&mut app);
+    app.answer_owner_request(true);
+    // The agent's next changing act goes on top of the import in the engine's history.
+    let answer = app.mailbox_mut().run_for_agent("mail.flag", &json!({ "id": 1, "flagged": was != Some(true) })).unwrap();
+    assert_eq!(answer["changed"], json!(true));
+    assert!(app.mailbox().can_undo(), "the owner's Undo is still there");
+    assert!(app.mailbox().undoable().is_none(), "the toast is gone: it said what the owner allowed, not the agent's flag");
+    app.mailbox_mut().undo();
+    assert_eq!(events(&mut app), held, "the owner's Undo takes the import back");
+    // The engine's history is one stack: the agent's flag above the import is taken back with it.
+    assert_eq!(flagged(&app), was, "and the agent's flag on top of it");
+    assert!(!app.mailbox().can_undo());
+}
+
+#[test]
+fn an_agent_s_undo_of_its_own_act_leaves_the_owner_s_undo_of_the_import() {
+    let (mut app, _clock) = window();
+    let held = events(&mut app);
+    let was = flagged(&app);
+    asked(&mut app);
+    app.answer_owner_request(true);
+    app.mailbox_mut().run_for_agent("mail.flag", &json!({ "id": 1, "flagged": was != Some(true) })).unwrap();
+    let undone = app.mailbox_mut().run_for_agent("history.undo", &json!({})).unwrap();
+    assert_eq!(undone["command"], json!("mail.flag"));
+    assert_eq!(flagged(&app), was);
+    let refused = app.mailbox_mut().run_for_agent("history.undo", &json!({}));
+    assert!(matches!(refused, Err(EngineError::NotAllowed { .. })), "the import is still the owner's: {refused:?}");
+    assert!(app.mailbox().can_undo());
+    app.mailbox_mut().undo();
+    assert_eq!(events(&mut app), held, "one Undo of the owner's takes the import back");
 }
 
 #[test]
@@ -282,15 +324,51 @@ fn a_second_request_waits_and_is_not_an_approval() {
 }
 
 #[test]
-fn a_refused_command_is_answered_with_its_error() {
+fn only_a_command_whose_question_the_app_builds_is_asked() {
     let (mut app, _clock) = window();
-    let params = json!({ "calendar": 999, "summary": "Call", "start": "2026-11-10T08:00:00Z" });
-    app.ask_owner(None, "event.create", &params).unwrap();
-    app.answer_owner_request(true);
-    let settled = app.take_settled();
-    assert!(matches!(settled.as_slice(), [(_, Settled::Ran(Err(EngineError::NotFound { .. })))]), "{settled:?}");
+    // Eight fields: the account's servers and user name are among them.
+    let update = json!({
+        "account": 1, "display_name": "Ada", "dry_run": false, "imap": { "host": "imap.example.org" }, "label": "Work",
+        "recheck": false, "submission": { "host": "smtp.example.org" }, "username": "ada@example.org"
+    });
+    for (command, params) in [("account.update", update), ("mail.send", json!({ "id": 7 })), ("event.delete", json!({ "id": 1 }))] {
+        assert!(app.mailbox().class_of(command).is_some_and(|(_, class)| class == inboxcraft_engine::AgentClass::Owner), "{command}");
+        assert!(!crate::owner_request::asks_with_own_question(command), "{command}");
+        assert_eq!(app.ask_owner(Some("inboxcraft-cli"), command, &params), None, "{command}");
+    }
+    assert!(!app.asks_owner(), "nothing is queued");
+    assert!(app.take_settled().is_empty(), "nothing is settled: nobody was asked");
+    assert!(!app.mailbox().can_undo(), "nothing ran");
+    assert!(crate::owner_request::asks_with_own_question("calendar.import"));
+    assert!(app.ask_owner(Some("inboxcraft-cli"), "calendar.import", &import_params()).is_some(), "the import is still asked");
+}
+
+#[test]
+fn a_refused_run_is_answered_with_its_error_and_no_toast() {
+    let (mut app, _clock) = window();
+    let params = json!({ "calendar": 999, "ics": import_params()["ics"].clone() });
+    let ran = app.mailbox_mut().run_for_owner_request("calendar.import", &params, |_| "never said".to_owned());
+    assert!(matches!(ran, Err(EngineError::NotFound { .. })), "{ran:?}");
     assert!(app.mailbox().undoable().is_none(), "no toast");
     assert!(!app.mailbox().can_undo(), "the history as before");
+}
+
+#[test]
+fn an_allow_reads_the_calendar_and_home_again() {
+    let (mut app, _clock) = window();
+    app.show_calendar();
+    let mut home = crate::home::Kept::default();
+    home.current(app.mailbox_mut(), None);
+    let builds = home.builds();
+    // An event in the week the calendar shows.
+    let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Example//Export//EN\r\nBEGIN:VEVENT\r\nUID:shown-1@example.org\r\n\
+        DTSTART:20261105T140000Z\r\nDTEND:20261105T150000Z\r\nSUMMARY:Allotment day\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    app.ask_owner(None, "calendar.import", &json!({ "calendar": CALENDAR, "ics": ics })).unwrap();
+    assert!(!app.calendar().events().any(|event| event.summary == "Allotment day"));
+    app.answer_owner_request(true);
+    assert!(app.calendar().events().any(|event| event.summary == "Allotment day"), "the calendar shows the import at once");
+    home.current(app.mailbox_mut(), None);
+    assert!(home.builds() > builds, "Home is built again, its agenda with it");
 }
 
 #[test]
@@ -666,16 +744,6 @@ fn skipped_single_and_left_out_are_said_only_when_there_are_some() {
 }
 
 #[test]
-fn another_owner_command_is_asked_with_its_values_quoted() {
-    let mut harness = shown_window();
-    harness.state_mut().ask_owner(Some("inboxcraft-cli"), "event.delete", &json!({ "id": 1 })).unwrap();
-    harness.run();
-    assert!(harness.query_by_label("Let a program run event.delete?").is_some());
-    assert!(harness.query_by_label("It gave these values, shown as it wrote them:").is_some());
-    assert!(labels(&harness).contains(&"“id: 1”".to_owned()), "{:?}", labels(&harness));
-}
-
-#[test]
 fn a_request_that_cannot_be_previewed_is_answered_without_asking() {
     let mut harness = shown_window();
     ask(&mut harness, "BEGIN:VCARD\r\nEND:VCARD\r\n");
@@ -776,6 +844,32 @@ fn a_clock_that_went_back_starts_the_arming_second_again() {
     wait(&mut harness, ARM_SECONDS);
     press(&mut harness, "Allow once");
     assert!(ran(&harness.state_mut().take_settled()), "armed a second after it showed again");
+}
+
+#[test]
+fn the_arming_second_starts_again_when_the_window_gains_focus() {
+    // A press that only raises the window must not land on an Allow armed while the window was in the background.
+    let mut harness = shown_window();
+    ask(&mut harness, &seven_events());
+    harness.input_mut().focused = false;
+    harness.run();
+    wait(&mut harness, ARM_SECONDS);
+    harness.input_mut().focused = true;
+    press(&mut harness, "Allow once");
+    assert!(harness.state_mut().take_settled().is_empty(), "the press that raised the window allows nothing");
+    assert!(harness.state().asks_owner(), "the question still waits");
+    wait(&mut harness, ARM_SECONDS);
+    press(&mut harness, "Allow once");
+    assert!(ran(&harness.state_mut().take_settled()), "armed a second after the window came to the front");
+}
+
+#[test]
+fn the_wait_for_the_arming_second_is_never_out_of_range() {
+    for shown_for in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -5.0, 0.0, 0.25, ARM_SECONDS, 7.0] {
+        let left = super::arming_left(shown_for);
+        assert!(left <= Duration::from_secs_f64(ARM_SECONDS), "{shown_for}: {left:?}");
+    }
+    assert_eq!(super::arming_left(0.25), Duration::from_secs_f64(ARM_SECONDS - 0.25));
 }
 
 /// The rows of the text painted in the last frame that starts with `wanted`, each as its characters.
