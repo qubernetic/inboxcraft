@@ -201,3 +201,22 @@ fn a_store_that_does_not_open_is_a_store_error() {
     let error: Value = serde_json::from_str(&err).unwrap();
     assert_eq!(error["error"]["code"], "store");
 }
+
+#[test]
+fn on_a_store_asking_the_owner_is_refused_as_today() {
+    let dir = fixture();
+    let import = r#"{"calendar":1,"ics":"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"}"#;
+    let remove = format!(r#"{{"account":{}}}"#, store::ACCOUNT);
+    for args in [["--json", "--ask-owner", "calendar.import", import], ["--json", "--ask-owner", "account.remove", remove.as_str()]] {
+        let (code, out, err) = on(dir.path(), &args);
+        assert_eq!((code, out.as_str()), (1, ""), "{err}");
+        let error: Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(error["error"]["code"], "not_allowed", "{err}");
+        let message = error["error"]["message"].as_str().unwrap();
+        assert!(message.ends_with("an owner command needs the running InboxCraft to ask the owner"), "{message}");
+    }
+    let kept = Sqlite::open(dir.path(), StoreConfig::default()).unwrap();
+    assert_eq!(kept.folders(AccountId::new(store::ACCOUNT)).unwrap().len(), 3);
+    let safe = json(dir.path(), &["--ask-owner", "account.list"]);
+    assert_eq!(safe["accounts"][0]["address"], "fixture@example.org", "a safe command runs as an agent's");
+}

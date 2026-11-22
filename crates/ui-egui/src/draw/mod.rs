@@ -48,6 +48,7 @@ mod host;
 mod invite;
 mod list;
 mod onboard;
+mod owner_request;
 pub(crate) mod paint;
 mod reader;
 mod reader_window;
@@ -362,6 +363,8 @@ pub struct InboxApp {
     home: crate::home::Kept,
     /// Home's character field, kept across frames: its cells are built for its rect, not every frame.
     field: crate::field::Field,
+    /// The `owner` commands agents asked the owner to allow, waiting for the owner's answer (`owner_request.rs`).
+    owner_requests: crate::owner_request::OwnerRequests,
 }
 
 /// While the person types in the composer, its draft is kept at most once in this many seconds: keeping it runs
@@ -620,6 +623,7 @@ impl InboxApp {
             menu: None,
             home: crate::home::Kept::default(),
             field: crate::field::Field::new(HOME_FIELD_SEED),
+            owner_requests: crate::owner_request::OwnerRequests::default(),
         }
     }
 

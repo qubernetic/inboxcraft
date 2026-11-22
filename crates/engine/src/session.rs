@@ -378,6 +378,8 @@ pub(crate) struct State {
     pub(crate) writes: Writes,
     /// The acts to undo, the newest last.
     pub(crate) history: Vec<Act>,
+    /// How many acts went into `history`, counting those that pushed the oldest out of a full one.
+    pub(crate) pushes: u64,
     /// Whether the store is the invented sample mailbox ([`Session::sample`]), where the `sample.*` commands run.
     pub(crate) sample: bool,
 }
@@ -598,6 +600,14 @@ impl Session {
         self.state.history.len()
     }
 
+    /// How many acts went into the undo history since the session began, an undo taking none off the count. Unlike
+    /// [`Session::history_len`] it grows also when the history is full and the oldest act goes out: a run that made
+    /// it grow made one step of undo.
+    #[must_use]
+    pub fn history_pushes(&self) -> u64 {
+        self.state.pushes
+    }
+
     /// The store.
     #[must_use]
     pub fn store(&self) -> &dyn Storage {
@@ -801,6 +811,9 @@ impl Session {
             self.state.kept.remove(&job);
         }
         if let Some(step) = undo {
+            if matches!(step, crate::undo::Step::Push(_)) {
+                self.state.pushes = self.state.pushes.saturating_add(1);
+            }
             crate::undo::take(&mut self.state.history, step);
         }
         let mut made = BTreeSet::new();

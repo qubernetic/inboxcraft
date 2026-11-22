@@ -42,18 +42,23 @@ fn help_says_how_to_run_a_command() {
     for flag in ["--help", "-h"] {
         let (code, out, err) = run_with(&[flag]);
         assert_eq!((code, err.as_str()), (0, ""));
-        assert!(out.contains("[--store <dir>] [--json] <command> [<params>]"), "{out}");
+        assert!(out.contains("[--store <dir>] [--json] [--ask-owner] <command> [<params> | --params-file <path>]"), "{out}");
+        assert!(out.contains("--ask-owner asks the owner in the running InboxCraft to allow an owner command once."), "{out}");
     }
 }
 
 #[test]
 fn the_store_and_the_parameters_are_read_in_any_order() {
-    let run = |store: &str, params: Value| Ok(Request::Run { store: Some(PathBuf::from(store)), id: "mail.list".to_owned(), params });
+    let run = |store: &str, params: Value| Ok(Request::Run { store: Some(PathBuf::from(store)), id: "mail.list".to_owned(), params, ask: false });
     assert_eq!(parsed(&["--store", "/tmp/a", "mail.list"]), run("/tmp/a", json!({})));
     assert_eq!(parsed(&["mail.list", "--json", "--store=/tmp/b", r#"{"limit":2}"#]), run("/tmp/b", json!({ "limit": 2 })));
     assert_eq!(parsed(&["--store", "/tmp/c", "--", "mail.list", "{}"]), run("/tmp/c", json!({})));
     assert_eq!(parsed(&["--json", "commands"]), Ok(Request::Commands));
-    assert_eq!(parsed(&["mail.list"]), Ok(Request::Run { store: None, id: "mail.list".to_owned(), params: json!({}) }), "in the running app");
+    assert_eq!(
+        parsed(&["mail.list"]),
+        Ok(Request::Run { store: None, id: "mail.list".to_owned(), params: json!({}), ask: false }),
+        "in the running app"
+    );
     assert_eq!(parsed(&["mcp"]), Ok(Request::Mcp { store: None }));
 }
 
@@ -133,7 +138,7 @@ fn ui_settings_open_goes_to_the_running_app_with_its_page() {
     let (code, out, _) = run_with(&["commands"]);
     assert_eq!(code, 0);
     assert!(out.lines().any(|line| line.starts_with("ui.settings.open ") && line.contains(" safe ")), "{out}");
-    let asked = Request::Run { store: None, id: "ui.settings.open".to_owned(), params: json!({ "page": "accounts" }) };
+    let asked = Request::Run { store: None, id: "ui.settings.open".to_owned(), params: json!({ "page": "accounts" }), ask: false };
     assert_eq!(parsed(&["ui.settings.open", r#"{"page":"accounts"}"#]), Ok(asked));
 }
 
@@ -142,7 +147,7 @@ fn ui_home_open_is_safe_and_goes_to_the_running_app() {
     let (code, out, _) = run_with(&["commands"]);
     assert_eq!(code, 0);
     assert!(out.lines().any(|line| line.starts_with("ui.home.open ") && line.contains(" safe ")), "{out}");
-    let asked = Request::Run { store: None, id: "ui.home.open".to_owned(), params: json!({}) };
+    let asked = Request::Run { store: None, id: "ui.home.open".to_owned(), params: json!({}), ask: false };
     assert_eq!(parsed(&["ui.home.open"]), Ok(asked));
 }
 
@@ -165,4 +170,18 @@ proptest! {
         prop_assert!(code <= 2);
         prop_assert!(code == 0 || out.is_empty());
     }
+}
+
+#[test]
+fn ask_owner_and_params_file_are_read_in_any_order() {
+    let files = tempfile::tempdir().unwrap();
+    let file = files.path().join("params.json");
+    std::fs::write(&file, r#"{"calendar":1}"#).unwrap();
+    let path = file.to_str().unwrap();
+    let asked = Ok(Request::Run { store: None, id: "calendar.import".to_owned(), params: json!({ "calendar": 1 }), ask: true });
+    assert_eq!(parsed(&["--ask-owner", "calendar.import", "--params-file", path]), asked);
+    assert_eq!(parsed(&["calendar.import", &format!("--params-file={path}"), "--ask-owner"]), asked);
+    assert_eq!(parsed(&["calendar.import", r#"{"calendar":1}"#, "--ask-owner"]), asked);
+    let plain = Ok(Request::Run { store: None, id: "calendar.import".to_owned(), params: json!({ "calendar": 1 }), ask: false });
+    assert_eq!(parsed(&["calendar.import", "--params-file", path]), plain);
 }

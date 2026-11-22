@@ -36,7 +36,7 @@ use std::collections::BTreeMap;
 use inboxcraft_engine::all_day_alert::AllDayAlert;
 use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::notify::{Level, Notice, Settings as NotifySettings};
-use inboxcraft_engine::{Applied, Caller, EngineError, Hold, MAX_HISTORY, MAX_LIST, ScreenerMode, Session};
+use inboxcraft_engine::{AgentClass, Applied, Caller, EngineError, Hold, MAX_HISTORY, MAX_LIST, ScreenerMode, Session};
 use inboxcraft_model::{Account, AccountId, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, WeekRule, Weekday};
 use serde_json::{Value, json};
@@ -612,6 +612,9 @@ pub enum Act {
     Move(u64),
     /// A change to a calendar event, made on the calendar screen ([`Mailbox::event_act`]); no act on a message.
     Event,
+    /// An owner's command an agent asked for, run on the owner's press of Allow ([`Mailbox::run_for_owner_request`]);
+    /// no act on a message.
+    Asked,
     /// Let its sender in (`screener.accept`): their held mail and their future mail come in, into `group` when one is
     /// chosen; with `open`, the message opens in the inbox.
     Accept {
@@ -1449,6 +1452,9 @@ impl Mailbox {
                 if answer.get("permanent").and_then(Value::as_bool) == Some(true) { tr!("Deleted for good") } else { tr!("Moved to Bin") }
             }
             Act::Event => return Err(UiError::Answer { command: "event", detail: "an event changes on the calendar screen".to_owned() }),
+            Act::Asked => {
+                return Err(UiError::Answer { command: "asked", detail: "an agent's request runs on the owner's answer only".to_owned() });
+            }
             Act::Move(folder) => {
                 self.write("mail.move", &json!({ "id": id, "folder": folder }))?;
                 let leaf = self.folders.iter().find(|row| row.id == folder).map(|row| row.leaf.clone()).unwrap_or_default();
@@ -1987,6 +1993,49 @@ impl Mailbox {
             self.undo = None;
             self.history = 0;
         }
+        self.refresh();
+        Ok(answer)
+    }
+
+    /// The command `id` as the registry knows it, with its agent class; `None` for a command there is none of.
+    #[must_use]
+    pub fn class_of(&self, id: &str) -> Option<(&'static str, AgentClass)> {
+        let spec = self.session.registry().get(id)?;
+        spec.class.map(|class| (spec.id, class))
+    }
+
+    /// Runs the `owner` command `command` with `params` an agent asked for, for the owner, who has just allowed it in
+    /// the window: whatever the window's caller is (a picture's script steps run as an agent), it runs as the owner's.
+    /// The list is read again. When it went into the engine's history, it is one step of the window's undo, as if
+    /// the owner had run it, and its toast says `text`; `history.undo` is still refused to the agent.
+    ///
+    /// # Errors
+    ///
+    /// The command's refusal, as [`Session::run_as`]; no toast then, and the history as it was.
+    pub(crate) fn run_for_owner_request(&mut self, command: &'static str, params: &Value, text: &str) -> Result<Value, EngineError> {
+        let before = self.session.history_pushes();
+        let answer = self.session.run_as(Caller::Owner, command, params);
+        let answer = match answer {
+            Ok(answer) => answer,
+            Err(error) => {
+                if let Some(line) = crate::store_log(&error, &mut self.logged) {
+                    eprintln!("{line}");
+                    #[cfg(test)]
+                    {
+                        self.logged_lines = self.logged_lines.saturating_add(1);
+                    }
+                }
+                return Err(error);
+            }
+        };
+        // Counted in pushes, not in length: a full history stays as long when the step goes on top.
+        let grew = self.session.history_pushes() > before;
+        let depth = self.history;
+        if grew {
+            self.history = self.history.saturating_add(1);
+        }
+        self.acts = self.acts.saturating_add(1);
+        self.undo = Some(Undo { act: Act::Asked, id: 0, serial: self.acts, text: text.to_owned(), undoable: grew, depth, selected: false });
         self.refresh();
         Ok(answer)
     }

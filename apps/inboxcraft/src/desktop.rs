@@ -13,8 +13,12 @@
 //! unread count on the [`Badge`] (the tray) when it changed, and show what the engine has to tell the owner as
 //! notifications ([`crate::notify`]). They also run the calls that came in over the control channel
 //! ([`crate::control`]) for an agent, so only `safe` commands run; without a window a call waits for the next look,
-//! at most [`WINDOWLESS_TICK`]. A click on one opens its message in the full-width reader, with the window
-//! brought forward or opened again; its buttons mark the message done or read, as the window's own acts do.
+//! at most [`WINDOWLESS_TICK`]. A call that asks the owner for an `owner` command waits in the window's queue
+//! ([`InboxApp::ask_owner`]) and is answered once the owner allowed or denied it there, or its two minutes ran out:
+//! `denied`, `timed_out`, or `busy` when eight wait already. One its asker withdrew (it left, or the server stopped
+//! waiting) leaves the queue unanswered and never runs ([`crate::control::Claim`]). A click on a notification opens its message in the
+//! full-width reader, with the window brought forward or opened again; its buttons mark the message done or read, as
+//! the window's own acts do.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,9 +27,10 @@ use std::time::Duration;
 
 use eframe::egui::{self, ViewportCommand};
 use inboxcraft_control_key::Failure;
+use inboxcraft_engine::AgentClass;
 use inboxcraft_model::Role;
 use inboxcraft_ui_egui::mailbox::{Act, Mailbox};
-use inboxcraft_ui_egui::{InboxApp, store_log};
+use inboxcraft_ui_egui::{InboxApp, Settled, Ticket, store_log};
 
 use crate::control::Call;
 use crate::instance::Request;
@@ -59,6 +64,8 @@ pub struct Desktop {
     deliver: Option<Box<dyn Deliver>>,
     clicks: Option<Receiver<Click>>,
     calls: Option<Receiver<Call>>,
+    /// The calls that ask the owner, waiting in the window's queue for the owner's answer.
+    asked: Vec<(Ticket, Call)>,
     /// A notification failed; the next failures are not reported again.
     failed: bool,
     /// The last store failure's detail written to standard error, so a caller that repeats a failing command does not
@@ -91,6 +98,7 @@ impl Desktop {
             deliver: None,
             clicks: None,
             calls: None,
+            asked: Vec::new(),
             failed: false,
             logged: None,
         }
@@ -187,6 +195,10 @@ impl Desktop {
         }
         self.keep_in_step();
         self.app.wake_when_due(ctx);
+        // The question in front runs out of time even while nothing else moves.
+        if let Some(left) = self.app.owner_request_due_in() {
+            ctx.request_repaint_after(left);
+        }
         if self.app.holds_agent_ask() {
             ctx.request_repaint();
         }
@@ -266,6 +278,31 @@ impl Desktop {
         show
     }
 
+    /// Takes out of the queue the requests whose callers withdrew them (the asker left, or the server gave up
+    /// waiting and answered it), lets the request in front run out of time, and answers the calls whose requests are
+    /// settled.
+    fn answer_asked(&mut self) {
+        let app = &mut self.app;
+        self.asked.retain(|(ticket, call)| {
+            let withdrawn = call.claim().is_withdrawn();
+            if withdrawn {
+                app.withdraw_owner_request(*ticket);
+            }
+            !withdrawn
+        });
+        self.app.expire_owner_requests();
+        for (ticket, settled) in self.app.take_settled() {
+            let Some(at) = self.asked.iter().position(|(asked, _)| *asked == ticket) else { continue };
+            let (_, call) = self.asked.swap_remove(at);
+            call.answer(match settled {
+                Settled::Ran(Ok(answer)) => Ok(answer),
+                Settled::Ran(Err(error)) => Err(Failure::new(error.code(), error.to_string())),
+                Settled::Denied => Err(Failure::new("denied", "the owner denied the request")),
+                Settled::TimedOut => Err(Failure::new("timed_out", "the owner did not answer within two minutes")),
+            });
+        }
+    }
+
     /// Hands the jobs on, applies the events, shows the unread count when it changed and the notices as
     /// notifications.
     fn keep_in_step(&mut self) {
@@ -273,6 +310,19 @@ impl Desktop {
         // An agent's undo waits while the owner edits an event in a window; a closed window edits nothing.
         self.app.tell_editing(self.window);
         for call in calls {
+            let owner = self.app.mailbox().class_of(call.command()).is_some_and(|(_, class)| class == AgentClass::Owner);
+            if call.asks_owner() && owner {
+                let claim = call.claim();
+                if claim.is_withdrawn() {
+                    // Its asker is gone or was answered already: there is nobody to ask for.
+                    continue;
+                }
+                match self.app.ask_owner_if(call.client(), call.command(), call.params(), Box::new(move || claim.take())) {
+                    Some(ticket) => self.asked.push((ticket, call)),
+                    None => call.answer(Err(Failure::new("busy", "eight requests wait for the owner already"))),
+                }
+                continue;
+            }
             let answer = self.app.mailbox_mut().run_for_agent(call.command(), call.params());
             if let Err(error) = &answer
                 && let Some(line) = store_log(error, &mut self.logged)
@@ -281,6 +331,7 @@ impl Desktop {
             }
             call.answer(answer.map_err(|error| Failure::new(error.code(), error.to_string())));
         }
+        self.answer_asked();
         // `ui.settings.open` and `ui.home.open` ask the window to show the settings or Home: the owner's at once, an
         // agent's newest at the end of the next frame ([`Desktop::frame`]), or at once without a window, where the owner
         // cannot act.

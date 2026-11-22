@@ -30,6 +30,7 @@
 //! - [`calendar`]: the calendar screen's state, behind the rail's Calendar.
 //! - [`component`]: the design system's components: card, icon button, pill, tooltip, avatar, badge, hover actions,
 //!   toast and popup, and a gallery of them for `ui_shot`.
+//! - [`owner_request`]: the `owner` commands agents ask the owner to allow once, waiting for the owner's answer.
 //! - [`icons`]: the window icon and the tray icon, the InboxCraft mark from the brand's files.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -57,6 +58,7 @@ pub mod mailbox;
 pub mod motion;
 pub mod onboard;
 pub mod original;
+pub mod owner_request;
 pub mod palette;
 pub mod picture;
 pub mod privacy;
@@ -77,6 +79,7 @@ pub mod workers;
 
 pub use draw::{InboxApp, LEAST_WINDOW, Screen, rows_built};
 pub use error::{UiError, store_log};
+pub use owner_request::{Settled, Ticket};
 
 /// The crate's package name.
 ///

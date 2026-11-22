@@ -14,6 +14,13 @@ use serde_json::Value;
 /// How long the CLI waits for the app's answer: longer than the app waits for its window.
 pub const PATIENCE: Duration = Duration::from_secs(60);
 
+/// How long the CLI waits for the answer to a request that asks the owner (`--ask-owner`): longer than the app waits
+/// for the owner over the most requests that can wait before it.
+pub const ASK_PATIENCE: Duration = Duration::from_secs(1020);
+
+/// The name the CLI gives itself when it asks the owner.
+pub(crate) const CLIENT: &str = "inboxcraft-cli";
+
 /// Where the CLI looks for the running app, and how it gets the token.
 pub struct Reach {
     runtime: Option<PathBuf>,
@@ -82,7 +89,14 @@ impl Remote {
 
     /// Runs `id` with `params` in the app and reads its answer.
     pub(crate) fn run(&self, id: &str, params: &Value) -> Result<Value, Failure> {
-        exchange(&self.socket, &inboxcraft_control_key::line::request_line(&self.token, id, params))
+        exchange(&self.socket, &inboxcraft_control_key::line::request_line(&self.token, id, params), PATIENCE)
+    }
+
+    /// Asks the owner in the app to allow `id` with `params` once, and reads the answer: the command's, or `denied`,
+    /// `timed_out`, `busy`.
+    pub(crate) fn ask(&self, id: &str, params: &Value) -> Result<Value, Failure> {
+        let line = inboxcraft_control_key::line::owner_request_line(&self.token, id, params, CLIENT);
+        exchange(&self.socket, &line, ASK_PATIENCE)
     }
 }
 
@@ -149,13 +163,13 @@ fn connect(_socket: &Path) -> std::io::Result<std::convert::Infallible> {
     Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "the control channel is not built on this system yet"))
 }
 
-/// Writes `line` on a new connection to `socket` and reads one answer.
+/// Writes `line` on a new connection to `socket` and reads one answer, waiting at most `patience` for it.
 #[cfg(unix)]
-fn exchange(socket: &Path, line: &str) -> Result<Value, Failure> {
+fn exchange(socket: &Path, line: &str, patience: Duration) -> Result<Value, Failure> {
     use std::io::{BufRead, BufReader, Read, Write};
     let closed = |error: std::io::Error| Failure::new("closed", format!("the connection to InboxCraft failed: {error}"));
     let mut stream = connect(socket).map_err(closed)?;
-    stream.set_read_timeout(Some(PATIENCE)).map_err(closed)?;
+    stream.set_read_timeout(Some(patience)).map_err(closed)?;
     stream.write_all(line.as_bytes()).map_err(closed)?;
     let cap = u64::try_from(inboxcraft_control_key::line::MAX_ANSWER).unwrap_or(u64::MAX);
     let mut answer = Vec::new();
@@ -164,7 +178,7 @@ fn exchange(socket: &Path, line: &str) -> Result<Value, Failure> {
 }
 
 #[cfg(not(unix))]
-fn exchange(_socket: &Path, _line: &str) -> Result<Value, Failure> {
+fn exchange(_socket: &Path, _line: &str, _patience: Duration) -> Result<Value, Failure> {
     Err(Failure::new("not_running", "the control channel is not built on this system yet; give --store <dir>"))
 }
 

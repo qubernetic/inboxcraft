@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use inboxcraft_cli::{Reach, run_in};
-use inboxcraft_control_key::line::{answer_line, read_request};
+use inboxcraft_control_key::line::{MAX_OWNER_LINE, Request, answer_line, read_request};
 use inboxcraft_control_key::{Failure, Token, socket};
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -24,8 +24,8 @@ fn token(fill: u8) -> Token {
     Token::from_bytes([fill; 32])
 }
 
-/// What the fake app saw: the commands with their params.
-type Seen = Arc<Mutex<Vec<(String, Value)>>>;
+/// What the fake app saw: the whole requests.
+type Seen = Arc<Mutex<Vec<Request>>>;
 
 /// A new runtime folder, the user's alone (`0700`) as `$XDG_RUNTIME_DIR` is.
 fn runtime_folder() -> TempDir {
@@ -58,8 +58,9 @@ fn app(known: Token, sandboxed: bool, answer: fn(&str, &Value) -> Result<Value, 
                 let Ok(line) = line else { break };
                 let request = read_request(&line).unwrap();
                 let reply = if request.token.as_ref() == Some(&known) {
-                    record.lock().unwrap().push((request.command.clone(), request.params.clone()));
-                    answer(&request.command, &request.params)
+                    let reply = answer(&request.command, &request.params);
+                    record.lock().unwrap().push(request);
+                    reply
                 } else {
                     Err(Failure::new("unauthorized", "the control token is wrong or revoked"))
                 };
@@ -69,6 +70,9 @@ fn app(known: Token, sandboxed: bool, answer: fn(&str, &Value) -> Result<Value, 
     });
     (runtime, seen)
 }
+
+/// How the fake app answers a request.
+type Answer = fn(&str, &Value) -> Result<Value, Failure>;
 
 fn echo(command: &str, params: &Value) -> Result<Value, Failure> {
     Ok(json!({ "command": command, "params": params }))
@@ -254,7 +258,7 @@ fn without_a_store_mcp_runs_its_tools_in_the_running_app() {
     let answers: Vec<Value> = out.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
     assert_eq!(answers.len(), 2, "{out}");
     assert_eq!(answers[1]["result"]["isError"], false, "{out}");
-    assert_eq!(seen.lock().unwrap()[0].0, "mail.list");
+    assert_eq!(seen.lock().unwrap()[0].command, "mail.list");
 }
 
 #[test]
@@ -273,7 +277,8 @@ fn without_a_store_mail_why_runs_in_the_running_app() {
     let text = answers[1]["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.starts_with("mail_why: message 7, 1 reason, most specific first\n"), "{text}");
     assert!(text.ends_with("\nthread | why.thread.yours | messages 2\n"), "{text}");
-    assert_eq!(seen.lock().unwrap().as_slice(), [("mail.why".to_owned(), json!({ "id": 7 }))]);
+    let seen: Vec<(String, Value)> = seen.lock().unwrap().iter().map(|request| (request.command.clone(), request.params.clone())).collect();
+    assert_eq!(seen, [("mail.why".to_owned(), json!({ "id": 7 }))]);
 }
 
 #[test]
@@ -299,4 +304,116 @@ fn a_bridged_tool_that_the_app_refuses_is_a_tool_error() {
 fn the_users_reach_reads_the_runtime_folder() {
     let reach = Reach::of_user();
     assert_eq!(reach.runtime(), std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).as_deref());
+}
+
+#[test]
+fn ask_owner_sends_the_request_as_one_that_asks() {
+    let (runtime, seen) = app(token(1), false, echo);
+    let reach = reach(Some(runtime.path()), Some(token(1)));
+    let (code, out, err) = cli_in(&reach, &["--ask-owner", "--json", "calendar.import", r#"{"calendar":1,"ics":""}"#], "");
+    assert_eq!((code, err.as_str()), (0, ""), "{out}");
+    let (code, _, err) = cli_in(&reach, &["--json", "calendar.import", r#"{"calendar":1,"ics":""}"#], "");
+    assert_eq!((code, err.as_str()), (0, ""));
+    let seen = seen.lock().unwrap();
+    let [asked, plain] = seen.as_slice() else { panic!("{seen:?}") };
+    assert!(asked.ask_owner);
+    assert_eq!(asked.client.as_deref(), Some("inboxcraft-cli"));
+    assert_eq!((asked.command.as_str(), &asked.params), ("calendar.import", &json!({ "calendar": 1, "ics": "" })));
+    assert!(!plain.ask_owner);
+    assert_eq!(plain.client, None);
+}
+
+#[test]
+fn a_denied_or_timed_out_request_is_exit_code_1_with_its_code() {
+    let answers: [(&str, Answer); 3] = [
+        ("denied", |_, _| Err(Failure::new("denied", "the owner denied the request"))),
+        ("timed_out", |_, _| Err(Failure::new("timed_out", "the owner did not answer within two minutes"))),
+        ("busy", |_, _| Err(Failure::new("busy", "eight requests wait for the owner already"))),
+    ];
+    for (code_wanted, answer) in answers {
+        let (runtime, _seen) = app(token(1), false, answer);
+        let (code, out, err) = cli_in(&reach(Some(runtime.path()), Some(token(1))), &["--ask-owner", "--json", "calendar.import", "{}"], "");
+        assert_eq!((code, out.as_str()), (1, ""), "{code_wanted}");
+        let error: Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(error["error"]["code"], code_wanted, "{err}");
+        assert!(error["error"]["message"].as_str().unwrap().contains("owner"), "{err}");
+    }
+}
+
+#[test]
+fn params_come_from_a_file_too() {
+    let (runtime, seen) = app(token(1), false, |_, _| Ok(json!({ "added": 1 })));
+    let reach = reach(Some(runtime.path()), Some(token(1)));
+    let files = tempfile::tempdir().unwrap();
+    let ics = "x".repeat(200 * 1024);
+    let file = files.path().join("params.json");
+    std::fs::write(&file, json!({ "calendar": 1, "ics": ics }).to_string()).unwrap();
+    let path = file.to_str().unwrap();
+    let (code, out, err) = cli_in(&reach, &["--ask-owner", "--json", "calendar.import", "--params-file", path], "");
+    assert_eq!((code, err.as_str()), (0, ""), "{out}");
+    let given = format!("--params-file={path}");
+    let (code, _, err) = cli_in(&reach, &["--ask-owner", &given, "calendar.import"], "");
+    assert_eq!((code, err.as_str()), (0, ""));
+    {
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert!(seen.iter().all(|request| request.ask_owner && request.params["ics"].as_str() == Some(ics.as_str())));
+    }
+    let too_big = files.path().join("big.json");
+    std::fs::write(&too_big, format!("{{\"ics\":\"{}\"}}", "x".repeat(MAX_OWNER_LINE))).unwrap();
+    let list = files.path().join("list.json");
+    std::fs::write(&list, "[1, 2]").unwrap();
+    let broken = files.path().join("broken.json");
+    std::fs::write(&broken, "{ not json").unwrap();
+    let missing = files.path().join("missing.json");
+    for args in [
+        vec!["--ask-owner", "calendar.import", "{}", "--params-file", path],
+        vec!["--ask-owner", "calendar.import", "--params-file", missing.to_str().unwrap()],
+        vec!["--ask-owner", "calendar.import", "--params-file", too_big.to_str().unwrap()],
+        vec!["--ask-owner", "calendar.import", "--params-file", list.to_str().unwrap()],
+        vec!["--ask-owner", "calendar.import", "--params-file", broken.to_str().unwrap()],
+        vec!["--ask-owner", "calendar.import", "--params-file", path, "--params-file", path],
+        vec!["--ask-owner", "calendar.import", "--params-file"],
+        vec!["--ask-owner", "calendar.import", "--params-file="],
+        vec!["--ask-owner", "mcp"],
+        vec!["--ask-owner", "commands"],
+        vec!["--ask-owner", "--help"],
+    ] {
+        let mut all = vec!["--json"];
+        all.extend_from_slice(&args);
+        let (code, out, err) = cli_in(&reach, &all, "");
+        assert_eq!((code, out.as_str()), (2, ""), "{args:?}: {err}");
+        let error: Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(error["error"]["code"], "usage", "{args:?}: {err}");
+    }
+    assert_eq!(seen.lock().unwrap().len(), 2, "nothing more was sent");
+}
+
+#[test]
+fn without_a_running_app_asking_says_the_app_is_needed() {
+    let empty = runtime_folder();
+    for reach in [reach(Some(empty.path()), Some(token(1))), reach(None, Some(token(1)))] {
+        let (code, out, err) = cli_in(&reach, &["--ask-owner", "--json", "calendar.import", "{}"], "");
+        assert_eq!((code, out.as_str()), (1, ""));
+        let error: Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(error["error"]["code"], "not_running", "{err}");
+        let message = error["error"]["message"].as_str().unwrap();
+        assert!(message.ends_with("an owner command needs the running InboxCraft to ask the owner"), "{message}");
+        assert!(!message.contains("--store"), "a store cannot ask the owner: {message}");
+    }
+}
+
+#[test]
+fn a_not_allowed_answer_points_at_ask_owner() {
+    let (runtime, _seen) = app(token(1), false, |command, _| Err(Failure::new("not_allowed", format!("{command} is an owner command"))));
+    let (code, _, err) = cli_in(&reach(Some(runtime.path()), Some(token(1))), &["--json", "calendar.import", "{}"], "");
+    assert_eq!(code, 1);
+    let error: Value = serde_json::from_str(&err).unwrap();
+    assert!(error["error"]["message"].as_str().unwrap().ends_with("ask the owner with --ask-owner"), "{err}");
+}
+
+#[test]
+fn the_cli_waits_longer_for_the_owner_than_the_app_does() {
+    assert_eq!(inboxcraft_cli::ASK_PATIENCE, std::time::Duration::from_secs(1020));
+    assert!(inboxcraft_cli::ASK_PATIENCE > std::time::Duration::from_secs(990));
 }
