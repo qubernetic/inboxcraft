@@ -842,3 +842,169 @@ fn a_close_with_a_draft_not_kept_keeps_the_window_and_inboxcraft() {
     assert!(!frame(&mut desktop).contains(&ViewportCommand::CancelClose), "a second close goes through");
     assert!(!desktop.has_window() && desktop.is_quitting());
 }
+
+/// A desktop on the sample mailbox, on a clock the test moves, taking the control channel's calls.
+fn asking() -> (Desktop, Sender<Call>, FakeClock, Sender<Request>) {
+    let fake = FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap());
+    let app = InboxApp::new(Mailbox::new(sample::session(Box::new(fake.clone())).unwrap(), Box::new(fake.clone())));
+    let (send, heard) = mpsc::channel();
+    let (calls_in, calls) = mpsc::channel();
+    (Desktop::new(app, heard).with_control(calls), calls_in, fake, send)
+}
+
+/// Sends a call of `command` with `params` that asks the owner; the receiver of its answer.
+fn ask(calls: &Sender<Call>, command: &str, params: serde_json::Value) -> mpsc::Receiver<Result<serde_json::Value, Failure>> {
+    let (call, answer) = call(command, params);
+    calls.send(call.asking_owner(Some("test".into()))).unwrap();
+    answer
+}
+
+/// Two invented events of `example.org` for the sample's calendar 2.
+fn import() -> serde_json::Value {
+    let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Example//Export//EN\r\n\
+        BEGIN:VEVENT\r\nUID:desk-1@example.org\r\nDTSTART:20261110T080000Z\r\nDTEND:20261110T090000Z\r\nSUMMARY:Dentist\r\nEND:VEVENT\r\n\
+        BEGIN:VEVENT\r\nUID:desk-2@example.org\r\nDTSTART:20261112T080000Z\r\nDTEND:20261112T090000Z\r\nSUMMARY:Piano\r\nEND:VEVENT\r\n\
+        END:VCALENDAR\r\n";
+    json!({ "calendar": 2, "ics": ics })
+}
+
+/// How many events the sample's calendar 2 holds.
+fn events(desktop: &mut Desktop) -> u64 {
+    let listed = desktop.app_mut().mailbox_mut().run_for_agent("calendar.list", &json!({})).unwrap();
+    listed["calendars"].as_array().unwrap().iter().find(|row| row["id"] == 2).unwrap()["events"].as_u64().unwrap()
+}
+
+fn failure(answer: &mpsc::Receiver<Result<serde_json::Value, Failure>>) -> Failure {
+    answer.try_recv().unwrap().unwrap_err()
+}
+
+#[test]
+fn an_asking_call_waits_for_the_owner_and_is_answered_when_allowed() {
+    let (mut desktop, calls, _clock, _send) = asking();
+    let ctx = egui::Context::default();
+    let held = events(&mut desktop);
+    let answer = ask(&calls, "calendar.import", import());
+    tick(&mut desktop, &ctx, false);
+    assert!(answer.try_recv().is_err(), "nothing until the owner answers");
+    assert!(desktop.app().asks_owner());
+    assert_eq!(events(&mut desktop), held);
+    desktop.app_mut().answer_owner_request(true);
+    tick(&mut desktop, &ctx, false);
+    assert_eq!(answer.try_recv().unwrap().unwrap()["added"], json!(2));
+    assert_eq!(events(&mut desktop), held + 2);
+}
+
+#[test]
+fn a_denied_call_is_answered_denied() {
+    let (mut desktop, calls, _clock, _send) = asking();
+    let ctx = egui::Context::default();
+    let held = events(&mut desktop);
+    let answer = ask(&calls, "calendar.import", import());
+    tick(&mut desktop, &ctx, false);
+    desktop.app_mut().answer_owner_request(false);
+    tick(&mut desktop, &ctx, false);
+    let denied = failure(&answer);
+    assert_eq!((denied.code.as_str(), denied.message.as_str()), ("denied", "the owner denied the request"));
+    assert_eq!(events(&mut desktop), held);
+}
+
+#[test]
+fn a_call_nobody_answers_is_timed_out_after_two_minutes() {
+    let (mut desktop, calls, clock, _send) = asking();
+    let ctx = egui::Context::default();
+    let answer = ask(&calls, "calendar.import", import());
+    tick(&mut desktop, &ctx, false);
+    clock.advance(Duration::from_secs(119));
+    tick(&mut desktop, &ctx, false);
+    assert!(answer.try_recv().is_err());
+    clock.advance(Duration::from_secs(1));
+    tick(&mut desktop, &ctx, false);
+    let timed_out = failure(&answer);
+    assert_eq!(timed_out.code, "timed_out");
+    assert_eq!(timed_out.message, "the owner did not answer within two minutes");
+}
+
+#[test]
+fn a_waiting_question_asks_for_a_frame_when_its_time_runs_out() {
+    let (mut desktop, calls, clock, _send) = asking();
+    let ctx = egui::Context::default();
+    // A new context asks for frames of its own at first.
+    for _ in 0..4 {
+        tick(&mut desktop, &ctx, false);
+    }
+    assert!(!ctx.has_requested_repaint(), "nothing waits in the sample");
+    let _answer = ask(&calls, "calendar.import", import());
+    tick(&mut desktop, &ctx, false);
+    clock.advance(Duration::from_secs(100));
+    tick(&mut desktop, &ctx, false);
+    assert_eq!(desktop.app().owner_request_due_in(), Some(Duration::from_secs(20)));
+    assert!(ctx.has_requested_repaint(), "the window looks again when the question runs out of time");
+}
+
+#[test]
+fn the_ninth_asking_call_is_busy_at_once() {
+    let (mut desktop, calls, _clock, _send) = asking();
+    let answers: Vec<_> = (0..9).map(|_| ask(&calls, "calendar.import", import())).collect();
+    tick(&mut desktop, &egui::Context::default(), false);
+    let (waiting, ninth) = answers.split_at(8);
+    assert!(waiting.iter().all(|answer| answer.try_recv().is_err()));
+    let busy = failure(&ninth[0]);
+    assert_eq!((busy.code.as_str(), busy.message.as_str()), ("busy", "eight requests wait for the owner already"));
+}
+
+#[test]
+fn without_a_window_a_request_times_out_and_nothing_runs() {
+    let (desktop, calls, clock, _send) = asking();
+    let mut desktop = desktop.without_window();
+    let held = events(&mut desktop);
+    let answer = ask(&calls, "calendar.import", import());
+    desktop.wait(SHORT);
+    assert!(answer.try_recv().is_err());
+    clock.advance(Duration::from_secs(120));
+    desktop.wait(SHORT);
+    assert_eq!(failure(&answer).code, "timed_out");
+    assert_eq!(events(&mut desktop), held);
+    assert!(!desktop.app().asks_owner());
+}
+
+#[test]
+fn an_asking_call_for_a_safe_command_runs_at_once_as_the_agent_s() {
+    let (mut desktop, calls, _clock, _send) = asking();
+    let answer = ask(&calls, "mail.list", json!({}));
+    tick(&mut desktop, &egui::Context::default(), false);
+    assert!(answer.try_recv().unwrap().is_ok());
+    assert!(!desktop.app().asks_owner());
+}
+
+#[test]
+fn an_asking_call_for_a_never_or_unknown_command_is_refused_as_today() {
+    // The registry holds no `never` command yet; an unknown one is refused as a plain call would be.
+    let (mut desktop, calls, _clock, _send) = asking();
+    let answer = ask(&calls, "no.such", json!({}));
+    tick(&mut desktop, &egui::Context::default(), false);
+    assert_eq!(failure(&answer).code, "unknown_command");
+    assert!(!desktop.app().asks_owner());
+}
+
+#[test]
+fn a_plain_call_for_an_owner_command_is_still_not_allowed() {
+    let (mut desktop, calls, _clock, _send) = asking();
+    let held = events(&mut desktop);
+    let (plain, answer) = call("calendar.import", import());
+    calls.send(plain).unwrap();
+    tick(&mut desktop, &egui::Context::default(), false);
+    assert_eq!(failure(&answer).code, "not_allowed");
+    assert!(!desktop.app().asks_owner());
+    assert_eq!(events(&mut desktop), held);
+}
+
+#[test]
+fn a_call_whose_asker_left_is_settled_quietly() {
+    let (mut desktop, calls, _clock, _send) = asking();
+    let ctx = egui::Context::default();
+    drop(ask(&calls, "calendar.import", import()));
+    tick(&mut desktop, &ctx, false);
+    desktop.app_mut().answer_owner_request(false);
+    tick(&mut desktop, &ctx, false);
+    assert!(!desktop.app().asks_owner());
+}

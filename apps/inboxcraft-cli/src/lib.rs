@@ -8,7 +8,10 @@
 //! store. `inboxcraft-cli --store <dir> [--json] <command> [<params>]` instead opens the store in `<dir>` and runs the
 //! command through the engine itself. Either way it runs as an agent ([`Caller::Agent`]) and writes its answer: as text, one field a line, or with `--json` as
 //! one JSON object on one line (snake_case keys, ISO 8601 dates in UTC, fields only ever added). Only `safe` commands
-//! run: an `owner` or `never` command is refused with a plain error, since nobody is there to approve it. A failure
+//! run: an `owner` or `never` command is refused with a plain error, since nobody is there to approve it. With
+//! `--ask-owner` the running app asks the owner to allow an `owner` command once and answers with the command's answer,
+//! or `denied`, `timed_out` or `busy`; on a store, or with no app running, it is refused as before. `--params-file
+//! <path>` reads the parameters from a file (one JSON object, at most `MAX_OWNER_LINE` bytes). A failure
 //! writes one error to stderr (with `--json`, one object `{"error":{"code":..,"message":..}}`) and exits non-zero:
 //! 1 when the command or the store failed, 2 when the arguments were wrong or `<dir>` holds no store.
 //!
@@ -30,6 +33,7 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use inboxcraft_control_key::Failure as Refused;
+use inboxcraft_control_key::line::MAX_OWNER_LINE;
 use inboxcraft_engine::{Caller, EngineError, Registry, Session};
 use inboxcraft_mcp::Server;
 use inboxcraft_store::{DATABASE_FILE, Sqlite, StoreConfig};
@@ -37,7 +41,7 @@ use inboxcraft_time::SystemClock;
 use serde_json::{Value, json};
 
 use remote::Remote;
-pub use remote::{PATIENCE, Reach, os_token};
+pub use remote::{ASK_PATIENCE, PATIENCE, Reach, os_token};
 
 /// The exit code of a command or a store that failed.
 const FAILED: u8 = 1;
@@ -53,7 +57,7 @@ const MAX_ECHO: usize = 160;
 
 const HELP: &str = "\
 Usage:
-  inboxcraft-cli [--store <dir>] [--json] <command> [<params>]
+  inboxcraft-cli [--store <dir>] [--json] [--ask-owner] <command> [<params> | --params-file <path>]
   inboxcraft-cli [--json] commands
   inboxcraft-cli [--store <dir>] mcp
   inboxcraft-cli --version
@@ -64,6 +68,8 @@ runs in the running InboxCraft, through its control channel; with --store, on th
 <params> is a JSON object, `{}` when left out. `commands` lists every command with its class.
 `mcp` serves the read-only MCP tools over stdin and stdout until stdin ends.
 --json writes the answer, or the error, as one JSON object on one line.
+--ask-owner asks the owner in the running InboxCraft to allow an owner command once.
+--params-file <path> reads <params> from a file: one JSON object.
 Exit codes: 0 done, 1 the command, the store or the app failed, 2 wrong arguments or no store in <dir>.
 ";
 
@@ -84,15 +90,35 @@ impl Failure {
     fn remote(refused: Refused) -> Self {
         let mut message = refused.message;
         if refused.code == "not_allowed" {
-            message.push_str("; only safe commands run for an agent (the owner runs this one in the app)");
+            message.push_str("; only safe commands run for an agent: ask the owner with --ask-owner");
         }
         Self { code: refused.code, message, exit: FAILED }
     }
 
-    fn engine(error: &EngineError) -> Self {
+    /// Why a request that asks the owner could not reach the running app.
+    fn unreached(refused: Refused) -> Self {
+        if refused.code != "not_running" {
+            return Self::remote(refused);
+        }
+        let mut message = refused.message;
+        for store in ["; give --store <dir>", ", or give --store <dir>"] {
+            if let Some(kept) = message.strip_suffix(store) {
+                message = kept.to_owned();
+            }
+        }
+        message.push_str("; an owner command needs the running InboxCraft to ask the owner");
+        Self { code: refused.code, message, exit: FAILED }
+    }
+
+    /// The engine's refusal on a store; `ask` when the owner was to be asked, which a store cannot do.
+    fn engine(error: &EngineError, ask: bool) -> Self {
         let mut message = error.to_string();
         if matches!(error, EngineError::NotAllowed { .. }) {
-            message.push_str("; the CLI runs headless, so only safe commands run (the owner runs this one in the app)");
+            message.push_str(if ask {
+                "; the CLI runs headless here, and an owner command needs the running InboxCraft to ask the owner"
+            } else {
+                "; the CLI runs headless, so only safe commands run (the owner runs this one in the app)"
+            });
         }
         Self { code: error.code().to_owned(), message, exit: FAILED }
     }
@@ -104,7 +130,7 @@ enum Request {
     Version,
     Help,
     Commands,
-    Run { store: Option<PathBuf>, id: String, params: Value },
+    Run { store: Option<PathBuf>, id: String, params: Value, ask: bool },
     Mcp { store: Option<PathBuf> },
 }
 
@@ -150,7 +176,8 @@ fn parse(args: &[OsString]) -> Result<Request, Failure> {
         return Err(Failure::usage(format!("more than {MAX_ARGS} arguments")));
     }
     let mut store: Option<PathBuf> = None;
-    let (mut version, mut help, mut options) = (false, false, true);
+    let mut params_file: Option<&str> = None;
+    let (mut version, mut help, mut options, mut ask) = (false, false, true, false);
     let mut words: Vec<&str> = Vec::new();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -164,6 +191,16 @@ fn parse(args: &[OsString]) -> Result<Request, Failure> {
             "--json" => {}
             "--version" | "-V" => version = true,
             "--help" | "-h" => help = true,
+            "--ask-owner" => ask = true,
+            _ if arg == "--params-file" || arg.starts_with("--params-file=") => {
+                let path = match arg.strip_prefix("--params-file=") {
+                    Some(path) => path,
+                    None => args.next().and_then(|path| path.to_str()).ok_or_else(|| Failure::usage("--params-file needs a file"))?,
+                };
+                if path.is_empty() || params_file.replace(path).is_some() {
+                    return Err(Failure::usage("give --params-file one file, once"));
+                }
+            }
             _ => {
                 let dir = match arg.strip_prefix("--store").map(|rest| rest.strip_prefix('=')) {
                     Some(Some(dir)) => dir,
@@ -179,30 +216,52 @@ fn parse(args: &[OsString]) -> Result<Request, Failure> {
         }
     }
     if help || version {
-        return match (help, version, words.is_empty() && store.is_none()) {
+        return match (help, version, words.is_empty() && store.is_none() && !ask && params_file.is_none()) {
             (true, _, true) => Ok(Request::Help),
             (false, true, true) => Ok(Request::Version),
             _ => Err(Failure::usage("--help and --version stand alone")),
         };
     }
+    let run_only = ask || params_file.is_some();
     match words.as_slice() {
+        ["commands" | "mcp", ..] if run_only => Err(Failure::usage("--ask-owner and --params-file go with a command id")),
+        [_, _] if params_file.is_some() => Err(Failure::usage("give the parameters inline or with --params-file, not both")),
         [] => Err(Failure::usage("give a command id, or `commands` for the list (see --help)")),
         ["commands"] => Ok(Request::Commands),
         ["mcp"] => Ok(Request::Mcp { store }),
         ["mcp", ..] => Err(Failure::usage("mcp takes no parameters: the tools take theirs from the client")),
         [id, rest @ ..] if rest.len() <= 1 => {
-            let params = match rest.first() {
-                Some(text) => serde_json::from_str::<Value>(text)
-                    .map_err(|error| Failure::usage(format!("the parameters are not JSON: {}", echo(&error.to_string()))))?,
-                None => json!({}),
+            let read = |text: &str| {
+                serde_json::from_str::<Value>(text)
+                    .map_err(|error| Failure::usage(format!("the parameters are not JSON: {}", echo(&error.to_string()))))
+            };
+            let params = match (rest.first(), params_file) {
+                (Some(text), _) => read(text)?,
+                (None, Some(path)) => read(&params_text(Path::new(path))?)?,
+                (None, None) => json!({}),
             };
             if !params.is_object() {
                 return Err(Failure::usage("the parameters are one JSON object"));
             }
-            Ok(Request::Run { store, id: (*id).to_owned(), params })
+            Ok(Request::Run { store, id: (*id).to_owned(), params, ask })
         }
         _ => Err(Failure::usage("give one command id and at most one JSON object of parameters")),
     }
+}
+
+/// The text of the parameters file `path`, at most [`MAX_OWNER_LINE`] bytes.
+fn params_text(path: &Path) -> Result<String, Failure> {
+    use std::io::Read as _;
+    let shown = || echo(&path.display().to_string());
+    let unread = |error: io::Error| Failure::usage(format!("the parameters file {} cannot be read: {error}", shown()));
+    let file = std::fs::File::open(path).map_err(unread)?;
+    let cap = u64::try_from(MAX_OWNER_LINE).unwrap_or(u64::MAX).saturating_add(1);
+    let mut bytes = Vec::new();
+    file.take(cap).read_to_end(&mut bytes).map_err(unread)?;
+    if bytes.len() > MAX_OWNER_LINE {
+        return Err(Failure::usage(format!("the parameters file {} is over {MAX_OWNER_LINE} bytes", shown())));
+    }
+    String::from_utf8(bytes).map_err(|_| Failure::usage(format!("the parameters file {} is not UTF-8", shown())))
 }
 
 /// A session on the store in `store`, which must hold one: the CLI never creates a store.
@@ -214,8 +273,8 @@ fn open(store: &Path) -> Result<Session, Failure> {
             exit: USAGE,
         });
     }
-    let opened = Sqlite::open(store, StoreConfig::default()).map_err(|error| Failure::engine(&error.into()))?;
-    Session::new(Box::new(opened), Box::new(SystemClock::new())).map_err(|error| Failure::engine(&error))
+    let opened = Sqlite::open(store, StoreConfig::default()).map_err(|error| Failure::engine(&error.into(), false))?;
+    Session::new(Box::new(opened), Box::new(SystemClock::new())).map_err(|error| Failure::engine(&error, false))
 }
 
 /// The text to write for `request`. `mcp` writes its answers to `out` itself, one a line, as it reads `input`.
@@ -225,10 +284,13 @@ fn answer(request: Request, json: bool, input: &mut dyn BufRead, out: &mut dyn W
         Request::Help => return Ok(HELP.to_owned()),
         Request::Commands if !json => return commands_text(),
         Request::Commands => commands()?,
-        Request::Run { store: Some(store), id, params } => {
-            open(&store)?.run_as(Caller::Agent, &id, &params).map_err(|error| Failure::engine(&error))?
+        Request::Run { store: Some(store), id, params, ask } => {
+            open(&store)?.run_as(Caller::Agent, &id, &params).map_err(|error| Failure::engine(&error, ask))?
         }
-        Request::Run { store: None, id, params } => Remote::find(reach).and_then(|app| app.run(&id, &params)).map_err(Failure::remote)?,
+        Request::Run { store: None, id, params, ask: false } => Remote::find(reach).and_then(|app| app.run(&id, &params)).map_err(Failure::remote)?,
+        Request::Run { store: None, id, params, ask: true } => {
+            Remote::find(reach).map_err(Failure::unreached)?.ask(&id, &params).map_err(Failure::remote)?
+        }
         Request::Mcp { store } => {
             let mut server = match store {
                 Some(store) => Server::new(open(&store)?),
@@ -247,7 +309,7 @@ fn answer(request: Request, json: bool, input: &mut dyn BufRead, out: &mut dyn W
 
 /// Every command with its class and summary.
 fn commands() -> Result<Value, Failure> {
-    let registry = Registry::builtin().map_err(|error| Failure::engine(&error))?;
+    let registry = Registry::builtin().map_err(|error| Failure::engine(&error, false))?;
     let list: Vec<Value> =
         registry.specs().map(|spec| json!({ "id": spec.id, "class": spec.class.map(|class| class.name()), "summary": spec.summary })).collect();
     Ok(json!({ "commands": list }))
@@ -255,7 +317,7 @@ fn commands() -> Result<Value, Failure> {
 
 /// Every command with its class and summary, one a line in columns.
 fn commands_text() -> Result<String, Failure> {
-    let registry = Registry::builtin().map_err(|error| Failure::engine(&error))?;
+    let registry = Registry::builtin().map_err(|error| Failure::engine(&error, false))?;
     let width = registry.specs().map(|spec| spec.id.len()).max().unwrap_or(0);
     let mut listing = String::new();
     for spec in registry.specs() {

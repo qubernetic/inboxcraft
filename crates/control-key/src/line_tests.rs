@@ -4,7 +4,7 @@
 use proptest::prelude::*;
 use serde_json::{Value, json};
 
-use super::{Failure, MAX_COMMAND, MAX_LINE, answer_line, read_answer, read_request, request_line};
+use super::{Failure, MAX_CLIENT, MAX_COMMAND, MAX_LINE, MAX_OWNER_LINE, answer_line, owner_request_line, read_answer, read_request, request_line};
 use crate::Token;
 
 fn token() -> Token {
@@ -150,5 +150,64 @@ proptest! {
     fn every_answer_reads_back(text in "\\PC{0,60}", number in any::<i64>()) {
         let value = json!({ "text": text, "number": number, "list": [Value::Null] });
         prop_assert_eq!(read_answer(answer_line(&Ok(value.clone())).as_bytes()), Ok(value));
+    }
+}
+
+#[test]
+fn a_line_may_ask_the_owner_and_name_its_client() {
+    let line = owner_request_line(&token(), "calendar.import", &json!({ "calendar": 1 }), "inboxcraft-cli");
+    assert_eq!(line.matches('\n').count(), 1);
+    let request = read_request(line.as_bytes()).unwrap();
+    assert!(request.ask_owner);
+    assert_eq!(request.client.as_deref(), Some("inboxcraft-cli"));
+    assert_eq!(request.command, "calendar.import");
+    assert_eq!(request.params, json!({ "calendar": 1 }));
+    let plain = read_request(request_line(&token(), "mail.list", &json!({})).as_bytes()).unwrap();
+    assert!(!plain.ask_owner);
+    assert_eq!(plain.client, None);
+    let declined = json!({ "token": token().text(), "command": "mail.list", "ask_owner": false }).to_string();
+    assert!(!read_request(declined.as_bytes()).unwrap().ask_owner);
+}
+
+#[test]
+fn an_owner_request_line_may_be_eight_mebibytes() {
+    let big = json!({ "ics": "x".repeat(MAX_LINE) });
+    assert_eq!(read_request(request_line(&token(), "calendar.import", &big).as_bytes()).unwrap_err().code, "too_long");
+    let declined = json!({ "token": token().text(), "command": "calendar.import", "params": big, "ask_owner": false });
+    assert_eq!(read_request(declined.to_string().as_bytes()).unwrap_err().code, "too_long");
+    assert!(read_request(owner_request_line(&token(), "calendar.import", &big, "a").as_bytes()).is_ok());
+    let huge = json!({ "ics": "x".repeat(MAX_OWNER_LINE) });
+    let failure = read_request(owner_request_line(&token(), "calendar.import", &huge, "a").as_bytes()).unwrap_err();
+    assert_eq!(failure.code, "too_long");
+    assert!(failure.message.contains(&MAX_OWNER_LINE.to_string()), "{failure:?}");
+}
+
+#[test]
+fn a_client_name_is_cut_and_cleaned() {
+    let name = format!("a\u{1b}[31m\nb{}", "c".repeat(100));
+    let request = read_request(owner_request_line(&token(), "calendar.import", &json!({}), &name).as_bytes()).unwrap();
+    let client = request.client.unwrap();
+    assert!(!client.chars().any(char::is_control), "{client:?}");
+    assert_eq!(client.chars().count(), MAX_CLIENT);
+    assert!(client.starts_with("a[31mb"), "{client:?}");
+    for empty in ["", "\u{1b}\n\0", "   "] {
+        let line = owner_request_line(&token(), "calendar.import", &json!({}), empty);
+        assert_eq!(read_request(line.as_bytes()).unwrap().client, None, "{empty:?}");
+    }
+}
+
+#[test]
+fn ask_owner_and_client_of_the_wrong_kind_are_a_bad_line() {
+    for (field, value) in [
+        ("ask_owner", json!("yes")),
+        ("ask_owner", json!(1)),
+        ("ask_owner", json!(null)),
+        ("client", json!(7)),
+        ("client", json!(null)),
+        ("client", json!(["a"])),
+    ] {
+        let mut line = json!({ "token": token().text(), "command": "calendar.import", "ask_owner": true });
+        line[field] = value.clone();
+        assert_eq!(read_request(line.to_string().as_bytes()).unwrap_err().code, "bad_line", "{field} {value}");
     }
 }

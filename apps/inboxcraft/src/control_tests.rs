@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use inboxcraft_control_key::line::{MAX_LINE, read_answer, request_line};
+use inboxcraft_control_key::line::{MAX_LINE, owner_request_line, read_answer, request_line};
 use inboxcraft_control_key::{ENTRY, Failure, SERVICE, Token};
 use inboxcraft_time::{Clock, SystemClock};
 use inboxcraft_ui_egui::fetch::Wake;
@@ -538,4 +538,86 @@ fn start_says_why_there_is_no_channel() {
     std::fs::create_dir(&inside).unwrap();
     std::fs::write(inside.join("inboxcraft"), b"").unwrap();
     assert!(none(Some(&inside), Arc::new(Memory::default())).contains("could not be opened"));
+}
+
+/// A window that answers every call `after` it came, with whether it asked the owner and the client's name.
+fn slow_window(after: Duration) -> (Limits, tempfile::TempDir, PathBuf, Listening) {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("control.sock");
+    let (send, calls) = mpsc::channel::<Call>();
+    std::thread::spawn(move || {
+        for call in calls {
+            let call_after = after;
+            std::thread::spawn(move || {
+                std::thread::sleep(call_after);
+                let answer = json!({ "asks_owner": call.asks_owner(), "client": call.client(), "size": call.params().to_string().len() });
+                call.answer(Ok(answer));
+            });
+        }
+    });
+    let limits = Limits { patience: Duration::from_millis(50), owner_patience: Duration::from_millis(400), ..Limits::default() };
+    let listening = listen_with(&socket, keeping(&token(1)), send, Arc::new(|| {}), limits).unwrap();
+    (limits, dir, socket, listening)
+}
+
+#[test]
+fn the_owner_is_waited_for_longer_than_the_window_by_default() {
+    let limits = Limits::default();
+    assert_eq!(limits.owner_patience, Duration::from_secs(990));
+    assert!(limits.owner_patience > limits.patience);
+}
+
+#[test]
+fn an_asking_line_is_waited_for_longer_than_a_plain_one() {
+    let (_limits, _dir, socket, _listening) = slow_window(Duration::from_millis(150));
+    let mut client = Client::to(&socket);
+    assert_eq!(code(client.run(&token(1), "calendar.import")), "busy");
+    let asked = client.send(owner_request_line(&token(1), "calendar.import", &json!({}), "inboxcraft-cli").as_bytes());
+    let answer = asked.unwrap().unwrap();
+    assert_eq!(answer["asks_owner"], json!(true));
+    assert_eq!(answer["client"], json!("inboxcraft-cli"));
+}
+
+#[test]
+fn an_asking_line_may_be_longer_than_a_plain_one() {
+    let (_limits, _dir, socket, _listening) = slow_window(Duration::ZERO);
+    let mut client = Client::to(&socket);
+    let big = json!({ "ics": "x".repeat(MAX_LINE) });
+    let answer = client.send(owner_request_line(&token(1), "calendar.import", &big, "a").as_bytes()).unwrap().unwrap();
+    assert!(answer["size"].as_u64().unwrap() > MAX_LINE as u64, "{answer}");
+    let mut client = Client::to(&socket);
+    assert_eq!(code(client.send(request_line(&token(1), "calendar.import", &big).as_bytes())), "too_long");
+    assert!(client.closed());
+}
+
+#[test]
+fn an_asking_line_nobody_answers_is_timed_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("control.sock");
+    let (send, calls) = mpsc::channel::<Call>();
+    let limits = Limits { patience: Duration::from_millis(50), owner_patience: Duration::from_millis(100), ..Limits::default() };
+    let _listening = listen_with(&socket, keeping(&token(1)), send, Arc::new(|| {}), limits).unwrap();
+    let mut client = Client::to(&socket);
+    let line = owner_request_line(&token(1), "calendar.import", &json!({}), "a");
+    let clock = SystemClock::new();
+    let failure = client.send(line.as_bytes()).unwrap().unwrap_err();
+    assert_eq!(failure.code, "timed_out");
+    assert_eq!(failure.message, "the owner did not answer in time");
+    assert!(clock.monotonic() >= Duration::from_millis(100));
+    let kept: Vec<Call> = calls.try_iter().collect();
+    drop(kept);
+    drop(calls);
+    assert_eq!(code(client.send(line.as_bytes())), "closing", "a window that is gone");
+}
+
+#[test]
+fn an_asking_call_the_window_drops_is_closing() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("control.sock");
+    let (send, calls) = mpsc::channel::<Call>();
+    std::thread::spawn(move || calls.into_iter().for_each(drop));
+    let _listening = listen_with(&socket, keeping(&token(1)), send, Arc::new(|| {}), Limits::default()).unwrap();
+    let mut client = Client::to(&socket);
+    let line = owner_request_line(&token(1), "calendar.import", &json!({}), "a");
+    assert_eq!(code(client.send(line.as_bytes())), "closing");
 }

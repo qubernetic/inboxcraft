@@ -16,6 +16,9 @@
 //!   no request is answered `bad_line`; a line over the limit `too_long`, and the connection closed. A request with the
 //!   right token goes to the window as a [`Call`], which runs it for an agent: only a `safe` command runs
 //!   (`Mailbox::run_for_agent`). A window that does not answer within [`Limits::patience`] is answered `busy`.
+//! - A request that asks the owner (`"ask_owner": true`) may be up to `MAX_OWNER_LINE` long and is a call that
+//!   [`asks_owner`](Call::asks_owner): the window asks the owner before an `owner` command runs, so it is waited for
+//!   [`Limits::owner_patience`] and answered `timed_out` after that.
 //!
 //! Unix only: elsewhere [`listen`] says the channel is not built (a gap, see `docs/gaps.md`).
 
@@ -39,13 +42,19 @@ pub struct Limits {
     pub idle: Duration,
     /// How long the window may take to answer a call before the client is answered `busy`.
     pub patience: Duration,
+    /// How long the window may take to answer a call that asks the owner before the client is answered `timed_out`:
+    /// longer than the owner may take over the most requests that can wait before it.
+    pub owner_patience: Duration,
 }
 
 impl Default for Limits {
     fn default() -> Self {
-        Self { clients: 8, idle: Duration::from_secs(300), patience: Duration::from_secs(30) }
+        Self { clients: 8, idle: Duration::from_secs(300), patience: Duration::from_secs(30), owner_patience: OWNER_PATIENCE }
     }
 }
+
+/// Eight questions of two minutes each, and the half minute of the default `patience`.
+const OWNER_PATIENCE: Duration = Duration::from_secs(990);
 
 /// One request with the right token, for the window to run and answer.
 #[derive(Debug)]
@@ -53,13 +62,36 @@ pub struct Call {
     command: String,
     params: Value,
     answer: Sender<Result<Value, Failure>>,
+    asks_owner: bool,
+    client: Option<String>,
 }
 
 impl Call {
     /// The call of `command` with `params`, answered on `answer`.
     #[must_use]
     pub fn new(command: String, params: Value, answer: Sender<Result<Value, Failure>>) -> Self {
-        Self { command, params, answer }
+        Self { command, params, answer, asks_owner: false, client: None }
+    }
+
+    /// The call as one that asks the owner to allow an `owner` command once, from the client that named itself
+    /// `client`.
+    #[must_use]
+    pub fn asking_owner(mut self, client: Option<String>) -> Self {
+        self.asks_owner = true;
+        self.client = client;
+        self
+    }
+
+    /// Whether the call asks the owner.
+    #[must_use]
+    pub fn asks_owner(&self) -> bool {
+        self.asks_owner
+    }
+
+    /// The name the client gave itself, when it asks the owner.
+    #[must_use]
+    pub fn client(&self) -> Option<&str> {
+        self.client.as_deref()
     }
 
     /// The command id.
@@ -226,11 +258,11 @@ mod unix {
     use std::path::Path;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::mpsc::{self, Sender};
+    use std::sync::mpsc::{self, RecvTimeoutError, Sender};
     use std::time::Duration;
 
     use inboxcraft_control_key::folder::{effective_uid, kept, look};
-    use inboxcraft_control_key::line::{MAX_LINE, answer_line, read_request};
+    use inboxcraft_control_key::line::{MAX_OWNER_LINE, answer_line, read_request};
     use inboxcraft_control_key::{ENTRY, Failure, Token};
     use inboxcraft_time::{Clock, SystemClock};
     use inboxcraft_ui_egui::fetch::Wake;
@@ -344,10 +376,11 @@ mod unix {
         }
     }
 
-    /// Reads one line into `line`, at most one byte over [`MAX_LINE`], all of it within `idle`: a client that trickles
-    /// its bytes is let go too. Whether there is a line to answer: false when the client left first or its time is up.
+    /// Reads one line into `line`, at most one byte over [`MAX_OWNER_LINE`] (`read_request` tells a line over the
+    /// plain limit from one that asks the owner), all of it within `idle`: a client that trickles its bytes is let go
+    /// too. Whether there is a line to answer: false when the client left first or its time is up.
     fn read_line(reader: &mut BufReader<UnixStream>, line: &mut Vec<u8>, idle: Duration) -> bool {
-        let cap = MAX_LINE.saturating_add(1);
+        let cap = MAX_OWNER_LINE.saturating_add(1);
         let clock = SystemClock::new();
         loop {
             let left = idle.saturating_sub(clock.monotonic());
@@ -386,13 +419,23 @@ mod unix {
             return unauthorized();
         }
         let (send, answered) = mpsc::channel();
-        if calls.send(Call::new(request.command, request.params, send)).is_err() {
-            return (Err(Failure::new("closing", "InboxCraft is closing")), false);
+        let closing = || (Err(Failure::new("closing", "InboxCraft is closing")), false);
+        let mut call = Call::new(request.command, request.params, send);
+        if request.ask_owner {
+            call = call.asking_owner(request.client);
+        }
+        let asks_owner = call.asks_owner();
+        if calls.send(call).is_err() {
+            return closing();
         }
         wake();
-        match answered.recv_timeout(limits.patience) {
+        let patience = if asks_owner { limits.owner_patience } else { limits.patience };
+        match answered.recv_timeout(patience) {
             Ok(answer) => (answer, true),
-            Err(_) => (Err(Failure::new("busy", "InboxCraft did not answer in time")), true),
+            Err(RecvTimeoutError::Timeout) if asks_owner => (Err(Failure::new("timed_out", "the owner did not answer in time")), true),
+            Err(RecvTimeoutError::Timeout) => (Err(Failure::new("busy", "InboxCraft did not answer in time")), true),
+            Err(RecvTimeoutError::Disconnected) if asks_owner => closing(),
+            Err(RecvTimeoutError::Disconnected) => (Err(Failure::new("busy", "InboxCraft did not answer in time")), true),
         }
     }
 }

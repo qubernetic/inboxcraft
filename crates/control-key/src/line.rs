@@ -14,6 +14,13 @@ use crate::Token;
 /// The longest request line read, in bytes, line end included.
 pub const MAX_LINE: usize = 1 << 20;
 
+/// The longest request line read when it asks the owner (`"ask_owner": true`), in bytes, line end included: an owner
+/// command such as `calendar.import` may carry a whole calendar.
+pub const MAX_OWNER_LINE: usize = 8 << 20;
+
+/// The most characters of a client's name kept.
+pub const MAX_CLIENT: usize = 64;
+
 /// The longest answer line a client reads, in bytes, line end included.
 pub const MAX_ANSWER: usize = 16 << 20;
 
@@ -29,6 +36,11 @@ pub struct Request {
     pub command: String,
     /// The command's parameters: one JSON object.
     pub params: Value,
+    /// Whether the client asks the owner to allow an `owner` command once (`"ask_owner": true`).
+    pub ask_owner: bool,
+    /// The name the client gave itself, control characters left out and at most [`MAX_CLIENT`] characters; `None`
+    /// when it gave none or nothing is left.
+    pub client: Option<String>,
 }
 
 /// Why a line was refused, or a command failed: a stable snake_case code and one English sentence.
@@ -70,18 +82,40 @@ pub fn request_line(token: &Token, command: &str, params: &Value) -> String {
     format!("{}\n", json!({ "token": token.text(), "command": command, "params": params }))
 }
 
+/// The line a client writes to ask the owner to allow `command` with `params` once, naming itself `client`, line end
+/// included.
+#[must_use]
+pub fn owner_request_line(token: &Token, command: &str, params: &Value, client: &str) -> String {
+    let value = json!({ "token": token.text(), "command": command, "params": params, "ask_owner": true, "client": client });
+    format!("{value}\n")
+}
+
 /// The request in `line` (with or without its line end).
 ///
 /// # Errors
 ///
-/// `too_long` for a line over [`MAX_LINE`]; `bad_line` for one that is not UTF-8, not one JSON object, names no
-/// command or one longer than [`MAX_COMMAND`], or has params that are not an object. A missing or unreadable token is
-/// not refused here: the request carries `None`, which the app refuses.
+/// `too_long` for a line over [`MAX_OWNER_LINE`], or over [`MAX_LINE`] when it does not ask the owner; `bad_line` for
+/// one that is not UTF-8, not one JSON object, names no command or one longer than [`MAX_COMMAND`], has params that
+/// are not an object, an `ask_owner` that is not a boolean or a `client` that is not a string. A missing or unreadable
+/// token is not refused here: the request carries `None`, which the app refuses.
 pub fn read_request(line: &[u8]) -> Result<Request, Failure> {
-    if line.len() > MAX_LINE {
-        return Err(Failure::new("too_long", format!("a line is at most {MAX_LINE} bytes")));
+    if line.len() > MAX_OWNER_LINE {
+        return Err(too_long(MAX_OWNER_LINE));
     }
-    let fields = object(line).map_err(Failure::bad_line)?;
+    let fields = match object(line) {
+        Ok(fields) => fields,
+        Err(_) if line.len() > MAX_LINE => return Err(too_long(MAX_LINE)),
+        Err(why) => return Err(Failure::bad_line(why)),
+    };
+    let ask_owner = fields.get("ask_owner");
+    if line.len() > MAX_LINE && ask_owner != Some(&Value::Bool(true)) {
+        return Err(too_long(MAX_LINE));
+    }
+    let ask_owner = match ask_owner {
+        None => false,
+        Some(Value::Bool(ask)) => *ask,
+        Some(_) => return Err(Failure::bad_line("ask_owner is true or false")),
+    };
     let token = fields.get("token").and_then(Value::as_str).and_then(Token::parse);
     let command = match fields.get("command") {
         Some(Value::String(command)) if !command.is_empty() && command.len() <= MAX_COMMAND => command.clone(),
@@ -93,7 +127,23 @@ pub fn read_request(line: &[u8]) -> Result<Request, Failure> {
         Some(params @ Value::Object(_)) => params.clone(),
         Some(_) => return Err(Failure::bad_line("the params are one JSON object")),
     };
-    Ok(Request { token, command, params })
+    let client = match fields.get("client") {
+        None => None,
+        Some(Value::String(name)) => client_name(name),
+        Some(_) => return Err(Failure::bad_line("the client is a name")),
+    };
+    Ok(Request { token, command, params, ask_owner, client })
+}
+
+fn too_long(most: usize) -> Failure {
+    Failure::new("too_long", format!("a line is at most {most} bytes"))
+}
+
+/// `name` without its control characters and cut to [`MAX_CLIENT`] characters; `None` when nothing is left.
+fn client_name(name: &str) -> Option<String> {
+    let name: String = name.chars().filter(|c| !c.is_control()).take(MAX_CLIENT).collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 /// The line the app answers with, line end included.
