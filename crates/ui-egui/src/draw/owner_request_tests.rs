@@ -581,6 +581,13 @@ fn quoted(label: &str) -> Option<(&str, &str, &str)> {
         assert!(!inside.contains(mark), "no mark in the data that could pass for a quote: {label:?}");
     }
     assert!(!inside.contains("''"), "no two apostrophes in a row: {label:?}");
+    let chars: Vec<char> = inside.chars().collect();
+    for pair in chars.windows(2) {
+        if let [first, then] = pair {
+            assert!(!(*first == '\'' && crate::owner_request::combining(*then)), "no mark on an apostrophe: {label:?}");
+            assert!(!crate::owner_request::quote(*then) || *then == '\'', "no quote mark but the apostrophe: {label:?}");
+        }
+    }
     Some((before, inside, after))
 }
 
@@ -839,5 +846,22 @@ fn a_long_name_in_the_heading_is_cut_and_stands_on_one_row() {
             assert!(fitted.starts_with("Add 7 events to “ab"), "{fitted:?}");
         });
         harness.run();
+    }
+}
+
+#[test]
+fn a_mark_between_two_apostrophes_draws_no_double_quote() {
+    // A character never drawn, a combining mark, the double acute and two turned commas: each title draws one
+    // apostrophe at most, and nothing else that could pass for a quote.
+    let mut harness = shown_window();
+    let titles = ["Dentist'\u{206A}'", "Dentist'\u{0301}'", "Dentist\u{030B}", "Dentist\u{02BB}\u{02BB}", "Dentist'\u{E0041}\u{034F}’"];
+    let events: Vec<String> = titles.iter().zip(1_u8..).map(|(title, n)| event(&format!("marks-{n}"), 10 + n, title)).collect();
+    ask(&mut harness, &ics(&events));
+    harness.run();
+    let labels = labels(&harness);
+    let named: Vec<&String> = labels.iter().filter(|label| quoted(label).is_some_and(|(before, _, _)| before.is_empty())).collect();
+    assert_eq!(named.len(), 5, "{labels:?}");
+    for line in named {
+        assert!(line.starts_with("“Dentist'” · 2026-11-1"), "{line:?}");
     }
 }

@@ -164,9 +164,10 @@ impl Preview {
 }
 
 /// Whether `c` is a mark data could close its own quotes with, or open new ones: the question's own `“` and `”`, the
-/// other quotes, and the marks drawn like a double quote (double primes, the double acute, the modifier letters, the
-/// Hebrew gershayim, the ditto mark) or like an apostrophe (two of which read as one double quote).
-fn quote(c: char) -> bool {
+/// other quotes, and the marks drawn like a double quote (double primes, the double acute and the combining double
+/// acute wherever it stands, the diaeresis, the modifier letters, the Hebrew gershayim, the ditto mark) or like an
+/// apostrophe (two of which read as one double quote: the turned comma, the tonos, primes, accents).
+pub(crate) fn quote(c: char) -> bool {
     matches!(
         c,
         '"' | '\''
@@ -195,11 +196,15 @@ fn quote(c: char) -> bool {
             | 'ʺ'
             | 'ˮ'
             | 'ʼ'
+            | 'ʻ'
             | 'ʹ'
             | '′'
             | '‵'
             | '´'
             | '`'
+            | '¨'
+            | '΄'
+            | '\u{030B}'
             | '״'
             | '׳'
             | '〃'
@@ -210,9 +215,16 @@ fn quote(c: char) -> bool {
     )
 }
 
+/// Whether `c` is a combining mark (general categories `Mn` and `Me` in the blocks of combining marks): one set on
+/// an apostrophe could make it read as a double quote, so there it is left out.
+pub(crate) fn combining(c: char) -> bool {
+    matches!(c, '\u{0300}'..='\u{036F}' | '\u{0483}'..='\u{0489}' | '\u{1AB0}'..='\u{1AFF}' | '\u{1DC0}'..='\u{1DFF}' | '\u{20D0}'..='\u{20FF}' | '\u{FE00}'..='\u{FE0F}' | '\u{FE20}'..='\u{FE2F}')
+}
+
 /// `text` from outside as a question shows it: the characters that must not be drawn left out
-/// ([`crate::component::hidden`]), each run of quote marks one apostrophe `'` ([`quote`]), so it can never close the
-/// quotes the question puts around it nor draw one of its own, each run of white space or control characters
+/// ([`crate::component::hidden`]), each run of quote marks one apostrophe `'` ([`quote`]) and a combining mark on that
+/// apostrophe left out ([`combining`]), so it can never close the quotes the question puts around it nor draw one of
+/// its own, each run of white space or control characters
 /// (no-break and wide spaces among it) one space, trimmed, and at most `most` characters, cut between grapheme
 /// clusters with a closing `…`. Only the first 16 `most` characters that are drawn are read: longer data is cut anyway.
 #[must_use]
@@ -229,9 +241,12 @@ pub(crate) fn data(text: &str, most: usize) -> String {
         }
         gap = false;
         if quote(c) {
+            // A run of marks, or two with only what is not drawn or a dropped mark between them, is one apostrophe.
             if !plain.ends_with('\'') {
                 plain.push('\'');
             }
+        } else if combining(c) && plain.ends_with('\'') {
+            // A mark on an apostrophe could make it read as a double quote: left out.
         } else {
             plain.push(c);
         }

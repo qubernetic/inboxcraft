@@ -139,11 +139,22 @@ fn too_long(most: usize) -> Failure {
     Failure::new("too_long", format!("a line is at most {most} bytes"))
 }
 
-/// `name` without its control characters and the format characters that could turn round, hide or break the words
-/// it is shown among (bidi embeddings, overrides, isolates and marks, zero-width characters, line and paragraph
-/// separators, the byte order mark), cut to [`MAX_CLIENT`] characters; `None` when nothing is left.
+/// Whether `c` is left out of a client's name: every format character (general category `Cf` of Unicode 15.1), the
+/// unassigned U+2065, and the line and paragraph separators. The window draws none of them
+/// (`inboxcraft_ui_egui::component::hidden`, the same set; a test of the app pins the two).
+fn hidden(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}' | '\u{0600}'..='\u{0605}' | '\u{061C}' | '\u{06DD}' | '\u{070F}' | '\u{0890}'..='\u{0891}' | '\u{08E2}' | '\u{180E}'
+            | '\u{200B}'..='\u{200F}' | '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}' | '\u{110BD}' | '\u{110CD}' | '\u{13430}'..='\u{1343F}' | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}' | '\u{E0001}' | '\u{E0020}'..='\u{E007F}'
+    )
+}
+
+/// `name` without its control characters and the characters that could turn round, hide or break the words it is
+/// shown among ([`hidden`]), cut to [`MAX_CLIENT`] characters; `None` when nothing is left.
 fn client_name(name: &str) -> Option<String> {
-    let hidden = |c: char| matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}' | '\u{061C}');
     let name: String = name.chars().filter(|c| !c.is_control() && !hidden(*c)).take(MAX_CLIENT).collect();
     let name = name.trim();
     (!name.is_empty()).then(|| name.to_owned())

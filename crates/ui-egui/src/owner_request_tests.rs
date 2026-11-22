@@ -133,23 +133,43 @@ fn what_came_from_outside_is_drawn_plain_and_cut() {
     assert_eq!(data("  \u{202E}\n ", MOST_NAME_CHARS), "");
 }
 
-/// Every mark that could pass for a quote, the question's own among them: each is an apostrophe in data.
-const LOOKALIKES: [char; 25] =
-    ['"', '“', '”', '„', '‟', '«', '»', '‹', '›', '‘', '’', '‚', '‛', '＂', '〝', '〞', '〟', '″', '‶', '˝', 'ʺ', 'ˮ', '״', '〃', 'ʼ'];
-
 #[test]
 fn hidden_characters_never_empty_a_name() {
     // The characters that are never drawn are left out before the cut: they cannot push the name out of it.
     assert_eq!(data(&format!("{}Studio", "\u{200B}".repeat(5_000)), MOST_NAME_CHARS), "Studio");
+    // Every format character is one never drawn (Unicode 15.1, general category Cf), among them those egui draws
+    // nothing for and the tags.
+    for c in [
+        '\u{00AD}',
+        '\u{0600}',
+        '\u{180E}',
+        '\u{206A}',
+        '\u{206F}',
+        '\u{FFF9}',
+        '\u{FFFB}',
+        '\u{110BD}',
+        '\u{1D173}',
+        '\u{E0001}',
+        '\u{E0041}',
+        '\u{E007F}',
+    ] {
+        assert!(crate::component::hidden(c), "U+{:04X}", u32::from(c));
+        assert_eq!(data(&format!("a{c}b"), MOST_NAME_CHARS), "ab", "U+{:04X}", u32::from(c));
+    }
 }
 
 #[test]
 fn data_cannot_close_its_own_quote_and_has_one_space_between_words() {
     // The quotes the question puts around data stand for an apostrophe inside it.
     assert_eq!(data("cli” that you started, “x", MOST_NAME_CHARS), "cli' that you started, 'x");
-    for quote in LOOKALIKES {
-        assert_eq!(data(&format!("a{quote}b"), MOST_NAME_CHARS), "a'b", "{quote:?}");
-        assert!(super::quote(quote), "{quote:?} is a quote mark");
+    // Every mark `quote` holds, read from the set itself.
+    let marks: Vec<char> = (0..=0x10_FFFF_u32).filter_map(char::from_u32).filter(|c| super::quote(*c)).collect();
+    for wanted in ['"', '“', '”', '〝', '〞', '〟', '″', '‶', '˝', 'ʺ', 'ˮ', '״', '〃', 'ʼ', '\u{0384}', '\u{02BB}', '\u{030B}', '\u{00A8}']
+    {
+        assert!(marks.contains(&wanted), "{wanted:?} is a quote mark");
+    }
+    for quote in marks {
+        assert_eq!(data(&format!("a{quote}b"), MOST_NAME_CHARS), "a'b", "U+{:04X}", u32::from(quote));
     }
     // A run of apostrophe-like marks reads as a double quote: it is one apostrophe.
     for run in ["''", "’’", "‘‘", "ʼʼ", "'ʼ'", "″'", "' '"] {
@@ -157,6 +177,20 @@ fn data_cannot_close_its_own_quote_and_has_one_space_between_words() {
         assert!(!said.contains("''"), "{run:?}: {said:?}");
     }
     assert_eq!(data("It’’s", MOST_NAME_CHARS), "It's");
+    // A character never drawn or a combining mark between two of them makes no two apostrophes; a combining mark on an
+    // apostrophe is left out, and the double acute is a quote mark wherever it stands.
+    for title in [
+        "Dentist'\u{206A}'",
+        "Dentist'\u{0301}'",
+        "Dentist\u{030B}",
+        "Dentist\u{02BB}\u{02BB}",
+        "Dentist'\u{034F}\u{0301}\u{E0041}’",
+        "Dentist\u{00A8}",
+    ] {
+        assert_eq!(data(title, MOST_NAME_CHARS), "Dentist'", "{title:?}");
+    }
+    assert_eq!(data("Dentist'\u{0301}", MOST_NAME_CHARS), "Dentist'", "no mark on an apostrophe");
+    assert_eq!(data("Cafe\u{0301}", MOST_NAME_CHARS), "Cafe\u{0301}", "a mark on a letter stays");
     // Every run of white space, no-break and wide spaces among it, is one space.
     assert_eq!(data("Wide \u{00A0}\u{2003}\u{3000}  \t\r\n gap", MOST_NAME_CHARS), "Wide gap");
     assert_eq!(data("\u{00A0} edges \u{2003}", MOST_NAME_CHARS), "edges");
