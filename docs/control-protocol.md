@@ -120,9 +120,9 @@ on their way or held down never do. The allowed command runs for the owner, once
 answer (or its error code); it is one step of the window's Undo, the status line says what the agent did with Undo
 beside it, and an agent cannot take it back (`history.undo` is refused with `not_allowed`). While the owner's own
 dialog shows, the question waits behind it. A request that cannot be shown (its parameters are wrong, say) is
-answered with its error at once, without asking. While the window is not focused, is minimised or is closed when a
-request comes to the front, one desktop notification says the question; a click on it brings the window forward,
-or opens one. When the client hangs up (the app looks every quarter of a second) or the app gives up waiting, the
+answered with its error when it comes to the front, without asking. While the window is not focused, is minimised
+or is closed when a request comes to the front, one desktop notification says the question; a click on it brings
+the window forward, or opens one. When the client hangs up (the app looks every quarter of a second) or the app gives up waiting, the
 request is withdrawn: it leaves the queue unanswered and runs nothing, also when the owner presses Allow on it
 meanwhile. A line that asks for a `safe` command runs at once, as the agent's, like any other; one that asks for a
 `never` command is refused with `not_allowed` and an unknown one with `unknown_command`, as without asking.
