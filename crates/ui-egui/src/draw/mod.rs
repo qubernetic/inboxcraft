@@ -365,6 +365,9 @@ pub struct InboxApp {
     field: crate::field::Field,
     /// The `owner` commands agents asked the owner to allow, waiting for the owner's answer (`owner_request.rs`).
     owner_requests: crate::owner_request::OwnerRequests,
+    /// Where the keyboard was when the first of the owner's questions showed (`None` while none shows), so it goes
+    /// back there when none is left.
+    owner_keyboard: Option<Option<egui::Id>>,
 }
 
 /// While the person types in the composer, its draft is kept at most once in this many seconds: keeping it runs
@@ -624,6 +627,7 @@ impl InboxApp {
             home: crate::home::Kept::default(),
             field: crate::field::Field::new(HOME_FIELD_SEED),
             owner_requests: crate::owner_request::OwnerRequests::default(),
+            owner_keyboard: None,
         }
     }
 
@@ -1624,7 +1628,7 @@ impl InboxApp {
         let home = self.screen == Screen::Home && !settings;
         Surfaces::new(Facts {
             float: crate::component::popup::any_open(ctx),
-            dialog: self.settings.confirms(self.onboarding.asking_remove()),
+            dialog: self.settings.confirms(self.onboarding.asking_remove()) || self.owner_question_shows(),
             command: self.command.results(),
             capture: self.settings.capturing().is_some(),
             editor: self.editing_event(),
@@ -3282,6 +3286,9 @@ impl InboxApp {
         let windowed = self.composer_in_window(ui.ctx(), &theme);
         // So does the event editor's window: what is typed or pressed in it passes the gate.
         let edited_apart = self.event_editor_in_window(ui.ctx(), &theme);
+        // An agent's request for an `owner` command, asked over everything drawn so far and before the status line
+        // reads its keys: its Esc is the question's.
+        self.owner_question(ui, &theme);
         // The status line, a strip of its own at the window's foot: it covers nothing of the panes.
         let (mut line, mut undid) = self.status_line(ui, &theme, &surfaces, (quiet, undo_taken, esc_free, esc_dismisses), regions.status);
         // The one gate for the place under a modal surface ([`Surfaces::modal`]): whatever pressed it (the pointer, a key,
@@ -3952,7 +3959,11 @@ impl InboxApp {
         // Done's key is the list's (an act on the selected row): its hint shows while the list has the keys. Under a
         // confirmation dialog the line says only its Esc, in the safe button's word; a press on it does nothing (the
         // gate under a modal surface drops it).
-        let dialog = self.settings.confirm_keep(self.onboarding.asking_remove()).filter(|_| surfaces.has(Surface::Dialog));
+        let dialog = self
+            .settings
+            .confirm_keep(self.onboarding.asking_remove())
+            .or_else(|| self.owner_question_shows().then_some("deny"))
+            .filter(|_| surfaces.has(Surface::Dialog));
         let hints: Vec<(&'static str, String, &'static str)> = match dialog {
             Some(word) => vec![(
                 status::DIALOG_ESC,

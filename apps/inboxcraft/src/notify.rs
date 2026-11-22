@@ -9,8 +9,9 @@
 //! notification portal and everything else through `org.freedesktop.Notifications`, both over the session bus. A
 //! click on the notification opens the message in the full-width reader, and its buttons (where the desktop shows
 //! them) mark it done or read: each is a [`Click`] for the window to answer. A calendar alert says when and where its
-//! event takes place on the computer's clock, and a click on it opens the event on the calendar. Other systems show no
-//! notifications yet.
+//! event takes place on the computer's clock, and a click on it opens the event on the calendar. An agent's question to
+//! the owner, asked while the window is not in front, is told in the app's words ([`owner_question`]), and a click on
+//! it brings the window forward. Other systems show no notifications yet.
 
 use inboxcraft_engine::notify::{About, Notice};
 use inboxcraft_time::Offset;
@@ -91,6 +92,23 @@ pub fn unkept(why: &str) -> Shown {
     }
 }
 
+/// The key of the notification that an agent asks the owner: one at a time, a later question's takes its place.
+pub const OWNER_QUESTION: &str = "owner-request";
+
+/// The notification that an agent asks the owner for permission while the window is not in front: `question` is the
+/// app's own one-line question, as the window asks it, never the agent's words. A click on it brings the window
+/// forward, or opens it, where the question waits.
+#[must_use]
+pub fn owner_question(question: &str) -> Shown {
+    Shown {
+        key: OWNER_QUESTION.to_owned(),
+        title: tr!("An agent asks for permission").to_owned(),
+        body: question.to_owned(),
+        buttons: Vec::new(),
+        mail: false,
+    }
+}
+
 /// The notification of `notice`; `account` names the account of a count, and an alert's times are on the clock of
 /// `offset`.
 #[must_use]
@@ -154,6 +172,9 @@ pub fn shown(notice: &Notice, account: Option<&str>, offset: Offset) -> Shown {
 #[must_use]
 pub fn clicked(key: &str, action: &str) -> Option<Click> {
     let open = action == OPEN || action == "default";
+    if key == OWNER_QUESTION {
+        return open.then_some(Click::Show);
+    }
     if let Some(rest) = key.strip_prefix("event-") {
         let (id, start) = rest.split_once('-')?;
         let (id, start) = (id.parse::<u64>().ok().filter(|id| *id > 0)?, start.parse::<i64>().ok()?);

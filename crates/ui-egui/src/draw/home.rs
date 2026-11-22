@@ -641,11 +641,15 @@ impl super::InboxApp {
     }
 
     /// Whether an agent's `ui.home.open` or `ui.settings.open` may change the place: not while the owner holds the
-    /// keys. They do while the command line's results, a dialog or a key's capture stand in front, a float (a menu,
+    /// keys. They do while the command line's results, a dialog (the owner's own, or an agent's question to the owner)
+    /// or a key's capture stand in front, a float (a menu,
     /// a list, a picker) is open, the composer has the keyboard (docked or floating), the event editor is open
     /// (whether or not the settings are over it), or the account form holds what the owner typed.
     pub(super) fn agent_may_move(&self) -> bool {
-        let held = self.command.results() || self.settings.confirms(self.onboarding.asking_remove()) || self.settings.capturing().is_some();
+        let held = self.command.results()
+            || self.settings.confirms(self.onboarding.asking_remove())
+            || self.settings.capturing().is_some()
+            || self.owner_question_shows();
         !(held || self.owner_keys || self.calendar.editor().is_some() || self.onboarding.holds_typing())
     }
 

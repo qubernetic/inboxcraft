@@ -190,7 +190,10 @@ fn a_client_name_is_cut_and_cleaned() {
     assert!(!client.chars().any(char::is_control), "{client:?}");
     assert_eq!(client.chars().count(), MAX_CLIENT);
     assert!(client.starts_with("a[31mb"), "{client:?}");
-    for empty in ["", "\u{1b}\n\0", "   "] {
+    let turned =
+        read_request(owner_request_line(&token(), "calendar.import", &json!({}), "cli\u{202E}\u{2066}\u{200B}\u{FEFF}tool").as_bytes()).unwrap();
+    assert_eq!(turned.client.as_deref(), Some("clitool"), "no format character turns the name round");
+    for empty in ["", "\u{1b}\n\0", "   ", "\u{202E}\u{200B}"] {
         let line = owner_request_line(&token(), "calendar.import", &json!({}), empty);
         assert_eq!(read_request(line.as_bytes()).unwrap().client, None, "{empty:?}");
     }

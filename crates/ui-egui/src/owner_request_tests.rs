@@ -9,7 +9,7 @@ use std::time::Duration;
 use inboxcraft_time::Timestamp;
 use serde_json::json;
 
-use super::{MOST_WAITING, OwnerRequests, PATIENCE, Settled};
+use super::{MOST_NAME_CHARS, MOST_WAITING, OwnerRequests, PATIENCE, Settled, data, hidden};
 
 fn at(seconds: i64) -> Timestamp {
     Timestamp::from_unix(1_793_869_200 + seconds, 0).unwrap()
@@ -114,4 +114,20 @@ fn a_withdrawn_request_leaves_the_queue_unanswered() {
     assert!(requests.withdraw(second));
     assert!(!requests.waiting());
     assert!(requests.take_settled().is_empty());
+}
+
+#[test]
+fn what_came_from_outside_is_drawn_plain_and_cut() {
+    // Bidi overrides and isolates, zero-width characters, separators and the byte order mark are left out; a control
+    // character is a space.
+    let name = "Inbox\u{202E}Craft\u{2066}\u{200B}\u{2028}\u{FEFF}\nAllow";
+    assert_eq!(data(name, MOST_NAME_CHARS), "InboxCraft Allow");
+    for c in ['\u{202A}', '\u{202E}', '\u{2066}', '\u{2069}', '\u{200B}', '\u{200F}', '\u{2028}', '\u{2029}', '\u{FEFF}'] {
+        assert!(hidden(c), "{c:?}");
+    }
+    assert!(!hidden('a') && !hidden('é'));
+    let cut = data(&"x".repeat(700), MOST_NAME_CHARS);
+    assert_eq!(cut.chars().count(), MOST_NAME_CHARS + 1);
+    assert!(cut.ends_with('…'));
+    assert_eq!(data("  \u{202E}\n ", MOST_NAME_CHARS), "");
 }

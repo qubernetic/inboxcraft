@@ -8,6 +8,11 @@
 //! moment it came to the front. At most [`MOST_WAITING`] wait; one more is turned away at once. A request is settled
 //! only by the owner's answer or by its time running out, which is a refusal: nothing here runs a command, and
 //! nothing but [`OwnerRequests::settle_front`] takes a request out of the queue.
+//!
+//! The question's words are the app's ([`preview`]): built once, when the request comes to the front, from the
+//! registry, the engine's reading of the request (`calendar.import.preview`) and `tr!`. What came from outside (the
+//! name the client gave itself, an event's title, a parameter's value, the calendar's name) is data: plain, cut, and
+//! only inside typographic quotes or in the places the words leave for it.
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -16,11 +21,31 @@ use inboxcraft_engine::EngineError;
 use inboxcraft_time::Timestamp;
 use serde_json::Value;
 
+use crate::component::dialog::Tone;
+use crate::mailbox::Mailbox;
+use crate::tr;
+
 /// The most requests that wait for the owner at a time.
 pub const MOST_WAITING: usize = 8;
 
 /// How long the owner has to answer the request in front; no answer by then is a refusal.
 pub const PATIENCE: Duration = Duration::from_secs(120);
+
+/// An Allow sooner than this many seconds after the question showed is no answer: a key or a press on its way when it
+/// opened lands on no question.
+pub(crate) const ARM_SECONDS: f64 = 1.0;
+
+/// The most events of an import named in its question; the rest are counted.
+pub(crate) const FIRST: usize = 5;
+
+/// The most parameters of another command shown in its question; the rest are counted.
+pub(crate) const MOST_VALUES: usize = 6;
+
+/// The most characters of a parameter's value as its question shows it.
+pub(crate) const MOST_VALUE_CHARS: usize = 120;
+
+/// The most characters of an event's title, a calendar's or a parameter's name in a question.
+pub(crate) const MOST_NAME_CHARS: usize = 80;
 
 /// Which request a settlement answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -43,7 +68,6 @@ pub(crate) struct OwnerRequest {
     /// Which request it is.
     pub(crate) ticket: Ticket,
     /// The name the asking client gave itself, as the channel knows it: the agent's words, never the app's.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the question that shows who asks is drawn next (#443)"))]
     pub(crate) client: Option<String>,
     /// The `owner` command asked for.
     pub(crate) command: &'static str,
@@ -53,6 +77,137 @@ pub(crate) struct OwnerRequest {
     pub(crate) since: Option<Timestamp>,
     /// Asked right before an Allow runs it: false when the asker withdrew it meanwhile, so it runs not.
     pub(crate) may_run: MayRun,
+    /// The question's words, built once when it is first asked ([`preview`]): the file is not read again each frame.
+    pub(crate) preview: Option<Preview>,
+    /// When the window first showed its question, on egui's clock: an Allow counts from [`ARM_SECONDS`] after.
+    pub(crate) shown_at: Option<f64>,
+}
+
+/// The question's words, built by the app once, when the request comes to the front.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Preview {
+    /// The question, the dialog's heading.
+    pub(crate) question: String,
+    /// The lines under it, each with its colour.
+    pub(crate) lines: Vec<(String, Tone)>,
+    /// What the status line says once it ran.
+    done: Done,
+}
+
+/// What the status line says once an allowed request ran.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Done {
+    /// "An agent ran {command}".
+    Ran(&'static str),
+    /// "An agent added {count} events to {calendar}", the count the import answers.
+    Added(String),
+}
+
+impl Preview {
+    /// The status line's sentence for the request that ran and gave `answer`.
+    #[must_use]
+    pub(crate) fn done(&self, answer: &Value) -> String {
+        match &self.done {
+            Done::Ran(command) => tr!("An agent ran {command}", command = command),
+            Done::Added(calendar) => {
+                let count = answer.get("added").and_then(Value::as_u64).unwrap_or(0);
+                tr!("An agent added {count} events to {calendar}", count = count, calendar = calendar)
+            }
+        }
+    }
+}
+
+/// Whether `c` is a format character that could turn round, hide or break the words around it: the bidi embeddings,
+/// overrides, isolates and marks, the zero-width ones, the line and paragraph separators and the byte order mark.
+#[must_use]
+pub(crate) fn hidden(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}' | '\u{061C}')
+}
+
+/// `text` from outside as a question shows it: its format characters left out ([`hidden`]), each control character a
+/// space, trimmed, and at most `most` characters, cut between grapheme clusters with a closing `…`.
+#[must_use]
+pub(crate) fn data(text: &str, most: usize) -> String {
+    let plain: String = text.chars().filter(|c| !hidden(*c)).map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let plain = plain.trim();
+    match crate::component::capped(plain, most) {
+        (kept, true) => format!("{}…", kept.trim_end()),
+        (kept, false) => kept.to_owned(),
+    }
+}
+
+/// The words of the question for `request`, or the engine's refusal of a request that cannot be previewed (an import
+/// whose file or calendar the engine refuses). An import is read once by `calendar.import.preview`, which is `safe`
+/// and changes nothing; any other `owner` command is asked with the values it was given, quoted.
+///
+/// # Errors
+///
+/// The engine's refusal of `calendar.import.preview`.
+pub(crate) fn preview(mailbox: &mut Mailbox, request: &OwnerRequest) -> Result<Preview, EngineError> {
+    let who = match request.client.as_deref().map(|client| data(client, MOST_NAME_CHARS)).filter(|client| !client.is_empty()) {
+        Some(client) => tr!("A program that calls itself “{client}” asks, over the control channel.", client = client),
+        None => tr!("A program asks, over the control channel.").to_owned(),
+    };
+    let mut lines = vec![(who, Tone::Muted)];
+    if request.command == "calendar.import" {
+        let read = mailbox.read_as_agent("calendar.import.preview", &request.params)?;
+        let count = |field: &str| read.get(field).and_then(Value::as_u64).unwrap_or(0);
+        let calendar = data(read.get("name").and_then(Value::as_str).unwrap_or_default(), MOST_NAME_CHARS);
+        let add = count("add");
+        let question = tr!("Add {count} events to {calendar}?", count = add, calendar = calendar);
+        let (skipped, single, left_out) = (count("skipped"), count("single"), count("left_out"));
+        if skipped > 0 {
+            lines.push((tr!("{count} are already in the calendar and stay as they are.", count = skipped), Tone::Muted));
+        }
+        if single > 0 {
+            lines.push((tr!("{count} repeat in a way InboxCraft cannot write and are added once.", count = single), Tone::Ink));
+        }
+        if left_out > 0 {
+            lines.push((tr!("{count} cannot be read and are left out.", count = left_out), Tone::Ink));
+        }
+        let first = read.get("first").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+        let offset = mailbox.offset();
+        for event in first.iter().take(FIRST) {
+            lines.push((named(event, offset), Tone::Ink));
+        }
+        let named_count = u64::try_from(first.len().min(FIRST)).unwrap_or(u64::MAX);
+        if add > named_count {
+            lines.push((tr!("and {count} more", count = add.saturating_sub(named_count)), Tone::Muted));
+        }
+        lines.push((tr!("Nothing already in the calendar is changed or removed. Undo takes the events back.").to_owned(), Tone::Muted));
+        return Ok(Preview { question, lines, done: Done::Added(calendar) });
+    }
+    let question = tr!("Let a program run {command}?", command = request.command);
+    lines.push((tr!("It gave these values, shown as it wrote them:").to_owned(), Tone::Muted));
+    let values = request.params.as_object();
+    for (name, value) in values.into_iter().flatten().take(MOST_VALUES) {
+        let written = serde_json::to_string(value).unwrap_or_default();
+        lines.push((tr!("“{name}: {value}”", name = data(name, MOST_NAME_CHARS), value = data(&written, MOST_VALUE_CHARS)), Tone::Ink));
+    }
+    let more = values.map_or(0, serde_json::Map::len).saturating_sub(MOST_VALUES);
+    if more > 0 {
+        lines.push((tr!("and {count} more", count = more), Tone::Muted));
+    }
+    Ok(Preview { question, lines, done: Done::Ran(request.command) })
+}
+
+/// The line of one event of an import's preview: its title, quoted, and when it starts, on the clock of `offset`.
+fn named(event: &Value, offset: inboxcraft_time::Offset) -> String {
+    let title = data(event.get("summary").and_then(Value::as_str).unwrap_or_default(), MOST_NAME_CHARS);
+    let start = event.get("start").and_then(Value::as_str).unwrap_or_default();
+    let when = if event.get("all_day").and_then(Value::as_bool) == Some(true) {
+        data(start, 10)
+    } else {
+        crate::mailbox::parse_date(start).and_then(|at| at.to_civil(offset)).map_or_else(String::new, |civil| {
+            format!("{:04}-{:02}-{:02} {:02}:{:02}", civil.year(), civil.month(), civil.day(), civil.hour(), civil.minute())
+        })
+    };
+    match (title.is_empty(), when.is_empty()) {
+        (true, true) => tr!("(No title)").to_owned(),
+        (true, false) => tr!("(No title) · {when}", when = when),
+        (false, true) => tr!("“{title}”", title = title),
+        (false, false) => tr!("“{title}” · {when}", title = title, when = when),
+    }
 }
 
 /// The requests waiting for the owner, in the order they came, and those settled but not yet answered.
@@ -108,13 +263,27 @@ impl OwnerRequests {
         }
         let ticket = Ticket(self.next);
         self.next = self.next.wrapping_add(1);
-        self.waiting.push_back(OwnerRequest { ticket, client: client.map(str::to_owned), command, params, since: None, may_run });
+        self.waiting.push_back(OwnerRequest {
+            ticket,
+            client: client.map(str::to_owned),
+            command,
+            params,
+            since: None,
+            may_run,
+            preview: None,
+            shown_at: None,
+        });
         Some(ticket)
     }
 
     /// The request the owner is asked about.
     pub(crate) fn front(&self) -> Option<&OwnerRequest> {
         self.waiting.front()
+    }
+
+    /// The request the owner is asked about, to keep its words and when it showed.
+    pub(crate) fn front_mut(&mut self) -> Option<&mut OwnerRequest> {
+        self.waiting.front_mut()
     }
 
     /// Settles the request in front as `settled`; nothing when none waits.

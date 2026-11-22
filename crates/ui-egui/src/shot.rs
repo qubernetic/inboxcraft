@@ -174,6 +174,10 @@ pub struct Shot {
     /// With `accounts`: the account removed before the picture, as the owner's press of the question removes it.
     #[serde(default)]
     pub remove_account: Option<u64>,
+    /// An agent's request for an `owner` command, asked of the window before the picture, as the control channel asks
+    /// it: `{"command", "params", "client"}`. The question shows; nothing runs.
+    #[serde(default)]
+    pub owner_request: Option<serde_json::Value>,
     /// Whether the settings show Shortcuts.
     #[serde(default)]
     pub shortcuts: Option<bool>,
@@ -2181,6 +2185,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     {
         return Err(bad(format!("{}: there is no account {account} to remove", shot.out)));
     }
+    if let Some(asked) = &shot.owner_request {
+        ask_owner(&mut app, &shot.out, asked)?;
+    }
     places(&mut app, &clock, shot)?;
     if let Some(scene) = &shot.outbox {
         outbox(&mut app, &clock, &shot.out, scene, words(shot))?;
@@ -2257,6 +2264,28 @@ mod fail_tests;
 #[cfg(test)]
 #[path = "shot_frames_tests.rs"]
 mod frames_tests;
+
+/// Asks the window, as the control channel does, for `asked`'s `owner` command (`{"command", "params", "client"}`),
+/// for the picture `out`: the question shows, nothing runs.
+fn ask_owner(app: &mut InboxApp, out: &str, asked: &serde_json::Value) -> Result<(), UiError> {
+    let fields = asked.as_object().ok_or_else(|| bad(format!("{out}: owner_request is not an object")))?;
+    if let Some(field) = fields.keys().find(|field| !["command", "params", "client"].contains(&field.as_str())) {
+        return Err(bad(format!("{out}: owner_request has no field {field:?}")));
+    }
+    let command = fields.get("command").and_then(serde_json::Value::as_str).ok_or_else(|| bad(format!("{out}: owner_request names no command")))?;
+    let client = match fields.get("client") {
+        None => None,
+        Some(client) => Some(client.as_str().ok_or_else(|| bad(format!("{out}: owner_request's client is not a string")))?),
+    };
+    let params = fields.get("params").cloned().unwrap_or_else(|| serde_json::json!({}));
+    if app.ask_owner(client, command, &params).is_none() {
+        return Err(bad(format!("{out}: {command:?} is no owner command to ask the owner about")));
+    }
+    if !app.prepare_owner_question() {
+        return Err(bad(format!("{out}: the owner's question for {command:?} cannot be drawn: its request is refused")));
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 #[path = "shot_scenes_tests.rs"]

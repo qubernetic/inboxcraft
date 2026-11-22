@@ -38,7 +38,7 @@ pub struct Request {
     pub params: Value,
     /// Whether the client asks the owner to allow an `owner` command once (`"ask_owner": true`).
     pub ask_owner: bool,
-    /// The name the client gave itself, control characters left out and at most [`MAX_CLIENT`] characters; `None`
+    /// The name the client gave itself, control and format characters left out and at most [`MAX_CLIENT`] characters; `None`
     /// when it gave none or nothing is left.
     pub client: Option<String>,
 }
@@ -139,9 +139,12 @@ fn too_long(most: usize) -> Failure {
     Failure::new("too_long", format!("a line is at most {most} bytes"))
 }
 
-/// `name` without its control characters and cut to [`MAX_CLIENT`] characters; `None` when nothing is left.
+/// `name` without its control characters and the format characters that could turn round, hide or break the words
+/// it is shown among (bidi embeddings, overrides, isolates and marks, zero-width characters, line and paragraph
+/// separators, the byte order mark), cut to [`MAX_CLIENT`] characters; `None` when nothing is left.
 fn client_name(name: &str) -> Option<String> {
-    let name: String = name.chars().filter(|c| !c.is_control()).take(MAX_CLIENT).collect();
+    let hidden = |c: char| matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}' | '\u{061C}');
+    let name: String = name.chars().filter(|c| !c.is_control() && !hidden(*c)).take(MAX_CLIENT).collect();
     let name = name.trim();
     (!name.is_empty()).then(|| name.to_owned())
 }
