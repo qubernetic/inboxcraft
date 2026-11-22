@@ -129,6 +129,8 @@ a message asks for it, and every tool is `safe`.
 - An HTML-only message gives no text yet.
 - It has no tool for the appearance; `ui.layout.set`, where the reader, the composer and the event editor show, is the owner's alone.
 - It has no tool for `event.all_day_alert.set`, the hour a new all-day event's alert rings: it is the owner's alone.
+- It stays read-only: no tool asks the owner to allow an `owner` command; only `inboxcraft-cli --ask-owner` does
+  ([cli.md](cli.md)).
 
 ## Revision history
 | Date | Change | Summary |

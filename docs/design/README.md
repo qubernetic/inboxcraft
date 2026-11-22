@@ -157,6 +157,9 @@ What the app still owes this file, one line each. The finer differences, with th
 - Motion is drawn as still key frames with their times; the file plays nothing.
 - The picture of the phone code on the Planned and Mobile pages is a placeholder and decodes to nothing.
 - Google and Microsoft 365 accounts are left out on purpose.
+- The question the window asks when an agent asks the owner to allow an `owner` command has no frame in the design
+  file yet. The code draws it by the confirm dialog's rules (`settings-templates/delete-confirm`), centred over the
+  dimmed window; the generator adds the frame later.
 
 ## Revision history
 | Date | Change | Summary |

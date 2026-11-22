@@ -269,8 +269,8 @@ time from the code as it is, not measured.
   over 64 MiB is not kept and not asked for again until the session restarts, so such a message cannot be read in
   InboxCraft. Opening a
   message marks it opened in the store, so its body is kept, also when an agent opens it (#27).
-- `engine` lets an agent run `safe` commands only; there are no per-account access levels, and an agent cannot ask
-  the owner to approve an `owner` command (#27).
+- `engine` lets an agent run `safe` commands only; there are no per-account access levels. An agent can ask the
+  owner to allow one `owner` command, in the running app only (`inboxcraft-cli --ask-owner`), never on a store (#27).
 - `account.check` runs for saved accounts only, as a job of the account's worker: onboarding adds the account
   first (`account.add`) and checks it then; changing the settings after a failed check removes the account and adds
   it again under a new id. Detect is no command: the window runs `net`'s Detect on a thread of its own, so an agent
@@ -677,7 +677,8 @@ time from the code as it is, not measured.
   CLI does not check the user id of the app it connects to (the standard library cannot read it yet, and the channel
   adds no crate for it); the owner and mode of the folders stand in for that check. It does not check the client's
   process, so any process of the owner's that can read the credential
-  store can use it. It has no approvals, so an `owner` command cannot be asked for over it. Without a window a call
+  store can use it. An `owner` command runs over it only when the line asks the owner and the owner allows it in the
+  window; there is no standing grant. Without a window a call
   waits up to half a second for the app's next look (#142).
 - An agent's act over the control channel ends the window's Undo for the owner's acts before it, rather than keeping
   both apart (#142).
