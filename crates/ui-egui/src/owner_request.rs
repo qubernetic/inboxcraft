@@ -87,11 +87,57 @@ pub(crate) struct OwnerRequest {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Preview {
     /// The question, the dialog's heading.
-    pub(crate) question: String,
-    /// The lines under it, each with its colour.
-    pub(crate) lines: Vec<(String, Tone)>,
+    pub(crate) question: Said,
+    /// The lines under it.
+    pub(crate) lines: Vec<Said>,
     /// What the status line says once it ran.
     done: Done,
+    /// The words as last fitted to the card ([`Fitted`]).
+    pub(crate) fitted: Option<Fitted>,
+}
+
+/// One sentence of the question, as the app wrote it: its words, its colour, and how the data quoted in it stands.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Said {
+    /// The words, the data in them between the one `“` and the one `”`.
+    pub(crate) text: String,
+    /// Its colour, for a line.
+    pub(crate) tone: Tone,
+    /// Where it holds data in quotes, how the data must stand when drawn; `None` for words of the app's alone.
+    pub(crate) data: Option<Quoted>,
+}
+
+impl Said {
+    /// The app's own words, no data in them.
+    fn plain(text: String, tone: Tone) -> Self {
+        Self { text, tone, data: None }
+    }
+
+    /// Words with data quoted in them that stands as `quoted` says.
+    fn quoting(text: String, tone: Tone, quoted: Quoted) -> Self {
+        Self { text, tone, data: Some(quoted) }
+    }
+}
+
+/// How the data quoted in a sentence stands when drawn: never with a row of it apart from its opening quote.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Quoted {
+    /// The whole line on one row (an event, a value): the data cut with `…` to make room for the rest.
+    Row,
+    /// The quoted run on one row, with both its quotes (a name in a sentence that wraps): cut with `…` where a row
+    /// cannot hold it.
+    Run,
+}
+
+/// The question's words as fitted to the card of one width, in one type ([`crate::draw`] fits them).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Fitted {
+    /// What they were fitted for: the words' width, the window's pixels per point, the lines' and the heading's type.
+    pub(crate) key: (f32, f32, crate::theme::Font, crate::theme::Font),
+    /// The heading.
+    pub(crate) question: String,
+    /// The lines.
+    pub(crate) lines: Vec<(String, Tone)>,
 }
 
 /// What the status line says once an allowed request ran.
@@ -117,22 +163,63 @@ impl Preview {
     }
 }
 
-/// Whether `c` is a quote mark data could close its own quotes with, or open new ones: the question's own `“` and
-/// `”`, and the other quotes that could pass for them.
+/// Whether `c` is a mark data could close its own quotes with, or open new ones: the question's own `“` and `”`, the
+/// other quotes, and the marks drawn like a double quote (double primes, the double acute, the modifier letters, the
+/// Hebrew gershayim, the ditto mark) or like an apostrophe (two of which read as one double quote).
 fn quote(c: char) -> bool {
-    matches!(c, '"' | '“' | '”' | '„' | '‟' | '«' | '»' | '‹' | '›' | '‘' | '’' | '‚' | '‛' | '＂' | '〝' | '〞' | '〟')
+    matches!(
+        c,
+        '"' | '\''
+            | '“'
+            | '”'
+            | '„'
+            | '‟'
+            | '«'
+            | '»'
+            | '‹'
+            | '›'
+            | '‘'
+            | '’'
+            | '‚'
+            | '‛'
+            | '＂'
+            | '＇'
+            | '〝'
+            | '〞'
+            | '〟'
+            | '″'
+            | '‴'
+            | '‶'
+            | '‷'
+            | '˝'
+            | 'ʺ'
+            | 'ˮ'
+            | 'ʼ'
+            | 'ʹ'
+            | '′'
+            | '‵'
+            | '´'
+            | '`'
+            | '״'
+            | '׳'
+            | '〃'
+            | '❛'
+            | '❜'
+            | '❝'
+            | '❞'
+    )
 }
 
 /// `text` from outside as a question shows it: the characters that must not be drawn left out
-/// ([`crate::component::hidden`]), each quote mark an apostrophe `'` ([`quote`]), so it can never close the quotes the
-/// question puts around it, each run of white space or control characters (no-break and wide spaces among it) one
-/// space, trimmed, and at most `most` characters, cut between grapheme clusters with a closing `…`. Only the first
-/// 16 `most` characters are read: data longer than that is cut anyway.
+/// ([`crate::component::hidden`]), each run of quote marks one apostrophe `'` ([`quote`]), so it can never close the
+/// quotes the question puts around it nor draw one of its own, each run of white space or control characters
+/// (no-break and wide spaces among it) one space, trimmed, and at most `most` characters, cut between grapheme
+/// clusters with a closing `…`. Only the first 16 `most` characters that are drawn are read: longer data is cut anyway.
 #[must_use]
 pub(crate) fn data(text: &str, most: usize) -> String {
     let mut plain = String::new();
     let mut gap = false;
-    for c in text.chars().take(most.saturating_mul(16)).filter(|c| !crate::component::hidden(*c)) {
+    for c in text.chars().filter(|c| !crate::component::hidden(*c)).take(most.saturating_mul(16)) {
         if c.is_whitespace() || c.is_control() {
             gap = true;
             continue;
@@ -141,7 +228,13 @@ pub(crate) fn data(text: &str, most: usize) -> String {
             plain.push(' ');
         }
         gap = false;
-        plain.push(if quote(c) { '\'' } else { c });
+        if quote(c) {
+            if !plain.ends_with('\'') {
+                plain.push('\'');
+            }
+        } else {
+            plain.push(c);
+        }
     }
     match crate::component::capped(&plain, most) {
         (kept, true) => format!("{}…", kept.trim_end()),
@@ -158,54 +251,57 @@ pub(crate) fn data(text: &str, most: usize) -> String {
 /// The engine's refusal of `calendar.import.preview`.
 pub(crate) fn preview(mailbox: &mut Mailbox, request: &OwnerRequest) -> Result<Preview, EngineError> {
     let who = match request.client.as_deref().map(|client| data(client, MOST_NAME_CHARS)).filter(|client| !client.is_empty()) {
-        Some(client) => tr!("A program that calls itself “{client}” asks, over the control channel.", client = client),
-        None => tr!("A program asks, over the control channel.").to_owned(),
+        Some(client) => {
+            Said::quoting(tr!("A program that calls itself “{client}” asks, over the control channel.", client = client), Tone::Muted, Quoted::Run)
+        }
+        None => Said::plain(tr!("A program asks, over the control channel.").to_owned(), Tone::Muted),
     };
-    let mut lines = vec![(who, Tone::Muted)];
+    let mut lines = vec![who];
     if request.command == "calendar.import" {
         let read = mailbox.read_as_agent("calendar.import.preview", &request.params)?;
         let count = |field: &str| read.get(field).and_then(Value::as_u64).unwrap_or(0);
         let calendar = data(read.get("name").and_then(Value::as_str).unwrap_or_default(), MOST_NAME_CHARS);
         let add = count("add");
-        let question = tr!("Add {count} events to “{calendar}”?", count = add, calendar = calendar);
+        let question = Said::quoting(tr!("Add {count} events to “{calendar}”?", count = add, calendar = calendar), Tone::Ink, Quoted::Run);
         let (skipped, single, left_out) = (count("skipped"), count("single"), count("left_out"));
         if skipped > 0 {
-            lines.push((tr!("{count} are already in the calendar and stay as they are.", count = skipped), Tone::Muted));
+            lines.push(Said::plain(tr!("{count} are already in the calendar and stay as they are.", count = skipped), Tone::Muted));
         }
         if single > 0 {
-            lines.push((tr!("{count} repeat in a way InboxCraft cannot write and are added once.", count = single), Tone::Ink));
+            lines.push(Said::plain(tr!("{count} repeat in a way InboxCraft cannot write and are added once.", count = single), Tone::Ink));
         }
         if left_out > 0 {
-            lines.push((tr!("{count} cannot be read and are left out.", count = left_out), Tone::Ink));
+            lines.push(Said::plain(tr!("{count} cannot be read and are left out.", count = left_out), Tone::Ink));
         }
         let first = read.get("first").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
         let offset = mailbox.offset();
         for event in first.iter().take(FIRST) {
-            lines.push((named(event, offset), Tone::Ink));
+            lines.push(named(event, offset));
         }
         let named_count = u64::try_from(first.len().min(FIRST)).unwrap_or(u64::MAX);
         if add > named_count {
-            lines.push((tr!("and {count} more", count = add.saturating_sub(named_count)), Tone::Muted));
+            lines.push(Said::plain(tr!("and {count} more", count = add.saturating_sub(named_count)), Tone::Muted));
         }
-        lines.push((tr!("Nothing already in the calendar is changed or removed. Undo takes the events back.").to_owned(), Tone::Muted));
-        return Ok(Preview { question, lines, done: Done::Added(calendar) });
+        lines.push(Said::plain(tr!("Nothing already in the calendar is changed or removed. Undo takes the events back.").to_owned(), Tone::Muted));
+        return Ok(Preview { question, lines, done: Done::Added(calendar), fitted: None });
     }
-    let question = tr!("Let a program run {command}?", command = request.command);
-    lines.push((tr!("It gave these values, shown as it wrote them:").to_owned(), Tone::Muted));
+    let question = Said::plain(tr!("Let a program run {command}?", command = request.command), Tone::Ink);
+    lines.push(Said::plain(tr!("It gave these values, shown as it wrote them:").to_owned(), Tone::Muted));
     let values = request.params.as_object();
     for (name, value) in values.into_iter().flatten().take(MOST_VALUES) {
         let written = serde_json::to_string(value).unwrap_or_default();
-        lines.push((tr!("“{name}: {value}”", name = data(name, MOST_NAME_CHARS), value = data(&written, MOST_VALUE_CHARS)), Tone::Ink));
+        let value = tr!("“{name}: {value}”", name = data(name, MOST_NAME_CHARS), value = data(&written, MOST_VALUE_CHARS));
+        lines.push(Said::quoting(value, Tone::Ink, Quoted::Row));
     }
     let more = values.map_or(0, serde_json::Map::len).saturating_sub(MOST_VALUES);
     if more > 0 {
-        lines.push((tr!("and {count} more", count = more), Tone::Muted));
+        lines.push(Said::plain(tr!("and {count} more", count = more), Tone::Muted));
     }
-    Ok(Preview { question, lines, done: Done::Ran(request.command) })
+    Ok(Preview { question, lines, done: Done::Ran(request.command), fitted: None })
 }
 
 /// The line of one event of an import's preview: its title, quoted, and when it starts, on the clock of `offset`.
-fn named(event: &Value, offset: inboxcraft_time::Offset) -> String {
+fn named(event: &Value, offset: inboxcraft_time::Offset) -> Said {
     let title = data(event.get("summary").and_then(Value::as_str).unwrap_or_default(), MOST_NAME_CHARS);
     let start = event.get("start").and_then(Value::as_str).unwrap_or_default();
     let when = if event.get("all_day").and_then(Value::as_bool) == Some(true) {
@@ -216,10 +312,10 @@ fn named(event: &Value, offset: inboxcraft_time::Offset) -> String {
         })
     };
     match (title.is_empty(), when.is_empty()) {
-        (true, true) => tr!("(No title)").to_owned(),
-        (true, false) => tr!("(No title) · {when}", when = when),
-        (false, true) => tr!("“{title}”", title = title),
-        (false, false) => tr!("“{title}” · {when}", title = title, when = when),
+        (true, true) => Said::plain(tr!("(No title)").to_owned(), Tone::Ink),
+        (true, false) => Said::plain(tr!("(No title) · {when}", when = when), Tone::Ink),
+        (false, true) => Said::quoting(tr!("“{title}”", title = title), Tone::Ink, Quoted::Row),
+        (false, false) => Said::quoting(tr!("“{title}” · {when}", title = title, when = when), Tone::Ink, Quoted::Row),
     }
 }
 

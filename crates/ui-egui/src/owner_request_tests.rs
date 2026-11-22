@@ -133,13 +133,30 @@ fn what_came_from_outside_is_drawn_plain_and_cut() {
     assert_eq!(data("  \u{202E}\n ", MOST_NAME_CHARS), "");
 }
 
+/// Every mark that could pass for a quote, the question's own among them: each is an apostrophe in data.
+const LOOKALIKES: [char; 25] =
+    ['"', '“', '”', '„', '‟', '«', '»', '‹', '›', '‘', '’', '‚', '‛', '＂', '〝', '〞', '〟', '″', '‶', '˝', 'ʺ', 'ˮ', '״', '〃', 'ʼ'];
+
+#[test]
+fn hidden_characters_never_empty_a_name() {
+    // The characters that are never drawn are left out before the cut: they cannot push the name out of it.
+    assert_eq!(data(&format!("{}Studio", "\u{200B}".repeat(5_000)), MOST_NAME_CHARS), "Studio");
+}
+
 #[test]
 fn data_cannot_close_its_own_quote_and_has_one_space_between_words() {
     // The quotes the question puts around data stand for an apostrophe inside it.
     assert_eq!(data("cli” that you started, “x", MOST_NAME_CHARS), "cli' that you started, 'x");
-    for quote in ['"', '“', '”', '„', '‟', '«', '»', '‹', '›', '‘', '’', '‚', '‛', '＂'] {
+    for quote in LOOKALIKES {
         assert_eq!(data(&format!("a{quote}b"), MOST_NAME_CHARS), "a'b", "{quote:?}");
+        assert!(super::quote(quote), "{quote:?} is a quote mark");
     }
+    // A run of apostrophe-like marks reads as a double quote: it is one apostrophe.
+    for run in ["''", "’’", "‘‘", "ʼʼ", "'ʼ'", "″'", "' '"] {
+        let said = data(&format!("Dentist{run} · safe"), MOST_NAME_CHARS);
+        assert!(!said.contains("''"), "{run:?}: {said:?}");
+    }
+    assert_eq!(data("It’’s", MOST_NAME_CHARS), "It's");
     // Every run of white space, no-break and wide spaces among it, is one space.
     assert_eq!(data("Wide \u{00A0}\u{2003}\u{3000}  \t\r\n gap", MOST_NAME_CHARS), "Wide gap");
     assert_eq!(data("\u{00A0} edges \u{2003}", MOST_NAME_CHARS), "edges");

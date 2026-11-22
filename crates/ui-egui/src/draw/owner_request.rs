@@ -21,7 +21,7 @@ use serde_json::Value;
 
 use super::InboxApp;
 use crate::component::dialog::{self, Answer, Dialog, Tone};
-use crate::owner_request::{ARM_SECONDS, MOST_WAITING, MayRun, Settled, Ticket};
+use crate::owner_request::{ARM_SECONDS, Fitted, MOST_WAITING, MayRun, Quoted, Said, Settled, Ticket};
 use crate::theme::Theme;
 use crate::tr;
 
@@ -115,7 +115,7 @@ impl InboxApp {
             return None;
         }
         let front = self.owner_requests.front()?;
-        Some((front.ticket, front.preview.as_ref()?.question.clone()))
+        Some((front.ticket, front.preview.as_ref()?.question.text.clone()))
     }
 
     /// Whether the question of the request in front shows this frame: one waits, and neither the owner's own dialog
@@ -143,11 +143,22 @@ impl InboxApp {
         let Some(front) = self.owner_requests.front_mut() else { return };
         // A clock that went back (a window opened again) starts the arming second again; it never shortens it.
         let shown_at = *front.shown_at.insert(front.shown_at.filter(|at| *at <= now).unwrap_or(now));
-        let Some(preview) = front.preview.as_ref() else { return };
-        let lines: Vec<(&str, Tone)> = preview.lines.iter().map(|(text, tone)| (text.as_str(), *tone)).collect();
+        let Some(preview) = front.preview.as_mut() else { return };
+        // Fitted to the card once for its width and its type: no quoted data stands on a row apart from its quote.
+        let key = (dialog::text_width(ui.ctx(), theme), ui.ctx().pixels_per_point(), theme.fonts.body, theme.fonts.heading);
+        if preview.fitted.as_ref().is_none_or(|fitted| fitted.key != key) {
+            let (width, f) = (key.0, &theme.fonts);
+            preview.fitted = Some(Fitted {
+                key,
+                question: fitted(ui, theme, &preview.question, f.heading, dialog::QUESTION_ROWS, width),
+                lines: preview.lines.iter().map(|said| (fitted(ui, theme, said, f.body, dialog::LINE_ROWS, width), said.tone)).collect(),
+            });
+        }
+        let Some(words) = preview.fitted.as_ref() else { return };
+        let lines: Vec<(&str, Tone)> = words.lines.iter().map(|(text, tone)| (text.as_str(), *tone)).collect();
         let shown = Dialog {
             id: Id::unique("owner-request").with(front.ticket),
-            question: &preview.question,
+            question: &words.question,
             lines: &lines,
             keep: tr!("Deny"),
             act: tr!("Allow once"),
@@ -217,6 +228,48 @@ impl InboxApp {
     pub fn asks_owner(&self) -> bool {
         self.owner_requests.waiting()
     }
+}
+
+/// `said` as the card draws it in `font`, on at most `rows` rows of `width`: its quoted data with no-break spaces, cut
+/// with `…` where it must be, so that no row of the data stands apart from its opening quote. A [`Quoted::Row`] line
+/// stands on one row whole (an event's title is cut so its date still fits); a [`Quoted::Run`] keeps the quoted run
+/// on one row with both its quotes. The longest data that fits is found by halving, a few layouts once per width.
+pub(super) fn fitted(ui: &Ui, theme: &Theme, said: &Said, font: crate::theme::Font, rows: usize, width: f32) -> String {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let Some(quoted) = said.data else { return said.text.clone() };
+    let text = said.text.as_str();
+    let (Some(open), Some(close)) = (text.find('“'), text.rfind('”')) else { return said.text.clone() };
+    let start = open.saturating_add('“'.len_utf8());
+    let (Some(head), Some(data), Some(tail)) = (text.get(..start), text.get(start..close), text.get(close..)) else { return said.text.clone() };
+    let data = data.replace(' ', "\u{a0}");
+    let parts: Vec<&str> = data.graphemes(true).collect();
+    let make = |kept: usize| match parts.get(..kept).filter(|_| kept < parts.len()) {
+        Some(kept) => format!("{head}{}…{tail}", kept.concat().trim_end_matches('\u{a0}')),
+        None => format!("{head}{data}{tail}"),
+    };
+    let fits = |words: &str| {
+        let galley = crate::component::wrapped(ui, words, font, theme.palette.ink, width, rows, egui::Align::Min);
+        let row_of = |mark: char| galley.rows.iter().position(|row| row.glyphs.iter().any(|glyph| glyph.chr == mark));
+        !galley.elided
+            && match quoted {
+                Quoted::Row => galley.rows.len() == 1,
+                Quoted::Run => row_of('“').is_some() && row_of('“') == row_of('”'),
+            }
+    };
+    if fits(&make(parts.len())) {
+        return make(parts.len());
+    }
+    // The most of the data that fits, by halving: none of it (`“…”`) when nothing does.
+    let (mut fit, mut over) = (0_usize, parts.len());
+    while fit.saturating_add(1) < over {
+        let mid = fit.saturating_add(over.saturating_sub(fit) / 2);
+        if fits(&make(mid)) {
+            fit = mid;
+        } else {
+            over = mid;
+        }
+    }
+    make(fit)
 }
 
 #[cfg(test)]

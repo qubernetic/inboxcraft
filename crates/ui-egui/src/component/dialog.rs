@@ -124,6 +124,13 @@ pub fn cover(ctx: &Context, theme: &Theme) -> Rect {
     Rect::from_min_max(screen.min, pos2(screen.right(), bottom))
 }
 
+/// The width the card's words get in `ctx`: the card's ([`WIDTH`], less where the window is narrower) less its margins
+/// and its edge.
+#[must_use]
+pub fn text_width(ctx: &Context, theme: &Theme) -> f32 {
+    (width(cover(ctx, theme)) - 2.0 * (PAD + EDGE)).max(1.0)
+}
+
 /// The card's width in a window whose dimmed part is `cover`: [`WIDTH`], less where the window is narrower.
 fn width(cover: Rect) -> f32 {
     WIDTH.min((cover.width() - 2.0 * CLEAR).max(1.0)).round()

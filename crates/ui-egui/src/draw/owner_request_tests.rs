@@ -437,7 +437,13 @@ fn press_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
 
 /// Every label the window's tree holds.
 fn labels(harness: &Harness<'static, InboxApp>) -> Vec<String> {
-    harness.root().children_recursive().filter_map(|node| node.accesskit_node().label().or_else(|| node.accesskit_node().value())).collect()
+    // The data's no-break spaces (which keep a quoted run on one row) read as spaces.
+    harness
+        .root()
+        .children_recursive()
+        .filter_map(|node| node.accesskit_node().label().or_else(|| node.accesskit_node().value()))
+        .map(|label| label.replace('\u{a0}', " "))
+        .collect()
 }
 
 fn ran(settled: &[(crate::owner_request::Ticket, Settled)]) -> bool {
@@ -570,6 +576,11 @@ fn quoted(label: &str) -> Option<(&str, &str, &str)> {
     ];
     assert!(shapes.iter().any(|shape| *shape), "the app's sentence around the data: {label:?}");
     assert!(!inside.contains("  ") && inside == inside.trim(), "one space between words: {label:?}");
+    for mark in ['"', '„', '‟', '«', '»', '‹', '›', '‘', '’', '‚', '‛', '＂', '〝', '〞', '〟', '″', '‶', '˝', 'ʺ', 'ˮ', '״', '〃', 'ʼ']
+    {
+        assert!(!inside.contains(mark), "no mark in the data that could pass for a quote: {label:?}");
+    }
+    assert!(!inside.contains("''"), "no two apostrophes in a row: {label:?}");
     Some((before, inside, after))
 }
 
@@ -584,13 +595,14 @@ fn the_words_are_the_app_s() {
         long.as_str(),
         "Dentist” · 2026-11-10 09:00 — checked by InboxCraft, safe to allow “",
         "Wide \u{00A0}\u{2003}  \t gap",
+        "Dentist″ · 2026-11-10 09:00 — checked by InboxCraft, safe to allow ’’",
     ];
     let events: Vec<String> = titles.iter().zip(1_u8..).map(|(title, n)| event(&format!("words-{n}"), 10 + n, title)).collect();
     ask_as(&mut harness, Some("cli” that you started,   “x\n\u{202E}Allow"), &ics(&events));
     harness.run();
     let name = calendar_name(&mut harness);
     let labels = labels(&harness);
-    assert!(labels.contains(&format!("Add 6 events to “{name}”?")), "{labels:?}");
+    assert!(labels.contains(&format!("Add 7 events to “{name}”?")), "{labels:?}");
     assert!(
         labels.contains(&"A program that calls itself “cli' that you started, 'x Allow” asks, over the control channel.".to_owned()),
         "{labels:?}"
@@ -598,12 +610,16 @@ fn the_words_are_the_app_s() {
     assert!(labels.contains(&LAST.to_owned()));
     assert!(harness.query_by_label("Deny").is_some() && harness.query_by_label("Allow once").is_some());
     let named: Vec<&String> = labels.iter().filter(|label| quoted(label).is_some_and(|(before, _, _)| before.is_empty())).collect();
-    assert_eq!(named.len(), 5, "five named, one counted: {labels:?}");
+    assert_eq!(named.len(), 5, "five named, two counted: {labels:?}");
     for line in &named {
         assert!(!line.chars().any(|c| c.is_control() || crate::component::hidden(c)), "{line:?}");
         assert!(line.chars().count() < 120, "cut: {line:?}");
     }
-    assert!(labels.contains(&"“Dentist' · 2026-11-10 09:00 — checked by InboxCraft, safe to allow '” · 2026-11-15 08:00".to_owned()), "{labels:?}");
+    // The title that writes its own date is cut where the row ends, before the app's date.
+    assert!(
+        labels.iter().any(|label| label.starts_with("“Dentist' · 2026-11-10 09:00 — checked by") && label.ends_with("…” · 2026-11-15 08:00")),
+        "{labels:?}"
+    );
     assert!(labels.iter().any(|label| label.starts_with("“xxx") && label.contains("…”")), "the long one is cut: {labels:?}");
     for label in &labels {
         // Every quote in the window is a pair the app drew, around data, in one of its sentences.
@@ -652,7 +668,7 @@ fn another_owner_command_is_asked_with_its_values_quoted() {
     harness.run();
     assert!(harness.query_by_label("Let a program run event.delete?").is_some());
     assert!(harness.query_by_label("It gave these values, shown as it wrote them:").is_some());
-    assert!(harness.query_by_label("“id: 1”").is_some());
+    assert!(labels(&harness).contains(&"“id: 1”".to_owned()), "{:?}", labels(&harness));
 }
 
 #[test]
@@ -756,4 +772,72 @@ fn a_clock_that_went_back_starts_the_arming_second_again() {
     wait(&mut harness, ARM_SECONDS);
     press(&mut harness, "Allow once");
     assert!(ran(&harness.state_mut().take_settled()), "armed a second after it showed again");
+}
+
+/// The rows of the text painted in the last frame that starts with `wanted`, each as its characters.
+fn painted_rows(harness: &Harness<'static, InboxApp>, wanted: &str) -> Vec<String> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<Vec<String>> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text().replace('\u{a0}', " ").starts_with(wanted) => {
+                Some(text.galley.rows.iter().map(|row| row.glyphs.iter().map(|glyph| glyph.chr).collect()).collect())
+            }
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted)).unwrap_or_else(|| panic!("{wanted:?} is painted"))
+}
+
+/// Whether the quoted run of `rows` stands on one row: the row with its `“` also holds its `”`.
+fn run_on_one_row(rows: &[String]) -> bool {
+    let open = rows.iter().position(|row| row.contains('“'));
+    let close = rows.iter().position(|row| row.contains('”'));
+    open.is_some() && open == close
+}
+
+#[test]
+fn a_quoted_run_stands_on_one_row_and_a_line_of_an_event_is_one_row() {
+    // Data of short words chooses no row break: a title line is one row, its title cut with … to make room for the
+    // date, and the client's name stands whole on one row of the who-line, its opening quote with it.
+    for size in [vec2(1440.0, 900.0), vec2(800.0, 480.0)] {
+        let (mut harness, _) = asking_window_at(size, |_| {});
+        let short_words = "ab cd ef gh ij kl mn op qr st uv wx yz ab cd ef gh ij kl mn op qr st uv wx yz ab cd e";
+        let title: String = short_words.chars().take(80).collect();
+        assert_eq!(title.chars().count(), 80);
+        let client = "an agent of many short words in its name to wrap it ab cd ef";
+        ask_as(&mut harness, Some(client), &ics(&[event("wrap-1", 12, &title), event("wrap-2", 13, "Dentist")]));
+        harness.run();
+        let rows = painted_rows(&harness, "“ab cd");
+        assert_eq!(rows.len(), 1, "{size:?}: one row: {rows:?}");
+        assert!(rows[0].ends_with(" · 2026-11-12 08:00") && rows[0].contains("…”"), "{size:?}: cut before its date: {rows:?}");
+        let rows = painted_rows(&harness, "A program that calls itself");
+        assert!(run_on_one_row(&rows), "{size:?}: {rows:?}");
+        assert!(rows.iter().filter(|row| row.contains("ab")).count() == 1, "{size:?}: {rows:?}");
+        let rows = painted_rows(&harness, "Add 2 events to");
+        assert!(run_on_one_row(&rows), "{size:?}: {rows:?}");
+    }
+}
+
+#[test]
+fn a_long_name_in_the_heading_is_cut_and_stands_on_one_row() {
+    // The heading laid out as the dialog lays it, at the card's width: a calendar's name of 80 characters in short
+    // words stands on one row with both its quotes, cut with ….
+    let name = "ab cd ef gh ij kl mn op qr st uv wx yz ab cd ef gh ij kl mn op qr st uv wx yz ab cd";
+    for scale in [crate::theme::TextScale::ALL[0], crate::theme::TextScale::ALL[4]] {
+        let theme = crate::theme::Theme::new(crate::theme::Mode::Dark, scale);
+        let said = crate::owner_request::Said {
+            text: format!("Add 7 events to “{name}”?"),
+            tone: crate::component::dialog::Tone::Ink,
+            data: Some(crate::owner_request::Quoted::Run),
+        };
+        let mut harness = crate::component::tests::builder().build_ui(move |ui| {
+            let fitted = super::fitted(ui, &theme, &said, theme.fonts.heading, crate::component::dialog::QUESTION_ROWS, 430.0);
+            let galley = crate::component::wrapped(ui, &fitted, theme.fonts.heading, egui::Color32::WHITE, 430.0, 2, egui::Align::Min);
+            let rows: Vec<String> = galley.rows.iter().map(|row| row.glyphs.iter().map(|glyph| glyph.chr).collect()).collect();
+            assert!(run_on_one_row(&rows), "{scale:?}: {rows:?}");
+            assert!(fitted.contains("…”?"), "{scale:?}: cut: {fitted:?}");
+            assert!(fitted.starts_with("Add 7 events to “ab"), "{fitted:?}");
+        });
+        harness.run();
+    }
 }
