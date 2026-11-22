@@ -2013,7 +2013,7 @@ impl Mailbox {
     ///
     /// The command's refusal, as [`Session::run_as`]; no toast then, and the history as it was.
     pub(crate) fn run_for_owner_request(&mut self, command: &'static str, params: &Value, text: &str) -> Result<Value, EngineError> {
-        let before = self.session.history_len();
+        let before = self.session.history_pushes();
         let answer = self.session.run_as(Caller::Owner, command, params);
         let answer = match answer {
             Ok(answer) => answer,
@@ -2028,7 +2028,8 @@ impl Mailbox {
                 return Err(error);
             }
         };
-        let grew = self.session.history_len() > before;
+        // Counted in pushes, not in length: a full history stays as long when the step goes on top.
+        let grew = self.session.history_pushes() > before;
         let depth = self.history;
         if grew {
             self.history = self.history.saturating_add(1);

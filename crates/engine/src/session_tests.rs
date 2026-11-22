@@ -123,6 +123,23 @@ fn history_len_counts_the_acts_undo_holds() {
 }
 
 #[test]
+fn history_pushes_count_every_step_also_one_that_pushes_the_oldest_out() {
+    let mut session = crate::test_support::session();
+    assert_eq!(session.history_pushes(), 0);
+    for turn in 0..crate::undo::MAX_HISTORY {
+        session.run("mail.flag", &json!({ "id": 1, "flagged": turn % 2 == 0 })).unwrap();
+    }
+    assert_eq!((session.history_len(), session.history_pushes()), (crate::undo::MAX_HISTORY, 100));
+    session.run("mail.flag", &json!({ "id": 1, "flagged": true })).unwrap();
+    assert_eq!(session.history_len(), crate::undo::MAX_HISTORY, "the oldest went out");
+    assert_eq!(session.history_pushes(), 101, "but the step was taken");
+    // An act that changes nothing is no step, and an undo takes one off without counting.
+    session.run("mail.flag", &json!({ "id": 1, "flagged": true })).unwrap();
+    session.run("history.undo", &json!({})).unwrap();
+    assert_eq!(session.history_pushes(), 101);
+}
+
+#[test]
 fn a_session_shows_its_commands_and_store() {
     let session = crate::test_support::session();
     assert!(session.registry().get("account.list").is_some());
