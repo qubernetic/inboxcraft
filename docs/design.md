@@ -335,6 +335,11 @@ full name or no name instead.
 - **Inbox,** in three views: Grouped (every group open), Smart (the first three rows of each group, with "show
   all") and List (one list by time). Groups are section labels with a count. Done mail is out of the way, not
   gone: "Show done" lists it again.
+- **Unread only.** A pill on the filters' line after "Show done", in every view and folder of mail (not in Drafts,
+  New senders, Later or the outbox), and the key `U`: on, the place lists its unread messages alone. A row read
+  meanwhile leaves at once; the open message stays open and keeps its row until the owner moves on, so the next
+  message is the next unread one. Each place keeps its own choice for the session. With nothing unread the list
+  says so ("Nothing unread here.", `<PLACE> · UNREAD`), not a blank pane.
 - **A row** is two lines: the sender, the account bar and the time, then subject and preview. Unread is a cyan
   square and heavier type. A subject is one line everywhere but in the reader.
 - **The screener.** First-time senders wait in New senders, a queue of one card a sender with Let in and Keep

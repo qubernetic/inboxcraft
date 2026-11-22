@@ -143,7 +143,7 @@ fn hidden_list(width: f32) -> Harness<'static, InboxApp> {
 fn with_the_list_hidden_its_keys_views_and_row_commands_rest_and_the_palette_shows_them_unavailable() {
     for width in [720.0, 979.0] {
         let mut harness = hidden_list(width);
-        let rows = [keymap::DONE, keymap::ARCHIVE, keymap::READ, keymap::FLAG, keymap::DELETE, keymap::UNDO];
+        let rows = [keymap::DONE, keymap::ARCHIVE, keymap::READ, keymap::FLAG, keymap::DELETE, keymap::UNDO, keymap::UNREAD];
         // In one pane Back is the way the list comes back in front of the composer (the lists slice's own rule); in two
         // panes it has nothing to do.
         let one_pane = width < 980.0;

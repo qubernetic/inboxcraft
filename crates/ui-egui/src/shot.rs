@@ -65,7 +65,8 @@
 //! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
 //! before the picture, so what that opens (a menu, a list) is in it; `put_away` set to `true` snoozes, pins, parks and marks
 //! done some of the sample's mail first ([`sample::put_away`]), `later` opens a pile of "Later" (`snoozed`, `pins`
-//! or `parked`), `show_done` set to `true` lists the done mail in its old place, `menu` opens a menu (`more`, `move`,
+//! or `parked`), `show_done` set to `true` lists the done mail in its old place, `unread_only` set to `true` lists
+//! the unread messages of the place opened alone ("Unread only"), `menu` opens a menu (`more`, `move`,
 //! `from`, `templates`, `group`), and `picker` opens the time picker
 //! over the selected message with that text typed (`""` for none). `outbox` shows the sample with its first account
 //! able to send and its sent message bounced ([`sample::sending`]): `waiting` the outbox with a send counting down its
@@ -337,6 +338,9 @@ pub struct Shot {
     /// Whether "Show done" lists the done mail in its old place.
     #[serde(default)]
     pub show_done: Option<bool>,
+    /// Whether the place opened lists its unread messages alone ("Unread only").
+    #[serde(default)]
+    pub unread_only: Option<bool>,
     /// A menu open: the reader's `more` or `move`, the composer's `from` or `templates`, the selected row's `group`.
     #[serde(default)]
     pub menu: Option<String>,
@@ -1114,6 +1118,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.put_away.is_some()
         || shot.later.is_some()
         || shot.show_done.is_some()
+        || shot.unread_only.is_some()
         || shot.picker.is_some()
         || shot.menu.is_some()
         || shot.outbox.is_some()
@@ -2105,6 +2110,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if let Some(name) = &shot.later {
         let pile = Pile::named(name).ok_or_else(|| bad(format!("{}: pile {name:?} is not snoozed, pins or parked", shot.out)))?;
         app.mailbox_mut().open(Place::Later(pile));
+    }
+    if shot.unread_only == Some(true) {
+        app.mailbox_mut().set_unread_only(true);
     }
     if let Some(text) = &shot.search {
         app.search(text);

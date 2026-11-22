@@ -243,6 +243,10 @@ pub const MENU: &str = "ui.list.menu";
 /// The same menu by the keyboard's Menu key: [`MENU`]'s second key.
 pub const MENU_KEY: &str = "ui.list.menu_key";
 
+/// List the unread messages of the place shown alone ("Unread only"), or all of them again: the engine's command id,
+/// the list's own (`U`).
+pub const UNREAD: &str = "ui.list.unread";
+
 /// The actions of the list's keys: they run only while the list has the keyboard (a row was pressed or keyed last
 /// and nothing else has the focus, or a row has it), and rest otherwise, in a text field as in the reader.
 pub const LIST_KEYS: [&str; 11] = [NEXT, PREVIOUS, DOWN, UP, PAGE_DOWN, PAGE_UP, FIRST, LAST, OPEN, MENU, MENU_KEY];
@@ -316,6 +320,7 @@ pub fn actions() -> Vec<Action> {
         action(VIEW_GROUPED, tr!("Inbox view: Grouped"), IconId::Inbox),
         action(VIEW_SMART, tr!("Inbox view: Smart"), IconId::Inbox),
         action(VIEW_LIST, tr!("Inbox view: List"), IconId::Inbox),
+        action(UNREAD, tr!("Unread only, or every message again"), IconId::MarkRead),
     ]
 }
 
@@ -408,6 +413,7 @@ impl Default for Keymap {
         keymap.bind(ARCHIVE, KeyboardShortcut::new(Modifiers::NONE, Key::A));
         keymap.bind(SNOOZE, KeyboardShortcut::new(Modifiers::NONE, Key::H));
         keymap.bind(READ, KeyboardShortcut::new(Modifiers::NONE, Key::R));
+        keymap.bind(UNREAD, KeyboardShortcut::new(Modifiers::NONE, Key::U));
         keymap.bind(FLAG, KeyboardShortcut::new(Modifiers::NONE, Key::S));
         keymap.bind(DELETE, KeyboardShortcut::new(Modifiers::NONE, Key::Delete));
         keymap.bind(UNDO, KeyboardShortcut::new(Modifiers::COMMAND, Key::Z));

@@ -233,7 +233,7 @@ fn the_window_s_asks_are_kept_up_to_a_few_while_nobody_takes_them() {
     assert_eq!(asked.len(), MAX_ASKED);
     let page = |asked: &crate::shown::Asked| match asked {
         crate::shown::Asked::Settings(asked) => asked.page,
-        crate::shown::Asked::Home(_) => None,
+        crate::shown::Asked::Home(_) | crate::shown::Asked::Unread(_) => None,
     };
     assert_eq!(asked.last().and_then(page), Some("accounts"), "the newest kept");
 }

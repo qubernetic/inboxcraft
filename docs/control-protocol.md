@@ -118,6 +118,14 @@ that is:
   `ui.settings.open` is, while the owner holds the keys; the owner's own
   key or press in that frame wins, and of an agent's calls of the two only the newest acts in a frame. The answer is
   `window`, `true` in the app, the same whether the window acted or passed over the call;
+- `ui.list.unread`, which lists the unread messages of the place the window shows alone (`on: true`), every message
+  again (`on: false`), or the other of the two (no `on`); it changes nothing in the store. An agent's call is passed
+  over as an agent's `ui.home.open` is, and the owner's own turn of the filter in that frame wins. It changes nothing
+  where the list does not show a place that has the filter: while a search shows, on the settings, Home or the
+  calendar, with the list hidden, and in New senders, Later, Drafts and the outbox. The answer is `on` as given
+  (`null` for the other of the two) and `window`; it is the same whether the window turned the filter or not, so it
+  does not say the state: an agent that needs one names it with `on`. The same list is `mail.list` with `unread` (and
+  `keep`, one message kept in its place read or not);
 - putting mail aside: `mail.snooze`, `mail.unsnooze`, `mail.park`, `mail.pin`, `mail.follow_up` and
   `mail.cancel_follow_up`. `mail.done`, the screener's and the groups' choices (`screener.accept`, `screener.block`,
   `screener.mode`, `group.set`, `group.account`), `pin.set` and `after.set` are the owner's and refused with
