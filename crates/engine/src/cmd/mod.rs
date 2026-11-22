@@ -9,6 +9,7 @@
 //! in the `modules!` line below.
 
 pub use mail::MAX_LIST;
+pub(crate) use sync::{finished as sync_finished, progress as sync_progress};
 
 use crate::CommandSpec;
 
@@ -40,7 +41,7 @@ macro_rules! modules {
     };
 }
 
-modules!(account, act, calendar, compose, folder, mail, notify, outbox, remote, sample, schedule, send, template, triage, ui);
+modules!(account, act, calendar, compose, folder, home, mail, notify, outbox, remote, sample, schedule, send, sync, template, triage, ui);
 
 /// Every built-in command.
 pub(crate) fn all() -> Vec<CommandSpec> {
@@ -60,6 +61,9 @@ mod add_tests;
 #[path = "alert_tests.rs"]
 mod alert_tests;
 #[cfg(test)]
+#[path = "all_day_alert_tests.rs"]
+mod all_day_alert_tests;
+#[cfg(test)]
 #[path = "calendar_sync_tests.rs"]
 mod calendar_sync_tests;
 #[cfg(test)]
@@ -75,8 +79,17 @@ mod done_tests;
 #[path = "dsn_tests.rs"]
 mod dsn_tests;
 #[cfg(test)]
+#[path = "event_alert_tests.rs"]
+mod event_alert_tests;
+#[cfg(test)]
 #[path = "event_chain_tests.rs"]
 mod event_chain_tests;
+#[cfg(test)]
+#[path = "event_form_tests.rs"]
+mod event_form_tests;
+#[cfg(test)]
+#[path = "event_owner_tests.rs"]
+mod event_owner_tests;
 #[cfg(test)]
 #[path = "event_tests.rs"]
 mod event_tests;
@@ -87,8 +100,14 @@ mod follow_up_tests;
 #[path = "group_tests.rs"]
 mod group_tests;
 #[cfg(test)]
+#[path = "home_tests.rs"]
+mod home_tests;
+#[cfg(test)]
 #[path = "hostile_tests.rs"]
 mod hostile_tests;
+#[cfg(test)]
+#[path = "id_range_tests.rs"]
+mod id_range_tests;
 #[cfg(test)]
 #[path = "invite_tests.rs"]
 mod invite_tests;
@@ -120,6 +139,9 @@ pub(crate) mod send_tests;
 #[path = "snooze_tests.rs"]
 mod snooze_tests;
 #[cfg(test)]
+#[path = "sync_tests.rs"]
+mod sync_tests;
+#[cfg(test)]
 #[path = "template_tests.rs"]
 mod template_tests;
 #[cfg(test)]
@@ -131,3 +153,6 @@ mod triage_tests;
 #[cfg(test)]
 #[path = "ui_tests.rs"]
 mod ui_tests;
+#[cfg(test)]
+#[path = "unread_tests.rs"]
+mod unread_tests;

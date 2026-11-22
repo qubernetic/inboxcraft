@@ -5,12 +5,13 @@ use egui::accesskit::{Role, Toggled};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::{IconButton, TextButton};
+use super::{IconButton, LinkSize, TextButton, Tone};
+use crate::component::Shown;
 use crate::component::control_side;
-use crate::component::tests::{builder, drew_icon, theme};
-use crate::iconset::{IconId, Style};
+use crate::component::tests::{Own, bring, builder, drew_icon, icons, own, painted, staged, theme};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
-use crate::theme::TextScale;
+use crate::theme::{Mode, TextScale, Theme};
 
 /// How often each of the three buttons was pressed.
 type Presses = [u32; 3];
@@ -58,12 +59,12 @@ fn a_disabled_button_takes_no_press_and_says_so() {
 }
 
 #[test]
-fn an_active_button_is_selected_and_shows_the_fill_icon() {
+fn an_active_button_is_selected_and_shows_its_icon() {
     let harness = harness();
     assert_eq!(harness.get_by_label("Unpin").accesskit_node().toggled(), Some(Toggled::True));
     assert_eq!(harness.get_by_label("Archive").accesskit_node().toggled(), Some(Toggled::False));
-    assert!(drew_icon(harness.output(), IconId::Pin, Style::Fill));
-    assert!(drew_icon(harness.output(), IconId::Archive, Style::Regular));
+    assert!(drew_icon(harness.output(), IconId::Pin));
+    assert!(drew_icon(harness.output(), IconId::Archive));
 }
 
 #[test]
@@ -75,7 +76,7 @@ fn the_button_grows_with_the_text_scale() {
             let mut harness = builder().build_ui_state(
                 move |ui, side: &mut f32| {
                     crate::theme::install_fonts(ui.ctx());
-                    *side = control_side(ui, &theme);
+                    *side = control_side(&theme);
                     IconButton::new(IconId::Done, "Done").show(ui, &theme, &Keymap::default());
                 },
                 0.0,
@@ -97,7 +98,9 @@ fn text_colours(output: &egui::FullOutput) -> Vec<(String, egui::Color32)> {
             egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, out)),
             egui::Shape::Text(text) => {
                 let colour = text.galley.rows.iter().flat_map(|row| row.visuals.mesh.vertices.iter()).map(|vertex| vertex.color).next();
-                out.push((text.galley.text().to_owned(), colour.unwrap_or(text.fallback_color)));
+                // A galley laid out in the placeholder colour takes the painter's colour.
+                let colour = colour.filter(|colour| *colour != egui::Color32::PLACEHOLDER);
+                out.push((text.galley.text().to_owned(), text.override_text_color.or(colour).unwrap_or(text.fallback_color)));
             }
             _ => {}
         }
@@ -116,15 +119,14 @@ fn a_button_on_a_gradient_draws_its_icon_in_the_ink_it_is_given() {
             IconButton::new(IconId::Settings, "Settings").ink(ink).active(active).show(ui, &theme, &Keymap::default());
         });
         harness.run();
-        let style = if active { Style::Fill } else { Style::Regular };
-        assert!(drew_icon(harness.output(), IconId::Settings, style));
+        assert!(drew_icon(harness.output(), IconId::Settings));
         assert!(text_colours(harness.output()).iter().all(|(_, colour)| *colour == ink), "{active}");
         assert_eq!(harness.get_by_label("Settings").accesskit_node().toggled(), Some(if active { Toggled::True } else { Toggled::False }));
     }
 }
 
 #[test]
-fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_reads_on_the_text_gradient() {
+fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_is_on_cyan() {
     let theme = theme();
     let mut harness = builder().build_ui_state(
         move |ui, presses: &mut [u32; 2]| {
@@ -140,8 +142,8 @@ fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_reads_on_t
     harness.run();
     let colours = text_colours(harness.output());
     let colour = |name: &str| colours.iter().find(|(text, _)| text == name).map(|(_, colour)| *colour);
-    assert_eq!(colour("Done all"), Some(theme.palette.text));
-    assert_eq!(colour("Review"), Some(crate::theme::text_gradient(theme.palette.gradient).1));
+    assert_eq!(colour("Done all"), Some(theme.palette.ink));
+    assert_eq!(colour("Review"), Some(theme.palette.on_cyan));
     harness.get_by_role_and_label(Role::Button, "Review").click();
     harness.run();
     harness.get_by_role_and_label(Role::Button, "Done all").click();
@@ -150,7 +152,7 @@ fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_reads_on_t
     crate::component::tests::quick_tooltips(&harness.ctx);
     harness.get_by_role_and_label(Role::Button, "Review").hover();
     harness.run();
-    harness.get_by_label("Ctrl+F");
+    harness.get_by_label("Ctrl F");
 }
 
 #[test]
@@ -218,8 +220,8 @@ fn text_buttons_of_every_tone_are_named_buttons_with_their_icons() {
     }
     harness.run();
     assert_eq!(harness.state(), &[1, 1, 0]);
-    assert!(drew_icon(harness.output(), IconId::Reply, Style::Regular));
-    assert!(drew_icon(harness.output(), IconId::Forward, Style::Regular));
+    assert!(drew_icon(harness.output(), IconId::Reply));
+    assert!(drew_icon(harness.output(), IconId::Forward));
 }
 
 #[test]
@@ -233,13 +235,736 @@ fn an_unavailable_text_button_takes_no_press() {
 }
 
 #[test]
-fn a_danger_button_is_filled_with_the_error_colour_and_reads_on_it() {
+fn a_danger_button_has_the_minus_edge_and_text() {
     let theme = theme();
     let mut harness = builder().build_ui(move |ui| {
         TextButton::new("Block").danger().show(ui, &theme, &Keymap::default());
     });
     harness.run();
     let colours = text_colours(harness.output());
-    assert_eq!(colours.iter().find(|(text, _)| text == "Block").map(|(_, colour)| *colour), Some(theme.palette.on_error));
+    assert_eq!(colours.iter().find(|(text, _)| text == "Block").map(|(_, colour)| *colour), Some(theme.palette.minus));
     harness.get_by_role_and_label(Role::Button, "Block");
+}
+
+/// The states of the icon button's sheet, in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IconState {
+    Default,
+    Hover,
+    Focus,
+    Pressed,
+    Selected,
+    Disabled,
+    Unavailable,
+}
+
+const ICON_STATES: [IconState; 7] =
+    [IconState::Default, IconState::Hover, IconState::Focus, IconState::Pressed, IconState::Selected, IconState::Disabled, IconState::Unavailable];
+
+/// The icon button "Pin" in `state` on a `surface` stage, at `scale`, in `mode`: its rect and its own look.
+fn icon_button_in(mode: Mode, scale: TextScale, state: IconState) -> (egui::Rect, Own) {
+    let theme = Theme::new(mode, scale);
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        egui::vec2(200.0, 200.0),
+        move |ui, theme| {
+            let button = IconButton::new(IconId::Pin, "Pin");
+            let button = match state {
+                IconState::Selected => button.active(true),
+                IconState::Disabled => button.enabled(false),
+                IconState::Unavailable => button.unavailable("Not yet: choose a message first"),
+                _ => button,
+            };
+            button.show(ui, theme, &Keymap::default());
+        },
+    );
+    let shown = match state {
+        IconState::Hover => Shown::Hover,
+        IconState::Focus => Shown::Focus,
+        IconState::Pressed => Shown::Pressed,
+        _ => Shown::Rest,
+    };
+    bring(&mut harness, "Pin", shown);
+    let rect = harness.get_by_label("Pin").rect();
+    (rect, own(&painted(&harness, "Pin"), rect))
+}
+
+#[test]
+fn an_icon_button_looks_as_its_sheet_says_in_every_state() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        for state in ICON_STATES {
+            let (rect, look) = icon_button_in(mode, TextScale::default(), state);
+            let at = format!("{mode:?} {state:?}: {look:#?}");
+            assert!((rect.width() - 32.0).abs() < 0.01 && (rect.height() - 32.0).abs() < 0.01, "{at} {rect:?}");
+            let (fill, edge, glyph) = match state {
+                IconState::Default | IconState::Focus => (None, None, p.muted),
+                IconState::Hover => (Some(p.stage), None, p.ink),
+                IconState::Pressed => (Some(p.stage), Some((1.0, p.muted, false)), p.ink),
+                IconState::Selected => (Some(p.cyan_muted), None, p.cyan_text),
+                IconState::Disabled | IconState::Unavailable => (None, None, p.dim),
+            };
+            assert_eq!(look.fill, fill, "{at}");
+            assert_eq!(look.edge, edge, "{at}");
+            let ring = (state == IconState::Focus).then_some((rect.expand(3.0), 1.0, p.cyan_edge));
+            assert_eq!(look.ring, ring, "{at}");
+            assert_eq!(look.texts.len(), 1, "{at}");
+            let (_, colour, family, size) = &look.texts[0];
+            assert_eq!((*colour, family.clone(), *size), (glyph, icons(), 16.0), "{at}");
+            assert!(!look.overflows, "{at}");
+            assert!(look.radius <= 0.0, "{at}");
+        }
+    }
+}
+
+#[test]
+fn an_icon_button_at_130_percent_is_the_scaled_side() {
+    let theme = Theme::new(Mode::Dark, TextScale::ALL[4]);
+    let side = theme.boxes().button;
+    for state in ICON_STATES {
+        let (rect, _) = icon_button_in(Mode::Dark, TextScale::ALL[4], state);
+        assert!((rect.width() - side).abs() < 0.01 && (rect.height() - side).abs() < 0.01, "{state:?} {rect:?}");
+    }
+}
+
+#[test]
+fn an_icon_button_held_down_by_enter_is_pressed() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        egui::vec2(200.0, 200.0),
+        |ui, theme| {
+            IconButton::new(IconId::Pin, "Pin").show(ui, theme, &Keymap::default());
+        },
+    );
+    bring(&mut harness, "Pin", Shown::Focus);
+    harness.key_down(egui::Key::Enter);
+    harness.run();
+    let rect = harness.get_by_label("Pin").rect();
+    let look = own(&painted(&harness, "Pin"), rect);
+    assert_eq!(look.edge, Some((1.0, theme.palette.muted, false)), "{look:#?}");
+    assert_eq!(look.fill, Some(theme.palette.stage), "{look:#?}");
+}
+
+/// The states of the text button's sheet, in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextState {
+    Default,
+    Hover,
+    Focus,
+    Pressed,
+    Disabled,
+    Unavailable,
+}
+
+const TEXT_STATES: [TextState; 6] =
+    [TextState::Default, TextState::Hover, TextState::Focus, TextState::Pressed, TextState::Disabled, TextState::Unavailable];
+
+/// The four tones with the sheet's label of each and its width there.
+const TONES: [(Tone, &str, f32); 4] =
+    [(Tone::Primary, "Send", 56.0), (Tone::Secondary, "Reply all", 95.0), (Tone::Danger, "Delete", 71.0), (Tone::Plain, "Discard", 79.0)];
+
+/// A keymap with Ctrl Enter for sending.
+fn send_keys() -> Keymap {
+    let mut keymap = Keymap::default();
+    keymap.bind("mail.send", egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter));
+    keymap
+}
+
+/// `button` (labelled `label`) on a `surface` stage in `mode` at `scale`, brought into `shown`: its rect and its look.
+fn text_button_in(
+    mode: Mode,
+    scale: TextScale,
+    label: &'static str,
+    shown: Shown,
+    button: impl Fn() -> TextButton<'static> + 'static,
+) -> (egui::Rect, Own) {
+    let theme = Theme::new(mode, scale);
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        egui::vec2(400.0, 120.0),
+        move |ui, theme| {
+            button().show(ui, theme, &send_keys());
+        },
+    );
+    bring(&mut harness, label, shown);
+    let rect = harness.get_by_label(label).rect();
+    (rect, own(&painted(&harness, label), rect))
+}
+
+/// The text button `label` in `tone` and `state`.
+fn toned(label: &'static str, tone: Tone, state: TextState) -> impl Fn() -> TextButton<'static> + 'static {
+    move || {
+        let button = TextButton::new(label);
+        let button = match tone {
+            Tone::Primary => button.primary(),
+            Tone::Secondary => button.secondary(),
+            Tone::Danger => button.danger(),
+            Tone::Plain => button.plain(),
+        };
+        match state {
+            TextState::Disabled => button.enabled(false),
+            TextState::Unavailable => button.unavailable("Not yet: add a recipient first"),
+            _ => button,
+        }
+    }
+}
+
+fn shown_of(state: TextState) -> Shown {
+    match state {
+        TextState::Hover => Shown::Hover,
+        TextState::Focus => Shown::Focus,
+        TextState::Pressed => Shown::Pressed,
+        _ => Shown::Rest,
+    }
+}
+
+/// The label's text in `look`: its colour, family and size.
+fn label_of(look: &Own, label: &str) -> Option<(egui::Color32, String, f32)> {
+    look.texts.iter().find(|(text, ..)| text == label).map(|(_, colour, family, size)| (*colour, family.clone(), *size))
+}
+
+#[test]
+fn a_text_button_looks_as_its_sheet_says_in_every_tone_and_state() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        let font = theme.fonts.button;
+        for (tone, label, width) in TONES {
+            for state in TEXT_STATES {
+                let (rect, look) = text_button_in(mode, TextScale::default(), label, shown_of(state), toned(label, tone, state));
+                let at = format!("{mode:?} {tone:?} {state:?}: {look:#?}");
+                assert!((rect.width() - width).abs() <= 1.0 && (rect.height() - 32.0).abs() < 0.01, "{at} {rect:?}");
+                let dashed = (1.0, p.line, true);
+                let (fill, edge, ink) = match (tone, state) {
+                    (Tone::Plain, TextState::Disabled | TextState::Unavailable) => (None, None, p.muted),
+                    (_, TextState::Disabled | TextState::Unavailable) => (None, Some(dashed), p.muted),
+                    (Tone::Primary, TextState::Default | TextState::Focus) => (Some(p.cyan), None, p.on_cyan),
+                    (Tone::Primary, TextState::Hover) => (Some(p.ink), None, p.bg),
+                    (Tone::Primary, TextState::Pressed) => (Some(p.cyan_muted), Some((1.0, p.cyan_edge, false)), p.cyan_text),
+                    (Tone::Secondary, TextState::Default | TextState::Focus) => (None, Some((1.0, p.line, false)), p.ink),
+                    (Tone::Secondary, TextState::Hover) => (Some(p.stage), Some((1.0, p.muted, false)), p.ink),
+                    (Tone::Secondary, TextState::Pressed) => (Some(p.stage), Some((1.0, p.ink, false)), p.ink),
+                    (Tone::Danger, TextState::Default | TextState::Focus) => (None, Some((1.0, p.minus, false)), p.minus),
+                    (Tone::Danger, TextState::Hover) => (Some(p.minus), None, p.bg),
+                    (Tone::Danger, TextState::Pressed) => (Some(p.stage), Some((1.0, p.minus, false)), p.minus),
+                    (Tone::Plain, TextState::Default | TextState::Focus) => (None, None, p.ink),
+                    (Tone::Plain, TextState::Hover) => (Some(p.stage), None, p.ink),
+                    (Tone::Plain, TextState::Pressed) => (Some(p.stage), Some((1.0, p.muted, false)), p.ink),
+                };
+                assert_eq!(look.fill, fill, "{at}");
+                assert_eq!(look.edge, edge, "{at}");
+                let ring = (state == TextState::Focus).then_some((rect.expand(3.0), 1.0, p.cyan_edge));
+                assert_eq!(look.ring, ring, "{at}");
+                assert_eq!(label_of(&look, label), Some((ink, font.id().family.to_string(), font.size)), "{at}");
+                assert_eq!(look.texts.len(), 1, "{at}");
+                assert!(!look.overflows, "{at}");
+                assert!(look.radius <= 0.0, "{at}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_text_button_with_an_arrow_a_key_an_icon_or_a_long_label_looks_as_its_sheet_says() {
+    const LONG: &str = "Ask for a receipt when this message is read by every recipient";
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        let rest = |label, button: fn() -> TextButton<'static>| text_button_in(mode, TextScale::default(), label, Shown::Rest, button);
+        let (rect, look) = rest("Continue", || TextButton::new("Continue").primary().arrow());
+        assert!((rect.width() - 103.0).abs() <= 1.0, "{rect:?}");
+        assert_eq!(
+            look.texts.iter().map(|(text, colour, ..)| (text.as_str(), *colour)).collect::<Vec<_>>(),
+            [("Continue", p.on_cyan), ("→", p.on_cyan)]
+        );
+        let (rect, look) = rest("Send", || TextButton::new("Send").primary().action("mail.send").key(true));
+        assert!((rect.width() - 140.0).abs() <= 1.0, "{rect:?}");
+        assert_eq!(look.fill, Some(p.cyan), "{look:#?}");
+        assert!(look.texts.iter().any(|(text, colour, ..)| text == "Ctrl Enter" && *colour == p.on_cyan), "{look:#?}");
+        assert!(look.radius <= 2.0, "only the chip is rounded: {look:#?}");
+        let (rect, look) = rest("Attach", || TextButton::new("Attach").secondary().icon(IconId::Attach));
+        assert!((rect.width() - 95.0).abs() <= 1.0, "{rect:?}");
+        assert!(look.texts.iter().any(|(_, colour, family, size)| *colour == p.ink && *family == icons() && *size == 16.0), "{look:#?}");
+        for button in [(|| TextButton::new(LONG).primary()) as fn() -> TextButton<'static>, || TextButton::new(LONG).secondary()] {
+            let (rect, look) = rest(LONG, button);
+            assert!((rect.width() - 264.0).abs() <= 1.0, "{rect:?}");
+            assert!(!look.overflows, "{look:#?}");
+        }
+    }
+}
+
+#[test]
+fn a_text_button_at_130_percent_is_the_scaled_height() {
+    let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
+    for (tone, label, _) in TONES {
+        for state in TEXT_STATES {
+            let (rect, _) = text_button_in(Mode::Light, TextScale::ALL[4], label, shown_of(state), toned(label, tone, state));
+            assert!((rect.height() - theme.boxes().button).abs() < 0.01, "{tone:?} {state:?} {rect:?}");
+        }
+    }
+}
+
+#[test]
+fn a_pressed_button_differs_from_a_hovered_one() {
+    for mode in [Mode::Dark, Mode::Light] {
+        for (tone, label, _) in TONES {
+            let (_, hovered) = text_button_in(mode, TextScale::default(), label, Shown::Hover, toned(label, tone, TextState::Hover));
+            let (_, pressed) = text_button_in(mode, TextScale::default(), label, Shown::Pressed, toned(label, tone, TextState::Pressed));
+            assert_ne!(hovered, pressed, "{mode:?} {tone:?}");
+        }
+        let (_, hovered) = icon_button_in(mode, TextScale::default(), IconState::Hover);
+        let (_, pressed) = icon_button_in(mode, TextScale::default(), IconState::Pressed);
+        assert_ne!(hovered, pressed, "{mode:?} icon button");
+    }
+}
+
+/// The states of the link's sheet, in its order: the line size has all five, the small one no pressed.
+const LINK_STATES: [(Shown, bool); 5] =
+    [(Shown::Rest, true), (Shown::Hover, true), (Shown::Focus, true), (Shown::Pressed, true), (Shown::Rest, false)];
+
+/// The link `label` in `size`, `enabled` or not, on a `surface` stage, brought into `shown`: its rect and its look.
+fn link_in(mode: Mode, scale: TextScale, label: &'static str, size: LinkSize, enabled: bool, shown: Shown) -> (egui::Rect, Own) {
+    let theme = Theme::new(mode, scale);
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        egui::vec2(300.0, 100.0),
+        move |ui, theme| {
+            super::link_with(ui, theme, &Keymap::default(), label, size, enabled, None);
+        },
+    );
+    if enabled {
+        bring(&mut harness, label, shown);
+    }
+    let rect = harness.get_by_label(label).rect();
+    (rect, own(&painted(&harness, label), rect))
+}
+
+#[test]
+fn a_link_looks_as_its_sheet_says_in_every_size_and_state() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        for (size, label, width, height, font) in
+            [(LinkSize::Line, "Show details", 102.0, 24.0, theme.fonts.button), (LinkSize::Small, "open log", 53.0, 16.0, theme.fonts.mono_s)]
+        {
+            for (shown, enabled) in LINK_STATES {
+                if size == LinkSize::Small && shown == Shown::Pressed {
+                    continue;
+                }
+                let (rect, look) = link_in(mode, TextScale::default(), label, size, enabled, shown);
+                let at = format!("{mode:?} {size:?} {shown:?} {enabled}: {look:#?}");
+                assert!((rect.width() - width).abs() <= 1.0 && (rect.height() - height).abs() < 0.01, "{at} {rect:?}");
+                let ink = if enabled { p.cyan_text } else { p.muted };
+                assert_eq!(look.texts, vec![(label.to_owned(), ink, font.id().family.to_string(), font.size)], "{at}");
+                let underlined = enabled && matches!(shown, Shown::Hover | Shown::Pressed);
+                assert_eq!(look.lines, if underlined { vec![p.cyan_text] } else { Vec::new() }, "{at}");
+                assert_eq!(look.fill, (enabled && shown == Shown::Pressed).then_some(p.cyan_muted), "{at}");
+                assert_eq!(look.edge, None, "{at}");
+                let ring = (enabled && shown == Shown::Focus).then_some((rect.expand(3.0), 1.0, p.cyan_edge));
+                assert_eq!(look.ring, ring, "{at}");
+                assert!(!look.overflows, "{at}");
+                assert!(look.radius <= 0.0, "{at}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_link_at_130_percent_is_the_scaled_height() {
+    let theme = Theme::new(Mode::Dark, TextScale::ALL[4]);
+    for (size, height) in [(LinkSize::Line, theme.boxes().link), (LinkSize::Small, theme.boxes().row_link)] {
+        let (rect, _) = link_in(Mode::Dark, TextScale::ALL[4], "open", size, true, Shown::Rest);
+        assert!((rect.height() - height).abs() < 0.01, "{size:?} {rect:?}");
+    }
+}
+
+/// The icon button "Pin", selected, on a `surface` stage, in its rail ink when `ink` is given, brought into `shown`.
+fn selected_in(mode: Mode, ink: Option<egui::Color32>, shown: Shown) -> (egui::Rect, Own) {
+    let theme = Theme::new(mode, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        egui::vec2(200.0, 200.0),
+        move |ui, theme| {
+            let button = IconButton::new(IconId::Pin, "Pin").active(true);
+            let button = match ink {
+                Some(ink) => button.ink(ink),
+                None => button,
+            };
+            button.show(ui, theme, &Keymap::default());
+        },
+    );
+    bring(&mut harness, "Pin", shown);
+    let rect = harness.get_by_label("Pin").rect();
+    (rect, own(&painted(&harness, "Pin"), rect))
+}
+
+#[test]
+fn a_selected_icon_button_pressed_keeps_the_wash_and_takes_the_accent_edge() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        for ink in [None, Some(p.ink)] {
+            let (_, rest) = selected_in(mode, ink, Shown::Rest);
+            let (_, hovered) = selected_in(mode, ink, Shown::Hover);
+            let (_, pressed) = selected_in(mode, ink, Shown::Pressed);
+            let at = format!("{mode:?} {ink:?}: {pressed:#?}");
+            assert_eq!(pressed.fill, Some(p.cyan_muted), "{at}");
+            assert_eq!(pressed.edge, Some((1.0, p.cyan_edge, false)), "{at}");
+            assert_eq!(pressed.texts[0].1, ink.unwrap_or(p.cyan_text), "{at}");
+            assert_ne!(pressed, rest, "{at}");
+            assert_ne!(pressed, hovered, "{at}");
+        }
+    }
+}
+
+/// The widget `label` that `add` draws on a `surface` stage in `mode`, held down by the pointer (`key` is `None`) or by
+/// `key` while it has the focus: its rect and its look.
+fn held_by(mode: Mode, label: &'static str, key: Option<egui::Key>, add: impl Fn(&mut egui::Ui, &Theme) + 'static) -> (egui::Rect, Own) {
+    let theme = Theme::new(mode, TextScale::default());
+    let mut harness = staged(theme, |p| p.surface, egui::vec2(400.0, 120.0), add);
+    match key {
+        None => bring(&mut harness, label, Shown::Pressed),
+        Some(key) => {
+            bring(&mut harness, label, Shown::Focus);
+            harness.key_down(key);
+            harness.run();
+        }
+    }
+    let rect = harness.get_by_label(label).rect();
+    (rect, own(&painted(&harness, label), rect))
+}
+
+/// How a test draws one control.
+type Draw = Box<dyn Fn(&mut egui::Ui, &Theme)>;
+
+/// Every pressable control of these sets but the section label (its own test): its label and how to draw it.
+fn pressables() -> Vec<(&'static str, Draw)> {
+    let mut all: Vec<(&'static str, Draw)> = vec![
+        ("Pin", Box::new(|ui, theme| drop(IconButton::new(IconId::Pin, "Pin").show(ui, theme, &Keymap::default())))),
+        ("Pinned", Box::new(|ui, theme| drop(IconButton::new(IconId::Pin, "Pinned").active(true).show(ui, theme, &Keymap::default())))),
+        ("Show details", Box::new(|ui, theme| drop(super::link_sized(ui, theme, &Keymap::default(), "Show details", LinkSize::Line)))),
+        ("open log", Box::new(|ui, theme| drop(super::link_sized(ui, theme, &Keymap::default(), "open log", LinkSize::Small)))),
+    ];
+    for (tone, label, _) in TONES {
+        all.push((label, Box::new(move |ui, theme| drop(TextButton::new(label).tone(tone).show(ui, theme, &Keymap::default())))));
+    }
+    all
+}
+
+#[test]
+fn enter_and_space_each_give_the_pressed_look_to_the_focused_control() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        for (index, (label, _)) in pressables().into_iter().enumerate() {
+            let draw = move |ui: &mut egui::Ui, theme: &Theme| (pressables().swap_remove(index).1)(ui, theme);
+            let (_, by_pointer) = held_by(mode, label, None, draw);
+            let (_, at_rest) = held_by(mode, label, Some(egui::Key::A), draw);
+            for key in [egui::Key::Enter, egui::Key::Space] {
+                let (rect, look) = held_by(mode, label, Some(key), draw);
+                let at = format!("{mode:?} {label} {key:?}: {look:#?} pointer {by_pointer:#?}");
+                assert_eq!(
+                    (look.fill, look.edge, &look.texts, &look.lines),
+                    (by_pointer.fill, by_pointer.edge, &by_pointer.texts, &by_pointer.lines),
+                    "{at}"
+                );
+                assert_ne!((look.fill, look.edge, &look.lines), (at_rest.fill, at_rest.edge, &at_rest.lines), "pressed differs from focus: {at}");
+                assert_eq!(look.ring, Some((rect.expand(3.0), 1.0, p.cyan_edge)), "{at}");
+            }
+        }
+    }
+}
+
+/// A control of the hover fade test: its label, how to draw it, its ground, and the one colour the fade moves, read
+/// from its look (`None`: not painted, so the ground shows).
+type Faded = (&'static str, Draw, fn(&crate::theme::Palette) -> egui::Color32, fn(&Own) -> Option<egui::Color32>);
+
+fn faded() -> Vec<Faded> {
+    vec![
+        (
+            "Pin",
+            Box::new(|ui, theme| drop(IconButton::new(IconId::Pin, "Pin").show(ui, theme, &Keymap::default()))),
+            |p| p.surface,
+            |o| o.texts.first().map(|t| t.1),
+        ),
+        ("Send", Box::new(|ui, theme| drop(TextButton::new("Send").primary().show(ui, theme, &Keymap::default()))), |p| p.surface, |o| o.fill),
+        (
+            "Reply all",
+            Box::new(|ui, theme| drop(TextButton::new("Reply all").secondary().show(ui, theme, &Keymap::default()))),
+            |p| p.surface,
+            |o| o.edge.map(|e| e.1),
+        ),
+        (
+            "Delete",
+            Box::new(|ui, theme| drop(TextButton::new("Delete").danger().show(ui, theme, &Keymap::default()))),
+            |p| p.surface,
+            |o| o.texts.first().map(|t| t.1),
+        ),
+        ("Discard", Box::new(|ui, theme| drop(TextButton::new("Discard").plain().show(ui, theme, &Keymap::default()))), |p| p.surface, |o| o.fill),
+        (
+            "Show details",
+            Box::new(|ui, theme| drop(super::link(ui, theme, &Keymap::default(), "Show details"))),
+            |p| p.surface,
+            |o| o.lines.first().copied(),
+        ),
+    ]
+}
+
+/// The fade frames of the control at `index` of [`faded`] with motion `reduced` or full: (rest, hover, on, off).
+fn fade_of(mode: Mode, index: usize, reduced: bool) -> (Own, Own, Vec<Own>, Vec<Own>) {
+    let theme = Theme::new(mode, TextScale::default());
+    let label = faded()[index].0;
+    let draw = move |ui: &mut egui::Ui, theme: &Theme| (faded().swap_remove(index).1)(ui, theme);
+    let still = |shown| {
+        let mut harness = staged(theme, faded()[index].2, egui::vec2(400.0, 120.0), draw);
+        bring(&mut harness, label, shown);
+        let rect = harness.get_by_label(label).rect();
+        own(&painted(&harness, label), rect)
+    };
+    let mut harness = crate::component::tests::staged_motion(theme, reduced, faded()[index].2, egui::vec2(400.0, 120.0), draw);
+    let (on, off) = crate::component::tests::hover_frames(&mut harness, label, 10);
+    assert!(crate::component::tests::rests(&mut harness, 2), "{mode:?} {label} asks for no repaint once the fade has ended");
+    // At full a label scrambles on hover (M3); with reduced motion it never does, and its text is checked as drawn.
+    if reduced {
+        (still(Shown::Rest), still(Shown::Hover), on, off)
+    } else {
+        (still(Shown::Rest), still(Shown::Hover), reads(on, label), reads(off, label))
+    }
+}
+
+/// `looks` with every text as long as `label` read as it: at full a label scrambles on hover (M3, `scramble_tests.rs`); these looks
+/// guard its colours.
+fn reads(looks: Vec<Own>, label: &str) -> Vec<Own> {
+    looks
+        .into_iter()
+        .map(|mut look| {
+            for text in look.texts.iter_mut().filter(|text| text.0.chars().count() == label.chars().count()) {
+                label.clone_into(&mut text.0);
+            }
+            look
+        })
+        .collect()
+}
+
+#[test]
+fn at_full_motion_hover_cross_fades_over_125_ms_both_ways() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        // Only the text button fades: the presentation's `.btn` transition; danger and plain have a fill at one end
+        // only, which switches at once and takes the label with it.
+        for index in (0..faded().len()).filter(|index| !INSTANT.contains(&faded()[*index].0) && !["Discard", "Delete"].contains(&faded()[*index].0)) {
+            let (label, _, ground, colour) = faded().swap_remove(index);
+            let p_ref = &p;
+            let (rest, hover, on, off) = fade_of(mode, index, false);
+            let (from, to) = (colour(&rest).unwrap_or(ground(p_ref)), colour(&hover).unwrap_or(ground(p_ref)));
+            // Frame 4 is 4/60 s, half-way; frame 8 is past 125 ms.
+            for (frames, a, b, end) in [(&on, from, to, &hover), (&off, to, from, &rest)] {
+                let mid = colour(&frames[3]).unwrap_or(ground(p_ref));
+                assert!(crate::component::tests::strictly_between(mid, a, b), "{mode:?} {label}: {mid:?} not between {a:?} and {b:?}");
+                assert_eq!(&frames[8], end, "{mode:?} {label}: the fade ends at the value itself");
+            }
+        }
+    }
+}
+
+/// The controls the presentation gives no transition: their hover is at once at every level of motion.
+const INSTANT: [&str; 2] = ["Pin", "Show details"];
+
+#[test]
+fn at_full_motion_an_icon_button_and_a_links_underline_change_at_once() {
+    for mode in [Mode::Dark, Mode::Light] {
+        for index in (0..faded().len()).filter(|index| INSTANT.contains(&faded()[*index].0)) {
+            let label = faded()[index].0;
+            let (rest, hover, on, off) = fade_of(mode, index, false);
+            assert_eq!(on[0], hover, "{mode:?} {label}: the first hovered frame");
+            assert_eq!(off[0], rest, "{mode:?} {label}: the first frame after leaving");
+        }
+    }
+}
+
+#[test]
+fn at_reduced_motion_hover_follows_the_pointer_in_the_same_frame() {
+    for mode in [Mode::Dark, Mode::Light] {
+        for index in 0..faded().len() {
+            let label = faded()[index].0;
+            let (rest, hover, on, off) = fade_of(mode, index, true);
+            assert_eq!(on[0], hover, "{mode:?} {label}: the first hovered frame");
+            assert_eq!(off[0], rest, "{mode:?} {label}: the first frame after leaving");
+        }
+    }
+}
+
+#[test]
+fn a_text_buttons_fill_that_is_not_there_at_rest_switches_at_once_on_any_ground() {
+    use crate::component::tests::{hover_frames, staged_motion};
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        let grounds: [fn(&crate::theme::Palette) -> egui::Color32; 2] = [|p| p.panel, |p| p.stage];
+        for ground in grounds {
+            for (label, tone) in [("Reply all", Tone::Secondary), ("Discard", Tone::Plain), ("Delete", Tone::Danger)] {
+                let mut harness = staged_motion(theme, false, ground, egui::vec2(400.0, 120.0), move |ui, theme| {
+                    TextButton::new(label).tone(tone).show(ui, theme, &Keymap::default());
+                });
+                let (on, off) = hover_frames(&mut harness, label, 10);
+                let hover_fill = if tone == Tone::Danger { p.minus } else { p.stage };
+                for (at, look) in on.iter().enumerate() {
+                    assert_ne!(look.fill, Some(p.surface), "{mode:?} {label} frame {at} in");
+                    assert_eq!(look.fill, Some(hover_fill), "{mode:?} {label} frame {at} in: the fill at once");
+                }
+                for (at, look) in off.iter().enumerate() {
+                    assert_eq!(look.fill, None, "{mode:?} {label} frame {at} out: gone at once");
+                    assert!(look.edge.is_none_or(|edge| edge.1 != p.surface), "{mode:?} {label} frame {at} out");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_text_buttons_label_follows_its_fill_so_danger_and_plain_change_at_once() {
+    use crate::component::tests::{hover_frames, staged_motion};
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        for (label, tone) in [("Delete", Tone::Danger), ("Discard", Tone::Plain)] {
+            let still = |shown| {
+                let mut harness = staged(
+                    theme,
+                    |p| p.surface,
+                    egui::vec2(400.0, 120.0),
+                    move |ui, theme| {
+                        TextButton::new(label).tone(tone).show(ui, theme, &Keymap::default());
+                    },
+                );
+                bring(&mut harness, label, shown);
+                let rect = harness.get_by_label(label).rect();
+                own(&painted(&harness, label), rect)
+            };
+            let mut harness = staged_motion(
+                theme,
+                false,
+                |p| p.surface,
+                egui::vec2(400.0, 120.0),
+                move |ui, theme| {
+                    TextButton::new(label).tone(tone).show(ui, theme, &Keymap::default());
+                },
+            );
+            let (on, off) = hover_frames(&mut harness, label, 10);
+            let (on, off) = (reads(on, label), reads(off, label));
+            assert_eq!(on[0], still(Shown::Hover), "{mode:?} {label}: the first hovered frame");
+            assert_eq!(off[0], still(Shown::Rest), "{mode:?} {label}: the first frame after leaving");
+            for look in on.iter().chain(&off) {
+                let ink = label_of(look, label).map(|l| l.0);
+                assert!(!(look.fill == Some(p.minus) && ink == Some(p.minus)), "{mode:?} {label}: a minus label on a minus fill");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_press_during_a_hover_fade_shows_the_pressed_look_in_that_frame() {
+    use crate::component::tests::staged_motion;
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let (_, held) = text_button_in(mode, TextScale::default(), "Send", Shown::Pressed, toned("Send", Tone::Primary, TextState::Pressed));
+        let (_, rest) = text_button_in(mode, TextScale::default(), "Send", Shown::Rest, toned("Send", Tone::Primary, TextState::Default));
+        let (_, hover) = text_button_in(mode, TextScale::default(), "Send", Shown::Hover, toned("Send", Tone::Primary, TextState::Hover));
+        let mut harness = staged_motion(
+            theme,
+            false,
+            |p| p.surface,
+            egui::vec2(400.0, 120.0),
+            |ui, theme| {
+                TextButton::new("Send").primary().show(ui, theme, &Keymap::default());
+            },
+        );
+        let centre = harness.get_by_label("Send").rect().center();
+        harness.hover_at(centre);
+        for _ in 0..3 {
+            harness.step();
+        }
+        // The frame before the press is mid-fade: neither the rest nor the hover look yet.
+        let before = own(&painted(&harness, "Send"), harness.get_by_label("Send").rect());
+        assert_ne!(before.fill, rest.fill, "{mode:?}: the fade has begun");
+        assert_ne!(before.fill, hover.fill, "{mode:?}: the fade has not ended");
+        harness.drag_at(centre);
+        harness.step();
+        let rect = harness.get_by_label("Send").rect();
+        let look = own(&painted(&harness, "Send"), rect);
+        assert_eq!((look.fill, look.edge, &look.texts), (held.fill, held.edge, &held.texts), "{mode:?}: pressed at once, mid-fade");
+    }
+}
+
+/// The share of `cyan_text` the underline of a hovered link of `size` adds to each pixel row, at scale 1 in `mode`:
+/// the rows it touches, from the hovered picture less the resting one.
+fn underline_rows(mode: Mode, size: LinkSize) -> Vec<(usize, f32)> {
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = Keymap::empty();
+    let (ground, ink) = (theme.palette.bg, theme.palette.cyan_text);
+    let draw = |shown: Shown| {
+        crate::shot::paint(egui::vec2(120.0, 32.0), 1.0, mode, |ui| {
+            crate::theme::install_fonts(ui.ctx());
+            ui.painter().rect_filled(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(120.0, 32.0)), 0.0, ground);
+            super::link_with(ui, &theme, &keymap, "open log", size, true, Some(shown));
+        })
+        .unwrap()
+    };
+    let (rest, hover) = (draw(Shown::Rest), draw(Shown::Hover));
+    let towards = f32::from(ink.b()) - f32::from(ground.b());
+    (0..rest.height())
+        .filter_map(|y| {
+            // The middle of the line under the words (both links run from x 8 to 40 at least), so a letter's tail in
+            // that row does not count.
+            let mut shares: Vec<f32> =
+                (8..40).map(|x| (f32::from(hover.pixel(x, y).unwrap().b()) - f32::from(rest.pixel(x, y).unwrap().b())) / towards).collect();
+            shares.sort_by(f32::total_cmp);
+            let share = shares.get(shares.len() / 2).copied().unwrap_or(0.0);
+            (share.abs() > 0.01).then_some((y, share))
+        })
+        .collect()
+}
+
+#[test]
+fn a_link_s_underline_covers_its_row_as_the_design_s_four_samples_a_pixel_do() {
+    // The sheet's underline: the face's own, 0.06 of the size thick (0.66 at 11, 0.78 at 13), which the design's
+    // renderer covers with three of a pixel's four sample rows: 0.75 of the colour in one row, at both sizes.
+    for mode in [Mode::Dark, Mode::Light] {
+        for size in [LinkSize::Line, LinkSize::Small] {
+            let rows = underline_rows(mode, size);
+            assert_eq!(rows.len(), 1, "{mode:?} {size:?}: one row: {rows:?}");
+            assert!((rows[0].1 - 0.75).abs() <= 0.02, "{mode:?} {size:?}: {rows:?}");
+        }
+    }
+}
+
+#[test]
+fn a_text_button_s_width_is_the_width_it_is_drawn() {
+    for scale in [TextScale::default(), TextScale::ALL[4]] {
+        let theme = Theme::new(Mode::Dark, scale);
+        let buttons = [
+            ("Reply", TextButton::new("Reply").primary().arrow()),
+            ("Reply all", TextButton::new("Reply all").secondary()),
+            ("Archive", TextButton::new("Archive").icon(IconId::Done).action(crate::keymap::ARCHIVE).key(true)),
+        ];
+        for (name, button) in buttons {
+            let measured = std::rc::Rc::new(std::cell::Cell::new(0.0_f32));
+            let kept = measured.clone();
+            let harness = staged(
+                theme,
+                |p| p.surface,
+                egui::vec2(600.0, 100.0),
+                move |ui, theme| {
+                    kept.set(button.width(ui, theme, &Keymap::default()));
+                    button.show(ui, theme, &Keymap::default());
+                },
+            );
+            let drawn = harness.get_by_label(name).rect().width();
+            assert!((drawn - measured.get()).abs() < 0.01, "{name} {scale:?}: measured {} drawn {drawn}", measured.get());
+        }
+    }
 }

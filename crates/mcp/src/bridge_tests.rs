@@ -57,3 +57,15 @@ fn a_bridged_server_says_what_it_serves() {
     assert!(instructions.contains("read-only"), "{instructions}");
     assert!(!instructions.contains("local store"), "{instructions}");
 }
+
+#[test]
+fn the_new_read_tools_run_their_commands_in_the_app() {
+    for (tool, arguments, command) in
+        [("mail_why", json!({ "id": 3 }), "mail.why"), ("week_settings", json!({}), "week.settings"), ("sync_status", json!({}), "sync.status")]
+    {
+        let (mut server, ran) = bridged(Ok(json!({})));
+        let (out, error) = text(&call(&mut server, tool, arguments.clone()));
+        assert!(!error, "{tool}: {out}");
+        assert_eq!(ran.lock().unwrap().as_slice(), [(command.to_owned(), arguments)]);
+    }
+}

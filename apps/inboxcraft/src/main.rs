@@ -9,7 +9,8 @@
 //! notifications (through the notification portal in the Flatpak). The CLI and the MCP server reach it through the control
 //! channel ([`inboxcraft::control`]), with the token in the credential store. Closing the window leaves it running
 //! ([`Desktop`]) unless the owner turned that off on the Notifications page ([`OwnerDesk`], which also starts
-//! InboxCraft with the computer); a new window opens on the same app when a later start or the tray asks for one.
+//! InboxCraft with the computer); a new window opens on the same app when a later start or the tray asks for one. Text in
+//! scripts IBM Plex does not hold takes the computer's own fonts, found on a worker thread ([`inboxcraft::fonts`]).
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -24,22 +25,24 @@ use inboxcraft::accounts::{Entries, OsEntries};
 use inboxcraft::control::Listening;
 use inboxcraft::desk::OwnerDesk;
 use inboxcraft::desktop::{Desktop, WINDOWLESS_TICK};
+use inboxcraft::fonts::Fallbacks;
 use inboxcraft::instance::Request;
 use inboxcraft::{Source, Step};
-use inboxcraft_engine::appearance::WindowFrame;
 use inboxcraft_time::SystemClock;
 use inboxcraft_ui_egui::fetch::Wake;
 
-/// The window's content as eframe draws it, for as long as one window lives.
-struct Window<'a>(&'a mut Desktop);
+/// The window's content as eframe draws it, for as long as one window lives, and the computer's fonts it takes once
+/// they are found.
+struct Window<'a>(&'a mut Desktop, Fallbacks);
 
 impl eframe::App for Window<'_> {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.1.install(ctx);
         self.0.tick(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.0.app_mut().ui(ui);
+        self.0.frame(ui);
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
@@ -60,8 +63,11 @@ impl eframe::App for Window<'_> {
 type Shown = Arc<Mutex<Option<egui::Context>>>;
 
 /// Opens windows on `desktop` until InboxCraft ends: while the desktop has no window it keeps the mail in step and
-/// waits for a request for one.
+/// waits for a request for one. The computer's fonts for the scripts the app's fonts lack are searched for on a worker
+/// thread once the first window has drawn its first frame with the app's own fonts; it takes them once they are found.
 fn windows(mut desktop: Desktop, shown: &Shown) -> ExitCode {
+    let wake = wake_of(shown);
+    let found = inboxcraft::fonts::search(move || wake());
     loop {
         if desktop.is_quitting() {
             return ExitCode::SUCCESS;
@@ -70,15 +76,7 @@ fn windows(mut desktop: Desktop, shown: &Shown) -> ExitCode {
             desktop.wait(WINDOWLESS_TICK);
             continue;
         }
-        let mut viewport = egui::ViewportBuilder::default()
-            .with_title("InboxCraft")
-            .with_app_id("io.github.qubernetic.inboxcraft")
-            .with_inner_size([1200.0, 760.0])
-            .with_min_inner_size([720.0, 480.0])
-            // See-through where the app paints nothing: the corners of its own frame.
-            .with_transparent(true)
-            // The app draws its own frame unless the owner chose the desktop's title bar (`ui.frame.set`).
-            .with_decorations(desktop.app().mailbox().appearance().frame == WindowFrame::System);
+        let mut viewport = inboxcraft::viewport(desktop.app().mailbox().appearance().frame);
         desktop.app_mut().set_own_frame(true);
         // On Wayland the desktop finds the icon through the app id; X11 and other systems take it from the window.
         if let Ok(icon) = inboxcraft_ui_egui::icons::window_icon() {
@@ -87,13 +85,15 @@ fn windows(mut desktop: Desktop, shown: &Shown) -> ExitCode {
         // `run_and_return` (the default) keeps eframe's event loop, so a later window can open on it.
         let options = eframe::NativeOptions { viewport, ..eframe::NativeOptions::default() };
         let context = Arc::clone(shown);
-        let window = Window(&mut desktop);
+        let window = Window(&mut desktop, Fallbacks::new(Arc::clone(&found)));
         let made = move |creation: &eframe::CreationContext<'_>| {
             if let Ok(mut shown) = context.lock() {
                 *shown = Some(creation.egui_ctx.clone());
             }
-            // Figtree from the first frame on, so no text is drawn in another font first.
+            // IBM Plex from the first frame on, so no text is drawn in another font first.
             inboxcraft_ui_egui::theme::install_fonts(&creation.egui_ctx);
+            // Each window's context: no keyboard zoom, the size from the text-size setting alone.
+            inboxcraft_ui_egui::theme::size_from_the_setting_alone(&creation.egui_ctx);
             Ok(Box::new(window) as Box<dyn eframe::App + '_>)
         };
         let ran = eframe::run_native("InboxCraft", options, Box::new(made));
@@ -134,7 +134,11 @@ fn sample() -> ExitCode {
         }
     };
     let (_send, heard) = mpsc::channel();
-    windows(Desktop::new(app, heard).closing_ends(), &shown)
+    // The sample's cleaned copies are in a folder of their own: an earlier sample's go now, this one's at the close.
+    inboxcraft::sweep_originals(inboxcraft::Whose::Sample);
+    let ended = windows(Desktop::new(app, heard).closing_ends(), &shown);
+    inboxcraft::sweep_originals(inboxcraft::Whose::Sample);
+    ended
 }
 
 /// The owner's mailbox, with a window or (`background`) without one.
@@ -147,6 +151,8 @@ fn owner(background: bool) -> ExitCode {
         Ok(instance) => instance,
         Err(code) => return ExitCode::from(code),
     };
+    // The cleaned copies an earlier run opened in the browser go (the sample's are in a folder of their own).
+    inboxcraft::sweep_originals(inboxcraft::Whose::Owner);
     let shown = Shown::default();
     let wake = wake_of(&shown);
     let (send, heard) = mpsc::channel::<Request>();
@@ -199,6 +205,8 @@ fn owner(background: bool) -> ExitCode {
     let ended = windows(desktop, &shown);
     drop(control);
     drop(listening);
+    // A normal close takes this run's copies with it; a kill leaves them till the next start.
+    inboxcraft::sweep_originals(inboxcraft::Whose::Owner);
     ended
 }
 

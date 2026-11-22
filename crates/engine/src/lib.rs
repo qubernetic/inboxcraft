@@ -61,10 +61,16 @@
 //!   message in the archive and keeps where it was, where "show done" (`mail.list` with `done`) lists it;
 //!   `mail.park` and `mail.pin` (`safe`) put it on the park pile (`park.list`; `mail.list` leaves it out and counts
 //!   it) or in the pins view (`pin.list`). Done takes a pin off unless `pin.set` (`owner`) keeps it
-//!   ([`Session::pins_outlast_done`]). `history.undo` takes each back.
+//!   ([`Session::pins_outlast_done`]). `history.undo` takes each back. What follows an act on the open message is the
+//!   owner's choice, `after.set` (`owner`): the next, the previous, the list, or stay on the next row unopened
+//!   ([`Session::after`]).
+//! - Home's greeting: which word of the sending name the headline greets the owner by is the owner's choice,
+//!   `greeting.set` (`owner`): the first word, the last, the full name or none ([`Session::greet_by`],
+//!   [`greet::GreetBy`]).
 //! - Snooze: `mail.snooze` (`safe`) puts a message in `InboxCraft/Snoozed` until a time, in a new copy that carries
 //!   the time in InboxCraft's own header field so another InboxCraft sees it; [`Session::tick`] brings it back to the
-//!   inbox unread and marked as returned, and `mail.unsnooze` (`safe`) at once.
+//!   inbox unread and marked as returned, and `mail.unsnooze` (`safe`) at once; a message moved on from the snoozed
+//!   folder stays where it was put either way.
 //! - Sending (`send`): `mail.send` (`owner`) holds a draft in the outbox for the owner's [`Hold`] (`send.set`,
 //!   `owner`; `send.settings`, `safe`) and `mail.send_later` (`owner`) until a time; `mail.unsend` (`owner`) takes it
 //!   back until then, the draft as it was. [`Session::tick`] sends it at its time; nothing goes while InboxCraft is
@@ -97,6 +103,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod act;
+pub mod after;
+pub mod all_day_alert;
 pub mod appearance;
 mod arrive;
 mod calendar;
@@ -104,6 +112,7 @@ mod class;
 mod cmd;
 mod draft;
 mod error;
+pub mod greet;
 mod json;
 pub mod notify;
 mod params;
@@ -112,10 +121,12 @@ mod reply;
 pub mod schedule;
 mod send;
 mod session;
+pub mod shown;
 mod sync;
 mod template;
 mod undo;
 mod view;
+pub mod week;
 mod write;
 mod writes;
 
@@ -123,6 +134,7 @@ pub use arrive::screener::ScreenerMode;
 pub use class::{AgentClass, Caller};
 pub use cmd::MAX_LIST;
 pub use error::{EngineError, MAX_ERROR_TEXT};
+pub use json::error_kind_name;
 pub use registry::{CommandSpec, Registry, Run, is_command_id};
 pub use send::Hold;
 pub use session::{Applied, Context, Outcome, Session};
@@ -138,6 +150,10 @@ pub fn name() -> &'static str {
     env!("CARGO_PKG_NAME")
 }
 
+#[cfg(test)]
+mod greet_tests;
+#[cfg(test)]
+mod store_failure_tests;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]

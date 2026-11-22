@@ -1,6 +1,6 @@
 # Privacy
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 ## What the InboxCraft project collects
 Nothing. InboxCraft has no telemetry, no analytics and no crash reporting, and there is no InboxCraft server.
@@ -85,7 +85,7 @@ or of nothing, and whether snoozed mail that comes back, follow-up reminders and
 config folder; the file names each account by its number only, never by its address. The sample window keeps none.
 Whether closing the window leaves InboxCraft running is kept in `background.json` beside them, and nothing else is.
 
-Removing an account ("Change settings") removes its folders, messages, drafts, calendars, schedule entries, the
+Removing an account ("Remove account…" on its form, or "Change settings" after a failed check) removes its folders, messages, drafts, calendars, schedule entries, the
 work still queued for it and its notification choice in `notify.json`; the draft copies already in the account's Drafts folder on the server stay. What
 InboxCraft knows of senders is kept, because it is yours and not an account's: it stays until you delete the data
 folder, which removes everything in the store above.
@@ -94,7 +94,7 @@ An account's password is one entry in the credential store: service `io.github.q
 `account-<store id>-<number>`, where the store id is a random number the store got when it was made, so two copies
 of InboxCraft (the Flatpak and another build, say) never share or overwrite each other's passwords. InboxCraft keeps
 your accounts from one start to the next, so the entry stays when you close the window; it removes it when you
-remove the account ("Change settings"). If InboxCraft crashes, is killed, or the credential store refuses at that
+remove the account ("Remove account…" on its form, or "Change settings"). If InboxCraft crashes, is killed, or the credential store refuses at that
 moment, an entry can stay behind. You can see and remove it with your system's own tool: "Passwords and Keys"
 (Seahorse) or `secret-tool clear service io.github.qubernetic.inboxcraft` on Linux, Keychain Access on macOS,
 Credential Manager on Windows.
@@ -226,3 +226,4 @@ Changes to this page are listed below. Questions: open an issue, or write to [in
 | 2026-11-08 | minor | Calendars synced at each start; a deleted event goes six seconds later; guests named, not mailed, `SCHEDULE-AGENT=CLIENT`; no query in the address; a new server forgets the old one's calendars and answers (#146) |
 | 2026-11-08 | minor | What an invitation's mark keeps and what an answer sends (#149) |
 | 2026-11-08 | minor | What a calendar alert's notification hands on, which events alert, no switch on the page yet (#150) |
+| 2026-11-21 | minor | "Remove account…" on an account's form removes it and its password (#317) |

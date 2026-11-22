@@ -10,21 +10,26 @@
 //!   never the log. ([`InboxApp::on_exit`](inboxcraft_ui_egui::InboxApp::on_exit) removes them all, for a window over
 //!   a store that is not kept.)
 //! - [`NetWorkers`]: one `net` worker per account, started at the account's first job; their events wake the window.
-//! - [`detect`]: Detect over the system's name servers and HTTPS, as the form's proposal.
+//! - [`run`] and [`detect`]: Detect over the system's name servers and HTTPS ([`system`]), probing the candidates within
+//!   [`PROBE_TIMEOUTS`] each, as the form's proposal, stopped by the form's stop.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
 use inboxcraft_model::{Account, AccountId, EmailAddress, Event, EventKind, Job, Security};
-use inboxcraft_net::detect::{self, Candidate, DetectConfig, Proposal as Found, Source as Where};
+use inboxcraft_net::detect::{self, Candidate, Checked, DetectConfig, Lookup, Outside, Proposal as Found, Source as Where};
 use inboxcraft_net::dns::Resolver;
+use inboxcraft_net::probe::Probe;
 use inboxcraft_net::web::Https;
-use inboxcraft_net::{Credentials, Password, TlsSettings, Worker, WorkerSettings};
+use inboxcraft_net::web::Web;
+use inboxcraft_net::{Connector, Credentials, Password, Stop, Timeouts, TlsSettings, Worker, WorkerSettings};
+use inboxcraft_time::Clock;
 use inboxcraft_ui_egui::fetch::Wake;
-use inboxcraft_ui_egui::onboard::{self, Keychain, Proposal, Suggestion};
+use inboxcraft_ui_egui::onboard::{self, Keychain, Proposal, Run, RunStop, Suggestion};
 use inboxcraft_ui_egui::workers::Workers;
 
 /// The service name of every password InboxCraft keeps in the credential store: the app id.
@@ -35,6 +40,9 @@ pub const DNS_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How long Detect waits for one web request.
 pub const WEB_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long Detect's probe of one server waits for the connection, and for each read and write on it.
+pub const PROBE_TIMEOUTS: Timeouts = Timeouts { connect: Duration::from_secs(10), io: WEB_TIMEOUT };
 
 /// The credential store entry's user name for `account` of the store whose id is `store`
 /// ([`inboxcraft_store::Sqlite::id`]). Every store numbers its accounts from 1, and two stores can share one
@@ -278,7 +286,18 @@ pub fn proposal(found: &Found) -> Proposal {
                     Where::AutoconfigRedirect => onboard::Source::AutoconfigRedirect,
                     Where::Ispdb => onboard::Source::Ispdb,
                     Where::Srv => onboard::Source::Srv,
+                    // A file or a host name the MX records and a rule of thumb pointed to: a guess the owner confirms.
+                    Where::ProviderAutoconfig | Where::Provider => onboard::Source::Provider,
                     Where::Guess => onboard::Source::Guess,
+                },
+                // A server the domain names that no probe reached is still proposed; the form says beside it why it
+                // was not checked.
+                checked: match candidate.checked {
+                    Checked::Answered => onboard::Checked::Answered,
+                    Checked::NoAnswer => onboard::Checked::NoAnswer,
+                    Checked::Refused => onboard::Checked::Refused,
+                    Checked::NoName => onboard::Checked::NoName,
+                    Checked::Clock => onboard::Checked::Clock,
                 },
             })
             .collect()
@@ -287,17 +306,81 @@ pub fn proposal(found: &Found) -> Proposal {
     Proposal { imap: suggestions(&found.imap), submission: suggestions(&found.submission), asked: found.asked.clone(), failed }
 }
 
-/// Detect for `address` over the system's name servers and HTTPS with `tls`; the ISPDB only when `ispdb`.
+/// Detect's runs started in this process: a newer one ends the older ones.
+static RUNS: AtomicU64 = AtomicU64::new(0);
+
+/// Counts a new run in `runs`, and the stop that ends it once a newer run starts: the form drops an older run's answer,
+/// so the run stops asking the network as soon as it can (before its next lookup or probe, or within its current
+/// wait).
 #[must_use]
-pub fn detect(tls: &TlsSettings, address: &str, ispdb: bool) -> Proposal {
+pub fn newer_run_stops(runs: &'static AtomicU64) -> Stop {
+    let mine = runs.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    Arc::new(move || runs.load(Ordering::SeqCst) != mine)
+}
+
+/// The stop of a run counted in `runs`: set by a newer run ([`newer_run_stops`]) or by the form (`form`, set when the
+/// owner cancels or leaves the form while Detect asks).
+#[must_use]
+pub fn run_stops(runs: &'static AtomicU64, form: &RunStop) -> Stop {
+    let newer = newer_run_stops(runs);
+    let form = form.clone();
+    Arc::new(move || form.is_stopped() || newer())
+}
+
+/// What Detect asks: the name servers, the web, the probes, and the clock that measures its time.
+pub struct Network {
+    /// The MX and SRV records.
+    pub dns: Box<dyn Lookup>,
+    /// The autoconfig files.
+    pub web: Box<dyn Web>,
+    /// The candidates' probes.
+    pub probe: Box<dyn Probe>,
+    /// The clock of its deadlines.
+    pub clock: Arc<dyn Clock>,
+}
+
+impl std::fmt::Debug for Network {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Network").finish_non_exhaustive()
+    }
+}
+
+/// The system's name servers, HTTPS and the probes with `tls`.
+#[must_use]
+pub fn system(tls: &TlsSettings) -> Network {
+    // Without the system's configuration there is no name server to ask: Detect goes on with the web only.
+    let dns = Resolver::system(DNS_TIMEOUT).unwrap_or_else(|_| Resolver::new(Vec::new(), DNS_TIMEOUT));
+    Network {
+        dns: Box::new(dns),
+        web: Box::new(Https::new(tls.clone(), WEB_TIMEOUT)),
+        probe: Box::new(Connector::new(tls.clone()).with_timeouts(PROBE_TIMEOUTS)),
+        clock: Arc::clone(tls.clock()),
+    }
+}
+
+/// The Detect the window runs on its thread: each run over the network `network` makes ([`system`] in the app), with
+/// the form's stop ([`detect`]).
+#[must_use]
+pub fn run(network: impl Fn() -> Network + Send + Sync + 'static) -> Run {
+    Arc::new(move |address: &str, ispdb: bool, stop: &RunStop| detect(&network(), address, ispdb, stop))
+}
+
+/// Detect for `address` over `network`; the ISPDB only when `ispdb`. A newer run ends this one, and so does `stop`
+/// once the form sets it ([`run_stops`]).
+#[must_use]
+pub fn detect(network: &Network, address: &str, ispdb: bool, stop: &RunStop) -> Proposal {
     let Ok(address) = EmailAddress::new(address) else {
         return Proposal { failed: vec!["the address is not a mail address".to_owned()], ..Proposal::default() };
     };
     let config = DetectConfig { ispdb, ..DetectConfig::default() };
-    // Without the system's configuration there is no name server to ask: Detect goes on with the web only.
-    let dns = Resolver::system(DNS_TIMEOUT).unwrap_or_else(|_| Resolver::new(Vec::new(), DNS_TIMEOUT));
-    let web = Https::new(tls.clone(), WEB_TIMEOUT);
-    proposal(&detect::detect(&address, &config, &dns, &web))
+    let outside = Outside {
+        dns: &*network.dns,
+        web: &*network.web,
+        probe: &*network.probe,
+        clock: Arc::clone(&network.clock),
+        stop: Some(run_stops(&RUNS, stop)),
+    };
+    proposal(&detect::detect(&address, &config, &outside))
 }
 
 #[cfg(test)]

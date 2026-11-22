@@ -77,7 +77,7 @@ struct LaterParams {
     id: u64,
     /// The time it goes: `2026-11-05T18:00:00Z`, with an offset, or a date (midnight UTC).
     at: Option<String>,
-    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`.
+    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`, `this_weekend`, `next_week`.
     preset: Option<String>,
 }
 
@@ -121,7 +121,7 @@ fn waiting(context: &Context<'_>, command: &'static str, id: u64, at: Timestamp)
     }
     ready(context, &draft)?.map_err(bad)?;
     let answer = json!({ "id": id, "state": "waiting", "at": json::date(at) });
-    let mut outcome = Outcome::new(answer).with_change(Change::PutOutgoing(Outgoing::new(draft.id, OutboxState::Waiting)));
+    let mut outcome = Outcome::new(answer).with_change(Change::PutOutgoing(Outgoing::of(&draft, OutboxState::Waiting)));
     for change in reschedule(context.store(), Due::Send(draft.id), Some(at), context.next_schedule_id())? {
         outcome = outcome.with_change(change);
     }
@@ -199,7 +199,7 @@ fn time(context: &Context<'_>, at: Option<&str>, preset: Option<&str>) -> Result
     let now = context.now();
     let at = match (at, preset) {
         (Some(text), None) => parse_date(text.trim()).ok_or_else(|| bad("at is a time such as 2026-11-05T18:00:00Z"))?,
-        (None, Some(name)) => presets(now, context.offsets())
+        (None, Some(name)) => presets(now, context.offsets(), context.state().week)
             .into_iter()
             .find(|(preset, _)| preset.name() == name)
             .map(|(_, at)| at)

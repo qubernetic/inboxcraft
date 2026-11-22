@@ -68,7 +68,7 @@ fn workspace(floors: &str) -> tempfile::TempDir {
 fn cov_context(root: &Path, lcov: Option<&'static str>, passes: bool) -> (Context, Rc<RefCell<Vec<String>>>) {
     let calls = Rc::new(RefCell::new(Vec::new()));
     let runner = FakeLlvmCov { calls: Rc::clone(&calls), lcov, passes };
-    let ctx = Context { root: root.to_path_buf(), cargo: OsString::from("cargo"), runner: Box::new(runner), lcov: None };
+    let ctx = Context { root: root.to_path_buf(), cargo: OsString::from("cargo"), runner: Box::new(runner), lcov: None, shots: None };
     (ctx, calls)
 }
 
@@ -333,14 +333,18 @@ fn an_unreadable_report_is_an_io_error() {
 fn this_workspace_names_every_core_crate_in_its_floors() {
     let root = crate::default_root();
     let floors = Floors::read(&root, &crate::workspace::members(&root).unwrap()).unwrap();
-    assert_eq!(floors.workspace, 95.0);
-    for name in ["model", "mime", "charset", "time", "ical", "vcard", "proto", "dav", "store", "engine", "testkit"] {
-        assert_eq!(floors.crates.get(&format!("inboxcraft-{name}")), Some(&98.0), "{name}");
+    // The floors stand at what the epic of #230 held (#425); none is below the one it had before.
+    assert_eq!(floors.workspace, 98.0);
+    for (names, floor) in [
+        (&["charset", "dav", "engine", "ical", "mcp", "mime", "model", "proto", "testkit", "time", "vcard"][..], 99.0),
+        (&["store"][..], 98.0),
+        (&["ui-egui"][..], 97.0),
+        (&["net"][..], 95.0),
+    ] {
+        for name in names {
+            assert_eq!(floors.crates.get(&format!("inboxcraft-{name}")), Some(&floor), "{name}");
+        }
     }
-    for name in ["ui-egui", "net"] {
-        assert_eq!(floors.crates.get(&format!("inboxcraft-{name}")), Some(&80.0), "{name}");
-    }
-    assert_eq!(floors.crates.get("inboxcraft-mcp"), Some(&95.0));
     assert_eq!(floors.crates.len(), 14);
     assert_eq!(floors.exclude, ["xtask/src/main.rs"]);
     assert_eq!(floors.workspace_exclude, ["apps/*/src/main.rs", "crates/ui-egui/src/draw/**"]);
@@ -355,6 +359,6 @@ fn the_io_error_of_a_spawn_reaches_the_caller() {
         }
     }
     let dir = workspace(FLOORS);
-    let mut ctx = Context { root: dir.path().to_path_buf(), cargo: OsString::from("cargo"), runner: Box::new(Gone), lcov: None };
+    let mut ctx = Context { root: dir.path().to_path_buf(), cargo: OsString::from("cargo"), runner: Box::new(Gone), lcov: None, shots: None };
     assert!(matches!(gate(&mut ctx, true, &mut Vec::new()), Err(Error::Spawn { .. })));
 }

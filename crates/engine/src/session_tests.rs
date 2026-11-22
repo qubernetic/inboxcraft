@@ -133,10 +133,12 @@ fn a_store_that_cannot_be_read_fails_the_session() {
         fn folder_state(&self, _: FolderId) -> Result<Option<inboxcraft_model::FolderState>, inboxcraft_store::StoreError> { broken() }
         fn messages(&self, _: FolderId) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { broken() }
         fn message(&self, _: MessageId) -> Result<Option<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { broken() }
+        fn linked(&self, _: &inboxcraft_model::MessageRef, _: &std::collections::BTreeSet<MessageId>) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { broken() }
         fn body(&self, _: MessageId) -> Result<Option<inboxcraft_store::Body>, inboxcraft_store::StoreError> { broken() }
         fn search(&self, _: &inboxcraft_store::Search) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { broken() }
         fn queued_jobs(&self) -> Result<Vec<inboxcraft_model::Job>, inboxcraft_store::StoreError> { broken() }
         fn drafts(&self, _: AccountId) -> Result<Vec<inboxcraft_model::Draft>, inboxcraft_store::StoreError> { broken() }
+        fn newest_drafts(&self, _: AccountId, _: usize) -> Result<(u64, Vec<inboxcraft_model::Draft>), inboxcraft_store::StoreError> { broken() }
         fn draft(&self, _: inboxcraft_model::DraftId) -> Result<Option<inboxcraft_model::Draft>, inboxcraft_store::StoreError> { broken() }
         fn outbox(&self) -> Result<Vec<inboxcraft_model::Outgoing>, inboxcraft_store::StoreError> { broken() }
         fn schedule(&self) -> Result<Vec<inboxcraft_model::Scheduled>, inboxcraft_store::StoreError> { broken() }

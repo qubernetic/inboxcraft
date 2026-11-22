@@ -40,8 +40,13 @@ pub mod autostart;
 pub mod control;
 pub mod desk;
 pub mod desktop;
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
+pub mod fontconfig;
+pub mod fonts;
 pub mod instance;
 pub mod notify;
+#[cfg(unix)]
+pub mod original;
 pub mod store;
 #[cfg(target_os = "linux")]
 pub mod tray;
@@ -73,6 +78,21 @@ pub enum Step {
     Autostart(bool),
     /// Put a new control token in the place of the old one (`--revoke-control`).
     RevokeControl,
+}
+
+/// The main window as `main` opens it, the frame `frame` chosen: 1200 × 760 at first, and never smaller than the
+/// least size the window is laid out at ([`inboxcraft_ui_egui::LEAST_WINDOW`]), so it is never cut at its right.
+#[must_use]
+pub fn viewport(frame: inboxcraft_engine::appearance::WindowFrame) -> eframe::egui::ViewportBuilder {
+    eframe::egui::ViewportBuilder::default()
+        .with_title("InboxCraft")
+        .with_app_id("io.github.qubernetic.inboxcraft")
+        .with_inner_size([1200.0, 760.0])
+        .with_min_inner_size(inboxcraft_ui_egui::LEAST_WINDOW)
+        // See-through where the app paints nothing: the corners of its own frame.
+        .with_transparent(true)
+        // The app draws its own frame unless the owner chose the desktop's title bar (`ui.frame.set`).
+        .with_decorations(frame == inboxcraft_engine::appearance::WindowFrame::System)
 }
 
 /// What `--help` prints.
@@ -143,6 +163,7 @@ pub const PICTURE_TIMEOUT: Duration = Duration::from_secs(20);
 /// allowed is fetched by `net`'s picture client (HTTPS only, a fixed user agent, no cookies, no referrer, public
 /// addresses only) on threads of its own, and the window adds accounts: passwords into the OS credential store,
 /// Detect on a thread, one `net` worker per account. Attachments are saved into the owner's downloads folder, never over a file.
+/// On Linux a message's cleaned copy opens in the owner's browser ([`original`]).
 ///
 /// # Errors
 ///
@@ -155,10 +176,14 @@ pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, k
     let owned = match mail {
         Mail::Sample => {
             let mailbox = Mailbox::new(sample::session(clock())?, clock());
-            return Ok(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save).with_keep(keep));
+            return Ok(with_originals(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save).with_keep(keep), Whose::Sample));
         }
         Mail::Store(owned) => owned,
     };
+    // A draft the store writes behind redraws the window when it lands or fails, so a failure is said at once.
+    if let Some(wake) = &wake {
+        owned.store.wake_on_keep(Arc::clone(wake));
+    }
     let keychain = Arc::new(accounts::OsKeychain::new(&owned.id));
     let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
     let client = PictureClient::new(tls.clone(), PICTURE_TIMEOUT);
@@ -167,10 +192,55 @@ pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, k
     let mut session = Session::new(owned.store, clock())?;
     session.start();
     let detecting = tls.clone();
-    let run: Run = Arc::new(move |address: &str, ispdb: bool| accounts::detect(&detecting, address, ispdb));
+    let run: Run = accounts::run(move || accounts::system(&detecting));
     let detect = Box::new(onboard::Threaded::new(run, wake.clone()));
     let workers = Box::new(accounts::NetWorkers::new(WorkerSettings::new(Connector::new(tls)), Arc::clone(&keychain) as Arc<dyn Credentials>, wake));
-    Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save).with_accounts(keychain, detect, workers).with_keep(keep))
+    Ok(with_originals(
+        InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save)
+            .with_accounts(keychain, detect, workers)
+            .with_week_default(inboxcraft_engine::week::for_locale(&locale()))
+            .with_keep(keep),
+        Whose::Owner,
+    ))
+}
+
+/// Whose cleaned copies a window writes: the owner's mailbox's or the sample's, each in a folder of its own.
+#[cfg(unix)]
+pub use original::Whose;
+
+/// Whose cleaned copies a window writes; here none are.
+#[cfg(not(unix))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Whose {
+    /// The owner's mailbox.
+    Owner,
+    /// The sample mailbox.
+    Sample,
+}
+
+/// `app`, opening a message's cleaned copy in the owner's browser, in `whose`'s folder ([`original::Originals::of`]).
+#[cfg(target_os = "linux")]
+fn with_originals(app: InboxApp, whose: Whose) -> InboxApp {
+    app.with_original(Box::new(original::Originals::of(whose)))
+}
+
+/// `app` as it is: here no copy goes to a browser, and the reader does not offer it.
+#[cfg(not(target_os = "linux"))]
+fn with_originals(app: InboxApp, _whose: Whose) -> InboxApp {
+    app
+}
+
+/// Removes the cleaned copies `whose` window opened in the browser: at the start (an earlier run's) and at a normal close.
+pub fn sweep_originals(whose: Whose) {
+    #[cfg(unix)]
+    original::sweep_all(whose);
+    #[cfg(not(unix))]
+    let _ = whose;
+}
+
+/// The owner's locale for dates, as the system names it (`LC_ALL`, else `LC_TIME`, else `LANG`), or nothing.
+fn locale() -> String {
+    ["LC_ALL", "LC_TIME", "LANG"].iter().filter_map(|name| std::env::var(name).ok()).find(|value| !value.is_empty()).unwrap_or_default()
 }
 
 /// The folder a start on the owner's mailbox claims ([`instance`]): the one that holds the store.

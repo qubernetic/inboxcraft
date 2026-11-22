@@ -33,13 +33,15 @@
 
 use std::collections::BTreeMap;
 
+use inboxcraft_engine::all_day_alert::AllDayAlert;
 use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::notify::{Level, Notice, Settings as NotifySettings};
 use inboxcraft_engine::{Applied, Caller, EngineError, Hold, MAX_HISTORY, MAX_LIST, ScreenerMode, Session};
 use inboxcraft_model::{Account, AccountId, Role};
-use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
+use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, WeekRule, Weekday};
 use serde_json::{Value, json};
 
+use crate::calendar::sync::{self, SyncHandle, Tracker};
 use crate::iconset::IconId;
 use crate::workers::Workers;
 use crate::{UiError, tr};
@@ -94,7 +96,7 @@ pub fn role_text(role: Role) -> &'static str {
         Role::Sent => tr!("Sent"),
         Role::Archive => tr!("Archive"),
         Role::Junk => tr!("Junk"),
-        Role::Trash => tr!("Trash"),
+        Role::Trash => tr!("Bin"),
         Role::All => tr!("All mail"),
         Role::Flagged => tr!("Flagged"),
         Role::Screener => tr!("Screener"),
@@ -170,6 +172,21 @@ impl Pile {
     }
 }
 
+/// A row that has just left the list (Done, Delete, Snooze …): its message as it was listed, where it stood, the
+/// group it stood in and the act done to it. The act is done when it starts; the row is only drawn while its gap
+/// closes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Leaving {
+    /// The message as its row showed it.
+    pub row: MessageRow,
+    /// Its place in the list it left.
+    pub at: usize,
+    /// The name of the group of the inbox it stood in.
+    pub group: Option<String>,
+    /// What was done to it.
+    pub act: Act,
+}
+
 /// A group of the grouped inbox, as the engine names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GroupKind {
@@ -184,8 +201,24 @@ pub enum GroupKind {
 }
 
 impl GroupKind {
-    /// Every group, in the order the inbox shows them.
+    /// Every group the engine names.
     pub const ALL: [Self; 4] = [Self::People, Self::Updates, Self::Newsletters, Self::Invitations];
+
+    /// The groups the inbox shows and a sender can be put in, in their order. Invitations is not one of them: an
+    /// invitation stands with its sender's mail ([`GroupKind::shown_for`]).
+    pub const SHOWN: [Self; 3] = [Self::People, Self::Updates, Self::Newsletters];
+
+    /// The group the inbox shows a message of group `kind` from `address` in: an invitation is grouped by who sent
+    /// it, People for a person and Updates for a system (an address no one answers from, or a delivery report's, as
+    /// the engine tells them apart); every other group is itself.
+    #[must_use]
+    pub fn shown_for(kind: Self, address: &str) -> Self {
+        match kind {
+            Self::Invitations if from_a_system(address) => Self::Updates,
+            Self::Invitations => Self::People,
+            kind => kind,
+        }
+    }
 
     /// Its name in the engine's commands.
     #[must_use]
@@ -209,7 +242,7 @@ impl GroupKind {
     pub fn text(self) -> &'static str {
         match self {
             Self::People => tr!("People"),
-            Self::Updates => tr!("Updates"),
+            Self::Updates => tr!("Notifications"),
             Self::Newsletters => tr!("Newsletters"),
             Self::Invitations => tr!("Invitations"),
         }
@@ -227,60 +260,87 @@ impl GroupKind {
     }
 }
 
+/// Whether `address` is a system's: its local part, without `-`, `_` and `.` and in small letters, starts with
+/// `noreply` or `donotreply`, or is `mailerdaemon` or `postmaster` (the engine's rule for the senders no person
+/// answers from).
+fn from_a_system(address: &str) -> bool {
+    let local = address.rsplit_once('@').map_or(address, |(local, _)| local);
+    let local: String = local.chars().filter(|c| !matches!(c, '-' | '_' | '.')).flat_map(char::to_lowercase).take(64).collect();
+    ["noreply", "donotreply"].iter().any(|start| local.starts_with(start)) || ["mailerdaemon", "postmaster"].contains(&local.as_str())
+}
+
 /// How the unified inbox shows its groups.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum InboxView {
-    /// A card for each group, its first rows and "Show all".
+    /// Every group open, each under its head.
+    Grouped,
+    /// The first three rows of each group under its head, and "show all".
     #[default]
-    Cards,
-    /// One list, each group under a heading.
+    Smart,
+    /// One list by time, without groups.
     List,
-    /// One list by date, without groups.
-    Simple,
 }
 
 impl InboxView {
-    /// Every view, in the order the Triage page offers them.
-    pub const ALL: [Self; 3] = [Self::Cards, Self::List, Self::Simple];
+    /// Every view, in the order the view switch and the Triage page offer them.
+    pub const ALL: [Self; 3] = [Self::Grouped, Self::Smart, Self::List];
 
     /// Its name where it is kept.
     #[must_use]
     pub fn id(self) -> &'static str {
         match self {
-            Self::Cards => "cards",
+            Self::Grouped => "grouped",
+            Self::Smart => "smart",
             Self::List => "list",
-            Self::Simple => "simple",
         }
     }
 
-    /// The view kept as `name`.
+    /// The view named `name` by [`InboxView::id`].
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|view| view.id() == name)
+    }
+
+    /// The view an earlier InboxCraft kept as `name`: `cards` is Smart, `list` (the list under headings) Grouped and
+    /// `simple` List. Kept files of then name the view under another key than now, so the old `list` is never read
+    /// as today's.
+    #[must_use]
+    pub fn named_before(name: &str) -> Option<Self> {
+        match name {
+            "cards" => Some(Self::Smart),
+            "list" => Some(Self::Grouped),
+            "simple" => Some(Self::List),
+            _ => None,
+        }
+    }
+
+    /// The id an earlier InboxCraft kept for the view, which [`InboxView::named_before`] reads.
+    #[must_use]
+    pub fn id_before(self) -> &'static str {
+        match self {
+            Self::Grouped => "list",
+            Self::Smart => "cards",
+            Self::List => "simple",
+        }
     }
 
     /// Its name as the person reads it.
     #[must_use]
     pub fn text(self) -> &'static str {
         match self {
-            Self::Cards => tr!("Cards"),
-            Self::List => tr!("Grouped list"),
-            Self::Simple => tr!("Simple list"),
+            Self::Grouped => tr!("Grouped"),
+            Self::Smart => tr!("Smart"),
+            Self::List => tr!("List"),
         }
     }
 }
 
-/// What is selected after the open message leaves the list (an act or a sync removed it).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum After {
-    /// The message below it, the next older one (the one above when it was the last).
-    #[default]
-    Next,
-    /// The message above it, the next newer one (the one below when it was the first).
-    Previous,
-    /// Nothing: back to the list.
-    List,
-}
+/// What is selected after the open message leaves the list (an act or a sync removed it): the owner's choice, kept by
+/// the engine (`after.set`).
+pub use inboxcraft_engine::after::After;
+
+/// Which word of the sending name Home greets the owner by: the owner's choice, kept by the engine (`greeting.set`).
+pub use inboxcraft_engine::greet::GreetBy;
 
 /// An account.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -327,8 +387,8 @@ pub struct FolderRow {
     pub role: Option<Role>,
     /// The unread messages in it.
     pub unread: u64,
-    /// All messages in it.
-    pub messages: u64,
+    /// All messages in it; `None` when `folder.list` does not say.
+    pub messages: Option<u64>,
     /// Whether it can hold mail: a `\Noselect` or `\NonExistent` folder cannot. Fails closed: `false` when
     /// `folder.list` leaves it out, so a move is never offered into a folder the engine would refuse.
     pub selectable: bool,
@@ -411,6 +471,69 @@ pub struct OutboxRow {
     pub state: SendState,
     /// It answers an invitation: sent again as it is, never edited.
     pub invite_answer: bool,
+    /// Every recipient as one line, To, Cc and Bcc each named, each recipient with its address: "To Odile
+    /// <odile@example.org> · Bcc Béla <bela@example.org>". Built when the outbox is read, each line listing at most
+    /// [`MAX_LISTED`] recipients and counting the rest.
+    pub addressed: String,
+    /// What changed in a refused send's draft since it was sent, in the engine's words (`to`, `bcc`, `text`, …;
+    /// `unknown` when no record of how it went is kept): such a send is not sent again from its row, only from the
+    /// composer.
+    pub changed: Vec<String>,
+}
+
+/// The most recipients an outbox row's line lists of each of To, Cc and Bcc; the rest are counted.
+pub const MAX_LISTED: usize = 20;
+
+/// A kept draft as the drafts place lists it, from `compose.list`. Its words are the owner's own text, read capped
+/// and plain ([`crate::home::kept`]) when the list is built, never run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftItem {
+    /// The draft.
+    pub id: u64,
+    /// The account it is written from.
+    pub account: u64,
+    /// The subject; `None` when it has none yet.
+    pub subject: Option<String>,
+    /// Whom it goes to as the row says it: "to Sunniva Aalto", or "no recipient yet".
+    pub to: String,
+    /// When it was last saved, as the row says it: "edited 12:10".
+    pub when: String,
+    /// The start of its text, one line, for a screen reader.
+    pub start: String,
+}
+
+/// The characters of a draft's text a screen reader is told, at most.
+const DRAFT_START: usize = 80;
+
+/// What the index's Drafts count asks `compose.list` for over `account` (all shown when `None`): one draft, so the
+/// store reads one row (#301), and the answer's `total`.
+fn draft_count_asked(account: Option<u64>) -> Value {
+    json!({ "account": account, "limit": 1 })
+}
+
+/// A draft of `compose.list` as the drafts place lists it; `None` without an id. Every text is capped and made plain
+/// here, where the list is built, so a draft of 10 000 characters costs a frame no more than a short one.
+fn draft_item(mailbox: &Mailbox, row: &Value) -> Option<DraftItem> {
+    let id = row.get("id").and_then(Value::as_u64)?;
+    let account = row.get("account").and_then(Value::as_u64).unwrap_or(0);
+    let subject = row.get("subject").and_then(Value::as_str).map(crate::home::kept).filter(|subject| !subject.trim().is_empty());
+    let first = row.get("to").and_then(Value::as_array).and_then(|to| to.first()).and_then(|to| to.get("text")).and_then(Value::as_str);
+    // By name only where the name could not be taken for another address: else by the address.
+    let whom = |to: &str| {
+        let (name, address) = recipient(to);
+        if plainly_named(&name) { name } else { address }
+    };
+    let to = match first.map(|to| crate::home::kept(&whom(to))).filter(|to| !to.trim().is_empty()) {
+        Some(to) => tr!("to {who}", who = to),
+        None => tr!("no recipient yet").to_owned(),
+    };
+    let saved = row.get("saved").and_then(Value::as_str).and_then(parse_date);
+    let when = saved.map_or_else(String::new, |saved| tr!("edited {when}", when = mailbox.short_date(saved)));
+    let text = row.get("text").and_then(Value::as_str).unwrap_or_default();
+    let (start, cut) = crate::component::capped(text.trim_start(), DRAFT_START);
+    let start = crate::component::plain(start).split_whitespace().collect::<Vec<_>>().join(" ");
+    let start = if cut { format!("{start}…") } else { start };
+    Some(DraftItem { id, account, subject, to, when, start })
 }
 
 /// A sender the screener holds back until the owner lets them in.
@@ -539,11 +662,18 @@ pub struct Mailbox {
     offset: Offset,
     accounts: Vec<AccountRow>,
     views: Vec<ViewRow>,
+    /// The folders of each of [`Mailbox::views`], in its order: what a view's unread count adds up.
+    view_folders: Vec<Vec<u64>>,
     folders: Vec<FolderRow>,
     narrowed: Option<u64>,
     place: Place,
     query: String,
     messages: Vec<MessageRow>,
+    /// The query [`Mailbox::messages`] were found for, and whether a field of its search read as many as the engine
+    /// lists; `None` when they are a place's rows.
+    found_for: Option<(String, bool)>,
+    /// Counts each new list of rows, so what is worked out from them can be kept until they change.
+    rows_serial: u64,
     selected: Option<u64>,
     /// Whether the selection came from the keyboard.
     keyed: bool,
@@ -555,8 +685,11 @@ pub struct Mailbox {
     inbox_view: InboxView,
     /// The message an accept-and-open opens in the inbox.
     opening: Option<u64>,
-    /// The message sliding out of the list, and what is done to it once it is out.
-    leaving: Option<(u64, Act)>,
+    /// The row that just left the list, while its gap closes.
+    leaving: Option<Leaving>,
+    /// The message the owner's own act took out of the list last (Done, Archive, Delete, Snooze, Move: never a Read or
+    /// a Flag, never the server), until [`Mailbox::take_taken`] reads it.
+    taken: Option<u64>,
     /// The act the toast shows.
     undo: Option<Undo>,
     acts: u64,
@@ -565,8 +698,22 @@ pub struct Mailbox {
     history: usize,
     /// The message an undo brought back, which opens without being marked read.
     restored: Option<u64>,
+    /// The message selected because its row took the focus (`Tab`, assistive technology): it opens as a preview,
+    /// not marked read, until a reading key, a press or `Enter` reads it ([`Mailbox::read_preview`]).
+    focused_in: Option<u64>,
+    /// The message the reader shows as a preview, opened by [`Mailbox::focused_in`]: read again, it stays unread.
+    previewed: Option<u64>,
     /// "Show done": the done mail is listed in its old place, dimmed.
     show_done: bool,
+    /// The places that list their unread messages alone ("Unread only"), for the session; a handful at most, as the
+    /// owner turns them on.
+    unread_only: Vec<Place>,
+    /// Under "Unread only", the message the owner moved on from, read: its row leaves once the reader has moved on too
+    /// ([`Mailbox::let_read_row_go`]).
+    letting_go: Option<u64>,
+    /// The message the next reading of the list keeps in place under "Unread only" instead of the selected one, once:
+    /// the message an Undo selects again.
+    keep_once: Option<u64>,
     /// How many messages of the place shown are on the park pile, from `mail.list`.
     parked: u64,
     /// How many messages each pile of "Later" holds, read while "Later" shows.
@@ -575,15 +722,49 @@ pub struct Mailbox {
     presets: Vec<(String, Timestamp)>,
     /// The outbox, from `outbox.list`.
     outbox: Vec<OutboxRow>,
+    /// The drafts the drafts place lists, from `compose.list`, read while it shows.
+    drafts: Vec<DraftItem>,
+    /// [`Mailbox::draft_writes`] when [`Mailbox::drafts`] was last read: a draft written since reads them again.
+    drafts_read: Option<u64>,
+    /// How many drafts the engine keeps over the accounts shown (`compose.list`'s `total`), listed or not.
+    drafts_total: u64,
+    /// [`Mailbox::draft_writes`] when [`Mailbox::drafts_total`] was last read, in the drafts place or outside it.
+    drafts_counted: Option<u64>,
+    /// The draft whose discard waits behind its toast: the drafts place leaves it out until Undo or the discard.
+    hidden_draft: Option<u64>,
     /// The subjects of the sends that went late since [`Mailbox::take_late`] was last called.
     late: Vec<String>,
     /// The engine's notices since [`Mailbox::take_notices`] was last called.
     notices: Vec<Notice>,
-    after: After,
+    /// Where the selected message stood when it last left the list: the rows from there on followed it.
+    gap: Option<usize>,
     error: Option<String>,
     runs: u64,
+    /// Counts the reads and changes of what the list's head and cards show (the rows, the place, the folders, the
+    /// accounts, the outbox, the view): a measure kept from the list stays good while it is the same.
+    revision: u64,
+    /// Counts the commands run through [`Mailbox::run`] that may change something (all but the reads,
+    /// [`changes_nothing`]): a draft kept, an event saved. Home is built again when it moved.
+    writes: u64,
+    /// Counts the writes of [`Mailbox::writes`] that may change a kept draft or a send (`compose.*`, `outbox.*`): the
+    /// drafts place reads its drafts again only after one.
+    draft_writes: u64,
     /// The id of the last command run through [`Mailbox::run`].
     last: Option<&'static str>,
+    /// Who the window's commands run for: the owner, or an agent while a picture's script steps drive the window.
+    caller: Caller,
+    /// The newest `ui.settings.open` or `ui.home.open` of an agent, waiting for the frame's end
+    /// ([`crate::InboxApp::act_on_agent_ask`]).
+    agent_ask: Option<inboxcraft_engine::shown::Asked>,
+    /// The first command [`Mailbox::run`] refused for [`Mailbox::caller`].
+    refused: Option<&'static str>,
+    /// The calendars' sync: the owner's press, its jobs and its events ([`crate::calendar::sync`]).
+    calendar_sync: SyncHandle,
+    /// The database's words of the last store failure of the window's commands written to standard error.
+    logged: Option<String>,
+    /// How many lines the window's commands wrote to standard error, for the tests.
+    #[cfg(test)]
+    logged_lines: u64,
 }
 
 impl std::fmt::Debug for Mailbox {
@@ -620,6 +801,26 @@ pub(crate) fn shown(text: &str) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .take(MAX_SHOWN)
         .collect()
+}
+
+/// Whether a person's `name` may be shown for them: it holds no at sign (it could be taken for another address than
+/// theirs) and something that shows (not only spaces, control, bidi, blank-looking or other invisible characters).
+/// Where it may not, the address is shown instead.
+pub(crate) fn plainly_named(name: &str) -> bool {
+    let at = |c: char| matches!(c, '@' | '\u{FF20}' | '\u{FE6B}');
+    !name.chars().any(at) && name.chars().any(|c| !looks_blank(c))
+}
+
+/// Whether `c` draws nothing a reader could see: a space, a control character, the Braille blank, or a code point
+/// Unicode makes default-ignorable (soft hyphen, the Hangul fillers, zero-width and bidi marks, variation selectors,
+/// the musical format marks, tag characters and the rest of that property).
+fn looks_blank(c: char) -> bool {
+    c.is_whitespace()
+        || c.is_control()
+        || matches!(c, '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}' | '\u{1160}' | '\u{17B4}' | '\u{17B5}' | '\u{180B}'..='\u{180F}')
+        || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{2800}' | '\u{3164}')
+        || matches!(c, '\u{FE00}'..='\u{FE0F}' | '\u{FEFF}' | '\u{FFA0}' | '\u{FFF0}'..='\u{FFF8}')
+        || matches!(c, '\u{1BCA0}'..='\u{1BCA3}' | '\u{1D173}'..='\u{1D17A}' | '\u{E0000}'..='\u{E0FFF}')
 }
 
 /// The first sender's name, or the address when it has none.
@@ -681,9 +882,54 @@ fn recipient(text: &str) -> (String, String) {
     }
 }
 
+/// The names of the recipients in `value`'s list `key`: at most [`MAX_LISTED`] read, and how many there are.
+fn named(value: &Value, key: &str) -> (Vec<(String, String)>, usize) {
+    let all = value.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    (all.iter().filter_map(Value::as_str).take(MAX_LISTED).map(recipient).collect(), all.len())
+}
+
+/// One recipient as the outbox row lists it: always its address, after its name where it has one that differs, so
+/// the row says where it goes and not only what it is called ("Odile Brannock <odile@example.org>").
+fn with_address((name, address): &(String, String)) -> String {
+    let shown = crate::bidi::address(address);
+    if name == address { shown.into_owned() } else { crate::bidi::left_to_right(tr!("{name} <{address}>", name = name, address = shown)) }
+}
+
+/// The outbox row's one line of recipients: To, then Cc and Bcc where they hold any, each at most [`MAX_LISTED`]
+/// recipients, each with its address, and how many more.
+fn addressed(lines: [(&[(String, String)], usize); 3]) -> String {
+    let [to, cc, bcc] = lines.map(|(names, all)| {
+        let listed = names.iter().map(with_address).collect::<Vec<_>>().join(", ");
+        match all.saturating_sub(names.len()) {
+            0 => listed,
+            more => tr!("{listed} and {more} more", listed = listed, more = more),
+        }
+    });
+    let mut line = if to.is_empty() { tr!("To {whom}", whom = tr!("(no recipient)")) } else { tr!("To {whom}", whom = to) };
+    if !cc.is_empty() {
+        line = tr!("{line} · Cc {whom}", line = line, whom = cc);
+    }
+    if !bcc.is_empty() {
+        line = tr!("{line} · Bcc {whom}", line = line, whom = bcc);
+    }
+    line
+}
+
+/// The parts of a draft the engine names as changed (`outbox.list`'s `changed`); anything else is left out.
+const CHANGES: [&str; 9] = ["from", "to", "cc", "bcc", "subject", "text", "attachments", "invitation", "unknown"];
+
 fn outbox_row(value: &Value) -> OutboxRow {
-    let to: Vec<(String, String)> =
-        value.get("to").and_then(Value::as_array).map(|to| to.iter().filter_map(Value::as_str).map(recipient).collect()).unwrap_or_default();
+    let (to, all_to) = named(value, "to");
+    let (cc, all_cc) = named(value, "cc");
+    let (bcc, all_bcc) = named(value, "bcc");
+    let addressed = addressed([(&to, all_to), (&cc, all_cc), (&bcc, all_bcc)]);
+    let changed = value
+        .get("changed")
+        .and_then(Value::as_array)
+        .map(|changed| {
+            changed.iter().filter_map(Value::as_str).filter(|part| CHANGES.contains(part)).take(CHANGES.len()).map(str::to_owned).collect()
+        })
+        .unwrap_or_default();
     let state = match value.get("state").and_then(Value::as_str) {
         Some("sending") => SendState::Sending,
         Some("refused") => {
@@ -699,6 +945,8 @@ fn outbox_row(value: &Value) -> OutboxRow {
         to: to.into_iter().map(|(name, _)| name).collect(),
         state,
         invite_answer: value.get("invite_answer").and_then(Value::as_bool).unwrap_or(false),
+        addressed,
+        changed,
     }
 }
 
@@ -718,6 +966,8 @@ fn preset_text(name: &str) -> Option<&'static str> {
         "later_today" => Some(tr!("Later today")),
         "this_evening" => Some(tr!("This evening")),
         "tomorrow_morning" => Some(tr!("Tomorrow morning")),
+        "this_weekend" => Some(tr!("This weekend")),
+        "next_week" => Some(tr!("Next week")),
         _ => None,
     }
 }
@@ -781,11 +1031,14 @@ impl Mailbox {
             offset: Offset::UTC,
             accounts: Vec::new(),
             views: Vec::new(),
+            view_folders: Vec::new(),
             folders: Vec::new(),
             narrowed: None,
             place: Place::View(Role::Inbox),
             query: String::new(),
             messages: Vec::new(),
+            found_for: None,
+            rows_serial: 0,
             selected: None,
             keyed: false,
             showcase: Showcase::default(),
@@ -794,22 +1047,45 @@ impl Mailbox {
             inbox_view: InboxView::default(),
             opening: None,
             leaving: None,
+            taken: None,
             undo: None,
             acts: 0,
             history: 0,
             restored: None,
+            focused_in: None,
+            previewed: None,
             show_done: false,
+            unread_only: Vec::new(),
+            letting_go: None,
+            keep_once: None,
             parked: 0,
             piles: [0; 3],
             presets: Vec::new(),
             outbox: Vec::new(),
+            drafts: Vec::new(),
+            drafts_read: None,
+            drafts_counted: None,
+            drafts_total: 0,
+            hidden_draft: None,
             late: Vec::new(),
             notices: Vec::new(),
-            after: After::Next,
+            gap: None,
             error: None,
             runs: 0,
+            revision: 0,
+            writes: 0,
+            draft_writes: 0,
             last: None,
+            caller: Caller::Owner,
+            refused: None,
+            calendar_sync: SyncHandle::default(),
+            logged: None,
+            agent_ask: None,
+            #[cfg(test)]
+            logged_lines: 0,
         };
+        // The window takes what `ui.settings.open` asks: its answer says so.
+        mailbox.session.set_window(true);
         mailbox.refresh();
         mailbox
     }
@@ -825,40 +1101,114 @@ impl Mailbox {
             .and_then(|()| self.load_outbox())
             .and_then(|()| self.load_list(self.place));
         if let (Some(at), None) = (was, self.selected) {
+            self.gap = Some(at);
             let last = self.messages.len().checked_sub(1);
-            let pick = match self.after {
+            let pick = match self.session.after() {
                 After::Next => last.map(|last| at.min(last)),
                 After::Previous => last.map(|last| at.saturating_sub(1).min(last)),
-                After::List => None,
+                // Stay: nothing opens; the window gives the keyboard to the row that took its place.
+                After::List | After::Stay => None,
             };
             self.selected = pick.and_then(|at| self.messages.get(at)).map(|row| row.id);
         }
         self.settle(result);
     }
 
-    /// The next-message rule.
+    /// Where the selected message stood in the list when it last left it: the rows from there on are the ones that
+    /// followed it, the rows before it the ones above. At either end the rule picks the row on the other side.
     #[must_use]
-    pub fn after(&self) -> After {
-        self.after
+    pub fn gap(&self) -> Option<usize> {
+        self.gap
     }
 
-    /// Sets the next-message rule.
+    /// The next-message rule, as `after.set` left it.
+    #[must_use]
+    pub fn after(&self) -> After {
+        self.session.after()
+    }
+
+    /// Sets the next-message rule through `after.set`, as the owner.
     pub fn set_after(&mut self, after: After) {
-        self.after = after;
+        if let Err(error) = self.run("after.set", &json!({ "after": after.name() })) {
+            self.fail(error);
+        }
+    }
+
+    /// Takes the next-message rule kept from an earlier run.
+    pub(crate) fn restore_after(&mut self, after: After) {
+        self.session.set_after(after);
+    }
+
+    /// Which word of the sending name Home greets by, as `greeting.set` left it.
+    #[must_use]
+    pub fn greet_by(&self) -> GreetBy {
+        self.session.greet_by()
+    }
+
+    /// Sets which word of the sending name Home greets by through `greeting.set`, as the owner.
+    pub fn set_greet_by(&mut self, by: GreetBy) {
+        if let Err(error) = self.run("greeting.set", &json!({ "greeting": by.name() })) {
+            self.fail(error);
+        }
+    }
+
+    /// Takes which word Home greets by, kept from an earlier run.
+    pub(crate) fn restore_greet_by(&mut self, by: GreetBy) {
+        self.session.set_greet_by(by);
     }
 
     /// Selects the row below the selected one (`forward`) or above it; the first row when none is selected. Stays at
     /// either end.
     pub fn step(&mut self, forward: bool) {
-        let at = self.selected.and_then(|id| self.messages.iter().position(|row| row.id == id));
+        self.step_by(forward, 1);
+    }
+
+    /// Selects the row `rows` below the selected one (`forward`) or above it, as far as the list goes (Page Down and
+    /// Page Up a page of rows, End and Home `usize::MAX`); with none selected, counts from just above the first row.
+    pub fn step_by(&mut self, forward: bool, rows: usize) {
+        let order: Vec<u64> = self.messages.iter().map(|row| row.id).collect();
+        self.step_in(&order, forward, rows);
+    }
+
+    /// [`Mailbox::step_by`] through the messages of `order`, the rows as the list shows them (its groups in turn, a
+    /// folded group's hidden rows left out), from the selected one; a selected message `order` does not hold counts as
+    /// none. An id the list does not hold is never selected.
+    pub fn step_in(&mut self, order: &[u64], forward: bool, rows: usize) {
+        let last = order.len().saturating_sub(1);
+        let at = self.selected.and_then(|id| order.iter().position(|shown| *shown == id));
         let next = match at {
+            None if forward => rows.saturating_sub(1).min(last),
             None => 0,
-            Some(at) if forward => at.saturating_add(1).min(self.messages.len().saturating_sub(1)),
-            Some(at) => at.saturating_sub(1),
+            Some(at) if forward => at.saturating_add(rows).min(last),
+            Some(at) => at.saturating_sub(rows),
         };
-        if let Some(row) = self.messages.get(next) {
-            self.selected = Some(row.id);
+        if let Some(id) = order.get(next).copied().filter(|id| self.messages.iter().any(|row| row.id == *id)) {
+            let before = self.selected.replace(id);
             self.keyed = true;
+            self.let_read_go(before);
+        }
+    }
+
+    /// Under "Unread only" the owner moved on from the message `before`: once the reader has moved on too, its row
+    /// leaves if it was read ([`Mailbox::let_read_row_go`]), so the next one is the next unread one.
+    fn let_read_go(&mut self, before: Option<u64>) {
+        if let Some(left) = before.filter(|id| self.selected != Some(*id)) {
+            self.letting_go = Some(left);
+        }
+    }
+
+    /// The row the owner moved on from under "Unread only" ([`Mailbox::let_read_go`]) leaves the list when it is read
+    /// and not selected again. The window calls it once the reader shows what is selected, so the reader never sees
+    /// its open message leave the list.
+    pub(crate) fn let_read_row_go(&mut self) {
+        let Some(left) = self.letting_go.take() else { return };
+        if self.selected == Some(left) || !self.query.is_empty() || !self.unread_only() {
+            return;
+        }
+        let count = self.messages.len();
+        self.messages.retain(|row| row.id != left || !row.seen);
+        if self.messages.len() != count {
+            self.rows_serial = self.rows_serial.wrapping_add(1);
         }
     }
 
@@ -875,8 +1225,22 @@ impl Mailbox {
         &self.showcase
     }
 
+    /// How often what the list's head and cards show was read or changed: equal, nothing of it changed in between.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// How many commands that may change something ran through the window so far ([`changes_nothing`] tells the
+    /// reads): equal, the window changed nothing in between.
+    #[must_use]
+    pub fn writes(&self) -> u64 {
+        self.writes
+    }
+
     /// Shows `showcase` in the list, for `ui_shot`.
     pub fn set_showcase(&mut self, showcase: Showcase) {
+        self.revision = self.revision.wrapping_add(1);
         self.showcase = showcase;
     }
 
@@ -930,29 +1294,78 @@ impl Mailbox {
 
     /// Shows the unified inbox's groups as `view` does.
     pub fn set_inbox_view(&mut self, view: InboxView) {
+        self.revision = self.revision.wrapping_add(1);
         self.inbox_view = view;
     }
 
     /// The groups the list shows: in the unified inbox without a search, unless the view is the simple list; the
     /// showcase's while it has any, else each group of the engine's that holds a row, in the order of
-    /// [`GroupKind::ALL`]. The rows no group holds are left out.
+    /// [`GroupKind::SHOWN`], an invitation in its sender's ([`GroupKind::shown_for`]). The rows no group holds are left
+    /// out.
     #[must_use]
     pub fn groups(&self) -> Vec<Group> {
-        if self.place != Place::View(Role::Inbox) || !self.query.is_empty() || self.inbox_view == InboxView::Simple {
+        if self.place != Place::View(Role::Inbox) || !self.query.is_empty() || self.inbox_view == InboxView::List {
             return Vec::new();
         }
         if !self.showcase.groups.is_empty() {
             return self.showcase.groups.clone();
         }
-        GroupKind::ALL
+        GroupKind::SHOWN
             .into_iter()
             .map(|kind| Group {
                 icon: kind.icon(),
                 name: kind.text().to_owned(),
-                messages: self.messages.iter().filter(|row| row.group == Some(kind)).map(|row| row.id).collect(),
+                messages: self
+                    .messages
+                    .iter()
+                    .filter(|row| row.group.is_some_and(|group| GroupKind::shown_for(group, &row.address) == kind))
+                    .map(|row| row.id)
+                    .collect(),
             })
             .filter(|group| !group.messages.is_empty())
             .collect()
+    }
+
+    /// The heads of Later's snoozed pile, each over the rows that come back in its time, in the list's order: "Back
+    /// today" (before tonight's midnight, and a row whose time has passed), "Back this week" (before the first day of
+    /// the next week, by the owner's week rule, `week.set`: where "Next week" of the presets begins) and "Later". A
+    /// head with no row is left out; any other place, and a search, has none.
+    #[must_use]
+    pub fn later_heads(&self) -> Vec<Group> {
+        if self.place != Place::Later(Pile::Snoozed) || !self.query.is_empty() {
+            return Vec::new();
+        }
+        let (today_ends, week_ends) = self.later_bounds();
+        let now = self.now();
+        let mut heads = [
+            Group { icon: IconId::Snooze, name: tr!("Back today").to_owned(), messages: Vec::new() },
+            Group { icon: IconId::Snooze, name: tr!("Back this week").to_owned(), messages: Vec::new() },
+            Group { icon: IconId::Snooze, name: tr!("Later").to_owned(), messages: Vec::new() },
+        ];
+        for row in &self.messages {
+            let at = match row.snoozed_until {
+                // Where the calendar cannot tell when today or the week ends, only a row whose time has passed is back
+                // today, and the others are Later: never all of them under the first head.
+                Some(until) if until <= now || today_ends.is_some_and(|end| until < end) => 0,
+                Some(until) if week_ends.is_some_and(|end| until < end) => 1,
+                // No time to sort by: it comes back at none the owner can see.
+                _ => 2,
+            };
+            if let Some(head) = heads.get_mut(at) {
+                head.messages.push(row.id);
+            }
+        }
+        heads.into_iter().filter(|head| !head.messages.is_empty()).collect()
+    }
+
+    /// When today ends and when this week ends on the list's wall clock, the week by the owner's rule; `None` where the
+    /// calendar cannot say (a clock beyond the years it counts).
+    pub(crate) fn later_bounds(&self) -> (Option<Timestamp>, Option<Timestamp>) {
+        let Some(now) = self.now().to_civil(self.offset) else { return (None, None) };
+        let midnight = CivilDateTime::new(now.year(), now.month(), now.day(), 0, 0, 0);
+        let today_ends = midnight.and_then(|day| day.plus_days(1)).and_then(|day| day.to_timestamp(self.offset));
+        let week_ends = self.week_rule().first_day_of(now).and_then(|first| first.plus_days(7)).and_then(|day| day.to_timestamp(self.offset));
+        (today_ends, week_ends)
     }
 
     /// Does `act` to the message `id` through the engine's commands, at once, and shows its toast; Undo takes it back
@@ -970,6 +1383,7 @@ impl Mailbox {
         if result.is_ok() || self.history != before {
             self.refresh();
         }
+        self.note_taken(Some(id));
         match result {
             Ok(text) => {
                 self.acts = self.acts.saturating_add(1);
@@ -985,6 +1399,7 @@ impl Mailbox {
     pub fn done_all(&mut self, ids: &[u64]) {
         let Some(first) = ids.first().copied() else { return };
         let (before, selected) = (self.history, self.selected.is_some_and(|id| ids.contains(&id)));
+        let was = self.selected.filter(|id| ids.contains(id));
         let mut result = Ok(());
         for id in ids {
             if let Err(error) = self.acted(*id, Act::Done) {
@@ -995,6 +1410,7 @@ impl Mailbox {
         if self.history != before {
             self.refresh();
         }
+        self.note_taken(was);
         match result {
             Ok(()) => {
                 self.acts = self.acts.saturating_add(1);
@@ -1048,8 +1464,9 @@ impl Mailbox {
             }
             Act::Unsnooze => {
                 // Bringing it back early is no act of the history: Undo has nothing to take back.
-                self.run("mail.unsnooze", &one)?;
-                tr!("Back in the inbox")
+                // A message moved on meanwhile stays where the owner put it: only its snooze goes.
+                let answer = self.run("mail.unsnooze", &one)?;
+                if answer.get("back").and_then(Value::as_bool) == Some(true) { tr!("Back in the inbox") } else { tr!("Snooze taken off") }
             }
             Act::FollowUp(until) => {
                 self.write("mail.follow_up", &json!({ "id": id, "until": engine_date(until) }))?;
@@ -1065,7 +1482,7 @@ impl Mailbox {
             }
             Act::Delete => {
                 let answer = self.write("mail.delete", &one)?;
-                if answer.get("permanent").and_then(Value::as_bool) == Some(true) { tr!("Deleted for good") } else { tr!("Moved to Trash") }
+                if answer.get("permanent").and_then(Value::as_bool) == Some(true) { tr!("Deleted for good") } else { tr!("Moved to Bin") }
             }
             Act::Event => return Err(UiError::Answer { command: "event", detail: "an event changes on the calendar screen".to_owned() }),
             Act::Move(folder) => {
@@ -1136,13 +1553,20 @@ impl Mailbox {
     /// The command's refusal.
     pub(crate) fn open_message(&mut self, id: u64) -> Result<Value, UiError> {
         let held = self.held(id);
+        // A row that only took the focus is shown, not read; read again (a fetched body), it stays a preview.
+        let by_focus = self.focused_in.take() == Some(id);
+        if by_focus || self.previewed == Some(id) {
+            self.previewed = Some(id);
+            return self.run("mail.read", &json!({ "id": id }));
+        }
+        self.previewed = None;
         if self.restored.take() == Some(id) || held {
             return self.run("mail.read", &json!({ "id": id }));
         }
         let answer = self.run("mail.open", &json!({ "id": id }))?;
         if answer.get("marked_seen").and_then(Value::as_bool) == Some(true) {
             self.history = self.history.saturating_add(1);
-            self.refresh();
+            self.shown_read(id);
         }
         Ok(answer)
     }
@@ -1161,29 +1585,81 @@ impl Mailbox {
         self.folders.iter().filter(|folder| folder.account == row.account && folder.id != row.folder && folder.selectable).collect()
     }
 
-    /// Starts `act` on the message `id`: an act that takes the row out of the list lets it slide out first
-    /// ([`Mailbox::leaving`], then [`Mailbox::left`]); the others are done at once. A row still sliding is done first.
+    /// Does `act` on the message `id` at once. When the act takes its row out of the list (and "Show done" does not
+    /// keep a done row in place), the row is kept as [`Mailbox::leaving`] while its gap closes, until
+    /// [`Mailbox::left`]; a row still closing is let go first.
     pub fn start(&mut self, id: u64, act: Act) {
         self.left();
+        // Under "Unread only" a row marked read leaves the list as a done one does; the open one stays until the owner
+        // moves on.
+        let read_leaves = act == Act::Read
+            && self.unread_only()
+            && self.query.is_empty()
+            && self.selected != Some(id)
+            && self.messages.iter().any(|row| row.id == id && !row.seen);
         // With "show done" a done message stays where it is, dimmed.
-        if act.slides() && !(act == Act::Done && self.show_done) {
-            self.leaving = Some((id, act));
-        } else {
+        if !(act.slides() || read_leaves) || (act == Act::Done && self.show_done) {
             self.act(id, act);
+            return;
+        }
+        let at = self.messages.iter().position(|row| row.id == id);
+        let row = at.and_then(|at| self.messages.get(at)).cloned();
+        let group = row.as_ref().and_then(|_| self.groups().into_iter().find(|group| group.messages.contains(&id)).map(|group| group.name));
+        self.act(id, act);
+        // A row the act left in the list (it failed) closes no gap.
+        let gone = !self.messages.iter().any(|row| row.id == id);
+        if let (Some(row), Some(at), true) = (row, at, gone) {
+            self.leaving = Some(Leaving { row, at, group, act });
         }
     }
 
-    /// The row sliding out of the list and what is done to it once it is out.
+    /// Notes that the owner's act took message `id` out of the list, when it did: an act that left its row in place
+    /// (a Read, a Flag, a refusal, a done row "Show done" keeps) notes nothing.
+    fn note_taken(&mut self, id: Option<u64>) {
+        if let Some(id) = id.filter(|id| !self.messages.iter().any(|row| row.id == *id)) {
+            self.taken = Some(id);
+        }
+    }
+
+    /// The row of message `id` as the store has it now, wherever it is (the list may show another place), read by its id
+    /// alone (`mail.row`): `None` only once the store keeps it no more (the server took it away); an error when the
+    /// store cannot say now. Read quietly: the window ran nothing for the owner.
+    pub(crate) fn message_row(&mut self, id: u64) -> Result<Option<MessageRow>, UiError> {
+        match self.quietly(|mailbox| mailbox.run("mail.row", &json!({ "id": id }))) {
+            Ok(answer) => match answer.get("message").map(message_row).filter(|row| row.id == id) {
+                Some(row) => Ok(Some(row)),
+                None => Err(UiError::Answer { command: "mail.row", detail: "no row of the message asked for".to_owned() }),
+            },
+            Err(UiError::Engine(EngineError::NotFound { what: "message", .. })) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// How many acts went through since the window opened: one more each time an act did what it was asked.
+    pub(crate) fn acts(&self) -> u64 {
+        self.acts
+    }
+
+    /// The message the owner's own act took out of the list last, once: it is forgotten as it is read.
+    pub fn take_taken(&mut self) -> Option<u64> {
+        self.taken.take()
+    }
+
+    /// The message whose row has just left the list and the act done to it, while its gap closes.
     #[must_use]
     pub fn leaving(&self) -> Option<(u64, Act)> {
-        self.leaving
+        self.leaving.as_ref().map(|leaving| (leaving.row.id, leaving.act))
     }
 
-    /// The sliding row is out: its act is done.
+    /// The row that has just left the list, while its gap closes.
+    #[must_use]
+    pub fn left_row(&self) -> Option<&Leaving> {
+        self.leaving.as_ref()
+    }
+
+    /// The gap of the row that left has closed: it is drawn no more.
     pub fn left(&mut self) {
-        if let Some((id, act)) = self.leaving.take() {
-            self.act(id, act);
-        }
+        self.leaving = None;
     }
 
     /// The last act while its toast shows.
@@ -1203,6 +1679,7 @@ impl Mailbox {
     /// Without a toast that can be undone it takes the newest act of the history back: again and again, it walks back
     /// through the session.
     pub fn undo(&mut self) {
+        self.left();
         let toast = self.undo.take();
         let floor = match &toast {
             Some(undo) if undo.undoable => undo.depth,
@@ -1222,7 +1699,10 @@ impl Mailbox {
             }
         }
         if self.history != before {
+            // Under "Unread only" the message selected again is read: the reading keeps it.
+            self.keep_once = toast.as_ref().filter(|undo| undo.undoable && undo.selected && self.history <= undo.depth).map(|undo| undo.id);
             self.refresh();
+            self.keep_once = None;
             if let Some(undo) = toast.filter(|undo| undo.undoable && undo.selected && self.history <= undo.depth)
                 && self.messages.iter().any(|row| row.id == undo.id)
             {
@@ -1282,6 +1762,37 @@ impl Mailbox {
         changed
     }
 
+    /// Runs `calendar.sync` for the owner's press on "sync now" (or "try again") at the calendar's foot, the only thing
+    /// that asks for it, unless a sync is under way. The accounts it asked are followed from here
+    /// ([`crate::calendar::sync::Tracker`]). Whether it ran.
+    pub(crate) fn sync_calendars(&mut self) -> bool {
+        if !sync::with(&self.calendar_sync, |tracker| tracker.can_start()) {
+            return false;
+        }
+        match self.run("calendar.sync", &json!({})) {
+            Ok(answer) => {
+                let ids = answer.get("accounts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+                let named: Vec<(u64, &str)> = ids
+                    .iter()
+                    .filter_map(Value::as_u64)
+                    .take(sync::MOST_JOBS)
+                    .map(|id| (id, self.accounts.iter().find(|row| row.id == id).map_or("", |row| row.label.as_str())))
+                    .collect();
+                sync::with(&self.calendar_sync, |tracker| tracker.start(&named));
+            }
+            Err(error) => {
+                sync::with(&self.calendar_sync, Tracker::not_started);
+                self.error = Some(error.to_string());
+            }
+        }
+        true
+    }
+
+    /// The calendars' sync, shared with the calendar's side panel, which draws it and notes the owner's press.
+    pub(crate) fn calendar_sync(&self) -> SyncHandle {
+        std::sync::Arc::clone(&self.calendar_sync)
+    }
+
     /// Takes the engine's notices into the mailbox, for the desktop, and the subjects of the sends that went late, for
     /// the window; at most [`MAX_NOTICES`] of each wait.
     fn hear(&mut self) {
@@ -1313,6 +1824,27 @@ impl Mailbox {
         Some(due.duration_since(self.clock.now()).filter(|left| !left.is_zero()).unwrap_or(OVERDUE_WAKE))
     }
 
+    /// What commands asked the window to show since the last call ([`Session::take_asked`]), oldest first.
+    pub fn take_asked(&mut self) -> Vec<inboxcraft_engine::shown::Asked> {
+        self.session.take_asked()
+    }
+
+    /// Holds an agent's ask until the frame's end, in the place of one held before: the newest only.
+    pub(crate) fn hold_agent_ask(&mut self, asked: inboxcraft_engine::shown::Asked) {
+        self.agent_ask = Some(asked);
+    }
+
+    /// The agent's ask held, taken.
+    pub(crate) fn take_agent_ask(&mut self) -> Option<inboxcraft_engine::shown::Asked> {
+        self.agent_ask.take()
+    }
+
+    /// Whether an agent's ask waits for the frame's end.
+    #[must_use]
+    pub fn holds_agent_ask(&self) -> bool {
+        self.agent_ask.is_some()
+    }
+
     /// What the engine has to tell the owner since the last call ([`Session::take_notices`]), for the desktop to show.
     pub fn take_notices(&mut self) -> Vec<Notice> {
         self.hear();
@@ -1328,6 +1860,11 @@ impl Mailbox {
                 return false;
             }
         };
+        let (now, offset) = (self.clock.now(), self.offset);
+        let alive: Vec<u64> = accounts.iter().map(|account| account.id().get()).collect();
+        // The owner's calendar sync follows its jobs; its end or a step of it is drawn, and the jobs its events queue
+        // are taken on the next round.
+        let mut changed = sync::with(&self.calendar_sync, |tracker| tracker.sent(&jobs, &alive, now, offset));
         for job in jobs {
             // A job for an account that is gone has nobody to run it.
             if let Some(account) = accounts.iter().find(|account| account.id() == job.account) {
@@ -1335,13 +1872,16 @@ impl Mailbox {
             }
         }
         workers.keep(&accounts.iter().map(Account::id).collect::<Vec<_>>());
-        let mut changed = false;
         for event in workers.events() {
-            match self.session.apply(&event) {
+            let applied = self.session.apply(&event);
+            match &applied {
                 Ok(Applied::Changed) => changed = true,
                 Ok(Applied::Dropped) => {}
-                Err(error) => self.error = Some(UiError::from(error).to_string()),
+                Err(error) => self.error = Some(UiError::from(error.clone()).to_string()),
             }
+            // After the engine took it: calendars found that it dropped read nothing.
+            let dropped = matches!(applied, Ok(Applied::Dropped));
+            changed |= sync::with(&self.calendar_sync, |tracker| tracker.heard(&event, dropped, now, offset));
         }
         changed
     }
@@ -1355,6 +1895,65 @@ impl Mailbox {
         self.settle(Err(error));
     }
 
+    /// The drafts whose keep the store wrote behind and failed since last asked, each with why, once: the disk holds
+    /// such a draft as it was before that keep. The database's own words go to the app's standard error, once.
+    pub(crate) fn failed_keeps(&mut self) -> Vec<(u64, UiError)> {
+        let mut failed = Vec::new();
+        while let Some((id, error)) = self.session.store().failed_keep() {
+            let error = EngineError::Store(error);
+            if let Some(line) = crate::store_log(&error, &mut self.logged) {
+                eprintln!("{line}");
+            }
+            failed.push((id.get(), UiError::from(error)));
+        }
+        failed
+    }
+
+    /// Waits at most `within` until every draft the store writes behind is on the disk, each whose write failed tried
+    /// once more: the end of a window or of the app.
+    ///
+    /// # Errors
+    ///
+    /// The store did not write them in that time, or a draft's write failed and none landed since.
+    pub(crate) fn wait_for_keeps(&self, within: std::time::Duration) -> Result<(), UiError> {
+        self.settle_keeps(within, None)
+    }
+
+    /// The same for draft `id` alone: the end of its composer.
+    ///
+    /// # Errors
+    ///
+    /// The store did not write the drafts in that time, or the draft's write failed and none landed since.
+    pub(crate) fn wait_for_keep(&self, id: u64, within: std::time::Duration) -> Result<(), UiError> {
+        self.settle_keeps(within, Some(id))
+    }
+
+    fn settle_keeps(&self, within: std::time::Duration, id: Option<u64>) -> Result<(), UiError> {
+        let store = self.session.store();
+        store.settle(within).map_err(|error| UiError::from(EngineError::Store(error)))?;
+        match store.unkept().into_iter().find(|(draft, _)| id.is_none_or(|id| draft.get() == id)) {
+            Some((_, error)) => Err(UiError::from(EngineError::Store(error))),
+            None => Ok(()),
+        }
+    }
+
+    /// The drafts whose write the store made behind and that failed, none landing since.
+    pub(crate) fn unkept_drafts(&self) -> Vec<u64> {
+        self.session.store().unkept().into_iter().map(|(draft, _)| draft.get()).collect()
+    }
+
+    /// A count of the drafts handed to the store to write behind: another number after a newer keep of any draft.
+    pub(crate) fn keeps_made(&self) -> u64 {
+        self.session.store().keeps()
+    }
+
+    /// Applies `event` as an account's sync worker tells it, checked by the engine as every worker's is: for a picture
+    /// of the status line synced or syncing, which no sample account reaches without a server. Whether it changed
+    /// anything.
+    pub(crate) fn tell(&mut self, event: &inboxcraft_model::Event) -> Result<bool, UiError> {
+        Ok(self.session.apply(event)? == Applied::Changed)
+    }
+
     /// The owner's appearance choices, as the `ui.*.set` commands left them.
     #[must_use]
     pub fn appearance(&self) -> &Appearance {
@@ -1366,10 +1965,59 @@ impl Mailbox {
         self.session.set_appearance(appearance);
     }
 
+    /// Runs `read`, the status line's reads of its facts (`safe` commands that change nothing), so that they count in
+    /// none of the window's tallies ([`Mailbox::runs`], [`Mailbox::last_run`], the refused command): those say what the
+    /// window ran for the owner, and the line reads at most once a second or when the mailbox changed.
+    pub(crate) fn quietly<R>(&mut self, read: impl FnOnce(&mut Self) -> R) -> R {
+        let (runs, writes, last, refused) = (self.runs, self.writes, self.last, self.refused);
+        let answer = read(self);
+        (self.runs, self.writes, self.last, self.refused) = (runs, writes, last, refused);
+        answer
+    }
+
+    /// Runs `command` for the window's caller; a command that may change something counts in [`Mailbox::writes`].
     pub(crate) fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
         self.runs = self.runs.saturating_add(1);
+        if !changes_nothing(command) {
+            self.writes = self.writes.wrapping_add(1);
+            if command.starts_with("compose.") || command.starts_with("outbox.") {
+                self.draft_writes = self.draft_writes.wrapping_add(1);
+            }
+        }
         self.last = Some(command);
-        Ok(self.session.run(command, params)?)
+        let answer = self.session.run_as(self.caller, command, params);
+        if let Err(EngineError::NotAllowed { command, .. }) = &answer {
+            self.refused = self.refused.or(Some(*command));
+        }
+        // The banner says the store's fixed sentence; the database's own words go to the app's standard error, once.
+        if let Err(error) = &answer
+            && let Some(line) = crate::store_log(error, &mut self.logged)
+        {
+            eprintln!("{line}");
+            #[cfg(test)]
+            {
+                self.logged_lines = self.logged_lines.saturating_add(1);
+            }
+        }
+        Ok(answer?)
+    }
+
+    /// Lets the window's commands run for `caller` from now on: [`Caller::Agent`] lets only a `safe` command run, as
+    /// while a picture's script steps drive the window.
+    pub(crate) fn set_caller(&mut self, caller: Caller) {
+        self.caller = caller;
+    }
+
+    /// Tells the session whether the owner has an event open in the editor: while it is, an agent's `history.undo` is
+    /// refused ([`Session::set_editing`]).
+    pub fn set_editing(&mut self, editing: bool) {
+        self.session.set_editing(editing);
+    }
+
+    /// The first command refused because it was not for the window's caller ([`Mailbox::set_caller`]).
+    #[must_use]
+    pub(crate) fn refused(&self) -> Option<&'static str> {
+        self.refused
     }
 
     /// Runs the command `id` with `params` for an agent (the control channel): only a `safe` command runs. The list is
@@ -1395,6 +2043,12 @@ impl Mailbox {
         self.last
     }
 
+    /// Narrows to `account` whether or not the list holds it: a test's stale id, as one removed elsewhere would be.
+    #[cfg(test)]
+    pub(crate) fn narrow_stale(&mut self, account: u64) {
+        self.narrowed = Some(account);
+    }
+
     /// How many commands ran through [`Mailbox::run`] so far.
     #[cfg(test)]
     pub(crate) fn runs(&self) -> u64 {
@@ -1402,6 +2056,7 @@ impl Mailbox {
     }
 
     fn load_accounts(&mut self) -> Result<(), UiError> {
+        self.revision = self.revision.wrapping_add(1);
         let answer = self.run("account.list", &json!({}))?;
         self.accounts = array("account.list", &answer, "accounts")?
             .iter()
@@ -1423,6 +2078,7 @@ impl Mailbox {
     }
 
     fn load_folders(&mut self) -> Result<(), UiError> {
+        self.revision = self.revision.wrapping_add(1);
         let answer = self.run("folder.list", &json!({ "account": self.narrowed }))?;
         let mut folders: Vec<FolderRow> = array("folder.list", &answer, "folders")?
             .iter()
@@ -1438,7 +2094,7 @@ impl Mailbox {
                     depth,
                     role: folder.get("role").and_then(Value::as_str).and_then(role),
                     unread: number(folder, "unread"),
-                    messages: number(folder, "messages"),
+                    messages: folder.get("messages").and_then(Value::as_u64),
                     selectable: folder.get("selectable").and_then(Value::as_bool) == Some(true),
                 }
             })
@@ -1448,17 +2104,40 @@ impl Mailbox {
             key(a).cmp(&key(b)).then_with(|| a.name.cmp(&b.name))
         });
         let unread: BTreeMap<u64, u64> = folders.iter().map(|folder| (folder.id, folder.unread)).collect();
-        self.views = array("folder.list", &answer, "views")?
+        (self.views, self.view_folders) = array("folder.list", &answer, "views")?
             .iter()
             .filter_map(|view| {
                 let role = view.get("role").and_then(Value::as_str).and_then(role)?;
-                let ids = view.get("folders").and_then(Value::as_array)?;
-                let unread = ids.iter().filter_map(Value::as_u64).filter_map(|id| unread.get(&id)).fold(0_u64, |sum, n| sum.saturating_add(*n));
-                Some(ViewRow { role, unread })
+                let ids: Vec<u64> = view.get("folders").and_then(Value::as_array)?.iter().filter_map(Value::as_u64).collect();
+                let unread = ids.iter().filter_map(|id| unread.get(id)).fold(0_u64, |sum, n| sum.saturating_add(*n));
+                Some((ViewRow { role, unread }, ids))
             })
-            .collect();
+            .unzip();
         self.folders = folders;
         Ok(())
+    }
+
+    /// The message `id` was marked read by `mail.open`: its row, its folder's unread count and those of the views over
+    /// it say so as a refresh would, without reading the list and the folders again (#406). A message the list does not
+    /// show, or shows as read already, is read again with everything.
+    fn shown_read(&mut self, id: u64) {
+        let Some(row) = self.messages.iter_mut().find(|row| row.id == id && !row.seen) else {
+            self.refresh();
+            return;
+        };
+        row.seen = true;
+        let folder = row.folder;
+        if let Some(held) = self.folders.iter_mut().find(|held| held.id == folder) {
+            held.unread = held.unread.saturating_sub(1);
+        }
+        for (view, ids) in self.views.iter_mut().zip(&self.view_folders) {
+            if ids.contains(&folder) {
+                let unread = self.folders.iter().filter(|held| ids.contains(&held.id)).fold(0_u64, |sum, held| sum.saturating_add(held.unread));
+                view.unread = unread;
+            }
+        }
+        self.revision = self.revision.wrapping_add(1);
+        self.rows_serial = self.rows_serial.wrapping_add(1);
     }
 
     fn load_screener(&mut self) -> Result<(), UiError> {
@@ -1477,19 +2156,139 @@ impl Mailbox {
         Ok(())
     }
 
+    /// Reads the drafts the drafts place lists (`compose.list`), newest first, at most [`MAX_LIST`] of the accounts
+    /// shown. The engine answers only the newest asked for, and the store reads only those (#301).
+    fn load_drafts(&mut self) -> Result<(), UiError> {
+        let answer = self.run("compose.list", &json!({ "account": self.narrowed, "limit": MAX_LIST }))?;
+        let drafts: Vec<DraftItem> = array("compose.list", &answer, "drafts")?.iter().filter_map(|row| draft_item(self, row)).collect();
+        let total = answer.get("total").and_then(Value::as_u64).unwrap_or(0);
+        if drafts != self.drafts || total != self.drafts_total {
+            self.drafts = drafts;
+            self.drafts_total = total;
+            self.revision = self.revision.wrapping_add(1);
+        }
+        self.drafts_read = Some(self.draft_writes);
+        self.drafts_counted = Some(self.draft_writes);
+        Ok(())
+    }
+
+    /// Reads how many drafts the engine keeps over the accounts shown (`compose.list`'s `total`, one draft asked for):
+    /// the index's Drafts count outside the drafts place.
+    fn count_drafts(&mut self) -> Result<(), UiError> {
+        // A read for the index, in none of the window's tallies (as the status line's reads).
+        let account = self.narrowed;
+        let answer = self.quietly(|mailbox| mailbox.run("compose.list", &draft_count_asked(account)))?;
+        let total = answer.get("total").and_then(Value::as_u64).unwrap_or(0);
+        if total != self.drafts_total {
+            self.drafts_total = total;
+            self.revision = self.revision.wrapping_add(1);
+        }
+        self.drafts_counted = Some(self.draft_writes);
+        Ok(())
+    }
+
+    /// While the drafts place shows, reads its drafts again when a draft or a send was written since they were read (a
+    /// draft saved, sent or discarded: `compose.*`, `outbox.*`); otherwise nothing, so a frame at rest, or after a write
+    /// of anything else, runs no command.
+    pub fn keep_drafts_fresh(&mut self) {
+        if self.drafts_listed() && self.drafts_read != Some(self.draft_writes) {
+            let read = self.load_drafts();
+            if let Err(error) = read {
+                // Not read again until the next such write: a refused read is not asked for every frame.
+                self.drafts_read = Some(self.draft_writes);
+                self.drafts_counted = Some(self.draft_writes);
+                self.error = Some(error.to_string());
+            }
+        } else if !self.drafts_listed() && self.drafts_counted != Some(self.draft_writes) {
+            // Outside the drafts place only the total is read, for the index's Drafts count (#328).
+            if let Err(error) = self.count_drafts() {
+                self.drafts_counted = Some(self.draft_writes);
+                self.error = Some(error.to_string());
+            }
+        }
+    }
+
+    /// How many drafts the engine keeps over the accounts shown, the one whose discard waits left out: the index's
+    /// Drafts count, kept fresh by [`Mailbox::keep_drafts_fresh`] in every place.
+    #[must_use]
+    pub fn drafts_total(&self) -> u64 {
+        // Listed, the draft counts only when it is among those read; outside the drafts place the list is not read,
+        // and a discard still waiting is one of the drafts counted.
+        let hidden = self.hidden_draft.is_some_and(|hidden| !self.drafts_listed() || self.drafts.iter().any(|draft| draft.id == hidden));
+        self.drafts_total.saturating_sub(u64::from(hidden))
+    }
+
+    /// Whether the drafts place shows its drafts: Drafts open, nothing searched.
+    #[must_use]
+    pub fn drafts_listed(&self) -> bool {
+        self.place == Place::View(Role::Drafts) && self.query.is_empty()
+    }
+
+    /// The drafts the drafts place lists, newest first, the one whose discard waits left out.
+    pub fn drafts(&self) -> impl Iterator<Item = &DraftItem> {
+        self.drafts.iter().filter(|draft| Some(draft.id) != self.hidden_draft)
+    }
+
+    /// Leaves the draft `hidden` out of [`Mailbox::drafts`] (its discard waits behind its toast), or none.
+    pub fn hide_draft(&mut self, hidden: Option<u64>) {
+        self.hidden_draft = hidden;
+    }
+
+    /// What the drafts place's head says under its title: how many drafts the engine keeps (its `total`, also past the
+    /// [`MAX_LIST`] it lists), the one whose discard waits left out.
+    #[must_use]
+    pub fn drafts_count(&self) -> String {
+        match self.drafts_total() {
+            0 => tr!("no drafts").to_owned(),
+            1 => tr!("1 draft").to_owned(),
+            count => tr!("{count} drafts", count = count),
+        }
+    }
+
+    /// The Drafts folders on the servers of the accounts shown that are known to hold mail: the mail there may be
+    /// drafts written in another program, which the drafts place does not list.
+    pub fn server_drafts(&self) -> impl Iterator<Item = &FolderRow> {
+        self.folders.iter().filter(|folder| {
+            folder.role == Some(Role::Drafts)
+                && folder.selectable
+                && folder.messages.is_some_and(|count| count > 0)
+                && self.narrowed.is_none_or(|narrowed| narrowed == folder.account)
+        })
+    }
+
     /// Reads the outbox (`outbox.list`).
     fn load_outbox(&mut self) -> Result<(), UiError> {
+        self.revision = self.revision.wrapping_add(1);
         let answer = self.run("outbox.list", &json!({}))?;
         self.outbox = array("outbox.list", &answer, "items")?.iter().map(outbox_row).collect();
         Ok(())
     }
 
     fn load_list(&mut self, place: Place) -> Result<(), UiError> {
+        self.revision = self.revision.wrapping_add(1);
+        // A fresh reading lists what the filter keeps: no row is left to let go.
+        self.letting_go = None;
         // The outbox shows while anything is in it, and gives way to the inbox after.
         let place = if place == Place::Outbox && self.outbox.is_empty() { Place::View(Role::Inbox) } else { place };
-        let rows = if self.query.is_empty() { self.list(place)? } else { self.found()? };
+        let (rows, found_for) = if self.query.is_empty() {
+            (self.list(place)?, None)
+        } else {
+            let query = self.query.clone();
+            let (rows, more) = self.search_all(&query)?;
+            (rows, Some((query, more)))
+        };
+        if place == Place::View(Role::Drafts) && self.query.is_empty() {
+            self.load_drafts()?;
+        } else {
+            self.drafts = Vec::new();
+            self.drafts_read = None;
+            // The total stays for the index; it is read again on the next frame that keeps it fresh.
+            self.drafts_counted = None;
+        }
         self.place = place;
         self.messages = rows;
+        self.found_for = found_for;
+        self.rows_serial = self.rows_serial.wrapping_add(1);
         if self.selected.is_some_and(|id| self.messages.iter().all(|row| row.id != id)) {
             self.selected = None;
         }
@@ -1500,15 +2299,23 @@ impl Mailbox {
         let mut params = json!({ "account": self.narrowed, "limit": MAX_LIST });
         if let Value::Object(fields) = &mut params {
             match place {
+                // The outbox lists sends, not messages; the drafts place the kept drafts ([`Mailbox::drafts`]).
+                Place::Outbox | Place::View(Role::Drafts) => return Ok(Vec::new()),
                 Place::View(role) => fields.insert("role".to_owned(), Value::String(role.label().to_ascii_lowercase())),
                 Place::Folder(id) => fields.insert("folder".to_owned(), json!(id)),
                 Place::Senders => return self.senders(),
                 Place::Later(pile) => return self.later(pile),
-                // The outbox lists sends, not messages.
-                Place::Outbox => return Ok(Vec::new()),
             };
             if self.show_done {
                 fields.insert("done".to_owned(), Value::Bool(true));
+            }
+            if self.unread_only_in(place) {
+                fields.insert("unread".to_owned(), Value::Bool(true));
+                // The message open in the place stays in its row once it is read, until the owner moves on; the one an
+                // Undo selects again comes back read.
+                if let Some(open) = self.keep_once.or(self.selected).filter(|_| place == self.place) {
+                    fields.insert("keep".to_owned(), json!(open));
+                }
             }
         }
         let answer = self.run("mail.list", &params)?;
@@ -1553,22 +2360,37 @@ impl Mailbox {
         Ok(rows)
     }
 
-    /// The search: every message whose subject, sender or recipient holds the query, newest first.
-    fn found(&mut self) -> Result<Vec<MessageRow>, UiError> {
+    /// Every message of the accounts shown whose subject, sender or recipient holds `query` (cut as
+    /// [`Mailbox::search`] cuts it), newest first: what the list shows searched for it; and whether a field's search
+    /// read as many as the engine lists ([`MAX_LIST`]), so that there may be more. The list's own rows when it shows
+    /// that search already: one search per text.
+    pub(crate) fn searched(&mut self, query: &str) -> Result<(Vec<MessageRow>, bool), UiError> {
+        let query: String = query.trim().chars().take(MAX_QUERY).collect();
+        if let Some((_, more)) = self.found_for.as_ref().filter(|(found, _)| *found == query) {
+            return Ok((self.messages.clone(), *more));
+        }
+        self.search_all(&query)
+    }
+
+    /// The search behind [`Mailbox::searched`], run.
+    fn search_all(&mut self, query: &str) -> Result<(Vec<MessageRow>, bool), UiError> {
         let mut rows: BTreeMap<u64, MessageRow> = BTreeMap::new();
+        let mut more = false;
         for field in ["subject", "from", "to"] {
             let mut params = json!({ "account": self.narrowed, "limit": MAX_LIST });
             if let Value::Object(fields) = &mut params {
-                fields.insert(field.to_owned(), Value::String(self.query.clone()));
+                fields.insert(field.to_owned(), Value::String(query.to_owned()));
             }
             let answer = self.run("mail.search", &params)?;
-            for row in array("mail.search", &answer, "messages")?.iter().map(message_row) {
+            let found = array("mail.search", &answer, "messages")?;
+            more |= u64::try_from(found.len()).unwrap_or(u64::MAX) >= MAX_LIST;
+            for row in found.iter().map(message_row) {
                 rows.insert(row.id, row);
             }
         }
         let mut rows: Vec<MessageRow> = rows.into_values().collect();
         rows.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| b.id.cmp(&a.id)));
-        Ok(rows)
+        Ok((rows, more))
     }
 
     /// Shows one account (`Some`) or all of them (`None`). An account that is not there narrows nothing; an open
@@ -1606,11 +2428,55 @@ impl Mailbox {
     /// Selects a row of the list, or none. A message not in the list is not selected.
     pub fn select(&mut self, message: Option<u64>) {
         self.keyed = false;
+        let before = self.selected;
         match message {
             Some(id) if self.messages.iter().any(|row| row.id == id) => self.selected = Some(id),
             Some(_) => {}
             None => self.selected = None,
         }
+        self.let_read_go(before);
+    }
+
+    /// Selects the message `id` as the keyboard does ([`Mailbox::keyed`]): `Tab` onto its row keys it.
+    pub fn select_keyed(&mut self, id: u64) {
+        if self.messages.iter().any(|row| row.id == id) {
+            let before = self.selected.replace(id);
+            self.keyed = true;
+            self.let_read_go(before);
+        }
+    }
+
+    /// Selects the message `id` because its row took the focus (`Tab`, `Shift Tab`, assistive technology): keyed as
+    /// [`Mailbox::select_keyed`], it opens as a preview and is not marked read.
+    pub fn select_by_focus(&mut self, id: u64) {
+        self.select_keyed(id);
+        if self.selected == Some(id) {
+            self.focused_in = Some(id);
+        }
+    }
+
+    /// The message `id` is read as the owner means it (`Enter`, a press on its row): one shown as a preview by
+    /// [`Mailbox::select_by_focus`] is marked read now, through `mail.open`. Whether it was a preview.
+    pub fn read_preview(&mut self, id: u64) -> bool {
+        let preview = self.previewed == Some(id) || self.focused_in == Some(id);
+        if !preview {
+            return false;
+        }
+        self.focused_in = None;
+        self.previewed = None;
+        if self.held(id) {
+            return true;
+        }
+        match self.run("mail.open", &json!({ "id": id })) {
+            Ok(answer) => {
+                if answer.get("marked_seen").and_then(Value::as_bool) == Some(true) {
+                    self.history = self.history.saturating_add(1);
+                    self.shown_read(id);
+                }
+            }
+            Err(error) => self.error = Some(error.to_string()),
+        }
+        true
     }
 
     /// Hides the error until the next one.
@@ -1660,6 +2526,21 @@ impl Mailbox {
         &self.query
     }
 
+    /// Puts `rows` in the list in place of the engine's: a list longer than the engine lists, for a test.
+    #[cfg(test)]
+    pub(crate) fn set_rows(&mut self, rows: Vec<MessageRow>) {
+        self.revision = self.revision.wrapping_add(1);
+        self.messages = rows;
+        self.rows_serial = self.rows_serial.wrapping_add(1);
+    }
+
+    /// Which list of rows this is: it changes whenever the rows are listed again, so what is worked out from the rows
+    /// can be kept while it stays.
+    #[must_use]
+    pub fn rows_serial(&self) -> u64 {
+        self.rows_serial
+    }
+
     /// The rows of the list.
     #[must_use]
     pub fn messages(&self) -> &[MessageRow] {
@@ -1684,6 +2565,12 @@ impl Mailbox {
         if !self.query.is_empty() {
             return tr!("Search").to_owned();
         }
+        self.place_title()
+    }
+
+    /// The name of the place shown, searched in or not: "Inbox", a folder's name, "Later".
+    #[must_use]
+    pub fn place_title(&self) -> String {
         match self.place {
             Place::View(role) => role_text(role).to_owned(),
             Place::Folder(id) => self.folders.iter().find(|folder| folder.id == id).map(|folder| folder.leaf.clone()).unwrap_or_default(),
@@ -1704,6 +2591,46 @@ impl Mailbox {
         self.show_done = show;
         let result = self.load_list(self.place);
         self.settle(result);
+    }
+
+    /// Whether the place shown can list its unread messages alone: a unified view or a folder of mail, not the drafts,
+    /// "New senders", "Later" or the outbox.
+    #[must_use]
+    pub fn can_unread_only(&self) -> bool {
+        Self::has_unread_only(self.place)
+    }
+
+    fn has_unread_only(place: Place) -> bool {
+        matches!(place, Place::Folder(_)) || matches!(place, Place::View(role) if role != Role::Drafts)
+    }
+
+    /// Whether "Unread only" is on in `place`.
+    fn unread_only_in(&self, place: Place) -> bool {
+        self.unread_only.contains(&place)
+    }
+
+    /// Whether the list shows the unread messages of its place alone ("Unread only"), its place's own choice.
+    #[must_use]
+    pub fn unread_only(&self) -> bool {
+        self.can_unread_only() && self.unread_only_in(self.place)
+    }
+
+    /// Turns "Unread only" on or off for the place shown, for the session, and reads the list again; a place that
+    /// cannot ([`Mailbox::can_unread_only`]) is left as it is.
+    pub fn set_unread_only(&mut self, on: bool) {
+        if !self.can_unread_only() || self.unread_only() == on {
+            return;
+        }
+        let place = self.place;
+        if on {
+            self.unread_only.push(place);
+        } else {
+            self.unread_only.retain(|kept| *kept != place);
+        }
+        if self.query.is_empty() {
+            let result = self.load_list(place);
+            self.settle(result);
+        }
     }
 
     /// How many messages of the place shown wait on the park pile.
@@ -1752,6 +2679,12 @@ impl Mailbox {
         self.clock.now()
     }
 
+    /// Moves the wall clock's offset the list shows times in (the tests: a change of time zone).
+    #[cfg(test)]
+    pub(crate) fn set_offset(&mut self, offset: Offset) {
+        self.offset = offset;
+    }
+
     /// The wall clock's offset the list shows times in.
     #[must_use]
     pub fn offset(&self) -> Offset {
@@ -1772,6 +2705,14 @@ impl Mailbox {
             }
             _ => self.when(row),
         }
+    }
+
+    /// When the snoozed `row` comes back, as a row says it ("Sat 09:00"); `None` for a message not snoozed or whose
+    /// time has passed.
+    #[must_use]
+    pub fn back_at(&self, row: &MessageRow) -> Option<String> {
+        let until = row.snoozed_until.filter(|until| *until > self.clock.now())?;
+        Some(crate::component::typed_time::short(until, self.clock.now(), self.offset))
     }
 
     /// Whether the message `id` is one the owner sent: it is in a folder for sent mail. A follow-up reminder goes on
@@ -1871,7 +2812,8 @@ impl Mailbox {
     pub fn spoken(&self, row: &MessageRow) -> String {
         let subject = if row.subject.is_empty() { tr!("(no subject)") } else { row.subject.as_str() };
         let mut parts = vec![row.sender.clone(), subject.to_owned()];
-        let date = self.row_date(row);
+        // A snoozed message says when it comes back, as its row shows it, not when it came.
+        let date = self.back_at(row).map_or_else(|| self.row_date(row), |when| tr!("back {when}", when = when));
         if !date.is_empty() {
             parts.push(date);
         }
@@ -1947,6 +2889,21 @@ impl Mailbox {
         }
     }
 
+    /// Where the send `row` stands, in the outbox row's own words: "sending in 4 s", "Sat 08:00", "sending…" or
+    /// "not sent".
+    #[must_use]
+    pub fn standing_shown(&self, row: &OutboxRow) -> String {
+        match &row.state {
+            SendState::Waiting(at) => match (self.seconds_left(row.draft), at) {
+                (Some(seconds), _) => tr!("sending in {seconds} s", seconds = seconds),
+                (None, Some(at)) if *at > self.clock.now() => crate::component::typed_time::short(*at, self.clock.now(), self.offset),
+                _ => tr!("sending…").to_owned(),
+            },
+            SendState::Sending => tr!("sending…").to_owned(),
+            SendState::Refused { .. } => tr!("not sent").to_owned(),
+        }
+    }
+
     /// The send `row` as a screen reader says it: whom it goes to, the subject, and where it stands, with the server's
     /// reply when it was refused.
     #[must_use]
@@ -1956,13 +2913,39 @@ impl Mailbox {
             SendState::Refused { reply, .. } => tr!("Not sent: {reply}", reply = reply),
             _ => self.standing(row),
         };
-        tr!("To {whom}, {subject}, {standing}", whom = self.recipients(row), subject = subject, standing = standing)
+        match self.changes_shown(row) {
+            Some(changes) => {
+                tr!("{whom}, {subject}, {standing}, {changes}", whom = row.addressed, subject = subject, standing = standing, changes = changes)
+            }
+            None => tr!("{whom}, {subject}, {standing}", whom = row.addressed, subject = subject, standing = standing),
+        }
     }
 
-    /// Whom the send `row` goes to, as its row says it.
+    /// What changed in the refused send `row` since it was sent, as its row says it: "Changed since it was refused:
+    /// Bcc, text"; `None` when nothing did.
     #[must_use]
-    pub fn recipients(&self, row: &OutboxRow) -> String {
-        if row.to.is_empty() { tr!("(no recipient)").to_owned() } else { row.to.join(", ") }
+    pub fn changes_shown(&self, row: &OutboxRow) -> Option<String> {
+        if row.changed.is_empty() {
+            return None;
+        }
+        if row.changed.iter().any(|part| part == "unknown") {
+            return Some(tr!("May have changed since it was refused; Edit to send it").to_owned());
+        }
+        let parts: Vec<&str> = row
+            .changed
+            .iter()
+            .map(|part| match part.as_str() {
+                "from" => tr!("From"),
+                "to" => tr!("To"),
+                "cc" => tr!("Cc"),
+                "bcc" => tr!("Bcc"),
+                "subject" => tr!("subject"),
+                "text" => tr!("text"),
+                "attachments" => tr!("attachments"),
+                _ => tr!("invitation"),
+            })
+            .collect();
+        Some(tr!("Changed since it was refused: {parts}; Edit to send it", parts = parts.join(", ")))
     }
 
     /// Takes the waiting send of `draft` back (`mail.unsend`): out of the outbox, its draft as it was, to be opened
@@ -1977,12 +2960,14 @@ impl Mailbox {
         result
     }
 
-    /// Sends the refused draft `draft` again (`outbox.retry`), held as every send is; the time it goes. The lists are
-    /// read again.
+    /// Send again on the refused send of `draft` (`outbox.retry`), held as every send is; the lists are read again.
+    /// Only a send that did not change since it was refused goes: one that changed is sent from the composer
+    /// (its row offers Edit), and the engine refuses it here.
     ///
     /// # Errors
     ///
-    /// The command's refusal: the draft cannot be sent as it is, or it was not refused.
+    /// The command's refusal: the draft cannot be sent as it is, it changed since it was refused, or it was not
+    /// refused.
     pub fn retry(&mut self, draft: u64) -> Result<Option<Timestamp>, UiError> {
         let answer = self.run("outbox.retry", &json!({ "id": draft }));
         self.refresh();
@@ -2037,6 +3022,11 @@ impl Mailbox {
         self.notify_set(&json!({ "reminders": on }));
     }
 
+    /// Whether a calendar event's alert notifies the owner (`notify.set`).
+    pub fn set_notify_alerts(&mut self, on: bool) {
+        self.notify_set(&json!({ "alerts": on }));
+    }
+
     fn notify_set(&mut self, params: &Value) {
         if let Err(error) = self.run("notify.set", params) {
             self.fail(error);
@@ -2046,6 +3036,74 @@ impl Mailbox {
     /// Takes the notification choices kept from an earlier run.
     pub(crate) fn restore_notify(&mut self, settings: NotifySettings) {
         self.session.set_notify_settings(settings);
+    }
+
+    /// How the owner's weeks are counted (`week.set`): the calendar's weeks and months, and "Next week" of the time
+    /// presets, count by it.
+    #[must_use]
+    pub fn week_rule(&self) -> WeekRule {
+        self.session.week_rule()
+    }
+
+    /// When an all-day event's alert rings (`event.all_day_alert.set`): a new all-day event's alarm, and the alert of
+    /// one without alarms.
+    #[must_use]
+    pub fn all_day_alert(&self) -> AllDayAlert {
+        self.session.all_day_alert()
+    }
+
+    /// The week rule as it is kept between runs ([`inboxcraft_engine::week::to_value`]), with the all-day alert beside
+    /// it ([`inboxcraft_engine::all_day_alert::KEY`]).
+    #[must_use]
+    pub(crate) fn kept_week(&self) -> Value {
+        let mut kept = inboxcraft_engine::week::to_value(self.session.week_rule());
+        if let Value::Object(fields) = &mut kept {
+            fields.insert(inboxcraft_engine::all_day_alert::KEY.into(), json!(self.session.all_day_alert().name()));
+        }
+        kept
+    }
+
+    /// Takes the week rule kept from an earlier run, read as outside data: what cannot be read is the default, never
+    /// an error ([`inboxcraft_engine::week::from_value`]). The window takes it with its locale's rule as the default
+    /// ([`Mailbox::restore_week_or`]); this is the tests' way with Monday.
+    #[cfg(test)]
+    pub(crate) fn restore_week(&mut self, kept: &Value) {
+        self.session.set_week_rule(inboxcraft_engine::week::from_value(kept));
+        self.session.set_all_day_alert(inboxcraft_engine::all_day_alert::from_value(kept));
+    }
+
+    /// Takes the week rule kept from an earlier run as [`Mailbox::restore_week`] does, with `default` for what cannot
+    /// be read, and the all-day alert kept beside it (the default where a file has none).
+    pub(crate) fn restore_week_or(&mut self, kept: &Value, default: WeekRule) {
+        self.session.set_week_rule(inboxcraft_engine::week::from_value_or(kept, default));
+        self.session.set_all_day_alert(inboxcraft_engine::all_day_alert::from_value(kept));
+    }
+
+    /// Counts weeks by `rule`, which nobody chose: the locale's at the start.
+    pub(crate) fn restore_week_rule(&mut self, rule: WeekRule) {
+        self.session.set_week_rule(rule);
+    }
+
+    /// Changes how weeks are counted through `week.set`, as the owner: the first day of the week, the first week of
+    /// the year, or both.
+    pub fn set_week(&mut self, first_day: Option<inboxcraft_time::Weekday>, first_week: Option<inboxcraft_time::FirstWeek>) {
+        let mut params = serde_json::Map::new();
+        if let Some(day) = first_day {
+            params.insert("first_day".into(), json!(inboxcraft_engine::week::day_name(day)));
+        }
+        if let Some(first) = first_week {
+            params.insert("first_week".into(), json!(inboxcraft_engine::week::first_week_name(first)));
+        }
+        if let Err(error) = self.run("week.set", &Value::Object(params)) {
+            self.fail(error);
+        }
+    }
+
+    /// Changes when an all-day event's alert rings through `event.all_day_alert.set`, as the owner.
+    pub fn set_all_day_alert(&mut self, choice: AllDayAlert) {
+        if let Err(error) = self.run("event.all_day_alert.set", &json!({ "at": choice.name() })) {
+            self.fail(error);
+        }
     }
 }
 
@@ -2058,6 +3116,19 @@ mod notify_tests;
 #[cfg(test)]
 #[path = "outbox_tests.rs"]
 mod outbox_tests;
+#[cfg(test)]
+#[path = "store_log_tests.rs"]
+mod store_log_tests;
+/// Whether `command` only reads: a list, a draft or a message shown, the settings or the state of something. Every
+/// other command may change what the window shows and counts in [`Mailbox::writes`].
+pub(crate) fn changes_nothing(command: &str) -> bool {
+    const READS: [&str; 10] = [".list", ".show", ".settings", ".status", ".presets", ".repeats", ".why", ".thread", ".search", ".row"];
+    READS.iter().any(|end| command.ends_with(end)) || command == "mail.attachment"
+}
+
+#[cfg(test)]
+#[path = "mailbox_read_tests.rs"]
+mod read_tests;
 #[cfg(test)]
 #[path = "mailbox_tests.rs"]
 mod tests;

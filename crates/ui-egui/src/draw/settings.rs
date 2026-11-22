@@ -1,73 +1,128 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings sheet over the dimmed window: the sections on the left (Appearance, Accounts, Notifications, Triage,
-//! Sending and Shortcuts; the others not built yet), the chosen page on the right. Notifications holds each account's
-//! level (all, people only, none), whether returned snoozes and follow-up reminders notify, and the two switches of
-//! the app's [`crate::desk::Desk`]: running in the background and starting with the computer. Accounts is drawn in `accounts.rs`. Triage holds
-//! the screener's mode, how the inbox shows its groups, whether a pin outlasts done and each account's grouping. Sending holds
-//! "Undo send", how long every send waits before it goes (5, 10, 30 or 60 seconds), and each account's signature, saved
-//! with its Save button. Shortcuts lists every action of
-//! the window with its key: a press on the key waits for the next key pressed, which becomes the action's. Each setting is a row: its name and a note on the left, its control on the right (or
-//! under them where the row is narrow): segmented choices for the mode, the typeface and the icon set, cards for the
-//! accent presets and the window frame, the custom accent's colour fields, a slider for the text size and a switch
-//! for "Reduce motion"; a preview in the look the controls choose closes the page.
+//! The settings, a place of the window in the body beside the index: the list of sections on the left, 232 wide (a head, "Settings" and how
+//! many sections there are, then a row per section: the nine of the design, Appearance, Accounts, Notifications,
+//! Triage, Sending, Calendar, Shortcuts, Privacy and About, then the two planned ones, AI and Plugins), and the open
+//! section's page beside it in a column 720 wide. A page is its head (where it is, `[ 04 ] SETTINGS · APPEARANCE`, its
+//! title and a sentence or two), then its groups: a section label (`[ A ] LOOK`) over settings rows.
+//!
+//! Appearance holds Look (mode, motion, text size) and Layout (the inbox view, where a message opens and is written,
+//! the window frame). Accounts is drawn in `accounts.rs`. Notifications holds each account's level (all, people
+//! only, none), whether returned snoozes and follow-up reminders notify, and the two switches of the app's
+//! [`crate::desk::Desk`]: running in the background and starting with the computer. Triage holds the screener's mode,
+//! whether a pin outlasts done and each account's grouping. Sending holds "Undo send", how long every send waits
+//! before it goes, and each account's signature, saved with its Save button. Shortcuts lists every action of the window
+//! with its key: a press on the key waits for the next key pressed, which becomes the action's. The sections and rows
+//! not built yet are drawn as coming soon (`planned.rs`).
+//!
+//! The settings are a place, not a surface in front: the index and the window's keys work beside them, and `Tab` walks
+//! from the index to the sections and on to the page.
 
-use egui::{
-    Align, Area, Frame, Id, Key, Layout, Order, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui,
-    UiBuilder, WidgetInfo, pos2, vec2,
-};
+use egui::{Align, Id, Layout, Rect, Response, Role, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 use inboxcraft_engine::ScreenerMode;
-use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, ComposerHost, EventEditorHost, ReaderHost, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
+use inboxcraft_engine::shown::SettingsAsked;
 
-use super::paint::{NavRow, focus_ring, line, line_height, nav_row, selection};
-use crate::component::avatar;
-use crate::component::button::{IconButton, TextButton};
+use super::paint::{Ring, focus_ring};
+use crate::component::button::{LinkSize, TextButton, link_sized, owner_pressed};
 use crate::component::field;
-use crate::component::segmented::{segmented, segmented_for};
+use crate::component::key::{Chip, ChipState};
+use crate::component::label::section_label;
+use crate::component::segmented::{segmented, segmented_again, segmented_for};
+use crate::component::settings_row::{page as on_page, settings_row, settings_row_soon_with};
+use crate::component::slider;
 use crate::component::switch::switch;
-use crate::component::tooltip;
-use crate::glass;
-use crate::gradient::{self, Gradient, Stop};
-use crate::iconset::{IconId, Style};
+use crate::draw::paint;
+use crate::iconset::IconId;
 use crate::keymap::{Action, Keymap};
-use crate::mailbox::{InboxView, Mailbox};
+use crate::mailbox::{After, GreetBy, InboxView, Mailbox};
 use crate::onboard::Onboarding;
-use crate::settings::{MAX_CHARS, Section, Settings};
-use crate::theme::{Face, Font, Look, PRESETS, Preset, TextScale, Theme, Weight};
+use crate::settings::{Section, Settings};
+use crate::theme::{Font, TextScale, Theme};
 use crate::tr;
 
-/// The sheet's size where the window has room for it, in points.
-const SHEET: [f32; 2] = [1100.0, 780.0];
+#[path = "settings_planned.rs"]
+mod planned;
 
-/// The width of the sections' column, in points.
-const NAV: f32 = 240.0;
+#[path = "settings_privacy.rs"]
+pub(super) mod privacy;
+#[path = "settings_scheduled.rs"]
+pub(super) mod scheduled;
+#[path = "settings_templates.rs"]
+pub(super) mod templates;
 
-/// The narrowest a row's name and note get beside its control, in points; narrower, the control goes under them.
-const TEXT_MIN: f32 = 240.0;
+/// The width of the sections' column, in points: as wide as the window's index.
+const NAV: f32 = 232.0;
 
-/// A swatch on an accent card, in points.
-const SWATCH: [f32; 2] = [72.0, 40.0];
+/// The height of the sections' head, in points.
+const NAV_HEAD: f32 = 48.0;
 
-/// A window on a window-frame card, in points.
-const THUMB: [f32; 2] = [84.0, 52.0];
+/// The room between the head's hairline and the first section, in points.
+const NAV_GAP: f32 = 8.0;
 
-/// The slider's track, in points.
-const TRACK: [f32; 2] = [200.0, 6.0];
+/// The width of a section's page, in points.
+const COLUMN: f32 = 720.0;
 
-/// What the owner asked for on the sheet this frame.
+/// The room above a page, in points.
+const PAGE_TOP: f32 = 24.0;
+
+/// The room left and right of a page, in points.
+const PAGE_X: f32 = 40.0;
+
+/// The least room right of a page, where the body is too narrow for the page's 720 (the design's narrow frames: 800,
+/// and 1000 at 130 %), in points.
+const PAGE_RIGHT: f32 = 38.0;
+
+/// The room under a page, in points.
+const PAGE_BOTTOM: f32 = 16.0;
+
+/// The room under the About page, in points.
+const ABOUT_BOTTOM: f32 = 24.0;
+
+/// How far a page's words stand in from its column, as far as a settings row's, in points.
+const INSET: f32 = 16.0;
+
+/// The room above a group's label, in points.
+const GROUP_TOP: f32 = 20.0;
+
+/// The room between a group's label (and its sentence) and its hairline, in points.
+const GROUP_UNDER: f32 = 8.0;
+
+/// The height of a row of the Shortcuts page's list, in points (at 100 %).
+const KEY_ROW: f32 = 36.0;
+
+/// The room above the Shortcuts page's field and Reset all keys, in points.
+const TOOLS_TOP: f32 = 16.0;
+
+/// The room under them, above the list's first hairline, in points.
+const TOOLS_UNDER: f32 = 12.0;
+
+/// The width of the field that narrows the Shortcuts page's list, in points.
+const FIND: f32 = 320.0;
+
+/// The least width of that field beside Reset all keys, in points: narrower, the button goes under it.
+const FIND_LEAST: f32 = 200.0;
+
+/// The least room between that field and Reset all keys beside it, in points.
+const FIND_GAP: f32 = 16.0;
+
+/// What the owner asked for on the settings this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Asked {
     Mode(ThemeMode),
-    Preset(&'static str),
-    Custom([String; 4]),
-    Font(Typeface),
-    Icons(Icons),
     Scale(TextScale),
-    ReduceMotion(bool),
+    /// The motion level, chosen by the owner.
+    Motion(crate::motion::Level),
     Frame(WindowFrame),
-    /// Another page of the sheet.
+    /// Where a message is written (`ui.layout.set`), chosen by the owner.
+    Composer(ComposerHost),
+    /// Where a message opens: in the pane or in a window of its own (`ui.layout.set`, the owner's).
+    ReaderHost(ReaderHost),
+    /// Where the event editor opens: small, full or in a window of its own (`ui.layout.set`, the owner's).
+    EventEditor(EventEditorHost),
+    /// Another page of the settings.
     Section(Section),
     /// Add account on the Accounts page: the form opens on it.
     Add,
@@ -93,6 +148,10 @@ pub(super) enum Asked {
     Grouped(u64, bool),
     /// Whether a pin stays on a message when it is done.
     KeepPins(bool),
+    /// What follows an act on the open message (`after.set`).
+    After(After),
+    /// Which word of the sending name Home greets by (`greeting.set`).
+    GreetBy(GreetBy),
     /// How long every send is held before it goes, in seconds.
     Hold(u8),
     /// Which new mail of the account notifies.
@@ -101,23 +160,79 @@ pub(super) enum Asked {
     Returns(bool),
     /// Whether follow-up reminders notify.
     Reminders(bool),
+    /// Whether calendar alerts notify.
+    Alerts(bool),
+    /// The first day of the week (`week.set`).
+    FirstDay(inboxcraft_time::Weekday),
+    /// The first week of the year (`week.set`).
+    FirstWeek(inboxcraft_time::FirstWeek),
+    /// When an all-day event's alert rings (`event.all_day_alert.set`).
+    AllDayAlert(inboxcraft_engine::all_day_alert::AllDayAlert),
     /// Whether closing the window leaves InboxCraft running.
     Background(bool),
     /// Whether InboxCraft starts with the computer.
     Login(bool),
-    Close,
+    /// The Templates page, under Sending.
+    Templates,
+    /// The form on a new template of the account.
+    NewTemplate(u64),
+    /// The form on the account's template of this name.
+    EditTemplate(u64, String),
+    /// Save the template as the form holds it.
+    SaveTemplate,
+    /// Close the form, keeping nothing typed.
+    CloseTemplate,
+    /// Ask the owner to confirm the delete of the account's template of this name.
+    AskDeleteTemplate(u64, String),
+    /// The owner confirmed it: delete the account's template of this name.
+    DeleteTemplate(u64, String),
+    /// The delete was not confirmed.
+    KeepTemplate,
+    /// The Scheduled page, under Sending.
+    Scheduled,
+    /// Ask the owner to confirm the cancel of this schedule entry.
+    AskCancelScheduled(u64),
+    /// The owner confirmed it: cancel this schedule entry.
+    CancelScheduled(u64),
+    /// The cancel was not confirmed.
+    KeepScheduled,
+    /// Read the senders whose pictures always load, for the Privacy page.
+    ReadPrivacy,
+    /// In one pane, back from a section's page to the list of sections (`← Settings`).
+    Sections,
+    /// The sender of this address: its pictures ask again.
+    AskAgain(String),
 }
 
-/// What the sheet shows and changes.
+impl Asked {
+    /// Whether this is a confirmation dialog's answer ([`crate::component::dialog`]): a template's delete kept or
+    /// done, an entry's cancel kept or done, an account kept or removed. Only the dialog asks these; it is the modal
+    /// surface they come from, so they pass where the place's asks under it do not.
+    pub(super) fn answers(&self) -> bool {
+        matches!(
+            self,
+            Self::KeepTemplate
+                | Self::DeleteTemplate(..)
+                | Self::KeepScheduled
+                | Self::CancelScheduled(_)
+                | Self::Page(super::onboard::Asked::KeepAccount | super::onboard::Asked::Remove)
+        )
+    }
+}
+
+/// What the settings show and change.
 pub(super) struct Sheet<'a> {
     pub(super) keymap: &'a Keymap,
     pub(super) settings: &'a mut Settings,
     pub(super) current: &'a Appearance,
-    pub(super) reduce: bool,
+    /// The motion level the window moves at this frame.
+    pub(super) level: crate::motion::Level,
     pub(super) mailbox: &'a Mailbox,
     pub(super) onboarding: &'a mut Onboarding,
     /// Whether the window can add accounts.
     pub(super) can_add: bool,
+    /// The account the message being written is from, when one is being written.
+    pub(super) writing: Option<u64>,
     /// What the app's desk says now.
     pub(super) desk: DeskView,
 }
@@ -133,74 +248,67 @@ pub(super) struct DeskView {
     pub(super) asking: bool,
 }
 
+/// The modes in the order the page shows them.
+const MODES: [ThemeMode; 3] = [ThemeMode::System, ThemeMode::Dark, ThemeMode::Light];
+
 /// The name of a mode.
 fn mode_name(mode: ThemeMode) -> &'static str {
     match mode {
-        ThemeMode::System => tr!("System"),
+        ThemeMode::System => tr!("Auto"),
         ThemeMode::Light => tr!("Light"),
         ThemeMode::Dark => tr!("Dark"),
     }
 }
 
-/// The name of a shipped preset; the id for one this front end does not name.
-fn preset_name(id: &'static str) -> &'static str {
-    match id {
-        "electric" => tr!("Electric"),
-        "aurora" => tr!("Aurora"),
-        "citrus" => tr!("Citrus"),
-        _ => id,
+/// The motion levels in the order the page shows them.
+const LEVELS: [crate::motion::Level; 3] = [crate::motion::Level::Full, crate::motion::Level::Reduced, crate::motion::Level::Off];
+
+/// The name of a motion level.
+fn motion_name(level: crate::motion::Level) -> &'static str {
+    match level {
+        crate::motion::Level::Full => tr!("Full"),
+        crate::motion::Level::Reduced => tr!("Reduced"),
+        crate::motion::Level::Off => tr!("Off"),
     }
 }
 
-/// The name of a typeface, as it is written.
-fn font_name(typeface: Typeface) -> &'static str {
-    match typeface {
-        Typeface::Figtree => "Figtree",
-        Typeface::Inter => "Inter",
+/// What a motion level does, under the control: two lines at every level, so nothing under it moves.
+fn motion_help(level: crate::motion::Level) -> &'static str {
+    match level {
+        crate::motion::Level::Full => {
+            tr!("Full: the character field reacts wherever it shows, labels scramble and rows decode in. The showpiece; nothing turns it on but you.")
+        }
+        crate::motion::Level::Reduced => {
+            tr!("Reduced keeps what explains a change and drops the text effects. Until you choose, the computer's reduce-motion setting gives Off.")
+        }
+        crate::motion::Level::Off => {
+            tr!(
+                "Off: every change happens at once and the sync bar becomes words. It is what the computer's reduce-motion setting gives until you choose."
+            )
+        }
     }
 }
 
-/// The name of an icon set, as it is written.
-fn icons_name(icons: Icons) -> &'static str {
-    match icons {
-        Icons::Phosphor => "Phosphor",
-        Icons::Lucide => "Lucide",
-    }
+/// The inbox views in the order Appearance offers them, each with the name the design gives it: Grouped opens every
+/// group, Smart shows the first rows of each, List is one list by time. The one place that names them.
+pub(super) fn inbox_views() -> [(InboxView, &'static str); 3] {
+    [(InboxView::Grouped, tr!("Grouped")), (InboxView::Smart, tr!("Smart")), (InboxView::List, tr!("List"))]
 }
 
-/// The name of a window frame.
-fn frame_name(frame: WindowFrame) -> &'static str {
-    match frame {
-        WindowFrame::System => tr!("Title bar"),
-        WindowFrame::TopRow => tr!("Top row"),
-        WindowFrame::Strip => tr!("Strip"),
-    }
-}
-
-/// The sections of the settings, with their icons and the page of those that are built.
-fn sections() -> [(IconId, &'static str, Option<Section>); 9] {
-    [
-        (IconId::Palette, tr!("Appearance"), Some(Section::Appearance)),
-        (IconId::At, tr!("Accounts"), Some(Section::Accounts)),
-        (IconId::Notify, tr!("Notifications"), Some(Section::Notifications)),
-        (IconId::Funnel, tr!("Triage"), Some(Section::Triage)),
-        (IconId::Send, tr!("Sending"), Some(Section::Sending)),
-        (IconId::Calendar, tr!("Calendar"), None),
-        (IconId::Keyboard, tr!("Shortcuts"), Some(Section::Shortcuts)),
-        (IconId::Shield, tr!("Privacy"), None),
-        (IconId::Info, tr!("About"), None),
-    ]
-}
-
-/// The name of a section.
-fn section_name(section: Section) -> &'static str {
+/// The icon of a section in the list.
+fn section_icon(section: Section) -> IconId {
     match section {
-        Section::Appearance => tr!("Appearance"),
-        Section::Accounts => tr!("Accounts"),
-        Section::Shortcuts => tr!("Shortcuts"),
-        Section::Sending => tr!("Sending"),
-        Section::Triage => tr!("Triage"),
-        Section::Notifications => tr!("Notifications"),
+        Section::Appearance => IconId::Palette,
+        Section::Accounts => IconId::At,
+        Section::Notifications => IconId::Notify,
+        Section::Triage => IconId::Funnel,
+        Section::Sending => IconId::Send,
+        Section::Calendar => IconId::Calendar,
+        Section::Shortcuts => IconId::Keyboard,
+        Section::Privacy => IconId::Shield,
+        Section::About => IconId::Info,
+        Section::Ai => IconId::Compose,
+        Section::Plugins => IconId::Add,
     }
 }
 
@@ -222,537 +330,552 @@ pub(super) fn screener_name(mode: ScreenerMode) -> &'static str {
     }
 }
 
-/// `stops` from the top left to the bottom right.
-fn diagonal(stops: [egui::Color32; 3]) -> Gradient {
-    let [first, middle, last] = stops;
-    Gradient::Linear { from: pos2(0.0, 0.0), to: pos2(1.0, 1.0), stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)] }
-}
-
-/// Whether `a` and `b` have the same colours, whatever they are called.
-fn same_colours(a: &Preset, b: &Preset) -> bool {
-    a.gradient == b.gradient && a.accent == b.accent
-}
-
-/// `font` in the SemiBold weight.
-fn semibold(font: Font) -> Font {
-    Font { face: Face::Sans(Weight::SemiBold), ..font }
-}
-
-fn note(ui: &mut Ui, theme: &Theme, text: &str) {
-    ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
-}
-
-/// A row's name and note.
-fn texts(ui: &mut Ui, theme: &Theme, title: &str, notes: &[&str]) {
-    ui.spacing_mut().item_spacing.y = 2.0;
-    ui.label(RichText::new(title).font(semibold(theme.fonts.body).id()).color(theme.palette.text));
-    for text in notes {
-        note(ui, theme, text);
+/// What the screener's `mode` does, as the help of its row.
+fn screener_help(mode: ScreenerMode) -> &'static str {
+    match mode {
+        ScreenerMode::Before => {
+            tr!("Before the inbox: the first mail of a sender you have not let in yet waits in New senders until you decide.")
+        }
+        ScreenerMode::Inside => tr!("Inside, marked: the first mail of a sender you have not let in yet shows in the inbox, marked."),
+        ScreenerMode::Off => tr!("Off: the first mail of a new sender comes in as any other."),
     }
 }
 
-/// A setting: its `title` and `notes` on the left and `control` at the right end, or under them when the row has no
-/// room for both, and a line under it. The control is measured in a pass that draws nothing and takes no press.
-fn row(ui: &mut Ui, theme: &Theme, title: &str, notes: &[&str], control: &mut dyn FnMut(&mut Ui)) {
-    row_with(ui, theme, None, title, notes, control);
+/// `text` in `font` and `colour`, wrapped to the room `ui` has.
+fn words(ui: &mut Ui, font: Font, text: &str, colour: egui::Color32) {
+    ui.add(egui::Label::new(font.rich(&crate::component::plain(text)).color(colour)).wrap());
 }
 
-/// The name and notes of a row, `width` wide, after its `icon` in the accent colour when it has one.
-fn heading(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: &str, notes: &[&str], width: f32) {
-    let Some(icon) = icon else {
-        ui.vertical(|ui| texts(ui, theme, title, notes));
-        return;
-    };
-    ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
-        let side = line_height(ui, theme.fonts.body) * 1.2;
-        let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-        theme.icons.paint(ui.painter(), rect, icon, Style::Regular, theme.palette.accent);
-        ui.add_space(theme.spacing.xs);
-        let used = side + theme.spacing.xs + ui.spacing().item_spacing.x * 2.0;
-        ui.vertical(|ui| {
-            ui.set_width((width - used).max(1.0));
-            texts(ui, theme, title, notes);
-        });
-    });
+/// Draws `add` in `ui` [`INSET`] in from either side, as far in as a settings row's words; what `add` gave.
+pub(super) fn inset<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let mut room = ui.available_rect_before_wrap();
+    room.min.x += INSET;
+    room.max.x = (room.max.x - INSET).max(room.min.x + 1.0);
+    let mut child = ui.new_child(UiBuilder::new().max_rect(room).layout(Layout::top_down(Align::Min)));
+    child.spacing_mut().item_spacing.y = 0.0;
+    let given = add(&mut child);
+    let used = child.min_rect();
+    ui.advance_cursor_after_rect(Rect::from_min_max(pos2(ui.max_rect().left(), used.top()), pos2(ui.max_rect().right(), used.bottom())));
+    given
 }
 
-/// A row as [`row`] draws it, with an `icon` before its name.
-pub(super) fn row_with(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: &str, notes: &[&str], control: &mut dyn FnMut(&mut Ui)) {
-    let s = &theme.spacing;
-    ui.add_space(s.l);
-    let width = ui.available_width();
-    let mut sizing = ui
-        .new_child(UiBuilder::new().max_rect(ui.available_rect_before_wrap()).layout(Layout::left_to_right(Align::Center)).sizing_pass().invisible());
-    control(&mut sizing);
-    let need = sizing.min_rect().width();
-    let room = width - need - s.l;
-    if room < TEXT_MIN {
-        heading(ui, theme, icon, title, notes, width);
-        ui.add_space(s.xs);
-        ui.horizontal_wrapped(|ui| control(ui));
-    } else {
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.set_width(room);
-                heading(ui, theme, icon, title, notes, room);
-            });
-            ui.add_space((width - room - need - 2.0 * ui.spacing().item_spacing.x).max(0.0));
-            control(ui);
-        });
-    }
-    ui.add_space(s.m);
+/// A `panel_line` hairline across `ui` at its cursor, and the pixel it takes.
+pub(super) fn rule(ui: &mut Ui, theme: &Theme) {
+    rule_in(ui, theme.palette.panel_line);
+}
+
+/// A hairline in `colour` across `ui` at its cursor, and the pixel it takes.
+fn rule_in(ui: &mut Ui, colour: egui::Color32) {
     let y = ui.cursor().top();
-    ui.painter().hline(ui.max_rect().x_range(), y, Stroke::new(1.0, theme.palette.line));
+    let x = ui.max_rect().x_range();
+    paint::hairline(ui.painter(), pos2(x.min, y), pos2(x.max - 1.0, y), colour);
     ui.add_space(1.0);
 }
 
-/// A card: a picture `swatch` big drawn by `paint`, its `name` under it; framed in the focus colour while `on`.
-fn card(ui: &mut Ui, theme: &Theme, name: &str, on: bool, swatch: [f32; 2], paint: impl FnOnce(&Painter, Rect)) -> Response {
+/// The room between the lines of a page's head, in points.
+const HEAD_GAP: f32 = 6.0;
+
+/// The height of the line that says where a page is.
+fn where_high(theme: &Theme) -> f32 {
+    16.0_f32.max(theme.fonts.label.line).ceil()
+}
+
+/// The height of a page's title line.
+fn title_high(theme: &Theme) -> f32 {
+    32.0_f32.max(theme.fonts.title.line).ceil()
+}
+
+/// The tag on the [`Ui`] of a page that stands alone in the body (one pane): its head leads back to the list.
+const ALONE: &str = "inboxcraft-settings-page-alone";
+
+/// Whether `ui` draws a page that stands alone in the body, in one pane.
+fn alone(ui: &Ui) -> bool {
+    ui.stack().iter().any(|frame| frame.tags().contains(ALONE))
+}
+
+/// Where the frame notes that the page's way back to the list was pressed.
+fn back_pressed_id() -> Id {
+    Id::unique("settings-back-pressed")
+}
+
+/// Where the frame notes that the keyboard goes to the page's way back to the list.
+fn back_focus_id() -> Id {
+    Id::unique("settings-back-focus")
+}
+
+/// Where the last frame noted that a page's head showed the way back to the list.
+fn back_drawn_id() -> Id {
+    Id::unique("settings-back-drawn")
+}
+
+/// Where the frame notes which of the two ways between the list and the page had the keyboard: a section's row (1) or
+/// the page's `← Settings` (2). Crossing Mail's breakpoint the one shown takes the keyboard the other had.
+fn keyboard_id() -> Id {
+    Id::unique("settings-keyboard-on")
+}
+
+/// Notes that the keyboard is on a section's row (1) or on `← Settings` (2) this frame.
+fn note_keyboard(ctx: &egui::Context, on: u8) {
+    ctx.data_mut(|data| data.insert_temp(keyboard_id(), on));
+}
+
+/// Whether the last frame's settings showed a section's page alone, with `← Settings` in its head, and no field of it
+/// had the keyboard: `Esc` goes back to the list of sections then (a field's Esc is the field's).
+pub(super) fn back_shown(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(back_drawn_id())).unwrap_or(false)
+}
+
+/// A page's head: where it is (`[ 04 ] SETTINGS · <SECTION>`; alone in one pane, `← Settings`, the way back to the list
+/// of sections), its title with `action` at its right end and, on a planned section, the coming-soon mark there; then
+/// `intro`, a sentence a line.
+pub(super) fn head(ui: &mut Ui, theme: &Theme, section: Section, intro: &[&str], action: impl FnOnce(&mut Ui)) {
     let p = &theme.palette;
-    let s = &theme.spacing;
-    let caption = semibold(theme.fonts.caption);
-    let galley = line(ui, &[(name, caption, p.text)], f32::INFINITY);
-    let size = vec2(swatch[0].max(galley.size().x) + s.s * 2.0, s.s + swatch[1] + s.xs + galley.size().y + s.s);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, name));
+    let alone = alone(ui);
+    inset(ui, |ui| {
+        let width = ui.available_width();
+        ui.allocate_ui_with_layout(vec2(width, where_high(theme)), Layout::left_to_right(Align::Center), |ui| {
+            if !alone {
+                section_label(ui, theme, "[ 04 ]", &tr!("Settings · {section}", section = section.name()), false);
+                return;
+            }
+            // No action of the window: the link's tooltip names it with no key.
+            let back = link_sized(ui, theme, &Keymap::empty(), tr!("← Settings"), LinkSize::Small);
+            let ctx = ui.ctx().clone();
+            ctx.data_mut(|data| data.insert_temp(back_drawn_id(), true));
+            if ctx.data_mut(|data| data.remove_temp::<bool>(back_focus_id())).unwrap_or(false) {
+                back.request_focus();
+            }
+            if back.clicked() {
+                ctx.data_mut(|data| data.insert_temp(back_pressed_id(), true));
+            }
+            if back.has_focus() {
+                note_keyboard(&ctx, 2);
+            }
+        });
+        ui.add_space(HEAD_GAP);
+        let tall = title_high(theme);
+        ui.allocate_ui_with_layout(vec2(width, tall), Layout::left_to_right(Align::Center), |ui| {
+            ui.set_min_height(tall);
+            let title = crate::component::label(ui, theme.fonts.title, section.name(), p.ink);
+            title.widget_info(|| WidgetInfo::labeled(Role::Heading, true, section.name()));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if section.planned() {
+                    crate::component::soon::soon_tag(ui, theme);
+                }
+                action(ui);
+            });
+        });
+        for line in intro {
+            ui.add_space(6.0);
+            words(ui, theme.fonts.body, line, p.muted);
+        }
+    });
+}
+
+/// A group of settings: its label (`[ A ] LOOK`), the sentence it needs if any, and the hairline its first row hangs
+/// from.
+pub(super) fn group(ui: &mut Ui, theme: &Theme, index: &str, word: &str, note: Option<&str>) {
+    ui.add_space(GROUP_TOP);
+    inset(ui, |ui| {
+        section_label(ui, theme, &format!("[ {index} ]"), word, false);
+        if let Some(note) = note {
+            ui.add_space(4.0);
+            words(ui, theme.fonts.caption, note, theme.palette.muted);
+        }
+    });
+    ui.add_space(GROUP_UNDER);
+    rule(ui, theme);
+}
+
+/// The page's body under its head, scrolling when it is taller than the sheet. Its rows keep the column's whole width:
+/// the scroll bar stands beside the column, in the page's room, never over a row or its focus edge.
+pub(super) fn body<R>(ui: &mut Ui, theme: &Theme, salt: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    scrolled(ui, theme, salt, true, add)
+}
+
+/// Where the frame notes the right edge of the window's body, for the scroll bar of a page taller than it.
+fn edge_id() -> Id {
+    Id::unique("settings-body-edge")
+}
+
+/// [`body`]: with `to_edge`, the scroll bar stands at the right edge of the window's body (a page taller than the body,
+/// as the design's narrow and 130 % frames draw it); without, beside the column (the Shortcuts page's list).
+fn scrolled<R>(ui: &mut Ui, theme: &Theme, salt: &str, to_edge: bool, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let width = ui.available_width().floor().max(1.0);
+    let mut room = ui.available_rect_before_wrap();
+    let beside = room.max.x + theme.sizes.scrollbar * 2.0;
+    let edge = if to_edge { ui.ctx().data(|data| data.get_temp::<f32>(edge_id())) } else { None };
+    room.max.x = edge.filter(|edge| edge.is_finite()).map_or(beside, |edge| edge.max(room.max.x));
+    let mut child = ui.new_child(UiBuilder::new().max_rect(room).layout(Layout::top_down(Align::Min)));
+    let area = ScrollArea::vertical().id_salt(("settings-page", salt)).auto_shrink([false, false]);
+    let given = crate::component::scroll::show(&mut child, theme, area, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        ui.set_width(width);
+        let given = on_page(ui, add);
+        follow_focus(ui);
+        given
+    })
+    .inner;
+    ui.advance_cursor_after_rect(child.min_rect());
+    given
+}
+
+/// Called last inside a scrolled page: the keyboard just came to a control of it, so the page scrolls to it, wherever
+/// it was. Only on the frame the focus arrives, so it never fights the wheel.
+pub(super) fn follow_focus(ui: &mut Ui) {
+    let ctx = ui.ctx().clone();
+    let arrived = ctx.memory(|memory| memory.focused().filter(|focused| !memory.had_focus_last_frame(*focused)));
+    if let Some(control) = arrived.and_then(|focused| ctx.read_response(focused)).filter(|control| ui.min_rect().contains_rect(control.rect)) {
+        ui.scroll_to_rect(control.rect, None);
+    }
+}
+
+/// Draws `add`, one row of a page that has a row for every account, only where it is near enough to be seen: within a
+/// view's height above or below what the page shows, so `Tab` still reaches the next row, which the page ([`body`])
+/// then scrolls to. Elsewhere the row takes the height it last had and lays nothing out: a page with hundreds of
+/// accounts builds the rows in sight only. The first time a row is drawn it is laid out wherever it is. A row at one
+/// of the run's `ends` is always laid out, so `Tab` and `Shift+Tab` coming round the sheet reach the first and the last
+/// account. A height kept at another width or text size is dropped: the row is laid out again.
+pub(super) fn culled(ui: &mut Ui, theme: &Theme, id: Id, ends: bool, add: impl FnOnce(&mut Ui)) {
+    let width = ui.available_width();
+    let top = ui.cursor().top();
+    let laid = Laid { width, text: theme.fonts.body.size, height: 0.0 };
+    let known = ui.ctx().data(|data| data.get_temp::<Laid>(id)).filter(|kept| kept.width == laid.width && kept.text == laid.text);
+    if let Some(height) = known.map(|kept| kept.height).filter(|_| !ends) {
+        let clip = ui.clip_rect();
+        let near = clip.expand2(vec2(0.0, clip.height()));
+        let row = Rect::from_min_size(pos2(ui.max_rect().left(), top), vec2(width, height));
+        if !near.intersects(row) {
+            ui.allocate_space(vec2(width, height));
+            return;
+        }
+    }
+    add(ui);
+    let height = (ui.cursor().top() - top).max(0.0);
+    if known.is_none_or(|kept| kept.height != height) {
+        ui.ctx().data_mut(|data| data.insert_temp(id, Laid { height, ..laid }));
+    }
+}
+
+/// A row's height as [`culled`] last laid it out, with the width and the text size it was laid out at.
+#[derive(Debug, Clone, Copy)]
+struct Laid {
+    /// The room's width, in points.
+    width: f32,
+    /// The body text's size, in points.
+    text: f32,
+    /// The row's height, in points.
+    height: f32,
+}
+
+/// The Appearance page: Look, then Layout.
+fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, level: crate::motion::Level, view: InboxView) -> Option<Asked> {
+    let mut asked = None;
+    let f = &theme.fonts;
+    head(ui, theme, Section::Appearance, &[], |_| {});
+    body(ui, theme, "appearance", |ui| {
+        group(ui, theme, "A", tr!("Look"), None);
+        let modes = MODES.map(|mode| (mode, mode_name(mode), f.button));
+        settings_row(ui, theme, tr!("Mode"), Some(tr!("Auto follows the computer's light or dark choice.")), |ui| {
+            if let Some(mode) = segmented(ui, theme, &modes, current.theme) {
+                asked = Some(Asked::Mode(mode));
+            }
+        });
+        // The design's three levels; the help says what the level shown does (until the owner chooses, the
+        // computer's wish for less motion shows Off).
+        let levels = LEVELS.map(|level| (level, motion_name(level), f.button));
+        settings_row(ui, theme, tr!("Motion"), Some(motion_help(level)), |ui| {
+            // Until the owner chooses, a press on the level shown chooses it; once chosen, that press asks nothing.
+            let pressed = segmented_again(ui, theme, &levels, level, Some(tr!("Motion")));
+            if let Some(chosen) = pressed.filter(|chosen| *chosen != level || !current.motion_chosen()) {
+                asked = Some(Asked::Motion(chosen));
+            }
+        });
+        let now = TextScale::from_percent(current.text_scale).unwrap_or_default();
+        settings_row(ui, theme, tr!("Text size"), Some(tr!("90 % to 130 %. Rows and bars follow the type.")), |ui| {
+            if let Some(scale) = slider::text_size(ui, theme, now) {
+                asked = Some(Asked::Scale(scale));
+            }
+        });
+        group(ui, theme, "B", tr!("Layout"), None);
+        let views = inbox_views().map(|(view, name)| (view, name, f.button));
+        let view_help = tr!("Grouped opens every group, Smart shows the first three rows of each, List is one list by time.");
+        settings_row(ui, theme, tr!("Inbox view"), Some(view_help), |ui| {
+            if let Some(chosen) = segmented(ui, theme, &views, view) {
+                asked = Some(Asked::InboxView(chosen));
+            }
+        });
+        let readers = [(ReaderHost::Docked, tr!("Pane"), f.button), (ReaderHost::Window, tr!("Window"), f.button)];
+        let reader_help = tr!("In the pane beside the list, or in a window of its own.");
+        settings_row(ui, theme, tr!("Open a message"), Some(reader_help), |ui| {
+            // A press on the host shown asks nothing: the control answers another host only.
+            if let Some(host) = segmented_for(ui, theme, &readers, current.layout.reader, Some(tr!("Open a message"))) {
+                asked = Some(Asked::ReaderHost(host));
+            }
+        });
+        // The owner's three hosts; a choice of the one shown asks nothing, and a held key's repeat chooses nothing.
+        let hosts = [
+            (ComposerHost::Docked, tr!("Pane"), f.button),
+            (ComposerHost::Floating, tr!("Floating"), f.button),
+            (ComposerHost::Window, tr!("Window"), f.button),
+        ];
+        let host_help = tr!("Docked in the reader's place, floating over it, or in a window of its own.");
+        settings_row(ui, theme, tr!("Write a message"), Some(host_help), |ui| {
+            let chosen = segmented_for(ui, theme, &hosts, current.layout.composer, Some(tr!("Write a message")));
+            if let Some(host) = chosen.filter(|host| *host != current.layout.composer && !crate::component::button::key_repeated(ui)) {
+                asked = Some(Asked::Composer(host));
+            }
+        });
+        // The design's two frames: InboxCraft's own (the command line is the title bar) and the desktop's title bar.
+        let frames = [(WindowFrame::Own, tr!("Own"), f.button), (WindowFrame::System, tr!("System"), f.button)];
+        let frame_help = tr!("InboxCraft's own frame, where the command line is the title bar, or the desktop's title bar above it.");
+        settings_row(ui, theme, tr!("Window frame"), Some(frame_help), |ui| {
+            if let Some(frame) = segmented(ui, theme, &frames, current.frame) {
+                asked = Some(Asked::Frame(frame));
+            }
+        });
+    });
+    asked
+}
+
+/// The height of a section's row, in points (at 100 %).
+const SECTION_ROW: f32 = 30.0;
+
+/// Where a section row's icon starts, from the row's left edge (its 2 px bar, then 42), in points.
+const SECTION_ICON_AT: f32 = 44.0;
+
+/// The room between a section row's icon and its name, and right of the name, in points.
+const SECTION_GAP: f32 = 10.0;
+
+/// The room right of a section row's name, in points.
+const SECTION_RIGHT: f32 = 14.0;
+
+/// One section in the list, the design's `mailbox-row`: 30 high, the icon 16 and the name in `body`, both `muted`;
+/// hovered, the `grid` fill and both `ink`; the section shown, the `stage` fill, a 2 px `cyan_edge` bar at its left
+/// and both `ink`; focused, the inside ring.
+fn section_row(ui: &mut Ui, theme: &Theme, section: Section, shown: bool) -> Response {
+    let p = &theme.palette;
+    let name = section.name();
+    let height = Theme::size(theme, SECTION_ROW).max(theme.fonts.body.line + 8.0).ceil();
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, shown, tr!("{section}, settings page", section = name)));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        if response.hovered() {
-            painter.rect_filled(rect, s.m, p.hover);
+        let hovered = response.hovered() && !shown;
+        if shown {
+            painter.rect_filled(paint::on_pixels(painter, rect), 0.0, p.stage);
+            painter.rect_filled(paint::on_pixels(painter, Rect::from_min_size(rect.min, vec2(2.0, rect.height()))), 0.0, p.cyan_edge);
+        } else if hovered {
+            painter.rect_filled(rect, 0.0, p.grid);
         }
-        let stroke = if on { Stroke::new(2.0, p.focus) } else { Stroke::new(1.0, p.field_border) };
-        painter.rect_stroke(rect, s.m, stroke, StrokeKind::Inside);
-        let picture = Rect::from_min_size(pos2(rect.center().x - swatch[0] / 2.0, rect.top() + s.s), vec2(swatch[0], swatch[1]));
-        paint(painter, picture);
-        painter.galley(pos2(rect.center().x - galley.size().x / 2.0, picture.bottom() + s.xs), galley, p.text);
-        focus_ring(ui, theme, &response);
+        let ink = if shown || hovered { p.ink } else { p.muted };
+        let side = theme.icon_side();
+        let left = rect.left() + SECTION_ICON_AT;
+        let icon = Rect::from_min_size(pos2(left, (rect.center().y - side / 2.0).round()), vec2(side, side));
+        crate::iconset::paint(painter, icon, section_icon(section), ink);
+        let at = icon.right() + SECTION_GAP;
+        let words = paint::line(ui, &[(name, theme.fonts.body, ink)], (rect.right() - SECTION_RIGHT - at).max(1.0));
+        ui.painter().galley(pos2(at, (rect.center().y - words.size().y / 2.0).round()), words, ink);
+        if response.has_focus() {
+            focus_ring(ui.painter(), theme, rect, Ring::Inside);
+        }
     }
     response
 }
 
-/// The accent cards: each preset's gradient, and Custom with a plus. Custom takes the colours of the fields, when they
-/// are colours.
-fn accents(ui: &mut Ui, theme: &Theme, settings: &Settings, current: &Appearance) -> Option<Asked> {
+/// "<n> sections": every row the list shows, the two planned ones, AI and Plugins, among them (the design's list has
+/// nine rows and says nine).
+fn section_count() -> String {
+    tr!("{count} sections", count = Section::ALL.len())
+}
+
+/// The list of sections: its head ("Settings" and how many sections there are), a `line` hairline, then a row per
+/// section, the one shown selected. The section pressed. Alone in one pane (`alone`) no row is selected and a press on
+/// any row, the one shown too, opens its page.
+fn nav(ui: &mut Ui, theme: &Theme, shown: Section, to_shown: bool, alone: bool) -> Option<Asked> {
     let p = &theme.palette;
-    let chosen = match current.accent {
-        Accent::Preset(id) => id,
-        Accent::Custom(_) => "custom",
-    };
+    let f = &theme.fonts;
+    let width = ui.available_width();
+    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+    let tall = NAV_HEAD.max(f.heading.line);
     let mut asked = None;
-    for preset in &PRESETS {
-        let gradient = diagonal(preset.gradient);
-        if card(ui, theme, preset_name(preset.id), chosen == preset.id, SWATCH, |painter, rect| gradient::fill(painter, rect, 8.0, &gradient))
-            .clicked()
-        {
-            asked = Some(Asked::Preset(preset.id));
-        }
-    }
-    let custom = card(ui, theme, tr!("Custom"), chosen == "custom", SWATCH, |painter, rect| {
-        painter.rect_filled(rect, 8.0, p.panel);
-        let side = rect.height() * 0.45;
-        theme.icons.paint(painter, Rect::from_center_size(rect.center(), vec2(side, side)), IconId::Add, Style::Regular, p.muted);
+    ui.allocate_ui_with_layout(vec2(width, tall), Layout::left_to_right(Align::Center), |ui| {
+        ui.set_min_height(tall);
+        ui.add_space(INSET);
+        crate::component::label(ui, f.heading, tr!("Settings"), p.ink);
+        ui.add_space(10.0);
+        let count = section_count();
+        // Cut only where there is no room (a window too small for the column).
+        let room = ui.available_width() - INSET;
+        let words = crate::component::cut(ui, &count, f.mono_s, p.muted, room);
+        let (at, said) = ui.allocate_exact_size(words.size(), Sense::hover());
+        said.widget_info(|| WidgetInfo::labeled(Role::Label, true, &count));
+        ui.painter().galley(at.min, words, p.muted);
     });
-    if custom.clicked() {
-        asked = settings.custom().map(Asked::Custom);
+    rule_in(ui, p.line);
+    ui.add_space(NAV_GAP);
+    for section in Section::ALL {
+        let row = section_row(ui, theme, section, !alone && section == shown);
+        if to_shown && section == shown {
+            row.request_focus();
+        }
+        if row.clicked() && (alone || section != shown) {
+            asked = Some(Asked::Section(section));
+        }
+        if row.has_focus() {
+            note_keyboard(ui.ctx(), 1);
+        }
     }
     asked
 }
 
-/// The four colour fields of the custom accent, each with a picker; whether "Use these colours" was pressed.
-fn custom(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings) -> Option<Asked> {
-    let names = [tr!("Gradient start"), tr!("Gradient middle"), tr!("Gradient end"), tr!("Accent")];
-    egui::Grid::new("custom-accent").num_columns(3).spacing(vec2(theme.spacing.m, theme.spacing.s)).show(ui, |ui| {
-        for (field, name) in settings.colours_mut().iter_mut().zip(names) {
-            let label = ui.label(name);
-            let mut picked = crate::settings::colour(field).unwrap_or(theme.palette.muted);
-            if ui.color_edit_button_srgba(&mut picked).labelled_by(label.id).changed() {
-                *field = crate::settings::hex(picked);
-            }
-            let edit = TextEdit::singleline(field)
-                .char_limit(MAX_CHARS)
-                .margin(crate::component::field::margin(theme))
-                .desired_width(theme.spacing.xl * 4.0)
-                .font(theme.fonts.mono.id());
-            let _ = ui.add(edit).labelled_by(label.id);
-            ui.end_row();
-        }
-    });
-    let custom = settings.custom();
-    if custom.is_none() {
-        note(ui, theme, tr!("Write each colour as # and six hex digits, like #2f6bff."));
-    }
-    if let Some(text) = settings.note() {
-        note(ui, theme, text);
-    }
-    ui.add_space(theme.spacing.xs);
-    let pressed =
-        ui.add_enabled_ui(custom.is_some(), |ui| TextButton::new(tr!("Use these colours")).primary().show(ui, theme, keymap)).inner.clicked();
-    custom.filter(|_| pressed).map(Asked::Custom)
-}
-
-/// A small window as `frame` draws it: the desktop's bar, or the window controls in the top row or on a strip.
-fn thumb(painter: &Painter, theme: &Theme, rect: Rect, frame: WindowFrame) {
-    let p = &theme.palette;
-    painter.rect_filled(rect, 6.0, p.background);
-    let bar = if frame == WindowFrame::System { 9.0 } else { 0.0 };
-    if bar > 0.0 {
-        painter.rect_filled(Rect::from_min_size(rect.min, vec2(rect.width(), bar)), egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, p.muted);
-    }
-    let rail = Rect::from_min_size(pos2(rect.left(), rect.top() + bar), vec2(9.0, rect.height() - bar));
-    let [first, middle, last] = p.gradient;
-    let down = Gradient::Linear {
-        from: pos2(0.5, 0.0),
-        to: pos2(0.5, 1.0),
-        stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
-    };
-    let round = if bar > 0.0 {
-        egui::CornerRadius { sw: 6, ..egui::CornerRadius::ZERO }
-    } else {
-        egui::CornerRadius { nw: 6, sw: 6, ..egui::CornerRadius::ZERO }
-    };
-    gradient::fill(painter, rail, round, &down);
-    let top = rect.top() + bar + if frame == WindowFrame::Strip { 9.0 } else { 3.0 };
-    for (x, w) in [(12.0, 22.0), (37.0, 44.0)] {
-        painter.rect_filled(Rect::from_min_max(pos2(rect.left() + x, top), pos2(rect.left() + x + w, rect.bottom() - 3.0)), 2.0, p.surface);
-    }
-    if frame != WindowFrame::System {
-        let y = if frame == WindowFrame::Strip { rect.top() + 3.5 } else { top + 3.5 };
-        for i in 0..3_u8 {
-            painter.circle_filled(pos2(rect.right() - 7.5 - f32::from(i) * 5.0, y), 1.5, p.text);
-        }
-    }
-    painter.rect_stroke(rect, 6.0, Stroke::new(1.0, p.field_border), StrokeKind::Inside);
-}
-
-/// The text size as a slider over the steps from 90 % to 130 %, a small and a large A at its ends and the size after
-/// it. A press or a drag sets the step under the pointer; the arrow keys move it one step.
-fn text_size(ui: &mut Ui, theme: &Theme, now: TextScale) -> Option<TextScale> {
-    let p = &theme.palette;
-    let steps = TextScale::ALL;
-    let last = steps.len().saturating_sub(1).max(1);
-    let index = steps.iter().position(|step| *step == now).unwrap_or(1);
-    ui.label(RichText::new("A").font(theme.fonts.caption.id()).color(p.muted));
-    let knob = 16.0;
-    let (rect, response) = ui.allocate_exact_size(vec2(TRACK[0], knob), Sense::click_and_drag());
-    let name = tr!("Text size");
-    response.widget_info(|| WidgetInfo::slider(true, f64::from(now.percent()), name));
-    let mut wanted = None;
-    if response.clicked() || response.dragged() {
-        response.request_focus();
-        if let Some(at) = response.interact_pointer_pos() {
-            let t = ((at.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-            // The nearest step; the cast is of a small index.
-            wanted = Some((t * last as f32).round() as usize);
-        }
-    }
-    if response.has_focus() {
-        let (left, right) = ui.input(|input| (input.key_pressed(Key::ArrowLeft), input.key_pressed(Key::ArrowRight)));
-        if left {
-            wanted = Some(index.saturating_sub(1));
-        } else if right {
-            wanted = Some((index + 1).min(last));
-        }
-    }
-    if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
-        let track = Rect::from_center_size(rect.center(), vec2(TRACK[0], TRACK[1]));
-        painter.rect_filled(track, TRACK[1] / 2.0, p.panel);
-        // An index of five steps.
-        let x = track.left() + track.width() * index as f32 / last as f32;
-        let done = Rect::from_min_max(track.min, pos2(x.max(track.left() + TRACK[1]), track.bottom()));
-        let [first, middle, last_stop] = p.gradient;
-        let across = Gradient::Linear {
-            from: pos2(0.0, 0.5),
-            to: pos2(1.0, 0.5),
-            stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last_stop)],
-        };
-        gradient::fill(painter, done, TRACK[1] / 2.0, &across);
-        painter.circle_filled(pos2(x, rect.center().y), knob / 2.0, p.field);
-        painter.circle_stroke(pos2(x, rect.center().y), knob / 2.0, Stroke::new(1.0, p.field_border));
-        if response.has_focus() {
-            painter.circle_stroke(pos2(x, rect.center().y), knob / 2.0 + 2.0, Stroke::new(2.0, p.focus));
-        }
-    }
-    ui.label(RichText::new("A").font(theme.fonts.title.id()).color(p.muted));
-    ui.label(RichText::new(tr!("{percent} %", percent = now.percent())).font(semibold(theme.fonts.body).id()).color(p.text));
-    wanted.and_then(|at| steps.get(at).copied()).filter(|step| *step != now)
-}
-
-/// The rows of the Appearance page; what was asked for.
-fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, current: &Appearance, reduce: bool) -> Option<Asked> {
-    let mut asked = None;
-    let f = &theme.fonts;
-    let modes = ThemeMode::ALL.map(|mode| (mode, mode_name(mode), f.button));
-    row(ui, theme, tr!("Mode"), &[tr!("System follows the computer's light or dark choice.")], &mut |ui| {
-        if let Some(mode) = segmented(ui, theme, &modes, current.theme) {
-            asked = Some(Asked::Mode(mode));
-        }
-    });
-    let accent_note =
-        tr!("Three gradient stops and an accent. A custom set that misses the contrast rules is nudged in lightness, and you are told.");
-    row(ui, theme, tr!("Accent"), &[accent_note], &mut |ui| {
-        if let Some(chosen) = accents(ui, theme, settings, current) {
-            asked = Some(chosen);
-        }
-    });
-    // The custom accent's fields, while it is in use or the colours typed differ from those in use.
-    let editing =
-        matches!(current.accent, Accent::Custom(_)) || settings.draft().is_none_or(|draft| !same_colours(&draft, &Preset::of(&current.accent)));
-    if editing {
-        ui.add_space(theme.spacing.s);
-        let about = tr!("Three colours for the gradient and one for links and accent text; the preview shows them as you type.");
-        texts(ui, theme, tr!("Custom accent"), &[about]);
-        ui.add_space(theme.spacing.xs);
-        asked = asked.or(custom(ui, theme, keymap, settings));
-        ui.add_space(theme.spacing.s);
-        ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, theme.palette.line));
-        ui.add_space(1.0);
-    }
-    // Each typeface's name is written in it.
-    let faces = Typeface::ALL.map(|typeface| (typeface, font_name(typeface), Font { typeface, ..f.button }));
-    row(ui, theme, tr!("Typeface"), &[], &mut |ui| {
-        if let Some(typeface) = segmented(ui, theme, &faces, current.font) {
-            asked = Some(Asked::Font(typeface));
-        }
-    });
-    let sets = Icons::ALL.map(|icons| (icons, icons_name(icons), f.button));
-    row(ui, theme, tr!("Icons"), &[], &mut |ui| {
-        if let Some(icons) = segmented(ui, theme, &sets, current.icons) {
-            asked = Some(Asked::Icons(icons));
-        }
-    });
-    row(ui, theme, tr!("Window frame"), &[tr!("The system's title bar, or a frame in the app's own colours.")], &mut |ui| {
-        for frame in WindowFrame::ALL {
-            if card(ui, theme, frame_name(frame), current.frame == frame, THUMB, |painter, rect| thumb(painter, theme, rect, frame)).clicked() {
-                asked = Some(Asked::Frame(frame));
-            }
-        }
-    });
-    let now = TextScale::from_percent(current.text_scale).unwrap_or_default();
-    row(ui, theme, tr!("Text size"), &[tr!("90 % to 130 %. Rows and toolbars follow the font.")], &mut |ui| {
-        if let Some(scale) = text_size(ui, theme, now) {
-            asked = Some(Asked::Scale(scale));
-        }
-    });
-    let mut motion_notes = vec![tr!("Every motion lands at its end at once.")];
-    if current.motion == Motion::System {
-        motion_notes.push(tr!("Until you choose, motion follows the system where InboxCraft can read it, and runs elsewhere."));
-    }
-    row(ui, theme, tr!("Reduce motion"), &motion_notes, &mut |ui| {
-        if switch(ui, theme, tr!("Reduce motion"), reduce).clicked() {
-            asked = Some(Asked::ReduceMotion(!reduce));
-        }
-    });
-    asked
-}
-
-/// A message row of the preview, drawn like the list's.
-fn preview_row(ui: &mut Ui, theme: &Theme, sender: (&str, &str), subject: &str, time: &str, selected: bool, unread: bool) {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let f = &theme.fonts;
-    let first = line_height(ui, f.sender_unread).max(line_height(ui, f.caption));
-    let second = line_height(ui, f.subject);
-    let height = first + second + s.s * 1.5;
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-    let painter = ui.painter();
-    if selected {
-        selection(painter, theme, rect, s.corner);
-    }
-    let side = (first + second).min(height - s.s);
-    let face = Rect::from_min_size(pos2(rect.left() + s.m + s.xs, rect.center().y - side / 2.0), vec2(side, side));
-    avatar::paint(painter, theme, face, sender.0, sender.1);
-    if unread {
-        painter.circle_filled(pos2(rect.left() + s.s, rect.center().y), 3.5, p.unread);
-    }
-    let left = face.right() + s.m;
-    let time = line(ui, &[(time, f.caption, p.muted)], rect.width());
-    let right = rect.right() - s.m;
-    let top = rect.top() + s.s * 0.75;
-    painter.galley(pos2(right - time.size().x, top + (first - time.size().y) / 2.0), time.clone(), p.muted);
-    let sender_font = if unread { f.sender_unread } else { f.sender };
-    let name = line(ui, &[(sender.0, sender_font, p.text)], (right - time.size().x - s.s - left).max(1.0));
-    painter.galley(pos2(left, top + (first - name.size().y) / 2.0), name, p.text);
-    let subject = line(ui, &[(subject, if unread { f.subject_unread } else { f.subject }, p.text)], (right - left).max(1.0));
-    painter.galley(pos2(left, top + first), subject, p.text);
-}
-
-/// The preview: two rows of the list, the first one selected, in `theme`.
-fn preview(ui: &mut Ui, theme: &Theme) {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    ui.add_space(s.m);
-    ui.label(RichText::new(tr!("Preview")).font(semibold(theme.fonts.caption).id()).color(p.muted));
-    ui.add_space(s.xs);
-    Frame::new().fill(p.background).stroke(Stroke::new(1.0, p.glass_edge)).corner_radius(s.card).inner_margin(s.s).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        preview_row(ui, theme, ("Odile Brannock", "odile@example.org"), tr!("Allotment rota for November"), "08:35", true, true);
-        preview_row(ui, theme, ("Teodor Lisk", "teodor@example.org"), tr!("Photos from the coast walk"), tr!("Yesterday"), false, false);
-    });
-}
-
-/// The sections on the left: the title, then a row each, the one shown selected; those not built yet are faded and
-/// say so. The section pressed.
-fn nav(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: Section) -> Option<Section> {
-    ui.spacing_mut().item_spacing.y = 2.0;
-    ui.label(RichText::new(tr!("Settings")).font(theme.fonts.title.id()).color(theme.palette.text));
-    ui.add_space(theme.spacing.s);
-    let mut pressed = None;
-    for (icon, name, section) in sections() {
-        let row = NavRow {
-            text: name,
-            spoken: tr!("{section}, settings page", section = name),
-            badge: 0,
-            selected: section == Some(shown),
-            depth: 0,
-            icon: Some(icon),
-            enabled: section.is_some(),
-        };
-        let response = nav_row(ui, theme, &row);
-        match section {
-            Some(section) if response.clicked() && section != shown => pressed = Some(section),
-            Some(_) => {}
-            None => {
-                tooltip::attach_note(response, theme, keymap, name, None, Some(tr!("Not available yet")));
-            }
-        }
-    }
-    pressed
-}
-
-/// The page shown: its title with Close, then Appearance's rows and preview, scrolling, or the Accounts page.
+/// The page shown.
 fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
-    let mut asked = None;
     let keymap = view.keymap;
-    let section = view.settings.section();
-    super::frame::beside(ui, theme, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(section_name(section)).font(theme.fonts.title.id()).color(theme.palette.text));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if IconButton::new(IconId::Close, tr!("Close")).show(ui, theme, keymap).clicked() {
-                    asked = Some(Asked::Close);
-                }
-            });
-        });
-    });
-    ui.add_space(theme.spacing.s);
-    let on_page = match section {
-        Section::Appearance => appearance(ui, theme, keymap, view.settings, view.current, view.reduce),
-        Section::Accounts => super::accounts::page(ui, theme, keymap, view.mailbox, view.onboarding, view.can_add),
+    let mailbox = view.mailbox;
+    if view.settings.under() == Some(crate::settings::Under::Templates) {
+        return templates::page(ui, theme, keymap, view.settings, mailbox);
+    }
+    if view.settings.under() == Some(crate::settings::Under::Scheduled) {
+        return scheduled::page(ui, theme, keymap, view.settings, mailbox);
+    }
+    match view.settings.section() {
+        Section::Appearance => appearance(ui, theme, view.current, view.level, mailbox.inbox_view()),
+        Section::Accounts => super::accounts::page(ui, theme, keymap, mailbox, view.onboarding, (view.can_add, view.writing)),
         Section::Shortcuts => shortcuts(ui, theme, keymap, view.settings),
-        Section::Sending => sending(ui, theme, keymap, view.settings, view.mailbox),
-        Section::Triage => triage(ui, theme, view.mailbox),
-        Section::Notifications => notifications(ui, theme, view.mailbox, view.settings, view.desk),
-    };
-    asked.or(on_page)
+        Section::Sending => sending(ui, theme, keymap, view.settings, mailbox),
+        Section::Triage => triage(ui, theme, mailbox),
+        Section::Notifications => notifications(ui, theme, mailbox, view.settings, view.desk),
+        Section::Calendar => planned::calendar(ui, theme, keymap, mailbox),
+        Section::Privacy => privacy::page(ui, theme, keymap, view.settings),
+        Section::About => planned::about(ui, theme),
+        Section::Ai => planned::ai(ui, theme),
+        Section::Plugins => planned::plugins(ui, theme),
+    }
 }
 
-/// The Appearance page under its title: the rows and the preview, scrolling.
-fn appearance(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, current: &Appearance, reduce: bool) -> Option<Asked> {
-    let mut asked = None;
-    let shown = match settings.draft() {
-        Some(draft) if matches!(current.accent, Accent::Custom(_)) || !same_colours(&draft, &Preset::of(&current.accent)) => {
-            Theme::of(theme.mode, &Look { preset: draft, text_scale: theme.text_scale, typeface: theme.typeface, icons: theme.icons })
-        }
-        _ => *theme,
-    };
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.set_max_width(ui.available_width() - theme.spacing.m);
-        asked = rows(ui, theme, keymap, settings, current, reduce);
-        preview(ui, &shown);
-    });
-    asked
-}
-
-/// A key as a chip that can be pressed: `shown` in a rounded frame, ringed in the focus colour while it `waits`.
-fn key_button(ui: &mut Ui, theme: &Theme, shown: &str, spoken: &str, waits: bool) -> Response {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let ink = if waits { p.accent } else { p.text };
-    let galley = line(ui, &[(shown, theme.fonts.caption, ink)], f32::INFINITY);
-    let size = galley.size() + vec2(s.s * 2.0, s.xs * 2.0);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+/// A key as a chip that can be pressed: `shown` in the chip `state` draws (the capture state while it waits).
+fn key_button(ui: &mut Ui, theme: &Theme, shown: &str, spoken: &str, state: ChipState) -> Response {
+    let chip = Chip::new(ui, theme, shown, state);
+    let (rect, response) = ui.allocate_exact_size(chip.size(), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, spoken));
     if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
-        painter.rect_filled(rect, s.corner, if response.hovered() { p.hover } else { p.panel });
-        let edge = if waits { Stroke::new(2.0, p.focus) } else { Stroke::new(1.0, p.field_border) };
-        painter.rect_stroke(rect, s.corner, edge, StrokeKind::Inside);
-        painter.galley(rect.center() - galley.size() / 2.0, galley, ink);
-        focus_ring(ui, theme, &response);
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 0.0, theme.palette.stage);
+        }
+        chip.paint(ui.painter(), rect.min);
+        if response.has_focus() {
+            focus_ring(ui.painter(), theme, response.rect, Ring::Outside);
+        }
     }
     response
 }
 
 /// The key of `action` on its row, drawn from the right in `ui`: the chip, which waits for a key when pressed, and
-/// Remove before it while it has one.
+/// "remove" before it while it has one.
 fn key_control(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, waits: bool) -> Option<Asked> {
     let mut asked = None;
     let chip = keymap.chip(ui.ctx(), action.id);
-    let (shown, spoken) = match (&chip, waits) {
-        (_, true) => (tr!("press a key…").to_owned(), tr!("{name}: press a key, or Escape to keep the old one", name = action.name)),
-        (Some(chip), false) => (chip.clone(), tr!("Key of {name}: {key}", name = action.name, key = chip)),
-        (None, false) => (tr!("No key").to_owned(), tr!("{name} has no key", name = action.name)),
+    let (shown, spoken, state) = match (&chip, waits) {
+        (_, true) => {
+            (tr!("press a key…").to_owned(), tr!("{name}: press a key, or Escape to keep the old one", name = action.name), ChipState::Capture)
+        }
+        (Some(chip), false) => (chip.clone(), tr!("Key of {name}: {key}", name = action.name, key = chip), ChipState::Default),
+        (None, false) => (tr!("No key").to_owned(), tr!("{name} has no key", name = action.name), ChipState::Disabled),
     };
-    if key_button(ui, theme, &shown, &spoken, waits).clicked() && !waits {
+    if key_button(ui, theme, &shown, &spoken, state).clicked() && !waits {
         asked = Some(Asked::Capture(action.id));
     }
     if chip.is_some() && !waits {
+        ui.add_space(12.0);
         let remove = tr!("Remove the key of {name}", name = action.name);
-        if IconButton::new(IconId::Close, &remove).show(ui, theme, keymap).clicked() {
+        let link = link_sized(ui, theme, keymap, tr!("remove"), LinkSize::Small);
+        ui.ctx().accesskit_node_builder(link.id, |node| node.set_label(remove.as_str()));
+        if link.clicked() {
             asked = Some(Asked::Unbind(action.id));
         }
     }
     asked
 }
 
-/// One action of the Shortcuts page: its name, and its key at the right end; a line under it.
+/// One action of the Shortcuts page: its name, and its key at the right end; a hairline under it, or, while it waits
+/// for a key, a `cyan_edge` box round the whole row.
 fn key_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, waits: bool) -> Option<Asked> {
-    let s = &theme.spacing;
-    let height = line_height(ui, theme.fonts.body) + s.m * 2.0;
-    let asked = ui
-        .allocate_ui_with_layout(vec2(ui.available_width(), height), Layout::left_to_right(Align::Center), |ui| {
-            ui.set_min_height(height);
-            ui.label(RichText::new(action.name).font(theme.fonts.body.id()).color(theme.palette.text));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| key_control(ui, theme, keymap, action, waits)).inner
-        })
-        .inner;
-    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, theme.palette.line));
-    ui.add_space(1.0);
+    let height = Theme::size(theme, KEY_ROW).max(theme.fonts.body.line).ceil();
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    // The whole row high, its hairline included, so a chip 20 high stands 8 from its top as the design has it.
+    let inner = Rect::from_min_max(pos2(rect.left() + INSET, rect.top()), pos2((rect.right() - INSET).max(rect.left() + INSET), rect.bottom()));
+    let mut right = ui.new_child(UiBuilder::new().max_rect(inner).layout(Layout::right_to_left(Align::Center)));
+    right.spacing_mut().item_spacing.x = 0.0;
+    let asked = key_control(&mut right, theme, keymap, action, waits);
+    let room = (right.min_rect().left() - inner.left() - 12.0).max(1.0);
+    let name = crate::component::cut(ui, action.name, theme.fonts.body, theme.palette.ink, room);
+    ui.painter().galley(pos2(inner.left(), (rect.center().y - name.size().y / 2.0).round()), name, theme.palette.ink);
+    if waits {
+        // The row waiting for a key is a box with a 1 px `cyan_edge` round it, as `settings-shortcuts/capture` has it.
+        paint::outline(ui.painter(), rect, theme.palette.cyan_edge);
+    } else {
+        let y = rect.bottom() - 1.0;
+        paint::hairline(ui.painter(), pos2(rect.left(), y), pos2(rect.right() - 1.0, y), theme.palette.panel_line);
+    }
     asked
 }
 
-/// The Shortcuts page under its title: a field that narrows the list and Reset all keys, the note on the last key
-/// given, then every action with its key, scrolling.
+/// The Shortcuts page: its head, the field that narrows the list and Reset all keys, the note on the last key given,
+/// then every action with its key, scrolling.
 fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings) -> Option<Asked> {
-    let s = &theme.spacing;
+    let p = &theme.palette;
     let mut asked = None;
-    note(ui, theme, tr!("Every action can have a key. One key runs one action: giving a key takes it from the action that had it."));
-    ui.add_space(s.s);
-    ui.horizontal(|ui| {
-        let width = (ui.available_width() * 0.6).max(1.0);
-        let find = field::search(ui, theme, Id::unique("shortcuts-find"), settings.find_mut(), tr!("Find a command"), width);
-        ui.ctx().accesskit_node_builder(find.id, |node| node.set_label(tr!("Find a command")));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if TextButton::new(tr!("Reset all keys")).show(ui, theme, keymap).clicked() {
-                asked = Some(Asked::ResetKeys);
-            }
-        });
+    head(
+        ui,
+        theme,
+        Section::Shortcuts,
+        &[tr!("Every action can have a key. One key runs one action per screen: giving a key takes it from its holder there.")],
+        |_| {},
+    );
+    ui.add_space(TOOLS_TOP);
+    inset(ui, |ui| {
+        // The field, its label over it, 320 wide where there is room; Reset all keys at the right end, 2 over its foot.
+        // Where the row is too narrow to keep the field [`FIND_LEAST`] wide beside the button, the button goes under the
+        // field, as a narrow settings row puts its control under its words.
+        let reset = TextButton::new(tr!("Reset all keys")).secondary();
+        let room = ui.available_width();
+        let beside = room - reset.width(ui, theme, keymap) - FIND_GAP;
+        let under = beside < FIND_LEAST;
+        let width = if under { room } else { beside }.clamp(1.0, FIND);
+        let field = ui
+            .allocate_ui_with_layout(vec2(width, 0.0), Layout::top_down(Align::Min), |ui| {
+                ui.set_width(width);
+                let find = field::Field::new(tr!("Find a command"), tr!("a part of its name"));
+                field::text_field(ui, theme, Id::unique("shortcuts-find"), settings.find_mut(), &find);
+            })
+            .response
+            .rect;
+        let pressed = if under {
+            ui.add_space(8.0);
+            reset.show(ui, theme, keymap).clicked()
+        } else {
+            let at = Rect::from_min_max(pos2(field.right(), field.top()), pos2(ui.max_rect().right(), field.bottom() - 2.0));
+            ui.scope_builder(UiBuilder::new().max_rect(at).layout(Layout::right_to_left(Align::Max)), |ui| reset.show(ui, theme, keymap).clicked())
+                .inner
+        };
+        if pressed {
+            asked = Some(Asked::ResetKeys);
+        }
+        if let Some(text) = settings.keys_note() {
+            ui.add_space(8.0);
+            words(ui, theme.fonts.caption, text, p.muted);
+        }
     });
-    if let Some(text) = settings.keys_note() {
-        ui.add_space(s.xs);
-        note(ui, theme, text);
-    }
+    ui.add_space(TOOLS_UNDER);
+    rule(ui, theme);
     let waiting = settings.capturing();
     let list = crate::palette::matching(settings.find());
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.set_max_width(ui.available_width() - s.m);
+    scrolled(ui, theme, "shortcuts", false, |ui| {
         if list.is_empty() {
-            ui.add_space(s.l);
-            note(ui, theme, &tr!("No command matches “{text}”.", text = settings.find()));
+            ui.add_space(12.0);
+            inset(ui, |ui| words(ui, theme.fonts.body, &tr!("No command matches “{text}”.", text = settings.find()), p.muted));
         }
         for action in &list {
             if let Some(pressed) = key_row(ui, theme, keymap, action, waiting == Some(action.id)) {
@@ -766,151 +889,302 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
 /// The holds "Undo send" offers, in seconds.
 const HOLDS: [u8; 4] = [5, 10, 30, 60];
 
-/// The Sending page under its title: "Undo send" with the hold's seconds, then each account with its signature in a
-/// field, and Save while it differs from the one the account has; scrolling.
-fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, mailbox: &Mailbox) -> Option<Asked> {
-    let s = &theme.spacing;
+/// The room between two signatures side by side, in points.
+const SIGNATURE_GAP: f32 = 24.0;
+
+/// The least width of a signature's column beside another, in points: the design draws them side by side only in the
+/// whole 720 column (332 each); in a narrow window, or at 130 % in one, each would keep about 300 and they stand one
+/// under the other.
+const SIGNATURE_LEAST: f32 = 320.0;
+
+/// The room between two signatures one under the other, in points.
+const SIGNATURE_UNDER: f32 = 16.0;
+
+/// One account's signature: its label, the field, and Save with "nothing changed" beside it while it is as kept.
+fn signature(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, account: &crate::mailbox::AccountRow) -> Option<Asked> {
+    let p = &theme.palette;
+    let label = tr!("Signature of {account}", account = account.label);
+    let typed = settings.signature_mut(account.id, &account.signature);
+    // The field's own label over it, in capitals, wrapped where it is long; the model keeps a signature's characters:
+    // what would pass them is refused whole and said, not cut.
+    field::multiline_field_holding(
+        ui,
+        theme,
+        Id::unique("signature").with(account.id),
+        typed,
+        &field::Field::new(&label, tr!("Anything they should know")),
+        field::Cap::Chars(inboxcraft_model::Account::MAX_SIGNATURE_CHARS),
+    );
+    let changed = settings.signature(account.id).is_some_and(|typed| typed != account.signature);
+    ui.add_space(8.0);
     let mut asked = None;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.set_max_width(ui.available_width() - s.m);
+    ui.horizontal(|ui| {
+        // Not the 24 between two signatures this row stands in: only the 12 below.
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let save = tr!("Save the signature of {account}", account = account.label);
+        let button = TextButton::new(tr!("Save")).secondary();
+        let response = if changed { button.show(ui, theme, keymap) } else { button.unavailable(tr!("Nothing changed")).show(ui, theme, keymap) };
+        ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(save.as_str()));
+        if changed && response.clicked() {
+            asked = Some(Asked::Signature(account.id));
+        }
+        if !changed {
+            ui.add_space(12.0);
+            crate::component::label(ui, theme.fonts.mono_s, tr!("nothing changed"), p.muted);
+        }
+    });
+    asked
+}
+
+/// A choice of the word Home greets by, as its segment names it.
+fn greet_name(by: GreetBy) -> &'static str {
+    match by {
+        GreetBy::First => tr!("First word"),
+        GreetBy::Last => tr!("Last word"),
+        GreetBy::Full => tr!("Full name"),
+        GreetBy::None => tr!("No name"),
+    }
+}
+
+/// What the choice of the word Home greets by does, under its row.
+fn greet_help(by: GreetBy) -> &'static str {
+    match by {
+        GreetBy::First => tr!("Home greets you by the first word of your sending name; titles such as Dr. are skipped."),
+        GreetBy::Last => tr!("Home greets you by the last word of your sending name; titles such as Dr. are skipped."),
+        GreetBy::Full => tr!("Home greets you by your whole sending name, as you wrote it."),
+        GreetBy::None => tr!("Home greets you without a name."),
+    }
+}
+
+/// The Sending page: Undo send, the signatures two by two, the templates and the scheduled list, then how Home greets
+/// you.
+fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, mailbox: &Mailbox) -> Option<Asked> {
+    let mut asked = None;
+    head(ui, theme, Section::Sending, &[], |_| {});
+    body(ui, theme, "sending", |ui| {
+        group(ui, theme, "A", tr!("Before it goes"), None);
         let hold = mailbox.hold_seconds();
         let labels = HOLDS.map(|seconds| tr!("{seconds} s", seconds = seconds));
         let holds: Vec<(u8, &str, Font)> = HOLDS.iter().zip(&labels).map(|(seconds, label)| (*seconds, label.as_str(), theme.fonts.button)).collect();
         let now = tr!("Every message waits here this long before it goes, so Undo can take it back. Now {seconds} s.", seconds = hold);
-        row(ui, theme, tr!("Undo send"), &[tr!("Hold mail for a few seconds before it goes."), &now], &mut |ui| {
+        settings_row(ui, theme, tr!("Undo send"), Some(&now), |ui| {
             if let Some(seconds) = segmented(ui, theme, &holds, hold) {
                 asked = Some(Asked::Hold(seconds));
             }
         });
-        ui.add_space(s.l);
-        note(
-            ui,
-            theme,
-            tr!("A signature goes under “-- ” at the end of every new message from its account. The drafts already started keep theirs."),
+        settings_row_soon_with(ui, theme, tr!("Send at once"), tr!("Undo send set to Off: every message goes the moment you send it."), |_| {});
+        let note = tr!(
+            "A signature goes under “-- ” at the end of every new message from its account. The drafts already started keep theirs. An empty field clears it."
         );
+        group(ui, theme, "B", tr!("Signatures"), Some(note));
         if mailbox.accounts().is_empty() {
-            ui.add_space(s.l);
-            note(ui, theme, tr!("Add an account first: a signature belongs to the account it is sent from."));
+            ui.add_space(12.0);
+            inset(ui, |ui| {
+                words(ui, theme.fonts.body, tr!("Add an account first: a signature belongs to the account it is sent from."), theme.palette.muted)
+            });
         }
-        for account in mailbox.accounts() {
-            ui.add_space(s.l);
-            heading(ui, theme, Some(IconId::At), &account.label, &[&account.address], ui.available_width());
-            ui.add_space(s.xs);
-            let label = tr!("Signature of {account}", account = account.label);
-            let typed = settings.signature_mut(account.id, &account.signature);
-            let edit = TextEdit::multiline(typed).id(Id::unique("signature").with(account.id)).desired_rows(3).desired_width(ui.available_width());
-            let field = ui.add(edit);
-            ui.ctx().accesskit_node_builder(field.id, |node| node.set_label(&label));
-            let changed = settings.signature(account.id).is_some_and(|typed| typed != account.signature);
-            ui.add_space(s.xs);
-            let save = tr!("Save the signature of {account}", account = account.label);
-            let button = TextButton::new(tr!("Save"));
-            let response = if changed { button.show(ui, theme, keymap) } else { button.unavailable(tr!("Nothing changed")).show(ui, theme, keymap) };
-            ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(&save));
-            if changed && response.clicked() {
-                asked = Some(Asked::Signature(account.id));
+        let pairs = mailbox.accounts().len().div_ceil(2);
+        for (index, pair) in mailbox.accounts().chunks(2).enumerate() {
+            let first = pair.first().map_or(0, |account| account.id);
+            let ends = index == 0 || index.saturating_add(1) == pairs;
+            culled(ui, theme, Id::unique("settings-signatures").with(first), ends, |ui| {
+                ui.add_space(INSET);
+                inset(ui, |ui| {
+                    let column = ((ui.available_width() - SIGNATURE_GAP) / 2.0).floor().max(1.0);
+                    // Two side by side while each keeps [`SIGNATURE_LEAST`]; one under the other below that.
+                    if column < SIGNATURE_LEAST {
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            for (index, account) in pair.iter().enumerate() {
+                                if index > 0 {
+                                    ui.add_space(SIGNATURE_UNDER);
+                                }
+                                if let Some(pressed) = signature(ui, theme, keymap, settings, account) {
+                                    asked = Some(pressed);
+                                }
+                            }
+                        });
+                        return;
+                    }
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = SIGNATURE_GAP;
+                        for account in pair {
+                            ui.allocate_ui_with_layout(vec2(column, 0.0), Layout::top_down(Align::Min), |ui| {
+                                ui.set_width(column);
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                if let Some(pressed) = signature(ui, theme, keymap, settings, account) {
+                                    asked = Some(pressed);
+                                }
+                            });
+                        }
+                    });
+                });
+                ui.add_space(INSET);
+                rule(ui, theme);
+            });
+        }
+        group(ui, theme, "C", tr!("Templates and scheduled"), None);
+        settings_row(ui, theme, tr!("Templates"), Some(tr!("Texts you write often, kept on their account, with a page to manage them.")), |ui| {
+            // Its own id, so the culled signatures above, laid out as the page scrolls, never move it: the focus stays.
+            let own = UiBuilder::new().scope_id(Id::unique("settings-manage-templates"));
+            if ui.scope_builder(own, |ui| link_sized(ui, theme, keymap, tr!("manage templates →"), LinkSize::Small)).inner.clicked() {
+                asked = Some(Asked::Templates);
             }
-            ui.add_space(s.m);
-            ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, theme.palette.line));
-            ui.add_space(1.0);
-        }
+        });
+        let line = tr!("Everything that waits for its time, sends, snoozes, reminders and calendar alerts, in one list.");
+        settings_row(ui, theme, tr!("Scheduled"), Some(line), |ui| {
+            let own = UiBuilder::new().scope_id(Id::unique("settings-open-scheduled"));
+            if ui.scope_builder(own, |ui| link_sized(ui, theme, keymap, tr!("open the list →"), LinkSize::Small)).inner.clicked() {
+                asked = Some(Asked::Scheduled);
+            }
+        });
+        group(ui, theme, "D", tr!("Your name"), None);
+        let by = mailbox.greet_by();
+        let choices = GreetBy::ALL.map(|by| (by, greet_name(by), theme.fonts.button));
+        settings_row(ui, theme, tr!("Home greets you by"), Some(greet_help(by)), |ui| {
+            // Its own id, as the links above: the culled signatures, laid out as the page scrolls, never move it.
+            let own = UiBuilder::new().scope_id(Id::unique("settings-greet-by"));
+            if let Some(by) = ui.scope_builder(own, |ui| segmented_for(ui, theme, &choices, by, Some(tr!("how Home greets you")))).inner {
+                asked = Some(Asked::GreetBy(by));
+            }
+        });
     });
     asked
 }
 
-/// The Triage page under its title: the screener's mode, the inbox view, and a switch for each account's grouping;
-/// scrolling.
+/// A choice of what follows an act, as its segment names it.
+fn after_name(after: After) -> &'static str {
+    match after {
+        After::Next => tr!("Next"),
+        After::Previous => tr!("Previous"),
+        After::List => tr!("List"),
+        After::Stay => tr!("Stay"),
+    }
+}
+
+/// What the choice of what follows an act does, under its row.
+fn after_help(after: After) -> &'static str {
+    match after {
+        After::Next => tr!("Done, Archive, Delete, Snooze or Move on the open message opens the one below it."),
+        After::Previous => tr!("Done, Archive, Delete, Snooze or Move on the open message opens the one above it."),
+        After::List => tr!("Done, Archive, Delete, Snooze or Move on the open message goes back to the list."),
+        After::Stay => tr!("Done, Archive, Delete, Snooze or Move on the open message leaves the keyboard on the next row, not opened."),
+    }
+}
+
+/// The Triage page: the screener, pins on done mail, what follows an act, each account's grouping.
 fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.set_max_width(ui.available_width() - theme.spacing.m);
+    head(ui, theme, Section::Triage, &[], |_| {});
+    body(ui, theme, "triage", |ui| {
+        group(
+            ui,
+            theme,
+            "A",
+            tr!("Screener"),
+            Some(tr!("Each sender is judged once, across the accounts. Turning it on lets in everyone your mail already names.")),
+        );
         let modes = ScreenerMode::ALL.map(|mode| (mode, screener_name(mode), f.button));
-        let screener_notes = [
-            tr!("The first mail of a sender you have not let in yet waits in New senders, shows in the inbox marked, or comes in as any other."),
-            tr!("Each sender is judged once, across the accounts. Turning it on lets in everyone your mail already names."),
-        ];
-        row(ui, theme, tr!("Screener"), &screener_notes, &mut |ui| {
-            if let Some(mode) = segmented(ui, theme, &modes, mailbox.screener_mode()) {
+        let mode = mailbox.screener_mode();
+        settings_row(ui, theme, tr!("New senders"), Some(screener_help(mode)), |ui| {
+            if let Some(mode) = segmented(ui, theme, &modes, mode) {
                 asked = Some(Asked::Screener(mode));
             }
         });
-        let views = InboxView::ALL.map(|view| (view, view.text(), f.button));
-        let view_note = tr!("People, Updates, Newsletters and Invitations as cards, as one list under headings, or one list by date.");
-        row(ui, theme, tr!("Inbox"), &[view_note], &mut |ui| {
-            if let Some(view) = segmented(ui, theme, &views, mailbox.inbox_view()) {
-                asked = Some(Asked::InboxView(view));
-            }
-        });
+        group(ui, theme, "B", tr!("Pins"), None);
         let keep = mailbox.pins_outlast_done();
         let pins_note = tr!("Off, Done takes the pin off; on, a pinned message stays in Pins after it is done.");
-        row(ui, theme, tr!("Keep pins on done mail"), &[pins_note], &mut |ui| {
-            if switch(ui, theme, tr!("Keep pins on done mail"), keep).clicked() {
+        settings_row(ui, theme, tr!("Keep pins on done mail"), Some(pins_note), |ui| {
+            let pressed = switch(ui, theme, tr!("Keep pins on done mail"), keep);
+            if owner_pressed(ui, &pressed) {
                 asked = Some(Asked::KeepPins(!keep));
             }
         });
+        group(ui, theme, "C", tr!("After an act"), None);
+        let afters = After::ALL.map(|after| (after, after_name(after), f.button));
+        let after = mailbox.after();
+        settings_row(ui, theme, tr!("What follows an act"), Some(after_help(after)), |ui| {
+            if let Some(after) = segmented_for(ui, theme, &afters, after, Some(tr!("what follows an act"))) {
+                asked = Some(Asked::After(after));
+            }
+        });
         if !mailbox.accounts().is_empty() {
-            ui.add_space(theme.spacing.xl);
-            let note =
-                tr!("Each account's inbox in People, Updates, Newsletters and Invitations, sorted by InboxCraft or by your choice for a sender.");
-            texts(ui, theme, tr!("Grouped inbox"), &[note]);
+            let note = tr!("Each account's inbox in People, Notifications and Newsletters, sorted by InboxCraft or by your choice for a sender.");
+            group(ui, theme, "D", tr!("Grouped inbox"), Some(note));
         }
-        for account in mailbox.accounts() {
-            let name = tr!("Group the inbox of {account}", account = account.label);
-            let note = tr!("Off, the mail of {address} stays out of the groups.", address = account.address);
-            row_with(ui, theme, Some(IconId::At), &account.label, &[&note], &mut |ui| {
-                if switch(ui, theme, &name, account.grouped).clicked() {
-                    asked = Some(Asked::Grouped(account.id, !account.grouped));
-                }
+        let count = mailbox.accounts().len();
+        for (index, account) in mailbox.accounts().iter().enumerate() {
+            let ends = index == 0 || index.saturating_add(1) == count;
+            culled(ui, theme, Id::unique("settings-grouped").with(account.id), ends, |ui| {
+                let name = tr!("Group the inbox of {account}", account = account.label);
+                settings_row(ui, theme, &name, Some(&crate::bidi::address(&account.address)), |ui| {
+                    let pressed = switch(ui, theme, &name, account.grouped);
+                    if owner_pressed(ui, &pressed) {
+                        asked = Some(Asked::Grouped(account.id, !account.grouped));
+                    }
+                });
             });
         }
     });
     asked
 }
 
-/// The Notifications page under its title: each account's level, returned snoozes and reminders, then running in
-/// the background and starting with the computer, each switch unavailable where the app's desk cannot do it;
-/// scrolling.
+/// The Notifications page: each account's level, what else notifies, then running in the background and starting
+/// with the computer, each switch unavailable where the app's desk cannot do it.
 fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Settings, desk: DeskView) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.set_max_width(ui.available_width() - theme.spacing.m);
-        note(
-            ui,
-            theme,
-            tr!("Per account: all new mail, mail from people only, or none. Mail from your own addresses never notifies, and letting a sender in raises no burst of old mail."),
-        );
-        note(
-            ui,
-            theme,
-            tr!("A notification shows who the mail is from and its subject; your desktop may keep it in its list and show it on the lock screen."),
-        );
+    let intro = [
+        tr!(
+            "Per account: all new mail, mail from people only, or none. Mail from your own addresses never notifies, and letting a sender in raises no burst of old mail."
+        ),
+        tr!("A notification shows who the mail is from and its subject; your desktop may keep it in its list and show it on the lock screen."),
+    ];
+    head(ui, theme, Section::Notifications, &intro, |_| {});
+    body(ui, theme, "notifications", |ui| {
+        group(ui, theme, "A", tr!("New mail"), None);
         if mailbox.accounts().is_empty() {
-            ui.add_space(theme.spacing.l);
-            note(ui, theme, tr!("Add an account first: each account chooses which of its new mail notifies you."));
-        }
-        let levels = Level::ALL.map(|level| (level, level_name(level), f.button));
-        for account in mailbox.accounts() {
-            let title = tr!("{account} · {address}", account = account.label, address = account.address);
-            row(ui, theme, &title, &[], &mut |ui| {
-                if let Some(level) = segmented_for(ui, theme, &levels, mailbox.notify_level(account.id), Some(&account.label)) {
-                    asked = Some(Asked::Level(account.id, level));
-                }
+            ui.add_space(12.0);
+            inset(ui, |ui| {
+                words(ui, f.body, tr!("Add an account first: each account chooses which of its new mail notifies you."), theme.palette.muted)
             });
         }
+        let levels = Level::ALL.map(|level| (level, level_name(level), f.button));
+        let count = mailbox.accounts().len();
+        for (index, account) in mailbox.accounts().iter().enumerate() {
+            let ends = index == 0 || index.saturating_add(1) == count;
+            culled(ui, theme, Id::unique("settings-level").with(account.id), ends, |ui| {
+                let title = tr!("{account} · {address}", account = account.label, address = crate::bidi::address(&account.address));
+                settings_row(ui, theme, &title, None, |ui| {
+                    if let Some(level) = segmented_for(ui, theme, &levels, mailbox.notify_level(account.id), Some(&account.label)) {
+                        asked = Some(Asked::Level(account.id, level));
+                    }
+                });
+            });
+        }
+        group(ui, theme, "B", tr!("What else notifies"), None);
         let chosen = mailbox.notify_settings();
         let (returns, reminders) = (chosen.returns, chosen.reminders);
-        row(ui, theme, tr!("Returned snoozes"), &[tr!("A snoozed message that comes back notifies you.")], &mut |ui| {
-            if switch(ui, theme, tr!("Returned snoozes"), returns).clicked() {
+        settings_row(ui, theme, tr!("Returned snoozes"), Some(tr!("A snoozed message that comes back notifies you.")), |ui| {
+            let pressed = switch(ui, theme, tr!("Returned snoozes"), returns);
+            if owner_pressed(ui, &pressed) {
                 asked = Some(Asked::Returns(!returns));
             }
         });
-        row(ui, theme, tr!("Follow-up reminders"), &[tr!("A message you asked to be reminded of, when no reply came, notifies you.")], &mut |ui| {
-            if switch(ui, theme, tr!("Follow-up reminders"), reminders).clicked() {
-                asked = Some(Asked::Reminders(!reminders));
-            }
-        });
+        settings_row(
+            ui,
+            theme,
+            tr!("Follow-up reminders"),
+            Some(tr!("A message you asked to be reminded of, when no reply came, notifies you.")),
+            |ui| {
+                let pressed = switch(ui, theme, tr!("Follow-up reminders"), reminders);
+                if owner_pressed(ui, &pressed) {
+                    asked = Some(Asked::Reminders(!reminders));
+                }
+            },
+        );
+        group(ui, theme, "C", tr!("In the background"), None);
         if let Some(pressed) = in_the_background(ui, theme, settings, desk) {
             asked = Some(pressed);
         }
@@ -927,7 +1201,7 @@ fn in_the_background(ui: &mut Ui, theme: &Theme, settings: &Settings, desk: Desk
         notes.push(elsewhere);
     }
     let background = desk.background.unwrap_or(false);
-    row(ui, theme, tr!("Run in the background"), &notes, &mut |ui| {
+    settings_row(ui, theme, tr!("Run in the background"), Some(&notes.join(" ")), |ui| {
         let pressed = ui.add_enabled_ui(desk.background.is_some(), |ui| switch(ui, theme, tr!("Run in the background"), background)).inner;
         if pressed.clicked() {
             asked = Some(Asked::Background(!background));
@@ -946,7 +1220,7 @@ fn in_the_background(ui: &mut Ui, theme: &Theme, settings: &Settings, desk: Desk
     }
     let login = desk.login.unwrap_or(false);
     let open = desk.login.is_some() && desk.background == Some(true) && !desk.asking;
-    row(ui, theme, tr!("Start with the computer"), &notes, &mut |ui| {
+    settings_row(ui, theme, tr!("Start with the computer"), Some(&notes.join(" ")), |ui| {
         if ui.add_enabled_ui(open, |ui| switch(ui, theme, tr!("Start with the computer"), login)).inner.clicked() {
             asked = Some(Asked::Login(!login));
         }
@@ -954,55 +1228,210 @@ fn in_the_background(ui: &mut Ui, theme: &Theme, settings: &Settings, desk: Desk
     asked
 }
 
-/// The sheet's place in `screen`: its size where there is room, and two gaps from each edge where there is not.
-fn place(theme: &Theme, screen: Rect) -> Rect {
-    let least = theme.spacing.gap * 2.0;
-    let margin = vec2(((screen.width() - SHEET[0]) / 2.0).max(least), ((screen.height() - SHEET[1]) / 2.0).max(least));
-    screen.shrink2(margin)
+/// Where the settings stand in `body`: the sections' column (232 wide, as the index) with the `line` hairline after it,
+/// and the page's column, 720 wide at most, 40 in from its left and at least 38 from the body's right edge, 24 under the
+/// top and 16 over the foot (the Shortcuts page's list runs to the foot, About keeps 24). In one pane (`single`) the
+/// list and the page each take the whole body, one at a time, the page 40 in from the body's left. On whole points;
+/// never inverted, however small the body.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Columns {
+    /// The sections' column.
+    pub(super) nav: Rect,
+    /// The hairline's x, right of the sections' column (in one pane, the body's left edge: no hairline is drawn).
+    pub(super) divider: f32,
+    /// The page's column.
+    pub(super) page: Rect,
 }
 
-/// Draws the settings sheet over the window, which it dims and keeps from taking presses; returns what was asked
-/// for, applied by the caller after the frame's drawing.
-pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> Option<Asked> {
+impl Columns {
+    /// The columns in `body` with the page `shown`, in one pane when `single`.
+    pub(super) fn of(body: Rect, shown: Section, single: bool) -> Self {
+        let body = Rect::from_min_max(body.min.round(), body.max.round().max(body.min.round()));
+        let nav_width = if single { body.width() } else { NAV.min(body.width()) };
+        let nav = Rect::from_min_size(body.min, vec2(nav_width, body.height()));
+        let divider = if single { body.left() } else { nav.right() };
+        let start = if single { body.left() } else { divider + 1.0 };
+        let bottom = match shown {
+            Section::Shortcuts => 0.0,
+            Section::About => ABOUT_BOTTOM,
+            _ => PAGE_BOTTOM,
+        };
+        let left = start + PAGE_X;
+        let room = Rect::from_min_max(
+            pos2(left, body.top() + PAGE_TOP),
+            pos2((body.right() - PAGE_RIGHT).max(left), (body.bottom() - bottom).max(body.top() + PAGE_TOP)),
+        );
+        let width = room.width().clamp(1.0, COLUMN).floor();
+        let page = Rect::from_min_size(room.min, vec2(width, room.height().max(1.0)));
+        Self { nav, divider, page }
+    }
+}
+
+/// Draws the settings in `ui`'s whole rect, the window's body: the sections' column and the page shown; in one pane
+/// ([`super::one_pane`], Mail's breakpoint) the list of sections or the page, the page's head leading back to the list.
+/// Returns what was asked for, applied by the caller after the frame's drawing.
+pub(super) fn place(ui: &mut Ui, theme: &Theme, mut view: Sheet<'_>) -> Option<Asked> {
     let p = &theme.palette;
-    let s = &theme.spacing;
-    let screen = ctx.content_rect();
-    // A press beside the sheet leaves it, and reaches nothing under it.
-    let beside = Area::new(Id::unique("settings-dim"))
-        .order(Order::Middle)
-        .fixed_pos(screen.min)
-        .show(ctx, |ui| {
-            let (rect, response) = ui.allocate_exact_size(screen.size(), Sense::click());
-            ui.painter().rect_filled(rect, 0.0, p.scrim);
-            // On the press, not the release: what lies under the press is no longer covered when the button comes up.
-            response.clicked() || (response.contains_pointer() && ui.input(|input| input.pointer.primary_pressed()))
-        })
-        .inner;
-    let rect = place(theme, screen);
-    let mut asked = beside.then_some(Asked::Close);
-    Area::new(Id::unique("settings-sheet")).order(Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
-        let (whole, response) = ui.allocate_exact_size(rect.size(), Sense::hover());
-        response.widget_info(|| WidgetInfo::labeled(Role::Dialog, true, tr!("Settings")));
-        // The float's shadow and edge, then solid surfaces: nothing of the window shows through the text.
-        ui.painter().extend(glass::float_shapes(ui.painter(), theme, whole));
-        ui.painter().rect_filled(whole.shrink(1.0), s.card, p.surface);
-        let nav_width = NAV.min(whole.width() * 0.3);
-        let left = Rect::from_min_size(whole.min, vec2(nav_width, whole.height())).shrink(1.0);
-        let round = s.card.clamp(0.0, 255.0) as u8;
-        ui.painter().rect_filled(left, egui::CornerRadius { nw: round, sw: round, ne: 0, se: 0 }, p.panel);
-        let inner = left.shrink2(vec2(s.m, s.l));
-        let shown = view.settings.section();
-        let pressed =
-            ui.scope_builder(UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)), |ui| nav(ui, theme, view.keymap, shown)).inner;
-        if let Some(section) = pressed {
-            asked = Some(Asked::Section(section));
+    let body = ui.max_rect();
+    // One node a screen reader names the place by; it takes no press, the sections and the page lie over it.
+    let place = ui.interact(body, Id::unique("settings-place"), Sense::hover());
+    place.widget_info(|| WidgetInfo::labeled(Role::Pane, true, tr!("Settings")));
+    ui.painter().rect_filled(body, 0.0, p.surface);
+    let shown = view.settings.section();
+    let single = super::one_pane(ui.ctx());
+    let listed = single && view.settings.listed();
+    let ctx = ui.ctx().clone();
+    // The keyboard on the way the window no longer shows (crossing Mail's breakpoint, or a row pressed in the list
+    // alone) goes to the one it shows: from a section's row to the page's `← Settings`, and back to the shown
+    // section's row.
+    let had = ctx.data_mut(|data| data.remove_temp::<u8>(keyboard_id())).unwrap_or(0);
+    let to_shown = view.settings.take_nav_hand() || (had == 2 && (!single || listed));
+    if had == 1 && single && !listed {
+        view.settings.hand_to_back();
+    }
+    let columns = Columns::of(body, shown, single);
+    ctx.data_mut(|data| {
+        data.insert_temp(back_drawn_id(), false);
+        data.remove_temp::<bool>(back_pressed_id());
+        data.insert_temp(edge_id(), body.right());
+    });
+    if !single {
+        paint::hairline(ui.painter(), pos2(columns.divider, body.top()), pos2(columns.divider, body.bottom() - 1.0), p.line);
+    }
+    let mut asked = None;
+    if !single || listed {
+        asked = ui
+            .scope_builder(UiBuilder::new().id_salt("settings-sections").max_rect(columns.nav).layout(Layout::top_down(Align::Min)), |ui| {
+                nav(ui, theme, shown, to_shown, single)
+            })
+            .inner;
+    }
+    if !listed {
+        if single && view.settings.take_back_hand() {
+            ctx.data_mut(|data| data.insert_temp(back_focus_id(), true));
         }
-        let body = Rect::from_min_max(pos2(whole.left() + nav_width, whole.top()), whole.max).shrink2(vec2(s.xl + s.xs, s.l + s.xs));
-        ui.scope_builder(UiBuilder::new().max_rect(body).layout(Layout::top_down(Align::Min)), |ui| {
+        let mut info = egui::UiStackInfo::default();
+        if single {
+            info = info.with_tag(ALONE);
+        }
+        let builder = UiBuilder::new().id_salt("settings-page").max_rect(columns.page).layout(Layout::top_down(Align::Min)).ui_stack_info(info);
+        ui.scope_builder(builder, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             if let Some(on_page) = page(ui, theme, &mut view) {
                 asked = Some(on_page);
             }
         });
-    });
+        ctx.data_mut(|data| data.remove_temp::<bool>(back_focus_id()));
+    }
+    if ctx.data_mut(|data| data.remove_temp::<bool>(back_pressed_id())).unwrap_or(false) {
+        asked = Some(Asked::Sections);
+    }
+    // A field with the keyboard keeps its Esc: the next frame's Esc does not go back to the list.
+    let typing = ctx.memory(|memory| memory.focused()).is_some_and(|focused| egui::text_edit::TextEditState::load(&ctx, focused).is_some());
+    if typing {
+        ctx.data_mut(|data| data.insert_temp(back_drawn_id(), false));
+    }
     asked
 }
+
+/// `ui.settings.open` with a page, as the palette's rows and the empty calendar's button run it, and the asks of the
+/// command whoever ran it (the control channel's too).
+impl super::InboxApp {
+    /// Runs `ui.settings.open` on `page` (a [`Section::id`]) as the window's own command, then shows what it asked.
+    pub(super) fn open_settings_on(&mut self, page: &'static str) {
+        // The command checks the page and answers every page: there is nothing for the banner.
+        let _answered = self.mailbox.run(crate::keymap::SETTINGS, &serde_json::json!({ "page": page }));
+        self.follow_settings_asked();
+    }
+
+    /// In one pane, an Esc with nothing in front (`esc`) on a section's page alone (`← Settings` in its head) goes back
+    /// to the list of sections; a field with the keyboard takes its own Esc first ([`back_shown`]).
+    pub(super) fn esc_to_sections(&mut self, ctx: &egui::Context, esc: bool) {
+        if esc && super::one_pane(ctx) && back_shown(ctx) {
+            self.settings.to_list(true);
+        }
+    }
+
+    /// A page's row of the palette: the palette closes and the settings show that page.
+    pub(super) fn palette_page(&mut self, page: &'static str) {
+        self.open_settings_on(page);
+    }
+
+    /// Takes what `ui.settings.open` and `ui.home.open` asked for since the last look: the owner's own asks are shown at
+    /// once, in order; of an agent's only the newest is kept, for [`Self::act_on_agent_ask`] at the frame's end.
+    pub fn follow_settings_asked(&mut self) {
+        for asked in self.mailbox.take_asked() {
+            if asked.by_agent() {
+                self.mailbox.hold_agent_ask(asked);
+            } else {
+                self.apply_asked(asked);
+            }
+        }
+    }
+
+    /// Shows the agent's ask held, unless `owner_acted`: the owner's own key or press on the settings or the place this
+    /// frame wins, and the ask goes. At most one agent's ask a frame.
+    pub fn act_on_agent_ask(&mut self, owner_acted: bool) {
+        // The owner's own turn of "Unread only" in this frame wins too.
+        let owner_acted = std::mem::take(&mut self.owner_turned_unread) || owner_acted;
+        if let Some(asked) = self.mailbox.take_agent_ask()
+            && !owner_acted
+        {
+            self.apply_asked(asked);
+        }
+    }
+
+    /// One ask of the window: the settings', Home's or "Unread only".
+    fn apply_asked(&mut self, asked: inboxcraft_engine::shown::Asked) {
+        match asked {
+            inboxcraft_engine::shown::Asked::Settings(asked) => self.apply_settings_ask(asked),
+            inboxcraft_engine::shown::Asked::Home(asked) => self.apply_home_ask(asked),
+            // Only the list's place changes: nothing is shown in place of what shows. An agent's is passed over while the
+            // owner holds the keys, as its `ui.home.open` is; any ask changes nothing where the list does not show a
+            // place that has it (a search, the settings, Home, the calendar, the list hidden), as the key rests there.
+            inboxcraft_engine::shown::Asked::Unread(asked) => {
+                if (asked.by_agent && !self.agent_may_move()) || !self.can_run(crate::keymap::UNREAD) {
+                    return;
+                }
+                let on = asked.on.unwrap_or(!self.mailbox.unread_only());
+                self.mailbox.set_unread_only(on);
+            }
+        }
+    }
+
+    /// Whether an agent's ask waits for the frame's end.
+    #[must_use]
+    pub fn holds_agent_ask(&self) -> bool {
+        self.mailbox.holds_agent_ask()
+    }
+
+    /// One ask of `ui.settings.open`, the one way the settings are shown by it and by their key. The owner's: the page
+    /// named, also while the settings show; a page that names none, the page last shown; bare (the key), the settings
+    /// on the page last shown or, while they show, the place the owner came from. An agent's takes nothing from the
+    /// owner: it never toggles away (bare, it shows the settings on the page last shown, and changes nothing while they
+    /// show), and it is passed over while the owner holds the keys ([`Self::agent_may_move`]).
+    pub(super) fn apply_settings_ask(&mut self, asked: SettingsAsked) {
+        if asked.by_agent {
+            if !self.agent_may_move() {
+                return;
+            }
+            self.open_settings_page(asked.page);
+        } else if asked.bare && self.settings.is_open() {
+            self.leave_settings();
+        } else {
+            self.open_settings_page(asked.page);
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "settings_page_tests.rs"]
+mod page_tests;
+
+#[cfg(test)]
+#[path = "settings_greeting_tests.rs"]
+mod greeting_tests;
+
+#[cfg(test)]
+#[path = "settings_narrow_tests.rs"]
+mod narrow_tests;

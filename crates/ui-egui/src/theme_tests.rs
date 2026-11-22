@@ -6,19 +6,366 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    AVATARS, BLACK, DARK, Face, Font, Look, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Typeface, WHITE, Weight, contrast,
-    font_definitions, ink_on, ink_over, install_fonts, mix, over, preference, rail_stops, readable, rgb, text_gradient,
+    FALLBACK_PROBES, FLOAT_SHADOW, Face, Fallback, Font, Fonts, ICON, Look, Mode, ModePreference, Palette, SHIPPED_FALLBACKS, TextScale, Theme,
+    contrast, font_definitions, font_definitions_with, install_fallbacks, install_fonts, missing_probes, mix, over, preference,
 };
-use crate::iconset::IconSet;
 use crate::motion::MOTION;
 
-/// Every preset in both modes.
+/// Both modes.
 fn all() -> Vec<Theme> {
-    PRESETS.iter().flat_map(|preset| [Theme::new(Mode::Light, preset), Theme::new(Mode::Dark, preset)]).collect()
+    [Mode::Light, Mode::Dark].map(|mode| Theme::new(mode, TextScale::default())).to_vec()
 }
 
 fn hex(colour: Color32) -> String {
-    format!("#{:02x}{:02x}{:02x}", colour.r(), colour.g(), colour.b())
+    let [r, g, b, a] = colour.to_srgba_unmultiplied();
+    format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+}
+
+/// The token named `name` (`acct1` to `acct6` for the account colours), as the design file names it.
+fn token(p: &Palette, name: &str) -> Option<Color32> {
+    Some(match name {
+        "bg" => p.bg,
+        "surface" => p.surface,
+        "panel" => p.panel,
+        "term" => p.term,
+        "line" => p.line,
+        "panel_line" => p.panel_line,
+        "grid" => p.grid,
+        "stage" => p.stage,
+        "ink" => p.ink,
+        "muted" => p.muted,
+        "dim" => p.dim,
+        "faint" => p.faint,
+        "cyan" => p.cyan,
+        "on_cyan" => p.on_cyan,
+        "cyan_text" => p.cyan_text,
+        "cyan_edge" => p.cyan_edge,
+        "cyan_muted" => p.cyan_muted,
+        "minus" => p.minus,
+        "plus" => p.plus,
+        "warn" => p.warn,
+        "scrim" => p.scrim,
+        _ => {
+            let n: usize = name.strip_prefix("acct")?.parse().ok()?;
+            *p.accounts.get(n.checked_sub(1)?)?
+        }
+    })
+}
+
+/// `#rrggbbaa` as a colour.
+fn rgba(value: u32) -> Color32 {
+    let [r, g, b, a] = value.to_be_bytes();
+    Color32::from_rgba_unmultiplied(r, g, b, a)
+}
+
+/// The design file's table, "Colour": token, dark, light, as `#rrggbbaa`.
+const TOKENS: [(&str, u32, u32); 27] = [
+    ("bg", 0x0E0F10FF, 0xF5F5F2FF),
+    ("surface", 0x151617FF, 0xFFFFFFFF),
+    ("panel", 0x101112FF, 0xF5F5F2FF),
+    ("term", 0x0A0B0CFF, 0xFFFFFFFF),
+    ("line", 0x2A2D2FFF, 0xD6D7D3FF),
+    ("panel_line", 0x202224FF, 0xE2E3DFFF),
+    ("grid", 0x17191AFF, 0xECECE8FF),
+    ("stage", 0x212427FF, 0xDEDFDBFF),
+    ("ink", 0xD4D4D4FF, 0x191919FF),
+    ("muted", 0x8B9196FF, 0x5A6065FF),
+    ("dim", 0x4A4F53FF, 0x9EA3A6FF),
+    ("faint", 0x2B2E30FF, 0xCFD1CDFF),
+    ("cyan", 0x22A8E0FF, 0x22A8E0FF),
+    ("on_cyan", 0x0E0F10FF, 0x0E0F10FF),
+    ("cyan_text", 0x22A8E0FF, 0x075E88FF),
+    ("cyan_edge", 0x22A8E0FF, 0x0B79ADFF),
+    ("cyan_muted", 0x00354CFF, 0xD3EEF9FF),
+    ("minus", 0xC98080FF, 0x9A3A36FF),
+    ("plus", 0x6AB26BFF, 0x246628FF),
+    ("warn", 0xEEC448FF, 0x6E5400FF),
+    ("scrim", 0x00000099, 0x19191955),
+    ("acct1", 0x9DAF19FF, 0x778224FF),
+    ("acct2", 0xA359B9FF, 0xB54ED5FF),
+    ("acct3", 0xC05928FF, 0xD84F05FF),
+    ("acct4", 0x547FFAFF, 0x163E8BFF),
+    ("acct5", 0xF55BB8FF, 0x7C1457FF),
+    ("acct6", 0x64DABFFF, 0x368977FF),
+];
+
+#[test]
+fn the_tokens_are_the_design_file_s_values() {
+    for (name, dark, light) in TOKENS {
+        for (mode, want) in [(Mode::Dark, dark), (Mode::Light, light)] {
+            let got = token(Palette::of(mode), name);
+            assert_eq!(got, Some(rgba(want)), "{mode:?} {name}: {:?} for #{want:08x}", got.map(hex));
+        }
+    }
+    assert_eq!(Theme::new(Mode::Dark, TextScale::default()).palette, Palette::of(Mode::Dark));
+    assert_eq!(Theme::new(Mode::Light, TextScale::default()).palette, Palette::of(Mode::Light));
+    assert_eq!(token(Palette::of(Mode::Dark), "acct7"), None);
+}
+
+/// The pairs the design file checks in each mode: text on a ground at 4.5:1, an edge or mark that carries meaning at
+/// 3:1. Exempt and not listed: `line`, `panel_line` and `faint` (structure and decoration) and `dim` (decoration).
+const PAIRS: [(&str, &str, f32); 71] = [
+    ("ink", "bg", 4.5),
+    ("ink", "surface", 4.5),
+    ("ink", "panel", 4.5),
+    ("ink", "term", 4.5),
+    ("ink", "grid", 4.5),
+    ("ink", "stage", 4.5),
+    ("muted", "bg", 4.5),
+    ("muted", "surface", 4.5),
+    ("muted", "panel", 4.5),
+    ("muted", "term", 4.5),
+    ("muted", "grid", 4.5),
+    ("muted", "stage", 4.5),
+    ("cyan_text", "bg", 4.5),
+    ("cyan_text", "surface", 4.5),
+    ("cyan_text", "panel", 4.5),
+    ("cyan_text", "term", 4.5),
+    ("cyan_text", "grid", 4.5),
+    ("cyan_text", "stage", 4.5),
+    ("minus", "bg", 4.5),
+    ("minus", "surface", 4.5),
+    ("minus", "panel", 4.5),
+    ("minus", "term", 4.5),
+    ("minus", "grid", 4.5),
+    ("minus", "stage", 4.5),
+    ("plus", "bg", 4.5),
+    ("plus", "surface", 4.5),
+    ("plus", "panel", 4.5),
+    ("plus", "term", 4.5),
+    ("plus", "grid", 4.5),
+    ("plus", "stage", 4.5),
+    ("warn", "bg", 4.5),
+    ("warn", "surface", 4.5),
+    ("warn", "panel", 4.5),
+    ("warn", "term", 4.5),
+    ("warn", "grid", 4.5),
+    ("warn", "stage", 4.5),
+    ("on_cyan", "cyan", 4.5),
+    ("cyan_edge", "bg", 3.0),
+    ("cyan_edge", "surface", 3.0),
+    ("cyan_edge", "panel", 3.0),
+    ("cyan_edge", "term", 3.0),
+    ("cyan_edge", "stage", 3.0),
+    ("acct1", "bg", 3.0),
+    ("acct1", "surface", 3.0),
+    ("acct1", "panel", 3.0),
+    ("acct1", "stage", 3.0),
+    ("acct2", "bg", 3.0),
+    ("acct2", "surface", 3.0),
+    ("acct2", "panel", 3.0),
+    ("acct2", "stage", 3.0),
+    ("acct3", "bg", 3.0),
+    ("acct3", "surface", 3.0),
+    ("acct3", "panel", 3.0),
+    ("acct3", "stage", 3.0),
+    ("acct4", "bg", 3.0),
+    ("acct4", "surface", 3.0),
+    ("acct4", "panel", 3.0),
+    ("acct4", "stage", 3.0),
+    ("acct5", "bg", 3.0),
+    ("acct5", "surface", 3.0),
+    ("acct5", "panel", 3.0),
+    ("acct5", "stage", 3.0),
+    ("acct6", "bg", 3.0),
+    ("acct6", "surface", 3.0),
+    ("acct6", "panel", 3.0),
+    ("acct6", "stage", 3.0),
+    // The "coming soon" mark: its words and its dashed edge, checked as a pair of its own.
+    ("muted", "bg", 4.5),
+    ("muted", "surface", 4.5),
+    ("muted", "panel", 4.5),
+    ("muted", "term", 4.5),
+    ("muted", "stage", 4.5),
+];
+
+#[test]
+fn every_checked_pair_meets_its_ratio() {
+    let modes = [Mode::Dark, Mode::Light];
+    assert_eq!(PAIRS.len() * modes.len(), 142, "the design file checks 142 pairs over the two modes");
+    for mode in modes {
+        let p = Palette::of(mode);
+        for (text, ground, need) in PAIRS {
+            let (Some(a), Some(b)) = (token(p, text), token(p, ground)) else { panic!("{text} on {ground}: no such token") };
+            let ratio = contrast(a, b);
+            assert!(ratio >= need, "{mode:?} {text} on {ground}: {ratio:.2} < {need}");
+        }
+    }
+}
+
+#[test]
+fn the_exempt_tokens_are_never_a_text_colour() {
+    for exempt in ["line", "panel_line", "faint", "dim"] {
+        assert!(PAIRS.iter().all(|(text, _, _)| *text != exempt), "{exempt} is decoration, never checked as text");
+    }
+}
+
+#[test]
+fn the_accent_is_no_account_colour() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Palette::of(mode);
+        for (index, account) in p.accounts.iter().enumerate() {
+            for accent in [p.cyan, p.cyan_text, p.cyan_edge] {
+                assert_ne!(*account, accent, "{mode:?} account {index}");
+            }
+        }
+    }
+}
+
+#[test]
+fn sizes_scale_with_text_and_distances_do_not() {
+    let large = TextScale::from_percent(130).unwrap();
+    let theme = Theme::new(Mode::Dark, large);
+    assert_eq!(theme.size(32.0), 42.0);
+    assert_eq!(theme.size(36.0), 46.0);
+    assert_eq!(theme.size(26.0), 34.0);
+    assert_eq!(theme.size(34.0), 44.0);
+    assert_eq!(theme.size(16.0), 20.0);
+    assert_eq!(theme.spacing.s4, 16.0);
+    let s = theme.spacing;
+    assert_eq!([s.s1, s.s2, s.s3, s.s4, s.s6, s.s10], [4.0, 8.0, 12.0, 16.0, 24.0, 40.0]);
+    assert_eq!(theme.spacing, Theme::new(Mode::Dark, TextScale::default()).spacing);
+    let z = theme.sizes;
+    assert_eq!(
+        [z.button, z.field, z.menu_row, z.mail_row, z.group_head, z.chip, z.list, z.scrollbar],
+        [32.0, 36.0, 32.0, 56.0, 32.0, 20.0, 440.0, 12.0]
+    );
+    assert_eq!(z.avatar, [24.0, 32.0, 40.0]);
+    assert_eq!([z.icon, z.mark], [16.0, 14.0]);
+    assert_eq!(theme.icon_side(), 20.0);
+    assert_eq!(Theme::new(Mode::Light, TextScale::default()).size(32.0), 32.0);
+}
+
+#[test]
+fn the_float_shadow_is_the_one_shadow() {
+    assert_eq!(FLOAT_SHADOW.offset, [0, 12]);
+    assert_eq!(FLOAT_SHADOW.blur, 32);
+    assert_eq!(FLOAT_SHADOW.spread, 0);
+    assert_eq!(FLOAT_SHADOW.color, Color32::from_black_alpha(102), "black at 40 %");
+}
+
+#[test]
+fn account_colours_repeat_from_the_seventh() {
+    for theme in all() {
+        let colours = theme.palette.accounts;
+        assert_eq!(theme.account_colour(0), colours[0]);
+        assert_eq!(theme.account_colour(5), colours[5]);
+        assert_eq!(theme.account_colour(6), colours[0], "wraps around");
+        assert_eq!(theme.account_colour(u64::MAX), colours[(u64::MAX % 6) as usize]);
+    }
+}
+
+#[test]
+fn the_visuals_follow_the_tokens_flat_and_square() {
+    for theme in all() {
+        let p = theme.palette;
+        let visuals = theme.visuals();
+        assert_eq!(visuals.dark_mode, theme.mode == Mode::Dark);
+        assert_eq!(visuals.panel_fill, p.bg);
+        assert_eq!(visuals.window_fill, p.surface);
+        assert_eq!(visuals.extreme_bg_color, p.term);
+        assert_eq!(visuals.selection.bg_fill, p.cyan_muted);
+        assert_eq!(visuals.hyperlink_color, p.cyan_text);
+        assert_eq!(visuals.override_text_color, Some(p.ink));
+        // Glyph coverage is alpha as it is, in both modes, as the design draws it: no boost in the dark.
+        assert_eq!(visuals.text_options.color_transfer_function, egui::epaint::FontColorTransferFunction::Off, "{:?}", theme.mode);
+        assert_eq!(visuals.window_shadow, egui::epaint::Shadow::NONE);
+        assert_eq!(visuals.popup_shadow, egui::epaint::Shadow::NONE);
+        assert_eq!(visuals.window_corner_radius, egui::CornerRadius::ZERO);
+        assert_eq!(visuals.menu_corner_radius, egui::CornerRadius::ZERO);
+        let w = &visuals.widgets;
+        for state in [w.noninteractive, w.inactive, w.hovered, w.active, w.open] {
+            assert_eq!(state.corner_radius, egui::CornerRadius::ZERO);
+            assert_eq!(state.bg_stroke.color, p.line);
+        }
+        let style = theme.style();
+        assert_eq!(style.spacing.item_spacing.y, theme.spacing.s1);
+        assert_eq!(style.spacing.scroll.fade.strength, 0.0, "no fade of egui's own over text");
+        // The thumb grows under the pointer inside a strip of one width: the scroll bar component paints it.
+        assert_eq!(style.spacing.scroll, crate::component::scroll::style(&theme), "the scroll bar's own style");
+        for (style_of, font) in [
+            (egui::TextStyle::Small, theme.fonts.caption),
+            (egui::TextStyle::Body, theme.fonts.body),
+            (egui::TextStyle::Button, theme.fonts.button),
+            (egui::TextStyle::Heading, theme.fonts.heading),
+            (egui::TextStyle::Monospace, theme.fonts.mono),
+        ] {
+            assert_eq!(style.text_styles.get(&style_of), Some(&font.id()), "{style_of:?}");
+        }
+    }
+}
+
+#[test]
+fn a_look_takes_the_owner_s_choices() {
+    use inboxcraft_engine::appearance::Appearance;
+    let appearance = Appearance { text_scale: 110, ..Appearance::default() };
+    let look = Look::of(&appearance);
+    assert_eq!(look.text_scale.percent(), 110);
+    let theme = Theme::of(Mode::Dark, &look);
+    assert_eq!(theme, Theme::new(Mode::Dark, look.text_scale));
+    assert_eq!(theme.palette, Palette::of(Mode::Dark));
+    assert_eq!(Look::of(&Appearance::default()), Look::default());
+    assert_eq!(Look::of(&Appearance { text_scale: 95, ..Appearance::default() }).text_scale, TextScale::default());
+}
+
+#[test]
+fn mode_of_reads_the_context_and_apply_installs_both_modes() {
+    let ctx = egui::Context::default();
+    let large = TextScale::from_percent(130).unwrap();
+    let look = Look { text_scale: large };
+    Theme::apply(&ctx, &look);
+    assert_eq!(ctx.style_of(egui::Theme::Light).visuals.panel_fill, Palette::of(Mode::Light).bg);
+    assert_eq!(ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Palette::of(Mode::Dark).bg);
+    let body = ctx.style_of(egui::Theme::Dark).text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
+    assert_eq!(body, Some(Theme::new(Mode::Dark, large).fonts.body.size));
+    ctx.set_theme(egui::Theme::Dark);
+    assert_eq!(Mode::of(&ctx), Mode::Dark);
+    assert_eq!(Theme::current(&ctx, &look), Theme::new(Mode::Dark, large));
+    ctx.set_theme(egui::Theme::Light);
+    assert_eq!(Mode::of(&ctx), Mode::Light);
+    assert_eq!(Theme::current(&ctx, &Look::default()), Theme::new(Mode::Light, TextScale::default()));
+}
+
+/// Whether `line` paints a gradient, a blur or a translucent fill of its own: a mesh, texture coordinates, a blurred
+/// rect, a gradient, or a colour made translucent in code.
+fn paints_a_gradient_or_a_blur(line: &str) -> bool {
+    ["Mesh", "new_uv", "with_blur_width", "Gradient", "gamma_multiply(", "linear_multiply(", "from_black_alpha(", "from_white_alpha("]
+        .iter()
+        .any(|word| line.contains(word))
+}
+
+#[test]
+fn the_gradient_check_finds_meshes_blurs_and_washes() {
+    assert!(paints_a_gradient_or_a_blur("let mut mesh = Mesh::default();"));
+    assert!(paints_a_gradient_or_a_blur("shape.with_blur_width(8.0)"));
+    assert!(paints_a_gradient_or_a_blur("let fill = Gradient::Linear { .. };"));
+    assert!(paints_a_gradient_or_a_blur("painter.rect_filled(rect, 0.0, p.stage.gamma_multiply(hover));"));
+    assert!(!paints_a_gradient_or_a_blur("painter.rect_filled(rect, 0.0, p.stage);"));
+}
+
+#[test]
+fn no_code_paints_a_gradient_or_a_blur() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for dir in ["src", "examples"] {
+        if root.join(dir).is_dir() {
+            sources(&root.join(dir), &mut files);
+        }
+    }
+    // The tokens (`scrim` and `FLOAT_SHADOW`), the float painter and the picture rasteriser are allowed.
+    let src = root.join("src");
+    let allowed = [src.join("theme.rs"), src.join("draw").join("paint.rs"), src.join("shot.rs")];
+    let mut found = Vec::new();
+    for file in files.iter().filter(|file| !allowed.contains(file)) {
+        let text = std::fs::read_to_string(file).unwrap();
+        for (index, line) in text.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or_default();
+            if paints_a_gradient_or_a_blur(code) {
+                found.push(format!("{}:{}: {}", file.strip_prefix(root).unwrap().display(), index + 1, line.trim()));
+            }
+        }
+    }
+    assert!(found.is_empty(), "flat fills only:\n{}", found.join("\n"));
 }
 
 #[test]
@@ -27,24 +374,6 @@ fn contrast_of_black_on_white_is_21_and_of_a_colour_on_itself_is_1() {
     assert!((contrast(Color32::WHITE, Color32::BLACK) - 21.0).abs() < 0.01);
     let grey = Color32::from_rgb(120, 120, 120);
     assert!((contrast(grey, grey) - 1.0).abs() < 0.001);
-}
-
-#[test]
-fn the_three_presets_are_one_table_entry_each_with_the_owners_colours() {
-    let ids: Vec<&str> = PRESETS.iter().map(|preset| preset.id).collect();
-    assert_eq!(ids, ["electric", "aurora", "citrus"]);
-    let electric = Preset::named("electric").unwrap();
-    assert_eq!(electric.gradient.map(hex), ["#2f6bff", "#8a3ffc", "#ff2d95"]);
-    assert_eq!(hex(electric.accent), "#ffd60a");
-    let aurora = Preset::named("aurora").unwrap();
-    assert_eq!(aurora.gradient.map(hex), ["#9b5cff", "#ff2bd6", "#ff8a00"]);
-    assert_eq!(hex(aurora.accent), "#00e5ff");
-    let citrus = Preset::named("citrus").unwrap();
-    assert_eq!(citrus.gradient.map(hex), ["#ff2e63", "#ff8f00", "#ffd000"]);
-    assert_eq!(hex(citrus.accent), "#3d5afe");
-    assert_eq!(Preset::default(), *electric, "Electric is the default");
-    assert_eq!(Preset::named("teal"), None);
-    assert_eq!(Preset::named("Electric"), None, "ids are lower case");
 }
 
 #[test]
@@ -61,123 +390,6 @@ fn the_mode_preference_is_system_by_default_and_maps_onto_egui() {
 }
 
 #[test]
-fn every_text_colour_meets_wcag_aa_on_the_surface_it_sits_on_for_every_preset_in_both_modes() {
-    for theme in all() {
-        let p = theme.palette;
-        for (name, text, background) in [
-            ("text on background", p.text, p.background),
-            ("text on panel", p.text, p.panel),
-            ("text on surface", p.text, p.surface),
-            ("text on field", p.text, p.field),
-            ("text on selection", p.text, p.selection),
-            ("muted on background", p.muted, p.background),
-            ("muted on surface", p.muted, p.surface),
-            ("muted on panel", p.muted, p.panel),
-            ("muted on selection", p.muted, p.selection),
-            ("accent text on background", p.accent, p.background),
-            ("accent text on surface", p.accent, p.surface),
-            ("accent text on panel", p.accent, p.panel),
-            ("accent text on selection", p.accent, p.selection),
-            ("text on accent", p.on_accent, p.accent),
-            ("badge text on badge", p.on_badge, p.badge),
-            ("error text on error", p.on_error, p.error),
-            ("error text on surface", p.error, p.surface),
-            ("error text on panel", p.error, p.panel),
-            ("flag text on surface", p.flag, p.surface),
-        ] {
-            let ratio = contrast(text, background);
-            assert!(ratio >= 4.5, "{} {:?} {name}: {ratio:.2}", theme.preset.id, theme.mode);
-        }
-    }
-}
-
-#[test]
-fn controls_and_markers_meet_three_to_one_for_every_preset_in_both_modes() {
-    for theme in all() {
-        let p = theme.palette;
-        for (name, colour, background) in [
-            ("unread marker on surface", p.unread, p.surface),
-            ("unread marker on selection", p.unread, p.selection),
-            ("flag on surface", p.flag, p.surface),
-            ("flag on selection", p.flag, p.selection),
-            ("focus ring on surface", p.focus, p.surface),
-            ("focus ring on panel", p.focus, p.panel),
-            ("focus ring on background", p.focus, p.background),
-            ("field border on surface", p.field_border, p.surface),
-            ("field border on field", p.field_border, p.field),
-        ] {
-            let ratio = contrast(colour, background);
-            assert!(ratio >= 3.0, "{} {:?} {name}: {ratio:.2}", theme.preset.id, theme.mode);
-        }
-    }
-}
-
-#[test]
-fn text_on_a_gradient_picks_white_or_dark_ink_by_contrast() {
-    assert_eq!(ink_on(Color32::from_rgb(0x20, 0x20, 0x60)), Color32::WHITE);
-    assert_ne!(ink_on(Color32::from_rgb(0xff, 0xd0, 0x00)), Color32::WHITE, "dark ink on yellow");
-    for theme in all() {
-        for step in 0..=32 {
-            let at = step as f32 / 32.0;
-            let behind = theme.gradient_at(at);
-            let ink = ink_on(behind);
-            let other = if ink == Color32::WHITE { theme.palette.ink } else { Color32::WHITE };
-            assert!(contrast(ink, behind) >= contrast(other, behind), "{} at {at}: the better ink", theme.preset.id);
-            assert!(contrast(ink, behind) >= 4.5, "{} {:?} ink on the gradient at {at}: {:.2}", theme.preset.id, theme.mode, contrast(ink, behind));
-        }
-    }
-    // Citrus's yellow end: white would not do.
-    let citrus = Theme::new(Mode::Light, Preset::named("citrus").unwrap());
-    assert!(contrast(Color32::WHITE, citrus.gradient_at(1.0)) < 4.5);
-    assert_ne!(ink_on(citrus.gradient_at(1.0)), Color32::WHITE);
-}
-
-#[test]
-fn the_gradient_runs_through_the_three_stops() {
-    for theme in all() {
-        let [first, middle, last] = theme.preset.gradient;
-        assert_eq!(theme.gradient_at(0.0), first);
-        assert_eq!(theme.gradient_at(0.5), middle);
-        assert_eq!(theme.gradient_at(1.0), last);
-        assert_eq!(theme.gradient_at(-3.0), first, "clamped");
-        assert_eq!(theme.gradient_at(f32::NAN), first, "nonsense starts at the start");
-        assert_eq!(theme.gradient_at(7.0), last, "clamped");
-        assert_eq!(theme.palette.gradient, theme.preset.gradient, "the gradient token is the preset at full strength");
-    }
-}
-
-#[test]
-fn light_mode_accent_text_is_the_middle_stop_darkened_and_dark_mode_the_middle_stop_lightened() {
-    for preset in &PRESETS {
-        let light = Theme::new(Mode::Light, preset).palette;
-        let middle = preset.gradient[1];
-        assert!(light.accent != middle && light.accent != preset.accent, "{}: darkened, not the raw colour", preset.id);
-        let channels = |c: Color32| u16::from(c.r()) + u16::from(c.g()) + u16::from(c.b());
-        assert!(channels(light.accent) < channels(middle), "{}: darker than the middle stop", preset.id);
-        let dark = Theme::new(Mode::Dark, preset).palette;
-        // Dark mode takes the middle stop mixed 30 % with white (lightened further where it would not read), never
-        // the preset's separate accent, which stays an account colour.
-        assert_ne!(dark.accent, preset.accent, "{}: not the separate accent", preset.id);
-        assert!(channels(dark.accent) >= channels(mix(middle, WHITE, 0.3)), "{}: at least the lightened stop", preset.id);
-        assert!(channels(dark.accent) > channels(middle), "{}: lighter than the middle stop", preset.id);
-    }
-}
-
-#[test]
-fn readable_moves_a_colour_only_as_far_as_it_must() {
-    let white = Color32::WHITE;
-    let already = Color32::from_rgb(0x20, 0x20, 0x20);
-    assert_eq!(readable(already, &[white], 4.5, Mode::Light), already);
-    let yellow = Color32::from_rgb(0xff, 0xd0, 0x00);
-    let darkened = readable(yellow, &[white], 4.5, Mode::Light);
-    assert!(contrast(darkened, white) >= 4.5);
-    assert!(contrast(darkened, white) < 6.0, "not darker than needed: {:.2}", contrast(darkened, white));
-    let lightened = readable(Color32::from_rgb(0x3d, 0x5a, 0xfe), &[Color32::BLACK], 7.0, Mode::Dark);
-    assert!(contrast(lightened, Color32::BLACK) >= 7.0);
-    assert_eq!(readable(yellow, &[], 4.5, Mode::Light), yellow, "nothing to sit on");
-}
-
-#[test]
 fn mix_runs_from_one_colour_to_the_other() {
     let (a, b) = (Color32::from_rgb(0, 100, 200), Color32::from_rgb(200, 0, 100));
     assert_eq!(mix(a, b, 0.0), a);
@@ -187,113 +399,55 @@ fn mix_runs_from_one_colour_to_the_other() {
     assert_eq!(mix(a, b, f32::NAN), a);
 }
 
-/// Teal: blue-green with more green than blue (the old `#1d6a64` and `#6cc4ba`); the presets' cyans have more blue.
-/// Coral: a soft orange-pink (the old `#f0a06a`).
-fn teal_or_coral(colour: Color32) -> bool {
-    let (r, g, b) = (i32::from(colour.r()), i32::from(colour.g()), i32::from(colour.b()));
-    let teal = g > r + 40 && b > r + 20 && g >= b;
-    let coral = r > 200 && r - g > 50 && (100..190).contains(&g) && (70..160).contains(&b);
-    teal || coral
+/// A style as the design file's table gives it: face, size, line, tracking and capitals.
+fn style(face: Face, size: f32, line: f32, tracking: f32, caps: bool) -> Font {
+    Font { face, size, line, tracking, caps }
 }
 
 #[test]
-fn no_teal_or_coral_is_left() {
-    for theme in all() {
-        let p = theme.palette;
-        let mut tokens = vec![p.accent, p.unread, p.flag, p.focus, p.badge, p.selection];
-        tokens.extend(p.accounts);
-        tokens.extend(p.avatars);
-        for colour in tokens {
-            assert!(!teal_or_coral(colour), "{} {:?}: {} is teal or coral", theme.preset.id, theme.mode, hex(colour));
-        }
+fn the_twelve_styles_are_the_design_file_s() {
+    let f = Fonts::of(TextScale::default());
+    let expected = [
+        ("display", f.display, style(Face::Mono, 40.0, 48.0, -0.01, false)),
+        ("title", f.title, style(Face::Mono, 22.0, 30.0, 0.0, false)),
+        ("heading", f.heading, style(Face::MonoSemiBold, 15.0, 22.0, 0.0, false)),
+        ("label", f.label, style(Face::Mono, 11.0, 16.0, 0.08, true)),
+        ("mono", f.mono, style(Face::Mono, 13.0, 20.0, 0.0, false)),
+        ("mono_s", f.mono_s, style(Face::Mono, 11.0, 16.0, 0.0, false)),
+        ("key", f.key, style(Face::MonoSemiBold, 11.0, 14.0, 0.0, false)),
+        ("button", f.button, style(Face::Mono, 13.0, 16.0, 0.0, false)),
+        ("body", f.body, style(Face::Sans, 14.0, 22.0, 0.0, false)),
+        ("strong", f.strong, style(Face::SansSemiBold, 14.0, 22.0, 0.0, false)),
+        ("caption", f.caption, style(Face::Sans, 12.0, 18.0, 0.0, false)),
+        ("read", f.read, style(Face::Sans, 16.0, 26.0, 0.0, false)),
+        ("brand", f.brand, style(Face::Brand, 22.0, 30.0, 0.0, false)),
+    ];
+    for (name, got, want) in expected {
+        assert_eq!(got, want, "{name}");
     }
+    assert_eq!(f.all().len(), expected.len(), "every style is listed");
+    // Type is not rounded (boxes are): at 130 % the body is 18.2 on 28.6, its tracking untouched.
+    let large = Fonts::of(TextScale::from_percent(130).unwrap());
+    assert!((large.body.size - 18.2).abs() < 1e-4 && (large.body.line - 28.6).abs() < 1e-4, "{:?}", large.body);
+    assert_eq!(large.label.tracking, 0.08);
+    assert!(large.label.caps);
 }
 
 #[test]
-fn glass_cards_and_colour_fields_are_translucent_and_the_float_is_solid() {
-    for theme in all() {
-        let p = theme.palette;
-        for (name, colour) in [
-            ("glass", p.glass),
-            ("card", p.card),
-            ("control edge", p.control_edge),
-            ("glass edge", p.glass_edge),
-            ("window edge", p.window_edge),
-            ("scrim", p.scrim),
-            ("glass highlight", p.glass_highlight),
-            ("shadow", p.shadow),
-            ("line", p.line),
-            ("hover", p.hover),
-        ] {
-            assert!(colour.a() < 255 && colour.a() > 0, "{} {:?} {name}: alpha {}", theme.preset.id, theme.mode, colour.a());
-        }
-        assert_eq!(p.float.a(), 255, "{} {:?} float alpha", theme.preset.id, theme.mode);
-        for (index, field) in p.colour_fields.iter().enumerate() {
-            assert!(field.a() > 0 && field.a() < 160, "{} {:?} colour field {index}", theme.preset.id, theme.mode);
-        }
+fn a_style_s_format_carries_its_line_height_and_tracking_in_points() {
+    let f = Fonts::of(TextScale::default());
+    let format = f.label.format(Color32::RED);
+    assert_eq!(format.font_id, f.label.id());
+    assert_eq!(format.line_height, Some(16.0));
+    assert!((format.extra_letter_spacing - 0.88).abs() < 1e-5, "{}", format.extra_letter_spacing);
+    assert_eq!(format.color, Color32::RED);
+    assert_eq!(f.label.text("Mail"), "MAIL");
+    assert_eq!(f.body.text("Mail"), "Mail");
+    let brand = f.brand.sized(44.0);
+    assert_eq!((brand.size, brand.line), (44.0, 60.0));
+    for wrong in [0.0, -3.0, f32::NAN, f32::INFINITY] {
+        assert_eq!(f.brand.sized(wrong), f.brand, "{wrong}");
     }
-}
-
-#[test]
-fn account_colours_are_distinct_and_visible_for_every_preset_in_both_modes() {
-    for theme in all() {
-        let colours = theme.palette.accounts;
-        for (index, colour) in colours.iter().enumerate() {
-            assert!(contrast(*colour, theme.palette.surface) >= 3.0, "{} {:?} account colour {index}", theme.preset.id, theme.mode);
-            assert!(
-                colours.iter().skip(index + 1).all(|other| other != colour),
-                "{} {:?} account colour {index} repeats",
-                theme.preset.id,
-                theme.mode
-            );
-        }
-        assert_eq!(theme.account_colour(0), colours[0]);
-        assert_eq!(theme.account_colour(colours.len() as u64), colours[0], "wraps around");
-        assert_eq!(theme.account_colour(u64::MAX), colours[(u64::MAX % colours.len() as u64) as usize]);
-    }
-}
-
-#[test]
-fn every_preset_gives_its_own_colours_and_the_modes_differ() {
-    for mode in [Mode::Light, Mode::Dark] {
-        let palettes: Vec<_> = PRESETS.iter().map(|preset| Theme::new(mode, preset).palette).collect();
-        for (index, palette) in palettes.iter().enumerate() {
-            for other in palettes.iter().skip(index + 1) {
-                assert_ne!(palette.accent, other.accent, "{mode:?}");
-                assert_ne!(palette.selection, other.selection, "{mode:?}");
-                assert_ne!(palette.background, other.background, "{mode:?}: the surfaces carry a trace of the preset");
-            }
-        }
-    }
-    for preset in &PRESETS {
-        assert_ne!(Theme::new(Mode::Light, preset).palette, Theme::new(Mode::Dark, preset).palette);
-    }
-}
-
-#[test]
-fn the_type_grows_and_the_spacing_is_positive() {
-    for theme in all() {
-        let f = theme.fonts;
-        assert!(0.0 < f.caption.size && f.caption.size < f.body.size && f.body.size < f.heading.size && f.heading.size < f.title.size, "{f:?}");
-        let s = theme.spacing;
-        assert!(0.0 < s.xs && s.xs < s.s && s.s < s.m && s.m < s.l && s.l < s.xl, "{s:?}");
-        assert!(s.folder_pane > 0.0 && s.corner > 0.0);
-    }
-}
-
-#[test]
-fn sender_and_subject_are_strong_the_preview_plain_and_unread_heavier() {
-    let f = Theme::new(Mode::Light, &Preset::default()).fonts;
-    assert_eq!(f.preview.face, Face::Sans(Weight::Regular));
-    assert_eq!(f.body.face, Face::Sans(Weight::Regular));
-    for (read, unread) in [(f.sender, f.sender_unread), (f.subject, f.subject_unread)] {
-        let (Face::Sans(read), Face::Sans(unread)) = (read.face, unread.face) else { panic!("sans") };
-        assert!(read < unread, "unread is heavier: {read:?} {unread:?}");
-    }
-    let Face::Sans(sender) = f.sender.face else { panic!("sans") };
-    assert!(sender > Weight::Regular, "the sender is stronger than the preview");
-    assert!(f.title.face == Face::Sans(Weight::Bold));
-    assert_eq!(f.mono.face, Face::Mono);
 }
 
 #[test]
@@ -310,7 +464,7 @@ fn the_text_scale_runs_from_90_to_130_percent_in_steps_of_10() {
 
 #[test]
 fn the_text_scale_applies_to_every_font_token_and_to_egui_s_text_styles() {
-    let base = Theme::new(Mode::Dark, &Preset::default());
+    let base = Theme::new(Mode::Dark, TextScale::default());
     assert_eq!(base.text_scale, TextScale::default());
     for scale in TextScale::ALL {
         let theme = base.with_text_scale(scale);
@@ -321,8 +475,9 @@ fn the_text_scale_applies_to_every_font_token_and_to_egui_s_text_styles() {
         assert_eq!(scaled.len(), plain.len());
         assert!(scaled.len() >= 12, "every token is listed");
         for (scaled, plain) in scaled.iter().zip(&plain) {
-            assert_eq!(scaled.face, plain.face);
+            assert_eq!((scaled.face, scaled.tracking, scaled.caps), (plain.face, plain.tracking, plain.caps));
             assert!((scaled.size - plain.size * scale.factor()).abs() < 1e-4, "{scale:?}: {scaled:?} from {plain:?}");
+            assert!((scaled.line - plain.line * scale.factor()).abs() < 1e-4, "{scale:?}: {scaled:?} from {plain:?}");
         }
         let body = theme.style().text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
         assert_eq!(body, Some(theme.fonts.body.size));
@@ -333,177 +488,307 @@ fn the_text_scale_applies_to_every_font_token_and_to_egui_s_text_styles() {
 }
 
 #[test]
-fn every_font_token_names_a_family_its_typeface_defines() {
+fn every_style_names_a_family_whose_first_font_is_its_face() {
     let definitions = font_definitions();
-    for (typeface, prefix) in [(Typeface::Figtree, "Figtree-"), (Typeface::Inter, "Inter-")] {
-        let theme = Theme::new(Mode::Light, &Preset::default()).with_typeface(typeface);
-        assert_eq!(theme.typeface, typeface);
-        for font in theme.fonts.all() {
-            let id = font.id();
-            assert_eq!(id.size, font.size);
-            let family = definitions.families.get(&id.family).unwrap_or_else(|| panic!("{:?} is defined", id.family));
-            let first = family.first().unwrap();
-            assert!(definitions.font_data.contains_key(first), "{first}");
-            match font.face {
-                Face::Mono => assert_eq!(first, "Hack"),
-                Face::Sans(_) => assert!(first.starts_with(prefix), "{first}"),
-            }
-        }
+    for font in Fonts::of(TextScale::default()).all() {
+        let id = font.id();
+        assert_eq!(id.size, font.size);
+        let family = definitions.families.get(&id.family).unwrap_or_else(|| panic!("{:?} is defined", id.family));
+        assert_eq!(family.first().map(String::as_str), Some(font.face.name()), "{font:?}");
+        assert!(family.len() > 1, "{:?} falls back to egui's faces", font.face);
+        assert!(family.iter().all(|name| definitions.font_data.contains_key(name)), "{family:?}");
     }
 }
 
 #[test]
-fn the_typeface_and_the_text_scale_change_independently() {
-    let base = Theme::new(Mode::Dark, &Preset::default());
-    let large = TextScale::from_percent(130).unwrap();
-    let both = base.with_text_scale(large).with_typeface(Typeface::Inter);
-    assert_eq!(both, base.with_typeface(Typeface::Inter).with_text_scale(large));
-    assert_eq!(both.fonts.body.size, base.with_text_scale(large).fonts.body.size);
-    assert!(both.fonts.all().iter().all(|font| font.typeface == Typeface::Inter));
-    assert_eq!(both.with_typeface(Typeface::Figtree), base.with_text_scale(large));
-}
-
-#[test]
-fn inter_draws_with_its_own_shapes() {
-    let ctx = egui::Context::default();
-    install_fonts(&ctx);
-    ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
-    let width = |typeface: Typeface| {
-        let font = Font { size: 14.0, face: Face::Sans(Weight::Regular), typeface };
-        ctx.fonts_mut(|fonts| "Budget for 2026".chars().map(|c| fonts.glyph_width(&font.id(), c)).sum::<f32>())
-    };
-    assert!((width(Typeface::Inter) - width(Typeface::Figtree)).abs() > 0.5, "Inter is a face of its own");
-}
-
-#[test]
-fn a_look_takes_the_owner_s_choices() {
-    use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Rgb};
-    let custom = CustomAccent { gradient: [Rgb(1, 2, 3), Rgb(4, 5, 6), Rgb(7, 8, 9)], accent: Rgb(0xff, 0xd6, 0x0a) };
-    let appearance =
-        Appearance { accent: Accent::Custom(custom), font: Typeface::Inter, icons: Icons::Lucide, text_scale: 110, ..Appearance::default() };
-    let look = Look::of(&appearance);
-    assert_eq!(look.preset.id, "custom");
-    assert_eq!(look.preset.gradient, [rgb(0x010203), rgb(0x040506), rgb(0x070809)]);
-    assert_eq!(look.preset.accent, rgb(0xffd60a));
-    assert_eq!(look.typeface, Typeface::Inter);
-    assert_eq!(look.icons, IconSet::Lucide);
-    assert_eq!(look.text_scale.percent(), 110);
-    let theme = Theme::of(Mode::Dark, &look);
-    assert_eq!((theme.typeface, theme.icons, theme.text_scale), (Typeface::Inter, IconSet::Lucide, look.text_scale));
-    assert_eq!(Look::of(&Appearance::default()), Look::default());
-    assert_eq!(Preset::of(&Accent::Preset("aurora")), *Preset::named("aurora").unwrap());
-    assert_eq!(Preset::of(&Accent::Preset("gone")), Preset::default(), "an id this front end does not ship is Electric");
-    assert_eq!(Look::of(&Appearance { text_scale: 95, ..Appearance::default() }).text_scale, TextScale::default());
-}
-
-#[test]
-fn the_engine_s_dark_surface_is_the_lightest_dark_neutral_and_every_preset_id_is_shipped() {
-    use inboxcraft_engine::appearance::{DARK_SURFACE, PRESETS as PRESET_IDS, Rgb};
-    let Rgb(r, g, b) = DARK_SURFACE;
-    assert_eq!(Color32::from_rgb(r, g, b), DARK.float);
-    for neutral in [DARK.background, DARK.panel, DARK.surface, DARK.field] {
-        assert!(contrast(neutral, BLACK) <= contrast(DARK.float, BLACK), "{}", hex(neutral));
-    }
-    assert_eq!(PRESET_IDS.to_vec(), PRESETS.iter().map(|preset| preset.id).collect::<Vec<_>>());
-}
-
-#[test]
-fn a_custom_accent_the_engine_nudged_reads_in_dark_mode_for_any_gradient() {
-    use inboxcraft_engine::appearance::{Accent, CustomAccent, Rgb};
-    for gradient in [[Rgb(0, 0, 0); 3], [Rgb(255, 255, 255); 3], [Rgb(0xff, 0xd0, 0), Rgb(0, 0xe5, 0xff), Rgb(0x3d, 0x5a, 0xfe)]] {
-        let custom = CustomAccent { gradient, accent: Rgb(0x30, 0x10, 0x60) }.readable();
-        let preset = Preset::of(&Accent::Custom(custom));
-        for mode in [Mode::Light, Mode::Dark] {
-            let p = Theme::new(mode, &preset).palette;
-            for behind in [p.background, p.panel, p.surface] {
-                assert!(contrast(p.accent, behind) >= 4.5, "{mode:?} {}", hex(p.accent));
-                assert!(contrast(p.text, behind) >= 4.5, "{mode:?}");
-            }
-        }
-    }
-}
-
-#[test]
-fn figtree_replaces_ubuntu_light_everywhere() {
+fn plex_replaces_the_bundled_faces() {
+    let bundled = egui::FontDefinitions::default();
     let definitions = font_definitions();
-    assert!(!definitions.font_data.contains_key("Ubuntu-Light"));
-    for (family, fonts) in &definitions.families {
-        assert!(!fonts.iter().any(|font| font.contains("Ubuntu")), "{family:?}: {fonts:?}");
-        assert!(fonts.iter().all(|font| definitions.font_data.contains_key(font)), "{family:?}: {fonts:?}");
-    }
-    let proportional = definitions.families.get(&egui::FontFamily::Proportional).unwrap();
-    assert_eq!(proportional.first().map(String::as_str), Some("Figtree-Regular"));
-    let monospace = definitions.families.get(&egui::FontFamily::Monospace).unwrap();
-    assert!(monospace.contains(&"Figtree-Regular".to_owned()), "Figtree stands in for Hack's missing signs: {monospace:?}");
-    for weight in [Weight::Regular, Weight::Medium, Weight::SemiBold, Weight::Bold] {
-        let family = Font { size: 14.0, face: Face::Sans(weight), typeface: Typeface::Inter }.id().family;
+    for (family, first) in [(egui::FontFamily::Proportional, "IBMPlexSans-Regular"), (egui::FontFamily::Monospace, "IBMPlexMono-Regular")] {
         let fonts = definitions.families.get(&family).unwrap();
-        assert!(fonts.len() > 1, "{weight:?} falls back to the emoji and icon fonts");
+        assert_eq!(fonts.first().map(String::as_str), Some(first), "{family:?}");
+        assert!(!["Ubuntu-Light", "Hack"].contains(&fonts[0].as_str()));
+        // egui's own faces stay behind: the fallbacks and the icon fonts, Hack behind Plex Sans too.
+        for font in bundled.families.get(&family).unwrap().iter().chain(std::iter::once(&"Hack".to_owned())) {
+            assert!(fonts[1..].contains(font), "{family:?}: {font} in {fonts:?}");
+        }
+    }
+    for face in Face::ALL {
+        assert!(definitions.font_data.contains_key(face.name()), "{face:?}");
     }
 }
 
 #[test]
-fn install_fonts_puts_figtree_into_the_context() {
+fn install_fonts_puts_plex_into_the_context() {
     let ctx = egui::Context::default();
     install_fonts(&ctx);
     ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
     let families = ctx.fonts(|fonts| fonts.definitions().families.clone());
-    assert_eq!(families.get(&egui::FontFamily::Proportional).and_then(|fonts| fonts.first()).map(String::as_str), Some("Figtree-Regular"));
-    let bold = Font { size: 14.0, face: Face::Sans(Weight::Bold), typeface: Typeface::Figtree };
-    let regular = Font { size: 14.0, face: Face::Sans(Weight::Regular), typeface: Typeface::Figtree };
+    assert_eq!(families.get(&egui::FontFamily::Proportional).and_then(|fonts| fonts.first()).map(String::as_str), Some("IBMPlexSans-Regular"));
+    let f = Fonts::of(TextScale::default());
     let width = |font: Font| ctx.fonts_mut(|fonts| fonts.glyph_width(&font.id(), 'm'));
-    assert!(width(bold) > width(regular), "the bold weight is its own face");
+    assert!(width(f.strong) > width(f.body), "SemiBold is its own face");
+    assert_eq!(width(f.heading), width(f.title.sized(15.0)), "Plex Mono keeps one advance in both weights");
+}
+
+/// The shipped Plex Sans as a fallback under another name.
+fn plex_as(name: &str) -> Fallback {
+    Fallback { name: name.to_owned(), data: include_bytes!("../../../assets/fonts/plex-sans/IBMPlexSans-Regular.ttf").to_vec(), index: 0 }
 }
 
 #[test]
-fn the_visuals_follow_the_tokens() {
-    for theme in all() {
-        let visuals = theme.visuals();
-        assert_eq!(visuals.dark_mode, theme.mode == Mode::Dark);
-        assert_eq!(visuals.panel_fill, theme.palette.panel);
-        assert_eq!(visuals.extreme_bg_color, theme.palette.field);
-        assert_eq!(visuals.selection.bg_fill, theme.palette.selection);
-        assert_eq!(visuals.hyperlink_color, theme.palette.accent);
-        assert_eq!(visuals.override_text_color, Some(theme.palette.text));
-        assert_eq!(visuals.widgets.hovered.bg_stroke.color, theme.palette.focus);
-        let style = theme.style();
-        assert_eq!(style.spacing.item_spacing.y, theme.spacing.xs);
-        for (style_of, token) in [
-            (egui::TextStyle::Small, theme.fonts.caption),
-            (egui::TextStyle::Body, theme.fonts.body),
-            (egui::TextStyle::Button, theme.fonts.button),
-            (egui::TextStyle::Heading, theme.fonts.heading),
-            (egui::TextStyle::Monospace, theme.fonts.mono),
-        ] {
-            assert_eq!(style.text_styles.get(&style_of), Some(&token.id()), "{style_of:?}");
+fn fallbacks_stand_behind_plex_in_every_text_family() {
+    let definitions = font_definitions_with(&[plex_as("system: Fake")]);
+    let icon = egui::FontFamily::Name(ICON.into());
+    let mut text_families = 0;
+    for (family, fonts) in &definitions.families {
+        if *family == icon {
+            assert!(!fonts.iter().any(|name| name == "system: Fake"), "the icon family holds no fallback");
+        } else {
+            text_families += 1;
+            assert_eq!(fonts.last().map(String::as_str), Some("system: Fake"), "{family:?}: {fonts:?}");
+        }
+    }
+    assert_eq!(text_families, 5, "the five faces' families, Proportional and Monospace among them");
+    let proportional = definitions.families.get(&egui::FontFamily::Proportional).unwrap();
+    assert_eq!(proportional.first().map(String::as_str), Some("IBMPlexSans-Regular"));
+    assert!(definitions.font_data.contains_key("system: Fake"));
+}
+
+#[test]
+fn a_fallback_that_is_not_a_font_is_skipped() {
+    let junk = Fallback { name: "junk".to_owned(), data: b"not a font".to_vec(), index: 0 };
+    let far = Fallback { index: 99, ..plex_as("far") };
+    let empty = Fallback { name: "empty".to_owned(), data: Vec::new(), index: 0 };
+    let fallbacks = [junk, far, empty];
+    let definitions = font_definitions_with(&fallbacks);
+    for name in ["junk", "far", "empty"] {
+        assert!(!definitions.font_data.contains_key(name), "{name}");
+        assert!(definitions.families.values().all(|fonts| !fonts.iter().any(|font| font == name)), "{name}");
+    }
+    let ctx = egui::Context::default();
+    let _ = install_fallbacks(&ctx, fallbacks.to_vec());
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        ui.label("日本語 🙂");
+    })
+    .textures_delta
+    .clear();
+}
+
+#[test]
+fn a_fallback_never_replaces_one_of_the_app_s_faces() {
+    let definitions = font_definitions_with(&[plex_as("IBMPlexMono-Regular"), plex_as(ICON)]);
+    let mono = definitions.families.get(&egui::FontFamily::Monospace).unwrap();
+    assert_eq!(mono.iter().filter(|name| *name == "IBMPlexMono-Regular").count(), 1);
+    assert_eq!(definitions.families.get(&egui::FontFamily::Name(ICON.into())).map(Vec::len), Some(1));
+}
+
+#[test]
+fn no_fallbacks_is_today_s_definitions() {
+    let (with, without) = (font_definitions_with(&[]), font_definitions());
+    assert_eq!(with.families, without.families);
+    assert_eq!(with.font_data.keys().collect::<Vec<_>>(), without.font_data.keys().collect::<Vec<_>>());
+    for (name, data) in &with.font_data {
+        let other = &without.font_data[name];
+        assert_eq!((data.bytes(), data.index), (other.bytes(), other.index), "{name}");
+    }
+}
+
+#[test]
+fn install_fallbacks_puts_them_into_the_context_and_asks_for_one_repaint() {
+    let ctx = fonts_ctx();
+    let fallback = plex_as("system: Fake");
+    let bytes = fallback.data.as_ptr();
+    let definitions = install_fallbacks(&ctx, vec![fallback]);
+    assert!(ctx.has_requested_repaint(), "the new fonts are drawn without waiting for input");
+    assert_eq!(definitions.font_data["system: Fake"].bytes().as_ptr(), bytes, "the bytes move in, not copied");
+    ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+    let families = ctx.fonts(|fonts| fonts.definitions().families.clone());
+    assert_eq!(families.get(&egui::FontFamily::Proportional).and_then(|fonts| fonts.last()).map(String::as_str), Some("system: Fake"));
+    assert_eq!(ctx.fonts(|fonts| fonts.definitions().font_data["system: Fake"].bytes().as_ptr()), bytes, "nor in the context");
+}
+
+#[test]
+fn the_computer_is_searched_for_every_script_the_app_s_fonts_lack() {
+    // The shipped Noto faces hold Arabic, Hebrew, Thai, Devanagari and emoji; Plex, Audiowide and egui's bundled faces
+    // (Ubuntu Light, Hack, the egui icons; egui's emoji faces are not compiled in) hold none of the other probes, so
+    // the start searches for those, and only those.
+    let shipped = ["arabic", "hebrew", "thai", "devanagari", "emoji"];
+    let others: Vec<(&str, char)> = FALLBACK_PROBES.iter().copied().filter(|(script, _)| !shipped.contains(script)).collect();
+    assert_eq!(missing_probes(&FALLBACK_PROBES), others);
+    assert_eq!(others.len(), 21, "Chinese, Japanese, Korean and the other scripts mail carries");
+    assert_eq!(missing_probes(&[("latin", 'A'), ("arrows", '⇧'), ("han", '日')]), vec![("han", '日')], "Plex and Hack hold these");
+    let mut scripts: Vec<&str> = FALLBACK_PROBES.iter().map(|(script, _)| *script).collect();
+    scripts.sort_unstable();
+    scripts.dedup();
+    assert_eq!(scripts.len(), FALLBACK_PROBES.len(), "one probe per script");
+    assert!(FALLBACK_PROBES.len() <= 32, "a found face's probes are bits of a u32");
+}
+
+/// One string of each script a shipped Noto face holds: `(script, text)`.
+const SHIPPED_SCRIPTS: [(&str, &str); 5] = [
+    ("hebrew", "שלום עולם, מה שלומך?"),
+    ("arabic", "مرحبا بالعالم، كيف حالك؟"),
+    ("devanagari", "नमस्ते दुनिया, क्षत्रिय"),
+    ("thai", "สวัสดีชาวโลก ภาษาไทย"),
+    ("emoji", "🙂 👍 🎉 ❤ ✌ 😀"),
+];
+
+#[test]
+fn the_shipped_scripts_lay_out_with_no_box_in_every_text_style() {
+    // The test harness panics on a sign no font holds, where the app draws a box: laying the strings out in it is the
+    // check that every glyph of every galley comes from a font.
+    let mut harness = egui_kittest::Harness::builder().with_context_setup(install_fonts).build_ui(|ui| {
+        for font in Fonts::of(TextScale::default()).all() {
+            for (_, text) in SHIPPED_SCRIPTS {
+                let galley = crate::component::galley(ui, text, font, Color32::BLACK);
+                assert!(galley.size().x > 0.0, "{font:?} {text}");
+                ui.label(egui::RichText::new(text).font(font.id()));
+            }
+        }
+    });
+    harness.run();
+    let ctx = fonts_ctx();
+    for font in Fonts::of(TextScale::default()).all() {
+        for (script, text) in SHIPPED_SCRIPTS {
+            let galley = laid_out(&ctx, text, font);
+            // A shaped run keeps a glyph per character, the ones a cluster took in with no picture of their own.
+            let glyphs: Vec<&egui::epaint::text::Glyph> = galley.rows.iter().flat_map(|row| row.glyphs.iter()).collect();
+            let drawn = glyphs.iter().filter(|glyph| !glyph.uv_rect.is_nothing()).count();
+            assert!(drawn >= text.split_whitespace().count() && galley.size().x > 0.0, "{script} in {font:?}: {drawn} drawn");
+            for glyph in &glyphs {
+                assert!(text.contains(glyph.chr), "{script} in {font:?}: {:?} is not the text's", glyph.chr);
+            }
+            for sign in text.chars().filter(|sign| !sign.is_whitespace()) {
+                assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&font.id(), sign)), "{script} in {font:?}: {sign:?} is a box");
+            }
         }
     }
 }
 
 #[test]
-fn mode_of_reads_the_context_and_apply_installs_both_modes_of_the_preset() {
-    let ctx = egui::Context::default();
-    let aurora = Preset::named("aurora").unwrap();
-    let large = TextScale::from_percent(130).unwrap();
-    let look = Look { preset: *aurora, text_scale: large, ..Look::default() };
-    Theme::apply(&ctx, &look);
-    assert_eq!(ctx.style_of(egui::Theme::Light).visuals.panel_fill, Theme::new(Mode::Light, aurora).palette.panel);
-    assert_eq!(ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, aurora).palette.panel);
-    let body = ctx.style_of(egui::Theme::Dark).text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
-    assert_eq!(body, Some(Theme::new(Mode::Dark, aurora).with_text_scale(large).fonts.body.size));
-    ctx.set_theme(egui::Theme::Dark);
-    assert_eq!(Mode::of(&ctx), Mode::Dark);
-    assert_eq!(Theme::current(&ctx, &look), Theme::new(Mode::Dark, aurora).with_text_scale(large));
-    ctx.set_theme(egui::Theme::Light);
-    assert_eq!(Mode::of(&ctx), Mode::Light);
-    assert_eq!(Theme::current(&ctx, &Look { preset: *aurora, ..Look::default() }), Theme::new(Mode::Light, aurora));
+fn plex_then_the_shipped_noto_faces_then_the_computer_s_in_every_text_family() {
+    let definitions = font_definitions_with(&[plex_as("system: Fake")]);
+    let icon = egui::FontFamily::Name(ICON.into());
+    let [hebrew, arabic, devanagari, thai, emoji] = SHIPPED_FALLBACKS;
+    for (family, fonts) in &definitions.families {
+        if *family == icon {
+            assert_eq!(fonts, &vec![ICON.to_owned()], "the icon family is Phosphor alone");
+            continue;
+        }
+        let first = fonts.first().map(String::as_str).unwrap_or_default();
+        assert!(Face::ALL.iter().any(|face| face.name() == first), "{family:?}: the app's face first, {fonts:?}");
+        // Hack keeps the signs it holds monospace: it stands before the script faces in the mono families.
+        let mono = Face::ALL.iter().any(|face| face.name() == first && face.is_mono());
+        let scripts = if mono { 2 } else { 1 };
+        if mono {
+            assert_eq!(fonts[1], "Hack", "{family:?}: Hack right behind Plex Mono, {fonts:?}");
+        }
+        assert_eq!(&fonts[scripts..scripts + 4], &[hebrew, arabic, devanagari, thai], "{family:?}: the script faces next, {fonts:?}");
+        let n = fonts.len();
+        assert_eq!(&fonts[n - 2..], &[emoji, "system: Fake"], "{family:?}: the emoji face, then the computer's: {fonts:?}");
+        assert!(fonts[scripts + 4..n - 2].iter().all(|font| egui::FontDefinitions::builtin_font_names().contains(&font.as_str())), "{fonts:?}");
+        for name in SHIPPED_FALLBACKS {
+            assert_eq!(fonts.iter().filter(|font| *font == name).count(), 1, "{family:?}: {name} once");
+        }
+    }
+    for name in SHIPPED_FALLBACKS {
+        assert!(definitions.font_data.contains_key(name), "{name}");
+    }
 }
 
-/// Whether `line` names a font of its own instead of a font token: a family, a font id, an egui text style or a
-/// size set by hand.
+#[test]
+fn the_signs_hack_holds_stay_monospace_and_hebrew_still_draws() {
+    // Each mono face with Hack alone behind it, as the family stood before the script faces came: what it draws.
+    let mut definitions = font_definitions();
+    let alone = |face: Face| egui::FontFamily::Name(format!("{} and Hack", face.name()).into());
+    for face in Face::ALL.into_iter().filter(|face| face.is_mono()) {
+        definitions.families.insert(alone(face), vec![face.name().to_owned(), "Hack".to_owned()]);
+    }
+    let hebrew = egui::FontFamily::Name("Hebrew alone".into());
+    definitions.families.insert(hebrew.clone(), vec![SHIPPED_FALLBACKS[0].to_owned()]);
+    let ctx = egui::Context::default();
+    ctx.set_fonts(definitions);
+    ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+    let size = 14.0;
+    let width = |family: &egui::FontFamily, sign: char| ctx.fonts_mut(|fonts| fonts.glyph_width(&egui::FontId::new(size, family.clone()), sign));
+    for face in Face::ALL.into_iter().filter(|face| face.is_mono()) {
+        // egui draws U+2009 and U+202F as half the first face's space and U+FEFF as nothing; U+2010 and U+25CC are
+        // Hack's, which Noto Sans Hebrew and Arabic also hold at their own widths.
+        for sign in ['\u{2009}', '\u{2010}', '\u{202F}', '\u{25CC}', '\u{FEFF}'] {
+            let (drawn, by_hack) = (width(&face.family(), sign), width(&alone(face), sign));
+            assert_eq!(drawn, by_hack, "{face:?} U+{:04X}: drawn {drawn}, before the script faces {by_hack}", u32::from(sign));
+        }
+        // The script faces still serve what Hack lacks.
+        for sign in "שלום עולם".chars().filter(|sign| !sign.is_whitespace()) {
+            assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&egui::FontId::new(size, face.family()), sign)), "{face:?}: {sign:?} is a box");
+            assert_eq!(width(&face.family(), sign), width(&hebrew, sign), "{face:?}: {sign:?} from Noto Sans Hebrew");
+        }
+    }
+}
+
+/// `text` laid out in `font` the way the components do it, in a frame of `ctx`.
+fn laid_out(ctx: &egui::Context, text: &str, font: Font) -> std::sync::Arc<egui::Galley> {
+    let mut galley = None;
+    ctx.run_ui(egui::RawInput::default(), |ui| galley = Some(crate::component::galley(ui, text, font, Color32::BLACK))).textures_delta.clear();
+    galley.unwrap()
+}
+
+fn fonts_ctx() -> egui::Context {
+    let ctx = egui::Context::default();
+    install_fonts(&ctx);
+    ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+    ctx
+}
+
+#[test]
+fn text_the_fonts_do_not_hold_falls_back() {
+    let ctx = fonts_ctx();
+    let f = Fonts::of(TextScale::default());
+    // Right-to-left and shaped text is no longer one glyph per character in order now that faces hold it
+    // (`the_shipped_scripts_lay_out_with_no_box_in_every_text_style` lays it out).
+    let text = "日本語 🙂";
+    for font in [f.body, f.mono] {
+        let galley = laid_out(&ctx, text, font);
+        let chars: String = galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+        assert_eq!(chars, text, "every character is laid out: {font:?}");
+        assert!(galley.size().x > 0.0 && galley.size().y > 0.0);
+        // Signs Plex does not hold come from the faces behind it: emoji from the shipped Noto Emoji, the
+        // rest from egui's (Hack, Ubuntu Light). No shipped face holds Japanese: it is boxes (`docs/gaps.md`).
+        for sign in ['●', '▶', '⇧', 'ǅ'] {
+            assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&font.id(), sign)), "{font:?} {sign}");
+        }
+    }
+}
+
+#[test]
+fn a_label_is_capitals_with_tracking() {
+    let ctx = fonts_ctx();
+    let label = Fonts::of(TextScale::default()).label;
+    let tracked = laid_out(&ctx, "Mail", label);
+    assert_eq!(tracked.job.text, "MAIL");
+    let plain = laid_out(&ctx, "Mail", Font { tracking: 0.0, ..label });
+    let extra = tracked.size().x - plain.size().x;
+    assert!((extra - 3.0 * 0.08 * 11.0).abs() <= 0.5, "{extra}");
+    assert_eq!(tracked.size().y, 16.0, "the line height is the style's");
+}
+
+#[test]
+fn the_mono_face_has_one_advance() {
+    let ctx = fonts_ctx();
+    let mono = Fonts::of(TextScale::default()).mono;
+    let narrow = laid_out(&ctx, "iiii", mono).size().x;
+    let wide = laid_out(&ctx, "MMMM", mono).size().x;
+    assert!((narrow - wide).abs() < 0.01, "{narrow} {wide}");
+}
+
+/// Whether `line` names a font of its own instead of a font token: a family, a font id, an egui text style, a face,
+/// or a size set by hand (`.size(` or a token `.sized(`).
 fn names_a_font(line: &str) -> bool {
     let size_by_hand = line.split(".size(").skip(1).any(|rest| !rest.starts_with(')'));
-    let styled = [".heading()", ".small()", ".strong()", ".monospace()", ".text_style(", "TextStyle::"].iter().any(|call| line.contains(call));
+    let styled = [".heading()", ".small()", ".strong()", ".monospace()", ".text_style(", "TextStyle::", "Face::", ".sized("]
+        .iter()
+        .any(|call| line.contains(call));
     line.contains("FontFamily") || line.contains("FontId") || size_by_hand || styled
 }
 
@@ -514,6 +799,8 @@ fn the_font_check_finds_families_sizes_and_styles() {
     assert!(names_a_font("RichText::new(text).strong()"));
     assert!(names_a_font("ui.label(RichText::new(x).heading())"));
     assert!(names_a_font("style.text_styles.insert(TextStyle::Body, x)"));
+    assert!(names_a_font("Font { face: Face::SansSemiBold, ..theme.fonts.caption }"));
+    assert!(names_a_font("theme.fonts.title.sized(30.0)"));
     assert!(!names_a_font("let width = galley.size().x;"));
     assert!(!names_a_font("RichText::new(text).font(theme.fonts.caption.id())"));
 }
@@ -582,14 +869,6 @@ fn the_colour_check_finds_literals_and_named_colours() {
 }
 
 #[test]
-fn the_old_teal_and_coral_would_be_caught() {
-    for old in [0x1D6A64, 0x6CC4BA, 0xF0A06A] {
-        let colour = Color32::from_rgb((old >> 16) as u8, (old >> 8) as u8, old as u8);
-        assert!(teal_or_coral(colour), "{}", hex(colour));
-    }
-}
-
-#[test]
 fn no_colour_constant_outside_the_token_code() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
@@ -624,202 +903,6 @@ fn over_lays_a_translucent_colour_on_an_opaque_one() {
     assert_eq!(over(Color32::from_rgb(1, 2, 3), under), Color32::from_rgb(1, 2, 3));
 }
 
-/// What the window shows behind a layer: the base, and each colour field at its centre.
-fn backdrops(p: &Palette) -> Vec<Color32> {
-    let mut found = vec![p.background];
-    found.extend(p.colour_fields.map(|field| over(field, p.background)));
-    found
-}
-
-#[test]
-fn text_reads_on_glass_over_the_colour_fields_for_every_preset_in_both_modes() {
-    for theme in all() {
-        let p = theme.palette;
-        for behind in backdrops(&p) {
-            for glass in [over(p.glass, behind), over(p.hover, over(p.glass, behind))] {
-                for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent), ("error", p.error)] {
-                    let ratio = contrast(ink, glass);
-                    assert!(ratio >= 4.5, "{} {:?} {name} on glass over {}: {ratio:.2}", theme.preset.id, theme.mode, hex(behind));
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn text_reads_on_the_float_hovered_or_not_for_every_preset_in_both_modes() {
-    for theme in all() {
-        let p = theme.palette;
-        for under in [p.float, over(p.hover, p.float)] {
-            for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent)] {
-                let ratio = contrast(ink, under);
-                assert!(ratio >= 4.5, "{} {:?} {name} on a float: {ratio:.2}", theme.preset.id, theme.mode);
-            }
-        }
-    }
-}
-
-#[test]
-fn a_float_hides_whatever_lies_under_it_whatever_its_colour() {
-    for theme in all() {
-        let p = theme.palette;
-        let mut under = backdrops(&p);
-        under.extend(p.gradient);
-        under.extend([p.panel, p.surface, p.text, p.muted, p.accent, BLACK, WHITE]);
-        for behind in under {
-            assert_eq!(over(p.float, behind), p.float, "{} {:?} over {}", theme.preset.id, theme.mode, hex(behind));
-        }
-    }
-}
-
-#[test]
-fn menus_and_tooltips_are_on_the_solid_float_and_nothing_casts_an_egui_shadow() {
-    for theme in all() {
-        let visuals = theme.visuals();
-        assert_eq!(visuals.window_fill, theme.palette.float);
-        assert_eq!(visuals.window_shadow, egui::epaint::Shadow::NONE);
-        assert_eq!(visuals.popup_shadow, egui::epaint::Shadow::NONE);
-        assert_eq!(theme.style().spacing.scroll.fade.strength, 0.0, "no fade of egui's own over text");
-        let s = theme.spacing;
-        assert!(s.card > s.corner, "glass layers are rounder than fields");
-        assert!(s.shadow > 0.0 && s.gap > 0.0);
-    }
-}
-
-/// Hue in degrees, saturation and value (HSV) of `colour`, each 0 to 1 but the hue.
-fn hsv(colour: Color32) -> (f32, f32, f32) {
-    let [r, g, b] = [colour.r(), colour.g(), colour.b()].map(|c| f32::from(c) / 255.0);
-    let (high, low) = (r.max(g).max(b), r.min(g).min(b));
-    let span = high - low;
-    let hue = if span == 0.0 {
-        0.0
-    } else if high == r {
-        60.0 * ((g - b) / span).rem_euclid(6.0)
-    } else if high == g {
-        60.0 * ((b - r) / span + 2.0)
-    } else {
-        60.0 * ((r - g) / span + 4.0)
-    };
-    (hue, if high == 0.0 { 0.0 } else { span / high }, high)
-}
-
-#[test]
-fn the_avatar_palette_is_vivid_distinct_and_free_of_teal_and_coral() {
-    assert!(AVATARS.len() >= 8);
-    for colour in AVATARS {
-        let (hue, saturation, value) = hsv(colour);
-        assert!(saturation >= 0.7 && value >= 0.6, "{} is not vivid: {saturation} {value}", hex(colour));
-        assert!(!(150.0..=200.0).contains(&hue), "{} is teal: {hue}", hex(colour));
-        assert!(!teal_or_coral(colour), "{}", hex(colour));
-    }
-    for (index, one) in AVATARS.iter().enumerate() {
-        for other in AVATARS.iter().skip(index + 1) {
-            let distance: i32 =
-                [(one.r(), other.r()), (one.g(), other.g()), (one.b(), other.b())].iter().map(|(a, b)| (i32::from(*a) - i32::from(*b)).abs()).sum();
-            assert!(distance >= 90, "{} and {} are too alike", hex(*one), hex(*other));
-        }
-    }
-    for theme in all() {
-        assert_eq!(theme.palette.avatars, AVATARS, "{} {:?}", theme.preset.id, theme.mode);
-    }
-}
-
-#[test]
-fn every_avatar_colour_passes_wcag_aa_with_its_initials_in_both_modes() {
-    for theme in all() {
-        for colour in theme.palette.avatars {
-            let ratio = contrast(ink_on(colour), colour);
-            assert!(ratio >= 4.5, "{} {:?}: initials on {} at {ratio}", theme.preset.id, theme.mode, hex(colour));
-        }
-    }
-}
-
-#[test]
-fn ink_over_several_colours_reads_on_every_one_of_them() {
-    for theme in all() {
-        let stops = theme.palette.gradient;
-        let ink = ink_over(&stops);
-        let worst = stops.iter().map(|stop| contrast(ink, *stop)).fold(f32::INFINITY, f32::min);
-        assert!(worst >= 3.0, "{}: an icon on the gradient at {worst}", theme.preset.id);
-        assert_eq!(ink_over(&[stops[0]]), ink_on(stops[0]));
-    }
-    assert_eq!(ink_over(&[]), ink_on(Color32::TRANSPARENT));
-}
-
-#[test]
-fn the_rail_darkens_each_stop_as_far_as_white_needs_or_keeps_the_gradient_with_the_better_ink() {
-    let white = Color32::WHITE;
-    for preset in &PRESETS {
-        let (stops, ink) = rail_stops(preset.gradient);
-        let worst = stops.iter().map(|stop| contrast(ink, *stop)).fold(f32::INFINITY, f32::min);
-        assert!(worst >= 3.0, "{}: icons on the rail at {worst}", preset.id);
-        if ink == white {
-            for (stop, raw) in stops.iter().zip(preset.gradient) {
-                // Darkened no further than white needs: a step lighter would not reach 3:1, unless it is untouched.
-                assert!(*stop == raw || contrast(white, mix(*stop, raw, 0.5)) < 3.2, "{}: {} from {}", preset.id, hex(*stop), hex(raw));
-                // At most 25 % darker: each channel keeps at least 75 % of the stop's.
-                assert!(u16::from(stop.r()) * 4 + 4 >= u16::from(raw.r()) * 3, "{}: at most 25 %", preset.id);
-            }
-        } else {
-            assert_eq!(stops, preset.gradient, "{}: the full gradient with the better ink", preset.id);
-            assert_eq!(ink, ink_over(&preset.gradient), "{}", preset.id);
-        }
-    }
-    let ink = |id: &str| PRESETS.iter().find(|preset| preset.id == id).map(|preset| rail_stops(preset.gradient).1);
-    assert_eq!(ink("electric"), Some(white));
-    assert_eq!(ink("aurora"), Some(white));
-    assert_ne!(ink("citrus"), Some(white));
-    // A stop white cannot reach within 25 %: the whole rail keeps the gradient.
-    let yellow = [rgb(0x2F6BFF), rgb(0x2F6BFF), rgb(0xFFD000)];
-    assert_eq!(rail_stops(yellow), (yellow, ink_over(&yellow)));
-    for theme in all() {
-        assert_eq!((theme.palette.rail, theme.palette.rail_ink), rail_stops(theme.palette.gradient));
-    }
-}
-
-#[test]
-fn a_card_is_the_translucent_surface_and_text_reads_on_it_over_every_colour_field_hovered_or_not() {
-    for theme in all() {
-        let p = theme.palette;
-        let want = if theme.mode == Mode::Light { 204 } else { 158 };
-        assert_eq!(p.card.a(), want, "{} {:?}", theme.preset.id, theme.mode);
-        assert!(p.control_edge.a() > 0 && p.control_edge.a() < 64, "{} {:?} control edge", theme.preset.id, theme.mode);
-        for behind in backdrops(&p) {
-            let card = over(p.card, over(p.glass, behind));
-            for under in [card, over(p.hover, card)] {
-                for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent), ("error", p.error)] {
-                    let ratio = contrast(ink, under);
-                    assert!(ratio >= 4.5, "{} {:?} {name} on a card over {}: {ratio:.2}", theme.preset.id, theme.mode, hex(behind));
-                }
-            }
-        }
-        for under in [p.selection, over(p.hover, p.selection)] {
-            for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent)] {
-                let ratio = contrast(ink, under);
-                assert!(ratio >= 4.5, "{} {:?} {name} on the selection: {ratio:.2}", theme.preset.id, theme.mode);
-            }
-        }
-    }
-}
-
-#[test]
-fn an_event_is_a_tint_of_its_account_and_its_text_reads_over_every_glass() {
-    for theme in all() {
-        let p = theme.palette;
-        let most = if theme.mode == Mode::Light { 51 } else { 77 };
-        for (event, account) in p.events.iter().zip(p.accounts) {
-            let [r, g, b, a] = event.to_srgba_unmultiplied();
-            assert!(a > 0 && a <= most, "{} {:?}: alpha {a}", theme.preset.id, theme.mode);
-            // Unmultiplying a faint tint moves a channel by a few steps.
-            assert!(contrast(Color32::from_rgb(r, g, b), account) < 1.1, "{} {:?}: {}", theme.preset.id, theme.mode, hex(account));
-            for behind in backdrops(&p) {
-                let ratio = contrast(p.text, over(*event, over(p.glass, behind)));
-                assert!(ratio >= 4.5, "{} {:?} text on an event over {}: {ratio:.2}", theme.preset.id, theme.mode, hex(behind));
-            }
-        }
-    }
-}
-
 #[test]
 fn the_theme_carries_the_motion_tokens_and_egui_s_animation_follows_them() {
     for theme in all() {
@@ -828,56 +911,382 @@ fn the_theme_carries_the_motion_tokens_and_egui_s_animation_follows_them() {
     }
 }
 
-#[test]
-fn the_text_gradient_darkens_the_stops_until_white_reads_or_keeps_them_with_the_deep_ink() {
-    for preset in &PRESETS {
-        let (stops, ink) = text_gradient(preset.gradient);
-        if ink == WHITE {
-            assert!(stops.iter().all(|stop| contrast(WHITE, *stop) >= 4.5), "{}: white reads on every stop", preset.id);
-            // No more than 40 % darker: each channel keeps at least 60 % of the stop's.
-            for (stop, raw) in stops.iter().zip(preset.gradient) {
-                assert!(u16::from(stop.r()) * 10 + 10 >= u16::from(raw.r()) * 6, "{}: at most 40 %", preset.id);
+/// The font atlas `ctx` builds in `mode` for a few words in the mono and the sans: every texel's alpha.
+fn atlas_in(mode: egui::Theme) -> Vec<u8> {
+    let ctx = egui::Context::default();
+    install_fonts(&ctx);
+    Theme::apply(&ctx, &Look::default());
+    ctx.set_theme(mode);
+    let mut atlas = Vec::new();
+    for _ in 0..2 {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let theme = Theme::current(ui.ctx(), &Look::default());
+            ui.label(theme.fonts.mono_s.rich("Archive H 01"));
+            ui.label(theme.fonts.body.rich("Marked as done"));
+        });
+        for (_, patches) in output.textures_delta.set.drain() {
+            for patch in patches {
+                let egui::ImageData::Color(image) = &patch.image;
+                if patch.pos.is_none() {
+                    atlas = image.pixels.iter().map(|texel| texel.a()).collect();
+                }
             }
+        }
+    }
+    atlas
+}
+
+#[test]
+fn glyphs_have_the_same_linear_coverage_in_dark_and_light() {
+    let (dark, light) = (atlas_in(egui::Theme::Dark), atlas_in(egui::Theme::Light));
+    assert!(dark.iter().any(|alpha| *alpha > 0 && *alpha < 255), "the atlas holds edge texels");
+    let differ = dark.iter().zip(&light).filter(|(d, l)| d != l).count();
+    assert_eq!(differ, 0, "{differ} texels of the dark atlas are not the light one's");
+}
+
+/// `text` as the compiler reads it, for a scan: comments and the insides of string and character literals dropped,
+/// and white space dropped wherever it does not stand between two parts of words, so that a call split over lines or
+/// spaced out reads as one (`ui . button (` is `ui.button(`). The second value is the line (from 1) of each character
+/// kept.
+fn squeezed(text: &str) -> (String, Vec<usize>) {
+    let chars: Vec<char> = text.chars().collect();
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let (mut out, mut lines) = (String::new(), Vec::new());
+    let (mut line, mut at, mut gap) = (1, 0, false);
+    // Skips to the end of a quoted run that started before `at`, counting its lines.
+    let skip_quoted = |at: &mut usize, line: &mut usize, close: &str| {
+        let close: Vec<char> = close.chars().collect();
+        while *at < chars.len() {
+            if chars[*at] == '\n' {
+                *line += 1;
+            }
+            if close.len() == 1 && chars[*at] == '\\' {
+                *at += 2;
+                continue;
+            }
+            if chars[*at..].starts_with(&close) {
+                *at += close.len();
+                return;
+            }
+            *at += 1;
+        }
+    };
+    while at < chars.len() {
+        let c = chars[at];
+        let next = chars.get(at + 1).copied();
+        let before = out.chars().last();
+        if c == '\n' {
+            line += 1;
+            gap = true;
+            at += 1;
+        } else if c.is_whitespace() {
+            gap = true;
+            at += 1;
+        } else if c == '/' && next == Some('/') {
+            while at < chars.len() && chars[at] != '\n' {
+                at += 1;
+            }
+        } else if c == '/' && next == Some('*') {
+            let mut depth = 0;
+            while at < chars.len() {
+                if chars[at..].starts_with(&['/', '*']) {
+                    depth += 1;
+                    at += 2;
+                } else if chars[at..].starts_with(&['*', '/']) {
+                    depth -= 1;
+                    at += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    if chars[at] == '\n' {
+                        line += 1;
+                    }
+                    at += 1;
+                }
+            }
+            gap = true;
+        } else if (c == 'r' || (c == 'b' && next == Some('r'))) && !(before.is_some_and(word) && !gap) && {
+            let start = if c == 'b' { at + 2 } else { at + 1 };
+            let hashes = chars[start.min(chars.len())..].iter().take_while(|c| **c == '#').count();
+            chars.get(start + hashes) == Some(&'"')
+        } {
+            let start = if c == 'b' { at + 2 } else { at + 1 };
+            let hashes = chars[start..].iter().take_while(|c| **c == '#').count();
+            at = start + hashes + 1;
+            skip_quoted(&mut at, &mut line, &format!("\"{}", "#".repeat(hashes)));
+            out.push_str("\"\"");
+            lines.extend([line, line]);
+            gap = false;
+        } else if c == '"' {
+            at += 1;
+            skip_quoted(&mut at, &mut line, "\"");
+            out.push_str("\"\"");
+            lines.extend([line, line]);
+            gap = false;
+        } else if c == '\'' && (next == Some('\\') || chars.get(at + 2) == Some(&'\'')) {
+            at += 1;
+            skip_quoted(&mut at, &mut line, "'");
+            out.push_str("''");
+            lines.extend([line, line]);
+            gap = false;
         } else {
-            assert_eq!(stops, preset.gradient, "{}: the full gradient with the better ink", preset.id);
-            assert_eq!(ink, ink_over(&preset.gradient), "{}", preset.id);
+            if gap && before.is_some_and(word) && word(c) {
+                out.push(' ');
+                lines.push(line);
+            }
+            gap = false;
+            out.push(c);
+            lines.push(line);
+            at += 1;
         }
     }
-    let ink = |id: &str| PRESETS.iter().find(|preset| preset.id == id).map(|preset| text_gradient(preset.gradient).1);
-    assert_eq!(ink("electric"), Some(WHITE));
-    assert_eq!(ink("aurora"), Some(WHITE));
-    assert_ne!(ink("citrus"), Some(WHITE));
+    (out, lines)
 }
 
-#[test]
-fn the_rail_avatar_s_initials_read_on_its_disc() {
-    for preset in &PRESETS {
-        let (disc, ink) = super::rail_avatar(preset.gradient);
-        assert!(contrast(ink, disc) >= 4.5, "{}", preset.id);
+/// Whether `name` stands in `code` at `at` as a word of its own.
+fn word_at(code: &str, at: usize, name: &str) -> bool {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    code[at..].starts_with(name) && !code[..at].chars().last().is_some_and(word) && !code[at + name.len()..].chars().next().is_some_and(word)
+}
+
+/// Where in `code` the word `name` stands, as a word of its own.
+fn words(code: &str, name: &str) -> Vec<usize> {
+    code.match_indices(name).map(|(at, _)| at).filter(|at| word_at(code, *at, name)).collect()
+}
+
+/// The raw egui widgets a squeezed view's `code` uses, each with where it starts: a method of `Ui` that adds one, or
+/// one of their types (an accessibility role or a text style of the same name, `Role::ComboBox`, `TextStyle::Button`,
+/// is not one).
+fn raw_widgets(code: &str) -> Vec<(usize, String)> {
+    const METHODS: [&str; 15] = [
+        "button",
+        "small_button",
+        "checkbox",
+        "radio",
+        "radio_value",
+        "selectable_label",
+        "selectable_value",
+        "toggle_value",
+        "separator",
+        "text_edit_singleline",
+        "text_edit_multiline",
+        "link",
+        "hyperlink",
+        "menu_button",
+        "collapsing",
+    ];
+    const TYPES: [&str; 13] = [
+        "ComboBox",
+        "Button",
+        "Checkbox",
+        "SelectableLabel",
+        "Separator",
+        "RadioButton",
+        "TextEdit",
+        "Popup",
+        "Hyperlink",
+        "ImageButton",
+        "Slider",
+        "DragValue",
+        "CollapsingHeader",
+    ];
+    let mut found = Vec::new();
+    // egui's popups (the float is the one way to a menu): its free function as well as its type.
+    for call in ["popup_below_widget(", "popup_above_or_below_widget("] {
+        found.extend(code.match_indices(call).filter(|(at, _)| word_at(code, *at, call.trim_end_matches('('))).map(|(at, _)| (at, call.to_owned())));
     }
-}
-
-#[test]
-fn close_is_a_plain_red_with_white_on_it_in_every_preset_and_mode() {
-    for theme in all() {
-        let p = theme.palette;
-        assert!(p.close.r() > 180 && p.close.g() < 80 && p.close.b() < 80, "{} {:?}: {}", theme.preset.id, theme.mode, hex(p.close));
-        assert_eq!(p.on_close, Color32::WHITE, "{} {:?}", theme.preset.id, theme.mode);
-        assert!(contrast(p.on_close, p.close) >= 4.5, "{} {:?}", theme.preset.id, theme.mode);
-        assert!(!teal_or_coral(p.close));
-    }
-}
-
-#[test]
-fn the_scroll_bar_is_wide_enough_to_see_and_its_ends_are_round() {
-    for theme in all() {
-        let style = theme.style();
-        let scroll = &style.spacing.scroll;
-        assert!(scroll.floating_width >= 4.0, "{} {:?}: {} at rest", theme.preset.id, theme.mode, scroll.floating_width);
-        assert!(scroll.bar_width > scroll.floating_width, "{} {:?}: wider under the pointer", theme.preset.id, theme.mode);
-        let w = &style.visuals.widgets;
-        for corner in [w.noninteractive, w.inactive, w.hovered, w.active].map(|visuals| visuals.corner_radius) {
-            assert!(f32::from(corner.nw) >= scroll.bar_width / 2.0, "{} {:?}: {corner:?} leaves the ends square", theme.preset.id, theme.mode);
+    for method in METHODS {
+        for call in [format!(".{method}("), format!("Ui::{method}(")] {
+            found.extend(code.match_indices(call.as_str()).map(|(at, _)| (at, call.clone())));
         }
     }
+    for name in TYPES {
+        found.extend(
+            words(code, name)
+                .into_iter()
+                .filter(|at| !code[..*at].ends_with("Role::") && !code[..*at].ends_with("TextStyle::"))
+                .map(|at| (at, name.to_owned())),
+        );
+    }
+    found.sort();
+    found
+}
+
+/// The end of the balanced brackets that open at `at` in `code`, or `at` when none opens there.
+fn closing(code: &str, at: usize) -> usize {
+    let bytes = code.as_bytes();
+    let Some(open @ (b'(' | b'<')) = bytes.get(at).copied() else { return at };
+    let close = if open == b'(' { b')' } else { b'>' };
+    let mut depth = 0;
+    for (index, byte) in bytes.iter().enumerate().skip(at) {
+        if *byte == open {
+            depth += 1;
+        } else if *byte == close {
+            depth -= 1;
+            if depth == 0 {
+                return index + 1;
+            }
+        }
+    }
+    bytes.len()
+}
+
+/// The methods called one after the other from `at` in `code`: `.a(…).b::<…>(…)` gives `a` and `b`.
+fn chain(code: &str, mut at: usize) -> Vec<String> {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut called = Vec::new();
+    at = closing(code, at);
+    while code[at..].starts_with('.') {
+        let name: String = code[at + 1..].chars().take_while(|c| word(*c)).collect();
+        if name.is_empty() {
+            break;
+        }
+        at += 1 + name.len();
+        if code[at..].starts_with("::") {
+            at = closing(code, at + 2);
+        }
+        at = closing(code, at);
+        called.push(name);
+    }
+    called
+}
+
+/// The scroll areas a squeezed file's `code` shows itself instead of through `component::scroll`, each with where it
+/// starts: one built and shown in one chain, one kept in a binding or a parameter and shown from there, and a
+/// renamed import, which the scan could not follow.
+fn bare_scroll_areas(code: &str) -> Vec<(usize, String)> {
+    const SHOWN: [&str; 3] = ["show", "show_rows", "show_viewport"];
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut found = Vec::new();
+    for at in words(code, "ScrollArea") {
+        let rest = &code[at + "ScrollArea".len()..];
+        if rest.starts_with(" as ") {
+            found.push((at, "ScrollArea as".to_owned()));
+        }
+        if let Some(built) = rest.strip_prefix("::") {
+            let name: String = built.chars().take_while(|c| word(*c)).collect();
+            let after = at + "ScrollArea::".len() + name.len();
+            if chain(code, after).iter().any(|called| SHOWN.contains(&called.as_str())) {
+                found.push((at, format!("ScrollArea::{name}(…).show")));
+            }
+        }
+        // `let area = ScrollArea::…`, `area: ScrollArea`, `area: egui::ScrollArea`: the name it is kept under.
+        let mut lead = &code[..at];
+        while let Some(path) = lead.strip_suffix("::") {
+            lead = path.trim_end_matches(word);
+        }
+        let kept = if lead.ends_with('=') && !lead.ends_with("==") {
+            Some(lead.trim_end_matches('='))
+        } else if lead.ends_with(':') && !lead.ends_with("::") {
+            Some(lead.trim_end_matches(':'))
+        } else {
+            None
+        };
+        let Some(kept) = kept else { continue };
+        let name: String = kept.chars().rev().take_while(|c| word(*c)).collect::<Vec<_>>().into_iter().rev().collect();
+        if name.is_empty() {
+            continue;
+        }
+        for shown in SHOWN {
+            let call = format!("{name}.{shown}(");
+            found.extend(code.match_indices(call.as_str()).filter(|(at, _)| word_at(code, *at, &name)).map(|(at, _)| (at, call.clone())));
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn the_squeeze_drops_comments_literals_and_the_room_between_words() {
+    let (code, lines) =
+        squeezed("ui\n  . button (\"Dismiss // not a comment\") // ui.checkbox(\nlet mut a = 'x'; /* ComboBox */ r#\"ui.separator()\"#;");
+    assert_eq!(code, "ui.button(\"\")let mut a='';\"\";");
+    assert_eq!(lines.first(), Some(&1));
+    assert_eq!(lines.get(code.find(".button").unwrap()), Some(&2));
+    assert_eq!(squeezed("fn f<'a>(x: &'a str) {}").0, "fn f<'a>(x:&'a str){}");
+}
+
+#[test]
+fn the_widget_scan_sees_calls_and_types_however_they_are_written() {
+    let scan = |text: &str| raw_widgets(&squeezed(text).0).into_iter().map(|(_, name)| name).collect::<Vec<_>>();
+    assert_eq!(scan("if ui.button(tr!(\"Dismiss\")).clicked() {}"), [".button("]);
+    assert_eq!(scan("ui\n    .checkbox(\n        &mut on,\n        name,\n    );"), [".checkbox("]);
+    assert_eq!(scan("row . selectable_label ( on , text )"), [".selectable_label("]);
+    assert_eq!(scan("egui::ComboBox::from_id_salt(\"x\")"), ["ComboBox"]);
+    assert_eq!(scan("ui.add(egui::Button::new(\"x\")); Ui::separator(ui);"), ["Button", "Ui::separator("]);
+    assert!(scan("TextButton::new(x).show(ui, theme, keymap); IconButton::new(i, n)").is_empty());
+    assert!(scan("WidgetInfo::labeled(Role::ComboBox, true, name); egui::PointerButton::Primary").is_empty());
+    assert!(scan("(TextStyle::Button, f.button.id())").is_empty());
+    assert!(scan("theme.fonts.button.rich(text); // ui.button(\"x\")\nlet s = \"ui.separator()\";").is_empty());
+    // Text: views write in the fields of `component::field`.
+    assert_eq!(scan("ui.add(egui::TextEdit::singleline(&mut text).hint_text(hint));"), ["TextEdit"]);
+    assert_eq!(
+        scan("ui.text_edit_singleline(&mut text); ui . text_edit_multiline ( &mut more );"),
+        [".text_edit_singleline(", ".text_edit_multiline("]
+    );
+    assert!(scan("if let Some(state) = egui::text_edit::TextEditState::load(ctx, id) {}").is_empty());
+    // Menus: views open them through `component::popup`.
+    assert_eq!(scan("egui::Popup::menu(&response).show(|ui| {});"), ["Popup"]);
+    assert_eq!(scan("Popup::context_menu(&row).show(add); egui::popup_below_widget(ui, id, &r, close, add);"), ["Popup", "popup_below_widget("]);
+    assert!(scan("popup::menu(ctx, theme, &response, id, width, add); PopupCloseBehavior::CloseOnClick;").is_empty());
+}
+
+#[test]
+fn the_widget_scan_sees_links_menus_folds_and_value_widgets() {
+    let scan = |text: &str| raw_widgets(&squeezed(text).0).into_iter().map(|(_, name)| name).collect::<Vec<_>>();
+    assert_eq!(scan("ui.link(\"x\"); ui.hyperlink(url);"), [".link(", ".hyperlink("]);
+    assert_eq!(scan("ui.menu_button(\"More\", |ui| {}); ui.collapsing(\"Log\", |ui| {});"), [".menu_button(", ".collapsing("]);
+    assert_eq!(scan("ui.add(egui::Hyperlink::new(url)); ui.add(egui::ImageButton::new(image));"), ["Hyperlink", "ImageButton"]);
+    assert_eq!(scan("ui.add(egui::Slider::new(&mut v, 0.0..=1.0)); ui.add(DragValue::new(&mut v));"), ["Slider", "DragValue"]);
+    assert_eq!(scan("egui::CollapsingHeader::new(\"Server\").show(ui, add);"), ["CollapsingHeader"]);
+    assert_eq!(scan("ui.radio(on, name); ui.toggle_value(&mut on, name);"), [".radio(", ".toggle_value("]);
+    assert!(scan("button::link(ui, theme, keymap, name); WidgetInfo::slider(true, 1.0, name); Role::Slider").is_empty());
+}
+
+#[test]
+fn the_scroll_scan_sees_an_area_shown_without_the_component() {
+    let scan = |text: &str| bare_scroll_areas(&squeezed(text).0).into_iter().map(|(_, name)| name).collect::<Vec<_>>();
+    assert_eq!(
+        scan("ScrollArea::vertical().id_salt(\"a\")\n    .auto_shrink([false; 2])\n    .show(ui, |ui| {});"),
+        ["ScrollArea::vertical(…).show"]
+    );
+    assert_eq!(scan("egui::ScrollArea::both().show_rows(ui, 20.0, 10, |ui, rows| {});"), ["ScrollArea::both(…).show"]);
+    assert_eq!(scan("let mut area = ScrollArea::vertical();\narea = area.max_height(4.0);\narea . show(ui, add);"), ["area.show("]);
+    assert_eq!(scan("fn f(ui: &mut Ui, area: egui::ScrollArea) { area.show_viewport(ui, add); }"), ["area.show_viewport("]);
+    assert_eq!(scan("use egui::ScrollArea as Area;"), ["ScrollArea as"]);
+    assert!(scan("let area = ScrollArea::vertical().max_height(4.0);\nscroll::show(ui, theme, area, |ui| {});").is_empty());
+    assert!(scan("crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {});").is_empty());
+}
+
+#[test]
+fn no_view_uses_a_raw_egui_widget() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for dir in ["src", "examples"] {
+        if root.join(dir).is_dir() {
+            sources(&root.join(dir), &mut files);
+        }
+    }
+    assert!(files.len() > 10, "the walk found the sources");
+    let components = root.join("src").join("component");
+    let scroll = components.join("scroll.rs");
+    let mut found = Vec::new();
+    for file in &files {
+        let text = std::fs::read_to_string(file).unwrap();
+        let (code, lines) = squeezed(&text);
+        // Only the scroll bar's own code shows a scroll area; components may use egui's widgets, views may not.
+        let mut sites = if *file == scroll { Vec::new() } else { bare_scroll_areas(&code) };
+        if !file.starts_with(&components) {
+            sites.extend(raw_widgets(&code));
+        }
+        for (at, what) in sites {
+            let line = code[..at].chars().count();
+            let line = lines.get(line).copied().unwrap_or(0);
+            found.push((file.strip_prefix(root).unwrap().display().to_string(), line, what));
+        }
+    }
+    found.sort();
+    let found: Vec<String> = found.into_iter().map(|(file, line, what)| format!("{file}:{line}: {what}")).collect();
+    assert!(found.is_empty(), "views use the components, and only component/scroll.rs shows a scroll area:\n{}", found.join("\n"));
 }

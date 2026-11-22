@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! A day of the calendar, counted from 1 January 1970, with the names the calendar screen gives it. Weeks start on
-//! Monday.
+//! A day of the calendar, counted from 1 January 1970, with the names the calendar screen gives it. Weeks are counted
+//! by the owner's [`WeekRule`] (the session's `week.set`): the day they start on and the year's first week come from
+//! the time crate, never from arithmetic of the calendar's own.
 
-use inboxcraft_time::{CivilDateTime, Offset, Timestamp, Weekday};
+use inboxcraft_time::{CivilDateTime, Offset, Timestamp, WeekRule, Weekday};
 
 use crate::tr;
 
@@ -80,17 +81,11 @@ impl Day {
         self.civil().map_or(Weekday::Thursday, CivilDateTime::weekday)
     }
 
-    /// The days since Monday: 0 on a Monday, 6 on a Sunday.
+    /// The first day of the day's week as `rule` counts it ([`WeekRule::first_day_of`]); the day itself when that
+    /// week starts outside the years the calendar knows.
     #[must_use]
-    pub fn weekday_index(self) -> i64 {
-        // 1 January 1970 was a Thursday.
-        self.0.saturating_add(3).rem_euclid(7)
-    }
-
-    /// The Monday of the day's week.
-    #[must_use]
-    pub fn monday(self) -> Self {
-        self.plus(-self.weekday_index())
+    pub fn week_start(self, rule: WeekRule) -> Self {
+        self.civil().and_then(|civil| rule.first_day_of(civil)).and_then(|first| Self::new(first.year(), first.month(), first.day())).unwrap_or(self)
     }
 
     /// The first day of the day's month.
@@ -105,6 +100,13 @@ impl Day {
         let index = self.year().saturating_mul(12).saturating_add(i32::from(self.month()) - 1).saturating_add(months);
         let (year, month) = (index.div_euclid(12), index.rem_euclid(12) + 1);
         u8::try_from(month).ok().and_then(|month| Self::new(year, month, 1)).unwrap_or(self.first_of_month())
+    }
+
+    /// The number of the day's week in its week-year as `rule` counts it ([`WeekRule::week`]), 1 to 53; `None` when
+    /// that week starts outside the years the calendar knows.
+    #[must_use]
+    pub fn week_number(self, rule: WeekRule) -> Option<u8> {
+        rule.week(self.civil()?).map(|week| week.number)
     }
 
     /// The day's midnight in UTC, as the engine reads a moment: `2026-11-09T00:00:00Z`.
@@ -151,15 +153,15 @@ pub fn weekday_short(weekday: Weekday) -> &'static str {
     }
 }
 
-/// The letter of the weekday `index` days after Monday, over a column of the mini month.
+/// The letter of `weekday`, over a column of the mini month.
 #[must_use]
-pub fn weekday_letter(index: i64) -> &'static str {
-    match index {
-        0 => tr!("M"),
-        1 | 3 => tr!("T"),
-        2 => tr!("W"),
-        4 => tr!("F"),
-        _ => tr!("S"),
+pub fn weekday_letter(weekday: Weekday) -> &'static str {
+    match weekday {
+        Weekday::Monday => tr!("M"),
+        Weekday::Tuesday | Weekday::Thursday => tr!("T"),
+        Weekday::Wednesday => tr!("W"),
+        Weekday::Friday => tr!("F"),
+        Weekday::Saturday | Weekday::Sunday => tr!("S"),
     }
 }
 
@@ -207,6 +209,54 @@ pub fn span(first: Day, last: Day) -> String {
         )
     } else {
         tr!("{from} – {to} {to_month} {year}", from = first.date(), to = last.date(), to_month = to_month, year = year)
+    }
+}
+
+/// The short name of `month` (1 to 12): `Dec`.
+#[must_use]
+pub fn month_short(month: u8) -> &'static str {
+    match month {
+        1 => tr!("Jan"),
+        2 => tr!("Feb"),
+        3 => tr!("Mar"),
+        4 => tr!("Apr"),
+        5 => tr!("May"),
+        6 => tr!("Jun"),
+        7 => tr!("Jul"),
+        8 => tr!("Aug"),
+        9 => tr!("Sep"),
+        10 => tr!("Oct"),
+        11 => tr!("Nov"),
+        _ => tr!("Dec"),
+    }
+}
+
+/// A day with its short month: `16 Nov`.
+#[must_use]
+pub fn short(day: Day) -> String {
+    tr!("{date} {month}", date = day.date(), month = month_short(day.month()))
+}
+
+/// `day` short, without its year: `Thu 5 Nov`.
+#[must_use]
+pub fn short_dated(day: Day) -> String {
+    tr!("{weekday} {date} {month}", weekday = weekday_short(day.weekday()), date = day.date(), month = month_short(day.month()))
+}
+
+/// The days `first` to `last` short, without the year, for a title with little room: `2 – 8 Nov`, `30 Nov – 6 Dec`.
+#[must_use]
+pub fn span_short(first: Day, last: Day) -> String {
+    let to_month = month_short(last.month());
+    if first.month() == last.month() && first.year() == last.year() {
+        tr!("{from} – {to} {to_month}", from = first.date(), to = last.date(), to_month = to_month)
+    } else {
+        tr!(
+            "{from} {from_month} – {to} {to_month}",
+            from = first.date(),
+            from_month = month_short(first.month()),
+            to = last.date(),
+            to_month = to_month
+        )
     }
 }
 

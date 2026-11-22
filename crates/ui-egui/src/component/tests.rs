@@ -5,24 +5,36 @@
 
 use std::time::Duration;
 
-use egui::{Context, Id, RawInput, pos2, vec2};
+use egui::accesskit::{self, NodeId};
+use egui::epaint::{ClippedShape, TextShape};
+use egui::epaint::{ColorMode, PathStroke};
+use egui::{Color32, Context, Id, Key, LayerId, RawInput, Rect, Shape, Stroke, StrokeKind, Vec2, pos2, vec2};
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::card::card;
 use super::hover::{self, Action};
-use super::toast::{self, Toast};
 use super::{button::IconButton, pill, popup};
-use crate::iconset::{IconId, IconSet, Style};
+use crate::draw::paint::{DashedEdges, dashed_edges_id};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion::{self, tests::FRAME};
-use crate::theme::{Mode, Preset, Theme, install_fonts};
+use crate::theme::{Mode, TextScale, Theme, install_fonts};
 
-/// A harness whose context has the bundled fonts from its first frame, stepping a frame at a time.
-pub(super) fn builder<State>() -> egui_kittest::HarnessBuilder<State> {
-    egui_kittest::Harness::<State>::builder().with_context_setup(install_fonts).with_step_dt(FRAME as f32).with_max_steps(60)
+/// The context setup of [`builder`]: the bundled fonts, and the paint recorded for [`painted`].
+fn setup(ctx: &Context) {
+    install_fonts(ctx);
+    record_layers(ctx);
+}
+
+/// A harness whose context has the bundled fonts from its first frame and records its paint, stepping a frame at a
+/// time.
+pub(crate) fn builder<State>() -> egui_kittest::HarnessBuilder<State> {
+    egui_kittest::Harness::<State>::builder().with_context_setup(setup).with_step_dt(FRAME as f32).with_max_steps(60)
 }
 
 /// Tooltips at once, wherever the pointer is.
-pub(super) fn quick_tooltips(ctx: &Context) {
+pub(crate) fn quick_tooltips(ctx: &Context) {
     ctx.all_styles_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
@@ -30,11 +42,11 @@ pub(super) fn quick_tooltips(ctx: &Context) {
 }
 
 pub(super) fn theme() -> Theme {
-    Theme::new(Mode::Light, &Preset::default())
+    Theme::new(Mode::Light, TextScale::default())
 }
 
-/// Whether the last frame of `output` drew `id` in `style` from the default icon set: its front glyph in its font.
-pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> bool {
+/// Whether the last frame of `output` drew `id`: its glyph in the icon family.
+pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId) -> bool {
     fn texts<'a>(shape: &'a egui::Shape, found: &mut Vec<&'a egui::epaint::TextShape>) {
         match shape {
             egui::Shape::Text(text) => found.push(text),
@@ -42,14 +54,409 @@ pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> 
             _ => {}
         }
     }
-    let glyph = IconSet::default().glyph(id, style);
-    let Some((front, _)) = glyph.layers.last() else { return false };
-    let family = glyph.face.id(1.0).family;
+    let front = crate::iconset::glyph(id);
+    let family = crate::theme::icon_font(1.0).family;
     let mut found = Vec::new();
     output.shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut found));
     found.iter().any(|text| {
         text.galley.job.text == front.to_string() && text.galley.job.sections.iter().all(|section| section.format.font_id.family == family)
     })
+}
+
+/// What one shape painted for a widget looks like.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Look {
+    /// A rect, or a circle, ellipse, path or line read as one: its fill, its stroke `(width, colour)` and where the
+    /// stroke lies, its corner radius (the largest corner; a circle's radius; 0 for paths and lines), and whether it
+    /// is an edge [`paint::dashed`](crate::draw::paint::dashed) drew.
+    Rect { fill: Color32, stroke: Option<(f32, Color32)>, stroke_kind: StrokeKind, radius: f32, dashed: bool },
+    /// Text: its colour, its font family's name (`Proportional`, `Monospace` or the name given), its size and the
+    /// height of its first row, which is the style's line height.
+    Text { text: String, colour: Color32, family: String, size: f32, row_height: f32 },
+    /// A shadow (a rect with a blur): where it lies against the widget's own rect (`offset` of the centres, `spread`
+    /// of the half widths), its blur and colour.
+    Shadow { offset: Vec2, blur: f32, spread: f32, colour: Color32 },
+}
+
+/// One shape painted for a widget: its rect, whether it lies inside the widget's own rect (`false`: in the 4 points
+/// around it, where a focus ring stands), whether its clip rect cuts it, whether it is text that reaches past the
+/// 4 points around the widget (`overflows`; always `false` for other shapes), and its look.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Painted {
+    pub rect: Rect,
+    pub inside: bool,
+    pub clipped: bool,
+    pub overflows: bool,
+    pub look: Look,
+}
+
+/// The margin [`stage`] keeps around a widget, in points: more than the 4 points [`painted`] looks around it.
+const STAGE_MARGIN: i8 = 16;
+
+/// Places a widget for [`painted`]: paints `ground` over the room `ui` has and adds the widget with `add` inside a
+/// 16 point margin, so the ground always strictly holds the widget and the 4 points around it, and the harness's
+/// own background is never read as the widget's fill.
+pub(crate) fn stage<R>(ui: &mut egui::Ui, ground: Color32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.painter().rect_filled(ui.available_rect_before_wrap(), 0.0, ground);
+    egui::Frame::NONE.inner_margin(egui::Margin::same(STAGE_MARGIN)).show(ui, add).inner
+}
+
+/// What [`painted`] found for a widget: the fill it stands on (`ground`) and its own shapes in paint order.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Paint {
+    pub ground: Option<Color32>,
+    pub shapes: Vec<Painted>,
+}
+
+impl Paint {
+    /// The rect looks, `(rect, look)`, in paint order.
+    pub(crate) fn rects(&self) -> impl Iterator<Item = &Painted> {
+        self.shapes.iter().filter(|shape| matches!(shape.look, Look::Rect { .. }))
+    }
+}
+
+/// How far around a widget its shapes may lie: a focus ring stands 3 points out (2 clear and its 1 px line).
+const AROUND: f32 = 4.0;
+
+/// One frame's paint as [`record_layers`] keeps it: each layer's shapes in paint order, each widget's layer by its
+/// AccessKit id, and the edges [`paint::dashed`](crate::draw::paint::dashed) drew.
+#[derive(Clone, Default)]
+struct Recorded {
+    layers: Vec<(LayerId, Vec<ClippedShape>)>,
+    widgets: Vec<(NodeId, LayerId)>,
+    dashed: Vec<(LayerId, Rect, Color32, f32)>,
+}
+
+fn recorded_id() -> Id {
+    Id::unique("component-tests-recorded-paint")
+}
+
+/// Keeps, at the end of every pass of `ctx`, what each layer painted, for [`painted`]. [`builder`] does it; another
+/// harness calls it in its context setup.
+pub(crate) fn record_layers(ctx: &Context) {
+    ctx.on_end_pass(
+        "component-tests-record",
+        std::sync::Arc::new(|ui: &mut egui::Ui| {
+            let ctx = ui.ctx().clone();
+            let widgets: Vec<(NodeId, LayerId)> = ctx.viewport(|viewport| {
+                viewport.this_pass.widgets.layers().flat_map(|(layer, rects)| rects.iter().map(|rect| (rect.id.accesskit_id(), *layer))).collect()
+            });
+            let mut layer_ids: Vec<LayerId> = ctx.memory(|memory| memory.areas().visible_layer_ids().into_iter().collect());
+            for layer in widgets.iter().map(|(_, layer)| *layer).chain([LayerId::background()]) {
+                if !layer_ids.contains(&layer) {
+                    layer_ids.push(layer);
+                }
+            }
+            let layers = ctx.graphics(|graphics| {
+                layer_ids.iter().filter_map(|layer| graphics.get(*layer).map(|list| (*layer, list.all_entries().cloned().collect()))).collect()
+            });
+            let pass = ctx.cumulative_pass_nr();
+            let dashed = ctx
+                .data(|data| data.get_temp::<DashedEdges>(dashed_edges_id()))
+                .filter(|edges| edges.0 == pass)
+                .map(|edges| edges.1)
+                .unwrap_or_default();
+            ctx.data_mut(|data| data.insert_temp(recorded_id(), Recorded { layers, widgets, dashed }));
+        }),
+    );
+}
+
+/// The shapes of `shape` flattened, nested `Shape::Vec`s opened.
+fn leaves<'a>(shape: &'a Shape, out: &mut Vec<&'a Shape>) {
+    match shape {
+        Shape::Vec(shapes) => shapes.iter().for_each(|shape| leaves(shape, out)),
+        shape => out.push(shape),
+    }
+}
+
+/// A stroke that shows, as `(width, colour)`.
+fn shown_stroke(stroke: Stroke) -> Option<(f32, Color32)> {
+    (stroke.width > 0.0 && stroke.color.a() > 0).then_some((stroke.width, stroke.color))
+}
+
+/// A path stroke of one colour that shows.
+fn shown_path_stroke(stroke: &PathStroke) -> Option<(f32, Color32)> {
+    match stroke.color {
+        ColorMode::Solid(colour) if stroke.width > 0.0 && colour.a() > 0 => Some((stroke.width, colour)),
+        _ => None,
+    }
+}
+
+/// The colour text is drawn in: the override, else the first section's colour, else the painter's fallback.
+fn text_colour(text: &TextShape) -> Color32 {
+    let section = text.galley.job.sections.first().map(|section| section.format.color).filter(|colour| *colour != Color32::PLACEHOLDER);
+    text.override_text_color.or(section).unwrap_or(text.fallback_color)
+}
+
+/// A shape's rect and look, against the widget's own rect `own`; `None` for meshes other than a float's shadow,
+/// callbacks and what shows nothing.
+fn read(shape: &Shape, own: Rect) -> Option<(Rect, Look)> {
+    let flat = |fill: Color32, stroke: Option<(f32, Color32)>, stroke_kind, radius| {
+        (fill.a() > 0 || stroke.is_some()).then_some(Look::Rect { fill, stroke, stroke_kind, radius, dashed: false })
+    };
+    match shape {
+        Shape::Rect(rect) if rect.blur_width > 0.0 => {
+            let shadow = rect.rect;
+            let offset = shadow.center() - own.center();
+            let spread = (shadow.width() - own.width()) / 2.0;
+            Some((shadow, Look::Shadow { offset, blur: rect.blur_width, spread, colour: rect.fill }))
+        }
+        Shape::Mesh(mesh) => crate::draw::paint::shadow_box(mesh).map(|shadow| {
+            // The float's own shadow mesh: read as the shadow token it draws.
+            let token = crate::theme::FLOAT_SHADOW;
+            let look = Look::Shadow {
+                offset: shadow.center() - own.center(),
+                blur: f32::from(token.blur),
+                spread: (shadow.width() - own.width()) / 2.0,
+                colour: token.color,
+            };
+            (shadow, look)
+        }),
+        Shape::Rect(rect) => {
+            let corner = rect.corner_radius;
+            let largest = f32::from(corner.nw.max(corner.ne).max(corner.sw).max(corner.se));
+            flat(rect.fill, shown_stroke(rect.stroke), rect.stroke_kind, largest).map(|look| (rect.rect, look))
+        }
+        Shape::Circle(circle) => {
+            let rect = Rect::from_center_size(circle.center, vec2(circle.radius * 2.0, circle.radius * 2.0));
+            flat(circle.fill, shown_stroke(circle.stroke), StrokeKind::Middle, circle.radius).map(|look| (rect, look))
+        }
+        Shape::Ellipse(ellipse) => {
+            let rect = Rect::from_center_size(ellipse.center, ellipse.radius * 2.0);
+            flat(ellipse.fill, shown_stroke(ellipse.stroke), StrokeKind::Middle, ellipse.radius.min_elem()).map(|look| (rect, look))
+        }
+        Shape::Path(path) => {
+            flat(path.fill, shown_path_stroke(&path.stroke), StrokeKind::Middle, 0.0).map(|look| (Rect::from_points(&path.points), look))
+        }
+        Shape::LineSegment { points, stroke } => {
+            flat(Color32::TRANSPARENT, shown_stroke(*stroke), StrokeKind::Middle, 0.0).map(|look| (Rect::from_two_pos(points[0], points[1]), look))
+        }
+        Shape::Text(text) => {
+            let font = text.galley.job.sections.first().map(|section| section.format.font_id.clone()).unwrap_or_default();
+            let row_height = text.galley.rows.first().map_or(0.0, |row| row.rect().height());
+            let look = Look::Text {
+                text: text.galley.job.text.clone(),
+                colour: text_colour(text),
+                family: font.family.to_string(),
+                size: font.size,
+                row_height,
+            };
+            // The run itself: a fraction of a pixel laid out before it (`paint::run_at`) is not text.
+            let lead = text.galley.job.sections.first().map_or(0.0, |section| section.leading_space.max(0.0));
+            let mut rect = text.galley.rect.translate(text.pos.to_vec2());
+            rect.min.x = (rect.min.x + lead).min(rect.max.x);
+            Some((rect, look))
+        }
+        _ => None,
+    }
+}
+
+/// What the last frame painted for the widget labelled `label`, read from its own layer only (a popup, tooltip or
+/// toast over it is not its paint):
+/// - `shapes`: the shapes inside its AccessKit rect grown by 4 points, in paint order, each marked `inside` its own
+///   rect or not (a focus ring is not), and `clipped` when its clip rect cuts it; shapes clipped away wholly are left
+///   out. A shadow is kept when its centre lies in the widget's rect, however far its blur reaches.
+/// - `ground`: the fill of the last shape before the widget's first one whose rect strictly holds the grown rect
+///   (the parent it stands on, or the [`stage`]); such shapes are not in `shapes`. Always `Some`: without one
+///   `painted` panics and asks for a [`stage`].
+/// - Text is kept whenever its galley touches the widget's own rect, marked `overflows` when it reaches past the
+///   grown rect; it is never dropped.
+///
+/// The line segments of an edge [`paint::dashed`](crate::draw::paint::dashed) drew are one shape with
+/// `dashed: true`; nothing else is ever dashed.
+///
+/// # Panics
+///
+/// When no widget or more than one has `label`, when the harness does not [`record_layers`] (build it with
+/// [`builder`]), or when no ground holds the widget (place it with [`stage`]).
+pub(crate) fn painted<State>(harness: &Harness<'_, State>, label: &str) -> Paint {
+    painted_in(harness, label, harness.get_by_label(label).rect())
+}
+
+/// [`painted`] for the widget `label` whose own rect is `own` and not its node's: a field whose text node scrolls
+/// inside its box.
+pub(crate) fn painted_in<State>(harness: &Harness<'_, State>, label: &str, own: Rect) -> Paint {
+    let node = harness.get_by_label(label);
+    let grown = own.expand(AROUND);
+    let id = node.accesskit_node().locate().0;
+    let recorded = harness
+        .ctx
+        .data(|data| data.get_temp::<Recorded>(recorded_id()))
+        .unwrap_or_else(|| panic!("the harness records no layers: build it with component::tests::builder"));
+    let layer =
+        recorded.widgets.iter().find(|(widget, _)| *widget == id).map(|(_, layer)| *layer).unwrap_or_else(|| panic!("{label}: no widget rect"));
+    let list: Vec<&ClippedShape> = recorded.layers.iter().filter(|(of, _)| *of == layer).flat_map(|(_, shapes)| shapes.iter()).collect();
+    let dashes: Vec<(Rect, Color32, f32)> = recorded
+        .dashed
+        .iter()
+        .filter(|(of, rect, ..)| *of == layer && grown.contains_rect(*rect))
+        .map(|(_, rect, colour, radius)| (*rect, *colour, *radius))
+        .collect();
+    // A dashed edge is one mesh of pixel squares, which `read` skips; `dashes` stands for it.
+    let (mut grounds, mut shapes) = (Vec::new(), Vec::new());
+    for clipped in list {
+        let mut flat = Vec::new();
+        leaves(&clipped.shape, &mut flat);
+        for shape in flat {
+            let Some((rect, look)) = read(shape, own) else { continue };
+            let visible = clipped.clip_rect.intersect(rect);
+            let thin = rect.width() == 0.0 || rect.height() == 0.0;
+            if !(visible.is_positive() || (thin && clipped.clip_rect.expand(0.5).contains_rect(rect))) {
+                continue;
+            }
+            let clipped = !clipped.clip_rect.expand(0.01).contains_rect(rect);
+            if let Look::Text { .. } = look {
+                // Text is never dropped while it touches the widget: text that leaves the grown rect is marked.
+                if rect.intersects(own) {
+                    shapes.push(Painted { rect, inside: own.expand(0.01).contains_rect(rect), clipped, overflows: !grown.contains_rect(rect), look });
+                }
+                continue;
+            }
+            let shadow = matches!(look, Look::Shadow { .. }) && own.contains(rect.center());
+            if !shadow && rect.contains_rect(grown) && rect != grown {
+                if let Look::Rect { fill, .. } = look
+                    && shapes.is_empty()
+                    && fill.a() > 0
+                {
+                    grounds.push(fill);
+                }
+                continue;
+            }
+            if shadow || grown.contains_rect(rect) {
+                shapes.push(Painted { rect, inside: own.expand(0.01).contains_rect(rect), clipped, overflows: false, look });
+            }
+        }
+    }
+    for (rect, colour, radius) in dashes {
+        let look = Look::Rect { fill: Color32::TRANSPARENT, stroke: Some((1.0, colour)), stroke_kind: StrokeKind::Inside, radius, dashed: true };
+        shapes.push(Painted { rect, inside: own.expand(0.01).contains_rect(rect), clipped: false, overflows: false, look });
+    }
+    let Some(ground) = grounds.last().copied() else {
+        panic!("{label}: no ground under the widget; place it with component::tests::stage so its own fill is never confused with the page's")
+    };
+    Paint { ground: Some(ground), shapes }
+}
+
+/// The node focused in the harness's AccessKit tree.
+fn focused<State>(harness: &Harness<'_, State>) -> Option<NodeId> {
+    harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).map(|node| node.accesskit_node().locate().0)
+}
+
+/// The labels of the pressable controls (a click or focus action, not disabled, not hidden; static text, which egui
+/// makes focusable for selecting, and scroll bars left out) Tab never focuses: Tab is pressed
+/// until the focus comes back to a control it has been on (at most 2 000 presses), two frames after each press. A
+/// control without a label is named by its role.
+pub(crate) fn keyboard_walk<State>(harness: &mut Harness<'_, State>) -> Vec<String> {
+    let pressable: Vec<(NodeId, String)> = harness
+        .root()
+        .children_recursive()
+        .filter(|node| {
+            let node = node.accesskit_node();
+            let data = node.data();
+            (data.supports_action(accesskit::Action::Click) || data.supports_action(accesskit::Action::Focus))
+                && !node.is_disabled()
+                && !node.is_hidden()
+                && node.role() != accesskit::Role::Label
+                // A scroll bar is never a Tab stop: the keyboard scrolls what it holds (a field's text, a list).
+                && node.role() != accesskit::Role::ScrollBar
+        })
+        .map(|node| {
+            let node = node.accesskit_node();
+            (node.locate().0, node.label().unwrap_or_else(|| format!("{:?} without a name", node.role())))
+        })
+        .collect();
+    let mut reached: Vec<NodeId> = Vec::new();
+    for _ in 0..2000 {
+        harness.key_press(Key::Tab);
+        harness.step();
+        harness.step();
+        match focused(harness) {
+            Some(id) if reached.contains(&id) => break,
+            Some(id) => reached.push(id),
+            None => {}
+        }
+    }
+    // The walk ends where it began. A window's first stop is the command line's field, whose caret blinks: one Tab on
+    // leaves the keyboard on a control, as a walk that began on one does, so a rest checked after the walk is the
+    // window's, not the caret's.
+    let in_a_field = harness.root().children_recursive().any(|node| {
+        let node = node.accesskit_node();
+        node.is_focused() && node.role() == accesskit::Role::TextInput
+    });
+    if in_a_field {
+        harness.key_press(Key::Tab);
+        harness.step();
+        harness.step();
+    }
+    // A radio button in a group Tab reached is reached through it (a segmented control's option: the group takes the
+    // focus and the arrow keys move the choice): the group holds it in the tree, or its options stand inside its box.
+    let groups: Vec<Rect> = harness
+        .root()
+        .children_recursive()
+        .filter(|node| node.accesskit_node().role() == accesskit::Role::RadioGroup && reached.contains(&node.accesskit_node().locate().0))
+        .filter_map(|node| node.accesskit_node().bounding_box())
+        .map(|b| Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32)).expand(0.5))
+        .collect();
+    let through_group: Vec<NodeId> = harness
+        .root()
+        .children_recursive()
+        .filter(|node| {
+            let data = node.accesskit_node();
+            let inside = data.bounding_box().is_some_and(|b| {
+                let rect = Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32));
+                groups.iter().any(|group| group.contains_rect(rect))
+            });
+            data.role() == accesskit::Role::RadioButton
+                && (inside
+                    || std::iter::successors(node.parent(), |up| up.parent())
+                        .find(|up| up.accesskit_node().role() == accesskit::Role::RadioGroup)
+                        .is_some_and(|group| reached.contains(&group.accesskit_node().locate().0)))
+        })
+        .map(|node| node.accesskit_node().locate().0)
+        .collect();
+    pressable.into_iter().filter(|(id, _)| !reached.contains(id) && !through_group.contains(id)).map(|(_, label)| label).collect()
+}
+
+/// `key` held on whatever has the keyboard: one fresh press, then `repeats` repeats as a held key sends them, each its
+/// own frame, then the release.
+pub(crate) fn hold_key<State>(harness: &mut Harness<'_, State>, key: Key, repeats: usize) {
+    let event = |pressed, repeat| egui::Event::Key { key, physical_key: None, pressed, repeat, modifiers: egui::Modifiers::NONE };
+    harness.event(event(true, false));
+    harness.run();
+    for _ in 0..repeats {
+        harness.event(event(true, true));
+        harness.run();
+    }
+    harness.event(event(false, false));
+    harness.run();
+}
+
+/// `key` already held down when a control takes the keyboard: the press lands while nothing has the keyboard, then
+/// `take` hands it to the control, then `repeats` repeats, each its own frame, then the release. (egui counts an event
+/// as a repeat only while its key is down, so the press must come first.)
+pub(crate) fn held_on<State>(harness: &mut Harness<'_, State>, key: Key, repeats: usize, take: impl FnOnce(&mut Harness<'_, State>)) {
+    let event = |pressed, repeat| egui::Event::Key { key, physical_key: None, pressed, repeat, modifiers: egui::Modifiers::NONE };
+    if let Some(id) = harness.ctx.memory(|memory| memory.focused()) {
+        harness.ctx.memory_mut(|memory| memory.surrender_focus(id));
+    }
+    harness.event(event(true, false));
+    harness.run();
+    take(harness);
+    harness.run();
+    for _ in 0..repeats {
+        harness.event(event(true, true));
+        harness.run();
+    }
+    harness.event(event(false, false));
+    harness.run();
+}
+
+/// Whether the page rests: after `frames` frames without input, the last asks for no repaint sooner than a second
+/// (a clock that ticks each minute rests; an animation or a repaint every frame does not).
+pub(crate) fn rests<State>(harness: &mut Harness<'_, State>, frames: usize) -> bool {
+    harness.run_steps(frames);
+    let delay = harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap_or(Duration::MAX);
+    delay >= Duration::from_secs(1)
 }
 
 /// Every component in one frame, `on` deciding what is shown, open, hovered or selected.
@@ -61,7 +468,6 @@ fn everything(ui: &mut egui::Ui, theme: &Theme, keymap: &Keymap, on: bool) {
     let row = egui::Rect::from_min_size(pos2(0.0, 300.0), vec2(400.0, 40.0));
     hover::actions(ui, theme, keymap, Id::unique("hover"), row, on, &[Action { icon: IconId::Done, name: "Done", action: None, unavailable: None }]);
     if on {
-        toast::show(&ctx, theme, keymap, Id::unique("toast"), &Toast { text: "Toast", undo: None }, pos2(200.0, 400.0));
         popup::show(&ctx, theme, Id::unique("popup"), pos2(10.0, 10.0), 200.0, |ui| ui.label("Item"));
     }
 }
@@ -96,4 +502,378 @@ fn repaint_after_switching(reduce: bool) -> Duration {
 fn the_reduced_motion_flag_stops_every_animation_of_every_component() {
     assert!(repaint_after_switching(false) < Duration::from_millis(100), "with motion, things are still moving");
     assert!(repaint_after_switching(true) > Duration::from_secs(1), "with reduced motion, everything has landed");
+}
+
+/// Draws, at the end of every pass of `ctx`, an icon button for `action` inside [`soon`](super::soon::soon), and with
+/// `normal` a usable one for it too: a window test's way to put a coming-soon control into the app's frame.
+pub(crate) fn offer_soon(ctx: &Context, action: &'static str, normal: bool) {
+    ctx.on_end_pass(
+        "component-tests-offer-soon",
+        std::sync::Arc::new(move |ui: &mut egui::Ui| {
+            let theme = theme();
+            let keymap = Keymap::default();
+            let button = IconButton::new(IconId::Keyboard, "Later control").action(action);
+            super::soon::soon(ui, &theme, |ui| button.show(ui, &theme, &keymap));
+            if normal {
+                IconButton::new(IconId::Keyboard, "Usable control").action(action).show(ui, &theme, &keymap);
+            }
+        }),
+    );
+}
+
+/// A widget's own look in one state, read from a [`Paint`] for the state tests of the sheets.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Own {
+    /// Its fill: a shape inside it whose fill covers its whole box.
+    pub fill: Option<Color32>,
+    /// Its edge over its whole box, drawn inside: `(width, colour, dashed)`.
+    pub edge: Option<(f32, Color32, bool)>,
+    /// A stroke outside its box (the focus ring): the outer bound of the line, its width and colour.
+    pub ring: Option<(Rect, f32, Color32)>,
+    /// Its texts, glyphs included: `(text, colour, family, size)`.
+    pub texts: Vec<(String, Color32, String, f32)>,
+    /// The colours of the level hairlines and thin level fills inside it (a link's underline).
+    pub lines: Vec<Color32>,
+    /// The largest corner radius it paints.
+    pub radius: f32,
+    /// Whether a text of it reaches past the 4 points around it.
+    pub overflows: bool,
+}
+
+/// [`Own`] of the widget whose own rect is `rect`, from `paint`.
+pub(crate) fn own(paint: &Paint, rect: Rect) -> Own {
+    let near = |a: Rect, b: Rect| (a.min - b.min).length() < 0.51 && (a.max - b.max).length() < 0.51;
+    let mut found = Own { fill: None, edge: None, ring: None, texts: Vec::new(), lines: Vec::new(), radius: 0.0, overflows: false };
+    for shape in &paint.shapes {
+        found.overflows |= shape.overflows;
+        match &shape.look {
+            Look::Rect { fill, stroke, stroke_kind, radius, dashed } => {
+                found.radius = found.radius.max(*radius);
+                if let (Some((_, colour)), StrokeKind::Middle, false) = (stroke, stroke_kind, dashed)
+                    && shape.inside
+                    && shape.rect.height() == 0.0
+                {
+                    found.lines.push(*colour);
+                    continue;
+                }
+                // A thin level fill inside it is a line too (a link's underline, the font's thickness).
+                if fill.a() > 0 && stroke.is_none() && shape.inside && shape.rect.height() < 1.0 && shape.rect.width() > 4.0 {
+                    found.lines.push(*fill);
+                    continue;
+                }
+                if fill.a() > 0 && near(shape.rect, rect) {
+                    found.fill = Some(*fill);
+                }
+                if let Some((width, colour)) = stroke {
+                    let outer = match stroke_kind {
+                        StrokeKind::Inside => shape.rect,
+                        StrokeKind::Middle => shape.rect.expand(width / 2.0),
+                        StrokeKind::Outside => shape.rect.expand(*width),
+                    };
+                    if near(outer, rect) {
+                        found.edge = Some((*width, *colour, *dashed));
+                    } else if !shape.inside && outer.contains_rect(rect) {
+                        found.ring = Some((outer, *width, *colour));
+                    }
+                }
+            }
+            Look::Text { text, colour, family, size, .. } => found.texts.push((text.clone(), *colour, family.clone(), *size)),
+            Look::Shadow { .. } => {}
+        }
+    }
+    found
+}
+
+/// Brings the widget labelled `label` in `harness` into `shown` the way a person would: the pointer over it, the
+/// keyboard focus on it, or the pointer held down on it; then runs the frames.
+pub(crate) fn bring<State>(harness: &mut Harness<'_, State>, label: &str, shown: super::Shown) {
+    let node = harness.get_by_label(label);
+    let centre = node.rect().center();
+    match shown {
+        super::Shown::Rest => {}
+        super::Shown::Hover => node.hover(),
+        super::Shown::Focus => node.focus(),
+        super::Shown::Pressed => {
+            harness.hover_at(centre);
+            harness.drag_at(centre);
+        }
+    }
+    harness.run();
+}
+
+/// A harness that draws `add` on a [`stage`] of `ground` in `theme`, motion reduced, as large as `size`.
+pub(crate) fn staged(
+    theme: Theme,
+    ground: fn(&crate::theme::Palette) -> Color32,
+    size: Vec2,
+    add: impl Fn(&mut egui::Ui, &Theme) + 'static,
+) -> Harness<'static> {
+    let mut harness = builder().with_size(size).build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), true);
+        stage(ui, ground(theme.palette), |ui| add(ui, &theme));
+    });
+    harness.run();
+    harness
+}
+
+/// [`staged`] with motion `reduced` or full: frames step one [`FRAME`] at a time.
+pub(crate) fn staged_motion(
+    theme: Theme,
+    reduced: bool,
+    ground: fn(&crate::theme::Palette) -> Color32,
+    size: Vec2,
+    add: impl Fn(&mut egui::Ui, &Theme) + 'static,
+) -> Harness<'static> {
+    let mut harness = builder().with_size(size).build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), reduced);
+        stage(ui, ground(theme.palette), |ui| add(ui, &theme));
+    });
+    harness.run();
+    harness
+}
+
+/// Every text painted in the frame, in the order painted.
+pub(crate) fn texts<State>(harness: &Harness<'_, State>) -> Vec<String> {
+    let mut out = Vec::new();
+    for clipped in &harness.output().shapes {
+        collect_texts(&clipped.shape, &mut out);
+    }
+    out
+}
+
+fn collect_texts(shape: &egui::Shape, out: &mut Vec<String>) {
+    match shape {
+        egui::Shape::Text(text) => out.push(text.galley.job.text.clone()),
+        egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect_texts(shape, out)),
+        _ => {}
+    }
+}
+
+/// The looks of the widget `label` frame by frame as the pointer comes onto it, `frames` frames, then leaves it,
+/// `frames` frames more: `(on, off)`, the first of each the frame the pointer moved in.
+pub(crate) fn hover_frames(harness: &mut Harness<'static>, label: &str, frames: usize) -> (Vec<Own>, Vec<Own>) {
+    let look = |harness: &mut Harness<'static>| {
+        harness.step();
+        let rect = harness.get_by_label(label).rect();
+        own(&painted(harness, label), rect)
+    };
+    harness.get_by_label(label).hover();
+    let on = (0..frames).map(|_| look(harness)).collect();
+    harness.hover_at(pos2(1.0, 1.0));
+    let off = (0..frames).map(|_| look(harness)).collect();
+    (on, off)
+}
+
+/// Whether `mid` lies strictly between `a` and `b`: every channel within them, and neither end itself.
+pub(crate) fn strictly_between(mid: Color32, a: Color32, b: Color32) -> bool {
+    let within = (0..4).all(|i| {
+        let (m, x, y) = (mid.to_array()[i], a.to_array()[i], b.to_array()[i]);
+        x.min(y) <= m && m <= x.max(y)
+    });
+    within && mid != a && mid != b
+}
+
+/// The family name of the icons.
+pub(crate) fn icons() -> String {
+    crate::theme::icon_font(1.0).family.to_string()
+}
+
+/// The centre of the ink in `picture` inside the whole pixels `x` and `y` (start inclusive, end exclusive): every
+/// pixel weighted by how far it stands from `ground` towards `ink`, a pixel's centre at its index + 0.5.
+pub(crate) fn ink_centre(
+    picture: &crate::shot::Picture,
+    x: std::ops::Range<usize>,
+    y: std::ops::Range<usize>,
+    ground: Color32,
+    ink: Color32,
+) -> Option<(f32, f32)> {
+    let channels = |colour: Color32| [f32::from(colour.r()), f32::from(colour.g()), f32::from(colour.b())];
+    let (g, i) = (channels(ground), channels(ink));
+    let towards = [i[0] - g[0], i[1] - g[1], i[2] - g[2]];
+    let length = towards.iter().map(|d| d * d).sum::<f32>();
+    if length <= 0.0 {
+        return None;
+    }
+    let (mut mass, mut sx, mut sy) = (0.0_f32, 0.0_f32, 0.0_f32);
+    for py in y {
+        for px in x.clone() {
+            let p = channels(picture.pixel(px, py)?);
+            let cover = ((p[0] - g[0]) * towards[0] + (p[1] - g[1]) * towards[1] + (p[2] - g[2]) * towards[2]) / length;
+            let cover = cover.clamp(0.0, 1.0);
+            mass += cover;
+            sx += cover * (px as f32 + 0.5);
+            sy += cover * (py as f32 + 0.5);
+        }
+    }
+    (mass > 0.0).then(|| (sx / mass, sy / mass))
+}
+
+#[test]
+fn a_cut_line_ends_its_last_word_with_the_ellipsis_and_no_space_before_it() {
+    let theme = theme();
+    let mut harness = builder().build_ui_state(
+        move |ui, shown: &mut Vec<String>| {
+            let font = theme.fonts.button;
+            let show = |text: &str, width: f32| -> String {
+                let galley = super::cut(ui, text, font, theme.palette.ink, width);
+                galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect()
+            };
+            *shown = vec![show("Zusammenfassung des Posteingangs", 136.0), show("Keep a copy", 400.0), show("ab cd", 1.0)];
+        },
+        Vec::new(),
+    );
+    harness.run();
+    let shown = harness.state();
+    assert_eq!(shown[0], "Zusammenfassung…", "the design drops the space the cut leaves before the ellipsis");
+    assert_eq!(shown[1], "Keep a copy", "a name that fits is not touched");
+    assert!(shown[2].chars().count() <= 2, "{:?}", shown[2]);
+}
+
+#[test]
+fn a_line_is_cut_once_while_its_text_and_room_stay_and_the_store_stays_small() {
+    let theme = theme();
+    let long = "Minutes of the quarterly studio planning meeting, with the kiln rota and the open day plan".repeat(4);
+    let mut harness = builder().build_ui_state(
+        move |ui, frame: &mut usize| {
+            let font = theme.fonts.caption;
+            // The same line twice a frame, and a line of its own each frame.
+            let one = super::fitted(ui, &long, font, theme.palette.ink, 200.0);
+            let two = super::fitted(ui, &long, font, theme.palette.ink, 200.0);
+            assert_eq!(one.job.text, two.job.text);
+            let _ = super::fitted(ui, &format!("{long} {frame}"), font, theme.palette.ink, 150.0);
+            *frame += 1;
+        },
+        0,
+    );
+    harness.run_steps(1);
+    let before = super::FITS.with(std::cell::Cell::get);
+    harness.run_steps(400);
+    let cut = super::FITS.with(std::cell::Cell::get) - before;
+    assert_eq!(cut, 400, "only each frame's new line is cut again: {cut}");
+    let kept = super::fit_store_len(&harness.ctx);
+    assert!(kept <= super::FIT_STORE, "the store stays bounded: {kept}");
+}
+
+#[test]
+fn a_cut_line_is_never_wider_than_its_box_however_egui_rounds_its_letters() {
+    let theme = theme();
+    let mut harness = builder().build_ui_state(
+        move |ui, found: &mut Vec<(String, f32)>| {
+            found.clear();
+            for (text, font, width) in [
+                ("Bakery on the corner, orders and deliveries", theme.fonts.body, 144.0_f32),
+                ("orders-and-deliveries@bakery-on-the-corner.example.org", theme.fonts.mono_s, 112.0),
+            ] {
+                let cut = super::cut(ui, text, font, theme.palette.ink, width);
+                let shown: String = cut.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+                let wide: f32 = cut.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum();
+                found.push((shown, wide));
+            }
+        },
+        Vec::new(),
+    );
+    harness.run();
+    let found = harness.state();
+    // The boards: `Bakery on the corner…` (the comma does not fit) and `orders-and-deli…` (16 × 6.6 is past 112).
+    assert_eq!(found[0].0, "Bakery on the corner…", "{found:?}");
+    assert_eq!(found[1].0, "orders-and-deli…", "{found:?}");
+    assert!(found[0].1 <= 144.0 && found[1].1 <= 112.0, "{found:?}");
+}
+
+#[test]
+fn a_fitted_line_is_cut_by_the_one_rule_never_wider_than_its_room() {
+    let theme = theme();
+    let texts = [
+        ("Bakery on the corner, orders and deliveries", theme.fonts.body),
+        ("orders-and-deliveries@bakery-on-the-corner.example.org", theme.fonts.mono_s),
+        ("Minutes of the quarterly studio planning meeting, with the kiln rota", theme.fonts.caption),
+        ("Odile Brannock, Teodor Lisk and the allotment committee", theme.fonts.strong),
+    ];
+    let mut harness = builder().build_ui_state(
+        move |ui, found: &mut Vec<(String, f32, f32)>| {
+            found.clear();
+            for (text, font) in texts {
+                // Every room from 40 to 300 in quarter points: the cut cache's line never reaches past its room.
+                for quarter in 160..1200_u16 {
+                    let room = f32::from(quarter) / 4.0;
+                    let fitted = super::fitted(ui, text, font, theme.palette.ink, room);
+                    let kept: String = fitted.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+                    let wide: f32 = fitted.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum();
+                    // The rule's slack: what adding up the advances in `f32` drifts by.
+                    if wide - room > 0.001 {
+                        found.push((kept, wide, room));
+                    }
+                }
+            }
+        },
+        Vec::new(),
+    );
+    harness.run();
+    let found = harness.state();
+    assert!(found.is_empty(), "{} lines past their room: {:?}", found.len(), found.iter().take(5).collect::<Vec<_>>());
+}
+
+/// Every edge and bar the shapes of `shapes` paint, as `(rect, stroke width)`: the stroked rects and the filled ones
+/// in `bar`'s colour.
+fn edges_of(shapes: &[ClippedShape], bar: Color32) -> Vec<(Rect, f32)> {
+    fn walk(shape: &Shape, bar: Color32, found: &mut Vec<(Rect, f32)>) {
+        match shape {
+            Shape::Rect(rect) if rect.stroke.width > 0.0 || rect.fill == bar => found.push((rect.rect, rect.stroke.width)),
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, bar, found)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    shapes.iter().for_each(|clipped| walk(&clipped.shape, bar, &mut found));
+    found
+}
+
+#[test]
+fn the_one_point_edges_and_the_place_bar_stand_on_whole_pixels_at_fractional_scales() {
+    // As a float's edge since #326: a 1-point stroke is a whole number of physical pixels and its box's sides fall on
+    // pixel boundaries, at 1.25 and 1.5 as at 1; the shown place row's 2-point bar too.
+    use super::gallery_index::{nav, nav_states};
+    for ppp in [1.0_f32, 1.25, 1.5] {
+        let theme = Theme::new(Mode::Dark, TextScale::default());
+        let bar = theme.palette.cyan_edge;
+        let mut harness = builder().with_pixels_per_point(ppp).with_size(vec2(480.0, 520.0)).build_ui(move |ui| {
+            motion::set_reduced(ui.ctx(), true);
+            ui.add_space(3.3);
+            ui.horizontal(|ui| {
+                ui.add_space(5.7);
+                ui.vertical(|ui| {
+                    let keymap = Keymap::default();
+                    if let Some(active) = nav_states().into_iter().find(|state| state.name == "active") {
+                        nav(ui, &theme, &active);
+                    }
+                    ui.add_space(0.3);
+                    let mut text = String::new();
+                    super::field::search(ui, &theme, Id::unique("search"), &mut text, "Search", 201.3);
+                    ui.add_space(0.3);
+                    let mut field = String::from("odile@example.org");
+                    super::field::text_field(ui, &theme, Id::unique("field"), &mut field, &super::field::Field::new("Address", ""));
+                    let mut open = false;
+                    let options = [(1_u8, "One"), (2, "Two")];
+                    let select =
+                        super::select::Select { name: "Count", shown: "One", options: &options, current: Some(1), icon: IconId::Inbox, width: 160.3 };
+                    let _ = select.show(ui, &theme, &mut open);
+                    ui.add_space(0.3);
+                    super::checkbox::checkbox(ui, &theme, "Remember", false);
+                    ui.add_space(0.3);
+                    super::button::TextButton::new("Save").secondary().show(ui, &theme, &keymap);
+                    ui.add_space(0.3);
+                    let choices = [(1_u8, "Day", theme.fonts.body), (2, "Week", theme.fonts.body)];
+                    let _ = super::segmented::segmented(ui, &theme, &choices, 1);
+                });
+            });
+        });
+        harness.run();
+        let edges = edges_of(&harness.output().shapes, bar);
+        assert!(edges.len() >= 6, "{ppp}: {edges:?}");
+        let whole = |at: f32| ((at * ppp) - (at * ppp).round()).abs() < 0.01;
+        for (rect, width) in &edges {
+            let sides = [rect.left(), rect.top(), rect.right(), rect.bottom()];
+            assert!(sides.iter().all(|side| whole(*side)) && whole(*width), "{ppp}: {rect:?} edge {width} off whole pixels: {edges:?}");
+        }
+    }
 }

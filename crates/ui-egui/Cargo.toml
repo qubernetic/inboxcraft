@@ -16,13 +16,18 @@ inboxcraft-mime = { workspace = true }
 inboxcraft-model = { workspace = true }
 inboxcraft-store = { workspace = true }
 inboxcraft-time = { workspace = true }
+harfrust = { workspace = true }
 png = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+skrifa = { workspace = true }
+unicode-bidi = { workspace = true }
+unicode-segmentation = { workspace = true }
 zune-jpeg = { workspace = true }
 
 [dev-dependencies]
 egui_kittest = { workspace = true }
+inboxcraft-store = { workspace = true, features = ["test-hooks"] }
 tempfile = { workspace = true }
 
 [lints]

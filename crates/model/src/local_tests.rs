@@ -205,3 +205,56 @@ fn debug_shows_no_mail_text() {
     let shown = format!("{outgoing:?}");
     assert!(!shown.contains("Budget") && shown.contains("message_bytes: 25"), "{shown}");
 }
+
+/// A stored draft's typed text is read within its cap, whatever the record holds: a line past 4 096 characters or not
+/// text is read as empty, lines past the third are left, and the draft still reads.
+#[test]
+fn a_hostile_typed_record_reads_within_the_cap() {
+    let base = r#"{"id":3,"account":1,"saved":[1000,0],"subject":"Budget","typed":"#;
+    let read = |typed: &str| -> Draft { serde_json::from_str(&format!("{base}{typed}}}")).unwrap() };
+    let fits = "ő".repeat(crate::MAX_TYPED_CHARS);
+    let over = "x".repeat(crate::MAX_TYPED_CHARS + 1);
+    let draft = read(&format!(r#"["{fits}","{over}","c@example.org","d@example.org","e"]"#));
+    assert_eq!(draft.typed, [fits.clone(), String::new(), "c@example.org".to_owned()]);
+    assert_eq!(draft.subject, "Budget", "the rest of the draft is read");
+    let draft = read(r#"[1, null, {"a": ["b"]}]"#);
+    assert_eq!(draft.typed, [String::new(), String::new(), String::new()]);
+    let draft = read(r#"["a@example.org"]"#);
+    assert_eq!(draft.typed, ["a@example.org".to_owned(), String::new(), String::new()]);
+    for odd in [r#""a@example.org""#, "7", "null", r#"{"to": "a"}"#, "true"] {
+        assert_eq!(read(odd).typed, [String::new(), String::new(), String::new()], "{odd}");
+    }
+    // Written back as three lines.
+    let written = serde_json::to_value(read(r#"["a","b","c","d"]"#)).unwrap();
+    assert_eq!(written["typed"], serde_json::json!(["a", "b", "c"]));
+}
+
+/// What a draft sent looked like: kept with its outbox item, read back, and each part that changed named, never shown
+/// in `Debug`.
+#[test]
+fn a_send_keeps_the_draft_as_it_went_and_names_what_changed() {
+    let draft = Draft {
+        to: vec!["Béla <bela@example.org>".to_owned()],
+        subject: "Budget".to_owned(),
+        text: "Secret".to_owned(),
+        ..Draft::new(DraftId::new(3), AccountId::new(1), at(1_000))
+    };
+    let outgoing = Outgoing::of(&draft, OutboxState::Waiting);
+    round_trip(&outgoing);
+    assert_eq!(outgoing.changes(&draft), Vec::<&str>::new());
+    let shown = format!("{outgoing:?}");
+    assert!(!shown.contains("Secret") && !shown.contains("bela") && !shown.contains("Budget"), "{shown}");
+    let changed = Draft {
+        account: AccountId::new(2),
+        cc: vec!["ann@example.org".to_owned()],
+        bcc: vec!["mallory@example.org".to_owned()],
+        forwards: Some(MessageId::new(9)),
+        calendar: Some(String::new()),
+        ..draft.clone()
+    };
+    assert_eq!(outgoing.changes(&changed), ["from", "cc", "bcc", "attachments", "invitation"]);
+    let changed = Draft { to: Vec::new(), subject: "Budget!".to_owned(), text: String::new(), ..draft.clone() };
+    assert_eq!(outgoing.changes(&changed), ["to", "subject", "text"]);
+    // A record kept nothing of it: it may have changed.
+    assert_eq!(Outgoing::new(DraftId::new(3), OutboxState::Waiting).changes(&draft), ["unknown"]);
+}

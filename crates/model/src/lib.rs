@@ -78,8 +78,8 @@ pub use folder::{Folder, FolderError, FolderListing, FolderPath, SpecialUse};
 pub use id::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, FolderId, JobId, MessageId, ModSeq, ScheduleId, ThreadId, Uid, UidValidity};
 pub use job::{FolderState, Job, JobKind};
 pub use local::{
-    Alert, Bounce, Calendar, CalendarEvent, Draft, DraftCopy, Due, Group, Invitation, ItipMethod, MessageState, OutboxState, Outgoing, Rsvp,
-    Scheduled, Screening, Sender,
+    Alert, Bounce, Calendar, CalendarEvent, Draft, DraftCopy, Due, Group, Invitation, ItipMethod, MAX_TYPED_CHARS, MessageState, OutboxState,
+    Outgoing, Rsvp, Scheduled, Screening, Sender, SentAs,
 };
 pub use message::{
     Envelope, MAX_ADDRESSES, MAX_PREVIEW_CHARS, MAX_REFERENCES, MAX_SUBJECT_CHARS, Message, MessageRef, Moving, SNOOZED_UNTIL, Summary,
@@ -87,7 +87,7 @@ pub use message::{
 pub use role::{Role, RoleError, RoleMap, RoleSource, detect_role};
 pub use signs::{Precedence, Signs};
 pub use text::is_invisible_mark;
-pub use thread::{Thread, group_threads};
+pub use thread::{Thread, group_threads, links, thread_order};
 pub use uid_set::UidSet;
 
 /// The crate's package name.

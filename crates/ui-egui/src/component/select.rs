@@ -1,36 +1,46 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The select: a closed field with the current choice and a chevron that opens a popup of the choices, for one of
-//! many made seldom. The popup sits on the solid float, over the field, the current choice marked and holding the
-//! keyboard focus; the arrow keys walk the choices, Enter takes one. A press beside it or Escape closes it. The caller
-//! keeps whether it is open, so that a form can close it with itself.
+//! The select: a closed field with the current choice and a caret (▾, drawn as a shape, 8 × 5) that opens a popup of
+//! the choices, for one of many made seldom. 36 high like a text field, so the two line up side by side: the `term`
+//! fill, a 1 px `line` edge, the choice in mono 13 cut with an ellipsis, the caret `muted`. Hovered: a `muted` edge and
+//! an `ink` caret; pressed: the `stage` fill with an `ink` edge and caret; open: a `cyan_edge` edge and ▴ in
+//! `cyan_text`. Focus is the ring 2 px clear. Disabled: a dashed `line` edge, no fill, the choice `muted` and the caret
+//! `dim`; unavailable looks disabled and its tooltip says why. Nothing in it moves (the design gives it no transition).
+//!
+//! The popup opens under the field, on the solid float, the current choice marked and holding the keyboard focus; the
+//! arrow keys walk the choices, Enter takes one. A press beside it or Escape closes it. The caller keeps whether it is
+//! open, so that a form can close it with itself.
 
-use egui::{Id, Key, Modifiers, Rect, Response, Role, ScrollArea, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui::{Color32, Id, Key, Rect, Response, Role, ScrollArea, Sense, Shape, Stroke, Ui, WidgetInfo, pos2, vec2};
 
-use crate::iconset::{IconId, Style};
-use crate::motion;
+use crate::draw::paint::{self, Ring};
+use crate::iconset::IconId;
+use crate::keymap::Keymap;
 use crate::theme::Theme;
 
-use super::{cut, line_height, popup};
+use super::{Hover, Lit, Shown, cut, lit, popup, scroll, solid, soon, tooltip};
 
 /// The widest the popup gets, in points; narrower beside a narrower field.
 const POPUP: f32 = 210.0;
 
-/// The side of the chevron, in points.
-const CARET: f32 = 14.0;
+/// The caret's width and height, in points.
+const CARET: [f32; 2] = [8.0, 5.0];
 
 /// How much of the window the popup's rows may take before they scroll.
 const MOST: f32 = 0.6;
 
-/// The room to the left and right of the text, in points.
-const SIDES: f32 = 10.0;
+/// The room left and right inside the field, in points.
+const PAD: f32 = 12.0;
+
+/// Between the choice and the caret, in points.
+const GAP: f32 = 8.0;
 
 /// A field's height: a line of body text and the design's room above and below; the event editor's text fields match
 /// it.
 #[must_use]
-pub fn height(ui: &Ui, theme: &Theme) -> f32 {
-    line_height(ui, theme.fonts.body) + 18.0
+pub fn height(theme: &Theme) -> f32 {
+    theme.boxes().field
 }
 
 /// What a select shows and offers.
@@ -53,72 +63,174 @@ pub struct Select<'a, T> {
 impl<T: Copy + PartialEq> Select<'_, T> {
     /// Draws the field and, while `open`, the popup; the field's response and the choice just taken.
     pub fn show(self, ui: &mut Ui, theme: &Theme, open: &mut bool) -> (Response, Option<T>) {
-        let high = height(ui, theme);
-        let width = if self.width.is_finite() { self.width.clamp(high, 2048.0) } else { high };
+        self.show_with(ui, theme, open, None, None)
+    }
+
+    /// [`Self::show`], unavailable when there is a `note`: drawn disabled, never opening, its tooltip saying why.
+    pub fn show_noted(self, ui: &mut Ui, theme: &Theme, open: &mut bool, note: Option<&str>) -> (Response, Option<T>) {
+        self.show_with(ui, theme, open, note, None)
+    }
+
+    /// [`Self::show_noted`] drawn in `shown` whatever the pointer and the keyboard do: a board of the gallery.
+    pub(crate) fn show_with(self, ui: &mut Ui, theme: &Theme, open: &mut bool, note: Option<&str>, shown: Option<Shown>) -> (Response, Option<T>) {
+        self.draw(ui, theme, open, note, shown, true)
+    }
+
+    /// The closed field drawn as if it were `open`, without its popup: the open state on a board of the gallery.
+    pub(crate) fn field_open(self, ui: &mut Ui, theme: &Theme) -> Response {
+        self.draw(ui, theme, &mut true, None, None, false).0
+    }
+
+    /// [`Self::show_with`], the popup drawn only with `list`.
+    fn draw(self, ui: &mut Ui, theme: &Theme, open: &mut bool, note: Option<&str>, shown: Option<Shown>, list: bool) -> (Response, Option<T>) {
+        let high = height(theme);
+        let width = if self.width.is_finite() { self.width.max(high).min(2048.0) } else { high };
         let (rect, _) = ui.allocate_exact_size(vec2(width, high), Sense::hover());
         let id = ui.make_persistent_id(("select", self.name));
-        let response = ui.interact(rect, id, Sense::click());
-        response
-            .widget_info(|| WidgetInfo { current_text_value: Some(self.shown.to_owned()), ..WidgetInfo::labeled(Role::ComboBox, true, self.name) });
-        if response.clicked() {
+        // Disabled, unavailable or coming soon, it never opens.
+        let enabled = ui.is_enabled() && !soon::is_soon(ui) && note.is_none();
+        if !enabled {
+            *open = false;
+        }
+        let response = ui.interact(rect, id, if enabled { Sense::click() } else { Sense::hover() });
+        response.widget_info(|| WidgetInfo {
+            current_text_value: Some(self.shown.to_owned()),
+            ..WidgetInfo::labeled(Role::ComboBox, enabled, self.name)
+        });
+        // Enter and Space open it when they come up, so that the field shows itself pressed while they are down; a press
+        // of the pointer or a screen reader's opens it at once. Only a key that went down on the closed field opens it:
+        // the key that takes a choice in the list goes down on a row, and comes up after the focus is back here.
+        let keys = [Key::Enter, Key::Space];
+        let (went_down, held, released) = ui.input(|input| {
+            // A key held down repeats its press; only the first goes down, so a key held on from a row never opens it.
+            let fresh =
+                input.events.iter().any(|event| matches!(event, egui::Event::Key { key, pressed: true, repeat: false, .. } if keys.contains(key)));
+            (fresh, keys.iter().any(|key| input.key_down(*key)), keys.iter().any(|key| input.key_released(*key)))
+        });
+        let armed = id.with("key-down");
+        let focused = response.has_focus() && !*open;
+        if focused && went_down {
+            ui.data_mut(|data| data.insert_temp(armed, ()));
+        }
+        let was_armed = if !focused || released || !held { ui.data_mut(|data| data.remove_temp::<()>(armed)).is_some() } else { false };
+        // A press that closed the float (it began outside it, on the field) does not open it again when it comes up.
+        let closing = id.with("closing-press");
+        let stale = ui.data(|data| data.get_temp::<()>(closing)).is_some();
+        if stale && (response.clicked() || !ui.input(|input| input.pointer.any_down())) {
+            ui.data_mut(|data| data.remove::<()>(closing));
+        }
+        let pressed = (response.clicked() && !held && !stale) || (focused && released && was_armed);
+        if enabled && pressed {
             *open = !*open;
             if *open {
                 ui.data_mut(|data| data.insert_temp(id.with("opened"), ()));
+            } else {
+                // Closed by the field itself (a screen reader's click): the field keeps the keyboard.
+                response.request_focus();
+                ui.data_mut(|data| data.insert_temp(id.with("refocus"), 3_u8));
             }
         }
-        self.paint_field(ui, theme, &response);
+        let refocus = id.with("refocus");
+        if let Some(left) = ui.data(|data| data.get_temp::<u8>(refocus)) {
+            if response.has_focus() || left == 0 || *open {
+                ui.data_mut(|data| data.remove::<u8>(refocus));
+            } else {
+                response.request_focus();
+                ui.data_mut(|data| data.insert_temp(refocus, left.saturating_sub(1)));
+            }
+        }
+        let lit = lit(ui, theme, &response, enabled, shown, Hover::AtOnce);
+        self.paint_field(ui, theme, &response, enabled, *open, lit);
+        let response = match note {
+            Some(note) => tooltip::attach_note(response, theme, &Keymap::empty(), self.name, None, Some(note)),
+            None => response,
+        };
         if !*open {
+            // However it closed (a choice, the field pressed again, its caller), it opens afresh next time.
+            popup::forget(ui.ctx(), id.with("popup"));
+            return (response, None);
+        }
+        if !list {
             return (response, None);
         }
         let opened_now = ui.data_mut(|data| data.remove_temp::<()>(id.with("opened"))).is_some();
-        let (inside, chosen) = self.popup(ui, theme, id, rect, opened_now);
-        let (escaped, beside) = ui.input_mut(|input| {
-            let beside = input.pointer.primary_pressed() && input.pointer.interact_pos().is_some_and(|at| !inside.contains(at) && !rect.contains(at));
-            (input.consume_key(Modifiers::NONE, Key::Escape), beside)
-        });
-        if escaped || chosen.is_some() {
-            *open = false;
-            response.request_focus();
-        } else if beside {
-            *open = false;
+        // The float closes itself on Esc and on a press outside it, and gives the field the keyboard back.
+        match self.popup(ui, theme, id, rect, opened_now) {
+            None => {
+                *open = false;
+                if ui.input(|input| input.pointer.any_down()) {
+                    ui.data_mut(|data| data.insert_temp(id.with("closing-press"), ()));
+                }
+            }
+            Some(Some(chosen)) => {
+                *open = false;
+                response.request_focus();
+                // The float held the keyboard this frame and the next: the field asks again until it has it.
+                ui.data_mut(|data| data.insert_temp(id.with("refocus"), 3_u8));
+                return (response, Some(chosen));
+            }
+            Some(None) => {}
         }
-        (response, chosen)
+        (response, None)
     }
 
-    fn paint_field(&self, ui: &Ui, theme: &Theme, response: &Response) {
+    fn paint_field(&self, ui: &Ui, theme: &Theme, response: &Response, enabled: bool, open: bool, lit: Lit) {
         let p = &theme.palette;
-        let s = &theme.spacing;
         let rect = response.rect;
         if !ui.is_rect_visible(rect) {
             return;
         }
-        let painter = ui.painter();
-        painter.rect_filled(rect, s.corner, p.field);
-        let hover = motion::toggle(ui.ctx(), response.id.with("hover"), response.hovered(), theme.motion.hover_fade);
-        if hover > 0.0 {
-            painter.rect_filled(rect, s.corner, p.hover.gamma_multiply(hover));
+        let painter = solid(ui);
+        let (fill, edge, value, mark) = if !enabled {
+            (Color32::TRANSPARENT, None, p.muted, p.dim)
+        } else if open {
+            (p.term, Some(p.cyan_edge), p.ink, p.cyan_text)
+        } else if lit.pressed {
+            (p.stage, Some(p.ink), p.ink, p.ink)
+        } else if lit.hover {
+            (p.term, Some(p.muted), p.ink, p.ink)
+        } else {
+            (p.term, Some(p.line), p.ink, p.muted)
+        };
+        match edge {
+            Some(colour) => {
+                painter.rect_filled(paint::on_pixels(&painter, rect), 0.0, fill);
+                paint::edge(&painter, rect, 0.0, 1.0, colour);
+            }
+            None => paint::dashed(&painter, rect, p.line),
         }
-        let edge = if response.has_focus() { Stroke::new(2.0, p.focus) } else { Stroke::new(1.0, p.field_border) };
-        painter.rect_stroke(rect, s.corner, edge, StrokeKind::Inside);
-        let caret = Rect::from_center_size(pos2(rect.right() - SIDES - CARET / 2.0, rect.center().y), vec2(CARET, CARET));
-        theme.icons.paint(painter, caret, IconId::Caret, Style::Regular, p.muted);
-        let text = cut(ui, self.shown, theme.fonts.body, p.text, caret.left() - rect.left() - SIDES * 2.0);
-        painter.galley(pos2(rect.left() + SIDES, rect.center().y - text.size().y / 2.0), text, p.text);
+        let caret = Rect::from_min_size(pos2(rect.right() - PAD - CARET[0], rect.center().y - CARET[1] / 2.0), vec2(CARET[0], CARET[1]));
+        // ▾ closed, ▴ open.
+        let points = if open {
+            vec![caret.left_bottom(), caret.right_bottom(), caret.center_top()]
+        } else {
+            vec![caret.left_top(), caret.right_top(), caret.center_bottom()]
+        };
+        painter.add(Shape::convex_polygon(points, mark, Stroke::NONE));
+        let text = cut(ui, self.shown, theme.fonts.mono, value, caret.left() - GAP - rect.left() - PAD);
+        paint::run_at(&painter, pos2(rect.left() + PAD, rect.center().y - text.size().y / 2.0), text, value);
+        if lit.focus {
+            paint::focus_ring(&painter, theme, rect, Ring::Outside);
+        }
     }
 
-    /// The popup over the field at `rect`; where it is and the choice taken in it. `opened_now` gives the current
-    /// choice, or else the first, the keyboard focus.
-    fn popup(&self, ui: &Ui, theme: &Theme, id: Id, rect: Rect, opened_now: bool) -> (Rect, Option<T>) {
+    /// The float under the field at `rect`: the choice taken in it, or `None` once it closed itself. `opened_now`
+    /// gives the current choice, or else the first, the keyboard focus.
+    fn popup(&self, ui: &Ui, theme: &Theme, id: Id, rect: Rect, opened_now: bool) -> Option<Option<T>> {
         let ctx = ui.ctx().clone();
-        let anchor = rect.left_top() + vec2(0.0, theme.spacing.s);
         let most = (ctx.content_rect().height() * MOST).max(rect.height());
-        popup::show(&ctx, theme, id.with("popup"), anchor, POPUP.min(rect.width()), |ui| {
+        let float = popup::Float { id: id.with("popup"), anchor: rect, width: POPUP.min(rect.width()), returns_to: id };
+        popup::float(&ctx, theme, &float, |ui| {
             let mut taken = None;
-            let scrolled = ScrollArea::vertical().id_salt("select-rows").max_height(most).show(ui, |ui| {
+            let known = self.options.iter().any(|(value, _)| self.current == Some(*value));
+            let area = ScrollArea::vertical().id_salt("select-rows").max_height(most);
+            scroll::show(ui, theme, area, |ui| {
                 for (index, (value, name)) in self.options.iter().enumerate() {
                     let chosen = self.current == Some(*value);
                     let row = popup::option(ui, theme, self.icon, name, chosen);
-                    if opened_now && (chosen || (self.current.is_none() && index == 0)) {
+                    // The current choice takes the keyboard, or the first row when there is none among the options (none
+                    // chosen, or one the options no longer hold).
+                    if opened_now && (chosen || (!known && index == 0)) {
                         row.request_focus();
                     }
                     if row.clicked() {
@@ -126,7 +238,7 @@ impl<T: Copy + PartialEq> Select<'_, T> {
                     }
                 }
             });
-            (scrolled.inner_rect.union(ui.min_rect()), taken)
+            taken
         })
     }
 }

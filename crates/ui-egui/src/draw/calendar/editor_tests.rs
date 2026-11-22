@@ -19,7 +19,9 @@ fn clock() -> Box<FakeClock> {
 
 /// The sample window on the calendar screen.
 fn on_calendar(theme: egui::Theme) -> Harness<'static, InboxApp> {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    // The small editor: the full editor and the window are in `hosts_tests.rs`.
+    app.set_event_editor_host(inboxcraft_engine::appearance::EventEditorHost::Small);
     let mut harness = Harness::builder().with_size(vec2(1200.0, 820.0)).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     press(&mut harness, "Calendar");
@@ -27,7 +29,8 @@ fn on_calendar(theme: egui::Theme) -> Harness<'static, InboxApp> {
 }
 
 fn press(harness: &mut Harness<'static, InboxApp>, name: &str) {
-    harness.get_by_role_and_label(Role::Button, name).click();
+    // A button, or a segmented control's option.
+    harness.query_by_role_and_label(Role::RadioButton, name).unwrap_or_else(|| harness.get_by_role_and_label(Role::Button, name)).click();
     harness.run();
 }
 
@@ -83,7 +86,7 @@ fn new_event_opens_the_editor_and_saving_adds_the_event_with_an_undo_toast() {
         assert!(shows(&harness, "Pottery class, Thursday 5 November, 09:00 – 10:00"));
         harness.get_by_label("Event added");
         harness.check_accessibility();
-        press(&mut harness, "Undo");
+        press(&mut harness, "undo");
         assert!(!shows(&harness, "Pottery class"), "undo takes the new event away");
     }
 }
@@ -98,7 +101,7 @@ fn the_notify_prompt_shows_only_when_the_event_has_guests() {
         assert!(!shows(&harness, "Tell the"), "the dentist has no guests");
         press(&mut harness, "Cancel");
         assert!(!editing(&harness));
-        pick(&mut harness, "Allotment work party");
+        pick(&mut harness, "Call with Petra about the logo");
         press(&mut harness, "Edit");
         harness.get_by_label("Tell the 1 guest about this change?");
         let quiet = harness.get_by_role_and_label(Role::RadioButton, "Don't tell them");
@@ -116,21 +119,22 @@ fn the_notify_prompt_shows_only_when_the_event_has_guests() {
 #[test]
 fn an_edit_with_its_guests_told_says_so_in_the_toast() {
     let mut harness = on_calendar(egui::Theme::Light);
-    pick(&mut harness, "Allotment work party");
+    pick(&mut harness, "Call with Petra about the logo");
     press(&mut harness, "Edit");
     type_into(&mut harness, "Title", " and soup");
     harness.get_by_role_and_label(Role::RadioButton, "Send them the update").click();
     harness.run();
     press(&mut harness, "Save");
     harness.get_by_label("Event saved; the guests are told");
-    assert!(shows(&harness, "Allotment work party and soup"));
+    assert!(shows(&harness, "Call with Petra about the logo and soup"));
 }
 
 #[test]
 fn the_form_s_controls_change_the_event() {
     let mut harness = on_calendar(egui::Theme::Light);
     press(&mut harness, "New event");
-    harness.get_by_role_and_label(Role::Button, "Studio").click();
+    press_field(&mut harness, "Calendar");
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio").click();
     harness.run();
     press(&mut harness, "Free");
     choose_repeat(&mut harness, "Weekly");
@@ -145,6 +149,7 @@ fn the_form_s_controls_change_the_event() {
     harness.run();
     assert_eq!(harness.state().calendar().editor().unwrap().form().start, "2026-11-05 09:00");
     press(&mut harness, "Busy");
+    // Opened a second time, the list stands over the editor still.
     choose_repeat(&mut harness, "Never");
     let form = harness.state().calendar().editor().unwrap().form().clone();
     assert_eq!((form.repeat.as_str(), form.busy), ("none", true));
@@ -165,7 +170,7 @@ fn a_custom_repeat_shows_as_custom_and_cannot_be_picked() {
     harness.key_press(Key::Escape);
     harness.run();
     assert_eq!(harness.state().calendar().editor().unwrap().form().repeat, "custom");
-    assert!(harness.query_by_label("Studio").is_some_and(|node| node.accesskit_node().role() == Role::CheckBox), "an edit picks no calendar");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Calendar").is_none(), "an edit picks no calendar");
 }
 
 #[test]
@@ -209,13 +214,14 @@ fn a_new_event_opens_with_the_list_closed_after_an_escape_left_one_open() {
 
 #[test]
 fn a_new_event_in_a_narrow_window_still_offers_every_control() {
-    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.set_event_editor_host(inboxcraft_engine::appearance::EventEditorHost::Small);
     let mut harness = Harness::builder().with_size(vec2(760.0, 620.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     press(&mut harness, "Calendar");
     press(&mut harness, "New event");
     for name in ["Busy", "Free"] {
-        harness.get_by_role_and_label(Role::Button, name);
+        harness.get_by_role_and_label(Role::RadioButton, name);
     }
     harness.get_by_role_and_label(Role::ComboBox, "Repeat");
 }
@@ -271,4 +277,171 @@ fn after_the_toast_ctrl_z_still_takes_an_event_s_change_back() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
     assert!(shows(&harness, "Dentist"), "the history's Undo reads the calendar again");
+}
+
+/// Every filled rect of the last frame and its fill.
+fn flat_rects(harness: &Harness<'static, InboxApp>) -> Vec<(egui::Rect, egui::Color32)> {
+    fn open(shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Color32)>) {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, out)),
+            egui::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, &mut out));
+    out
+}
+
+/// The sample's call with Petra (one guest) open in the editor by Edit.
+fn editing_the_party(theme: egui::Theme) -> Harness<'static, InboxApp> {
+    let mut harness = on_calendar(theme);
+    pick(&mut harness, "Call with Petra about the logo");
+    press(&mut harness, "Edit");
+    // The editor stands where it was measured the frame before.
+    harness.run();
+    harness
+}
+
+#[test]
+fn the_edit_editor_stands_over_the_details_at_the_card_s_bottom_right() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let p = crate::theme::Palette::of(if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light });
+        let harness = editing_the_party(theme);
+        let found = flat_rects(&harness);
+        // The card: the `line` down between the view and the side panel runs its height; the panel is 252 wide.
+        let (edge, _) = found
+            .iter()
+            .copied()
+            .filter(|(rect, fill)| *fill == p.line && rect.width() == 1.0 && rect.height() > 500.0 && rect.left() > 600.0)
+            .min_by(|a, b| a.0.left().total_cmp(&b.0.left()))
+            .unwrap();
+        let card = egui::Rect::from_min_max(egui::pos2(edge.right(), edge.top()), egui::pos2(edge.right() + 252.0, edge.bottom()));
+        let (editor, _) = found.iter().copied().find(|(rect, fill)| *fill == p.surface && rect.width() == 432.0).unwrap();
+        // The frame: its right edge 3 inside the card's, its bottom on the card's bottom edge.
+        assert_eq!(editor.right(), card.right() - 3.0, "{editor:?} in {card:?}");
+        assert_eq!(editor.bottom(), card.bottom() + 1.0, "{editor:?} in {card:?}");
+    }
+}
+
+#[test]
+fn the_question_to_the_guests_stands_in_its_box() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let p = crate::theme::Palette::of(if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light });
+        let harness = editing_the_party(theme);
+        let question = harness.get_by_label("Tell the 1 guest about this change?").rect();
+        let found = flat_rects(&harness);
+        // The frame: `panel`, a 1 px `cyan_edge`, 398 × 78, the question 13 in from its left and top.
+        let (boxed, _) = found
+            .iter()
+            .copied()
+            .filter(|(rect, fill)| *fill == p.panel && rect.contains_rect(question))
+            .min_by(|a, b| a.0.area().total_cmp(&b.0.area()))
+            .unwrap();
+        assert_eq!((boxed.width(), boxed.height()), (398.0, 78.0), "{boxed:?}");
+        assert_eq!((question.left() - boxed.left(), question.top() - boxed.top()), (13.0, 13.0), "{question:?} in {boxed:?}");
+        let side =
+            |rect: &egui::Rect| (rect.width() == boxed.width() && rect.height() == 1.0) || (rect.height() == boxed.height() && rect.width() == 1.0);
+        let edges = found.iter().filter(|(rect, fill)| *fill == p.cyan_edge && boxed.contains_rect(*rect) && side(rect)).count();
+        assert_eq!(edges, 4, "four sides of cyan_edge");
+    }
+}
+
+#[test]
+fn the_small_editor_has_no_alert_field() {
+    let mut harness = on_calendar(egui::Theme::Light);
+    press(&mut harness, "New event");
+    harness.get_by_role_and_label(Role::ComboBox, "Repeat");
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Alert").is_none(), "Alert is the full editor's and the window's");
+    press(&mut harness, "Cancel");
+    pick(&mut harness, "Dentist");
+    press(&mut harness, "Edit");
+    assert!(editing(&harness));
+    assert!(harness.query_by_role_and_label(Role::ComboBox, "Alert").is_none());
+}
+
+#[test]
+fn someone_elses_event_opens_read_only_with_close_alone() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = on_calendar(theme);
+        pick(&mut harness, "Allotment work party");
+        press(&mut harness, "Edit");
+        assert!(editing(&harness));
+        harness.get_by_label("Teodor Lisk's event. You can read it here; only the organiser can change it.");
+        assert!(harness.query_by_role_and_label(Role::Button, "Save").is_none(), "no Save in someone else's event");
+        assert!(harness.query_by_role_and_label(Role::Button, "Cancel").is_none(), "Close stands alone");
+        assert!(!shows(&harness, "Tell the"), "nothing changes, so nobody is asked about telling the guests");
+        harness.check_accessibility();
+        type_into(&mut harness, "Title", "X");
+        let editor = harness.state().calendar().editor().unwrap();
+        assert_eq!(editor.form().summary, "Allotment work party", "the title is read-only");
+        assert!(!editor.edited());
+        harness.get_by_role_and_label(Role::CheckBox, "Private").click();
+        harness.run();
+        assert!(!harness.state().calendar().editor().unwrap().form().private, "the ticks are disabled");
+        press(&mut harness, "Close");
+        assert!(!editing(&harness), "Close closes it");
+    }
+}
+
+#[test]
+fn ctrl_and_a_press_on_a_link_in_the_description_copies_it() {
+    use egui::{Event, PointerButton};
+    let mut harness = on_calendar(egui::Theme::Light);
+    pick(&mut harness, "Call with Petra about the logo");
+    press(&mut harness, "Edit");
+    harness.state_mut().calendar_mut().0.editor_mut().unwrap().form_mut().description = "Boards: https://files.example.org/boards".to_owned();
+    harness.run();
+    // A point on the link: the description's box, a third of the way along its first line.
+    let rect = harness.get_by_role_and_label(Role::MultilineTextInput, "Description").rect();
+    let at = egui::pos2(rect.left() + rect.width() / 3.0, rect.top() + 18.0);
+    let click = |harness: &mut Harness<'static, InboxApp>, modifiers: Modifiers| {
+        harness.event(Event::PointerMoved(at));
+        harness.run();
+        for pressed in [true, false] {
+            harness.event_modifiers(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers }, modifiers);
+            harness.run();
+        }
+    };
+    click(&mut harness, Modifiers::NONE);
+    assert_eq!(harness.state().notice(), None, "a plain press puts the caret down while editing");
+    click(&mut harness, Modifiers::COMMAND);
+    assert_eq!(harness.state().notice(), Some("Link copied: https://files.example.org/boards"));
+    assert!(editing(&harness), "the editor stays open");
+}
+
+#[test]
+fn a_copied_link_s_notice_reads_in_the_order_it_was_copied() {
+    use egui::{Event, PointerButton};
+    const LINK: &str = "https://שלום.קום.example.org/boards?week=שלום";
+    let mut harness = on_calendar(egui::Theme::Light);
+    pick(&mut harness, "Call with Petra about the logo");
+    press(&mut harness, "Edit");
+    harness.state_mut().calendar_mut().0.editor_mut().unwrap().form_mut().description = LINK.to_owned();
+    harness.run();
+    let rect = harness.get_by_role_and_label(Role::MultilineTextInput, "Description").rect();
+    let at = egui::pos2(rect.left() + 40.0, rect.top() + 18.0);
+    harness.event(Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event_modifiers(
+            Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::COMMAND },
+            Modifiers::COMMAND,
+        );
+        harness.run();
+    }
+    harness.run();
+    fn walk(shape: &egui::Shape, found: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Text(text) => found.push(text.galley.job.text.clone()),
+            _ => {}
+        }
+    }
+    let mut painted = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut painted));
+    // The status line draws the link with its right-to-left labels where they are written, as it was copied.
+    let notice = format!("Link copied: {LINK}");
+    assert!(painted.contains(&notice), "{painted:?}");
+    assert_eq!(harness.state().notice().map(|said| said.replace('\u{200E}', "")), Some(notice), "only marks of no width are added");
 }

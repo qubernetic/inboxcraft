@@ -1,16 +1,15 @@
 # InboxCraft design
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-17 · **Change:** major
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 InboxCraft's look in words: the Qubernetic design, its tokens, its rules and its screens. The source of truth is
-the FigCraft design file [`docs/design/inboxcraft.figcraft`](design/README.md): 21 pages, 64 component sets, every
+the FigCraft design file [`docs/design/inboxcraft.figcraft`](design/README.md): 23 pages, 64 component sets, every
 state drawn in dark and in light. This page puts that file into words; where the two differ, the file is right and
 this page is changed.
 
-**The app does not follow this design yet.** The code and the screenshots in `docs/images/` still show the earlier
-glass and gradient look. This page describes the look the app is being built towards;
+**The app follows most of this design.** The code and the screenshots in `docs/images/` show the Qubernetic look;
 [the design file's README](design/README.md#not-in-the-code-yet) lists the file's pages and what is not in the
-code yet, which today is everything.
+code yet.
 
 Everything here is original (see `AGENTS.md`, "Assets"). The InboxCraft mark and wordmark and the Qubernetic mark
 are trademarks of Qubernetic and are not under this repository's licences; see [`NOTICE`](../NOTICE).
@@ -151,6 +150,8 @@ these when it is built.
 - **One focus edge for every list row:** 1 px `cyan_edge`, 2 px inside the row, clear of the pane's borders and of
   the hairlines over and under the row.
 - **A scroll thumb never covers a focus edge.** Where the thumb passes one, the edge is drawn over the thumb.
+  Neither moves when they meet: in a 440 px list the edge's right line is on column 437 and the resting thumb on
+  432 to 435, with one column of the row's ground between. This 1 px is meant.
 - **Lines stand on whole pixels.** Equal columns are cut at whole pixels, never at a fraction.
 
 ## Icons, numbers and labels
@@ -165,7 +166,9 @@ these when it is built.
 - **Avatars** are a square with two mono initials on `stage`.
 - **The character field.** The ground of Home, the first start and the cover is a grid of 8 × 15 px cells; about
   5 in 100 hold a `·` in `faint`. The pattern is fixed and never moves by itself. It shows at 20 % on the empty
-  area of a pane, never behind text a person reads, and never takes a click.
+  area of a pane and never takes a click. On Home it lies under the whole page, the brief too, and calms near the
+  text: inside a text block its cells flip with 0.2 of their chance and a flipped one shows at 0.2 of its opacity,
+  coming back to the whole over 80 px, eased; the dots at rest and the emblem do not change.
 
 ## Wording
 - Plain words: say what happened, then what to do. No codes without words. "Could not reach mail.example.org.
@@ -193,17 +196,26 @@ Everything is designed at 1440 × 900. Four fixed regions:
 
 - **Command line.** Plain text searches, `>` runs a command, `@` finds a person, `#` goes to a mailbox. `Ctrl K`
   and `/` open it empty; `Ctrl F` opens the same field narrowed to searching mail in the current mailbox. Results
-  hang under the field as a float and the window behind is dimmed. `Esc` returns to the list.
-- **Index.** Five places: `[ 00 ] HOME`, `[ 01 ] MAIL`, `[ 02 ] CALENDAR`, `[ 03 ] LATER`, `[ 04 ] SETTINGS`. Under
-  MAIL stand the mailboxes every account shares, then one row for each account, which opens to its folders. In a
-  short window only the mailboxes scroll. The account picker opens from the owner's row at the index's foot.
+  hang under the field as a float and the window under the command line is dimmed; the line itself is not. `Esc`
+  returns to the list.
+- **Index.** At the top stands New message, above the places and as wide as the column: a secondary button with
+  the compose glyph, its words and its key, `C`, 32 high with 12 px at its sides and 8 px under it. It is the same
+  on every place, and disabled while there is no account to write from. Then five places: `[ 00 ] HOME`,
+  `[ 01 ] MAIL`, `[ 02 ] CALENDAR`, `[ 03 ] LATER`, `[ 04 ] SETTINGS`. Under MAIL stand the mailboxes every account
+  shares, then one row for each account, which opens to its folders. In a short window only the mailboxes scroll.
+  The account picker opens from the owner's row at the index's foot. The narrow index shows New message as its
+  glyph alone, in a 32 px square. Drafts, in Mail and under Calendar, has a glyph of its own, a page with a dashed
+  edge (`file-dashed`), so it is not taken for New message's pencil.
 - **Panes.** Every list is 440 wide; the pane beside it takes the rest (766 for the reader at 1440). Rows are
   lines, not cards. A pane with nothing in it says so in its centre.
 - **Status line.** At rest: the sync state, the accounts, the outbox, the next event. A notice is a stretch of
   this line under a 2 px line in its kind's colour, not a box. An undo line stays 5 s, a notice with nothing to
   undo 4 s, an error until it is dismissed.
-- **Frame.** With the window's own frame the command line is also the title bar and the drag strip. The other
-  setting is the system's frame. Both are drawn maximised and without focus as well.
+- **Frame.** With the window's own frame the command line is also the title bar and the drag strip, also while its
+  results or the event editor show. The other setting is the system's frame. Both are drawn maximised and without
+  focus as well. The window's corners are square in every state; in the own frame a window that is neither
+  maximised nor full screen has a one-pixel outline in `line` inside its edge, and so does a reader, composer or
+  event editor in a window of its own.
 - **Keys.** `D` done (mark as read and archive), `A` archive, `H` snooze, `R` read, `S` flag, `C` write, `J` and
   `K` or the arrows move in a list, `Ctrl Z` undo, `Ctrl Enter` send. Single letters work when the focus is not in
   a text field. `Tab` goes through the regions in reading order. Every key can be changed in Settings.
@@ -216,11 +228,20 @@ screens at 1100 and at 800 as well as at 1440.
 |---|---|---|
 | under 1280 (drawn at 1100) | the index narrows to 56 px of icons; the command field takes the room | the reader beside the 440 px list would have less than 606 px |
 | under 980 (drawn at 800) | the body holds one pane; list and reader swap (`Enter` opens, `Esc` goes back) | the reader would have less than 482 px |
-| 800 | the least width; the one pane is 743 px | |
+| 800 | the least width; the one pane is 743 px; the window cannot be made narrower | no frame draws it narrower |
 
 The command line and the status line keep their heights and never leave. The list keeps 440 px whenever a second
 pane stands beside it. A control is never cut: text cuts on one line with `…`, and a part that does not fit is
 left out whole. In one pane the composer and the calendar's side panel swap in the same way as the reader.
+
+Settings follows the same two breakpoints (drawn at 800, and at 1000 with the text at 130 %). From 980 up the list of
+sections stays beside the page at 232 px and the page's column narrows (630 px at 1000). Under 980 the body holds
+one pane: the list of sections or a section's page, swapping as the list and the reader do; the page's head starts
+with `← Settings` where it says where it is, and `Esc` goes back too. A setting whose control needs more than half
+its row gives the control a line of its own under the name and its help, at the left (the attachment's rule);
+Sending's two signatures stand one under the other; About's emblem leaves whole, as on Home. At 130 % the text
+columns of a list row (a name, a time) grow with their type, and the scheduled list puts the person under the
+subject.
 
 ### Text at 130 %
 Every type size and line height is × 1.3, and with them the height of every row and control (status line 26 → 34,
@@ -235,7 +256,7 @@ The 64 sets of the file. A screen is built from instances of these only.
 | Set | For | States in brief |
 |---|---|---|
 | `icon-button` | an act shown as an icon, 32 × 32 | default, hover, focus, pressed, selected, disabled, unavailable |
-| `text-button` | an act in words; primary, secondary, danger, plain | default, hover, focus, pressed, disabled, unavailable; with key, arrow or icon |
+| `text-button` | an act in words; primary, secondary, danger, plain | default, hover, focus, pressed, disabled, unavailable; with key, arrow or icon; secondary with icon and key, and icon only, each with hover, focus, pressed and disabled (the index's New message) |
 | `link-button` | a text link, also the small link of a row | default, hover, focus, pressed, disabled |
 | `key-chip` | a key | default, on cyan, capture, none, disabled |
 | `key-hint` | a key with what it does, in the status line | default, hover |
@@ -285,7 +306,7 @@ The 64 sets of the file. A screen is built from instances of these only.
 | `draft-file` | a file on a draft | default, hover, focus, too large |
 | `event-block` | a calendar event | timed, band, chip, row; picked, hover, focus |
 | `thread-row` | a message of a conversation | folded, open, unread, hover, focus |
-| `invite-card` | an invitation above a message | request, changed, out of date, answered, cancelled, reply, clash |
+| `invite-card` | an invitation above a message | request, described (the event's description inside the card), changed, out of date, answered, changing, cancelled, reply, clash |
 | `block` | a titled box of rows, on Home | default, hover, focus, selected |
 | `block-line` | the last line of such a box | empty, more |
 | `count-tile` | a count on Home | default, accent, warn, minus, zero, overflow |
@@ -302,13 +323,23 @@ The 64 sets of the file. A screen is built from instances of these only.
 ### Home
 A page of its own: at the left a 600 px brief of today (a headline, four counts, the day's agenda, the drafts to
 pick up, two buttons), at the right the Qubernetic emblem drawn in characters on the character field. It is also
-drawn with nothing to do, with overflowing counts, before the first account, and with everything failing. Where
-the window is too narrow for the emblem, it leaves whole; it is never cut or made smaller.
+drawn with nothing to do, with overflowing counts, before the first account, and with everything failing. The
+emblem with the names under it (the two wordmarks and the tagline, 16 below it) stands centred in the free area
+right of the brief and under the command line, across and down, at any window height. The character field lies
+under the whole page and answers the pointer anywhere on it, calmer near the brief's text and the names. Where the window is too
+narrow or too low for the emblem and its names, it leaves whole; it is never cut or made smaller. The headline greets the
+owner by the first word of the sending name, titles such as Dr. skipped; Settings › Sending sets the last word, the
+full name or no name instead.
 
 ### Mail lists and the screener
 - **Inbox,** in three views: Grouped (every group open), Smart (the first three rows of each group, with "show
   all") and List (one list by time). Groups are section labels with a count. Done mail is out of the way, not
   gone: "Show done" lists it again.
+- **Unread only.** A pill on the filters' line after "Show done", in every view and folder of mail (not in Drafts,
+  New senders, Later or the outbox), and the key `U`: on, the place lists its unread messages alone. A row read
+  meanwhile leaves at once; the open message stays open and keeps its row until the owner moves on, so the next
+  message is the next unread one. Each place keeps its own choice for the session. With nothing unread the list
+  says so ("Nothing unread here.", `<PLACE> · UNREAD`), not a blank pane.
 - **A row** is two lines: the sender, the account bar and the time, then subject and preview. Unread is a cyan
   square and heavier type. A subject is one line everywhere but in the reader.
 - **The screener.** First-time senders wait in New senders, a queue of one card a sender with Let in and Keep
@@ -330,6 +361,9 @@ the window is too narrow for the emblem, it leaves whole; it is never cut or mad
 - **Eight kinds** are drawn: a mailing list (the thread as a tree, folded quotes, a coloured diff), marketing, a
   receipt, a notification from a code forge, pictures inside a message, a newsletter, an invitation (a card above
   the text with the answers and a clash warning) and a message that did not arrive.
+- **An invitation that asks** makes the card's Going the pane's one primary button; Reply at the foot steps down to
+  secondary. After Change answer the card offers the three answers again and Keep my answer, which goes back to
+  the answer given and sends nothing.
 - The reader can stand at full width or in a window of its own (960 × 900: the main frame without the index).
 
 ### The composer
@@ -359,12 +393,16 @@ event's details, the sync control. "+N more" in a month cell opens a list of tha
 ### Settings and accounts
 - Settings is a place of the window: a second 232 px column with nine sections (Appearance, Accounts,
   Notifications, Triage, Sending, Calendar, Shortcuts, Privacy, About) and the section's page beside it, 720 wide.
+  In a narrow window it gives way as "Widths" says: one pane under 980, settings whose control takes a line.
 - **Appearance** has two groups. Look: mode (Auto, Dark, Light), motion (full, reduced, off), text size. Layout:
   inbox view, open a message (pane or window), write a message (pane or window), window frame (own or system).
   There are no accent presets, custom colours or typeface and icon choices.
 - **Adding an account:** the address with Detect, the sign-in, the servers. What Detect asked, and where, stands
   open beside the form. The check prints its seven steps like a terminal, one by one as they run; a failure shows
   the failing line and plain words under it. No password is sent without encryption, and no setting allows it.
+  Detect and Check and add can always be pressed: a press with something missing says what, under its field, and
+  gives that field the keyboard. They wait only while Detect is asking.
+- **An account's settings:** Save is disabled until something changes, and the line beside it says so.
 - **Removing an account** is a danger button; its confirmation says first that it cannot be undone.
 
 ### Outside the window
@@ -372,7 +410,8 @@ event's details, the sync control. "+N more" in a month cell opens a list of tha
   icons shows it in one colour. The menu has two entries, Open InboxCraft and Quit InboxCraft.
 - **Notifications:** the desktop owns their look, the app their text. The text is who wrote and the subject, never
   the message's text, and nothing at all for a sender who has not been let in.
-- **The marks.** The InboxCraft mark stands in the command line, the tray and the app icon (on a dark tile); the
+- **The marks.** The InboxCraft mark stands in the command line, the tray and the app icon (the dark-theme mark
+  with a mid-grey frame on a clear ground, no tile, so it reads on light and dark panels); the
   Qubernetic emblem only on Home and About.
 
 ## Motion
@@ -403,8 +442,8 @@ and the movement jumps to its end. A scrambling character changes once, so nothi
 
 | | What moves | Full | Reduced | Off | What it tells |
 |---|---|---|---|---|---|
-| M1 | the character field | cells within 60 px of the pointer flip to code glyphs and cool down over 200 ms | on Home only, within 30 px | still dots | where the pointer is; it carries no fact |
-| M2 | the emblem on Home | cells under the pointer flip and settle back | the same | still | whose program this is |
+| M1 | the character field | cells within 60 px of the pointer flip to code glyphs, the nearest most often, and flip again while the pointer stands still; each is back 80 to 200 ms after its flip, taking new glyphs on the way once the pointer has left it; near Home's text with 0.2 to 1 of the chance and opacity | on Home only, as at full | still dots | where the pointer is; it carries no fact |
+| M2 | the emblem on Home | cells under the pointer flip and settle back; by itself one cell at a time twinkles to a code glyph (about 7.5 a second, half of the ink ones in cyan) for 250 to 750 ms | the same | still | whose program this is |
 | M3 | scramble | a label resolves from the left on hover, 70 ms a character, at most 300 ms; a headline on load, 700 ms | no hover; Home's headline once per launch | none | that a control can be pressed; that a page was just made |
 | M4 | a new row arrives | the row decodes in over 300 ms; the unread square blinks once | fades in, 125 ms; the square blinks once | the row is there | that mail came and which row it is |
 | M5 | Done | the words dissolve (125 ms), the row closes (180 ms); undo line with a 5 s bar | the row closes (180 ms); undo line with its bar | the row is gone; undo line without a bar | which row went, and that it can be taken back |
@@ -443,15 +482,15 @@ each feature's behaviour is decided when it is designed. Two things on it are id
   reading area.
 
 ## Limits
-- **The code does not follow this page.** `crates/ui-egui/src/theme.rs`, the app and the pictures in
-  `docs/images/` show the earlier look.
+- **The code follows most of this page.** What it does not follow yet is listed in
+  [the design file's README](design/README.md#not-in-the-code-yet).
 - The file decides the look, not the behaviour of features that are not built. Where a screen is new against the
   app, the engine work behind it is not decided here.
 - The file does not define what counts as a tracker, so the content bar's tracker count has no rule yet.
 - The desktop draws the tray, its menu and the notifications; the file shows them on a grey wireframe that copies
   no desktop, so their final look is not decided here.
 - Motion is drawn as still frames; durations are tokens, and the file plays nothing.
-- Only 1440, 1100 and 800 px widths and 100 % and 130 % text are drawn. Hover, focus and pressed states are not
+- Only 1440, 1100 and 800 px widths (and Settings at 1000) and 100 % and 130 % text are drawn. Hover, focus and pressed states are not
   drawn again at 130 %. A row's height in the file at 130 % is 1.3 × its height; the app may come out a few px
   less.
 - The interface is drawn in English only. The picture of the phone code is a placeholder and decodes to nothing.
@@ -500,3 +539,12 @@ each feature's behaviour is decided when it is designed. Two things on it are id
 | 2026-11-08 | minor | The list's header, stripe and row spacing, the view switch, the toast and the time picker (#208) |
 | 2026-11-08 | minor | The add form's outgoing server and CalDAV address; an account's settings (#214) |
 | 2026-11-17 | major | Rewritten for the Qubernetic design file (#226) |
+| 2026-11-21 | minor | The invitation's one primary and Keep my answer, the add form's buttons, Save until a change, the focus edge beside the thumb; 23 pages (#327) |
+| 2026-11-21 | minor | The app follows most of this design; what it does not is in the file's README (#332) |
+| 2026-11-21 | minor | The invitation card's described state: the event's description inside the card (#342) |
+| 2026-11-21 | minor | Home greets by the word of the sending name the owner chose (#349) |
+| 2026-11-21 | minor | New message at the top of the index; the text-button set's icon-and-key and icon-only states (#354) |
+| 2026-11-21 | minor | Drafts has a glyph of its own in the index (#354) |
+| 2026-11-21 | minor | Settings in a narrow window (#368) |
+| 2026-11-21 | minor | The least width cannot be made narrower; the title bar under the results and the editor (#412) |
+| 2026-11-21 | minor | M1 and M2: the field flips under a still pointer, the emblem twinkles by itself (#418) |

@@ -1,54 +1,30 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The owner's appearance choices: mode, accent, typeface, icon set, text scale and motion.
+//! The owner's appearance choices: mode, text scale, motion, window frame and layout.
+//!
+//! Motion has three levels ([`MotionLevel`]: full, reduced, off) and a flag saying whether the owner chose one; while
+//! the owner has not, the computer's wish for less motion turns it off ([`effective`]). The front end reads the level
+//! alone; the older two-way field [`Appearance::motion`] stays for one release, for the kept file and the commands'
+//! answers, and with [`Appearance::motion_reduced`] it holds the level. [`Appearance::with_motion`] is their only
+//! writer; a pair built otherwise is made one level by [`Appearance::normalised`], which the session applies to every
+//! appearance it takes in.
 //!
 //! The `ui.*.set` commands change one choice each; the session holds the result ([`crate::Session::appearance`]) and
 //! the front end draws with it and keeps it on disk, handing it back with [`crate::Session::set_appearance`] at the
 //! next start. The kept form is [`Appearance::to_value`]; [`Appearance::from_value`] reads it back choice by choice,
-//! so a damaged file loses only what cannot be read.
+//! so a damaged file loses only what cannot be read. The colours, the typeface and the icons are fixed: a file kept
+//! by an older version that names an accent, a typeface or an icon set loads, and those fields are dropped.
 //!
-//! A custom accent is the colour of links and accent text in dark mode, so it must read there: an accent under WCAG
-//! AA (4.5:1) on [`DARK_SURFACE`] is made lighter, hue and saturation kept, just far enough ([`readable`]). The front
-//! end derives every other token from the four colours and checks each of them itself.
+//! The layout ([`Layout`]) says where the reader and the composer show: docked in the main window, the composer
+//! floating over it, or each in a window of its own; and where the event editor opens: small, full or in a window of
+//! its own. A kept file without a layout, or with one that cannot be read (junk, or a host a newer build knows), reads
+//! as docked and the event editor full, part by part, and the other choices are read as ever.
 
 use serde_json::{Map, Value, json};
 
-/// The WCAG AA ratio for text.
-pub const AA: f32 = 4.5;
-
-/// The lightest surface dark-mode text sits on before a preset tints it (the dark float of `docs/design.md`); a
-/// custom accent must reach [`AA`] on it.
-pub const DARK_SURFACE: Rgb = Rgb(0x1e, 0x23, 0x30);
-
-/// The accent presets the front end ships, by id, the default first.
-pub const PRESETS: [&str; 3] = ["electric", "aurora", "citrus"];
-
 /// The text scales in per cent, smallest first.
 pub const TEXT_SCALES: [u16; 5] = [90, 100, 110, 120, 130];
-
-/// An opaque sRGB colour.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Rgb(pub u8, pub u8, pub u8);
-
-impl Rgb {
-    /// The colour written as `#rrggbb`, nothing else (`#` and six hex digits, either case).
-    #[must_use]
-    pub fn from_hex(text: &str) -> Option<Self> {
-        let digits = text.strip_prefix('#')?;
-        if digits.len() != 6 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return None;
-        }
-        let channel = |at: usize| digits.get(at..at + 2).and_then(|pair| u8::from_str_radix(pair, 16).ok());
-        Some(Self(channel(0)?, channel(2)?, channel(4)?))
-    }
-
-    /// `#rrggbb`, in lower case.
-    #[must_use]
-    pub fn hex(self) -> String {
-        format!("#{:02x}{:02x}{:02x}", self.0, self.1, self.2)
-    }
-}
 
 /// Defines a choice: an enum whose variants each have a stable id for commands and the kept file.
 macro_rules! choice {
@@ -100,28 +76,9 @@ choice! {
 }
 
 choice! {
-    /// The typeface of every text style.
-    Typeface {
-        /// Figtree (OFL), the default.
-        Figtree = "figtree",
-        /// Inter (OFL).
-        Inter = "inter",
-    } default Figtree
-}
-
-choice! {
-    /// The icon set.
-    Icons {
-        /// Phosphor (MIT), the default.
-        Phosphor = "phosphor",
-        /// Lucide (ISC).
-        Lucide = "lucide",
-    } default Phosphor
-}
-
-choice! {
-    /// Reduced motion: follow the system where it can be read (the web build; elsewhere motion runs), always reduce
-    /// it, or always let it run.
+    /// The older two-way motion setting: follow the system where it can be read, always reduce it, or always let it
+    /// run. [`MotionLevel`] replaces it; no front end reads it. In the kept file and in the commands' answers it is the
+    /// field `motion`, for one release.
     Motion {
         /// The system's wish where it can be read, otherwise motion runs.
         System = "system",
@@ -133,87 +90,111 @@ choice! {
 }
 
 choice! {
-    /// Who draws the window's frame: the desktop's title bar, or the app's own (its window controls in the top row,
-    /// or on a slim strip of its own above the panes). Only a native window has a frame; elsewhere this is kept and
+    /// How much the window moves: every movement, the calm ones only, or none. Which movements each level keeps is the
+    /// front end's.
+    MotionLevel {
+        /// Every movement runs.
+        Full = "full",
+        /// Only the calm movements run.
+        Reduced = "reduced",
+        /// Nothing moves: every movement lands at its end at once.
+        Off = "off",
+    } default Reduced
+}
+
+/// The level the window moves at: the owner's `level` when `chosen`, else [`MotionLevel::Off`] when the computer asks
+/// for less motion (`system_reduces`), else `level`.
+#[must_use]
+pub const fn effective(level: MotionLevel, chosen: bool, system_reduces: bool) -> MotionLevel {
+    if !chosen && system_reduces { MotionLevel::Off } else { level }
+}
+
+choice! {
+    /// Who draws the window's frame: the desktop's title bar, or the app's own (the command line is the title bar: it
+    /// moves the window and holds the window controls). Only a native window has a frame; elsewhere this is kept and
     /// does nothing.
     WindowFrame {
         /// The desktop's title bar.
         System = "system",
-        /// The window controls in the top row, no title bar.
-        TopRow = "top_row",
-        /// A slim strip of the app's own with the title and the window controls.
-        Strip = "strip",
-    } default Strip
+        /// The app's own: the command line is the title bar.
+        Own = "own",
+    } default Own
 }
 
-/// Four colours of the owner's own: the gradient's three stops and the accent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CustomAccent {
-    /// The gradient, first to last stop.
-    pub gradient: [Rgb; 3],
-    /// The accent, made readable on dark surfaces ([`readable`]).
-    pub accent: Rgb,
-}
-
-impl CustomAccent {
-    /// The four colours as `#rrggbb`, the accent last.
+impl WindowFrame {
+    /// The choice with this id, or the own frame for the ids of the two own frames of older versions (`top_row`,
+    /// `strip`): what a kept appearance and the `ui.frame.set` command read.
     #[must_use]
-    pub fn hex(&self) -> [String; 4] {
-        let [first, middle, last] = self.gradient;
-        [first.hex(), middle.hex(), last.hex(), self.accent.hex()]
-    }
-
-    /// Four `#rrggbb` colours, the accent last, as they were written; `None` unless there are exactly four.
-    #[must_use]
-    pub fn from_hex(colours: &[&str]) -> Option<Self> {
-        let [first, middle, last, accent] = colours else { return None };
-        Some(Self { gradient: [Rgb::from_hex(first)?, Rgb::from_hex(middle)?, Rgb::from_hex(last)?], accent: Rgb::from_hex(accent)? })
-    }
-
-    /// The same colours with the accent made readable ([`readable`]).
-    #[must_use]
-    pub fn readable(self) -> Self {
-        Self { accent: readable(self.accent), ..self }
+    pub fn read(id: &str) -> Option<Self> {
+        Self::named(id).or_else(|| matches!(id, "top_row" | "strip").then_some(Self::Own))
     }
 }
 
-/// Where the colours come from: a shipped preset by id, or four colours of the owner's own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Accent {
-    /// One of [`PRESETS`].
-    Preset(&'static str),
-    /// The owner's own colours.
-    Custom(CustomAccent),
+choice! {
+    /// Where the reader shows a message: docked in the main window, or in a window of its own.
+    ReaderHost {
+        /// In the main window, beside the list.
+        Docked = "docked",
+        /// In a window of its own.
+        Window = "window",
+    } default Docked
 }
 
-impl Default for Accent {
-    /// The first preset.
-    fn default() -> Self {
-        Self::Preset(PRESETS[0])
-    }
+choice! {
+    /// Where the composer shows: docked in the main window, floating over it, or in a window of its own.
+    ComposerHost {
+        /// In the main window.
+        Docked = "docked",
+        /// Floating over the main window.
+        Floating = "floating",
+        /// In a window of its own.
+        Window = "window",
+    } default Docked
 }
 
-impl Accent {
-    /// The shipped preset with this id.
+choice! {
+    /// Where the event editor opens, for a new event and for an edit alike: the small float over the calendar, the full
+    /// editor in the calendar's place with the event's day beside it, or a window of its own.
+    EventEditorHost {
+        /// The small float over the calendar.
+        Small = "small",
+        /// In the calendar's place, the event's day beside it.
+        Full = "full",
+        /// In a window of its own.
+        Window = "window",
+    } default Full
+}
+
+/// Where the reader, the composer and the event editor show. A front end that cannot open a second window shows the
+/// reader and the composer docked and the event editor full, whatever is kept here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Layout {
+    /// Where the reader shows.
+    pub reader: ReaderHost,
+    /// Where the composer shows.
+    pub composer: ComposerHost,
+    /// Where the event editor opens.
+    pub event_editor: EventEditorHost,
+}
+
+impl Layout {
+    /// The layout as JSON: `{"reader": …, "composer": …, "event_editor": …}`.
     #[must_use]
-    pub fn preset(id: &str) -> Option<Self> {
-        PRESETS.iter().find(|preset| **preset == id).map(|preset| Self::Preset(preset))
+    pub fn to_value(self) -> Value {
+        json!({ "reader": self.reader.id(), "composer": self.composer.id(), "event_editor": self.event_editor.id() })
     }
 
-    fn to_value(self) -> Value {
-        match self {
-            Self::Preset(id) => json!({ "preset": id }),
-            Self::Custom(custom) => json!({ "custom": custom.hex() }),
+    /// The layout kept as [`Layout::to_value`] wrote it, part by part: a part that is missing, not a string or not a
+    /// host this build knows (junk, or one a newer build kept) is its default (docked; the event editor full); other
+    /// keys are ignored.
+    #[must_use]
+    pub fn from_value(value: &Value) -> Self {
+        let part = |key: &str| value.get(key).and_then(Value::as_str);
+        Self {
+            reader: part("reader").and_then(ReaderHost::named).unwrap_or_default(),
+            composer: part("composer").and_then(ComposerHost::named).unwrap_or_default(),
+            event_editor: part("event_editor").and_then(EventEditorHost::named).unwrap_or_default(),
         }
-    }
-
-    fn from_value(value: &Value) -> Option<Self> {
-        let object = value.as_object()?;
-        if let Some(id) = object.get("preset") {
-            return Self::preset(id.as_str()?);
-        }
-        let colours: Vec<&str> = object.get("custom")?.as_array()?.iter().map(Value::as_str).collect::<Option<_>>()?;
-        Some(Self::Custom(CustomAccent::from_hex(&colours)?.readable()))
     }
 }
 
@@ -222,30 +203,33 @@ impl Accent {
 pub struct Appearance {
     /// Light, dark or the system's.
     pub theme: ThemeMode,
-    /// The colours.
-    pub accent: Accent,
-    /// The typeface.
-    pub font: Typeface,
-    /// The icon set.
-    pub icons: Icons,
     /// The text scale in per cent, one of [`TEXT_SCALES`].
     pub text_scale: u16,
-    /// Reduced motion.
+    /// The older two-way motion setting, kept for one release: [`Motion::System`] while the owner has not
+    /// chosen a level, [`Motion::Full`] for [`MotionLevel::Full`], [`Motion::Reduce`] for the other two. Set the level
+    /// with [`Appearance::with_motion`], read it with [`Appearance::motion_level`]. Only `with_motion` writes this
+    /// field and [`Appearance::motion_reduced`]: a struct update of one of them alone may disagree with the other, and
+    /// [`Appearance::normalised`] then decides.
     pub motion: Motion,
+    /// The owner chose [`MotionLevel::Reduced`]; `with_motion` sets it beside [`Motion::Reduce`] only. Only
+    /// `with_motion` writes this field and [`Appearance::motion`]. While it is `false` (its default) `motion` alone
+    /// says the level; when it is `true` the level is Reduced, chosen, whatever `motion` says.
+    pub motion_reduced: bool,
     /// Who draws the window's frame.
     pub frame: WindowFrame,
+    /// Where the reader and the composer show.
+    pub layout: Layout,
 }
 
 impl Default for Appearance {
     fn default() -> Self {
         Self {
             theme: ThemeMode::default(),
-            accent: Accent::default(),
-            font: Typeface::default(),
-            icons: Icons::default(),
             text_scale: 100,
             motion: Motion::default(),
+            motion_reduced: false,
             frame: WindowFrame::default(),
+            layout: Layout::default(),
         }
     }
 }
@@ -256,113 +240,91 @@ impl Appearance {
     pub fn to_value(&self) -> Value {
         json!({
             "theme": self.theme.id(),
-            "accent": self.accent.to_value(),
-            "font": self.font.id(),
-            "icons": self.icons.id(),
             "text_scale": self.text_scale,
-            "motion": self.motion.id(),
+            "motion": self.normalised().motion.id(),
+            "motion_level": self.motion_level().id(),
+            "motion_chosen": self.motion_chosen(),
             "frame": self.frame.id(),
+            "layout": self.layout.to_value(),
         })
     }
 
     /// The choices kept as [`Appearance::to_value`] wrote them. The file is outside data: each choice that is missing
-    /// or cannot be read is the default, unknown fields are ignored, and a custom accent is made readable again.
+    /// or cannot be read is the default, and unknown fields (among them the accent, typeface and icon set of older
+    /// versions) are ignored.
+    ///
+    /// Motion is `motion_level` with `motion_chosen` (missing or not a boolean: chosen; not chosen: the default
+    /// level). Without a level that can be read, the field `motion` of older versions maps: `system` to the default
+    /// level not chosen, `reduce` to off, `full` to full; a level's own name there reads as that level, chosen. The
+    /// frame `top_row` or `strip` of older versions reads as the own frame ([`WindowFrame::read`]). The layout is read
+    /// by [`Layout::from_value`]: without one, the reader and the composer are docked.
     #[must_use]
     pub fn from_value(value: &Value) -> Self {
         let empty = Map::new();
         let object = value.as_object().unwrap_or(&empty);
         let text = |key: &str| object.get(key).and_then(Value::as_str);
         let default = Self::default();
+        let motion = match text("motion_level").and_then(MotionLevel::named) {
+            Some(level) => Some((level, object.get("motion_chosen").and_then(Value::as_bool).unwrap_or(true))),
+            None => text("motion").and_then(|old| match Motion::named(old) {
+                Some(Motion::System) => Some((MotionLevel::Reduced, false)),
+                Some(Motion::Reduce) => Some((MotionLevel::Off, true)),
+                Some(Motion::Full) => Some((MotionLevel::Full, true)),
+                None => MotionLevel::named(old).map(|level| (level, true)),
+            }),
+        };
+        let (level, chosen) = motion.unwrap_or((MotionLevel::default(), false));
         Self {
             theme: text("theme").and_then(ThemeMode::named).unwrap_or(default.theme),
-            accent: object.get("accent").and_then(Accent::from_value).unwrap_or(default.accent),
-            font: text("font").and_then(Typeface::named).unwrap_or(default.font),
-            icons: text("icons").and_then(Icons::named).unwrap_or(default.icons),
             text_scale: object
                 .get("text_scale")
                 .and_then(Value::as_u64)
                 .and_then(|percent| u16::try_from(percent).ok())
                 .filter(|percent| TEXT_SCALES.contains(percent))
                 .unwrap_or(default.text_scale),
-            motion: text("motion").and_then(Motion::named).unwrap_or(default.motion),
-            frame: text("frame").and_then(WindowFrame::named).unwrap_or(default.frame),
+            frame: text("frame").and_then(WindowFrame::read).unwrap_or(default.frame),
+            layout: object.get("layout").map(Layout::from_value).unwrap_or_default(),
+            ..default
+        }
+        .with_motion(level, chosen)
+    }
+
+    /// These choices with motion at `level`, `chosen` by the owner or not. A level not chosen is the default level,
+    /// whatever `level` is.
+    #[must_use]
+    pub const fn with_motion(self, level: MotionLevel, chosen: bool) -> Self {
+        let (motion, motion_reduced) = match (chosen, level) {
+            (false, _) => (Motion::System, false),
+            (true, MotionLevel::Full) => (Motion::Full, false),
+            (true, MotionLevel::Reduced) => (Motion::Reduce, true),
+            (true, MotionLevel::Off) => (Motion::Reduce, false),
+        };
+        Self { motion, motion_reduced, ..self }
+    }
+
+    /// The motion level kept: the owner's choice, or the default level while there is none.
+    #[must_use]
+    pub const fn motion_level(&self) -> MotionLevel {
+        match self.motion {
+            _ if self.motion_reduced => MotionLevel::Reduced,
+            Motion::System => MotionLevel::Reduced,
+            Motion::Full => MotionLevel::Full,
+            Motion::Reduce => MotionLevel::Off,
         }
     }
-}
 
-/// The relative luminance of `colour` (WCAG 2).
-fn luminance(colour: Rgb) -> f32 {
-    let channel = |value: u8| {
-        let c = f32::from(value) / 255.0;
-        if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
-    };
-    0.2126 * channel(colour.0) + 0.7152 * channel(colour.1) + 0.0722 * channel(colour.2)
-}
-
-/// The WCAG contrast ratio of two colours, 1 to 21.
-#[must_use]
-pub fn contrast(a: Rgb, b: Rgb) -> f32 {
-    let (la, lb) = (luminance(a), luminance(b));
-    let (light, dark) = if la >= lb { (la, lb) } else { (lb, la) };
-    (light + 0.05) / (dark + 0.05)
-}
-
-/// `colour` as hue (0 to 1), saturation and lightness (0 to 1).
-fn hsl(colour: Rgb) -> (f32, f32, f32) {
-    let [r, g, b] = [colour.0, colour.1, colour.2].map(|channel| f32::from(channel) / 255.0);
-    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
-    let l = (max + min) / 2.0;
-    let d = max - min;
-    if d <= f32::EPSILON {
-        return (0.0, 0.0, l);
+    /// These choices with [`Appearance::motion`] and [`Appearance::motion_reduced`] as `with_motion` writes them for
+    /// the level they say: a pair built by a struct update that disagrees becomes one level.
+    #[must_use]
+    pub const fn normalised(self) -> Self {
+        self.with_motion(self.motion_level(), self.motion_chosen())
     }
-    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
-    let h = if (max - r).abs() <= f32::EPSILON {
-        (g - b) / d + if g < b { 6.0 } else { 0.0 }
-    } else if (max - g).abs() <= f32::EPSILON {
-        (b - r) / d + 2.0
-    } else {
-        (r - g) / d + 4.0
-    };
-    (h / 6.0, s, l)
-}
 
-/// The colour of hue `h`, saturation `s` and lightness `l`; each is clamped to 0..=1, and nonsense is 0.
-fn from_hsl(h: f32, s: f32, l: f32) -> Rgb {
-    let unit = |x: f32| if x.is_nan() { 0.0 } else { x.clamp(0.0, 1.0) };
-    let (h, s, l) = (unit(h), unit(s), unit(l));
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
-    let p = 2.0 * l - q;
-    let hue = |t: f32| {
-        let t = t.rem_euclid(1.0);
-        if t < 1.0 / 6.0 {
-            p + (q - p) * 6.0 * t
-        } else if t < 0.5 {
-            q
-        } else if t < 2.0 / 3.0 {
-            p + (q - p) * (2.0 / 3.0 - t) * 6.0
-        } else {
-            p
-        }
-    };
-    // Each value is in 0..=1, so the cast loses nothing.
-    let channel = |t: f32| (hue(t) * 255.0).round().clamp(0.0, 255.0) as u8;
-    Rgb(channel(h + 1.0 / 3.0), channel(h), channel(h - 1.0 / 3.0))
-}
-
-/// `accent` as it is, if it reaches [`AA`] on [`DARK_SURFACE`]; otherwise made lighter in steps of 1 % lightness,
-/// hue and saturation kept, until it does. White always does.
-#[must_use]
-pub fn readable(accent: Rgb) -> Rgb {
-    if contrast(accent, DARK_SURFACE) >= AA {
-        return accent;
+    /// Whether the owner chose the motion level; while not, the computer's wish decides ([`effective`]).
+    #[must_use]
+    pub const fn motion_chosen(&self) -> bool {
+        self.motion_reduced || !matches!(self.motion, Motion::System)
     }
-    let (h, s, l) = hsl(accent);
-    const STEPS: u8 = 100;
-    (1..=STEPS)
-        .map(|step| from_hsl(h, s, l + f32::from(step) / f32::from(STEPS)))
-        .find(|candidate| contrast(*candidate, DARK_SURFACE) >= AA)
-        .unwrap_or(Rgb(0xff, 0xff, 0xff))
 }
 
 #[cfg(test)]

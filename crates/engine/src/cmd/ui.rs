@@ -1,67 +1,96 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `ui.*.set`: the appearance choices, one command each, all `safe`: they change how the window looks and nothing
-//! that leaves the computer. Each answers the whole [`Appearance`] after the change; the front end draws with it and
-//! keeps it on disk.
+//! `ui.*.set`: the appearance choices, one command each, `safe` but `ui.layout.set`: they change how the window looks
+//! and nothing that leaves the computer. Each answers the whole [`Appearance`] after the change; the front end draws
+//! with it and keeps it on disk.
+//!
+//! `ui.layout.set` (`owner`) says where the reader, the composer and the event editor show: `reader` (`docked` or
+//! `window`), `composer` (`docked`, `floating` or `window`) and `event_editor` (`small`, `full` or `window`), any of
+//! them. It is the owner's, as `after.set` is: it moves the owner's work about the screen.
+//!
+//! `ui.settings.open` (`safe`) asks the window to show the settings, on the page its optional `page` names (one of
+//! [`crate::shown::SETTINGS_PAGES`]); a `page` that names none is no page, never an error. It changes nothing; its
+//! answer's `window` says whether a window takes the ask (`false` headless, where nothing is shown).
+//!
+//! `ui.home.open` (`safe`, no parameters) asks the window to show Home, as Home's place in the index does. It changes
+//! nothing; its answer's `window` says whether a window takes the ask (`false` headless, where nothing is shown). An
+//! agent's ask is guarded as an agent's `ui.settings.open` is ([`crate::shown::HomeAsked`]).
+//!
+//! `ui.list.unread` (`safe`) asks the window to list the unread messages of the place it shows alone (`on: true`), all
+//! of them again (`on: false`), or the other of the two (no `on`). It changes nothing in the store. Its answer is `on`
+//! as given (`null` for the other of the two) and `window`, whether a window takes the ask (`false` headless); it is
+//! the same whether the window turned the filter or not (the engine does not know the window's state). An agent's ask
+//! is guarded as an agent's `ui.settings.open` is ([`crate::shown::UnreadAsked`]).
+//!
+//! `ui.motion.set` takes `level` (`full`, `reduced` or `off`); the older `reduce` (`on`, `off` or `system`) still
+//! answers for one release, and `level` wins when both are given.
 
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::appearance::{AA, Accent, Appearance, CustomAccent, DARK_SURFACE, Icons, Motion, TEXT_SCALES, ThemeMode, Typeface, WindowFrame, contrast};
-use crate::params::decode;
-use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
+use crate::appearance::{Appearance, ComposerHost, EventEditorHost, Layout, MotionLevel, ReaderHost, TEXT_SCALES, ThemeMode, WindowFrame};
+use crate::params::{NoParams, decode, decode_quietly};
+use crate::shown::{self, HomeAsked, SettingsAsked, UnreadAsked};
+use crate::{AgentClass, Caller, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[ACCENT, FONT, FRAME, ICONS, MOTION, TEXT_SCALE, THEME];
+pub(crate) const COMMANDS: &[CommandSpec] = &[FRAME, HOME, LAYOUT, MOTION, SETTINGS, TEXT_SCALE, THEME, UNREAD];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["mode", "preset", "custom", "font", "icons", "percent", "reduce", "frame"];
+pub(crate) const FIELDS: &[&str] = &["mode", "percent", "level", "reduce", "frame", "page", "reader", "composer", "event_editor", "on"];
 
 /// `ui.theme.set`: light, dark or the system's.
 pub(crate) const THEME: CommandSpec =
     CommandSpec { id: "ui.theme.set", class: Some(AgentClass::Safe), summary: "Show light, dark or what the system shows", run: theme };
 
-/// `ui.accent.set`: a shipped preset or four colours of the owner's own.
-pub(crate) const ACCENT: CommandSpec = CommandSpec {
-    id: "ui.accent.set",
-    class: Some(AgentClass::Safe),
-    summary: "Take the colours from a preset or from four colours of your own",
-    run: accent,
-};
-
-/// `ui.font.set`: the typeface.
-pub(crate) const FONT: CommandSpec =
-    CommandSpec { id: "ui.font.set", class: Some(AgentClass::Safe), summary: "Draw every text in Figtree or Inter", run: font };
-
-/// `ui.icons.set`: the icon set.
-pub(crate) const ICONS: CommandSpec =
-    CommandSpec { id: "ui.icons.set", class: Some(AgentClass::Safe), summary: "Draw the icons from Phosphor or Lucide", run: icons };
-
 /// `ui.text_scale.set`: the text scale.
 pub(crate) const TEXT_SCALE: CommandSpec =
     CommandSpec { id: "ui.text_scale.set", class: Some(AgentClass::Safe), summary: "Draw every text at 90 to 130 per cent", run: text_scale };
 
-/// `ui.motion.set`: reduced motion.
+/// `ui.motion.set`: how much the window moves.
 pub(crate) const MOTION: CommandSpec =
-    CommandSpec { id: "ui.motion.set", class: Some(AgentClass::Safe), summary: "Reduce motion, let it run, or follow the system", run: motion };
+    CommandSpec { id: "ui.motion.set", class: Some(AgentClass::Safe), summary: "Let the window move fully, calmly or not at all", run: motion };
 
 /// `ui.frame.set`: who draws the window's frame.
 pub(crate) const FRAME: CommandSpec = CommandSpec {
     id: "ui.frame.set",
     class: Some(AgentClass::Safe),
-    summary: "Draw the window frame: the system's, controls in the top row, or a slim strip",
+    summary: "Draw the window frame: the system's, or the app's own with the command line as its title bar",
     run: frame,
 };
 
-/// The outcome of a change to the appearance: the whole appearance as the answer, `more` added to it.
-fn changed(appearance: Appearance, more: Value) -> Outcome {
-    let mut value = json!({ "appearance": appearance.to_value() });
-    if let (Some(value), Value::Object(more)) = (value.as_object_mut(), more) {
-        value.extend(more);
-    }
-    Outcome::new(value).with_appearance(appearance)
+/// `ui.layout.set`: where the reader and the composer show.
+pub(crate) const LAYOUT: CommandSpec = CommandSpec {
+    id: "ui.layout.set",
+    class: Some(AgentClass::Owner),
+    summary: "Show the reader and the composer docked, the composer floating, or each in a window of its own; open the event editor small, full or in a window",
+    run: layout,
+};
+
+/// `ui.settings.open`: the settings, on a page when one is named.
+pub(crate) const SETTINGS: CommandSpec = CommandSpec {
+    id: "ui.settings.open",
+    class: Some(AgentClass::Safe),
+    summary: "Show the settings, on the page named; without one as their key does",
+    run: settings_open,
+};
+
+/// `ui.home.open`: Home.
+pub(crate) const HOME: CommandSpec = CommandSpec { id: "ui.home.open", class: Some(AgentClass::Safe), summary: "Show Home, the brief of today", run: home_open };
+
+/// `ui.list.unread`: the unread messages alone in the list, or all again.
+pub(crate) const UNREAD: CommandSpec = CommandSpec {
+    id: "ui.list.unread",
+    class: Some(AgentClass::Safe),
+    summary: "List only the unread messages of the place shown, or all of them again",
+    run: unread,
+};
+
+/// The outcome of a change to the appearance: the whole appearance as the answer.
+fn changed(appearance: Appearance) -> Outcome {
+    Outcome::new(json!({ "appearance": appearance.to_value() })).with_appearance(appearance)
 }
 
 #[derive(Deserialize)]
@@ -74,72 +103,7 @@ struct ThemeParams {
 fn theme(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: ThemeParams = decode(THEME.id, params)?;
     let theme = ThemeMode::named(&params.mode).ok_or_else(|| EngineError::bad_params(THEME.id, "mode is system, light or dark"))?;
-    Ok(changed(Appearance { theme, ..context.state().appearance }, json!({})))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AccentParams {
-    /// A shipped preset's id.
-    preset: Option<String>,
-    /// Four `#rrggbb` colours: the gradient's three stops and the accent.
-    custom: Option<Vec<String>>,
-}
-
-fn accent(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
-    let params: AccentParams = decode(ACCENT.id, params)?;
-    let current = context.state().appearance;
-    match (params.preset, params.custom) {
-        (Some(id), None) => {
-            let accent = Accent::preset(&id).ok_or_else(|| EngineError::bad_params(ACCENT.id, "preset is electric, aurora or citrus"))?;
-            Ok(changed(Appearance { accent, ..current }, json!({ "nudged": false })))
-        }
-        (None, Some(colours)) => {
-            let colours: Vec<&str> = colours.iter().map(String::as_str).collect();
-            let asked = CustomAccent::from_hex(&colours)
-                .ok_or_else(|| EngineError::bad_params(ACCENT.id, "custom is four #rrggbb colours: three gradient stops and the accent"))?;
-            let custom = asked.readable();
-            let ratio = f64::from((contrast(custom.accent, DARK_SURFACE) * 100.0).floor() / 100.0);
-            let more = if custom == asked {
-                json!({ "nudged": false, "contrast": ratio })
-            } else {
-                json!({
-                    "nudged": true,
-                    "requested": asked.accent.hex(),
-                    "contrast": ratio,
-                    "reason": format!("the accent missed WCAG AA ({AA}:1) as text on dark surfaces and was made lighter"),
-                })
-            };
-            Ok(changed(Appearance { accent: Accent::Custom(custom), ..current }, more))
-        }
-        _ => Err(EngineError::bad_params(ACCENT.id, "give either preset or custom")),
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FontParams {
-    /// `figtree` or `inter`.
-    font: String,
-}
-
-fn font(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
-    let params: FontParams = decode(FONT.id, params)?;
-    let font = Typeface::named(&params.font).ok_or_else(|| EngineError::bad_params(FONT.id, "font is figtree or inter"))?;
-    Ok(changed(Appearance { font, ..context.state().appearance }, json!({})))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct IconsParams {
-    /// `phosphor` or `lucide`.
-    icons: String,
-}
-
-fn icons(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
-    let params: IconsParams = decode(ICONS.id, params)?;
-    let icons = Icons::named(&params.icons).ok_or_else(|| EngineError::bad_params(ICONS.id, "icons is phosphor or lucide"))?;
-    Ok(changed(Appearance { icons, ..context.state().appearance }, json!({})))
+    Ok(changed(Appearance { theme, ..context.state().appearance }))
 }
 
 #[derive(Deserialize)]
@@ -154,36 +118,123 @@ fn text_scale(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineEr
     if !TEXT_SCALES.contains(&params.percent) {
         return Err(EngineError::bad_params(TEXT_SCALE.id, "percent is 90, 100, 110, 120 or 130"));
     }
-    Ok(changed(Appearance { text_scale: params.percent, ..context.state().appearance }, json!({})))
+    Ok(changed(Appearance { text_scale: params.percent, ..context.state().appearance }))
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MotionParams {
-    /// `on`, `off` or `system`.
-    reduce: String,
+    /// `full`, `reduced` or `off`.
+    level: Option<String>,
+    /// Deprecated, for one release: `on` (off), `off` (full) or `system` (the default level, not chosen).
+    reduce: Option<String>,
+}
+
+/// The level and whether the owner chose it, from `ui.motion.set`'s parameters: `level` when given, else the old
+/// `reduce`. Either one that is not one of its words is refused, even beside a good `level`.
+fn motion_level(params: &MotionParams) -> Result<(MotionLevel, bool), EngineError> {
+    let refused = |what| EngineError::bad_params(MOTION.id, what);
+    let level = params.level.as_deref().map(|level| MotionLevel::named(level).ok_or_else(|| refused("level is full, reduced or off"))).transpose()?;
+    let old = params
+        .reduce
+        .as_deref()
+        .map(|reduce| match reduce {
+            "on" => Ok((MotionLevel::Off, true)),
+            "off" => Ok((MotionLevel::Full, true)),
+            "system" => Ok((MotionLevel::Reduced, false)),
+            _ => Err(refused("reduce is on, off or system")),
+        })
+        .transpose()?;
+    level.map(|level| (level, true)).or(old).ok_or_else(|| refused("level is full, reduced or off"))
 }
 
 fn motion(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: MotionParams = decode(MOTION.id, params)?;
-    let motion = match params.reduce.as_str() {
-        "on" => Motion::Reduce,
-        "off" => Motion::Full,
-        "system" => Motion::System,
-        _ => return Err(EngineError::bad_params(MOTION.id, "reduce is on, off or system")),
-    };
-    Ok(changed(Appearance { motion, ..context.state().appearance }, json!({})))
+    let (level, chosen) = motion_level(&params)?;
+    Ok(changed(context.state().appearance.with_motion(level, chosen)))
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FrameParams {
-    /// `system`, `top_row` or `strip`.
+    /// `system` or `own`; `top_row` and `strip`, the own frames of older versions, read as `own`.
     frame: String,
 }
 
 fn frame(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: FrameParams = decode(FRAME.id, params)?;
-    let frame = WindowFrame::named(&params.frame).ok_or_else(|| EngineError::bad_params(FRAME.id, "frame is system, top_row or strip"))?;
-    Ok(changed(Appearance { frame, ..context.state().appearance }, json!({})))
+    let frame = WindowFrame::read(&params.frame).ok_or_else(|| EngineError::bad_params(FRAME.id, "frame is system or own"))?;
+    Ok(changed(Appearance { frame, ..context.state().appearance }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LayoutParams {
+    /// `docked` or `window`.
+    reader: Option<String>,
+    /// `docked`, `floating` or `window`.
+    composer: Option<String>,
+    /// `small`, `full` or `window`.
+    event_editor: Option<String>,
+}
+
+fn layout(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: LayoutParams = decode(LAYOUT.id, params)?;
+    if params.reader.is_none() && params.composer.is_none() && params.event_editor.is_none() {
+        return Err(EngineError::bad_params(LAYOUT.id, "give reader, composer, event_editor or more of them"));
+    }
+    let appearance = context.state().appearance;
+    let reader = match params.reader.as_deref() {
+        None => appearance.layout.reader,
+        Some(id) => ReaderHost::named(id).ok_or_else(|| EngineError::bad_params(LAYOUT.id, "reader is docked or window"))?,
+    };
+    let composer = match params.composer.as_deref() {
+        None => appearance.layout.composer,
+        Some(id) => ComposerHost::named(id).ok_or_else(|| EngineError::bad_params(LAYOUT.id, "composer is docked, floating or window"))?,
+    };
+    let event_editor = match params.event_editor.as_deref() {
+        None => appearance.layout.event_editor,
+        Some(id) => EventEditorHost::named(id).ok_or_else(|| EngineError::bad_params(LAYOUT.id, "event_editor is small, full or window"))?,
+    };
+    Ok(changed(Appearance { layout: Layout { reader, composer, event_editor }, ..appearance }))
+}
+
+/// Reads `page` alone, by hand: a `page` that is no page's id is no page, and a refusal repeats nothing it was sent. The
+/// answer is the page asked for and whether a window takes the ask; it says nothing of what the window shows, so a
+/// window that passes over an agent's ask (the owner typing in the account form) answers the same.
+fn settings_open(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let given = match params {
+        Value::Null => None,
+        Value::Object(fields) => {
+            if fields.keys().any(|field| field != "page") {
+                return Err(EngineError::bad_params(SETTINGS.id, "the only parameter is page"));
+            }
+            fields.get("page").filter(|page| !page.is_null())
+        }
+        _ => return Err(EngineError::bad_params(SETTINGS.id, "the parameters are not a JSON object")),
+    };
+    let page = shown::page(given);
+    let asked = SettingsAsked { page, bare: given.is_none(), by_agent: context.caller() == Caller::Agent };
+    Ok(Outcome::new(json!({ "page": page, "window": context.state().window })).with_settings(asked))
+}
+
+/// Takes no parameters, and a refusal repeats nothing it was sent. The answer is whether a window takes the ask; it says nothing of what the window shows, so a
+/// window that passes over an agent's ask answers the same.
+fn home_open(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let NoParams {} = decode_quietly(HOME.id, params)?;
+    let asked = HomeAsked { by_agent: context.caller() == Caller::Agent };
+    Ok(Outcome::new(json!({ "window": context.state().window })).with_home(asked))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UnreadParams {
+    /// On, off, or (not given) the other of what the place shows.
+    on: Option<bool>,
+}
+
+fn unread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: UnreadParams = decode_quietly(UNREAD.id, params)?;
+    let asked = UnreadAsked { on: params.on, by_agent: context.caller() == Caller::Agent };
+    Ok(Outcome::new(json!({ "on": params.on, "window": context.state().window })).with_unread(asked))
 }

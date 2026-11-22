@@ -8,7 +8,8 @@ use egui::epaint::{ClippedPrimitive, Mesh, Primitive, TextureId, Vertex, WHITE_U
 use egui::{Color32, ColorImage, Rect, TextureOptions, pos2, vec2};
 
 use super::{Canvas, Open, Picture, Shot, Texture, apply_textures, fill, parse_script, render, shoot};
-use crate::theme::{Mode, PRESETS, Preset, Theme, contrast, over};
+use crate::theme::{Mode, TextScale, Theme};
+use egui_kittest::kittest::Queryable as _;
 
 fn shot(json: &str) -> Shot {
     parse_script(json).unwrap().remove(0)
@@ -35,20 +36,18 @@ fn a_bad_line_is_named() {
 }
 
 #[test]
-fn the_sample_window_is_drawn_in_the_tokens_of_each_preset_in_each_mode() {
-    for preset in &PRESETS {
+fn the_sample_window_is_drawn_in_the_tokens_of_each_mode() {
+    {
         for mode in [Mode::Light, Mode::Dark] {
             let name = if mode == Mode::Light { "light" } else { "dark" };
-            let id = preset.id;
-            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "preset": "{id}", "size": [1000, 700]}}"#))).unwrap();
+            let id = "flat";
+            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "size": [1000, 700]}}"#))).unwrap();
             assert_eq!((picture.width(), picture.height()), (1000, 700));
-            let palette = Theme::new(mode, preset).palette;
-            // Below the list's rows: its glass over the colour fields (rasterised for 1024 by 768).
-            let theme = Theme::new(mode, preset);
-            let [r, g, b, _] = crate::glass::fields(&theme).colour_at(pos2(980.5, 686.5), vec2(1024.0, 768.0)).map(|c| (c * 255.0).round() as u8);
-            let expected = over(palette.glass, Color32::from_rgb(r, g, b));
-            let glass = picture.pixel(980, 686).unwrap();
-            assert!(contrast(glass, expected) < 1.03, "{id} {name}: glass over the fields below the list: {glass:?} {expected:?}");
+            let palette = Theme::new(mode, TextScale::default()).palette;
+            // Below the list's rows: the flat surface of its pane.
+            // (The body ends at 672, over the status line.)
+            let pane = picture.pixel(980, 660).unwrap();
+            assert_eq!(pane, palette.surface, "{name}: the pane below the list is the flat surface");
             let mut colours = std::collections::BTreeSet::new();
             for y in (0..700).step_by(7) {
                 for x in (0..1000).step_by(7) {
@@ -56,19 +55,19 @@ fn the_sample_window_is_drawn_in_the_tokens_of_each_preset_in_each_mode() {
                 }
             }
             assert!(colours.len() > 20, "{id} {name}: text and markers were drawn, not just the panels ({} colours)", colours.len());
-            assert!(colours.contains(&palette.text.to_array()), "{id} {name}: text in the text colour");
+            assert!(colours.contains(&palette.ink.to_array()), "{id} {name}: text in the text colour");
         }
     }
 }
 
 #[test]
-fn an_icon_sheet_shows_every_icon_of_the_set_in_the_tokens_of_its_preset() {
-    for preset in &PRESETS {
+fn an_icon_sheet_shows_every_icon_of_the_set_in_the_tokens_of_its_mode() {
+    {
         for mode in [Mode::Light, Mode::Dark] {
             let name = if mode == Mode::Light { "light" } else { "dark" };
-            let id = preset.id;
-            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "preset": "{id}", "icons": true}}"#))).unwrap();
-            let palette = Theme::new(mode, preset).palette;
+            let id = "icons";
+            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "icons": true}}"#))).unwrap();
+            let palette = Theme::new(mode, TextScale::default()).palette;
             assert_eq!(picture.pixel(0, 0), Some(palette.panel), "{id} {name}: the sheet is on the panel");
             let mut colours = std::collections::BTreeSet::new();
             for y in 0..picture.height() {
@@ -76,7 +75,7 @@ fn an_icon_sheet_shows_every_icon_of_the_set_in_the_tokens_of_its_preset() {
                     colours.insert(picture.pixel(x, y).unwrap().to_array());
                 }
             }
-            for (token, colour) in [("text", palette.text), ("accent", palette.accent)] {
+            for (token, colour) in [("text", palette.ink), ("accent", palette.cyan_text)] {
                 assert!(colours.contains(&colour.to_array()), "{id} {name}: icons in the {token} colour");
             }
         }
@@ -90,31 +89,29 @@ fn an_icon_sheet_is_not_a_window() {
 }
 
 #[test]
-fn the_component_gallery_is_drawn_in_the_tokens_of_its_preset_and_mode() {
+fn the_component_gallery_is_drawn_in_the_tokens_of_its_mode() {
     let mut pictures = Vec::new();
-    for preset in &PRESETS {
+    {
         for mode in [Mode::Light, Mode::Dark] {
             let name = if mode == Mode::Light { "light" } else { "dark" };
-            let id = preset.id;
-            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "preset": "{id}", "components": true}}"#))).unwrap();
+            let id = "gallery";
+            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "components": true}}"#))).unwrap();
             let size = crate::component::gallery::size();
             assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
-            let theme = Theme::new(mode, preset);
+            let theme = Theme::new(mode, TextScale::default());
             let mut colours = std::collections::BTreeSet::new();
             for y in 0..picture.height() {
                 for x in 0..picture.width() {
                     colours.insert(picture.pixel(x, y).unwrap().to_array());
                 }
             }
-            let avatar = crate::component::avatar::colour(&theme, "odile@example.org");
-            assert!(colours.contains(&avatar.to_array()), "{id} {name}: the avatars in their palette");
-            assert!(colours.contains(&theme.palette.selection.to_array()), "{id} {name}: the selected pill on the selection");
-            assert!(colours.contains(&theme.palette.float.to_array()), "{id} {name}: the floats solid");
+            assert!(colours.contains(&theme.palette.stage.to_array()), "{id} {name}: the selected pill on the selection");
+            assert!(colours.contains(&theme.palette.surface.to_array()), "{id} {name}: the floats solid");
             pictures.push(picture);
         }
     }
     for (index, one) in pictures.iter().enumerate() {
-        assert!(pictures.iter().skip(index + 1).all(|other| other != one), "every preset and mode looks its own");
+        assert!(pictures.iter().skip(index + 1).all(|other| other != one), "each mode looks its own");
     }
 }
 
@@ -127,13 +124,15 @@ fn the_component_gallery_is_not_a_window_nor_an_icon_sheet() {
 }
 
 #[test]
-fn a_shot_without_a_preset_is_electric() {
-    let picture = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [600, 400]}"#)).unwrap();
-    let electric = shoot(&shot(r#"{"out": "x.png", "mode": "light", "preset": "electric", "size": [600, 400]}"#)).unwrap();
-    let citrus = shoot(&shot(r#"{"out": "x.png", "mode": "light", "preset": "citrus", "size": [600, 400]}"#)).unwrap();
-    assert_eq!(picture, electric);
-    assert_ne!(picture.pixel(4, 390), citrus.pixel(4, 390));
-    assert_eq!(Preset::default().id, "electric");
+fn a_script_naming_a_preset_a_font_or_an_icon_set_is_refused() {
+    for (json, key) in [
+        (r#"{"out":"x.png","preset":"aurora"}"#, "preset"),
+        (r#"{"out":"x.png","font":"inter"}"#, "font"),
+        (r#"{"out":"x.png","icon_set":"lucide"}"#, "icon_set"),
+    ] {
+        let error = parse_script(json).unwrap_err().to_string();
+        assert!(error.contains(key), "{json}: {error}");
+    }
 }
 
 #[test]
@@ -146,18 +145,14 @@ fn a_text_scale_draws_the_window_with_larger_type() {
 }
 
 #[test]
-fn a_font_and_an_icon_set_draw_the_window_the_gallery_and_the_sheet_in_them() {
-    for page in [r#""size": [600, 400]"#, r#""components": true"#, r#""icons": true"#] {
-        let plain = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", {page}}}"#))).unwrap();
-        let named = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "font": "figtree", "icon_set": "phosphor", {page}}}"#))).unwrap();
-        assert_eq!(plain, named, "{page}: Figtree and Phosphor are the default");
-        let inter = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "font": "inter", {page}}}"#))).unwrap();
-        let lucide = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "icon_set": "lucide", {page}}}"#))).unwrap();
-        if !page.contains("icons") {
-            assert_ne!(plain, inter, "{page}");
-        }
-        assert_ne!(plain, lucide, "{page}");
-    }
+fn home_in_the_window_is_synced_as_its_frame_unless_the_shot_says_otherwise() {
+    // The frames of Home in the window carry the synced status line, not the sample's offline one (#325, 3.10).
+    let home = r#""out": "x.png", "mode": "dark", "size": [1000, 760], "home_place": true"#;
+    let plain = shoot(&shot(&format!("{{{home}}}"))).unwrap();
+    let synced = shoot(&shot(&format!(r#"{{{home}, "sync": "synced"}}"#))).unwrap();
+    let syncing = shoot(&shot(&format!(r#"{{{home}, "sync": "syncing"}}"#))).unwrap();
+    assert_eq!(plain, synced, "Home in the window is synced");
+    assert_ne!(plain, syncing, "a sync the shot names is kept");
 }
 
 #[test]
@@ -220,11 +215,16 @@ fn a_shot_acts_on_the_selected_row_or_catches_it_sliding_out() {
     assert_ne!(stepped, toast);
     assert_ne!(toast, sliding);
     assert_ne!(toast, read, "another toast");
+    // Taken away as another device would: no toast, and the row gone.
+    let removed = shoot(&line(r#", "act": "removed""#)).unwrap();
+    assert_ne!(removed, stepped, "the row is gone");
+    assert_ne!(removed, toast, "no toast");
     for act in ["flag", "unflag", "archive", "delete", "unread"] {
         assert_ne!(shoot(&line(&format!(r#", "act": "{act}""#))).unwrap(), stepped, "{act}");
     }
     for (more, says) in [
-        (r#", "act": "snooze""#, "not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block or newsletters"),
+        (r#", "act": "snooze""#, "not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block, newsletters or removed"),
+        (r#", "act": "removed", "slide": true"#, "only done, archive and delete slide"),
         (r#", "act": "read", "slide": true"#, "only done, archive and delete slide"),
         (r#", "slide": true"#, "slide needs an act"),
     ] {
@@ -241,7 +241,6 @@ fn a_shot_acts_on_the_selected_row_or_catches_it_sliding_out() {
 fn a_shot_that_names_something_wrong_is_refused() {
     for (json, says) in [
         (r#"{"out": "x.png", "mode": "sepia"}"#, "sepia"),
-        (r#"{"out": "x.png", "mode": "light", "preset": "teal"}"#, "no preset \"teal\""),
         (r#"{"out": "x.png", "mode": "light", "open": {"role": "attic"}}"#, "attic"),
         (r#"{"out": "x.png", "mode": "light", "select": "No such subject"}"#, "No such subject"),
         (r#"{"out": "x.png", "mode": "light", "select": "Your bike is due for a service", "pictures": "maybe"}"#, "maybe"),
@@ -253,9 +252,7 @@ fn a_shot_that_names_something_wrong_is_refused() {
         (r#"{"out": "x.png", "mode": "light", "size": [0, 100]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "size": [100000, 100]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "size": [100, -5]}"#, "pixels a side"),
-        (r#"{"out": "x.png", "mode": "light", "font": "Comic Sans"}"#, "font \"Comic Sans\" is not figtree or inter"),
-        (r#"{"out": "x.png", "mode": "light", "icon_set": "tabler"}"#, "icon set \"tabler\" is not phosphor or lucide"),
-        (r#"{"out": "x.png", "mode": "light", "view": "tiles"}"#, "view \"tiles\" is not cards, list or simple"),
+        (r#"{"out": "x.png", "mode": "light", "view": "tiles"}"#, "view \"tiles\" is not grouped, smart or list"),
     ] {
         let error = shoot(&shot(json)).unwrap_err().to_string();
         assert!(error.contains(says), "{json}: {error}");
@@ -364,7 +361,7 @@ fn textures_are_set_patched_and_freed() {
 
 #[test]
 fn rendering_any_app_needs_a_sane_size() {
-    let mut app = crate::InboxApp::new(crate::mailbox::Mailbox::new(
+    let mut app = crate::InboxApp::at_mail(crate::mailbox::Mailbox::new(
         crate::sample::session(Box::new(inboxcraft_time::FakeClock::new(inboxcraft_time::Timestamp::UNIX_EPOCH))).unwrap(),
         Box::new(inboxcraft_time::FakeClock::new(inboxcraft_time::Timestamp::UNIX_EPOCH)),
     ));
@@ -376,12 +373,12 @@ fn rendering_any_app_needs_a_sane_size() {
 
 #[test]
 fn a_shot_shows_the_add_account_page_in_each_state_and_refuses_another() {
-    for state in ["form", "detected", "checking", "passed", "failed"] {
+    for state in ["empty", "form", "invalid", "detected", "checking", "passed", "failed"] {
         let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "size": [700, 500], "onboard": "{state}"}}"#))).unwrap();
         assert_eq!((picture.width(), picture.height()), (700, 500), "{state}");
     }
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "onboard": "half"}"#)).unwrap_err().to_string();
-    assert!(error.contains("onboard \"half\" is not form, detected, checking, passed or failed"), "{error}");
+    assert!(error.contains("onboard \"half\" is not empty, form, invalid, detected, checking, passed or failed"), "{error}");
 }
 
 #[test]
@@ -392,11 +389,11 @@ fn the_picture_credential_store_takes_and_keeps_nothing() {
 }
 
 #[test]
-fn a_shot_shows_the_palette_the_shortcuts_page_and_the_calendar() {
+fn a_shot_shows_the_command_line_the_shortcuts_page_and_the_calendar() {
     let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
     for place in [
-        r#""palette": """#,
-        r#""palette": "mode""#,
+        r#""command": ">""#,
+        r#""command": ">mode""#,
         r#""shortcuts": true"#,
         r#""shortcuts": true, "capture": "ui.calendar.show""#,
         r#""calendar": true"#,
@@ -408,7 +405,7 @@ fn a_shot_shows_the_palette_the_shortcuts_page_and_the_calendar() {
         let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", {bad}}}"#))).unwrap_err().to_string();
         assert!(error.contains("is not an action on the Shortcuts page"), "{error}");
     }
-    for place in [r#""palette": "x""#, r#""calendar": true"#, r#""shortcuts": true"#] {
+    for place in [r#""command": "x""#, r#""calendar": true"#, r#""shortcuts": true"#] {
         let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {place}}}"#))).unwrap_err().to_string();
         assert!(error.contains("has no window"), "{error}");
     }
@@ -472,8 +469,11 @@ fn a_shot_shows_the_composer_in_each_scene_and_the_sending_page() {
         r#""compose": "bad""#,
         r#""compose": "suggest""#,
         r#""compose": "floating""#,
+        r#""compose": "folded""#,
         r#""compose": "reply""#,
+        r#""compose": "reply-floating""#,
         r#""compose": "template""#,
+        r#""compose": "discarded""#,
         r#""sending": true"#,
     ] {
         let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "size": [900, 600], {place}}}"#))).unwrap();
@@ -482,7 +482,7 @@ fn a_shot_shows_the_composer_in_each_scene_and_the_sending_page() {
         seen.push(picture);
     }
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "compose": "sent"}"#)).unwrap_err().to_string();
-    assert!(error.contains("is not new, written, bad, suggest, floating, reply or template"), "{error}");
+    assert!(error.contains("is not new, written, bad, suggest, floating, folded, reply, reply-floating, template or discarded"), "{error}");
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "first": true, "compose": "reply"}"#)).unwrap_err().to_string();
     assert!(error.contains("the reply did not open"), "{error}");
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "first": true, "compose": "new"}"#)).unwrap_err().to_string();
@@ -499,11 +499,14 @@ fn a_shot_shows_new_senders_the_triage_page_the_inbox_views_and_the_screening_ac
     let window = shoot(&line("")).unwrap();
     let senders = shoot(&line(r#", "open": {"role": "senders"}"#)).unwrap();
     let triage = shoot(&line(r#", "triage": true"#)).unwrap();
+    let grouped = shoot(&line(r#", "view": "grouped""#)).unwrap();
     let listed = shoot(&line(r#", "view": "list""#)).unwrap();
-    let simple = shoot(&line(r#", "view": "simple""#)).unwrap();
-    let cards = shoot(&line(r#", "view": "cards""#)).unwrap();
-    assert_eq!(window, cards, "cards when left out");
-    for (name, picture) in [("senders", &senders), ("triage", &triage), ("list", &listed), ("simple", &simple)] {
+    let smart = shoot(&line(r#", "view": "smart""#)).unwrap();
+    assert_eq!(window, smart, "smart when left out");
+    // The earlier ids of the cards and the simple list are read as Smart and List.
+    assert_eq!(shoot(&line(r#", "view": "cards""#)).unwrap(), smart);
+    assert_eq!(shoot(&line(r#", "view": "simple""#)).unwrap(), listed);
+    for (name, picture) in [("senders", &senders), ("triage", &triage), ("grouped", &grouped), ("list", &listed)] {
         assert_ne!(&window, picture, "{name}");
     }
     let held = |act: &str| shoot(&line(&format!(r#", "open": {{"role": "senders"}}, "select": "Winter swim at the harbour steps"{act}"#))).unwrap();
@@ -570,15 +573,471 @@ fn a_shot_shows_later_show_done_and_the_time_picker() {
 fn a_shot_shows_the_outbox_the_countdown_send_later_and_a_bounce() {
     let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600]{more}}}"#));
     let window = shoot(&line("")).unwrap();
-    let scenes: Vec<_> =
-        ["waiting", "countdown", "schedule", "bounce"].iter().map(|scene| shoot(&line(&format!(r#", "outbox": "{scene}""#))).unwrap()).collect();
+    let scenes: Vec<_> = ["waiting", "countdown", "schedule", "bounce", "changed"]
+        .iter()
+        .map(|scene| shoot(&line(&format!(r#", "outbox": "{scene}""#))).unwrap())
+        .collect();
     for (at, scene) in scenes.iter().enumerate() {
         assert_ne!(*scene, window, "scene {at} differs from the plain window");
     }
     assert_ne!(scenes[0], scenes[1]);
     assert_ne!(scenes[2], scenes[3]);
+    assert_ne!(scenes[0], scenes[4], "the changed send offers only Edit");
     let error = shoot(&line(r#", "outbox": "lost""#)).unwrap_err().to_string();
-    assert!(error.contains("is not waiting, countdown, schedule or bounce"), "{error}");
+    assert!(error.contains("is not waiting, changed, countdown, schedule or bounce"), "{error}");
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "outbox": "waiting"}"#)).unwrap_err().to_string();
     assert!(error.contains("has no window"), "{error}");
+}
+
+#[test]
+fn a_low_floats_shadow_fades_evenly_along_the_diagonals_from_its_corners() {
+    let shadow = crate::theme::FLOAT_SHADOW;
+    let offset = egui::vec2(0.0, f32::from(shadow.offset[1]));
+    let reach = 1.5 * f32::from(shadow.blur);
+    for (x, y) in [(60.0, 60.0), (60.5, 60.0), (60.0, 60.5), (60.3, 60.7)] {
+        for size in [egui::vec2(48.0, 24.0), egui::vec2(63.0, 24.0), egui::vec2(88.0, 28.0), egui::vec2(237.0, 32.0)] {
+            let rect = Rect::from_min_size(pos2(x, y), size);
+            let mesh = crate::draw::paint::shadow_mesh(rect);
+            let picture = fill(&[ClippedPrimitive { clip_rect: Rect::EVERYTHING, primitive: Primitive::Mesh(mesh) }], &white(), 400, 200, 1.0);
+            let alpha = |px: i64, py: i64| {
+                usize::try_from(px).ok().zip(usize::try_from(py).ok()).and_then(|(px, py)| picture.pixel(px, py)).map_or(0, |c| c.a())
+            };
+            let core = rect.translate(offset);
+            for (corner, (dx, dy)) in
+                [(core.left_top(), (-1, -1)), (core.right_top(), (1, -1)), (core.left_bottom(), (-1, 1)), (core.right_bottom(), (1, 1))]
+            {
+                let (cx, cy) = (corner.x.floor() as i64, corner.y.floor() as i64);
+                let line: Vec<u8> = (0..reach as i64).map(|step| alpha(cx + dx * step, cy + dy * step)).collect();
+                assert!(line[2] > 0, "{rect:?} {corner:?}: shaded at the corner: {line:?}");
+                let steps = line.windows(2).all(|pair| pair[1] <= pair[0]);
+                let dark = line.windows(3).any(|three| three[1] > three[0] && three[1] > three[2]);
+                assert!(steps && !dark, "{rect:?} {corner:?}: not even outward: {line:?}");
+            }
+        }
+    }
+}
+
+/// The picture of a dashed edge round `rect` in `colour` with corners of `radius`, on the light ground.
+fn dashed_picture(rect: Rect, colour: Color32, radius: f32) -> Picture {
+    super::paint(egui::vec2(80.0, 50.0), 1.0, Mode::Light, |ui| crate::draw::paint::dashed_round(ui.painter(), rect, colour, radius)).unwrap()
+}
+
+/// Whether the design's dashed edge is on at pixel `(x, y)` of a `w` by `h` box: one path clockwise from the top
+/// left corner along the box's edge, dashes 2 on and 2 off, the phase carried round the corners, 1 px inside.
+fn dash_on(x: usize, y: usize, w: usize, h: usize) -> bool {
+    dash_on_scaled(x, y, w, h, 1, 2)
+}
+
+/// [`dash_on`] with a line `thick` pixels thick and dashes and gaps of `dash` pixels: a pixel in a side's band takes
+/// that side's place on the path; where two bands cross at a corner it is on when either side has it on.
+fn dash_on_scaled(x: usize, y: usize, w: usize, h: usize, thick: usize, dash: usize) -> bool {
+    let on = |s: usize| s % (2 * dash) < dash;
+    let mut sides = Vec::new();
+    if y < thick {
+        sides.push(x);
+    }
+    if x >= w - thick {
+        sides.push(w + y);
+    }
+    if y >= h - thick {
+        sides.push(w + h + (w - 1 - x));
+    }
+    if x < thick {
+        sides.push(2 * w + h + (h - 1 - y));
+    }
+    sides.into_iter().any(on)
+}
+
+#[test]
+fn a_dashed_edge_is_2_on_2_off_clockwise_on_whole_pixels() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    for (w, h) in [(40, 20), (41, 19), (17, 20), (56, 32)] {
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(w as f32, h as f32));
+        let picture = dashed_picture(rect, colour, 0.0);
+        let ground = picture.pixel(2, 2);
+        let mut wrong = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let edge = x == 0 || y == 0 || x == w - 1 || y == h - 1;
+                let want = if edge && dash_on(x, y, w, h) { Some(colour) } else { ground };
+                let got = picture.pixel(10 + x, 10 + y);
+                if got != want {
+                    wrong.push((x, y, got));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "{w} × {h}: {} pixels wrong, e.g. {:?}", wrong.len(), &wrong[..wrong.len().min(6)]);
+        for x in [9, 10 + w] {
+            assert_eq!(picture.pixel(x, 15), ground, "{w} × {h}: nothing outside");
+        }
+    }
+}
+
+/// A dashed edge round `rect` with corners of `radius`, alone on nothing, in an 80 by 50 point picture at `scale`.
+fn dashed_alone(rect: Rect, colour: Color32, radius: f32, scale: f32) -> Picture {
+    let ctx = egui::Context::default();
+    ctx.set_pixels_per_point(scale);
+    let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(80.0, 50.0))), ..egui::RawInput::default() };
+    let mut output = ctx.run_ui(input, |ui| crate::draw::paint::dashed_round(ui.painter(), rect, colour, radius));
+    output.textures_delta.clear();
+    let primitives = ctx.tessellate(output.shapes, scale);
+    fill(&primitives, &white(), (80.0 * scale).round() as usize, (50.0 * scale).round() as usize, scale)
+}
+
+/// The box `rect` covers in whole pixels at `scale`: its edges rounded to the pixel grid.
+fn pixel_box(rect: Rect, scale: f32) -> (usize, usize, usize, usize) {
+    let px = |points: f32| (points * scale).round() as usize;
+    (px(rect.left()), px(rect.top()), px(rect.right()) - px(rect.left()), px(rect.bottom()) - px(rect.top()))
+}
+
+/// The thickness of a dashed edge at `scale`, in pixels, as a solid 1 point edge weighs: 1, 1, 2, 2 at 1, 1.25, 1.5
+/// and 2; and its dash and gap, 2 points rounded to pixels: 2, 3, 3, 4.
+fn dash_metrics(scale: f32) -> (usize, usize) {
+    (scale.round().max(1.0) as usize, (2.0 * scale).round() as usize)
+}
+
+#[test]
+fn a_dashed_edge_follows_the_scale_on_whole_pixels() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        let (thick, dash) = dash_metrics(scale);
+        for (w, h) in [(40.0, 20.0), (41.0, 19.0)] {
+            let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(w, h));
+            let picture = dashed_alone(rect, colour, 0.0, scale);
+            let (left, top, wide, high) = pixel_box(rect, scale);
+            let mut wrong = Vec::new();
+            for y in 0..picture.height {
+                for x in 0..picture.width {
+                    let inside = (left..left + wide).contains(&x) && (top..top + high).contains(&y);
+                    let (bx, by) = (x.wrapping_sub(left), y.wrapping_sub(top));
+                    let edge = inside && (bx < thick || by < thick || bx >= wide - thick || by >= high - thick);
+                    let want = if edge && dash_on_scaled(bx, by, wide, high, thick, dash) { colour } else { Color32::TRANSPARENT };
+                    let got = picture.pixel(x, y);
+                    if got != Some(want) {
+                        wrong.push((bx as isize, by as isize, got));
+                    }
+                }
+            }
+            assert!(
+                wrong.is_empty(),
+                "{w} × {h} at {scale} ({wide} × {high} px): {} pixels wrong, e.g. {:?}",
+                wrong.len(),
+                &wrong[..wrong.len().min(6)]
+            );
+        }
+    }
+}
+
+/// The weight of an edge across column `x` of `picture` from row `from` on: the coverage of its pixels summed, in
+/// pixels.
+fn weight_down(picture: &Picture, x: usize, from: usize) -> f32 {
+    (from..from + 6).map(|y| picture.pixel(x, y).map_or(0.0, |c| f32::from(c.a()) / 255.0)).sum()
+}
+
+#[test]
+fn a_dashed_edge_weighs_what_a_solid_1_point_edge_does_at_every_scale() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(40.0, 20.0));
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        let ctx = egui::Context::default();
+        ctx.set_pixels_per_point(scale);
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(80.0, 50.0))), ..egui::RawInput::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, colour), egui::StrokeKind::Inside);
+        });
+        output.textures_delta.clear();
+        let primitives = ctx.tessellate(output.shapes, scale);
+        let size = |points: f32| (points * scale).round() as usize;
+        let solid = fill(&primitives, &white(), size(80.0), size(50.0), scale);
+        let dashed = dashed_alone(rect, colour, 0.0, scale);
+        let (left, top, ..) = pixel_box(rect, scale);
+        // The solid edge's weight, rounded to whole pixels as the dashed edge must lie on them.
+        let want = weight_down(&solid, left + size(20.0), top).round();
+        // Across a dash of the top, just right of the left side's band: that column is on at every scale.
+        let got = weight_down(&dashed, left + dash_metrics(scale).0, top);
+        assert_eq!(got, want, "at {scale}: the dashed edge is {got} px, the solid one {want}");
+    }
+}
+
+#[test]
+fn a_dashed_edge_paints_each_pixel_once() {
+    // A translucent colour shows a pixel painted twice: it comes out more opaque than the colour.
+    let colour = Color32::from_rgba_premultiplied(40, 42, 44, 96);
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        for (w, h) in [(40.0, 20.0), (41.0, 19.0), (17.0, 20.0)] {
+            for radius in [0.0, 2.0] {
+                let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(w, h));
+                let picture = dashed_alone(rect, colour, radius, scale);
+                let mut twice = Vec::new();
+                for y in 0..picture.height {
+                    for x in 0..picture.width {
+                        let alpha = picture.pixel(x, y).map_or(0, |c| c.a());
+                        if alpha > colour.a() {
+                            twice.push((x, y, alpha));
+                        }
+                    }
+                }
+                assert!(twice.is_empty(), "{w} × {h} radius {radius} at {scale}: {} pixels painted twice: {twice:?}", twice.len());
+            }
+        }
+    }
+}
+
+#[test]
+fn a_dashed_edge_with_radius_2_rounds_its_corners_and_keeps_the_phase() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(17.0, 20.0));
+    let picture = dashed_picture(rect, colour, 2.0);
+    let ground = picture.pixel(2, 2);
+    // The top's straight part starts 2 in, at the path's start: on, on, off, off.
+    let top: Vec<_> = (12..18).map(|x| picture.pixel(x, 10)).collect();
+    assert_eq!(top, vec![Some(colour), Some(colour), ground, ground, Some(colour), Some(colour)], "{top:?}");
+    // The corner pixel itself is only partly covered, as a round corner's is.
+    for (x, y) in [(10, 10), (26, 10), (26, 29), (10, 29)] {
+        assert_ne!(picture.pixel(x, y), Some(colour), "corner {x}, {y}");
+    }
+}
+
+/// The coverage (0 to 1) of each row of a hovered link `name` in `size`, drawn at 10, 10 on nothing: the mean alpha of
+/// the row across the link's text, its first and last two columns left out.
+fn underline_rows(name: &'static str, size: crate::component::button::LinkSize) -> Vec<f32> {
+    let keymap = crate::keymap::Keymap::default();
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut width = 0;
+    let picture = super::paint(egui::vec2(200.0, 60.0), 1.0, Mode::Light, |ui| {
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(180.0, 40.0));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            let response = crate::component::button::link_with(ui, &theme, &keymap, name, size, true, Some(crate::component::Shown::Hover));
+            width = response.rect.width() as usize;
+        });
+    })
+    .unwrap();
+    let pad = if size == crate::component::button::LinkSize::Line { 4 } else { 0 };
+    (0..30)
+        .map(|row| {
+            let columns: Vec<f32> =
+                (10 + pad + 2..10 + width - pad - 2).map(|x| picture.pixel(x, 10 + row).map_or(0.0, |c| f32::from(c.a()) / 255.0)).collect();
+            columns.iter().sum::<f32>() / columns.len().max(1) as f32
+        })
+        .collect()
+}
+
+#[test]
+fn a_links_underline_is_the_fonts_in_the_rows_the_sheet_draws_it() {
+    use crate::component::button::LinkSize;
+    // The sheet underlines the text as the font does: 0.06 em thick, 0.14 em under the baseline. In the 24 high link
+    // that is row 18 at about 70 %; in the 16 high small link row 13 at about 65 %.
+    for (name, size, row) in [("Show details", LinkSize::Line, 18), ("show all", LinkSize::Small, 13)] {
+        let rows = underline_rows(name, size);
+        let at = format!("{name}: {:?}", rows.iter().enumerate().skip(10).take(12).map(|(r, c)| (r, (c * 100.0).round())).collect::<Vec<_>>());
+        assert!((0.55..=0.85).contains(&rows[row]), "{at}");
+        assert!(rows[row - 1] <= 0.2 && rows[row + 1] <= 0.2, "{at}");
+    }
+}
+
+#[test]
+fn an_icon_sits_in_its_box_as_the_board_draws_it() {
+    // The icon button board: the pin's ink in a 32 box runs over columns 10 to 22 and rows 9 to 21, its bar across
+    // rows 12 and 13 (hinted, the outline snaps up into rows 8 to 21).
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let picture = super::paint(egui::vec2(60.0, 60.0), 1.0, Mode::Light, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        // A 16 px glyph in the middle of a 32 box at 10, 10, as the icon button paints it.
+        crate::iconset::paint(
+            ui.painter(),
+            Rect::from_center_size(pos2(26.0, 26.0), egui::vec2(16.0, 16.0)),
+            crate::iconset::IconId::Pin,
+            theme.palette.ink,
+        );
+    })
+    .unwrap();
+    // Rows and columns with at least a quarter of ink somewhere in them.
+    let inked = |x: usize, y: usize| picture.pixel(x, y).is_some_and(|c| c.a() >= 64);
+    let rows: Vec<usize> = (0..32).filter(|y| (0..32).any(|x| inked(10 + x, 10 + y))).collect();
+    let columns: Vec<usize> = (0..32).filter(|x| (0..32).any(|y| inked(10 + x, 10 + y))).collect();
+    assert_eq!((rows.first(), rows.last()), (Some(&9), Some(&21)), "rows {rows:?}");
+    assert_eq!((columns.first(), columns.last()), (Some(&10), Some(&22)), "columns {columns:?}");
+}
+
+#[test]
+fn the_fields_page_is_its_own_picture_and_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "fields": true}}"#))).unwrap();
+        let size = crate::component::gallery_fields::size();
+        assert_eq!((picture.width as f32, picture.height as f32), (size.x, size.y), "{name}");
+    }
+    for extra in [r#""components": true"#, r#""icons": true"#, r#""settings": true"#, r#""menu": "more""#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "fields": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("no window"), "{extra}: {error}");
+    }
+    let error = parse_script(r#"{"out": "x.png", "mode": "dark", "components": true, "page": "fields"}"#).unwrap_err();
+    assert!(error.to_string().contains("unknown field `page`"), "one key a page: {error}");
+}
+
+#[test]
+fn the_blocks_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "blocks": true}}"#))).unwrap();
+        let size = crate::component::gallery_blocks::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""icons": true"#, r#""components": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "blocks": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}
+
+#[test]
+fn the_lists_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "lists": true}}"#))).unwrap();
+        let size = crate::component::gallery_lists::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""blocks": true"#, r#""components": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "lists": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}
+
+#[test]
+fn the_home_sets_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "home_sets": true}}"#))).unwrap();
+        let size = crate::component::gallery_home::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""lists": true"#, r#""components": true"#, r#""calendar_sets": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "home_sets": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}
+
+#[test]
+fn a_click_presses_before_the_picture_and_what_it_opens_is_drawn() {
+    // A button that paints its ground cyan once it has been pressed.
+    let pressed = std::cell::Cell::new(false);
+    let picture = super::paint_pointed(vec2(120.0, 60.0), 1.0, Mode::Dark, super::Pointer { rest: None, click: Some(pos2(30.0, 20.0)) }, |ui| {
+        let button = ui.put(Rect::from_min_size(pos2(10.0, 10.0), vec2(60.0, 20.0)), egui::Button::new("Press"));
+        if button.clicked() {
+            pressed.set(true);
+        }
+        if pressed.get() {
+            ui.painter().rect_filled(Rect::from_min_size(pos2(80.0, 40.0), vec2(20.0, 10.0)), 0.0, Color32::from_rgb(0, 200, 255));
+        }
+    })
+    .unwrap();
+    assert!(pressed.get(), "the press reached the button");
+    assert_eq!(picture.pixel(90, 45), Some(Color32::from_rgb(0, 200, 255)), "what the press opened is in the picture");
+    assert!(shoot(&shot(r#"{"out": "x.png", "mode": "dark", "components": true, "click": [1, 1]}"#)).is_err(), "the gallery has no window");
+}
+
+#[test]
+fn a_pointer_or_a_click_off_any_window_is_refused_by_name() {
+    for key in ["pointer", "click"] {
+        for at in ["[1e39, 10]", "[10, -1e39]", "[100000, 10]", "[-5, 10]"] {
+            let line = format!(r#"{{"out": "x.png", "mode": "dark", "{key}": {at}}}"#);
+            let error = shoot(&shot(&line)).err().map(|error| error.to_string()).unwrap_or_default();
+            assert!(error.contains("x.png") && error.contains(key), "{key} {at}: {error:?}");
+        }
+    }
+}
+
+#[test]
+fn the_screens_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "screens": true}}"#))).unwrap();
+        let size = crate::component::gallery_screens::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""fields": true"#, r#""blocks": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "screens": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}
+
+#[test]
+fn the_status_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "status_sets": true}}"#))).unwrap();
+        let size = crate::component::gallery_status::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""lists": true"#, r#""calendar_sets": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "status_sets": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}
+
+#[test]
+fn home_is_drawn_in_the_body_of_a_1440_window_in_its_states_and_no_other_page() {
+    for state in ["today", "nothing-to-do", "overflow-counts", "first-run", "everything-failing", "today@130"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "home": "{state}"}}"#))).unwrap();
+        assert_eq!((picture.width(), picture.height()), (1205, 826), "{state}");
+    }
+    for bad in [r#""home": "nowhere""#, r#""home": "today@99""#, r#""home": "today", "home_sets": true"#, r#""home": "today", "text_scale": 130"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", {bad}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{bad}: {error}");
+    }
+}
+
+fn clock() -> Box<inboxcraft_time::FakeClock> {
+    Box::new(inboxcraft_time::FakeClock::new(inboxcraft_time::Timestamp::from_unix(1_793_869_200, 0).unwrap()))
+}
+
+/// At 1.5× the line between the list and the pane beside it is 2 pixels (a point rounded to whole pixels), and the
+/// pane's content stands a point (1.5 pixels) right of the list: nothing the open reader or the docked composer paints
+/// covers the line's second pixel, down the panes' heads and bodies.
+#[test]
+fn at_150_nothing_beside_the_list_covers_the_second_pixel_of_its_line() {
+    let scale = 1.5;
+    let lines = [Mode::Light, Mode::Dark].map(|mode| Theme::new(mode, TextScale::default()).palette.line);
+    for scene in ["reader", "composer"] {
+        let mut mailbox = crate::mailbox::Mailbox::new(crate::sample::session(clock()).unwrap(), clock());
+        if scene == "reader" {
+            let first = mailbox.messages().first().map(|row| row.id);
+            mailbox.select(first);
+        }
+        let mut app = crate::InboxApp::at_mail(mailbox);
+        if scene == "composer" {
+            app.compose();
+        }
+        let size = vec2(1440.0, 900.0);
+        let mut harness = crate::component::tests::builder()
+            .with_size(size)
+            .with_pixels_per_point(scale)
+            .build_ui_state(|ui, app: &mut crate::InboxApp| app.ui(ui), app);
+        harness.run();
+        // A row of the list: its right is the list's; the line is looked at from the list's head (its place's name 8
+        // lower) to 400 under the row's top, beside the reader's or the composer's head and body.
+        let row = harness.get_all_by_role(egui::accesskit::Role::ListBoxOption).next().unwrap().rect();
+        let head = harness.get_by_label("Inbox").rect();
+        let list = egui::Rect::from_min_max(egui::pos2(row.left(), head.top() - 8.0), egui::pos2(row.right(), row.top() + 400.0));
+        let output = harness.output().clone();
+        let primitives = harness.ctx.tessellate(output.shapes, scale);
+        let (width, height) = ((size.x * scale).round() as usize, (size.y * scale).round() as usize);
+        let picture = fill(&primitives, &white(), width, height, scale);
+        // The line stands in the first point right of the list, from the pixel that point starts on.
+        let first = (list.right() * scale).round() as usize;
+        let top = (list.top() * scale).ceil() as usize + 2;
+        let bottom = (list.bottom() * scale).floor() as usize - 2;
+        let mut wrong = Vec::new();
+        for y in top..bottom {
+            for x in [first, first + 1] {
+                let got = picture.pixel(x, y).unwrap();
+                if !lines.contains(&got) {
+                    wrong.push((x, y, got));
+                }
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "{scene}: {} pixels of the line at {first} and {} not the line's, e.g. {:?}",
+            wrong.len(),
+            first + 1,
+            &wrong[..wrong.len().min(6)]
+        );
+        // The pixel right of the line is not the line's: the line is 2 pixels, not wider.
+        assert!(!lines.contains(&picture.pixel(first + 2, (top + bottom) / 2).unwrap()), "{scene}: the line is 2 pixels wide");
+    }
 }

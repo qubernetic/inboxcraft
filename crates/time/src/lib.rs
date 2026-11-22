@@ -13,6 +13,8 @@
 //!   an [`Offset`] from UTC.
 //! - [`Offsets`] is the computer's offset over time, summer time included: a fixed [`Offset`], or an
 //!   [`OffsetTable`] of changes. [`Offsets::resolve`] finds the moment a wall-clock time stands for across a change.
+//! - [`WeekRule`] counts weeks as a region does: the day they start on and the year's first [`Week`] (ISO 8601 by
+//!   default).
 //! - [`MailDate`] reads and writes the dates of mail headers (RFC 5322), obsolete forms included.
 //!
 //! ```
@@ -30,10 +32,12 @@ mod civil;
 mod clock;
 mod rfc5322;
 mod timestamp;
+mod week;
 mod zone;
 
 pub use civil::{CivilDateTime, Offset, Weekday, days_in_month, is_leap_year};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use rfc5322::{DateError, MAX_COMMENT_DEPTH, MAX_LEN, MailDate, Zone};
 pub use timestamp::Timestamp;
+pub use week::{FirstWeek, Week, WeekRule};
 pub use zone::{OffsetTable, Offsets};

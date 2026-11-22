@@ -120,11 +120,11 @@ fn the_start_works_out_the_alerts_of_every_event_held() {
     assert!(scheduled(&session).is_empty(), "the store came without alerts");
     session.start();
     // Lunch at 11:00 and the call at 14:00 UTC on Friday 6th, the stand-up at 9:30 in Budapest on Monday 9th, the
-    // days off from Tuesday 10th on the computer's clock (+01:00).
+    // days off from Tuesday 10th on the computer's clock (+01:00), at 09:00 the day before.
     assert_eq!(alerts(&session, 2), [utc(2026, 11, 6, 10, 50)]);
     assert_eq!(alerts(&session, 3), [utc(2026, 11, 6, 13, 50)]);
     assert_eq!(alerts(&session, 1), [utc(2026, 11, 9, 8, 20), utc(2026, 11, 16, 8, 20)]);
-    assert_eq!(alerts(&session, 4), [utc(2026, 11, 8, 23, 0)]);
+    assert_eq!(alerts(&session, 4), [utc(2026, 11, 9, 8, 0)]);
     assert_eq!(session.next_due().unwrap(), Some(utc(2026, 11, 6, 9, 0)), "the next sweep, a day after the start");
 }
 
@@ -274,4 +274,20 @@ fn an_alert_tells_the_organiser_s_title_and_place_as_one_short_clean_line_each()
     assert!(about.summary.starts_with("Team lunch today Lunch Lunch"), "{:?}", about.summary);
     assert_eq!(about.summary.chars().count(), crate::notify::MAX_TEXT, "cut at the most it may be");
     assert_eq!(about.location, "Corner café upstairs");
+}
+
+#[test]
+fn the_schedule_list_names_an_alert_by_its_event_account_and_lead() {
+    let (mut session, _clock) = fresh();
+    let params = json!({ "calendar": 1, "summary": "Design review\r\n\u{202E}Room 3", "start": "2026-11-05T12:00:00Z" });
+    let id = session.run("event.create", &params).unwrap()["id"].as_u64().unwrap();
+    let answer = session.run("schedule.list", &json!({})).unwrap();
+    let entry = answer["entries"].as_array().unwrap().iter().find(|entry| entry["what"] == "alert").unwrap().clone();
+    assert_eq!(entry["due"], json!("2026-11-05T11:50:00Z"));
+    assert_eq!(entry["account"], json!(1));
+    assert_eq!(entry["subject"], json!("Design review Room 3"));
+    assert_eq!(entry["who"], json!(""));
+    assert_eq!(entry["event"], json!(id));
+    assert_eq!(entry["starts"], json!("2026-11-05T12:00:00Z"));
+    assert_eq!(entry["before_minutes"], json!(10));
 }

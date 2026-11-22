@@ -1,19 +1,18 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, ComposerHost, EventEditorHost, Layout, Motion, ReaderHost, ThemeMode, WindowFrame};
 
 use super::{FILE, KEYS_FILE, Keep, KeepFile, MAX_FILE, NoKeep};
 
 fn chosen() -> Appearance {
     Appearance {
         theme: ThemeMode::Dark,
-        accent: Accent::Preset("citrus"),
-        font: Typeface::Inter,
-        icons: Icons::Lucide,
         text_scale: 120,
         motion: Motion::Reduce,
-        frame: WindowFrame::TopRow,
+        motion_reduced: false,
+        frame: WindowFrame::System,
+        layout: Layout { reader: ReaderHost::Window, composer: ComposerHost::Floating, event_editor: EventEditorHost::Small },
     }
 }
 
@@ -26,7 +25,7 @@ fn a_kept_appearance_comes_back_from_the_file() {
     keep.store(&chosen()).unwrap();
     assert_eq!(KeepFile::new(path.clone()).load(), Some(chosen()));
     let text = std::fs::read_to_string(&path).unwrap();
-    assert!(text.contains("\"font\": \"inter\""), "{text}");
+    assert!(text.contains("\"motion\": \"reduce\""), "{text}");
     // Storing again replaces the file and leaves no temporary file behind.
     keep.store(&Appearance::default()).unwrap();
     assert_eq!(keep.load(), Some(Appearance::default()));
@@ -177,23 +176,44 @@ fn the_triage_choices_are_kept_beside_the_appearance_and_come_back() {
     use inboxcraft_engine::ScreenerMode;
 
     use super::{TRIAGE_FILE, Triage};
-    use crate::mailbox::InboxView;
+    use crate::mailbox::{After, GreetBy, InboxView};
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("nested").join(FILE);
     let mut keep = KeepFile::new(path.clone());
     assert_eq!(keep.load_triage(), None, "nothing kept yet");
-    let chosen = Triage { screener: ScreenerMode::Inside, view: InboxView::List, keep_pins: true, hold: Some(30) };
+    let chosen = Triage {
+        screener: ScreenerMode::Inside,
+        view: InboxView::Grouped,
+        keep_pins: true,
+        hold: Some(30),
+        after: After::Stay,
+        greet_by: GreetBy::Last,
+    };
     keep.store_triage(&chosen).unwrap();
     assert_eq!(KeepFile::new(path.clone()).load_triage(), Some(chosen));
     let kept = dir.path().join("nested").join(TRIAGE_FILE);
     let text = std::fs::read_to_string(&kept).unwrap();
-    assert!(text.contains("\"screener\": \"inside\"") && text.contains("\"view\": \"list\"") && text.contains("\"keep_pins\": true"), "{text}");
-    assert!(text.contains("\"hold_seconds\": 30"), "{text}");
+    assert!(
+        text.contains("\"screener\": \"inside\"")
+            && text.contains("\"view\": \"list\"")
+            && text.contains("\"inbox_view\": \"grouped\"")
+            && text.contains("\"keep_pins\": true"),
+        "{text}"
+    );
+    assert!(text.contains("\"hold_seconds\": 30") && text.contains("\"after\": \"stay\""), "{text}");
+    assert!(text.contains("\"greeting\": \"last\""), "{text}");
     // Damaged, huge and wrong: the defaults or nothing.
-    std::fs::write(&kept, b"{ \"screener\": 3, \"view\": \"tiles\", \"keep_pins\": \"yes\", \"hold_seconds\": 600 }").unwrap();
+    std::fs::write(
+        &kept,
+        b"{ \"screener\": 3, \"view\": \"tiles\", \"keep_pins\": \"yes\", \"hold_seconds\": 600, \"after\": \"sideways\", \"greeting\": \"middle\" }",
+    )
+    .unwrap();
     assert_eq!(keep.load_triage(), Some(Triage::default()));
-    assert_eq!(Triage::default(), Triage { screener: ScreenerMode::Off, view: InboxView::Cards, keep_pins: false, hold: None });
+    assert_eq!(
+        Triage::default(),
+        Triage { screener: ScreenerMode::Off, view: InboxView::Smart, keep_pins: false, hold: None, after: After::Next, greet_by: GreetBy::First }
+    );
     std::fs::write(&kept, b"\xff not json").unwrap();
     assert_eq!(keep.load_triage(), None);
     std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();
@@ -243,4 +263,45 @@ fn the_notification_choices_are_kept_beside_the_appearance_and_come_back() {
     assert!(KeepFile::new(blocker.join(FILE)).store_notify(&chosen).is_err());
     assert!(KeepFile::new(std::path::PathBuf::from("/")).store_notify(&chosen).is_err());
     assert_eq!(KeepFile::new(std::path::PathBuf::from("/")).load_notify(), None);
+}
+
+#[test]
+fn the_week_rule_is_kept_beside_the_appearance_and_comes_back() {
+    use super::WEEK_FILE;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested").join(FILE);
+    let mut keep = KeepFile::new(path.clone());
+    assert_eq!(keep.load_week(), None, "nothing kept yet");
+    let chosen = serde_json::json!({ "first_day": "sunday", "first_week": "week_of_1_january" });
+    keep.store_week(&chosen).unwrap();
+    assert_eq!(KeepFile::new(path.clone()).load_week(), Some(chosen.clone()));
+    let kept = dir.path().join("nested").join(WEEK_FILE);
+    std::fs::write(&kept, b"\xff not json").unwrap();
+    assert_eq!(keep.load_week(), None);
+    std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();
+    assert_eq!(keep.load_week(), None);
+    let mut none = NoKeep;
+    none.store_week(&chosen).unwrap();
+    assert_eq!(none.load_week(), None);
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"a file where the folder should be").unwrap();
+    assert!(KeepFile::new(blocker.join(FILE)).store_week(&chosen).is_err());
+    assert!(KeepFile::new(std::path::PathBuf::from("/")).store_week(&chosen).is_err());
+}
+
+/// The kept greeting: each choice read back by its name; a junk value, another type or none is the first word.
+#[test]
+fn the_kept_greeting_reads_back_and_junk_is_the_first_word() {
+    use super::Triage;
+    use crate::mailbox::GreetBy;
+    use serde_json::json;
+
+    for by in GreetBy::ALL {
+        assert_eq!(Triage::from_value(&Triage { greet_by: by, ..Triage::default() }.to_value()).greet_by, by, "{by:?}");
+    }
+    for junk in [json!({ "greeting": "LAST" }), json!({ "greeting": "last\u{0}" }), json!({ "greeting": 2 }), json!({ "greeting": null }), json!({})]
+    {
+        assert_eq!(Triage::from_value(&junk).greet_by, GreetBy::First, "{junk}");
+    }
 }

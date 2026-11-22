@@ -7,8 +7,13 @@ InboxCraft is a clean-room mail and calendar program. It is not affiliated with,
 Mailspring or any other mail product. Product names mentioned in the documentation (to say what a feature
 corresponds to) are trademarks of their owners.
 
-The InboxCraft mark and wordmark and the Qubernetic mark are trademarks of Qubernetic. They are not licensed under
-the MIT License or the Apache License; they appear in this repository to show the product's own identity.
+The InboxCraft mark and wordmark and the Qubernetic mark, wordmark and emblem, in `assets/brand/` and in the design
+files, are by Qubernetic and licensed under the Creative Commons Attribution-NoDerivatives 4.0 International licence
+(CC BY-ND 4.0, the legal code in `LICENSES/CC-BY-ND-4.0.txt` and at
+https://creativecommons.org/licenses/by-nd/4.0/legalcode), a Creative Commons licence that allows
+redistribution: they may be copied and shared unchanged, with credit to Qubernetic, and may not be changed. They are
+not licensed under the MIT License or the Apache License. The licence grants no trademark rights: the InboxCraft and
+Qubernetic names and marks remain trademarks of Qubernetic. `REUSE.toml` says which files this covers.
 
 Portions adapted from other projects
 ------------------------------------
@@ -29,18 +34,29 @@ above.
 
 Third-party material
 --------------------
-- Figtree (https://github.com/erikdkennedy/figtree, release v2.0.3), Copyright 2022 The Figtree Project Authors,
-  SIL Open Font Licence 1.1: the Regular, Medium, SemiBold and Bold weights in `assets/fonts/figtree/`, compiled into
-  the desktop app as its typeface. The licence text is `assets/fonts/figtree/OFL.txt`.
+- IBM Plex Mono and IBM Plex Sans (https://github.com/IBM/plex), Copyright 2017 IBM Corp. with Reserved Font Name
+  "Plex", SIL Open Font Licence 1.1: the Regular and SemiBold weights in `assets/fonts/plex-mono/` (from the
+  Qubernetic brand repository, tag v0.3.0) and `assets/fonts/plex-sans/` (release `@ibm/plex-sans@1.1.0`), compiled
+  into the desktop app as its typefaces. The licence texts are the `OFL.txt` files beside them.
+- Audiowide, Copyright (c) 2012 Brian J. Bonislawsky DBA Astigmatic (AOETI) with Reserved Font Name "Audiowide", SIL
+  Open Font Licence 1.1: `assets/fonts/audiowide/Audiowide-Regular.ttf` (from the Qubernetic brand repository, tag
+  v0.3.0), compiled into the desktop app for the product names. The licence text is `assets/fonts/audiowide/OFL.txt`.
 - Phosphor Icons (https://github.com/phosphor-icons/web, release 2.1.1), Copyright (c) 2020-2021 Phosphor Icons, MIT:
-  the Regular, Fill and Duotone icon fonts in `assets/icons/phosphor/`, compiled into the desktop app as its icon
-  set. The licence text is `assets/icons/phosphor/LICENSE`.
+  the Regular icon font `assets/icons/phosphor/Phosphor.ttf`, compiled into the desktop app as its one icon
+  family. The licence text is `assets/icons/phosphor/LICENSE`.
 - egui's bundled fonts, compiled into the desktop app through the epaint_default_fonts crate
   (https://github.com/emilk/egui): Ubuntu Light (Copyright 2010-2011 Canonical Ltd., Ubuntu Font Licence 1.0; still
-  compiled in with that crate, but no text uses it since Figtree replaced it), Hack
-  (Copyright 2018 Source Foundry Authors, MIT, with the Bitstream Vera licence for the glyphs it derives from), Noto
-  Emoji (Copyright 2013 Google LLC, SIL Open Font Licence 1.1) and the emoji icon font with egui's subset of it
-  (Copyright 2014 John Slegers, MIT). The licence texts ship in that crate's `fonts/` directory.
+  compiled in with that crate; since IBM Plex replaced it, it only stands in for signs Plex lacks), Hack
+  (Copyright 2018 Source Foundry Authors, MIT, with the Bitstream Vera licence for the glyphs it derives from) and
+  egui's five-glyph subset of the emoji icon font (Copyright 2014 John Slegers, MIT). egui's Noto Emoji and the whole
+  emoji icon font are not compiled in (the `monochrome_emoji_fonts` feature is off). The licence texts ship in that
+  crate's `fonts/` directory.
+- Noto Sans Hebrew (release NotoSansHebrew-v3.001), Noto Sans Arabic (NotoSansArabic-v2.013), Noto Sans Devanagari
+  (NotoSansDevanagari-v2.007) and Noto Sans Thai (NotoSansThai-v2.002), Copyright 2022 The Noto Project Authors
+  (https://github.com/notofonts), and Noto Emoji (version 3.006, from Google Fonts), Copyright 2013 Google LLC, all
+  SIL Open Font Licence 1.1: the Regular files under `assets/fonts/noto/`, compiled into the desktop app behind IBM
+  Plex. The licence texts are the `OFL.txt` files beside them.
+- For the scripts none of these hold, the desktop app draws with fonts it finds on the computer.
 - SQLite (https://sqlite.org, public domain) through the rusqlite and libsqlite3-sys crates (MIT), compiled from
   the bundled amalgamation into native builds only; the browser build keeps its in-memory store.
 - Rust dependencies keep their own licences; `cargo deny check licenses` lists them.

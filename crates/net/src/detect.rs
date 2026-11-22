@@ -5,31 +5,63 @@
 //! proposal, and nothing it finds gets a password before the owner has seen it and TLS has verified it
 //! ([`CheckTarget::detected`]).
 //!
-//! In this order, stopping at the first source that names an IMAP server:
+//! The lookups run in stages; after each, the candidates it added ([`crate::candidates`], a pure function of what the
+//! lookups returned) are probed in order ([`crate::probe`]): a candidate counts only when it greets and, encrypted,
+//! offers a sign-in. Detect stops once it has found an IMAP and a submission server, or when the stages are done.
 //!
 //! 1. The MX records of the address's domain (DNS).
 //! 2. Mozilla autoconfig at the domain, over HTTPS: `https://autoconfig.<domain>/mail/config-v1.1.xml`, then
 //!    `https://<domain>/.well-known/autoconfig/mail/config-v1.1.xml`. Plain HTTP
 //!    (`http://autoconfig.<domain>/...`) counts only as a redirect to HTTPS on the MX domain, which is then fetched.
-//! 3. Mozilla's ISPDB, for the domain and then for the MX domain: only when it is switched on
-//!    ([`DetectConfig::ispdb`]), because it tells Mozilla the domain.
-//! 4. SRV records (RFC 6186, RFC 8314): `_imaps._tcp`, `_imap._tcp`, `_submissions._tcp`, `_submission._tcp`.
-//! 5. Common host names (`imap.<domain>`, `mail.<domain>`, `smtp.<domain>`), as a hint the owner must confirm.
+//!    Then Mozilla's ISPDB, for the domain and then for the MX domain: only when it is switched on
+//!    ([`DetectConfig::ispdb`]), because it tells Mozilla the domain, and only when no file named an IMAP server.
+//! 3. SRV records (RFC 6186, RFC 8314): `_imaps._tcp`, `_imap._tcp`, `_submissions._tcp`, `_submission._tcp`.
+//! 4. `mail.`, `imap.` and `smtp.` of the address's own domain.
+//! 5. The provider domains of the MX hosts ([`crate::candidates::provider_domains`]), last, as a guess about a third
+//!    party: their autoconfig over HTTPS, then `mail.`, `imap.` and `smtp.` of them.
 //!
-//! The MX domain is the MX host's last two labels, or three when the second last is a short label under a
-//! two-letter country label (`example.co.uk`): a rule of thumb without the public suffix list.
+//! While the domain names servers of a kind, the guesses of that kind (steps 4 and 5) are tried only once every
+//! server it names for that kind has failed for a definite reason: the connection refused, no such name, a
+//! certificate that does not hold, no STARTTLS, no sign-in the app can do, or a server that spoke something else. A
+//! named server that only timed out, dropped the connection, or whose certificate did not fit this computer's clock
+//! (far off, or a certificate not valid yet) keeps the guesses away, and is proposed unchecked.
+//!
+//! A host whose name was not found is not probed again in the run, on any port; nor is one of the domain's own
+//! common host names whose probe timed out, for the guesses on it (a guess that drops packets is not worth more
+//! waits; a server the domain names on that host is still probed). Any other host whose probe timed out is not probed
+//! again on that port only: a network that drops 465 may let 587 through.
+//!
+//! The whole run is capped: at most [`DetectConfig::tries`] probes, and [`DetectConfig::within`] of time as a deadline
+//! every lookup and probe is given, so the run ends at its cap; each probe has its own deadline inside it
+//! ([`DetectConfig::probe_within`], [`PROBE_TIME`]) that a server sending a byte at a time cannot stretch, and tries at
+//! most [`crate::probe::PROBE_ADDRESSES`] addresses of a host. [`Outside::stop`] ends the run at once. A lookup or a probe that
+//! fails, times out or returns junk is noted in [`Proposal::failed`] and skipped. No user name and no password is
+//! sent by Detect.
+//!
+//! The MX domain (for the redirect and the ISPDB) is the MX host's last two labels, or three when the second last is
+//! a short label under a two-letter country label (`example.co.uk`): a rule of thumb without the public suffix list.
 
-use std::num::NonZeroU16;
+use std::sync::Arc;
+use std::time::Duration;
 
-use inboxcraft_model::{EmailAddress, ErrorKind, Host, Security, Server};
+use inboxcraft_model::{EmailAddress, ErrorKind, Host, Server};
+use inboxcraft_time::Clock;
 
-use crate::autoconfig::{self, Autoconfig, Offer};
+use crate::autoconfig::{self, Autoconfig};
+use crate::candidates::{Lookups, Reached, SrvName, candidates, provider_domains};
 use crate::dns::{Resolver, Srv};
+use crate::probe::{PROBE_TIME, Probe, Service};
 use crate::web::Web;
-use crate::{CheckTarget, NetError};
+use crate::{CheckTarget, Deadline, NetError, Stop};
 
 /// Mozilla's ISPDB: `<base><domain>` is the autoconfig file of a domain it knows.
 pub const ISPDB: &str = "https://autoconfig.thunderbird.net/v1.1/";
+
+/// The most probes of one run.
+pub const MAX_TRIES: usize = 24;
+
+/// The run's deadline: every lookup and probe it gives ends by then.
+pub const MAX_TIME: Duration = Duration::from_secs(120);
 
 /// How Detect runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,12 +70,18 @@ pub struct DetectConfig {
     pub ispdb: bool,
     /// Where the ISPDB is ([`ISPDB`]).
     pub ispdb_base: String,
+    /// The most probes ([`MAX_TRIES`]).
+    pub tries: usize,
+    /// The run's deadline: every lookup and probe ends by then ([`MAX_TIME`]).
+    pub within: Duration,
+    /// One probe's deadline, from its name lookup to the capabilities, inside the run's ([`PROBE_TIME`]).
+    pub probe_within: Duration,
 }
 
 impl Default for DetectConfig {
-    /// The ISPDB off, at [`ISPDB`].
+    /// The ISPDB off, at [`ISPDB`]; [`MAX_TRIES`] and [`MAX_TIME`].
     fn default() -> Self {
-        Self { ispdb: false, ispdb_base: ISPDB.to_owned() }
+        Self { ispdb: false, ispdb_base: ISPDB.to_owned(), tries: MAX_TRIES, within: MAX_TIME, probe_within: PROBE_TIME }
     }
 }
 
@@ -62,6 +100,26 @@ pub trait Lookup {
     ///
     /// The cause, when no server answered.
     fn srv(&self, name: &str) -> Result<Vec<Srv>, NetError>;
+
+    /// As [`Lookup::mx`], over by `deadline` at the latest.
+    ///
+    /// # Errors
+    ///
+    /// As [`Lookup::mx`]; [`ErrorKind::TimedOut`] once `deadline` has passed.
+    fn mx_by(&self, domain: &Host, deadline: &Deadline) -> Result<Vec<Host>, NetError> {
+        deadline.wait(Duration::MAX)?;
+        self.mx(domain)
+    }
+
+    /// As [`Lookup::srv`], over by `deadline` at the latest.
+    ///
+    /// # Errors
+    ///
+    /// As [`Lookup::srv`]; [`ErrorKind::TimedOut`] once `deadline` has passed.
+    fn srv_by(&self, name: &str, deadline: &Deadline) -> Result<Vec<Srv>, NetError> {
+        deadline.wait(Duration::MAX)?;
+        self.srv(name)
+    }
 }
 
 impl Lookup for Resolver {
@@ -72,9 +130,32 @@ impl Lookup for Resolver {
     fn srv(&self, name: &str) -> Result<Vec<Srv>, NetError> {
         Resolver::srv(self, name)
     }
+
+    fn mx_by(&self, domain: &Host, deadline: &Deadline) -> Result<Vec<Host>, NetError> {
+        Resolver::mx_by(self, domain, deadline)
+    }
+
+    fn srv_by(&self, name: &str, deadline: &Deadline) -> Result<Vec<Srv>, NetError> {
+        Resolver::srv_by(self, name, deadline)
+    }
 }
 
-/// Where a candidate came from.
+/// What Detect asks: DNS, the web, the probe, the clock its caps run on, and the stop that ends it.
+#[derive(Clone)]
+pub struct Outside<'a> {
+    /// The MX and SRV records.
+    pub dns: &'a dyn Lookup,
+    /// The autoconfig files.
+    pub web: &'a dyn Web,
+    /// The candidates.
+    pub probe: &'a dyn Probe,
+    /// Its monotonic time measures [`DetectConfig::within`] and [`DetectConfig::probe_within`].
+    pub clock: Arc<dyn Clock>,
+    /// Asked before every lookup and probe and inside every wait: `true` ends the run at once, with what it found.
+    pub stop: Option<Stop>,
+}
+
+/// Where a candidate came from: one of a fixed set, never text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Source {
     /// The provider's autoconfig file, over HTTPS at the address's domain.
@@ -86,8 +167,43 @@ pub enum Source {
     Ispdb,
     /// An SRV record.
     Srv,
-    /// A common host name: a hint, not something the domain said.
+    /// An autoconfig file over HTTPS at a provider domain of the MX hosts: what the DNS answer and a rule of thumb
+    /// pointed to.
+    ProviderAutoconfig,
+    /// A common host name of a provider domain of the MX hosts (`mail.<provider>`): a guess.
+    Provider,
+    /// A common host name of the address's domain: a guess.
     Guess,
+}
+
+impl Source {
+    /// Whether the domain named the server: its own autoconfig file, the ISPDB's entry for it, or its SRV records.
+    #[must_use]
+    pub fn is_named(self) -> bool {
+        matches!(self, Self::Autoconfig | Self::Ispdb | Self::Srv)
+    }
+
+    /// Whether the server is a guess: a common host name of the domain, or anything from the MX hosts' provider.
+    #[must_use]
+    pub fn is_guess(self) -> bool {
+        matches!(self, Self::Guess | Self::Provider | Self::ProviderAutoconfig)
+    }
+}
+
+/// Whether a proposed server answered Detect's probe: one of a fixed set, never text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Checked {
+    /// It greeted and, encrypted, offered a sign-in.
+    Answered,
+    /// No probe reached it (no answer in time, a dropped connection, or no time or tries left), but the domain names
+    /// it: proposed unchecked. The account check still verifies TLS before any password goes out.
+    NoAnswer,
+    /// As [`Checked::NoAnswer`], but its probe was refused the connection.
+    Refused,
+    /// As [`Checked::NoAnswer`], but its host's name was not found.
+    NoName,
+    /// As [`Checked::NoAnswer`], but its certificate did not fit this computer's clock, which may be what is off.
+    Clock,
 }
 
 /// A server Detect proposes.
@@ -99,6 +215,8 @@ pub struct Candidate {
     pub username: String,
     /// Where it came from.
     pub source: Source,
+    /// Whether it answered the probe.
+    pub checked: Checked,
 }
 
 impl Candidate {
@@ -113,69 +231,303 @@ impl Candidate {
 /// What Detect found.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Proposal {
-    /// The MX hosts of the domain, by preference.
+    /// The MX hosts of the domain, by preference, at most [`crate::candidates::MAX_MX`].
     pub mx: Vec<Host>,
-    /// IMAP servers, the best first.
+    /// The IMAP server that answered the probe, or else the first one the domain names that no probe could reach
+    /// ([`Checked::NoAnswer`]); empty when there is neither.
     pub imap: Vec<Candidate>,
-    /// Submission (SMTP) servers, the best first.
+    /// The submission (SMTP) server, as [`Proposal::imap`].
     pub submission: Vec<Candidate>,
-    /// Every DNS query and URL, in order: `dns MX example.org`, `https://...`. What left the computer, for the owner;
-    /// each URL also means a name lookup of its host by the system.
+    /// Every DNS query, URL and probe, in order: `dns MX example.org`, `https://...`, `imap mail.example.org:993
+    /// (TLS)`. What left the computer, for the owner; each URL and probe also means a name lookup of its host by the
+    /// system.
     pub asked: Vec<String>,
-    /// The lookups that failed, with their cause.
+    /// The lookups and probes that failed, with their cause.
     pub failed: Vec<(String, ErrorKind)>,
 }
 
-/// Detects settings for `address`, asking `dns` and `web`.
+/// Detects settings for `address`, asking `outside`.
 #[must_use]
-pub fn detect(address: &EmailAddress, config: &DetectConfig, dns: &dyn Lookup, web: &dyn Web) -> Proposal {
-    let mut run = Run { address, web, proposal: Proposal::default() };
+pub fn detect(address: &EmailAddress, config: &DetectConfig, outside: &Outside<'_>) -> Proposal {
+    let mut run = Run::new(address, config, outside);
     let Ok(domain) = Host::new(address.domain()) else { return run.proposal };
-    run.proposal.asked.push(format!("dns MX {domain}"));
-    match dns.mx(&domain) {
-        Ok(hosts) => run.proposal.mx = hosts,
-        Err(error) => run.proposal.failed.push((format!("dns MX {domain}"), error.kind())),
+    if run.time_left() {
+        let asked = format!("dns MX {domain}");
+        run.proposal.asked.push(asked.clone());
+        match outside.dns.mx_by(&domain, &run.deadline) {
+            Ok(hosts) => run.lookups.set_mx(hosts),
+            Err(error) => run.proposal.failed.push((asked, error.kind())),
+        }
     }
-    let mx_domain = run.proposal.mx.first().and_then(base_domain);
-    if run.autoconfig(&domain, mx_domain.as_deref()) {
-        return run.proposal;
-    }
-    if config.ispdb {
+    run.proposal.mx = run.lookups.mx().to_vec();
+    let mx_domain = run.lookups.mx().first().and_then(base_domain);
+    if !run.autoconfig(&domain, mx_domain.as_deref()) && config.ispdb {
         let mut domains = vec![domain.as_str().to_lowercase()];
         if let Some(mx) = mx_domain.as_ref().filter(|mx| !domains.contains(mx)) {
             domains.push(mx.clone());
         }
         for name in domains {
             if let Some(found) = run.fetch(&format!("{}{name}", config.ispdb_base)) {
-                run.take(found, Source::Ispdb);
-                if !run.proposal.imap.is_empty() {
-                    return run.proposal;
+                run.lookups.add_file(Source::Ispdb, found);
+                if run.lookups.files_name_imap() {
+                    break;
                 }
             }
         }
     }
-    run.srv(dns, &domain);
-    if run.proposal.imap.is_empty() {
-        run.guess(&domain);
+    run.probe_new();
+    if run.done() {
+        return run.finish();
     }
-    run.proposal
+    run.srv(&domain);
+    run.lookups.reach(Reached::Srv);
+    run.probe_new();
+    if run.done() {
+        return run.finish();
+    }
+    run.lookups.reach(Reached::Own);
+    run.probe_new();
+    if run.done() {
+        return run.finish();
+    }
+    let own = domain.as_str().to_lowercase();
+    for provider in provider_domains(run.lookups.mx(), &own) {
+        for url in
+            [format!("https://autoconfig.{provider}/mail/config-v1.1.xml"), format!("https://{provider}/.well-known/autoconfig/mail/config-v1.1.xml")]
+        {
+            if run.proposal.asked.contains(&url) {
+                continue;
+            }
+            if let Some(found) = run.fetch(&url) {
+                let names_imap = !found.imap.is_empty();
+                run.lookups.add_provider_file(&provider, found);
+                if names_imap {
+                    break;
+                }
+            }
+        }
+    }
+    run.lookups.reach(Reached::Providers);
+    run.probe_new();
+    run.finish()
 }
 
 struct Run<'a> {
     address: &'a EmailAddress,
-    web: &'a dyn Web,
+    config: &'a DetectConfig,
+    outside: &'a Outside<'a>,
+    /// The run's cap and stop, given to every lookup and probe.
+    deadline: Deadline,
+    lookups: Lookups,
     proposal: Proposal,
+    /// Every server probed, for what, and why it failed.
+    tried: Vec<(Service, Server, Option<ErrorKind>)>,
+    /// Hosts whose name was not found: not probed again, on any port.
+    no_name: Vec<Host>,
+    /// The domain's own guessed hosts that timed out: no guess on them is probed again, on any port; a server the
+    /// domain names on such a host still is.
+    guess_down: Vec<Host>,
+    /// Hosts and ports that timed out: not probed again on that port.
+    blocked: Vec<(Host, u16)>,
+    /// A cap was reached: nothing more is asked.
+    ended: bool,
 }
 
-impl Run<'_> {
-    /// The autoconfig file at the domain; whether it named an IMAP server.
+impl<'a> Run<'a> {
+    /// A run for `address`, its deadline started now.
+    fn new(address: &'a EmailAddress, config: &'a DetectConfig, outside: &'a Outside<'a>) -> Self {
+        let deadline = Deadline::new(Arc::clone(&outside.clock), config.within);
+        let deadline = match &outside.stop {
+            Some(stop) => deadline.with_stop(Arc::clone(stop)),
+            None => deadline,
+        };
+        Self {
+            address,
+            config,
+            outside,
+            deadline,
+            lookups: Lookups::default(),
+            proposal: Proposal::default(),
+            tried: Vec::new(),
+            no_name: Vec::new(),
+            guess_down: Vec::new(),
+            blocked: Vec::new(),
+            ended: false,
+        }
+    }
+
+    /// Whether the run may still ask: within its time. The first time it may not, the cap is noted.
+    fn time_left(&mut self) -> bool {
+        if self.ended {
+            return false;
+        }
+        if self.deadline.is_stopped() {
+            // Stopped: whoever stopped it no longer listens.
+            self.ended = true;
+        } else if self.deadline.left().is_none() {
+            self.end(format!("detect: the cap of {} s", self.config.within.as_secs()), ErrorKind::TimedOut);
+        }
+        !self.ended
+    }
+
+    /// Whether the run may probe once more: within its time and its tries.
+    fn may_try(&mut self) -> bool {
+        if self.time_left() && self.tried.len() >= self.config.tries {
+            self.end(format!("detect: the cap of {} tries", self.config.tries), ErrorKind::TooLarge);
+        }
+        !self.ended
+    }
+
+    fn end(&mut self, what: String, kind: ErrorKind) {
+        self.ended = true;
+        self.proposal.failed.push((what, kind));
+    }
+
+    fn found(&self, service: Service) -> bool {
+        match service {
+            Service::Imap => !self.proposal.imap.is_empty(),
+            Service::Submission => !self.proposal.submission.is_empty(),
+        }
+    }
+
+    /// The proposal. For a kind no probe answered: the first server the domain names ([`Source::is_named`]) that was
+    /// not probed or whose probe got no answer (a network failure, not a server that spoke and was wrong), as
+    /// [`Checked::NoAnswer`].
+    fn finish(mut self) -> Proposal {
+        let list = candidates(self.address, &self.lookups);
+        for service in [Service::Imap, Service::Submission] {
+            if self.found(service) {
+                continue;
+            }
+            let unreached = |candidate: &&Candidate| {
+                let outcome =
+                    self.tried.iter().find(|(held, server, _)| *held == service && *server == candidate.server).map(|(_, _, failed)| *failed);
+                // Its own probe's answer, not its host's on another port.
+                match outcome {
+                    None => true,
+                    Some(failed) => failed.is_some_and(no_answer),
+                }
+            };
+            let Some(named) = list.of(service).iter().filter(|candidate| candidate.source.is_named()).find(unreached) else { continue };
+            let named = Candidate { checked: self.unchecked(service, named), ..named.clone() };
+            match service {
+                Service::Imap => self.proposal.imap.push(named),
+                Service::Submission => self.proposal.submission.push(named),
+            }
+        }
+        self.proposal
+    }
+
+    /// Why `candidate`, proposed unchecked, was not checked: its own probe's failure, or its host's name not found
+    /// by another probe.
+    fn unchecked(&self, service: Service, candidate: &Candidate) -> Checked {
+        let own = self.tried.iter().find(|(held, server, _)| *held == service && *server == candidate.server).and_then(|(_, _, failed)| *failed);
+        let no_name =
+            || self.tried.iter().any(|(_, server, failed)| server.host() == candidate.server.host() && *failed == Some(ErrorKind::HostNotFound));
+        match own {
+            Some(ErrorKind::ConnectionRefused) => Checked::Refused,
+            Some(ErrorKind::HostNotFound) => Checked::NoName,
+            Some(kind) if clock_fault(kind) => Checked::Clock,
+            None if no_name() => Checked::NoName,
+            _ => Checked::NoAnswer,
+        }
+    }
+
+    /// Found both, or out of time or tries.
+    fn done(&self) -> bool {
+        self.ended || (self.found(Service::Imap) && self.found(Service::Submission))
+    }
+
+    /// Probes, in order, the candidates not probed yet, until one of each kind answers. The list is made again before
+    /// each probe: a named server's definite failure may open its kind to the guesses.
+    fn probe_new(&mut self) {
+        for service in [Service::Imap, Service::Submission] {
+            while !self.found(service) {
+                self.open_guesses(service);
+                let list = candidates(self.address, &self.lookups);
+                let next = list
+                    .of(service)
+                    .iter()
+                    .find(|candidate| {
+                        !self.tried.iter().any(|(held, server, _)| *held == service && *server == candidate.server) && !self.skipped(candidate)
+                    })
+                    .cloned();
+                let Some(candidate) = next else { break };
+                if !self.may_try() {
+                    return;
+                }
+
+                let what = format!("{} {}", service.word(), candidate.server);
+                self.proposal.asked.push(what.clone());
+                match self.outside.probe.probe(&candidate.server, service, &self.deadline.sooner(self.config.probe_within)) {
+                    Ok(()) => {
+                        self.tried.push((service, candidate.server.clone(), None));
+                        let answered = Candidate { checked: Checked::Answered, ..candidate.clone() };
+                        match service {
+                            Service::Imap => self.proposal.imap.push(answered),
+                            Service::Submission => self.proposal.submission.push(answered),
+                        }
+                        break;
+                    }
+                    Err(error) => {
+                        self.tried.push((service, candidate.server.clone(), Some(error.kind())));
+                        self.note_unreachable(&candidate, error.kind());
+                        self.proposal.failed.push((what, error.kind()));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Opens `service` to the guesses when the domain names servers of it and every one has failed for a definite
+    /// reason ([`definite`]): its own probe, or no address for its host.
+    fn open_guesses(&mut self, service: Service) {
+        self.lookups.open_guesses(service, false);
+        let list = candidates(self.address, &self.lookups);
+        let mut named = list.of(service).iter().filter(|candidate| candidate.source.is_named()).peekable();
+        let open = named.peek().is_some()
+            && named.all(|candidate| {
+                let own = self.tried.iter().find(|(held, server, _)| *held == service && *server == candidate.server).map(|(_, _, failed)| *failed);
+                match own {
+                    Some(failed) => failed.is_some_and(definite),
+                    None => self
+                        .tried
+                        .iter()
+                        .any(|(_, server, failed)| server.host() == candidate.server.host() && *failed == Some(ErrorKind::HostNotFound)),
+                }
+            });
+        self.lookups.open_guesses(service, open);
+    }
+
+    /// Whether `candidate` is not probed again: its host has no address, it is a guess on a guessed host that timed
+    /// out, or its host and port timed out.
+    fn skipped(&self, candidate: &Candidate) -> bool {
+        let server = &candidate.server;
+        self.no_name.contains(server.host())
+            || (candidate.source.is_guess() && self.guess_down.contains(server.host()))
+            || self.blocked.iter().any(|(host, port)| host == server.host() && *port == server.port().get())
+    }
+
+    /// After `candidate`'s probe failed with `kind`: a name not found skips its host; a timeout of the domain's own
+    /// guess skips the guesses on its host, and any other timeout only its host and port.
+    fn note_unreachable(&mut self, candidate: &Candidate, kind: ErrorKind) {
+        let host = candidate.server.host();
+        match kind {
+            ErrorKind::HostNotFound => self.no_name.push(host.clone()),
+            ErrorKind::TimedOut | ErrorKind::PortTimedOut if candidate.source == Source::Guess => self.guess_down.push(host.clone()),
+            ErrorKind::TimedOut | ErrorKind::PortTimedOut => self.blocked.push((host.clone(), candidate.server.port().get())),
+            _ => {}
+        }
+    }
+
+    /// The autoconfig file at the domain; whether a file read named an IMAP server.
     fn autoconfig(&mut self, domain: &Host, mx_domain: Option<&str>) -> bool {
         let secure =
             [format!("https://autoconfig.{domain}/mail/config-v1.1.xml"), format!("https://{domain}/.well-known/autoconfig/mail/config-v1.1.xml")];
         for url in secure {
             if let Some(found) = self.fetch(&url) {
-                self.take(found, Source::Autoconfig);
-                if !self.proposal.imap.is_empty() {
+                self.lookups.add_file(Source::Autoconfig, found);
+                if self.lookups.files_name_imap() {
                     return true;
                 }
             }
@@ -187,15 +539,18 @@ impl Run<'_> {
             return false;
         }
         if let Some(found) = self.fetch(&redirect) {
-            self.take(found, Source::AutoconfigRedirect);
+            self.lookups.add_file(Source::AutoconfigRedirect, found);
         }
-        !self.proposal.imap.is_empty()
+        self.lookups.files_name_imap()
     }
 
-    /// `url`'s autoconfig file, when it answers 200 with one.
+    /// `url`'s autoconfig file, when it answers 200 with one (its size capped before it is read: [`autoconfig::parse`]).
     fn fetch(&mut self, url: &str) -> Option<Autoconfig> {
+        if !self.time_left() {
+            return None;
+        }
         self.proposal.asked.push(url.to_owned());
-        match self.web.get(url) {
+        match self.outside.web.get_by(url, &self.deadline) {
             Ok(answer) if answer.status == 200 => {
                 let found = autoconfig::parse(&answer.body, self.address);
                 if found.is_none() {
@@ -213,8 +568,11 @@ impl Run<'_> {
 
     /// Where `url` redirects to, if it does.
     fn redirect(&mut self, url: &str) -> Option<String> {
+        if !self.time_left() {
+            return None;
+        }
         self.proposal.asked.push(url.to_owned());
-        match self.web.get(url) {
+        match self.outside.web.get_by(url, &self.deadline) {
             Ok(answer) if matches!(answer.status, 301 | 302 | 303 | 307 | 308) => answer.location,
             Ok(_) => None,
             Err(error) => {
@@ -224,63 +582,50 @@ impl Run<'_> {
         }
     }
 
-    fn take(&mut self, found: Autoconfig, source: Source) {
-        let candidate = |offer: Offer| Candidate { server: offer.server, username: offer.username, source };
-        self.proposal.imap.extend(found.imap.into_iter().map(candidate));
-        self.proposal.submission.extend(found.submission.into_iter().map(candidate));
-    }
-
-    /// The SRV records of the domain, the encrypted ones first.
-    fn srv(&mut self, dns: &dyn Lookup, domain: &Host) {
-        let services = [
-            ("_imaps", Security::Tls, true),
-            ("_imap", Security::StartTls, true),
-            ("_submissions", Security::Tls, false),
-            ("_submission", Security::StartTls, false),
-        ];
-        for (service, security, imap) in services {
-            let name = format!("{service}._tcp.{domain}");
-            self.proposal.asked.push(format!("dns SRV {name}"));
-            let records = match dns.srv(&name) {
-                Ok(records) => records,
-                Err(error) => {
-                    self.proposal.failed.push((format!("dns SRV {name}"), error.kind()));
-                    continue;
-                }
-            };
-            for record in records {
-                let candidate = Candidate {
-                    server: Server::new(record.host, record.port, security),
-                    username: self.address.as_str().to_owned(),
-                    source: Source::Srv,
-                };
-                let list = if imap { &mut self.proposal.imap } else { &mut self.proposal.submission };
-                if !list.contains(&candidate) {
-                    list.push(candidate);
-                }
+    /// The SRV records of the domain.
+    fn srv(&mut self, domain: &Host) {
+        for name in SrvName::ALL {
+            if !self.time_left() {
+                return;
             }
-        }
-    }
-
-    /// Common host names, as hints: nothing is asked.
-    fn guess(&mut self, domain: &Host) {
-        let hint = |name: &str, port: u16, security: Security| {
-            let host = Host::new(&format!("{name}.{domain}")).ok()?;
-            Some(Candidate {
-                server: Server::new(host, NonZeroU16::new(port)?, security),
-                username: self.address.as_str().to_owned(),
-                source: Source::Guess,
-            })
-        };
-        self.proposal.imap.extend([hint("imap", 993, Security::Tls), hint("mail", 993, Security::Tls)].into_iter().flatten());
-        if self.proposal.submission.is_empty() {
-            self.proposal.submission.extend([hint("smtp", 465, Security::Tls), hint("mail", 587, Security::StartTls)].into_iter().flatten());
+            let asked = format!("dns SRV {}._tcp.{domain}", name.label());
+            self.proposal.asked.push(asked.clone());
+            match self.outside.dns.srv_by(&format!("{}._tcp.{domain}", name.label()), &self.deadline) {
+                Ok(records) => self.lookups.add_srv(name, records),
+                Err(error) => self.proposal.failed.push((asked, error.kind())),
+            }
         }
     }
 }
 
+/// Whether a probe's failure means that nothing answered, or that this computer's clock may be what is wrong, rather
+/// than a server that spoke and was wrong.
+fn no_answer(kind: ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::TimedOut
+            | ErrorKind::PortTimedOut
+            | ErrorKind::MailPortsBlocked
+            | ErrorKind::ConnectionRefused
+            | ErrorKind::ConnectionDropped
+            | ErrorKind::HostNotFound
+    ) || clock_fault(kind)
+}
+
+/// Whether a certificate failed by this computer's clock: far off, or a certificate not valid yet, which a clock a
+/// little behind also gives. The server may be fine.
+fn clock_fault(kind: ErrorKind) -> bool {
+    matches!(kind, ErrorKind::ClockFarOff | ErrorKind::CertificateNotYetValid)
+}
+
+/// Whether a probe's failure says the server is not usable, rather than that it was not reached in time or that this
+/// computer's clock is off: anything but a timeout, blocked ports, a dropped connection or a clock fault.
+fn definite(kind: ErrorKind) -> bool {
+    !(matches!(kind, ErrorKind::TimedOut | ErrorKind::PortTimedOut | ErrorKind::MailPortsBlocked | ErrorKind::ConnectionDropped) || clock_fault(kind))
+}
+
 /// The domain an MX host belongs to, by the rule of thumb of the module; lowercase.
-fn base_domain(host: &Host) -> Option<String> {
+pub(crate) fn base_domain(host: &Host) -> Option<String> {
     let name = host.as_str().to_lowercase();
     let labels: Vec<&str> = name.split('.').collect();
     let count = labels.len();

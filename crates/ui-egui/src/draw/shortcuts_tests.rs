@@ -24,7 +24,7 @@ fn clock() -> Box<FakeClock> {
 
 fn build(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
     let mut harness = Harness::builder()
-        .with_size(vec2(1200.0, 820.0))
+        .with_size(vec2(1440.0, 820.0))
         .with_theme(theme)
         .with_max_steps(12)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
@@ -33,15 +33,14 @@ fn build(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
 }
 
 fn app() -> InboxApp {
-    InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()))
+    InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()))
 }
 
 /// The sheet open on Shortcuts, through its section in the nav.
 fn on_shortcuts(theme: egui::Theme) -> Harness<'static, InboxApp> {
-    let mut harness = build(app(), theme);
-    harness.get_by_label("Appearance settings").click();
-    harness.run();
-    harness.get_by_label("Shortcuts, settings page").click();
+    let mut app = app();
+    super::tests::at_settings(&mut app, Section::Shortcuts);
+    let mut harness = build(app, theme);
     harness.run();
     assert_eq!(harness.state().settings().section(), Section::Shortcuts);
     harness
@@ -54,28 +53,30 @@ fn press_chip(harness: &mut Harness<'static, InboxApp>, starts: &str) {
     harness.run();
 }
 
-fn press_beside_the_sheet(harness: &mut Harness<'static, InboxApp>) {
-    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
-    let at = egui::pos2(sheet.left() / 2.0, sheet.center().y);
-    harness.hover_at(at);
-    harness.run();
-    for pressed in [true, false] {
-        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
-        harness.run();
-    }
-}
-
 #[test]
 fn the_shortcuts_page_lists_every_action_with_its_key() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let harness = on_shortcuts(theme);
         assert!(!harness.get_by_label("Shortcuts, settings page").accesskit_node().is_disabled());
-        harness.get_by_label("Key of Command palette: Ctrl+K");
-        harness.get_by_label("Key of Search mail: Ctrl+F");
+        harness.get_by_label("Key of Command line: Ctrl K");
+        harness.get_by_label("Key of Search mail: Ctrl F");
         harness.get_by_label("Show sent mail has no key");
+        // The list's keys, each with its own: J and K, the arrows, the page keys, Enter, Shift F10 and the Menu key.
+        let keymap = crate::keymap::Keymap::default();
+        for id in crate::keymap::LIST_KEYS {
+            let action = crate::keymap::action(id).unwrap();
+            let words = crate::component::key::key_words(&keymap.shortcut(id).unwrap());
+            harness.get_by_label(&format!("Key of {}: {words}", action.name));
+        }
+        // The inbox's three views, actions without a key of their own.
+        for name in ["Inbox view: Grouped", "Inbox view: Smart", "Inbox view: List", "Back to the list"] {
+            harness.get_by_label(&format!("{name} has no key"));
+        }
+        harness.get_by_label("Key of The next message of the list: J");
+        harness.get_by_label("Key of The message before in the list: K");
         harness.get_by_role_and_label(Role::TextInput, "Find a command");
         harness.get_by_role_and_label(Role::Button, "Reset all keys");
-        harness.get_by_role_and_label(Role::Button, "Remove the key of Command palette");
+        harness.get_by_role_and_label(Role::Button, "Remove the key of Command line");
         harness.check_accessibility();
     }
 }
@@ -90,10 +91,10 @@ fn a_press_on_a_key_waits_for_the_next_key_which_becomes_the_action_s() {
     harness.run();
     assert_eq!(harness.state().settings().capturing(), None);
     assert_eq!(harness.state().keymap().shortcut(keymap::SENT), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Num3)));
-    harness.get_by_label("Key of Show sent mail: Ctrl+3");
+    harness.get_by_label("Key of Show sent mail: Ctrl 3");
     assert!(harness.state().settings().is_open(), "the press only gave the key");
     // The new key works at once.
-    harness.state_mut().close_settings();
+    harness.state_mut().leave_settings();
     harness.run();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Num3);
     harness.run();
@@ -108,9 +109,9 @@ fn a_key_another_action_had_moves_and_the_page_says_so() {
     harness.run();
     assert_eq!(harness.state().keymap().shortcut(keymap::SENT), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::K)));
     assert_eq!(harness.state().keymap().shortcut(keymap::PALETTE), None, "one key runs one action");
-    assert!(!harness.state().palette().is_open(), "the press gave a key and opened nothing");
-    harness.get_by_label("Ctrl+K was the key of Command palette; it has none now.");
-    harness.get_by_label("Command palette has no key");
+    assert!(!harness.state().command().results(), "the press gave a key and opened nothing");
+    harness.get_by_label("Ctrl K was the key of Command line; it has none now.");
+    harness.get_by_label("Command line has no key");
     // Giving an action its own key again says nothing.
     press_chip(&mut harness, "Key of Show sent mail");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
@@ -121,7 +122,7 @@ fn a_key_another_action_had_moves_and_the_page_says_so() {
 #[test]
 fn escape_while_waiting_keeps_the_old_key_and_the_sheet() {
     let mut harness = on_shortcuts(egui::Theme::Light);
-    press_chip(&mut harness, "Key of Command palette");
+    press_chip(&mut harness, "Key of Command line");
     harness.key_press(Key::Escape);
     harness.run();
     assert_eq!(harness.state().settings().capturing(), None);
@@ -132,12 +133,12 @@ fn escape_while_waiting_keeps_the_old_key_and_the_sheet() {
 #[test]
 fn remove_takes_a_key_away_and_reset_gives_every_action_its_first_key() {
     let mut harness = on_shortcuts(egui::Theme::Light);
-    harness.get_by_role_and_label(Role::Button, "Remove the key of Command palette").click();
+    harness.get_by_role_and_label(Role::Button, "Remove the key of Command line").click();
     harness.run();
     assert_eq!(harness.state().keymap().shortcut(keymap::PALETTE), None);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    assert!(!harness.state().palette().is_open(), "a key taken away runs nothing");
+    assert!(!harness.state().command().results(), "a key taken away runs nothing");
     harness.get_by_role_and_label(Role::Button, "Reset all keys").click();
     harness.run();
     assert_eq!(harness.state().keymap(), &Keymap::default());
@@ -152,7 +153,7 @@ fn the_field_narrows_the_list() {
     harness.run();
     assert_eq!(harness.state().settings().find(), "sent");
     harness.get_by_label("Show sent mail has no key");
-    assert!(harness.query_by_label("Key of Command palette: Ctrl+K").is_none());
+    assert!(harness.query_by_label("Key of Command line: Ctrl K").is_none());
     harness.get_by_role_and_label(Role::TextInput, "Find a command").type_text(" zzz");
     harness.run();
     harness.get_by_label("No command matches “sent zzz”.");
@@ -168,15 +169,15 @@ fn a_key_without_ctrl_or_alt_types_into_a_field_instead_of_running() {
     harness.key_press(Key::G);
     harness.run();
     assert!(harness.state().settings().is_open(), "G runs nothing while the sheet is open");
-    harness.state_mut().close_settings();
+    harness.state_mut().leave_settings();
     harness.run();
     harness.state_mut().search("");
-    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::search_id()));
+    harness.ctx.memory_mut(|memory| memory.request_focus(crate::command::field_id()));
     harness.run();
     harness.key_press(Key::G);
     harness.run();
     assert_eq!(harness.state().screen(), super::Screen::Mail, "G in the search field is typed");
-    harness.ctx.memory_mut(|memory| memory.surrender_focus(super::list::search_id()));
+    harness.ctx.memory_mut(|memory| memory.surrender_focus(crate::command::field_id()));
     harness.run();
     harness.key_press(Key::G);
     harness.run();
@@ -212,7 +213,7 @@ fn keys_that_cannot_be_kept_show_in_the_error_banner() {
     assert!(harness.state().mailbox().error().is_some_and(|error| error.contains("blocker")), "{:?}", harness.state().mailbox().error());
 }
 
-/// The sheet on Shortcuts in the state an open sheet can hold: a text in the field and an action waiting for a key.
+/// The settings on Shortcuts in the state the page can hold: a text in the field and an action waiting for a key.
 fn busy_sheet() -> Harness<'static, InboxApp> {
     let mut harness = on_shortcuts(egui::Theme::Light);
     harness.state_mut().settings_mut().find_mut().push_str("show");
@@ -222,61 +223,246 @@ fn busy_sheet() -> Harness<'static, InboxApp> {
     harness
 }
 
-fn assert_closed_clean(harness: &mut Harness<'static, InboxApp>) {
+/// The settings left: the key waited for is no longer waited for and no key was given; the page and its text stay
+/// for the next time.
+fn assert_left_kept(harness: &mut Harness<'static, InboxApp>) {
     let settings = harness.state().settings();
     assert!(!settings.is_open());
-    assert_eq!((settings.capturing(), settings.find(), settings.keys_note()), (None, "", None), "the open state is forgotten");
+    assert_eq!((settings.capturing(), settings.find(), settings.keys_note()), (None, "show", None), "the wait ends, the text stays");
     assert_eq!(harness.state().keymap(), &Keymap::default(), "no key was given on the way out");
-    assert!(harness.query_by_role_and_label(Role::Dialog, "Settings").is_none());
-    // The next opening is clean.
+    assert!(harness.query_by_role_and_label(Role::Pane, "Settings").is_none());
+    // Coming back shows the page as it was left, waiting for nothing.
     harness.state_mut().open_settings();
     harness.run();
-    assert_eq!(harness.state().settings().section(), Section::Appearance);
+    assert_eq!(harness.state().settings().section(), Section::Shortcuts);
     assert_eq!(harness.state().settings().capturing(), None);
+    assert_eq!(harness.state().settings().find(), "show");
 }
 
 #[test]
-fn the_close_button_forgets_the_open_state() {
+fn leaving_settings_ends_a_key_capture() {
     let mut harness = busy_sheet();
-    harness.get_by_role_and_label(Role::Button, "Close").click();
+    // Through the window's own way out, as the index and every key to a place take it.
+    harness.state_mut().leave_settings();
     harness.run();
-    assert_closed_clean(&mut harness);
+    assert_left_kept(&mut harness);
 }
 
 #[test]
-fn escape_forgets_the_open_state() {
+fn escape_ends_the_wait_and_then_closes_nothing() {
     let mut harness = busy_sheet();
-    // The first Escape stops the wait, the second leaves the sheet.
+    // The first Escape stops the wait; the second finds nothing in front, and a place is not closed.
     harness.key_press(Key::Escape);
     harness.run();
     assert!(harness.state().settings().is_open());
+    assert_eq!(harness.state().settings().capturing(), None);
     harness.key_press(Key::Escape);
     harness.run();
-    assert_closed_clean(&mut harness);
+    assert!(harness.state().settings().is_open(), "a place is not closed by an Escape");
+    assert_eq!(harness.state().settings().find(), "show");
+    assert_eq!(harness.state().keymap(), &Keymap::default());
 }
 
 #[test]
-fn a_press_beside_the_sheet_forgets_the_open_state() {
-    let mut harness = busy_sheet();
-    press_beside_the_sheet(&mut harness);
-    assert_closed_clean(&mut harness);
-}
-
-#[test]
-fn the_rail_and_the_keys_that_show_another_place_forget_the_open_state() {
-    for leave in ["Mail", "Calendar", "Sent mail", "Search mail", "Appearance settings"] {
+fn the_index_and_the_keys_that_show_another_place_leave_the_settings_and_keep_the_page() {
+    // A press on a place of the index shows that place, as its key does; SETTINGS again shows the place left (the mail).
+    for leave in ["Mail", "Calendar", "Later", "Settings"] {
         let mut harness = busy_sheet();
-        harness.get_by_role_and_label(Role::Button, leave).click();
+        let row = harness.get_by_role_and_label(Role::Button, leave).rect();
+        let at = row.center();
+        harness.hover_at(at);
         harness.run();
-        assert_closed_clean(&mut harness);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+            harness.run();
+        }
+        let screen = if leave == "Calendar" { crate::Screen::Calendar } else { crate::Screen::Mail };
+        assert_eq!(harness.state().screen(), screen, "{leave}: the place pressed shows");
+        assert_eq!(matches!(harness.state().mailbox().place(), crate::mailbox::Place::Later(_)), leave == "Later", "{leave}");
+        assert_left_kept(&mut harness);
     }
+    // The palette comes over the settings: they stay.
     let mut harness = busy_sheet();
     harness.key_press(Key::Escape);
     harness.run();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
-    assert!(harness.state().palette().is_open());
-    harness.state_mut().palette_mut().close();
+    assert!(harness.state().command().results());
+    harness.state_mut().command_mut().close_results();
     harness.run();
-    assert_closed_clean(&mut harness);
+    assert!(harness.state().settings().is_open(), "the palette leaves the settings shown");
+    assert_eq!(harness.state().settings().find(), "show");
+}
+
+#[test]
+fn a_waiting_key_chip_has_a_1_px_edge_and_the_focus_ring_stands_2_px_clear_of_it() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = on_shortcuts(theme);
+        press_chip(&mut harness, "Show sent mail has no key");
+        let waiting = "Show sent mail: press a key, or Escape to keep the old one";
+        harness.get_by_label(waiting).focus();
+        harness.run();
+        let rect = harness.get_by_label(waiting).rect();
+        let mode = if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light };
+        let cyan = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette.cyan_edge;
+        let mut strokes = super::tests::strokes_round(harness.output(), cyan, rect);
+        strokes.sort_by(|a, b| a.0.width().total_cmp(&b.0.width()));
+        let near = |a: egui::Rect, b: egui::Rect| (a.min - b.min).length() < 0.51 && (a.max - b.max).length() < 0.51;
+        assert_eq!(strokes.len(), 2, "{theme:?} the edge and the ring: {strokes:?}");
+        let ((edge, edge_width, _), (ring, ring_width, whole)) = (strokes[0], strokes[1]);
+        assert!(near(edge, rect) && edge_width == 1.0, "{theme:?} the edge is 1 px: {strokes:?} {rect:?}");
+        assert!(near(ring, rect.expand(3.0)) && ring_width == 1.0, "{theme:?} the ring is outside, 2 px clear: {strokes:?} {rect:?}");
+        assert!(whole, "{theme:?} the ring has room: {strokes:?}");
+    }
+}
+
+/// The page under the key scopes: it says a key runs one action per screen, lists Fold and the calendar's keys, takes
+/// a key only from an action whose scope meets the one given it, and names that action.
+#[test]
+fn the_page_lists_fold_and_the_calendar_s_keys_and_moves_a_key_only_where_scopes_meet() {
+    let mut harness = on_shortcuts(egui::Theme::Dark);
+    harness.get_by_label("Every action can have a key. One key runs one action per screen: giving a key takes it from its holder there.");
+    harness.get_by_label("Fold or open the floating draft has no key");
+    for name in ["left", "right"] {
+        let row = format!("Key of Calendar: pick to the {name}");
+        assert!(
+            harness.query_all_by_role(Role::Button).any(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with(&row))),
+            "{row}"
+        );
+    }
+    // Fold given the calendar's Enter: the window's and the calendar's scopes meet, so Open loses it, and the page says so.
+    let enter = KeyboardShortcut::new(Modifiers::NONE, Key::Enter);
+    press_chip(&mut harness, "Fold or open the floating draft has no key");
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().keymap().shortcut(keymap::FOLD), Some(enter));
+    assert_eq!(harness.state().keymap().shortcut(keymap::CALENDAR_OPEN), None, "one key runs one action where scopes meet");
+    assert!(harness.state().settings().keys_note().is_some_and(|note| note.contains("Calendar: open what is picked")));
+    // A key held only by the mail list's action stays the list's when a calendar key takes it: the two screens never
+    // show together, so nothing is taken and nothing is said.
+    let j = KeyboardShortcut::new(Modifiers::NONE, Key::J);
+    harness.state_mut().keymap_mut().bind("ui.list.down", j);
+    press_chip(&mut harness, "Key of Calendar: pick to the left");
+    harness.key_press(Key::J);
+    harness.run();
+    assert_eq!(harness.state().keymap().shortcut(keymap::CALENDAR_LEFT), Some(j));
+    assert_eq!(harness.state().keymap().shortcut("ui.list.down"), Some(j), "the list keeps its key");
+    assert_eq!(harness.state().settings().keys_note(), None);
+    // Within the calendar's scope one key still runs one action: Right given J takes it from Left.
+    press_chip(&mut harness, "Key of Calendar: pick to the right");
+    harness.key_press(Key::J);
+    harness.run();
+    assert_eq!(harness.state().keymap().shortcut(keymap::CALENDAR_LEFT), None);
+    assert_eq!(harness.state().keymap().shortcut("ui.list.down"), Some(j));
+    assert!(harness.state().settings().keys_note().is_some_and(|note| note.contains("Calendar: pick to the left")));
+}
+
+/// The `colour` filled rects painted this frame inside `within`.
+fn fills_in(output: &egui::FullOutput, colour: egui::Color32, within: egui::Rect) -> Vec<egui::Rect> {
+    fn walk(shape: &egui::Shape, colour: egui::Color32, within: egui::Rect, found: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, colour, within, found)),
+            egui::Shape::Rect(rect) if rect.fill == colour && within.contains_rect(rect.rect) => found.push(rect.rect),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, colour, within, &mut found);
+    }
+    found
+}
+
+#[test]
+fn the_row_waiting_for_a_key_is_a_box_720_by_36_with_a_1_px_cyan_edge() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = on_shortcuts(theme);
+        press_chip(&mut harness, "Show sent mail has no key");
+        let chip = harness.get_by_label("Show sent mail: press a key, or Escape to keep the old one").rect();
+        let sheet = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+        // `settings-shortcuts/capture`: the whole row, the column's 720 by its 36, the chip 8 under its top and 16 in
+        // from its right end.
+        let left = sheet.left() + 232.0 + 1.0 + 40.0;
+        let row = egui::Rect::from_min_size(egui::pos2(left, chip.top() - 8.0), vec2(720.0, 36.0));
+        assert_eq!(chip.right(), row.right() - 16.0, "{theme:?}: {chip:?} in {row:?}");
+        let mode = if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light };
+        let cyan = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette.cyan_edge;
+        let bands: Vec<_> = fills_in(harness.output(), cyan, row).into_iter().filter(|band| band.width() == 1.0 || band.height() == 1.0).collect();
+        assert_eq!(bands.len(), 4, "{theme:?}: four sides: {bands:?}");
+        let around = bands.iter().fold(egui::Rect::NOTHING, |all, band| all.union(*band));
+        assert_eq!(around, row, "{theme:?}: the edge round the whole row");
+    }
+}
+
+#[test]
+fn reset_all_keys_is_a_secondary_button_134_by_32() {
+    let harness = on_shortcuts(egui::Theme::Dark);
+    let reset = harness.get_by_role_and_label(Role::Button, "Reset all keys").rect();
+    // `settings-shortcuts/default`: a secondary text button, its 1 px `line` edge round 134 × 32.
+    assert_eq!((reset.width(), reset.height()), (134.0, 32.0), "{reset:?}");
+    let line = crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default()).palette.line;
+    assert!(!super::tests::strokes_round(harness.output(), line, reset).is_empty(), "its edge");
+}
+
+#[test]
+fn the_inbox_views_are_actions_the_palette_runs_and_a_key_can_take() {
+    use crate::mailbox::InboxView;
+    let mut harness = build(app(), egui::Theme::Light);
+    for (id, view) in [(keymap::VIEW_GROUPED, InboxView::Grouped), (keymap::VIEW_LIST, InboxView::List), (keymap::VIEW_SMART, InboxView::Smart)] {
+        assert!(harness.state().can_run(id), "{id}");
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, id);
+        harness.run();
+        assert_eq!(harness.state().mailbox().inbox_view(), view, "{id}");
+    }
+    // Rebindable: a key given to one runs it.
+    harness.state_mut().keymap_mut().bind(keymap::VIEW_LIST, KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::L));
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::L);
+    harness.run();
+    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::List);
+}
+
+/// A press of the pointer on the window's button called `label` off the settings (the index).
+fn press_off_the_settings(harness: &mut Harness<'static, InboxApp>, label: &str) {
+    let settings = harness.get_by_role_and_label(Role::Pane, "Settings").rect();
+    let at = harness
+        .query_all_by_role(Role::Button)
+        .find(|node| {
+            !settings.contains_rect(node.rect()) && node.accesskit_node().label().is_some_and(|name| name == label || name.starts_with(label))
+        })
+        .unwrap_or_else(|| panic!("no {label} off the settings"))
+        .rect()
+        .center();
+    harness.hover_at(at);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+}
+
+#[test]
+fn while_a_key_is_waited_for_every_row_of_the_index_ends_the_wait_and_acts() {
+    // A mailbox: the wait ends and the mail shows it.
+    let mut harness = busy_sheet();
+    press_off_the_settings(&mut harness, "Sent");
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), crate::mailbox::Place::View(inboxcraft_model::Role::Sent), "the mailbox shows");
+    assert_left_kept(&mut harness);
+    // The account picker's choice: the wait ends, the settings are left and the mail narrows.
+    let mut harness = busy_sheet();
+    press_off_the_settings(&mut harness, "Show mail of");
+    harness.run();
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio, holloway.studio@example.org").click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().mailbox().narrowed(), Some(2), "the mail narrows");
+    assert_left_kept(&mut harness);
+    // An account row: the wait ends and its folders open; the settings stay, as the row shows no place.
+    let mut harness = busy_sheet();
+    press_off_the_settings(&mut harness, "Personal");
+    harness.run();
+    assert!(harness.state().settings().is_open(), "an account row shows no place");
+    assert_eq!(harness.state().settings().capturing(), None, "the wait ends");
+    assert_eq!(harness.state().keymap(), &Keymap::default(), "and no key was given");
 }

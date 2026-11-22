@@ -3,6 +3,7 @@
 
 //! The native backend: SQLite with a full-text index, the message sources as files next to it.
 
+mod keeper;
 mod local;
 mod private;
 mod schema;
@@ -12,12 +13,18 @@ mod tests;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
+use crate::KeepWake;
 use inboxcraft_model::{
     Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId,
-    FolderState, Job, Message, MessageId, MessageState, Outgoing, Scheduled, Sender,
+    FolderState, Job, Message, MessageId, MessageRef, MessageState, Outgoing, Scheduled, Sender,
 };
 use inboxcraft_time::Timestamp;
+use keeper::Keeper;
+#[cfg(any(test, feature = "test-hooks"))]
+pub use keeper::{KeepHold, KeeperHooks};
 use rusqlite::config::DbConfig;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
 pub use schema::SCHEMA_VERSION;
@@ -43,11 +50,41 @@ pub struct Sqlite {
     conn: Connection,
     sources: PathBuf,
     config: StoreConfig,
+    /// The database file, for the draft keeper's own connection.
+    database: PathBuf,
+    /// The draft keeper, once [`Sqlite::keep_drafts_behind`] started it.
+    keeper: Option<Keeper>,
 }
 
+/// How long a batch that is not only drafts kept waits for the drafts the keeper still writes: they come first.
+const SETTLE_WAIT: Duration = Duration::from_secs(3);
+
+/// A connection to `database` as the store keeps it: no URI names, defensive, the schema not trusted (nothing the file
+/// holds may call a function with side effects or write the schema: the file is outside data), WAL,
+/// `synchronous=FULL`, foreign keys on, removed pages zeroed.
+fn connect(database: &Path) -> Result<Connection, StoreError> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let conn = Connection::open_with_flags(database, flags)?;
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
+    conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))?;
+    conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;")?;
+    Ok(conn)
+}
+
+/// A database failure by its kind, told apart by the database's result code, never by its words; the words are kept,
+/// cut, as the detail.
 impl From<rusqlite::Error> for StoreError {
     fn from(error: rusqlite::Error) -> Self {
-        Self::Database(error.to_string())
+        use rusqlite::ErrorCode;
+        let detail: String = error.to_string().chars().filter(|c| !c.is_control()).take(crate::MAX_ERROR_DETAIL).collect();
+        match error.sqlite_error_code() {
+            Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => Self::DatabaseBusy(detail),
+            Some(ErrorCode::DiskFull) => Self::DatabaseFull(detail),
+            Some(ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase) => Self::DatabaseDamaged(detail),
+            Some(ErrorCode::ConstraintViolation) => Self::DatabaseRefused(detail),
+            _ => Self::Database(detail),
+        }
     }
 }
 
@@ -87,19 +124,140 @@ impl Sqlite {
         let (wal, shm) = (dir.join(format!("{DATABASE_FILE}-wal")), dir.join(format!("{DATABASE_FILE}-shm")));
         private::tighten(&[dir, &sources], &[&database, &wal, &shm])?;
         drop(private::create_file(&database, false)?);
-        // No URI names, and nothing the file holds (triggers, views, schema) may call a function with side effects
-        // or write the schema: the file is outside data.
-        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        let mut conn = Connection::open_with_flags(database, flags)?;
-        conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
-        conn.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
-        conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))?;
-        conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;")?;
+        let mut conn = connect(&database)?;
         schema::migrate(&mut conn)?;
         scrub(&conn)?;
         let kept = conn.prepare("SELECT id FROM body")?.query_map([], |row| row.get(0))?.collect::<Result<BTreeSet<i64>, _>>()?;
         sources::sweep(&sources, &kept)?;
-        Ok(Self { conn, sources, config })
+        Ok(Self { conn, sources, config, database, keeper: None })
+    }
+
+    /// From now on a batch that only changes drafts the store holds, each still from its account, is written behind
+    /// by the draft keeper, a thread with a connection of its own, so that [`Storage::apply`] returns at once: in
+    /// order, the newest of each draft, one write at a time, each with `synchronous=FULL`. The store's reads see a
+    /// draft kept from the moment it was kept. A write that fails keeps the draft's newest text in memory, is told
+    /// once by [`Storage::failed_keep`], listed by [`Storage::unkept`] and tried again 1 s, 2 s, 4 s … at most 30 s
+    /// apart until it lands or the draft is removed; meanwhile every other batch that names the draft is refused
+    /// ([`StoreError::DraftNotKept`]), except one that removes it. Any other batch first waits (at most 3 s) for the
+    /// keeper, so it comes after every keep. The end of the store waits at most 3 s for what is still to be written,
+    /// unless [`Storage::settle`] already waited. A batch that makes a draft, moves it to another account or does
+    /// anything else is written at once, as before. If the keeper's thread ever ends, the store writes what it held
+    /// and every later draft on the caller's thread, and says so once on standard error.
+    ///
+    /// # Errors
+    ///
+    /// The keeper's connection or thread could not be made; the store then writes everything at once.
+    pub fn keep_drafts_behind(&mut self) -> Result<(), StoreError> {
+        if self.keeper.is_none() {
+            self.keeper = Some(Keeper::start(&self.database)?);
+        }
+        Ok(())
+    }
+
+    /// Holds the draft keeper until the hold is dropped: what is kept meanwhile waits (tests). `None` without a
+    /// keeper.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn hold_keeps(&self) -> Option<KeepHold> {
+        self.keeper.as_ref().map(|keeper| keeper.hooks().hold())
+    }
+
+    /// The draft keeper's test hooks, as a handle that outlives a borrow of the store (tests). `None` without a
+    /// keeper.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn keeper_hooks(&self) -> Option<KeeperHooks> {
+        self.keeper.as_ref().map(Keeper::hooks)
+    }
+
+    /// Makes every write of the draft keeper fail while `refuse` is on, as a full or failing disk would (tests).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn refuse_keeps(&self, refuse: bool) {
+        if let Some(keeper) = &self.keeper {
+            keeper.hooks().refuse(refuse);
+        }
+    }
+
+    /// How many writes the draft keeper started (tests); 0 without a keeper.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn keeper_tries(&self) -> u64 {
+        self.keeper.as_ref().map_or(0, Keeper::tries)
+    }
+
+    /// Makes an open on this thread fail after indexing the links of `after` messages, as a kill half-way through
+    /// the migration would; `None` lets it finish (tests).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn stop_link_indexing_after(after: Option<usize>) {
+        schema::FAIL_LINKS_AFTER.with(|stop| stop.set(after));
+    }
+
+    /// Ends the draft keeper's thread as if it had died (tests).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn stop_keeper(&self) {
+        if let Some(keeper) = &self.keeper {
+            keeper.stop();
+        }
+    }
+
+    /// A keeper whose thread ended: what it held is written on this connection, and the store writes every draft at
+    /// once from now on, said once on standard error. Until what it held is written the keeper stays, its drafts
+    /// with it.
+    fn outlive_keeper(&mut self) -> Result<(), StoreError> {
+        if !self.write_what_a_gone_keeper_held()? {
+            return Ok(());
+        }
+        eprintln!("inboxcraft: the draft keeper stopped; drafts are written on the window's thread from now on");
+        self.keeper = None;
+        Ok(())
+    }
+
+    /// When the keeper's thread ended, writes what it held on this connection and forgets it there; whether it ended.
+    ///
+    /// # Errors
+    ///
+    /// What it held could not be written: the keeper keeps it, and the disk holds those drafts as they were before.
+    fn write_what_a_gone_keeper_held(&self) -> Result<bool, StoreError> {
+        let Some(keeper) = self.keeper.as_ref().filter(|keeper| keeper.is_gone()) else { return Ok(false) };
+        let held = keeper.all_held();
+        if !held.is_empty() {
+            let tx = self.conn.unchecked_transaction()?;
+            for draft in &held {
+                local::put_draft(&tx, draft)?;
+            }
+            tx.commit()?;
+            for draft in &held {
+                keeper.forget(draft.id);
+            }
+        }
+        Ok(true)
+    }
+
+    /// The drafts of `batch` when the keeper may write it behind: only drafts, every one held by the store from the
+    /// same account.
+    fn behind(&self, batch: &Batch) -> Result<Option<Vec<Arc<Draft>>>, StoreError> {
+        if self.keeper.is_none() || batch.is_empty() {
+            return Ok(None);
+        }
+        let mut drafts = Vec::new();
+        for each in batch.changes() {
+            let Change::PutDraft(draft) = each else { return Ok(None) };
+            let Some(id) = key(draft.id.get()) else { return Ok(None) };
+            let held: Option<i64> = self.conn.query_row("SELECT account FROM draft WHERE id = ?1", [id], |row| row.get(0)).optional()?;
+            if held.is_none() || held != key(draft.account.get()) {
+                return Ok(None);
+            }
+            drafts.push(Arc::new(draft.clone()));
+        }
+        Ok(Some(drafts))
+    }
+
+    /// The draft `id` as the store holds it: the keep that waits for the disk, or the database's.
+    fn held_draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError> {
+        if let Some(draft) = self.keeper.as_ref().and_then(|keeper| keeper.held(id)) {
+            return Ok(Some(Draft::clone(&draft)));
+        }
+        self.one("SELECT record FROM draft WHERE id = ?1", [key(id.get())])
     }
 
     /// The schema version of the open database.
@@ -123,7 +281,7 @@ impl Sqlite {
         id.ok_or(StoreError::Corrupt("the store's id"))
     }
 
-    fn entries(&self, filter: &str, key: i64) -> Result<Vec<Entry>, StoreError> {
+    fn entries(&self, filter: &str, key: Option<i64>) -> Result<Vec<Entry>, StoreError> {
         let sql =
             format!("SELECT record, opened, EXISTS (SELECT 1 FROM body WHERE body.message = message.id) FROM message WHERE {filter} ORDER BY uid");
         let mut statement = self.conn.prepare(&sql)?;
@@ -161,9 +319,54 @@ fn phrase(words: &[String]) -> Option<String> {
     (!words.is_empty()).then(|| format!("\"{}\"", words.join(" ").replace('"', "\"\"")))
 }
 
-/// An id as SQLite stores it.
-fn key(id: u64) -> Result<i64, StoreError> {
-    i64::try_from(id).map_err(|_| StoreError::Database(format!("id {id} is out of range")))
+/// The draft a change names, if one.
+fn drafted(change: &Change) -> Option<DraftId> {
+    match change {
+        Change::PutDraft(draft) => Some(draft.id),
+        Change::RemoveDraft(id) | Change::RemoveOutgoing(id) => Some(*id),
+        Change::PutOutgoing(outgoing) => Some(outgoing.draft),
+        Change::PutScheduled(Scheduled { what: inboxcraft_model::Due::Send(id), .. }) => Some(*id),
+        _ => None,
+    }
+}
+
+/// Whether `batch` removes draft `id`, itself or with its account, as `keeper` holds it.
+fn removes(batch: &Batch, id: DraftId, keeper: &Keeper) -> bool {
+    let account = keeper.held(id).map(|draft| draft.account);
+    batch.changes().iter().any(|change| match change {
+        Change::RemoveDraft(removed) => *removed == id,
+        Change::RemoveAccount(removed) => Some(*removed) == account,
+        _ => false,
+    })
+}
+
+/// The newest drafts of account `?1`, at most `?2`, in the order of the `draft_newest` index.
+const NEWEST_DRAFTS: &str = "SELECT record FROM draft WHERE account = ?1 ORDER BY saved DESC, saved_nanos DESC, id DESC LIMIT ?2";
+
+/// An id as SQLite looks it up: `None` past `i64::MAX`, which no key can be. `None` binds as NULL, and `= NULL` is
+/// true for no row whatever the file holds (a negative key in a damaged file too), so the lookup finds nothing, as for
+/// an unknown id: a read gives nothing, a change that needs the thing gives the kind's `Unknown…` error and a removal
+/// removes nothing. No caller has to tell the two apart.
+///
+/// Bind it only in `= ?n`: `?n IS NULL` reads NULL as "no filter" ([`Storage::search`] answers such a filter
+/// itself). A value written as a reference to another row is the key read back from that row by the existence check
+/// before the write ([`exists`], `local::held`, [`folder_account`]), never this.
+fn key(id: u64) -> Option<i64> {
+    i64::try_from(id).ok()
+}
+
+/// A search filter on `id`: `None` when it can match nothing (an id no key can be), else the value for
+/// `?n IS NULL OR column = ?n`, `Some(None)` for no filter.
+fn filter(id: Option<u64>) -> Option<Option<i64>> {
+    match id {
+        None => Some(None),
+        Some(id) => key(id).map(Some),
+    }
+}
+
+/// A record's own id as SQLite stores it; [`StoreError::IdOutOfRange`] past `i64::MAX`.
+fn stored(id: u64) -> Result<i64, StoreError> {
+    i64::try_from(id).map_err(|_| StoreError::IdOutOfRange(id))
 }
 
 fn json<T: Serialize>(value: &T) -> Result<String, StoreError> {
@@ -180,18 +383,17 @@ fn parse<T: DeserializeOwned>(text: &str) -> Result<T, StoreError> {
 
 /// The account a held folder belongs to.
 fn folder_account(tx: &Transaction<'_>, folder: FolderId) -> Result<Option<i64>, StoreError> {
-    Ok(tx.query_row("SELECT account FROM folder WHERE id = ?1", [key(folder.get())?], |row| row.get(0)).optional()?)
+    Ok(tx.query_row("SELECT account FROM folder WHERE id = ?1", [key(folder.get())], |row| row.get(0)).optional()?)
 }
 
-/// The key of a held message.
+/// The key of a held message, as its row holds it.
 fn exists(tx: &Transaction<'_>, id: MessageId) -> Result<i64, StoreError> {
-    let held = key(id.get())?;
-    let found = tx.query_row("SELECT 1 FROM message WHERE id = ?1", [held], |_| Ok(())).optional()?;
-    found.map(|()| held).ok_or(StoreError::UnknownMessage(id))
+    let found = tx.query_row("SELECT id FROM message WHERE id = ?1", [key(id.get())], |row| row.get(0)).optional()?;
+    found.ok_or(StoreError::UnknownMessage(id))
 }
 
 /// The body rows (source files) below the rows `filter` picks, to remove once the batch commits.
-fn drop_bodies(tx: &Transaction<'_>, filter: &str, id: i64, files: &mut Files) -> Result<(), StoreError> {
+fn drop_bodies(tx: &Transaction<'_>, filter: &str, id: Option<i64>, files: &mut Files) -> Result<(), StoreError> {
     let sql = format!("SELECT body.id FROM body JOIN message ON message.id = body.message WHERE {filter}");
     let mut statement = tx.prepare(&sql)?;
     for row in statement.query_map([id], |row| row.get(0))? {
@@ -218,40 +420,41 @@ fn change(tx: &Transaction<'_>, sources: &Path, change: &Change, files: &mut Fil
         Change::PutAccount(account) => {
             tx.execute(
                 "INSERT INTO account (id, record) VALUES (?1, ?2) ON CONFLICT (id) DO UPDATE SET record = excluded.record",
-                params![key(account.id().get())?, json(account)?],
+                params![stored(account.id().get())?, json(account)?],
             )?;
         }
         Change::RemoveAccount(id) => {
-            let id = key(id.get())?;
+            let id = key(id.get());
             drop_bodies(tx, "message.account = ?1", id, files)?;
             tx.execute("DELETE FROM account WHERE id = ?1", [id])?;
         }
         Change::PutFolder(folder) => put_folder(tx, folder)?,
         Change::RemoveFolder(id) => {
-            let id = key(id.get())?;
+            let id = key(id.get());
             drop_bodies(tx, "message.folder = ?1", id, files)?;
             tx.execute("DELETE FROM folder WHERE id = ?1", [id])?;
         }
         Change::SetFolderState(id, state) => {
-            if tx.execute("UPDATE folder SET state = ?2 WHERE id = ?1", params![key(id.get())?, json(state)?])? == 0 {
+            if tx.execute("UPDATE folder SET state = ?2 WHERE id = ?1", params![key(id.get()), json(state)?])? == 0 {
                 return Err(StoreError::UnknownFolder(*id));
             }
         }
         Change::PutMessage(message) => put_message(tx, message)?,
         Change::SetFlags(id, flags) => {
-            let id_key = key(id.get())?;
-            let held: Option<String> = tx.query_row("SELECT record FROM message WHERE id = ?1", [id_key], record).optional()?;
-            let message: Message = parse(&held.ok_or(StoreError::UnknownMessage(*id))?)?;
-            tx.execute("UPDATE message SET record = ?2 WHERE id = ?1", params![id_key, json(&with_flags(&message, flags))?])?;
+            let held: Option<(i64, String)> =
+                tx.query_row("SELECT id, record FROM message WHERE id = ?1", [key(id.get())], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
+            let (row, text) = held.ok_or(StoreError::UnknownMessage(*id))?;
+            let message: Message = parse(&text)?;
+            tx.execute("UPDATE message SET record = ?2 WHERE id = ?1", params![row, json(&with_flags(&message, flags))?])?;
         }
         Change::RemoveMessage(id) => {
-            let id = key(id.get())?;
+            let id = key(id.get());
             drop_bodies(tx, "message.id = ?1", id, files)?;
             tx.execute("DELETE FROM message WHERE id = ?1", [id])?;
         }
         Change::PutBody(id, body) => put_body(tx, sources, exists(tx, *id)?, body, files)?,
         Change::RemoveBody(id) => {
-            let id = key(id.get())?;
+            let id = key(id.get());
             drop_bodies(tx, "message.id = ?1", id, files)?;
             tx.execute("DELETE FROM body WHERE message = ?1", [id])?;
         }
@@ -283,32 +486,34 @@ fn change(tx: &Transaction<'_>, sources: &Path, change: &Change, files: &mut Fil
 }
 
 fn put_folder(tx: &Transaction<'_>, folder: &Folder) -> Result<(), StoreError> {
-    let account = key(folder.account().get())?;
-    if tx.query_row("SELECT id FROM account WHERE id = ?1", [account], |row| row.get::<_, i64>(0)).optional()?.is_none() {
-        return Err(StoreError::UnknownAccount(folder.account()));
-    }
+    let held = tx.query_row("SELECT id FROM account WHERE id = ?1", [key(folder.account().get())], |row| row.get::<_, i64>(0)).optional()?;
+    let Some(account) = held else { return Err(StoreError::UnknownAccount(folder.account())) };
     if folder_account(tx, folder.id())?.is_some_and(|held| held != account) {
         return Err(StoreError::WrongAccount { folder: folder.id(), account: folder.account() });
     }
     tx.execute(
         "INSERT INTO folder (id, account, record) VALUES (?1, ?2, ?3) ON CONFLICT (id) DO UPDATE SET record = excluded.record",
-        params![key(folder.id().get())?, account, json(folder)?],
+        params![stored(folder.id().get())?, account, json(folder)?],
     )?;
     Ok(())
 }
 
+/// The messages that name the link `?1`, by id: those [`Storage::linked`] gives.
+/// One message a link names, read by [`Storage::linked`].
+const LINKED: &str = "SELECT record, opened, EXISTS (SELECT 1 FROM body WHERE body.message = message.id) FROM message WHERE id = ?1";
+
 fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError> {
     let folder = message.folder();
-    match folder_account(tx, folder)? {
+    let account = match folder_account(tx, folder)? {
         None => return Err(StoreError::UnknownFolder(folder)),
-        Some(account) if account != key(message.account().get())? => {
+        Some(account) if Some(account) != key(message.account().get()) => {
             return Err(StoreError::WrongAccount { folder, account: message.account() });
         }
-        Some(_) => {}
-    }
-    let (id, uid) = (key(message.id().get())?, message.summary().uid());
+        Some(account) => account,
+    };
+    let (id, folder_key, uid) = (stored(message.id().get())?, stored(folder.get())?, message.summary().uid());
     let other: Option<i64> =
-        tx.query_row("SELECT id FROM message WHERE folder = ?1 AND uid = ?2", params![key(folder.get())?, uid.get()], |row| row.get(0)).optional()?;
+        tx.query_row("SELECT id FROM message WHERE folder = ?1 AND uid = ?2", params![folder_key, uid.get()], |row| row.get(0)).optional()?;
     if other.is_some_and(|other| other != id) {
         return Err(StoreError::DuplicateUid { folder, uid });
     }
@@ -319,23 +524,26 @@ fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError
          ON CONFLICT (id) DO UPDATE SET account = excluded.account, folder = excluded.folder, uid = excluded.uid,
              date = excluded.date, from_text = excluded.from_text, to_text = excluded.to_text,
              subject_text = excluded.subject_text, record = excluded.record",
-        params![
-            id,
-            key(message.account().get())?,
-            key(folder.get())?,
-            uid.get(),
-            fields.date,
-            fields.from,
-            fields.to,
-            fields.subject,
-            json(message)?
-        ],
+        params![id, account, folder_key, uid.get(), fields.date, fields.from, fields.to, fields.subject, json(message)?],
     )?;
+    tx.execute("DELETE FROM message_link WHERE message = ?1", [id])?;
+    Ok(put_links(&mut tx.prepare(PUT_LINK)?, id, message)?)
+}
+
+/// One link of a message into the index of links, prepared once for all the links of a message, or of every message
+/// a migration indexes.
+pub(super) const PUT_LINK: &str = "INSERT OR IGNORE INTO message_link (link, message) VALUES (?1, ?2)";
+
+/// The links `message` (row `id`) names, into the index of links by `statement` ([`PUT_LINK`]): each once.
+pub(super) fn put_links(statement: &mut rusqlite::Statement<'_>, id: i64, message: &Message) -> rusqlite::Result<()> {
+    for link in inboxcraft_model::links(message) {
+        statement.execute(params![link.as_str(), id])?;
+    }
     Ok(())
 }
 
 fn put_body(tx: &Transaction<'_>, sources: &Path, message: i64, body: &Body, files: &mut Files) -> Result<(), StoreError> {
-    drop_bodies(tx, "message.id = ?1", message, files)?;
+    drop_bodies(tx, "message.id = ?1", Some(message), files)?;
     files.removed |= !files.dropped.is_empty();
     tx.execute("DELETE FROM body WHERE message = ?1", [message])?;
     let length = i64::try_from(body.source().len()).map_err(|_| StoreError::TooLarge)?;
@@ -353,6 +561,30 @@ impl Storage for Sqlite {
     }
 
     fn apply(&mut self, batch: &Batch) -> Result<(), StoreError> {
+        self.outlive_keeper()?;
+        if let Some(drafts) = self.behind(batch)?
+            && let Some(keeper) = &self.keeper
+        {
+            keeper.keep(drafts);
+            return Ok(());
+        }
+        // Every keep comes before this batch, and no new try of a failed one starts while it is written: a send or a
+        // discard after a keep finds the draft as kept, and a discarded draft is never written again.
+        let gate = match &self.keeper {
+            Some(keeper) => {
+                let named: Vec<DraftId> = batch.changes().iter().filter_map(drafted).collect();
+                // A batch on a draft whose write failed first gives that write one more try.
+                keeper.retry(&named);
+                let gate = keeper.gate(SETTLE_WAIT)?;
+                // Still not on the disk: the batch would act on the draft as it was before. A batch that removes the
+                // draft (a discard, its account removed) goes on.
+                if let Some(id) = named.iter().copied().find(|id| keeper.failing(*id).is_some() && !removes(batch, *id, keeper)) {
+                    return Err(StoreError::DraftNotKept(id));
+                }
+                Some(gate)
+            }
+            None => None,
+        };
         let mut files = Files::default();
         let sources = &self.sources;
         let applied = self.conn.transaction().map_err(StoreError::from).and_then(|tx| {
@@ -374,6 +606,16 @@ impl Storage for Sqlite {
         for id in remove {
             sources::remove(sources, id);
         }
+        if result.is_ok()
+            && let Some(keeper) = &self.keeper
+        {
+            for draft in keeper.all_held() {
+                if removes(batch, draft.id, keeper) {
+                    keeper.forget(draft.id);
+                }
+            }
+        }
+        drop(gate);
         result
     }
 
@@ -385,22 +627,46 @@ impl Storage for Sqlite {
 
     fn folders(&self, account: AccountId) -> Result<Vec<Folder>, StoreError> {
         let mut statement = self.conn.prepare("SELECT record FROM folder WHERE account = ?1 ORDER BY id")?;
-        let rows = statement.query_map([key(account.get())?], record)?;
+        let rows = statement.query_map([key(account.get())], record)?;
         rows.map(|row| parse(&row?)).collect()
     }
 
     fn folder_state(&self, folder: FolderId) -> Result<Option<FolderState>, StoreError> {
         let state: Option<Option<String>> =
-            self.conn.query_row("SELECT state FROM folder WHERE id = ?1", [key(folder.get())?], |row| row.get(0)).optional()?;
+            self.conn.query_row("SELECT state FROM folder WHERE id = ?1", [key(folder.get())], |row| row.get(0)).optional()?;
         state.flatten().map(|state| parse(&state)).transpose()
     }
 
     fn messages(&self, folder: FolderId) -> Result<Vec<Entry>, StoreError> {
-        self.entries("folder = ?1", key(folder.get())?)
+        self.entries("folder = ?1", key(folder.get()))
     }
 
     fn message(&self, id: MessageId) -> Result<Option<Entry>, StoreError> {
-        Ok(self.entries("id = ?1", key(id.get())?)?.into_iter().next())
+        Ok(self.entries("id = ?1", key(id.get()))?.into_iter().next())
+    }
+
+    fn linked(&self, link: &MessageRef, known: &BTreeSet<MessageId>) -> Result<Vec<Entry>, StoreError> {
+        // The ids from the index alone (its primary key), then the record of each one not known yet.
+        let ids: Vec<i64> = {
+            let mut statement = self.conn.prepare("SELECT message FROM message_link WHERE link = ?1 ORDER BY message")?;
+            let rows = statement.query_map([link.as_str()], |row| row.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let mut statement = self.conn.prepare(LINKED)?;
+        let mut found = Vec::new();
+        for id in ids {
+            if u64::try_from(id).is_ok_and(|id| known.contains(&MessageId::new(id))) {
+                continue;
+            }
+            let row = statement.query_row([id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?))).optional()?;
+            let Some((record, opened, has_body)) = row else { continue };
+            let entry = Entry::new(serde_json::from_str(&record)?, opened, has_body);
+            // The index is written with the record; a record that no longer names the link is not linked by it.
+            if inboxcraft_model::links(entry.message()).any(|named| named == link) {
+                found.push(entry);
+            }
+        }
+        Ok(found)
     }
 
     fn body(&self, id: MessageId) -> Result<Option<Body>, StoreError> {
@@ -408,7 +674,7 @@ impl Storage for Sqlite {
             .conn
             .query_row(
                 "SELECT body.id, body.length, body_text.text FROM body JOIN body_text ON body_text.rowid = body.message WHERE body.message = ?1",
-                [key(id.get())?],
+                [key(id.get())],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
@@ -417,8 +683,10 @@ impl Storage for Sqlite {
     }
 
     fn search(&self, search: &Search) -> Result<Vec<MessageId>, StoreError> {
-        let account = search.account().map(|account| key(account.get())).transpose()?;
-        let folder = search.folder().map(|folder| key(folder.get())).transpose()?;
+        // A filter on an id no key can be matches nothing; bound as NULL it would match everything.
+        let (Some(account), Some(folder)) = (filter(search.account().map(AccountId::get)), filter(search.folder().map(FolderId::get))) else {
+            return Ok(Vec::new());
+        };
         let text = phrase(search.text());
         let limit = i64::try_from(search.limit()).unwrap_or(i64::MAX);
         self.ids(
@@ -438,11 +706,66 @@ impl Storage for Sqlite {
     }
 
     fn drafts(&self, account: AccountId) -> Result<Vec<Draft>, StoreError> {
-        self.records("SELECT record FROM draft WHERE account = ?1 ORDER BY id", [key(account.get())?])
+        let mut drafts: Vec<Draft> = self.records("SELECT record FROM draft WHERE account = ?1 ORDER BY id", [key(account.get())])?;
+        // A keep still on its way takes its draft's place: only a draft the store holds is kept behind.
+        if let Some(keeper) = &self.keeper {
+            for held in keeper.held_of(account) {
+                if let Some(draft) = drafts.iter_mut().find(|draft| draft.id == held.id) {
+                    *draft = Draft::clone(&held);
+                }
+            }
+        }
+        Ok(drafts)
+    }
+
+    fn newest_drafts(&self, of: AccountId, limit: usize) -> Result<(u64, Vec<Draft>), StoreError> {
+        let account = key(of.get());
+        let total: i64 = self.conn.query_row("SELECT count(*) FROM draft WHERE account = ?1", [account], |row| row.get(0))?;
+        let total = u64::try_from(total).unwrap_or(0);
+        let held = self.keeper.as_ref().map(|keeper| keeper.held_of(of)).unwrap_or_default();
+        // The keeps on their way are newer than the disk says: as many more rows as there are keeps hold every draft
+        // that is not one of them and is among the newest `limit`.
+        let wanted = limit.saturating_add(held.len());
+        // `draft_newest` holds this order, so the scan stops after `wanted` rows.
+        let mut drafts: Vec<Draft> = self.records(NEWEST_DRAFTS, params![account, i64::try_from(wanted).unwrap_or(i64::MAX)])?;
+        if held.is_empty() {
+            return Ok((total, drafts));
+        }
+        drafts.retain(|draft| !held.iter().any(|kept| kept.id == draft.id));
+        drafts.extend(held.iter().map(|kept| Draft::clone(kept)));
+        drafts.sort_by(|a, b| b.saved.cmp(&a.saved).then(b.id.cmp(&a.id)));
+        drafts.truncate(limit);
+        Ok((total, drafts))
     }
 
     fn draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError> {
-        self.one("SELECT record FROM draft WHERE id = ?1", [key(id.get())?])
+        self.held_draft(id)
+    }
+
+    fn settle(&self, within: Duration) -> Result<(), StoreError> {
+        // A keeper whose thread ended writes nothing more: what it held is written here, or the wait says why not.
+        if self.write_what_a_gone_keeper_held()? {
+            return Ok(());
+        }
+        self.keeper.as_ref().map_or(Ok(()), |keeper| keeper.settle_all(within))
+    }
+
+    fn failed_keep(&self) -> Option<(DraftId, StoreError)> {
+        self.keeper.as_ref().and_then(Keeper::take_failed)
+    }
+
+    fn unkept(&self) -> Vec<(DraftId, StoreError)> {
+        self.keeper.as_ref().map(Keeper::unkept).unwrap_or_default()
+    }
+
+    fn keeps(&self) -> u64 {
+        self.keeper.as_ref().map_or(0, Keeper::keeps)
+    }
+
+    fn wake_on_keep(&self, wake: KeepWake) {
+        if let Some(keeper) = &self.keeper {
+            keeper.wake_on(wake);
+        }
     }
 
     fn outbox(&self) -> Result<Vec<Outgoing>, StoreError> {
@@ -462,7 +785,7 @@ impl Storage for Sqlite {
     }
 
     fn message_state(&self, id: MessageId) -> Result<MessageState, StoreError> {
-        Ok(self.one("SELECT record FROM message_state WHERE message = ?1", [key(id.get())?])?.unwrap_or_default())
+        Ok(self.one("SELECT record FROM message_state WHERE message = ?1", [key(id.get())])?.unwrap_or_default())
     }
 
     fn message_states(&self) -> Result<Vec<(MessageId, MessageState)>, StoreError> {
@@ -477,29 +800,29 @@ impl Storage for Sqlite {
     }
 
     fn calendars(&self, account: AccountId) -> Result<Vec<Calendar>, StoreError> {
-        self.records("SELECT record FROM calendar WHERE account = ?1 ORDER BY id", [key(account.get())?])
+        self.records("SELECT record FROM calendar WHERE account = ?1 ORDER BY id", [key(account.get())])
     }
 
     fn sync_token(&self, calendar: CalendarId) -> Result<Option<String>, StoreError> {
         let token: Option<Option<String>> =
-            self.conn.query_row("SELECT sync_token FROM calendar WHERE id = ?1", [key(calendar.get())?], |row| row.get(0)).optional()?;
+            self.conn.query_row("SELECT sync_token FROM calendar WHERE id = ?1", [key(calendar.get())], |row| row.get(0)).optional()?;
         Ok(token.flatten())
     }
 
     fn calendar_events(&self, calendar: CalendarId) -> Result<Vec<CalendarEvent>, StoreError> {
-        self.records("SELECT record FROM calendar_event WHERE calendar = ?1 ORDER BY id", [key(calendar.get())?])
+        self.records("SELECT record FROM calendar_event WHERE calendar = ?1 ORDER BY id", [key(calendar.get())])
     }
 
     fn calendar_event(&self, id: CalendarEventId) -> Result<Option<CalendarEvent>, StoreError> {
-        self.one("SELECT record FROM calendar_event WHERE id = ?1", [key(id.get())?])
+        self.one("SELECT record FROM calendar_event WHERE id = ?1", [key(id.get())])
     }
 
     fn alerts(&self, event: CalendarEventId) -> Result<Vec<Alert>, StoreError> {
-        self.records("SELECT record FROM alert WHERE event = ?1 ORDER BY at, id", [key(event.get())?])
+        self.records("SELECT record FROM alert WHERE event = ?1 ORDER BY at, id", [key(event.get())])
     }
 
     fn alert(&self, id: AlertId) -> Result<Option<Alert>, StoreError> {
-        self.one("SELECT record FROM alert WHERE id = ?1", [key(id.get())?])
+        self.one("SELECT record FROM alert WHERE id = ?1", [key(id.get())])
     }
 
     fn stale_bodies(&self, cutoff: Timestamp) -> Result<Vec<MessageId>, StoreError> {
@@ -516,7 +839,7 @@ impl Storage for Sqlite {
              WHERE folder = ?1 AND NOT EXISTS (SELECT 1 FROM body WHERE body.message = message.id)
                AND (opened = 1 OR date IS NULL OR date >= ?2)
              ORDER BY uid",
-            params![key(folder.get())?, cutoff.unix_seconds()],
+            params![key(folder.get()), cutoff.unix_seconds()],
         )
     }
 }

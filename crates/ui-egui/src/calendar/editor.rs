@@ -3,27 +3,132 @@
 
 //! The event editor's form: a new event (`event.create`) or an event picked on the screen (`event.update`), with its
 //! title, its start and end typed as `2026-11-06 13:00` (a day alone, `2026-11-06`, for an all-day event), all-day,
-//! private, a repeat preset, busy or free, and the guests' addresses. An edit sends only what changed. Editing an
+//! private, a repeat preset, busy or free, the alert, and the guests' addresses. An edit sends only what changed. Editing an
 //! event that has guests asks whether to tell them of the change; the default is not to. A new event asks nothing:
 //! inviting the guests is the invitations' work.
 //!
 //! The times are the computer's wall clock at its offset, sent to the engine in UTC. Changing the times of an
 //! occurrence of a repeating event moves the whole series to them.
 
+use inboxcraft_engine::all_day_alert::AllDayAlert;
 use inboxcraft_time::{CivilDateTime, Offset};
 use serde_json::{Map, Value, json};
 
-use super::{Day, EventRow, Moment};
+use super::{Day, EventRow, MAX_DESCRIPTION, Moment};
 use crate::tr;
 
 /// The repeat presets the editor offers, as `event.repeats` names them.
 pub const REPEATS: [&str; 6] = ["none", "daily", "weekdays", "weekly", "monthly", "yearly"];
+
+/// An event's alert, as `event.list` says it and the Alert field picks it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Alert {
+    /// No alarm of its own: the default lead rings, ten minutes before a timed event and a day before an all-day one.
+    #[default]
+    Default,
+    /// No alert.
+    None,
+    /// This many minutes before the start.
+    Before(u32),
+    /// An all-day event's alarm at one of the hours the setting writes, kept as it is.
+    AllDay(AllDayAlert),
+    /// An alarm the field cannot name (after the start, from the end, at a moment), kept as it is.
+    Custom,
+}
+
+impl Alert {
+    /// The alert `event.list` gives: `null` or nothing, `"none"`, an all-day hour's name, the minutes, or anything else
+    /// as custom.
+    #[must_use]
+    pub fn read(value: Option<&Value>) -> Self {
+        match value {
+            None | Some(Value::Null) => Self::Default,
+            Some(Value::String(word)) if word == "none" => Self::None,
+            Some(Value::String(word)) => AllDayAlert::from_name(word).map_or(Self::Custom, Self::AllDay),
+            Some(value) => value.as_u64().and_then(|minutes| u32::try_from(minutes).ok()).map_or(Self::Custom, Self::Before),
+        }
+    }
+
+    /// What `event.create` and `event.update` take for it; `None` for the default, an all-day hour and a custom alarm,
+    /// which are never sent.
+    fn param(self) -> Option<Value> {
+        match self {
+            Self::None => Some(json!("none")),
+            Self::Before(minutes) => Some(json!(minutes)),
+            Self::Default | Self::AllDay(_) | Self::Custom => None,
+        }
+    }
+}
+
+/// The minutes a timed event's default alert rings before its start, as the engine writes it.
+const TIMED_DEFAULT: u32 = 10;
+
+/// The alerts the Alert field offers.
+pub const ALERTS: [Alert; 11] = [
+    Alert::None,
+    Alert::Before(0),
+    Alert::Before(5),
+    Alert::Before(10),
+    Alert::Before(15),
+    Alert::Before(30),
+    Alert::Before(60),
+    Alert::Before(120),
+    Alert::Before(1440),
+    Alert::Before(2880),
+    Alert::Before(10_080),
+];
+
+/// An alert in words, in its field: `None`, `10 min before`, `1 day before`; the default as the lead it rings with on
+/// a timed event, or on an all-day one at the hour `all_day` names; a lead of a whole number of hours under a day
+/// before an all-day event as the hour the day before it rings at.
+#[must_use]
+pub fn alert_text(alert: Alert, all_day: Option<AllDayAlert>) -> String {
+    const HOUR: u32 = 60;
+    const DAY: u32 = 24 * HOUR;
+    const WEEK: u32 = 7 * DAY;
+    match alert {
+        Alert::Default => match all_day {
+            Some(choice) => all_day_alert_text(choice).to_owned(),
+            None => alert_text(Alert::Before(TIMED_DEFAULT), None),
+        },
+        Alert::Before(minutes) if all_day.is_some() && minutes > 0 && minutes < DAY && minutes % HOUR == 0 => {
+            tr!("{hour}:00 the day before", hour = format!("{:02}", (DAY - minutes) / HOUR))
+        }
+        Alert::AllDay(hour) => all_day_alert_text(hour).to_owned(),
+        Alert::None => tr!("None").to_owned(),
+        Alert::Custom => tr!("Custom").to_owned(),
+        Alert::Before(0) => tr!("At the start").to_owned(),
+        Alert::Before(WEEK) => tr!("1 week before").to_owned(),
+        Alert::Before(minutes) if minutes % WEEK == 0 => tr!("{count} weeks before", count = minutes / WEEK),
+        Alert::Before(DAY) => tr!("1 day before").to_owned(),
+        Alert::Before(minutes) if minutes % DAY == 0 => tr!("{count} days before", count = minutes / DAY),
+        Alert::Before(HOUR) => tr!("1 hour before").to_owned(),
+        Alert::Before(minutes) if minutes % HOUR == 0 => tr!("{count} hours before", count = minutes / HOUR),
+        Alert::Before(minutes) => tr!("{count} min before", count = minutes),
+    }
+}
+
+/// When an all-day event's alert rings, in words: the setting's choices and a new all-day event's default alert.
+#[must_use]
+pub fn all_day_alert_text(choice: AllDayAlert) -> &'static str {
+    match choice {
+        AllDayAlert::DayBefore9 => tr!("09:00 the day before"),
+        AllDayAlert::DayBefore12 => tr!("12:00 the day before"),
+        AllDayAlert::DayBefore18 => tr!("18:00 the day before"),
+        AllDayAlert::OnTheDay9 => tr!("09:00 on the day"),
+    }
+}
 
 /// The longest text a field of the editor takes, in characters.
 pub const MAX_FIELD: usize = 1000;
 
 /// The longest guest list typed, in characters.
 pub const MAX_GUESTS_TEXT: usize = 8000;
+
+/// What the editor says when Esc or a press outside would lose what was typed: every way on from there.
+fn warning() -> &'static str {
+    tr!("What you typed is not saved. Save keeps it; Cancel, or Esc again, throws it away.")
+}
 
 /// A repeat preset in words, on its pill: `Never`, `Weekly`; `Custom` for a repeat the presets do not name.
 #[must_use]
@@ -58,8 +163,12 @@ pub struct Form {
     pub busy: bool,
     /// The repeat preset ([`REPEATS`]), or `custom` for a repeat the presets do not name, kept as it is.
     pub repeat: String,
+    /// The alert; the full editor and the window show it, the small editor does not.
+    pub alert: Alert,
     /// The guests' addresses, separated by commas.
     pub guests: String,
+    /// What the event says about itself, its lines kept.
+    pub description: String,
 }
 
 /// The event editor.
@@ -76,8 +185,23 @@ pub struct Editor {
     notify: bool,
     /// Why the last save was refused.
     problem: Option<String>,
+    /// The link a press in the description copied last, until the status line says so.
+    copied: Option<String>,
+    /// Someone else's event, opened read-only: who organises it (empty when the event does not say).
+    theirs: Option<String>,
+    /// Whether the description read was cut to [`MAX_DESCRIPTION`]: it is then shown, never sent back cut.
+    description_cut: bool,
     /// The list of choices open in the form, when one is.
     menu: Option<Menu>,
+    /// The form and the guests' answer as they were when the editor said the typing is not saved, and whether Esc made
+    /// it say so: an Esc after Esc's warning, with nothing changed since, throws the typing away; any change asks again.
+    warned: Option<(Form, bool, bool)>,
+    /// When an all-day event's alert rings by default, as the calendar last took it from the session: what a new
+    /// all-day event's Alert says it rings with.
+    all_day_alert: AllDayAlert,
+    /// Whether the owner picked an alert in this edit ([`Editor::pick_alert`]): then it is what is saved, whatever
+    /// the switch between timed and all-day would trade it for.
+    alert_picked: bool,
 }
 
 /// A list of choices of the form that opens over it.
@@ -87,6 +211,8 @@ pub enum Menu {
     Repeat,
     /// The calendars, where they do not fit side by side.
     Calendar,
+    /// The alerts, in the full editor and the window.
+    Alert,
 }
 
 impl Editor {
@@ -103,9 +229,25 @@ impl Editor {
             private: false,
             busy: true,
             repeat: REPEATS[0].to_owned(),
+            alert: Alert::Default,
             guests: String::new(),
+            description: String::new(),
         };
-        Self { id: None, was: form.clone(), form, choices, notify: false, problem: None, menu: None }
+        Self {
+            id: None,
+            was: form.clone(),
+            form,
+            choices,
+            notify: false,
+            problem: None,
+            copied: None,
+            theirs: None,
+            description_cut: false,
+            menu: None,
+            warned: None,
+            all_day_alert: AllDayAlert::default(),
+            alert_picked: false,
+        }
     }
 
     /// The occurrence `event` to edit: its times as the screen shows them.
@@ -122,9 +264,64 @@ impl Editor {
             private: event.private,
             busy: event.busy,
             repeat: event.repeat.clone().unwrap_or_else(|| REPEATS[0].to_owned()),
+            alert: event.alert,
             guests: addresses.join(", "),
+            description: event.description.clone(),
         };
-        Self { id: Some(event.id), was: form.clone(), form, choices: Vec::new(), notify: false, problem: None, menu: None }
+        Self {
+            id: Some(event.id),
+            was: form.clone(),
+            form,
+            choices: Vec::new(),
+            notify: false,
+            problem: None,
+            copied: None,
+            theirs: (!event.own).then(|| event.organizer.clone().unwrap_or_default()),
+            description_cut: event.description.chars().count() >= MAX_DESCRIPTION,
+            menu: None,
+            warned: None,
+            all_day_alert: AllDayAlert::default(),
+            alert_picked: false,
+        }
+    }
+
+    /// The day its Starts names, while it names one (`2026-11-06`, with a time after it or not).
+    #[must_use]
+    pub fn day(&self) -> Option<Day> {
+        self.form.start.trim().get(..10).and_then(Day::parse)
+    }
+
+    /// When an all-day event's alert rings by default ([`Editor::set_all_day_alert`]).
+    #[must_use]
+    pub fn all_day_alert(&self) -> AllDayAlert {
+        self.all_day_alert
+    }
+
+    /// Takes when an all-day event's alert rings by default, from the session.
+    pub fn set_all_day_alert(&mut self, choice: AllDayAlert) {
+        self.all_day_alert = choice;
+    }
+
+    /// The alert the field shows: the one the owner picked in this edit, or else what a save writes. An event the edit
+    /// makes all-day trades an alarm still at the timed default (ten minutes) for the setting's hour, and one it makes
+    /// timed trades an alarm at one of the setting's hours for the timed default, as the engine does.
+    #[must_use]
+    pub fn shown_alert(&self) -> Alert {
+        let (form, was) = (&self.form, &self.was);
+        if self.alert_picked || form.alert != was.alert || form.all_day == was.all_day {
+            return form.alert;
+        }
+        match form.alert {
+            Alert::Before(TIMED_DEFAULT) if form.all_day => Alert::Default,
+            Alert::AllDay(_) if !form.all_day => Alert::Before(TIMED_DEFAULT),
+            alert => alert,
+        }
+    }
+
+    /// The owner picks `alert` in the Alert field: it is saved as it is.
+    pub fn pick_alert(&mut self, alert: Alert) {
+        self.form.alert = alert;
+        self.alert_picked = true;
     }
 
     /// The list of choices open in the form, when one is.
@@ -144,10 +341,54 @@ impl Editor {
         self.id
     }
 
-    /// The editor's title: `New event` or `Edit event`.
+    /// The editor's title: `New event`, `Edit event`, or `Event` for someone else's.
     #[must_use]
     pub fn title(&self) -> &'static str {
-        if self.id.is_none() { tr!("New event") } else { tr!("Edit event") }
+        match (self.id, &self.theirs) {
+            (None, _) => tr!("New event"),
+            (Some(_), Some(_)) => tr!("Event"),
+            (Some(_), None) => tr!("Edit event"),
+        }
+    }
+
+    /// Whether the event is someone else's: the editor shows it and changes nothing.
+    #[must_use]
+    pub fn read_only(&self) -> bool {
+        self.theirs.is_some()
+    }
+
+    /// Why someone else's event cannot be changed here, in words: `Teodor Lisk's event. …`; `None` for the owner's.
+    #[must_use]
+    pub fn read_only_note(&self) -> Option<String> {
+        self.theirs.as_ref().map(|name| {
+            if name.trim().is_empty() {
+                tr!("Someone else's event. You can read it here; only the organiser can change it.").to_owned()
+            } else {
+                tr!("{name}'s event. You can read it here; only the organiser can change it.", name = name)
+            }
+        })
+    }
+
+    /// A press in the description at character `at` (with Ctrl or Cmd held: `command`): on a link, while Ctrl or Cmd
+    /// is held or the event is someone else's, the link to copy, kept for [`Self::take_copied`].
+    pub fn press_description(&mut self, at: usize, command: bool) -> Option<String> {
+        if !command && !self.read_only() {
+            return None;
+        }
+        let link = link_at(&self.form.description, at)?;
+        self.copied = Some(link.clone());
+        Some(link)
+    }
+
+    /// The link a press in the description copied, once.
+    pub fn take_copied(&mut self) -> Option<String> {
+        self.copied.take()
+    }
+
+    /// Whether the description can be changed: not in someone else's event, nor one read cut short.
+    #[must_use]
+    pub fn description_editable(&self) -> bool {
+        !self.read_only() && !self.description_cut
     }
 
     /// What the form holds.
@@ -185,7 +426,7 @@ impl Editor {
     /// Whether the editor asks to tell the guests of the change: an edit of an event with guests.
     #[must_use]
     pub fn asks_notify(&self) -> bool {
-        self.id.is_some() && !guests_of(&self.form.guests).is_empty()
+        self.id.is_some() && !self.read_only() && !guests_of(&self.form.guests).is_empty()
     }
 
     /// The question: `Tell the 2 guests about this change?`.
@@ -211,12 +452,40 @@ impl Editor {
     /// Why the last save was refused.
     #[must_use]
     pub fn problem(&self) -> Option<&str> {
-        self.problem.as_deref()
+        if self.warned() { Some(warning()) } else { self.problem.as_deref() }
     }
 
-    /// The save was refused for `why`: the editor stays open and says so.
+    /// Whether anything was typed or changed since the editor opened.
+    #[must_use]
+    pub fn edited(&self) -> bool {
+        self.form != self.was
+    }
+
+    /// Whether the editor said that what was typed is not saved, and nothing changed since.
+    #[must_use]
+    pub fn warned(&self) -> bool {
+        self.warned.as_ref().is_some_and(|(form, notify, _)| *form == self.form && *notify == self.notify)
+    }
+
+    /// Whether Esc made the editor say that what was typed is not saved, and nothing changed since: an Esc now throws
+    /// the typing away.
+    #[must_use]
+    pub fn warned_by_escape(&self) -> bool {
+        self.warned() && self.warned.as_ref().is_some_and(|(_, _, escape)| *escape)
+    }
+
+    /// Esc (`escape`), a press outside, New event or Edit with something typed: the editor stays open and says how to
+    /// keep or throw away the typing. The warning holds until the form changes; only one Esc raised arms the next Esc.
+    pub(crate) fn warn(&mut self, escape: bool) {
+        self.warned = Some((self.form.clone(), self.notify, escape));
+        self.problem = None;
+    }
+
+    /// The save was refused for `why`: the editor stays open and says so; the reason takes the warning's place, and
+    /// the next Esc warns again.
     pub(crate) fn refused(&mut self, why: String) {
         self.problem = Some(why);
+        self.warned = None;
     }
 
     /// The command that saves the form and its parameters, with the times in UTC from the computer's `offset`; `None`
@@ -226,6 +495,9 @@ impl Editor {
     ///
     /// What cannot be read in the form, in words.
     pub fn changes(&self, offset: Offset) -> Result<Option<(&'static str, Value)>, String> {
+        if self.read_only() {
+            return Ok(None);
+        }
         let form = &self.form;
         let times = || -> Result<(String, String), String> {
             if form.all_day {
@@ -252,6 +524,20 @@ impl Editor {
                 "repeat": form.repeat,
                 "guests": guests,
             });
+            let params = match (params, form.alert.param()) {
+                (Value::Object(mut fields), Some(alert)) => {
+                    fields.insert("alert".to_owned(), alert);
+                    Value::Object(fields)
+                }
+                (params, _) => params,
+            };
+            let params = match params {
+                Value::Object(mut fields) if !form.description.trim().is_empty() => {
+                    fields.insert("description".to_owned(), json!(form.description));
+                    Value::Object(fields)
+                }
+                params => params,
+            };
             return Ok(Some(("event.create", params)));
         };
         let was = &self.was;
@@ -276,8 +562,16 @@ impl Editor {
         if form.repeat != was.repeat && REPEATS.contains(&form.repeat.as_str()) {
             params.insert("repeat".to_owned(), json!(form.repeat));
         }
+        if (form.alert != was.alert || (self.alert_picked && form.all_day != was.all_day))
+            && let Some(alert) = form.alert.param()
+        {
+            params.insert("alert".to_owned(), alert);
+        }
         if guests != guests_of(&was.guests) {
             params.insert("guests".to_owned(), json!(guests));
+        }
+        if form.description != was.description && !self.description_cut {
+            params.insert("description".to_owned(), json!(form.description));
         }
         if params.is_empty() {
             return Ok(None);
@@ -288,6 +582,39 @@ impl Editor {
         }
         Ok(Some(("event.update", Value::Object(params))))
     }
+}
+
+/// The longest link the description gives to copy, in bytes.
+pub const MAX_LINK: usize = 2048;
+
+/// The link in `text` at character `at`, as a press there would copy it: a word starting `http://`, `https://` or
+/// `mailto:` (in any letter case), with the brackets, quotes and full stops around it left off; a web link needs a
+/// host. `None` where no link stands, or one longer than [`MAX_LINK`].
+#[must_use]
+pub fn link_at(text: &str, at: usize) -> Option<String> {
+    let (start, word) = text
+        .split(char::is_whitespace)
+        .scan(0_usize, |from, word| {
+            let start = *from;
+            *from = from.saturating_add(word.chars().count()).saturating_add(1);
+            Some((start, word))
+        })
+        .find(|(start, word)| at >= *start && at <= start.saturating_add(word.chars().count()))?;
+    let lead = word.chars().take_while(|c| matches!(c, '(' | '<' | '[' | '"' | '\'' | '«')).count();
+    let link =
+        word.trim_start_matches(['(', '<', '[', '"', '\'', '«']).trim_end_matches(['.', ',', ';', ':', '!', '?', ')', '>', ']', '"', '\'', '»']);
+    let first = start.saturating_add(lead);
+    if at < first || at > first.saturating_add(link.chars().count()) || link.len() > MAX_LINK || link.chars().any(char::is_control) {
+        return None;
+    }
+    let scheme = link.get(..link.find(':')?)?.to_ascii_lowercase();
+    let rest = link.get(scheme.len().saturating_add(1)..)?;
+    let usable = match scheme.as_str() {
+        "http" | "https" => rest.strip_prefix("//").is_some_and(|host| host.split(['/', '?', '#']).next().is_some_and(|host| !host.is_empty())),
+        "mailto" => !rest.is_empty(),
+        _ => false,
+    };
+    usable.then(|| link.to_owned())
 }
 
 /// A wall-clock moment as the form shows it: `2026-11-06 13:00`.
@@ -333,3 +660,10 @@ pub fn guests_of(text: &str) -> Vec<String> {
 #[cfg(test)]
 #[path = "editor_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "editor_alert_tests.rs"]
+mod alert_tests;
+#[cfg(test)]
+#[path = "editor_owner_tests.rs"]
+mod owner_tests;

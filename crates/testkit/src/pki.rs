@@ -150,12 +150,32 @@ impl TestPki {
         let now = OffsetDateTime::now_utc();
         let valid = (now.saturating_sub(time::Duration::hours(1)), now.saturating_add(time::Duration::days(365)));
         let expired = (now.saturating_sub(time::Duration::days(730)), now.saturating_sub(time::Duration::days(365)));
-        let (issuer, host, (not_before, not_after)) = match fault {
+        let (issuer, host, validity) = match fault {
             Some(CertFault::UnknownCa) => (&self.stranger, HOST, valid),
             Some(CertFault::Expired) => (&self.trusted, HOST, expired),
             Some(CertFault::WrongHost) => (&self.trusted, WRONG_HOST, valid),
             None | Some(CertFault::ClockFarOff) => (&self.trusted, HOST, valid),
         };
+        Self::config(issuer, host, validity)
+    }
+
+    /// A server configuration presenting a valid certificate of the test CA for `host`: a made-up name the tests'
+    /// fake resolver sends to a fake server, such as a provider's host.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Certificate`] or [`Error::Tls`] when the certificate or the configuration cannot be made.
+    pub fn server_config_for(&self, host: &str) -> Result<Arc<ServerConfig>, Error> {
+        let now = OffsetDateTime::now_utc();
+        let valid = (now.saturating_sub(time::Duration::hours(1)), now.saturating_add(time::Duration::days(365)));
+        Self::config(&self.trusted, host, valid)
+    }
+
+    fn config(
+        issuer: &CertifiedIssuer<'static, KeyPair>,
+        host: &str,
+        (not_before, not_after): (OffsetDateTime, OffsetDateTime),
+    ) -> Result<Arc<ServerConfig>, Error> {
         let key = KeyPair::generate()?;
         let mut params = CertificateParams::new(vec![host.to_owned()])?;
         params.distinguished_name.push(DnType::CommonName, host);

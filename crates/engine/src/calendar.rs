@@ -23,6 +23,8 @@ use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp, Weekday};
 use serde_json::{Value, json};
 
 use crate::EngineError;
+use crate::all_day_alert::AllDayAlert;
+use crate::arrive::invite::Owner;
 use crate::sync::Plan;
 
 pub(crate) mod alert;
@@ -362,11 +364,23 @@ pub(crate) struct Details {
     pub(crate) private: Option<bool>,
     /// The guests' addresses, each once.
     pub(crate) guests: Option<Vec<EmailAddress>>,
+    /// The alert ([`alert::set_lead`]).
+    pub(crate) alert: Option<alert::Lead>,
 }
 
 impl Details {
     /// Whether it changes nothing.
     pub(crate) fn is_empty(&self) -> bool {
+        self.alert.is_none() && self.only_alert_if_any()
+    }
+
+    /// Whether the alert is all they change.
+    pub(crate) fn only_alert(&self) -> bool {
+        self.alert.is_some() && self.only_alert_if_any()
+    }
+
+    /// Whether they change nothing but, maybe, the alert.
+    fn only_alert_if_any(&self) -> bool {
         self.summary.is_none()
             && self.location.is_none()
             && self.description.is_none()
@@ -397,6 +411,9 @@ impl Details {
         }
         if let Some(private) = self.private {
             event.class = private.then_some(Class::Private);
+        }
+        if let Some(lead) = self.alert {
+            alert::set_lead(event, lead);
         }
         if let Some(guests) = self.guests {
             event.attendees = guests
@@ -441,6 +458,8 @@ pub(crate) struct Edit {
     pub(crate) end: Option<String>,
     /// All-day from now on, or no longer.
     pub(crate) all_day: Option<bool>,
+    /// The alert an event that becomes all-day gets in place of the timed default (and the one it trades back).
+    pub(crate) all_day_alert: AllDayAlert,
 }
 
 /// Why an edit cannot be made.
@@ -452,8 +471,9 @@ pub(crate) enum EditError {
 }
 
 /// `held` edited by `change` and `details` at `now`: its times kept in their own form (its zone, the computer's wall
-/// clock, or UTC; a single moment in UTC that starts repeating moves to the wall clock), and `SEQUENCE` counted on
-/// when the guests are told (`notify`). The new text and the number of guests.
+/// clock, or UTC, a series too; a single moment in UTC that starts repeating moves to the wall clock), a time `change`
+/// does not give written as it came, and `SEQUENCE` counted on when the guests are told (`notify`). The new text and
+/// the number of guests.
 pub(crate) fn edit(
     held: &CalendarEvent,
     change: &Edit,
@@ -467,28 +487,53 @@ pub(crate) fn edit(
     let index = calendar.events.iter().position(|event| event.recurrence_id.is_none()).ok_or(EditError::Unreadable)?;
     let event = calendar.events.get(index).ok_or(EditError::Unreadable)?;
     let times = times(&calendar, event, change, local)?;
+    // Only the series itself changes between timed and all-day here; its changed instances keep their own form.
+    let switch = change.all_day.filter(|all_day| *all_day != event.all_day());
+    let repeated = !event.rules.is_empty() || !event.dates.is_empty();
     let repeating = match details.repeat {
         Some(repeat) => repeat != Repeat::None,
-        None => !event.rules.is_empty() || !event.dates.is_empty(),
+        None => repeated,
     };
     let form = match &event.start {
         When::Zoned(_, tzid) => Form::Zoned(tzid.clone()),
         When::Floating(_) => Form::Floating,
-        When::Utc(_) | When::Date(_) if repeating => Form::Floating,
-        When::Utc(_) | When::Date(_) => Form::Utc,
+        // A series keeps UTC; a single moment that starts repeating moves to the wall clock.
+        When::Utc(_) if repeating && !repeated => Form::Floating,
+        When::Utc(_) => Form::Utc,
+        When::Date(_) if repeating => Form::Floating,
+        When::Date(_) => Form::Utc,
     };
+    // Times the owner did not change are written as they came, unless the event moves to another form (a switch to
+    // or from whole days always gives a start).
+    let keep_start = change.start.is_none() && form.holds(&event.start);
+    let keep_end = keep_start && change.end.is_none();
     let zone = calendar.zones.offsets(&event.start, local);
     let (start, end) = placed(times, &form, zone, local).ok_or(EditError::Bad("the times cannot be written"))?;
+    let alert = details.alert;
     let event = calendar.events.get_mut(index).ok_or(EditError::Unreadable)?;
-    event.start = start;
-    event.end = Some(end);
-    event.duration = None;
+    if !keep_start {
+        event.start = start;
+    }
+    if !keep_end {
+        event.end = Some(end);
+        event.duration = None;
+    }
     event.stamp = Some(now);
     details.apply(event, organizer);
     unscheduled(event);
     let guests = event.attendees.len();
     if notify && guests > 0 {
         event.sequence = event.sequence.saturating_add(1);
+    }
+    match alert {
+        Some(lead) => alert::set_every_lead(&mut calendar, lead),
+        None => {
+            if let Some(to_all_day) = switch
+                && let Some(event) = calendar.events.get_mut(index)
+            {
+                alert::follow_switch(event, to_all_day, change.all_day_alert);
+            }
+        }
     }
     let text = calendar.write().map_err(|_| EditError::Bad("the event cannot be written"))?;
     Ok((text, guests))
@@ -556,6 +601,17 @@ enum Form {
     Zoned(String),
 }
 
+impl Form {
+    /// Whether `when` is already written in this form; a whole day is in every form.
+    fn holds(&self, when: &When) -> bool {
+        match (self, when) {
+            (_, When::Date(_)) | (Self::Utc, When::Utc(_)) | (Self::Floating, When::Floating(_)) => true,
+            (Self::Zoned(zone), When::Zoned(_, tzid)) => zone == tzid,
+            _ => false,
+        }
+    }
+}
+
 /// `times` as an event's start and its end (whole days: the day after the last), in `form`; a zone's times on the
 /// clock of `zone`, floating ones on `local`.
 fn placed(times: Times, form: &Form, zone: &dyn Offsets, local: &dyn Offsets) -> Option<(When, When)> {
@@ -599,8 +655,9 @@ pub(crate) fn master(calendar: &Calendar) -> Option<&Event> {
     calendar.events.iter().find(|event| event.recurrence_id.is_none())
 }
 
-/// One occurrence of `held` (read into `calendar`) as `event.list` shows it, on the computer's clock `local`.
-pub(crate) fn row(held: &CalendarEvent, calendar: &Calendar, occurrence: &Occurrence, local: &dyn Offsets) -> Value {
+/// One occurrence of `held` (read into `calendar`) as `event.list` shows it, on the computer's clock `local`, for the
+/// account's `owner` (`None` when the account is not known).
+pub(crate) fn row(held: &CalendarEvent, calendar: &Calendar, occurrence: &Occurrence, local: &dyn Offsets, owner: Option<&Owner>) -> Value {
     let Some(event) = calendar.events.get(occurrence.event) else { return Value::Null };
     let series = master(calendar).filter(|master| master.uid == event.uid).unwrap_or(event);
     let repeat = match Repeat::of(series) {
@@ -631,7 +688,21 @@ pub(crate) fn row(held: &CalendarEvent, calendar: &Calendar, occurrence: &Occurr
         "recurrence_id": occurrence.recurrence_id.as_ref().map(when),
         "zone": zone(calendar, event, start, end, local),
         "guests": event.attendees.iter().map(guest).collect::<Vec<_>>(),
+        "alert": alert::lead_of(event),
+        "organizer": series.organizer.as_ref().map(organizer),
+        "own": own(series, owner),
     })
+}
+
+/// The organiser named by an event: the address without its `mailto:`, and the name.
+fn organizer(organizer: &Attendee) -> Value {
+    json!({ "address": address_of(organizer), "name": organizer.name })
+}
+
+/// Whether `event` is the owner's own: it names no organiser, or the organiser is the account's `owner`. Someone
+/// else's event is theirs to change; an organiser named while the account is not known is someone else.
+pub(crate) fn own(event: &Event, owner: Option<&Owner>) -> bool {
+    event.organizer.as_ref().is_none_or(|organizer| owner.is_some_and(|owner| owner.is(organizer)))
 }
 
 /// The event's own zone with its wall-clock times, when its clock shows another time than the computer's at the

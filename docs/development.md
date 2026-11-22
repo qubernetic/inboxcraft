@@ -1,6 +1,6 @@
 # Development setup
 
-> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-08 · **Change:** minor
+> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-21 · **Change:** minor
 
 InboxCraft is developed in two layers. The Rust toolchain and every check run in a container; the host only runs the
 binary the container built. The `justfile` is the one command surface over both, and a thin layer over
@@ -9,7 +9,7 @@ binary the container built. The `justfile` is the one command surface over both,
 ## The two layers
 | Layer | Where | What runs there |
 |---|---|---|
-| Container | the `rust` service in `docker-compose.yml`, image from `Dockerfile` | `cargo`, `rustc`, clippy, rustfmt, nextest, cargo-deny, cargo-llvm-cov, `cargo xtask` |
+| Container | the `rust` service in `docker-compose.yml`, image from `Dockerfile` | `cargo`, `rustc` (through sccache), clippy, rustfmt, nextest, cargo-deny, cargo-llvm-cov, `cargo xtask` |
 | Host | your desktop session | the built `inboxcraft` binary from `target/`, through `just run` and `just run-sample` |
 
 The working copy is bind-mounted at `/workspace`, so `target/` is shared: what the container builds, the host runs.
@@ -28,7 +28,8 @@ just --list       # every recipe
 ```
 
 Other recipes: `test` (nextest; extra arguments go to it), `lint`, `fmt`, `fmt-check`, `deny`, `cov`, `layers`,
-`wasm`, `shot` (the `ui_shot` pictures of the sample window, see `docs/design.md`), `side-by-side` (each of
+`wasm`, `shot` (the `ui_shot` pictures of the sample window, see `docs/design.md`; `cargo xtask shots --fix`
+writes every picture of `shots.jsonl` and `--check` says which ones the code no longer draws), `side-by-side` (each of
 those pictures beside its mood sketch, see `docs/design.md`, "Pictures"), `icon` (exports the app icon),
 `flatpak-sources` and `flatpak-sources-check`, `shell`, `dev`, `down`, `rebuild`, `clean` (removes the cargo
 volumes and `target/`), on the host `flatpak` (see "The dev Flatpak") and, for the owner only, `it-live` (see "Live
@@ -62,6 +63,42 @@ prerequisites and `libdbus-1-dev`), plus the toolchain components, the `wasm32-u
 tools pinned there. As of 2026-11-04 it has them (cargo 1.98.0, nextest 0.9.150, cargo-deny 0.20.2, cargo-llvm-cov
 0.9.1), and `AGENT_HORDE=1 just ci` runs green in it.
 
+## The compile cache (sccache)
+Every worktree, and every agent working beside another, builds in a target dir of its own
+(`CARGO_TARGET_DIR=target/wt-<name>`), and without help each of them compiles every third-party dependency again. In
+the dev container every `rustc` call goes through [sccache](https://github.com/mozilla/sccache), which keeps the
+compiled crates in one cache that all target dirs share.
+
+- **Where it is set.** The image sets `RUSTC_WRAPPER=/usr/local/cargo/bin/sccache-wrap`,
+  `SCCACHE_DIR=/workspace/target/sccache` and `SCCACHE_CACHE_SIZE=40G` (`Dockerfile`). Nothing in
+  `.cargo/config.toml` names it, so native mode (`AGENT_HORDE=1`) and the GitHub workflow build without it and need
+  no sccache installed.
+- **Why the wrapper.** sccache puts every `CARGO_*` variable into the key of an entry, `CARGO_TARGET_DIR` too, so two
+  target dirs would never share one. `sccache-wrap` drops `CARGO_TARGET_DIR` and `CARGO_BUILD_TARGET_DIR` and runs
+  sccache; rustc gets its output dir as an argument and needs neither. Measured on 2026-11-18 with
+  `cargo build -p inboxcraft-ui-egui` in two fresh target dirs on a busy machine: without the wrapper the second dir
+  had 1 cache hit in 168 compile requests; with it the first dir took 97 s (83 misses) and the second 37 s (72 hits,
+  11 misses). The wrapper is a bash script: `sh` (dash) drops the variables whose names are not shell names, such as
+  `CARGO_BIN_EXE_inboxcraft-web`, and the tests that read them with `env!` no longer compile. When
+  `CARGO_INCREMENTAL` is on, which sccache refuses, it runs rustc without sccache; `cargo xtask cov` sets it, so the
+  coverage run takes nothing from the cache.
+- **Where it lies.** `target/sccache` in the working copy, on the bind mount, so it outlives the container and needs
+  no volume of its own. It never grows past 40 GiB; the oldest entries go first.
+- **Looking at it.** `just shell`, then `sccache --show-stats` (hits, misses and why a call was not cacheable;
+  `sccache --zero-stats` starts the counts again). The sccache server starts with the first build and stops after
+  10 idle minutes; the counts start again with it.
+- **Emptying it.** While nobody is building (every build in the container shares the one server):
+  `sccache --stop-server` in the container, then `rm -rf target/sccache`. `just clean` deletes it
+  with the rest of `target/`, and so does a `cargo clean` without `CARGO_TARGET_DIR` (it removes `target/` whole); a
+  `cargo clean` in a target dir of its own leaves it alone.
+- **What it does not cache.** Crates built incrementally, which are the workspace's own crates in the dev profile:
+  they still compile in every target dir, and the gain is the dependencies (egui, winit, wgpu and the rest). Binary
+  crates (`bin`) and linking are not cached either, and the first build after the cache is emptied fills it and is
+  no faster.
+- **After a change to it.** The settings live in the image: a `Dockerfile` change reaches the running container only
+  after `just rebuild`, `just down` and `just dev`, which start it again on the new image. Builds running in the
+  container at that moment are lost, so do it when nobody is building.
+
 ## The workspace
 | Directory | What is in it |
 |---|---|
@@ -86,24 +123,25 @@ try:
 - the reader: a reply with its quote, a thread, a newsletter whose remote pictures load only when asked (the sample
   draws them in code), attachments to save into the downloads folder;
 - the hover actions on a row, or on the row selected with the arrow keys: Done (D) marks it read and files it as done
-  in its account's Archive ("Show done" over the list shows it there again, dimmed), R marks it read or unread, Delete moves it to Trash; A archives it and S flags it. The reader's
-  toolbar adds Archive and Move to a folder, its More menu flag and read or unread. A row that leaves the list
-  slides out; a toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was, and
+  in its account's Archive ("Show done" over the list shows it there again, with a tick), R marks it read or unread, Delete moves it to Trash; A archives it and S flags it. The reader's
+  toolbar adds Archive and Move to a folder, its More menu flag and read or unread, and for an HTML message "Open the original in the browser" (a cleaned copy, with no script and no address in it). A row that leaves the list
+  does so at once and its gap closes; the status line says what was done, with Undo (Ctrl+Z) for five seconds, which puts the row back as it was, and
   Ctrl+Z after it walks back through the earlier acts;
-- the appearance settings (the gear on the rail, Ctrl+Comma): mode, preset, typeface, icons, text scale and reduced
+- the appearance settings (the gear on the rail, Ctrl+Comma): mode, window frame, text scale and reduced
   motion, kept in `inboxcraft/appearance.json` in the owner's config folder as in the normal window.
 - the composer (New message in the folder pane, or C): recipients as chips with suggestions from the sample's people,
-  a signature from the Sending page, the draft kept at every change; Close keeps it, Discard removes it. Send is
-  refused, with the reason in the error banner: the sample's accounts have no submission server, so the outbox, the
-  countdown toast of Undo send and Schedule show only with an account that can send (`ui_shot`'s `"outbox"` pictures
-  them); "Undo send" on the Sending page sets the hold all the same. Reply, Reply all
-  and Forward under the open message start the composer filled in. Templates at the composer's foot stays disabled:
-  the sample has none, and saving one (`template.save`, `owner`) has no place in the window yet.
+  a signature from the Sending page, the draft kept as it is typed (at most once a second while typing); Close keeps
+  it, Discard closes it behind "Draft discarded" with Undo for five seconds, which brings the composer back as it was,
+  and the draft goes when they end (a new message nothing was written in goes at once). Send is refused, with the reason in the error banner: the sample's accounts have no
+  submission server, so the outbox, the countdown toast of Undo send and Schedule show only with an account that
+  can send (`ui_shot`'s `"outbox"` pictures them); "Undo send" on the Sending page sets the hold all the same.
+  Reply, Reply all and Forward under the open message start the composer filled in. Templates at the composer's foot
+  stays disabled: the sample has none, and saving one (`template.save`, `owner`) has no place in the window yet.
 - the screener and the grouped inbox: the screener is on (before the inbox) and holds two invented new senders;
   Review on the screener card opens New senders, where a message is a preview with Accept (into a group), Accept and
-  open, and Block. The inbox shows People and Updates as cards; a right click on a row (or the reader's More menu)
-  puts its sender in another group. Settings, Triage changes the screener's mode, the inbox view (cards, grouped
-  list, simple list) and each account's grouping. Each act has a toast with Undo.
+  open, and Block. The inbox shows People and Notifications under their heads (Smart: the first three rows of each); a right click on a
+  row (or the reader's More menu) puts its sender in another group. Settings, Triage changes the screener's mode,
+  the inbox view (Grouped, Smart, List) and each account's grouping. Each act has a toast with Undo.
 - done, park, pin, snooze and reminders: Snooze (H) in the reader opens the time picker; on a message in Sent the
   same button sets a "Remind me if no reply" reminder. Pin pins the open message, More parks it. Later on the rail
   lists the snoozed mail, the pins and the park pile. "Done all" on a group card files the group.
@@ -117,22 +155,45 @@ try:
   and the update that moves it (`sample::invitations`) to the inbox, where they are in the Invitations group. The
   update's card says what changed and what was answered before; Going is refused there, as the sample refuses every
   send, and works on an account with a submission server.
+- right-to-left mail: the `ui_shot` line `"right_to_left": true` adds a Hebrew and an Arabic message from invented
+  people (`sample::right_to_left`), the newest two in the inbox, for the pictures of right-to-left senders and subjects.
 
 The same acts work on a real account, through the same engine commands (`mail.seen`, `mail.flag`, `mail.archive`,
 `mail.delete`, `mail.move`, `mail.open`, `screener.accept`, `screener.block`, `group.set`, `history.undo`); there the
 change also goes to the server. The sample's own
 command, `sample.mail.set`, is refused in any other session.
 
+### The frame bench (`just bench-ui`)
+`just bench-ui` builds the `ui_bench` example in the release profile in the container and measures how long the
+sample window takes to build a frame (its `ui` and the tessellation, on the CPU; nothing is drawn on a GPU) over the
+sample grown to 10 000 invented messages (`sample::grown`), of which the list shows the engine's 1 000 newest; the
+header says both. Four scenes of 300 frames each, after 30 to warm up: `inbox-default-rest` (the inbox in the view a
+new owner sees, today the cards), `inbox-list-rest` and `inbox-list-scroll` (the grouped list, which lays out every
+listed row, scrolling 40 points a frame: the stress case) and `reader-html` (the reader open on an HTML message);
+with them `home-window-sweep` and `reader-step-why`, the first row of the grouped list pressed and then J every
+frame, so each frame opens the next message and asks `mail.why` for its why line (alone with `--why`; under it a
+line gives the median of each part a step runs, alone: `mail.why`, `mail.thread`, `mail.open` and the list read
+again). For each it prints `median_ms`, `p95_ms`, the `shapes` and the list's `rows_built` of the last frame, and it starts
+with the CPU's model, its core count and the first core's frequency governor, so numbers from two machines are never
+mixed up. It runs twice: with every core free, where the budget is a p95 of at most 4 ms, and pinned to one core with
+`taskset -c 0`, where it is one frame at 60 Hz, 16.6 ms; a scene that misses either is a miss. The pinned run pins
+the core but not the clock: the governor is printed, not set, as setting it needs root, and the header says so.
+Without `taskset` the pinned run is skipped with a line saying so. The bench is not a gate: a MISS never makes it
+fail. `just bench-ui` runs the four; `cargo run --release -p inboxcraft-ui-egui --example ui_bench -- --compose`
+runs the composer's 16 scenes instead (a message text of 16 KiB to 1 MiB, at rest and typing, without and with
+AccessKit; see the example's own doc).
+
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|
-| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `changes`, `layers`, `flatpak-sources-check`, doctests, `cov --check` (the one test run, nextest profile `ci`, `.config/nextest.toml`), `wasm`, `cargo deny check`, `stats` |
+| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `changes`, `layers`, `flatpak-sources-check`, doctests, `cov --check` (the one test run, nextest profile `ci`, `.config/nextest.toml`), `wasm`, `cargo deny check`, `shots --check`, `stats` |
 | `cargo xtask spdx` | every `.rs` file starts with a `// SPDX-FileCopyrightText:` line and `// SPDX-License-Identifier:` with the workspace licence; `--fix` adds what is missing, a file under another licence is reported and never changed |
 | `cargo xtask test-files` | no inline test module (`mod tests { ... }`, `mod <name>_tests { ... }`, or any module with a body under `#[cfg(test)]`) outside test files |
 | `cargo xtask cov` | line coverage per crate and for the workspace under `cargo llvm-cov nextest` (profile `ci`), the report in `lcov.info`; `--check` fails below the floors in `.config/coverage.toml` (see "The coverage gate") |
-| `cargo xtask assets` | every asset file (picture, icon, font or sound by extension, or anything under `assets/`) has a row in `ATTRIBUTION.md`; `<name>` in a row path stands for one or more characters within one directory |
+| `cargo xtask assets` | every asset file (picture, icon, font or sound by extension, or anything under `assets/`) has a row in `ATTRIBUTION.md`; `<name>` in a row path stands for one or more characters within one directory; and the files under the folders of `.config/assets.toml` match their pinned sha256 (see "Pinned asset files") |
 | `cargo xtask changes` | every change fragment in `changes/` is well formed (see "Change fragments"); `--fold` writes them into the documents and deletes them, and is not part of `ci` |
 | `cargo xtask layers` | the layering rules below, from the table in `xtask/src/layers.rs` |
+| `cargo xtask shots` | every scene of `crates/ui-egui/shots.jsonl`, drawn by `ui_shot` as `just shot` runs it (into a `shots-*` folder of the run's own under the target directory, removed at the end, `ui_shot --out-dir`), equals its committed picture byte for byte; fails naming the scene on a picture that differs, a scene without a picture, two scenes that write one picture, a PNG in a folder of the pictures that no scene writes, a run that draws no scene, and an `out` that is not a plain path under `docs/images/` or has a symbolic link on its way; `--check` is the default, `--fix` writes the renders over the pictures and deletes those of no scene, never outside `docs/images/`. The render is deterministic, so there is no tolerance. The pictures are what the dev profile draws (the gate builds `ui_shot` in it; a release build is not checked). About 25 s in the dev container with a warm build (22 to 32 s measured) |
 | `cargo xtask flatpak-sources-check` | `contrib/flatpak/cargo-sources.json` is what `Cargo.lock` gives (see "The dev Flatpak"); `cargo xtask flatpak-sources` writes it |
 | `cargo xtask wasm` | the standalone and layer 0 to 5 crates, all but `net`, build for `wasm32-unknown-unknown` (one `cargo build`) |
 | `cargo xtask stats` | Rust files, code lines and test lines (not blank) per crate, and a total; it only reports |
@@ -191,9 +252,10 @@ The floors live in one file, `.config/coverage.toml`:
 
 | Floor | Crates |
 |---|---|
-| 95 % | the workspace total |
-| 98 % | `charset`, `dav`, `engine`, `ical`, `mime`, `model`, `proto`, `store`, `testkit`, `time`, `vcard` |
-| 80 % | `net`, `ui-egui` |
+| 99 % | `charset`, `dav`, `engine`, `ical`, `mcp`, `mime`, `model`, `proto`, `testkit`, `time`, `vcard` |
+| 98 % | the workspace total; `store` |
+| 97 % | `ui-egui` |
+| 95 % | `net` |
 
 - A line is an lcov `DA` record (llvm-cov already leaves out the test files); it is covered when its count is not 0.
   A file belongs to the member whose directory holds it most closely.
@@ -260,6 +322,46 @@ lines joined), each Gaps line joins the end of "Known rough edges", each revisio
 document's revision table, and the status line of that document takes the date and the largest change. A malformed
 fragment, or a document without its section, makes the fold write nothing.
 
+### Pinned asset files
+Asset files copied from elsewhere (fonts, the brand marks) are pinned by sha256 in `.config/assets.toml`, so a
+changed or swapped file fails `cargo xtask assets` (and so `just ci`) instead of slipping in unnoticed. The pin sits
+beside the file's row in `ATTRIBUTION.md`, which still says whose it is and under which licence.
+
+```toml
+roots = ["assets/brand", "assets/fonts/plex-mono", "assets/fonts/plex-sans", "assets/fonts/audiowide"]
+
+[[source]]
+id = "ibm-plex"
+url = "https://github.com/IBM/plex"
+version = "<release tag>"
+
+[[file]]
+path = "assets/fonts/plex-mono/IBMPlexMono-Regular.ttf"
+source = "ibm-plex"
+from = "<its path in the source>"
+sha256 = "<64 hexadecimal digits>"
+```
+
+- `roots` lists the folders the manifest governs: every file under one of them needs a `[[file]]`, whatever its
+  directory is called (hidden, `plan` and `target` directories count too). A root that does not exist yet is fine;
+  one that exists but is not a directory is a setup error naming it. Files outside the roots may be pinned too.
+- Symbolic links are never followed: a link under a root, a root or pinned path that is a link, or a pinned path
+  with a linked directory in it, each fails as `assets: <path> is a symbolic link, not followed`.
+- A `[[source]]` names where files come from: `id`, and `url` and `version` (the release tag) as they apply.
+- A `[[file]]` has `path` and `sha256`; `source` (the `id` of a `[[source]]`) and `from` (the file's path there) say
+  where it came from. A path is relative to the repository root, `/`-separated, with no `.`, `..` or `\`.
+- The manifest must exist and parse; a bad path, a sha256 that is not 64 hexadecimal digits, an unknown key or
+  source and a file pinned twice are setup errors (exit code 2) that name the file.
+
+To add or update a file, copy it in, take its hash with `sha256sum <path>`, and add or change its `[[file]]` (and the
+`version` of its `[[source]]`) in the same commit as the file and its `ATTRIBUTION.md` row. The gate fails with one
+line per problem:
+
+- `assets: <path> is not pinned in .config/assets.toml`: a file under a root has no `[[file]]`.
+- `assets: <path> differs from its pinned sha256`: the file's contents changed.
+- `assets: <path> is pinned but missing`: a `[[file]]` has no regular file (nothing, or a directory).
+- `assets: <path> is a symbolic link, not followed`: see above.
+
 ## The dev Flatpak
 `contrib/flatpak/` builds InboxCraft as a Flatpak with the app id `io.github.qubernetic.inboxcraft`, from the
 checkout and without a network during the build. After the first setup, `git pull && just flatpak` updates the
@@ -273,9 +375,11 @@ installed app, and it starts from the desktop's menu like any other: the entry o
 | `io.github.qubernetic.inboxcraft.desktop` | the menu entry, one main window, with the sample mailbox and Quit as its actions |
 | `io.github.qubernetic.inboxcraft.metainfo.xml` | the AppStream description software centres show |
 
-The icon is `assets/app-icon/inboxcraft.svg`, exported from the shapes in `crates/ui-egui/src/icons.rs`; the same
-shapes are the window icon. After a change to the shapes, `just icon` exports the file again; a test fails while the
-file and the code differ.
+The icon is the InboxCraft mark, a trademark of Qubernetic (see `NOTICE`): the manifest copies the brand's icon
+theme tree, `assets/brand/inboxcraft/linux/hicolor/` (every size from 16 to 512 px and the scalable SVG), into
+`/app/share/icons/hicolor/`. The window icon and the tray icon are the brand's PNGs built into the binary
+(`crates/ui-egui/src/icons.rs`). The files are pinned (see "Pinned asset files"): a new version of the mark comes
+from the brand's release, never from an edit here.
 
 **Permissions.** The manifest asks for as little as the app needs, each with its reason in a comment above it: the
 network (IMAP, SMTP, CalDAV), a Wayland window with X11 only as a fallback (and the shared memory X11 needs), the
@@ -402,7 +506,7 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 | `changes` | decides whether `flatpak` runs: always on a push to `develop` or `main` and on a manual run, never on a push to `epic/**`; on a PR only when `git diff` of GitHub's merge commit against its first parent, the base tip, touches a Flatpak input | read |
 | `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml`, both from the `cov` gate, as the `reports` artifact; restores the dependency cache; on a push to `develop`, `main` or `epic/**` that did not create the branch, prunes `target/` and saves it | read |
 | `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
-| `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache) and keeps it as the `flatpak` artifact for 7 days | read |
+| `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache; the runtime, SDK and Rust extension come fresh from Flathub into the user installation) and keeps it as the `flatpak` artifact for 7 days | read |
 | `ci` | the gate: succeeds only when `changes`, `test` and `codecov` did, and `flatpak` did or was skipped because `changes` said so (no Flatpak input in the PR, or a push to `epic/**`) | read |
 
 - **A draft starts no job.** Every job is skipped on a draft PR, so a push to a draft bills nothing; the draft cannot
@@ -412,7 +516,7 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 - **The Flatpak inputs.** A PR runs `flatpak` only when it changes one of these, the files the manifest builds from
   apart from our own Rust sources: `contrib/flatpak/` (the manifest, `cargo-sources.json`, the desktop file and the
   metainfo), `Cargo.toml` (the workspace root only), `Cargo.lock`, `.cargo/`, `apps/inboxcraft/Cargo.toml`,
-  `assets/app-icon/` (the icon the manifest installs) and `.github/workflows/ci.yml`. The list lives in the
+  `assets/brand/inboxcraft/linux/` (the icons the manifest installs) and `.github/workflows/ci.yml`. The list lives in the
   `changes` job. A Rust change that builds natively but not in the Flatpak SDK shows on the next push to `develop` or
   `main`, not in its own PR.
 - **No Flatpak on an epic push.** A push to `epic/**` skips `flatpak` (10 to 11 billed minutes per push, #78). What
@@ -491,7 +595,9 @@ written and expanded, and `dav_xml`, `dav_client` and `testkit_dav` (#144): the 
 CalDAV client's response reader with discovery and sync fed what it read, and the fake CalDAV server's own request
 and XML readers and session, and `engine_invite` (#149): any bytes kept as a message's body, and as an invitation's
 calendar part, read into its invitation mark and card, answered and removed, and `engine_alerts` (#150): any bytes
-a calendar sync brings as an event, read for its alerts across a change of the clock and fired as time goes on.
+a calendar sync brings as an event, read for its alerts across a change of the clock and fired as time goes on, and
+`fontconfig_scan` (#233): any bytes as a fontconfig file, through the desktop app's bounded reader of the font
+folders.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
@@ -508,7 +614,8 @@ releases at least 7 days old) and `actions` (prefix `ci(deps)`).
 - **Fuzzing:** `FUZZ_TOOLCHAIN` and `CARGO_FUZZ_VERSION` in `.github/workflows/fuzz.yml`.
 - **Actions:** Dependabot bumps the SHA and the tag comment together.
 
-After a `Dockerfile` change, run `just rebuild`.
+After a `Dockerfile` change, run `just rebuild`, then `just down` and `just dev` to start the container on the new
+image.
 
 ## Revision history
 | Date | Change | Summary |
@@ -576,3 +683,19 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-08 | minor | Making, changing and deleting events on the sample (#148) |
 | 2026-11-08 | minor | The sample's invitations and the fuzz target `engine_invite` (#149) |
 | 2026-11-08 | minor | The fuzz target `engine_alerts` (#150) |
+| 2026-11-21 | patch | The sample's appearance settings without preset, typeface and icons (#231) |
+| 2026-11-21 | minor | Pinned asset files: the manifest, its format and the gate's messages; the dev Flatpak installs the brand's icon theme tree, no more `just icon` (#232) |
+| 2026-11-21 | minor | The frame bench, `just bench-ui`, and the fuzz target `fontconfig_scan` (#233) |
+| 2026-11-21 | minor | `ui_bench --compose`: the composer's scenes (#234) |
+| 2026-11-21 | patch | A leaving row acts at once and its gap closes; a done row shows a tick (#236) |
+| 2026-11-21 | patch | The inbox views are Grouped, Smart and List (#236) |
+| 2026-11-21 | patch | The sample's composer keeps its draft at most once a second while typing (#238, #243) |
+| 2026-11-21 | minor | The compile cache in the dev container: sccache, its wrapper, where it lies, how to look at it and empty it (#246) |
+| 2026-11-21 | minor | `cargo xtask shots` and its place in `ci` (#248) |
+| 2026-11-21 | minor | Acts: Undo in the status line for five seconds (#309) |
+| 2026-11-21 | patch | The sample's composer: Discard with Undo (#340) |
+| 2026-11-21 | minor | The sample's right-to-left mail for the pictures (#356) |
+| 2026-11-21 | minor | The reader's More menu opens the original in the browser (#388) |
+| 2026-11-21 | patch | CI: the `flatpak` job installs its runtime and SDK for the user (#391) |
+| 2026-11-21 | patch | The frame bench names `reader-step-why` (#404) |
+| 2026-11-21 | minor | The coverage floors stand at what the epic holds: 95 to 100 % a crate, 98 % in all (#425) |

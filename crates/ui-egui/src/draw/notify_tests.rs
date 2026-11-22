@@ -30,7 +30,7 @@ fn clock() -> Box<FakeClock> {
 }
 
 fn app() -> InboxApp {
-    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_reduce_motion(true);
     app
 }
@@ -38,7 +38,7 @@ fn app() -> InboxApp {
 /// The sample's mail in a session that is not the sample's, as the owner's own mail would be.
 fn real_app() -> InboxApp {
     let session = Session::new(Box::new(sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap()), clock()).unwrap();
-    let mut app = InboxApp::new(Mailbox::new(session, clock()));
+    let mut app = InboxApp::at_mail(Mailbox::new(session, clock()));
     app.set_reduce_motion(true);
     app
 }
@@ -54,7 +54,7 @@ fn harness_of(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
 }
 
 fn on_the_page(mut app: InboxApp) -> Harness<'static, InboxApp> {
-    app.settings_mut().open_at(Section::Notifications, &Appearance::default());
+    super::tests::at_settings(&mut app, Section::Notifications);
     harness_of(app, egui::Theme::Light)
 }
 
@@ -136,14 +136,14 @@ fn the_page_lists_every_account_with_its_level_and_a_press_changes_it() {
     let mut harness = on_the_page(app());
     harness.get_by_label("Notifications, settings page");
     harness.get_by_label("Personal · mira@example.org");
-    assert_eq!(toggled(&harness, Role::Button, "All for Personal"), Some(Toggled::True));
-    assert_eq!(toggled(&harness, Role::Button, "People only for Studio"), Some(Toggled::False));
-    harness.get_by_role_and_label(Role::Button, "People only for Studio").click();
+    assert_eq!(toggled(&harness, Role::RadioButton, "All for Personal"), Some(Toggled::True));
+    assert_eq!(toggled(&harness, Role::RadioButton, "People only for Studio"), Some(Toggled::False));
+    harness.get_by_role_and_label(Role::RadioButton, "People only for Studio").click();
     harness.run();
     assert_eq!(harness.state().mailbox().notify_level(2), Level::People);
     assert_eq!(harness.state().mailbox().notify_level(1), Level::All);
-    assert_eq!(toggled(&harness, Role::Button, "People only for Studio"), Some(Toggled::True));
-    harness.get_by_role_and_label(Role::Button, "None for Personal").click();
+    assert_eq!(toggled(&harness, Role::RadioButton, "People only for Studio"), Some(Toggled::True));
+    harness.get_by_role_and_label(Role::RadioButton, "None for Personal").click();
     harness.run();
     assert_eq!(harness.state().mailbox().notify_level(1), Level::None);
 }
@@ -167,7 +167,7 @@ fn without_a_desk_the_background_switches_say_they_are_not_available_here() {
     let mut harness = on_the_page(app());
     assert!(disabled(&harness, "Run in the background"));
     assert!(disabled(&harness, "Start with the computer"));
-    assert!(harness.query_all_by_label("Not available in this window").count() >= 1);
+    assert!(harness.query_all_by_label_contains("Not available in this window").count() >= 1, "said in the rows' help");
     harness.get_by_role_and_label(Role::Switch, "Run in the background").click();
     harness.run();
     assert!(harness.state().settings().is_open());
@@ -185,14 +185,14 @@ fn the_background_switch_asks_the_desk_and_turning_it_off_ends_starting_with_the
     assert_eq!(desk.calls(), ["background false", "login false"]);
     assert_eq!(toggled(&harness, Role::Switch, "Run in the background"), Some(Toggled::False));
     harness.run();
-    harness.get_by_label("Waiting for the desktop's answer…");
+    assert!(harness.query_all_by_label_contains("Waiting for the desktop's answer…").next().is_some());
     desk.0.lock().unwrap().login = Some(false);
     desk.0.lock().unwrap().answer = Some(Ok(()));
     harness.run();
     harness.run();
-    assert!(harness.query_by_label("Waiting for the desktop's answer…").is_none());
+    assert!(harness.query_all_by_label_contains("Waiting for the desktop's answer…").next().is_none());
     assert!(disabled(&harness, "Start with the computer"), "starting with the computer needs the background");
-    harness.get_by_label("Turn on Run in the background first: a start at login opens no window.");
+    assert!(harness.query_all_by_label_contains("Turn on Run in the background first: a start at login opens no window.").next().is_some());
     harness.get_by_role_and_label(Role::Switch, "Run in the background").click();
     harness.run();
     assert_eq!(desk.calls().last().map(String::as_str), Some("background true"));
@@ -207,17 +207,17 @@ fn starting_with_the_computer_waits_for_the_desktop_and_says_why_it_was_not_done
     harness.run();
     assert_eq!(desk.calls(), ["login true"]);
     harness.run();
-    harness.get_by_label("Waiting for the desktop's answer…");
+    assert!(harness.query_all_by_label_contains("Waiting for the desktop's answer…").next().is_some());
     assert!(disabled(&harness, "Start with the computer"), "one question at a time");
     desk.0.lock().unwrap().answer = Some(Err("the desktop did not allow InboxCraft to start at login".to_owned()));
     harness.run();
     harness.run();
-    harness.get_by_label("Not changed: the desktop did not allow InboxCraft to start at login.");
+    assert!(harness.query_all_by_label_contains("Not changed: the desktop did not allow InboxCraft to start at login.").next().is_some());
     assert_eq!(toggled(&harness, Role::Switch, "Start with the computer"), Some(Toggled::False));
     // The note goes with the sheet.
-    harness.state_mut().close_settings();
+    harness.state_mut().leave_settings();
     harness.run();
-    harness.state_mut().settings_mut().open_at(Section::Notifications, &Appearance::default());
+    super::tests::at_settings(harness.state_mut(), Section::Notifications);
     harness.run();
     assert!(harness.query_by_label("Not changed: the desktop did not allow InboxCraft to start at login.").is_none());
 }
@@ -238,7 +238,7 @@ fn a_background_choice_the_desk_refuses_shows_in_the_error_banner() {
 #[test]
 fn without_accounts_the_page_says_to_add_one_first() {
     let session = Session::new(Box::new(Memory::new(StoreConfig::default())), clock()).unwrap();
-    let harness = on_the_page(InboxApp::new(Mailbox::new(session, clock())));
+    let harness = on_the_page(InboxApp::at_mail(Mailbox::new(session, clock())));
     harness.get_by_label("Add an account first: each account chooses which of its new mail notifies you.");
     harness.get_by_role_and_label(Role::Switch, "Returned snoozes");
 }
@@ -247,7 +247,7 @@ fn without_accounts_the_page_says_to_add_one_first() {
 fn every_control_on_the_page_has_an_accessible_name_in_both_modes() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let mut app = app().with_desk(Box::new(Fake::with(Some(true), Some(false))));
-        app.settings_mut().open_at(Section::Notifications, &Appearance::default());
+        super::tests::at_settings(&mut app, Section::Notifications);
         let harness = harness_of(app, theme);
         harness.check_accessibility();
     }
@@ -348,7 +348,7 @@ fn a_refusal_that_comes_after_the_sheet_closed_shows_in_the_error_banner() {
     let mut harness = on_the_page(app().with_desk(Box::new(desk.clone())));
     harness.get_by_role_and_label(Role::Switch, "Start with the computer").click();
     harness.run();
-    harness.state_mut().close_settings();
+    harness.state_mut().leave_settings();
     harness.run();
     desk.0.lock().unwrap().answer = Some(Err("the Background portal did not answer".to_owned()));
     harness.run();

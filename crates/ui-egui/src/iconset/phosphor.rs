@@ -1,21 +1,18 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Phosphor (https://github.com/phosphor-icons/web, release 2.1.1, MIT): the code points of its Regular, Fill and
-//! Duotone fonts in `assets/icons/phosphor/`. Regular and Fill share a code point per icon; Duotone has two, the
-//! faint back and the lines.
+//! Phosphor (https://github.com/phosphor-icons/web, release 2.1.1, MIT): the code points of its Regular font,
+//! `assets/icons/phosphor/Phosphor.ttf`.
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use super::{BACK_OPACITY, Glyph, IconId, Metrics, Style};
-use crate::theme::IconFont;
+use super::{IconId, Metrics};
 
 /// A glyph fills the font's em square with a margin of its own, centred on the line's middle.
 pub(super) const METRICS: Metrics = Metrics { size: 1.0, drop: 0.0 };
 
-/// The Phosphor name of each id and its Regular (and Fill) code point; Duotone draws it as the back and the next
-/// code point as the lines.
-const fn point(id: IconId) -> char {
+/// The Phosphor name of each id and its code point.
+pub(super) const fn glyph(id: IconId) -> char {
     match id {
         IconId::Inbox => '\u{e4aa}',     // tray
         IconId::Done => '\u{e184}',      // check-circle
@@ -62,18 +59,10 @@ const fn point(id: IconId) -> char {
         IconId::Globe => '\u{e288}',     // globe
         IconId::Changed => '\u{e094}',   // arrows-clockwise
         IconId::Older => '\u{e1a0}',     // clock-counter-clockwise
-    }
-}
-
-/// The glyphs of `id` in `style`.
-pub(super) fn glyph(id: IconId, style: Style) -> Glyph {
-    let point = point(id);
-    match style {
-        Style::Regular => Glyph { face: IconFont::PhosphorRegular, layers: vec![(point, 1.0)], disc: 0.0 },
-        Style::Fill => Glyph { face: IconFont::PhosphorFill, layers: vec![(point, 1.0)], disc: 0.0 },
-        Style::Duotone => {
-            let lines = char::from_u32(u32::from(point).saturating_add(1)).unwrap_or(point);
-            Glyph { face: IconFont::PhosphorDuotone, layers: vec![(point, BACK_OPACITY), (lines, 1.0)], disc: 0.0 }
-        }
+        IconId::Check => '\u{e182}',     // check
+        IconId::Countdown => '\u{ed2c}', // clock-countdown
+        IconId::Pause => '\u{e39e}',     // pause
+        IconId::CameBack => '\u{e08a}',  // arrow-u-up-left
+        IconId::Dock => '\u{e0a6}',      // the composer frame's glyph for its place
     }
 }

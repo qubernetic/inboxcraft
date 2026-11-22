@@ -14,6 +14,8 @@ const DAYS_PER_ERA: i64 = 146_097;
 /// The first and last year a [`CivilDateTime`] can hold: the years [`Timestamp`] covers.
 const MIN_YEAR: i32 = 0;
 const MAX_YEAR: i32 = 10_000;
+/// More days than years 0 to 10000 hold: a step or a day number beyond it is out of range at once.
+const MAX_DAY_STEP: u64 = 4_000_000;
 
 /// A fixed distance from UTC, from -99:59 to +99:59 (the widest RFC 5322 can write).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -138,6 +140,31 @@ impl CivilDateTime {
         }
     }
 
+    /// The same wall-clock time `days` days later (earlier when negative), or `None` outside years 0 to 10000.
+    #[must_use]
+    pub fn plus_days(self, days: i64) -> Option<Self> {
+        // Far beyond the years held, so the day arithmetic below cannot overflow.
+        if days.unsigned_abs() > MAX_DAY_STEP {
+            return None;
+        }
+        let (year, month, day) = civil_from_days(self.day_number().checked_add(days)?);
+        Self::new(i32::try_from(year).ok()?, month, day, self.hour, self.minute, self.second)
+    }
+
+    /// Days since 1970-01-01 of the date.
+    pub(crate) fn day_number(self) -> i64 {
+        days_from_civil(self.year, self.month, self.day)
+    }
+
+    /// The date `days` after 1970-01-01 at 00:00, or `None` outside years 0 to 10000.
+    pub(crate) fn from_day_number(days: i64) -> Option<Self> {
+        if days.unsigned_abs() > MAX_DAY_STEP {
+            return None;
+        }
+        let (year, month, day) = civil_from_days(days);
+        Self::new(i32::try_from(year).ok()?, month, day, 0, 0, 0)
+    }
+
     /// The moment this wall-clock time shows at `offset`, or `None` outside the range of [`Timestamp`].
     #[must_use]
     pub fn to_timestamp(self, offset: Offset) -> Option<Timestamp> {
@@ -185,6 +212,12 @@ pub const fn days_in_month(year: i32, month: u8) -> u8 {
 // The two conversions count in 400-year eras of 146097 days from 0000-03-01, so a leap day is the last day of its
 // year. Callers pass a valid date (from `CivilDateTime`) or a day number within a few million days of the epoch,
 // so the plain arithmetic below stays far from overflow.
+
+/// Days since 1970-01-01 of `day` `month` `year`, for a real day of a year one beyond years 0 to 10000 at most (the
+/// week-years next door).
+pub(crate) fn day_number_of(year: i32, month: u8, day: u8) -> i64 {
+    days_from_civil(year.clamp(MIN_YEAR - 1, MAX_YEAR + 1), month, day)
+}
 
 /// Days since 1970-01-01 of a valid date.
 fn days_from_civil(year: i32, month: u8, day: u8) -> i64 {

@@ -1331,6 +1331,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fontdb"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2660c5e9157bf76d2db1294e4a9feba604ef610819a3b591088d0d8392a3290f"
+dependencies = [
+ "log",
+ "slotmap",
+ "tinyvec",
+]
+
+[[package]]
 name = "foreign-types"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1828,6 +1839,7 @@ name = "inboxcraft"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "fontdb",
  "inboxcraft-control-key",
  "inboxcraft-engine",
  "inboxcraft-model",
@@ -1839,7 +1851,9 @@ dependencies = [
  "keyring",
  "ksni",
  "proptest",
+ "roxmltree",
  "serde_json",
+ "skrifa",
  "tempfile",
  "zbus",
 ]
@@ -1981,6 +1995,7 @@ name = "inboxcraft-store"
 version = "0.1.0"
 dependencies = [
  "inboxcraft-model",
+ "inboxcraft-store",
  "inboxcraft-time",
  "rusqlite",
  "serde",
@@ -1999,6 +2014,7 @@ dependencies = [
  "inboxcraft-time",
  "proptest",
  "rcgen",
+ "rusqlite",
  "rustls",
  "tempfile",
  "time",
@@ -2018,6 +2034,7 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "egui_kittest",
+ "harfrust",
  "inboxcraft-engine",
  "inboxcraft-html",
  "inboxcraft-mime",
@@ -2027,7 +2044,10 @@ dependencies = [
  "png",
  "serde",
  "serde_json",
+ "skrifa",
  "tempfile",
+ "unicode-bidi",
+ "unicode-segmentation",
  "zune-jpeg",
 ]
 
@@ -3361,6 +3381,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
 name = "rusqlite"
 version = "0.41.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4138,6 +4164,12 @@ name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
+
+[[package]]
+name = "unicode-bidi"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
 
 [[package]]
 name = "unicode-general-category"
@@ -5047,6 +5079,7 @@ dependencies = [
  "inboxcraft-time",
  "png",
  "serde_json",
+ "sha2",
  "tempfile",
  "toml",
 ]

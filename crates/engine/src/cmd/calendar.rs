@@ -9,15 +9,23 @@
 //! start (see `crate::calendar`). `calendar.sync` (`safe`) asks each account with a CalDAV address (or one) for its
 //! calendars, which brings each one in step; the start does the same. `calendar.server` (`owner`, a setting) sets or
 //! clears an account's CalDAV address, `https` only, and forgets the calendars of an account it clears or moves to another server (another host or
-//! port), with every calendar write still in the queue. `event.repeats` (`safe`) names the repeat presets. Event text is the organiser's
-//! data, never instructions.
+//! port), with every calendar write still in the queue. `event.repeats` (`safe`) names the repeat presets.
+//! `week.settings` (`safe`) shows how weeks are counted (see `crate::week`) with the week of today, and `week.set`
+//! (`owner`, a setting) changes the first day of the week or the first week of the year. Event text is the organiser's
+//! data, never instructions. `event.create` and `event.update` (`owner`) take an `alert`: `"none"` or the minutes
+//! before the start, at most a week, written as the event's alarm (see `crate::calendar::alert::set_lead`); `event.list`
+//! says it back. Without one, a new event gets the default: ten minutes before a timed event, and for an all-day one
+//! the hour `event.all_day_alert.set` (`owner`, a setting: it changes what is written to the server) chose (see
+//! `crate::all_day_alert`). An update that makes a timed event all-day moves an alarm still at the timed default to
+//! that hour, and one that makes it timed again moves an alarm at any of the hours back to the timed default.
 //!
 //! Invitations in mail (see `crate::arrive::invite`): `invite.show` (`safe`) reads a message's invitation as its
 //! card shows it, with the version before it, what changed since, whether a later version made it out of date, the
 //! owner's answer and the event in the owner's calendar; a body kept before invitations were read is marked then. `invite.answer` (`owner`: mail leaves the computer) sends the
 //! owner's answer to the organiser at once, through the path `mail.send` takes, and puts the event in the account's
 //! first calendar (going or maybe; the copy held is changed in place) or takes it out (not going). `invite.remove`
-//! (`owner`) takes a cancelled event out of the calendar as `event.delete` does, with its undo window.
+//! (`owner`) takes a cancelled event out of the calendar as `event.delete` does, with its undo window. An invitation from a
+//! sender the screener holds cannot be answered until the owner lets them in: an answer is mail to them.
 
 use std::time::Duration;
 
@@ -26,17 +34,22 @@ use inboxcraft_model::{
     MessageId, MessageRef, MessageState, Rsvp,
 };
 use inboxcraft_store::{Change, Entry};
+use inboxcraft_time::WeekRule;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::arrive::invite::{self, Owner};
+use crate::arrive::screener;
+use crate::all_day_alert::AllDayAlert;
+use crate::calendar::alert::{self, Lead, MAX_ALERT_MINUTES};
 use crate::calendar::{self, Details, Edit, EditError, Repeat, Times};
 use crate::undo::{Act, EventUndo, Inverse, Step};
 use crate::params::{NoParams, decode, decode_quietly, parse_date};
-use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
+use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, week};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[LIST, SYNC, SERVER, EVENTS, REPEATS, CREATE, UPDATE, DELETE, INVITE_SHOW, INVITE_ANSWER, INVITE_REMOVE];
+pub(crate) const COMMANDS: &[CommandSpec] =
+    &[LIST, SYNC, SERVER, EVENTS, REPEATS, CREATE, UPDATE, DELETE, INVITE_SHOW, INVITE_ANSWER, INVITE_REMOVE, WEEK_SETTINGS, WEEK_SET, ALL_DAY_ALERT_SET];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
@@ -57,9 +70,21 @@ pub(crate) const FIELDS: &[&str] = &[
     "busy",
     "private",
     "guests",
+    "alert",
     "notify",
     "answer",
+    "first_day",
+    "first_week",
+    "at",
 ];
+
+/// `event.all_day_alert.set`: when a new all-day event's alert rings.
+pub(crate) const ALL_DAY_ALERT_SET: CommandSpec = CommandSpec {
+    id: "event.all_day_alert.set",
+    class: Some(AgentClass::Owner),
+    summary: "Change when a new all-day event's alert rings: 9:00, 12:00 or 18:00 the day before, or 9:00 on the day",
+    run: all_day_alert_set,
+};
 
 /// The longest summary or location, in characters.
 const MAX_LINE: usize = 1000;
@@ -100,6 +125,22 @@ pub(crate) const EVENTS: CommandSpec = CommandSpec {
 /// `event.repeats`: the repeat presets.
 pub(crate) const REPEATS: CommandSpec =
     CommandSpec { id: "event.repeats", class: Some(AgentClass::Safe), summary: "Name the repeat presets an event can take", run: repeats };
+
+/// `week.settings`: how weeks are counted, and the week of today.
+pub(crate) const WEEK_SETTINGS: CommandSpec = CommandSpec {
+    id: "week.settings",
+    class: Some(AgentClass::Safe),
+    summary: "Show the first day of the week, the first week of the year and the week of today",
+    run: week_settings,
+};
+
+/// `week.set`: change how weeks are counted.
+pub(crate) const WEEK_SET: CommandSpec = CommandSpec {
+    id: "week.set",
+    class: Some(AgentClass::Owner),
+    summary: "Change the first day of the week or the first week of the year",
+    run: week_set,
+};
 
 /// `event.create`: a new event, written to the server.
 pub(crate) const CREATE: CommandSpec =
@@ -143,6 +184,17 @@ struct CreateParams {
     private: Option<bool>,
     #[serde(default)]
     guests: Option<Vec<String>>,
+    /// `none`, or the minutes before the start (at most a week); left out, the default lead.
+    #[serde(default)]
+    alert: Option<AlertParam>,
+}
+
+/// The `alert` parameter: `"none"` or the minutes before the start.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum AlertParam {
+    Minutes(u64),
+    Word(String),
 }
 
 #[derive(Deserialize)]
@@ -171,6 +223,9 @@ struct UpdateParams {
     private: Option<bool>,
     #[serde(default)]
     guests: Option<Vec<String>>,
+    /// `none`, or the minutes before the start (at most a week); left out, as it is.
+    #[serde(default)]
+    alert: Option<AlertParam>,
     /// Tell the guests of the change (the default is not to).
     #[serde(default)]
     notify: bool,
@@ -315,7 +370,9 @@ fn events(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     }
     let local = context.offsets();
     let (mut rows, mut unreadable, mut truncated) = (Vec::new(), 0_usize, false);
+    let accounts = context.store().accounts()?;
     for calendar in held {
+        let owner = accounts.iter().find(|account| account.id() == calendar.account).map(Owner::of);
         for event in context.store().calendar_events(calendar.id)? {
             let Some(object) = calendar::read(&event) else {
                 unreadable = unreadable.saturating_add(1);
@@ -323,7 +380,7 @@ fn events(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
             };
             let expansion = object.occurrences(from, to, local);
             truncated |= expansion.truncated;
-            rows.extend(expansion.occurrences.iter().map(|occurrence| (occurrence.start, calendar::row(&event, &object, occurrence, local))));
+            rows.extend(expansion.occurrences.iter().map(|occurrence| (occurrence.start, calendar::row(&event, &object, occurrence, local, owner.as_ref()))));
         }
     }
     rows.sort_by_key(|(start, _)| *start);
@@ -336,6 +393,70 @@ fn events(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
 fn repeats(_context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let _: NoParams = decode(REPEATS.id, params)?;
     Ok(Outcome::new(json!({ "repeats": Repeat::ALL.map(Repeat::name) })))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WeekSetParams {
+    /// `monday` to `sunday`.
+    first_day: Option<String>,
+    /// `first_four_day_week` or `week_of_1_january`.
+    first_week: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AllDayAlertParams {
+    /// `day_before_9`, `day_before_12`, `day_before_18` or `on_the_day_9`.
+    at: String,
+}
+
+fn all_day_alert_set(_context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: AllDayAlertParams = decode(ALL_DAY_ALERT_SET.id, params)?;
+    let choice = AllDayAlert::from_name(&params.at)
+        .ok_or_else(|| EngineError::bad_params(ALL_DAY_ALERT_SET.id, "at is day_before_9, day_before_12, day_before_18 or on_the_day_9"))?;
+    let names = AllDayAlert::ALL.map(AllDayAlert::name);
+    Ok(Outcome::new(json!({ "all_day_alert": choice.name(), "choices": names })).with_all_day_alert(choice))
+}
+
+fn week_settings(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let NoParams {} = decode(WEEK_SETTINGS.id, params)?;
+    Ok(Outcome::new(week_answer(context, context.state().week)))
+}
+
+fn week_set(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: WeekSetParams = decode(WEEK_SET.id, params)?;
+    if params.first_day.is_none() && params.first_week.is_none() {
+        return Err(EngineError::bad_params(WEEK_SET.id, "nothing to change: give first_day or first_week"));
+    }
+    let mut rule = context.state().week;
+    if let Some(name) = params.first_day.as_deref() {
+        rule.first_day = week::day_from_name(name).ok_or_else(|| EngineError::bad_params(WEEK_SET.id, "first_day is monday to sunday"))?;
+    }
+    if let Some(name) = params.first_week.as_deref() {
+        rule.first_week = week::first_week_from_name(name)
+            .ok_or_else(|| EngineError::bad_params(WEEK_SET.id, "first_week is first_four_day_week or week_of_1_january"))?;
+    }
+    Ok(Outcome::new(week_answer(context, rule)).with_week(rule))
+}
+
+/// `rule`, the names it can take, and the week of today in the owner's wall-clock time (`null` at the ends of time).
+fn week_answer(context: &Context<'_>, rule: WeekRule) -> Value {
+    let today = context.offsets().civil(context.now()).and_then(|today| rule.week(today)).map(|week| {
+        let day = week.first_day;
+        json!({
+            "first_day": format!("{:04}-{:02}-{:02}", day.year(), day.month(), day.day()),
+            "number": week.number,
+            "year": week.year,
+        })
+    });
+    let mut answer = week::to_value(rule);
+    if let Value::Object(fields) = &mut answer {
+        fields.insert("days".into(), json!(week::DAYS));
+        fields.insert("first_weeks".into(), json!(week::FIRST_WEEKS));
+        fields.insert("this_week".into(), today.unwrap_or(Value::Null));
+    }
+    answer
 }
 
 /// What an event says beside its times, checked as `spec` reads it.
@@ -376,7 +497,19 @@ fn details(
         }
         None => None,
     };
-    Ok(Details { summary, location, description, repeat, busy, private, guests })
+    Ok(Details { summary, location, description, repeat, busy, private, guests, alert: None })
+}
+
+/// The alert `alert` names, checked as `spec` reads it.
+fn lead(spec: &CommandSpec, alert: Option<AlertParam>) -> Result<Option<Lead>, EngineError> {
+    match alert {
+        None => Ok(None),
+        Some(AlertParam::Word(word)) if word == "none" => Ok(Some(Lead::None)),
+        Some(AlertParam::Minutes(minutes)) if minutes <= u64::from(MAX_ALERT_MINUTES) => {
+            Ok(u32::try_from(minutes).ok().map(Lead::Before))
+        }
+        Some(_) => Err(EngineError::bad_params(spec.id, &format!("alert is none or the minutes before the start, at most {MAX_ALERT_MINUTES}"))),
+    }
 }
 
 /// Event `id`.
@@ -416,7 +549,7 @@ fn create(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         Times::Moments(start, end)
     };
     let times = times.checked().map_err(bad)?;
-    let details = details(
+    let mut details = details(
         &CREATE,
         Some(params.summary),
         params.location,
@@ -426,6 +559,8 @@ fn create(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         params.private,
         params.guests,
     )?;
+    // Without an alert, the default lead is written as the event's alarm, so every device rings as this one does.
+    details.alert = Some(lead(&CREATE, params.alert)?.unwrap_or(alert::default_lead(params.all_day, context.state().all_day_alert)));
     let now = context.now();
     let id = CalendarEventId::new(context.state().next_event);
     let name = format!("inboxcraft-{}-{:09}-{}", now.unix_seconds(), now.subsec_nanos(), id.get());
@@ -446,8 +581,8 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     let bad = |reason: &str| EngineError::bad_params(UPDATE.id, reason);
     let held = held_event(context, params.id)?;
     let (_, owner) = owner_of(context, held.calendar)?;
-    let edit = Edit { start: params.start, end: params.end, all_day: params.all_day };
-    let details = details(
+    let edit = Edit { start: params.start, end: params.end, all_day: params.all_day, all_day_alert: context.state().all_day_alert };
+    let mut details = details(
         &UPDATE,
         params.summary,
         params.location,
@@ -457,15 +592,24 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         params.private,
         params.guests,
     )?;
+    details.alert = lead(&UPDATE, params.alert)?;
     if edit.start.is_none() && edit.end.is_none() && edit.all_day.is_none() && details.is_empty() {
         return Err(bad("nothing to change"));
     }
-    let (ical, guests) = calendar::edit(&held, &edit, details, params.notify, owner.address(), context.now(), context.offsets()).map_err(|error| match error {
-        EditError::Unreadable => bad("the event cannot be read"),
-        EditError::Bad(reason) => bad(reason),
-    })?;
+    let only_alert = edit.start.is_none() && edit.end.is_none() && edit.all_day.is_none() && details.only_alert();
+    let (ical, guests) = match details.alert {
+        // An alert alone touches the alarms and nothing else, so the guests are not told either.
+        Some(lead) if only_alert => {
+            let ical = alert::relead(&held.ical, lead).ok_or_else(|| bad("the event cannot be read"))?;
+            (ical, calendar::read(&held).and_then(|object| calendar::master(&object).map(|event| event.attendees.len())).unwrap_or_default())
+        }
+        _ => calendar::edit(&held, &edit, details, params.notify, owner.address(), context.now(), context.offsets()).map_err(|error| match error {
+            EditError::Unreadable => bad("the event cannot be read"),
+            EditError::Bad(reason) => bad(reason),
+        })?,
+    };
     let job = CalendarJob::Put { calendar: held.calendar, event: held.id, url: held.href.clone(), etag: held.etag.clone(), ical: ical.clone() };
-    let answer = json!({ "id": params.id, "guests": guests, "notified": params.notify && guests > 0 });
+    let answer = json!({ "id": params.id, "guests": guests, "notified": params.notify && guests > 0 && !only_alert });
     Ok(Outcome::new(answer)
         .with_change(Change::PutCalendarEvent(CalendarEvent { ical, ..held.clone() }))
         .with_kept_job(owner.id(), JobKind::Calendar(job))
@@ -585,6 +729,8 @@ struct Card {
     held: Option<CalendarEvent>,
     /// The mark was read just now, from a body kept before: the card keeps it.
     fresh: bool,
+    /// The screener holds its sender: nobody has let them in yet, so no answer goes to them.
+    screened: bool,
 }
 
 impl Card {
@@ -622,6 +768,7 @@ impl Card {
             ItipMethod::Cancel => "the event is cancelled",
             ItipMethod::Reply | ItipMethod::Other => "it asks for no answer",
             ItipMethod::Request if self.latest().is_some() => "a later invitation came",
+            ItipMethod::Request if self.screened => "the sender is not let in yet",
             ItipMethod::Request => {
                 let Some(event) = self.event() else { return Some("the text of the message is not here yet") };
                 let Some(organizer) = &event.organizer else { return Some("it names no organiser") };
@@ -649,10 +796,10 @@ fn card(context: &Context<'_>, entry: &Entry) -> Result<Option<Card>, EngineErro
     let store = context.store();
     let message = entry.message().clone();
     let object = store.body(message.id())?.and_then(|body| invite::read(body.source()));
+    let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
     let (mark, fresh) = match store.message_state(message.id())?.invitation {
         Some(mark) => (*mark, false),
         None => {
-            let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
             match object.as_ref().filter(|_| role != Some(inboxcraft_model::Role::Blocked)).and_then(|object| invite::mark(object, context.offsets())) {
                 Some(mark) => (mark, true),
                 None => return Ok(None),
@@ -669,7 +816,8 @@ fn card(context: &Context<'_>, entry: &Entry) -> Result<Option<Card>, EngineErro
         }
     }
     let held = held_copy(context, message.account(), &mark.uid)?;
-    Ok(Some(Card { message, account, mark, object, versions, held, fresh }))
+    let screened = screener::is_new(store, context.state().screener, role, &store.accounts()?, &message)?;
+    Ok(Some(Card { message, account, mark, object, versions, held, fresh, screened }))
 }
 
 /// The event `uid` in the calendars of `account`: the first that holds it as its series.

@@ -4,7 +4,8 @@
 //! The keymap: which key runs which action. Actions are named by id, the engine's command ids once they have a key
 //! and the window's own (`ui.search.focus`) until then. Everything that shows a key (the key chip of a tooltip, a
 //! menu row, a toast's Undo) reads it from here when it is drawn, so a changed key shows at once; one key runs one
-//! action.
+//! action of a [`Scope`]: actions of screens never shown together (the calendar's arrows, the mail list's) may share
+//! one.
 //!
 //! Every action of the window is in [`actions`], with its name, so the command palette lists them all and the
 //! Shortcuts page gives each one a key. The keymap is kept between runs as [`Keymap::to_value`]: every action's key
@@ -16,6 +17,7 @@ use egui::{Context, Event, Key, KeyboardShortcut, Modifiers};
 use serde_json::{Map, Value};
 
 use crate::iconset::IconId;
+use crate::theme::TextScale;
 use crate::tr;
 
 /// Focus the search field.
@@ -23,6 +25,10 @@ pub const FIND: &str = "ui.search.focus";
 
 /// Show the mail: leave the settings or the add-account page (the rail's Mail button).
 pub const MAIL: &str = "ui.mail.show";
+
+/// Show Home, the brief of today (the index's `[ 00 ] HOME`). No key of its own at the start: Command and 0 resets the
+/// text size ([`TEXT_RESET`]); the index's HOME and the palette show it, and the Shortcuts page can give it a key.
+pub const HOME: &str = "ui.home.open";
 
 /// Open the appearance settings (the rail's settings button).
 pub const SETTINGS: &str = "ui.settings.open";
@@ -48,8 +54,11 @@ pub const DELETE: &str = "ui.message.delete";
 /// Undo the act of the toast while it shows, else the newest act of the session.
 pub const UNDO: &str = "ui.undo";
 
-/// Open the command palette.
+/// Open the command line, empty (its id is the palette's it replaces, so a key kept for it stays).
 pub const PALETTE: &str = "ui.palette.open";
+
+/// Open the command line, empty, by a bare key: it runs only while no text field has the keyboard.
+pub const COMMAND_LINE: &str = "ui.command.open";
 
 /// Show the calendar (the rail's Calendar button).
 pub const CALENDAR: &str = "ui.calendar.show";
@@ -75,14 +84,172 @@ pub const DARK: &str = "ui.mode.dark";
 /// Show what the system shows (`ui.theme.set`).
 pub const SYSTEM_MODE: &str = "ui.mode.system";
 
-/// Turn reduced motion on or off (`ui.motion.set`).
-pub const MOTION: &str = "ui.motion.toggle";
+/// Draw every text a step larger (`ui.text_scale.set`, 90 % to 130 % in steps of 10): Command and Plus.
+pub const TEXT_LARGER: &str = "ui.text_size.larger";
+
+/// The same step larger by Command and `=`, the Plus key without Shift on most layouts: [`TEXT_LARGER`]'s second key.
+pub const TEXT_LARGER_EQUALS: &str = "ui.text_size.larger_equals";
+
+/// Draw every text a step smaller: Command and Minus.
+pub const TEXT_SMALLER: &str = "ui.text_size.smaller";
+
+/// Draw every text at 100 % again: Command and 0.
+pub const TEXT_RESET: &str = "ui.text_size.reset";
+
+/// The text size's keys: each changes the text size by one step, or back to 100 %, and the status line says the size.
+pub const TEXT_SIZE_KEYS: [&str; 4] = [TEXT_LARGER, TEXT_LARGER_EQUALS, TEXT_SMALLER, TEXT_RESET];
+
+/// What the text-size action `id` makes of the text size `now`, and what the status line says of it: one step larger
+/// or smaller, or 100 %; at the end it steps towards the size stays and the words say it is the largest or the
+/// smallest. An id that is not one of [`TEXT_SIZE_KEYS`] leaves the size as it is.
+#[must_use]
+pub fn text_size_step(id: &str, now: TextScale) -> (TextScale, String) {
+    let percent = |scale: TextScale| scale.percent();
+    match id {
+        TEXT_LARGER | TEXT_LARGER_EQUALS => match now.larger() {
+            Some(scale) => (scale, tr!("Text size {percent} %", percent = percent(scale))),
+            None => (now, tr!("Text size {percent} %, the largest", percent = percent(now))),
+        },
+        TEXT_SMALLER => match now.smaller() {
+            Some(scale) => (scale, tr!("Text size {percent} %", percent = percent(scale))),
+            None => (now, tr!("Text size {percent} %, the smallest", percent = percent(now))),
+        },
+        TEXT_RESET => (TextScale::default(), tr!("Text size {percent} %", percent = percent(TextScale::default()))),
+        _ => (now, tr!("Text size {percent} %", percent = percent(now))),
+    }
+}
+
+/// Whether `text` is what [`text_size_step`] says, for any size: a newer word on the text size takes its place in the
+/// status line.
+#[must_use]
+pub fn is_text_size_notice(text: &str) -> bool {
+    TextScale::ALL.into_iter().any(|scale| TEXT_SIZE_KEYS.into_iter().any(|id| text_size_step(id, scale).1 == text))
+}
+
+/// Back to the list: in one pane the list takes the open message's place again, its keyed row focused.
+pub const BACK: &str = "ui.reader.back";
+
+/// Show the inbox grouped: every group open.
+pub const VIEW_GROUPED: &str = "ui.view.grouped";
+
+/// Show the inbox smart: the first three rows of each group.
+pub const VIEW_SMART: &str = "ui.view.smart";
+
+/// Show the inbox as one list by time.
+pub const VIEW_LIST: &str = "ui.view.list";
 
 /// Write a new message (`compose.new`), or bring back the one being written.
 pub const COMPOSE: &str = "ui.compose.new";
 
 /// Send the message being written (`mail.send`).
 pub const SEND: &str = "ui.compose.send";
+
+/// Fold the floating composer to its head, or open it again.
+pub const FOLD: &str = "ui.compose.fold";
+
+/// Calendar: move the pick left (a day back, or the event of the day before).
+pub const CALENDAR_LEFT: &str = "ui.calendar.left";
+
+/// Calendar: move the pick right (a day on, or the event of the next day).
+pub const CALENDAR_RIGHT: &str = "ui.calendar.right";
+
+/// Calendar: move the pick up (a week back, or the event before).
+pub const CALENDAR_UP: &str = "ui.calendar.up";
+
+/// Calendar: move the pick down (a week on, or the next event).
+pub const CALENDAR_DOWN: &str = "ui.calendar.down";
+
+/// Calendar: open the picked day, or take the keyboard into the picked event's details.
+pub const CALENDAR_OPEN: &str = "ui.calendar.open";
+
+/// Calendar: leave the picked event's details and let the pick go.
+pub const CALENDAR_CLOSE: &str = "ui.calendar.close";
+
+/// The calendar's keys: they act on the calendar screen only (`draw/calendar/keys.rs`).
+pub const CALENDAR_KEYS: [&str; 6] = [CALENDAR_LEFT, CALENDAR_RIGHT, CALENDAR_UP, CALENDAR_DOWN, CALENDAR_OPEN, CALENDAR_CLOSE];
+
+/// Where an action acts: the whole window, or one screen. Two actions may share a key when their scopes are never
+/// active together (the calendar's arrows and the mail list's); within a scope, and against the window's, one key runs
+/// one action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// Anywhere in the window.
+    Window,
+    /// The calendar screen alone ([`CALENDAR_KEYS`]).
+    Calendar,
+    /// The mail screen's list alone: the `ui.list.*` actions.
+    Mail,
+}
+
+impl Scope {
+    /// Whether actions in this scope and in `other` can be pressed at the same time: the window's with every scope, a
+    /// screen's with its own.
+    #[must_use]
+    pub fn meets(self, other: Self) -> bool {
+        self == Self::Window || other == Self::Window || self == other
+    }
+}
+
+/// The scope of action `id`: the calendar's keys act on the calendar screen, the `ui.list.*` actions on the mail
+/// screen's list, every other action anywhere. The scope is read from the id alone: a `ui.list.*` action must never
+/// be live on the calendar, and an action that can act on more than one screen (the composer's, which floats over
+/// either) keeps an id outside both, so it is the window's.
+#[must_use]
+pub fn scope(id: &str) -> Scope {
+    if CALENDAR_KEYS.contains(&id) {
+        Scope::Calendar
+    } else if id.starts_with("ui.list.") {
+        Scope::Mail
+    } else {
+        Scope::Window
+    }
+}
+
+/// After the open message left the list, open the message the next-message rule names (the next or the previous
+/// one). No key of its own: the palette runs it.
+pub const OPEN_HELD: &str = "ui.reader.open_held";
+
+/// Move the list's focused row a page down: by the rows in sight.
+pub const PAGE_DOWN: &str = "ui.list.page_down";
+
+/// Move the list's focused row a page up.
+pub const PAGE_UP: &str = "ui.list.page_up";
+
+/// Move the list's focused row to the first row.
+pub const FIRST: &str = "ui.list.first";
+
+/// Move the list's focused row to the last row.
+pub const LAST: &str = "ui.list.last";
+
+/// Move the list's keyed row one down: the next message.
+pub const NEXT: &str = "ui.list.next";
+
+/// Move the list's keyed row one up: the message before.
+pub const PREVIOUS: &str = "ui.list.previous";
+
+/// The next message by the arrow: [`NEXT`]'s second key.
+pub const DOWN: &str = "ui.list.down";
+
+/// The message before by the arrow: [`PREVIOUS`]'s second key.
+pub const UP: &str = "ui.list.up";
+
+/// Open the list's keyed message and hand the keyboard to the reader; `Esc` there gives it back to the list.
+pub const OPEN: &str = "ui.list.open";
+
+/// Open the menu of what has the keyboard: the group menu of the list's keyed row, or the menu of the reader's
+/// focused line or subject.
+pub const MENU: &str = "ui.list.menu";
+
+/// The same menu by the keyboard's Menu key: [`MENU`]'s second key.
+pub const MENU_KEY: &str = "ui.list.menu_key";
+
+/// List the unread messages of the place shown alone ("Unread only"), or all of them again: the engine's command id,
+/// the list's own (`U`).
+pub const UNREAD: &str = "ui.list.unread";
+
+/// The actions of the list's keys: they run only while the list has the keyboard (a row was pressed or keyed last
+/// and nothing else has the focus, or a row has it), and rest otherwise, in a text field as in the reader.
+pub const LIST_KEYS: [&str; 11] = [NEXT, PREVIOUS, DOWN, UP, PAGE_DOWN, PAGE_UP, FIRST, LAST, OPEN, MENU, MENU_KEY];
 
 /// The longest key text read, in bytes; `Command+Shift+Alt+ArrowRight` takes 28.
 pub const MAX_TEXT: usize = 64;
@@ -103,28 +270,57 @@ pub struct Action {
 pub fn actions() -> Vec<Action> {
     let action = |id, name, icon| Action { id, name, icon };
     vec![
-        action(PALETTE, tr!("Command palette"), IconId::Keyboard),
+        action(PALETTE, tr!("Command line"), IconId::Keyboard),
+        action(COMMAND_LINE, tr!("Command line, by a bare key"), IconId::Keyboard),
         action(FIND, tr!("Search mail"), IconId::Search),
+        action(HOME, tr!("Show Home"), IconId::Home),
         action(MAIL, tr!("Show mail"), IconId::Inbox),
         action(SENT, tr!("Show sent mail"), IconId::Send),
         action(LATER, tr!("Show later: snoozed, pins and parked"), IconId::Pin),
         action(COMPOSE, tr!("New message"), IconId::Compose),
         action(SEND, tr!("Send the message"), IconId::Send),
+        action(FOLD, tr!("Fold or open the floating draft"), IconId::Dock),
         action(CALENDAR, tr!("Show the calendar"), IconId::Calendar),
+        action(CALENDAR_LEFT, tr!("Calendar: pick to the left"), IconId::Previous),
+        action(CALENDAR_RIGHT, tr!("Calendar: pick to the right"), IconId::Next),
+        action(CALENDAR_UP, tr!("Calendar: pick above"), IconId::Previous),
+        action(CALENDAR_DOWN, tr!("Calendar: pick below"), IconId::Next),
+        action(CALENDAR_OPEN, tr!("Calendar: open what is picked"), IconId::Calendar),
+        action(CALENDAR_CLOSE, tr!("Calendar: leave the details"), IconId::Close),
+        action(OPEN_HELD, tr!("Open the message the rule names"), IconId::Mail),
         action(DONE, tr!("Done"), IconId::Done),
         action(ARCHIVE, tr!("Archive"), IconId::Archive),
         action(SNOOZE, tr!("Snooze or remind me"), IconId::Snooze),
         action(READ, tr!("Mark read or unread"), IconId::MarkRead),
         action(FLAG, tr!("Flag or take the flag off"), IconId::Flag),
         action(DELETE, tr!("Delete"), IconId::Delete),
+        action(NEXT, tr!("The next message of the list"), IconId::Caret),
+        action(PREVIOUS, tr!("The message before in the list"), IconId::Caret),
+        action(DOWN, tr!("The next message of the list (the arrow)"), IconId::Caret),
+        action(UP, tr!("The message before in the list (the arrow)"), IconId::Caret),
+        action(OPEN, tr!("Open the list's message and read it"), IconId::Mail),
+        action(MENU, tr!("The menu of the list's row, the reader's line or its subject"), IconId::More),
+        action(MENU_KEY, tr!("The menu of the list's row, the reader's line or its subject (the Menu key)"), IconId::More),
+        action(PAGE_DOWN, tr!("A page down the list"), IconId::Caret),
+        action(PAGE_UP, tr!("A page up the list"), IconId::Caret),
+        action(FIRST, tr!("The first message of the list"), IconId::Caret),
+        action(LAST, tr!("The last message of the list"), IconId::Caret),
         action(UNDO, tr!("Undo"), IconId::Back),
         action(FULL_WIDTH, tr!("Reader full width"), IconId::Mail),
+        action(BACK, tr!("Back to the list"), IconId::Back),
         action(SETTINGS, tr!("Settings"), IconId::Settings),
         action(SHORTCUTS, tr!("Shortcuts"), IconId::Keyboard),
         action(LIGHT, tr!("Light mode"), IconId::Palette),
         action(DARK, tr!("Dark mode"), IconId::Palette),
         action(SYSTEM_MODE, tr!("Mode of the system"), IconId::Palette),
-        action(MOTION, tr!("Reduce motion on or off"), IconId::Palette),
+        action(TEXT_LARGER, tr!("Larger text"), IconId::Palette),
+        action(TEXT_LARGER_EQUALS, tr!("Larger text (=)"), IconId::Palette),
+        action(TEXT_SMALLER, tr!("Smaller text"), IconId::Palette),
+        action(TEXT_RESET, tr!("Text size 100 %"), IconId::Palette),
+        action(VIEW_GROUPED, tr!("Inbox view: Grouped"), IconId::Inbox),
+        action(VIEW_SMART, tr!("Inbox view: Smart"), IconId::Inbox),
+        action(VIEW_LIST, tr!("Inbox view: List"), IconId::Inbox),
+        action(UNREAD, tr!("Unread only, or every message again"), IconId::MarkRead),
     ]
 }
 
@@ -217,13 +413,36 @@ impl Default for Keymap {
         keymap.bind(ARCHIVE, KeyboardShortcut::new(Modifiers::NONE, Key::A));
         keymap.bind(SNOOZE, KeyboardShortcut::new(Modifiers::NONE, Key::H));
         keymap.bind(READ, KeyboardShortcut::new(Modifiers::NONE, Key::R));
+        keymap.bind(UNREAD, KeyboardShortcut::new(Modifiers::NONE, Key::U));
         keymap.bind(FLAG, KeyboardShortcut::new(Modifiers::NONE, Key::S));
         keymap.bind(DELETE, KeyboardShortcut::new(Modifiers::NONE, Key::Delete));
         keymap.bind(UNDO, KeyboardShortcut::new(Modifiers::COMMAND, Key::Z));
         keymap.bind(PALETTE, KeyboardShortcut::new(Modifiers::COMMAND, Key::K));
+        keymap.bind(COMMAND_LINE, KeyboardShortcut::new(Modifiers::NONE, Key::Slash));
         keymap.bind(CALENDAR, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num2));
         keymap.bind(COMPOSE, KeyboardShortcut::new(Modifiers::NONE, Key::C));
         keymap.bind(SEND, KeyboardShortcut::new(Modifiers::COMMAND, Key::Enter));
+        keymap.bind(CALENDAR_LEFT, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowLeft));
+        keymap.bind(CALENDAR_RIGHT, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowRight));
+        keymap.bind(CALENDAR_UP, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowUp));
+        keymap.bind(CALENDAR_DOWN, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowDown));
+        keymap.bind(CALENDAR_OPEN, KeyboardShortcut::new(Modifiers::NONE, Key::Enter));
+        keymap.bind(CALENDAR_CLOSE, KeyboardShortcut::new(Modifiers::NONE, Key::Escape));
+        keymap.bind(NEXT, KeyboardShortcut::new(Modifiers::NONE, Key::J));
+        keymap.bind(PREVIOUS, KeyboardShortcut::new(Modifiers::NONE, Key::K));
+        keymap.bind(DOWN, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowDown));
+        keymap.bind(UP, KeyboardShortcut::new(Modifiers::NONE, Key::ArrowUp));
+        keymap.bind(OPEN, KeyboardShortcut::new(Modifiers::NONE, Key::Enter));
+        keymap.bind(MENU, KeyboardShortcut::new(Modifiers::SHIFT, Key::F10));
+        keymap.bind(MENU_KEY, KeyboardShortcut::new(Modifiers::NONE, Key::Menu));
+        keymap.bind(PAGE_DOWN, KeyboardShortcut::new(Modifiers::NONE, Key::PageDown));
+        keymap.bind(PAGE_UP, KeyboardShortcut::new(Modifiers::NONE, Key::PageUp));
+        keymap.bind(FIRST, KeyboardShortcut::new(Modifiers::NONE, Key::Home));
+        keymap.bind(LAST, KeyboardShortcut::new(Modifiers::NONE, Key::End));
+        keymap.bind(TEXT_LARGER, KeyboardShortcut::new(Modifiers::COMMAND, Key::Plus));
+        keymap.bind(TEXT_LARGER_EQUALS, KeyboardShortcut::new(Modifiers::COMMAND, Key::Equals));
+        keymap.bind(TEXT_SMALLER, KeyboardShortcut::new(Modifiers::COMMAND, Key::Minus));
+        keymap.bind(TEXT_RESET, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num0));
         keymap
     }
 }
@@ -245,6 +464,14 @@ impl Keymap {
     #[must_use]
     pub fn action_of(&self, shortcut: KeyboardShortcut) -> Option<&str> {
         self.bindings.iter().find(|(_, held)| **held == shortcut).map(|(id, _)| id.as_str())
+    }
+
+    /// The action that would lose `shortcut` were `action` given it: another action holding it in a scope that meets
+    /// `action`'s ([`Scope::meets`]).
+    #[must_use]
+    pub fn clash(&self, action: &str, shortcut: KeyboardShortcut) -> Option<&str> {
+        let mine = scope(action);
+        self.bindings.iter().find(|(id, held)| **held == shortcut && id.as_str() != action && scope(id).meets(mine)).map(|(id, _)| id.as_str())
     }
 
     /// Every action's key, to keep: `{"keys": {"ui.search.focus": "Command+F", "ui.sent.show": null, ...}}`.
@@ -277,9 +504,11 @@ impl Keymap {
         keymap
     }
 
-    /// Gives `action` the key `shortcut`, in place of its old one; an action that had the key loses it.
+    /// Gives `action` the key `shortcut`, in place of its old one; an action that had the key in a scope that meets
+    /// `action`'s loses it ([`Keymap::clash`]); one of a screen never shown with `action`'s keeps it.
     pub fn bind(&mut self, action: &str, shortcut: KeyboardShortcut) {
-        self.bindings.retain(|_, held| *held != shortcut);
+        let mine = scope(action);
+        self.bindings.retain(|id, held| *held != shortcut || !scope(id).meets(mine));
         self.bindings.insert(action.to_owned(), shortcut);
     }
 
@@ -288,10 +517,10 @@ impl Keymap {
         self.bindings.remove(action);
     }
 
-    /// The key of `action` as the platform writes it (`Ctrl+F`, `⌘F`), for a key chip.
+    /// The key of `action` written out in words for a key chip (`Ctrl F`, `Del`, `↓`); `None` when it has none.
     #[must_use]
-    pub fn chip(&self, ctx: &Context, action: &str) -> Option<String> {
-        self.shortcut(action).map(|shortcut| ctx.format_shortcut(&shortcut))
+    pub fn chip(&self, _ctx: &Context, action: &str) -> Option<String> {
+        self.shortcut(action).map(|shortcut| crate::component::key::key_words(&shortcut))
     }
 
     /// Whether the key of `action` was pressed in this frame; the press is taken, so nothing else sees it.
@@ -304,3 +533,7 @@ impl Keymap {
 #[cfg(test)]
 #[path = "keymap_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "keymap_text_size_tests.rs"]
+mod text_size_tests;

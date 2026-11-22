@@ -24,12 +24,18 @@ use std::time::Duration;
 use eframe::egui::{self, ViewportCommand};
 use inboxcraft_control_key::Failure;
 use inboxcraft_model::Role;
-use inboxcraft_ui_egui::InboxApp;
 use inboxcraft_ui_egui::mailbox::{Act, Mailbox};
+use inboxcraft_ui_egui::{InboxApp, store_log};
 
 use crate::control::Call;
 use crate::instance::Request;
 use crate::notify::{Click, Deliver, shown};
+
+/// What the settings show: whether, which page, and the action waiting for a key; and the place the window shows.
+fn settings_now(app: &InboxApp) -> (bool, inboxcraft_ui_egui::settings::Section, Option<&'static str>, inboxcraft_ui_egui::Screen) {
+    let settings = app.settings();
+    (settings.is_open(), settings.section(), settings.capturing(), app.screen())
+}
 
 /// How often InboxCraft without a window looks for the workers' events.
 pub const WINDOWLESS_TICK: Duration = Duration::from_millis(500);
@@ -55,6 +61,9 @@ pub struct Desktop {
     calls: Option<Receiver<Call>>,
     /// A notification failed; the next failures are not reported again.
     failed: bool,
+    /// The last store failure's detail written to standard error, so a caller that repeats a failing command does not
+    /// repeat the line.
+    logged: Option<String>,
 }
 
 impl std::fmt::Debug for Desktop {
@@ -83,6 +92,7 @@ impl Desktop {
             clicks: None,
             calls: None,
             failed: false,
+            logged: None,
         }
     }
 
@@ -177,6 +187,26 @@ impl Desktop {
         }
         self.keep_in_step();
         self.app.wake_when_due(ctx);
+        if self.app.holds_agent_ask() {
+            ctx.request_repaint();
+        }
+    }
+
+    /// Draws a frame of the window, then shows an agent's ask that came in before it ([`InboxApp::act_on_agent_ask`])
+    /// unless the owner's own key or press changed the settings or the place in this frame: the owner's wins.
+    pub fn frame(&mut self, ui: &mut egui::Ui) {
+        let before = settings_now(&self.app);
+        self.app.ui(ui);
+        // A close taken back because a draft is not on the disk: the window stays, and InboxCraft with it.
+        if self.app.took_back_close() {
+            self.window = true;
+            self.quitting = false;
+        }
+        let acted = self.app.holds_agent_ask();
+        self.app.act_on_agent_ask(settings_now(&self.app) != before);
+        if acted {
+            ui.ctx().request_repaint();
+        }
     }
 
     /// Without a window: waits up to `patience` for a request and answers it, then keeps the mail in step. With nobody
@@ -184,13 +214,28 @@ impl Desktop {
     pub fn wait(&mut self, patience: Duration) {
         match self.heard.recv_timeout(patience) {
             Ok(Request::Show) => self.window = true,
-            Ok(Request::Quit) | Err(RecvTimeoutError::Disconnected) => self.quitting = true,
+            Ok(Request::Quit) | Err(RecvTimeoutError::Disconnected) => {
+                self.quitting = true;
+                self.end_keeps();
+            }
             Err(RecvTimeoutError::Timeout) => {}
         }
         if self.answer_clicks() {
             self.window = true;
         }
         self.keep_in_step();
+    }
+
+    /// The end of InboxCraft without a window: waits for the drafts kept to reach the disk, and says one that did not
+    /// in a notification (and on standard error), there being no window to say it in.
+    fn end_keeps(&mut self) {
+        let Err(error) = self.app.end_keeps() else { return };
+        eprintln!("inboxcraft: {error}");
+        if let Some(deliver) = self.deliver.as_mut()
+            && let Err(error) = deliver.deliver(&crate::notify::unkept(&error))
+        {
+            eprintln!("inboxcraft: {error}");
+        }
     }
 
     /// Answers the clicks on notifications; whether one asks for the window.
@@ -200,6 +245,8 @@ impl Desktop {
         for click in clicks {
             match click {
                 Click::Open(id) => {
+                    // The reader shows only on the mail: from Home, the calendar or the settings the window goes there.
+                    self.app.show_mail();
                     let (reader, mailbox) = self.app.reader_mut();
                     reader.open(mailbox, Some(id));
                     reader.set_full_width(true);
@@ -223,9 +270,23 @@ impl Desktop {
     /// notifications.
     fn keep_in_step(&mut self) {
         let calls: Vec<Call> = self.calls.as_ref().map(|calls| calls.try_iter().collect()).unwrap_or_default();
+        // An agent's undo waits while the owner edits an event in a window; a closed window edits nothing.
+        self.app.tell_editing(self.window);
         for call in calls {
             let answer = self.app.mailbox_mut().run_for_agent(call.command(), call.params());
+            if let Err(error) = &answer
+                && let Some(line) = store_log(error, &mut self.logged)
+            {
+                eprintln!("{line}");
+            }
             call.answer(answer.map_err(|error| Failure::new(error.code(), error.to_string())));
+        }
+        // `ui.settings.open` and `ui.home.open` ask the window to show the settings or Home: the owner's at once, an
+        // agent's newest at the end of the next frame ([`Desktop::frame`]), or at once without a window, where the owner
+        // cannot act.
+        self.app.follow_settings_asked();
+        if !self.window {
+            self.app.act_on_agent_ask(false);
         }
         self.app.pump();
         let notices = self.app.mailbox_mut().take_notices();

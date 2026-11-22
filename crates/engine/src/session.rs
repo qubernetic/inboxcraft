@@ -12,17 +12,19 @@ use inboxcraft_model::{
     ScheduleId, StepReport, UidValidity,
 };
 use inboxcraft_store::{Batch, Change, Storage};
-use inboxcraft_time::{Clock, Offset, Offsets, Timestamp};
+use inboxcraft_time::{Clock, Offset, Offsets, Timestamp, WeekRule};
 use serde_json::Value;
 
 use crate::ScreenerMode;
 use crate::act::Effects;
+use crate::all_day_alert::AllDayAlert;
 use crate::appearance::Appearance;
 use crate::calendar::alert;
 use crate::draft;
 use crate::notify::{self, Notice, Settings};
 use crate::schedule::{self, Fired};
 use crate::send::Hold;
+use crate::shown::{Asked, HomeAsked, SettingsAsked, UnreadAsked};
 use crate::undo::{Act, Step};
 use crate::writes::{Settled, Writes};
 use crate::{Caller, EngineError, Registry, error};
@@ -49,10 +51,20 @@ pub struct Outcome {
     notify: Option<Settings>,
     /// Whether a pin outlasts done from now on.
     pins_outlast_done: Option<bool>,
+    /// What follows an act on the open message from now on.
+    after: Option<crate::after::After>,
+    /// Which word of the sending name Home greets by from now on.
+    greet_by: Option<crate::greet::GreetBy>,
     /// How long every send is held from now on.
     hold: Option<Hold>,
+    /// How weeks are counted from now on.
+    week: Option<WeekRule>,
+    /// When an all-day event's alert rings from now on.
+    all_day_alert: Option<AllDayAlert>,
     /// Held jobs withdrawn: their removal from the store's queue is in the batch.
     withdrawn: Vec<JobId>,
+    /// The window is asked to show the settings or Home.
+    shown: Option<Asked>,
 }
 
 /// A job before it has an id.
@@ -85,8 +97,13 @@ impl Outcome {
             screener: None,
             notify: None,
             pins_outlast_done: None,
+            after: None,
+            greet_by: None,
             hold: None,
+            week: None,
+            all_day_alert: None,
             withdrawn: Vec::new(),
+            shown: None,
         }
     }
 
@@ -173,6 +190,18 @@ impl Outcome {
         self
     }
 
+    /// The outcome changing what follows an act on the open message from now on.
+    pub(crate) fn with_after(mut self, after: crate::after::After) -> Self {
+        self.after = Some(after);
+        self
+    }
+
+    /// The outcome changing which word of the sending name Home greets by from now on.
+    pub(crate) fn with_greet_by(mut self, by: crate::greet::GreetBy) -> Self {
+        self.greet_by = Some(by);
+        self
+    }
+
     /// The outcome keeping a pin through done (`true`) or taking it off from now on.
     pub(crate) fn with_pins_outlast_done(mut self, keep: bool) -> Self {
         self.pins_outlast_done = Some(keep);
@@ -182,6 +211,36 @@ impl Outcome {
     /// The outcome holding every send for `hold` from now on.
     pub(crate) fn with_hold(mut self, hold: Hold) -> Self {
         self.hold = Some(hold);
+        self
+    }
+
+    /// The outcome asking the window to show the settings.
+    pub(crate) fn with_settings(mut self, asked: SettingsAsked) -> Self {
+        self.shown = Some(Asked::Settings(asked));
+        self
+    }
+
+    /// The outcome asking the window to show Home.
+    pub(crate) fn with_home(mut self, asked: HomeAsked) -> Self {
+        self.shown = Some(Asked::Home(asked));
+        self
+    }
+
+    /// The outcome asking the window to list the unread messages alone, or all again.
+    pub(crate) fn with_unread(mut self, asked: UnreadAsked) -> Self {
+        self.shown = Some(Asked::Unread(asked));
+        self
+    }
+
+    /// The outcome counting weeks by `rule` from now on.
+    pub(crate) fn with_week(mut self, rule: WeekRule) -> Self {
+        self.week = Some(rule);
+        self
+    }
+
+    /// The outcome ringing all-day events' alerts at `choice` from now on.
+    pub(crate) fn with_all_day_alert(mut self, choice: AllDayAlert) -> Self {
+        self.all_day_alert = Some(choice);
         self
     }
 
@@ -280,10 +339,28 @@ pub(crate) struct State {
     pub(crate) notify: Settings,
     /// Whether done leaves a pin on (`pin.set`); the front end keeps it on disk and hands it back at the start.
     pub(crate) pins_outlast_done: bool,
+    /// What follows an act on the open message (`after.set`); the front end keeps it on disk and hands it back at the
+    /// start.
+    pub(crate) after: crate::after::After,
+    /// Which word of the sending name Home greets by (`greeting.set`); the front end keeps it on disk and hands it
+    /// back at the start.
+    pub(crate) greet_by: crate::greet::GreetBy,
     /// How long every send is held (`send.set`); the front end keeps it on disk and hands it back at the start.
     pub(crate) hold: Hold,
+    /// How weeks are counted (`week.set`); the front end keeps it on disk and hands it back at the start.
+    pub(crate) week: WeekRule,
+    /// When an all-day event's alert rings (`event.all_day_alert.set`); the front end keeps it on disk and hands it
+    /// back at the start.
+    pub(crate) all_day_alert: AllDayAlert,
     /// What to tell the owner, for the front end to take ([`Session::take_notices`]).
     pub(crate) notices: VecDeque<Notice>,
+    /// Whether a window takes what commands ask it to show ([`Session::set_window`]); `false` headless.
+    pub(crate) window: bool,
+    /// Whether the owner has an event open in the editor ([`Session::set_editing`]): an agent's `history.undo` waits.
+    pub(crate) editing: bool,
+    /// What the window is asked to show, in order, for the front end to take ([`Session::take_asked`]); the newest
+    /// [`crate::shown::MAX_ASKED`].
+    pub(crate) asked: VecDeque<Asked>,
     /// The owner's own moves that come back through a sync, to tell nothing of (see [`crate::notify`]).
     pub(crate) quiet: VecDeque<String>,
     /// The id the next added account gets: past every id this session has held, so a removed account's id is not
@@ -321,8 +398,15 @@ pub(crate) struct AccountState {
     pub(crate) connection: Option<ConnectionState>,
     /// Whether the server, at the last sign-in, removes only the messages named (UID EXPUNGE); `false` until it said.
     pub(crate) uid_expunge: bool,
-    /// The last failure, until the account is online again.
+    /// The last failure, until the account signs in again (`Online` from a state that was not signed in) or its worker
+    /// tells that it is current (`SyncFinished`).
     pub(crate) failure: Option<(ErrorKind, Option<FolderId>)>,
+    /// The sync round under way as the worker last told it: folder syncs done (below `of`) and of; `None` before the
+    /// first, once the round ended (synced or failed), when the connection went offline and when the settings
+    /// changed.
+    pub(crate) progress: Option<(u32, u32)>,
+    /// When the account's last sync round ended with every folder synced, as its worker told.
+    pub(crate) synced: Option<Timestamp>,
     /// The last account check, running or done.
     pub(crate) check: Option<Check>,
     /// The account's settings or password changed: the next check that signs in starts the sync again, as the
@@ -531,9 +615,10 @@ impl Session {
         &self.state.appearance
     }
 
-    /// Takes the appearance choices kept from an earlier run, read with [`Appearance::from_value`].
+    /// Takes the appearance choices kept from an earlier run, read with [`Appearance::from_value`]; motion fields that
+    /// disagree become one level ([`Appearance::normalised`]).
     pub fn set_appearance(&mut self, appearance: Appearance) {
-        self.state.appearance = appearance;
+        self.state.appearance = appearance.normalised();
     }
 
     /// The screener's mode, as `screener.mode` left it.
@@ -566,6 +651,28 @@ impl Session {
         self.state.pins_outlast_done
     }
 
+    /// What follows an act on the open message, as `after.set` left it.
+    #[must_use]
+    pub fn after(&self) -> crate::after::After {
+        self.state.after
+    }
+
+    /// Takes what follows an act, kept from an earlier run.
+    pub fn set_after(&mut self, after: crate::after::After) {
+        self.state.after = after;
+    }
+
+    /// Which word of the sending name Home greets by, as `greeting.set` left it.
+    #[must_use]
+    pub fn greet_by(&self) -> crate::greet::GreetBy {
+        self.state.greet_by
+    }
+
+    /// Takes which word Home greets by, kept from an earlier run.
+    pub fn set_greet_by(&mut self, by: crate::greet::GreetBy) {
+        self.state.greet_by = by;
+    }
+
     /// Takes the pin setting kept from an earlier run.
     pub fn set_pins_outlast_done(&mut self, keep: bool) {
         self.state.pins_outlast_done = keep;
@@ -582,10 +689,59 @@ impl Session {
         self.state.hold = hold;
     }
 
+    /// How weeks are counted, as `week.set` left it.
+    #[must_use]
+    pub fn week_rule(&self) -> WeekRule {
+        self.state.week
+    }
+
+    /// Takes the week rule kept from an earlier run, read with [`crate::week::from_value`].
+    pub fn set_week_rule(&mut self, rule: WeekRule) {
+        self.state.week = rule;
+    }
+
+    /// When an all-day event's alert rings, as `event.all_day_alert.set` left it.
+    #[must_use]
+    pub fn all_day_alert(&self) -> AllDayAlert {
+        self.state.all_day_alert
+    }
+
+    /// Takes the all-day alert kept from an earlier run, read with [`crate::all_day_alert::from_value`]. When it
+    /// changes after the start, the next tick works the alerts out again, so the first sweep's are not kept.
+    pub fn set_all_day_alert(&mut self, choice: AllDayAlert) {
+        if choice == self.state.all_day_alert {
+            return;
+        }
+        self.state.all_day_alert = choice;
+        // The alerts of all-day events without alarms move: the next tick works them out again.
+        if self.state.sweep_at.is_some() {
+            self.state.sweep_at = Some(self.clock.now());
+        }
+    }
+
     /// What to tell the owner since the last call, in order: more than [`notify::MAX_SINGLE`] new messages of one
     /// account as one count.
     pub fn take_notices(&mut self) -> Vec<Notice> {
         notify::collapse(std::mem::take(&mut self.state.notices))
+    }
+
+    /// Says that a window takes what commands ask it to show (`ui.settings.open`, `ui.home.open`): their answer's `window`
+    /// is then `true`.
+    pub fn set_window(&mut self, window: bool) {
+        self.state.window = window;
+    }
+
+    /// Says whether the owner has an event open in the editor: while it is, an agent's `history.undo` is refused
+    /// ([`EngineError::Editing`]), so the agent cannot take an act back under the owner's typing. The owner's own undo
+    /// runs as before. The front end says it again each time the editor may have opened or ended; `false` at the start.
+    pub fn set_editing(&mut self, editing: bool) {
+        self.state.editing = editing;
+    }
+
+    /// What commands asked the window to show since the last call, oldest first: at most
+    /// [`crate::shown::MAX_ASKED`], the newest.
+    pub fn take_asked(&mut self) -> Vec<Asked> {
+        std::mem::take(&mut self.state.asked).into()
     }
 
     /// Takes the computer's offset from UTC over time; until then the session works in UTC.
@@ -617,8 +773,26 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed, resync, appearance, undo, screener, notify, pins_outlast_done, hold, withdrawn } =
-            outcome;
+        let Outcome {
+            value,
+            batch,
+            jobs,
+            senders,
+            removed,
+            resync,
+            appearance,
+            undo,
+            screener,
+            notify,
+            pins_outlast_done,
+            after,
+            greet_by,
+            hold,
+            week,
+            all_day_alert,
+            withdrawn,
+            shown,
+        } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
         for job in withdrawn {
             self.state.held.retain(|(_, held)| held.id != job);
@@ -660,8 +834,26 @@ impl Session {
         if let Some(keep) = pins_outlast_done {
             self.state.pins_outlast_done = keep;
         }
+        if let Some(after) = after {
+            self.state.after = after;
+        }
+        if let Some(by) = greet_by {
+            self.state.greet_by = by;
+        }
         if let Some(hold) = hold {
             self.state.hold = hold;
+        }
+        if let Some(rule) = week {
+            self.state.week = rule;
+        }
+        if let Some(choice) = all_day_alert {
+            self.set_all_day_alert(choice);
+        }
+        if let Some(asked) = shown {
+            if self.state.asked.len() >= crate::shown::MAX_ASKED {
+                self.state.asked.pop_front();
+            }
+            self.state.asked.push_back(asked);
         }
         for account in removed {
             self.state.accounts.remove(&account);
@@ -672,7 +864,10 @@ impl Session {
             self.state.writes.forget(account);
         }
         for account in resync {
-            self.state.accounts.entry(account).or_default().resync = true;
+            let held = self.state.accounts.entry(account).or_default();
+            held.resync = true;
+            // A new worker signs in with the new settings; the old one's round is over.
+            held.progress = None;
         }
         for (sender, allowed) in senders {
             if allowed {
@@ -682,7 +877,7 @@ impl Session {
             }
         }
         if let Some(appearance) = appearance {
-            self.state.appearance = appearance;
+            self.state.appearance = appearance.normalised();
         }
         Ok(value)
     }
@@ -745,7 +940,14 @@ impl Session {
         let started = self.started;
         let planned = catch_unwind(AssertUnwindSafe(|| {
             let plan = schedule::due(&context, started)?;
-            let notices = notify::fired(context.store, &context.state.notify, &plan.fired, &plan.sent, context.offsets, context.now)?;
+            let notices = notify::fired(
+                context.store,
+                &context.state.notify,
+                &plan.fired,
+                &plan.sent,
+                (context.offsets, context.state.all_day_alert),
+                context.now,
+            )?;
             Ok::<_, EngineError>((plan, notices))
         }));
         let (plan, notices) = planned.map_err(|_| EngineError::Panicked("schedule"))??;
@@ -819,10 +1021,10 @@ impl Session {
     /// Works out the alerts of every event held again, and when to do it next.
     fn sweep(&mut self) -> Result<(), EngineError> {
         let now = self.clock.now();
-        let (store, offsets) = (&*self.store, &*self.offsets);
+        let (store, offsets, all_day) = (&*self.store, &*self.offsets, self.state.all_day_alert);
         let mut ids = alert::Ids { alert: self.state.next_alert, schedule: self.state.next_schedule };
-        let changes =
-            catch_unwind(AssertUnwindSafe(|| alert::sweep(store, now, offsets, &mut ids))).map_err(|_| EngineError::Panicked("alerts"))??;
+        let changes = catch_unwind(AssertUnwindSafe(|| alert::sweep(store, now, offsets, all_day, &mut ids)))
+            .map_err(|_| EngineError::Panicked("alerts"))??;
         let batch = changes.into_iter().fold(Batch::new(), Batch::with);
         self.commit("alerts", None, &batch, Vec::new())?;
         self.state.sweep_at = now.checked_add(alert::SWEEP);
@@ -893,10 +1095,11 @@ impl Session {
         let with_kept;
         // The alerts of the events the batch puts come in the same batch.
         let ids = state.as_ref().unwrap_or(&self.state);
+        let all_day = ids.all_day_alert;
         let mut ids = alert::Ids::past(ids.next_alert, ids.next_schedule, batch);
         let (store, offsets, now) = (&*self.store, &*self.offsets, self.clock.now());
-        let alerts =
-            catch_unwind(AssertUnwindSafe(|| alert::follow(store, batch, now, offsets, &mut ids))).map_err(|_| EngineError::Panicked(what))??;
+        let alerts = catch_unwind(AssertUnwindSafe(|| alert::follow(store, batch, now, offsets, all_day, &mut ids)))
+            .map_err(|_| EngineError::Panicked(what))??;
         let batch = if kept.is_empty() && alerts.is_empty() {
             batch
         } else {

@@ -6,31 +6,31 @@
 # or more components).
 
 # The workspace total: every counted line, without the files in `workspace-exclude`.
-workspace = 95
+workspace = 98
 
 # Files counted nowhere: `xtask`'s `main` dispatch.
 exclude = ["xtask/src/main.rs"]
 
 # Files counted for their own crate but not for the workspace total: the apps' `main` and the `ui-egui` drawing code
-# (its floor is the crate's 80 %).
+# (its floor is the crate's).
 workspace-exclude = ["apps/*/src/main.rs", "crates/ui-egui/src/draw/**"]
 
 [crates]
-# The core crates.
-inboxcraft-charset = 98
-inboxcraft-dav = 98
-inboxcraft-engine = 98
-inboxcraft-ical = 98
-# The MCP server: the issue asks 95 % of it (#141).
-inboxcraft-mcp = 95
-inboxcraft-mime = 98
-inboxcraft-model = 98
-inboxcraft-proto = 98
+# The core crates. The floors stand at what the epic of #230 held, rounded down (#425).
+inboxcraft-charset = 99
+inboxcraft-dav = 99
+inboxcraft-engine = 99
+inboxcraft-ical = 99
+# The MCP server: the issue asked 95 % of it (#141); it holds more.
+inboxcraft-mcp = 99
+inboxcraft-mime = 99
+inboxcraft-model = 99
+inboxcraft-proto = 99
 inboxcraft-store = 98
-# The fake server frame: the issue asks the core-crate floor of it.
-inboxcraft-testkit = 98
-inboxcraft-time = 98
-inboxcraft-vcard = 98
+# The fake server frame: the issue asks at least the core-crate floor of it.
+inboxcraft-testkit = 99
+inboxcraft-time = 99
+inboxcraft-vcard = 99
 # State and view-model logic tested headless, drawing through `ui_shot`; `net` against the fake servers.
-inboxcraft-net = 80
-inboxcraft-ui-egui = 80
+inboxcraft-net = 95
+inboxcraft-ui-egui = 97

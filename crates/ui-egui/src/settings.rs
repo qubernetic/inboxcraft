@@ -1,84 +1,183 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings sheet: whether it is open and on which page, the four colours of the custom accent as the owner types them,
-//! and what the engine said about the last ones it took; on the Shortcuts page, the text that narrows the list, the
-//! action waiting for a key and what giving the last key changed; on the Sending page, the signatures as typed until
-//! they are saved (`compose.signature`); on the Notifications page, why the last change of starting with the computer
-//! was not done.
+//! The settings, a place of the window: whether they are the place shown and on which page; on the Shortcuts page, the
+//! text that narrows the list, the action waiting for a key and what giving the last key changed; on the Sending page,
+//! the signatures as typed until they are saved (`compose.signature`); on the Notifications page, why the last change
+//! of starting with the computer was not done.
 //!
-//! The sheet has one open state: every way out (its Close button, Escape, a press beside it, a rail button or a key
-//! that shows another place) goes through [`Settings::close`], which forgets everything the open sheet held, so it
-//! opens clean the next time.
+//! A place is not closed: every way to another place (its key or the index's SETTINGS pressed again, a key or a row of
+//! the index that shows another place) goes through [`Settings::leave`], which ends a key being waited for and drops
+//! the notes on what the last change did, and keeps the rest: the page, the text that narrows the Shortcuts page, a
+//! signature typed and not saved. Coming back shows the settings as they were left.
 //!
-//! Every other control of the page runs its `ui.*.set` command at once; the custom accent is a draft the page's
-//! preview shows until "Use these colours" runs `ui.accent.set` with it. The colours come from the keyboard or the
-//! colour picker, so they are read as hostile: only `#rrggbb` (the `#` may be left out, space around it is dropped)
-//! is a colour, and a field holds at most [`MAX_CHARS`] characters.
+//! Every other control of the page runs its `ui.*.set` command at once.
 
 use std::collections::BTreeMap;
 
-use egui::Color32;
-use inboxcraft_engine::appearance::{Accent, Appearance, Rgb};
-use serde_json::Value;
-
-use crate::theme::Preset;
-use crate::tr;
-
-/// The most characters a colour field takes.
-pub const MAX_CHARS: usize = 16;
-
-/// A page of the settings sheet that is built.
+/// A page of the settings.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Section {
-    /// Mode, accent, typeface, icons, window frame, text size and motion.
+    /// Look (mode, motion, text size) and Layout (the inbox view, where a message opens and is written, the window
+    /// frame).
     #[default]
     Appearance,
     /// The accounts, and adding one.
     Accounts,
-    /// Every action of the window with its key, to give it another.
-    Shortcuts,
-    /// The signature of each account's new messages.
-    Sending,
-    /// The screener's mode, how the inbox shows its groups, and each account's grouping.
-    Triage,
     /// Which new mail of each account notifies, returned snoozes and reminders, running in the background and
     /// starting with the computer.
     Notifications,
+    /// The screener's mode, pins on done mail, and each account's grouping.
+    Triage,
+    /// Undo send, the signature of each account's new messages, the templates and the scheduled list.
+    Sending,
+    /// The calendar's alerts and each account's calendars; coming soon.
+    Calendar,
+    /// Every action of the window with its key, to give it another.
+    Shortcuts,
+    /// The senders whose remote pictures always load; coming soon.
+    Privacy,
+    /// The program, its licences and its makers; coming soon.
+    About,
+    /// A model that summarises and drafts; planned, coming soon.
+    Ai,
+    /// Plugins; planned, coming soon.
+    Plugins,
 }
 
-/// The settings sheet.
+impl Section {
+    /// Every section, in the order the settings list them: the nine of the design, then the two planned ones.
+    pub const ALL: [Self; 11] = [
+        Self::Appearance,
+        Self::Accounts,
+        Self::Notifications,
+        Self::Triage,
+        Self::Sending,
+        Self::Calendar,
+        Self::Shortcuts,
+        Self::Privacy,
+        Self::About,
+        Self::Ai,
+        Self::Plugins,
+    ];
+
+    /// Its name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Appearance => crate::tr!("Appearance"),
+            Self::Accounts => crate::tr!("Accounts"),
+            Self::Notifications => crate::tr!("Notifications"),
+            Self::Triage => crate::tr!("Triage"),
+            Self::Sending => crate::tr!("Sending"),
+            Self::Calendar => crate::tr!("Calendar"),
+            Self::Shortcuts => crate::tr!("Shortcuts"),
+            Self::Privacy => crate::tr!("Privacy"),
+            Self::About => crate::tr!("About"),
+            Self::Ai => crate::tr!("AI"),
+            Self::Plugins => crate::tr!("Plugins"),
+        }
+    }
+
+    /// Its name in scripts (the `ui_shot` examples): `appearance`, `accounts` … `ai`, `plugins`.
+    #[must_use]
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Appearance => "appearance",
+            Self::Accounts => "accounts",
+            Self::Notifications => "notifications",
+            Self::Triage => "triage",
+            Self::Sending => "sending",
+            Self::Calendar => "calendar",
+            Self::Shortcuts => "shortcuts",
+            Self::Privacy => "privacy",
+            Self::About => "about",
+            Self::Ai => "ai",
+            Self::Plugins => "plugins",
+        }
+    }
+
+    /// The section [`Section::id`] calls `name`.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|section| section.id() == name)
+    }
+
+    /// Whether the whole section is planned and not built: its page carries the coming-soon mark on its head.
+    #[must_use]
+    pub fn planned(self) -> bool {
+        matches!(self, Self::About | Self::Ai | Self::Plugins)
+    }
+}
+
+/// The settings place.
 #[derive(Debug, Default)]
 pub struct Settings {
     open: bool,
     section: Section,
-    colours: [String; 4],
-    note: Option<String>,
     /// The action waiting for a key on the Shortcuts page.
     capturing: Option<&'static str>,
     /// The text that narrows the Shortcuts page's list.
     find: String,
     /// What giving the last key changed, on the Shortcuts page.
     keys_note: Option<String>,
-    /// The signatures as typed on the Sending page, by account; an account not in it shows the one it has.
+    /// The signatures as typed on the Sending page and not saved yet, by account, kept while another place is shown;
+    /// an account not in it shows the one it has.
     signatures: BTreeMap<u64, String>,
     /// Why the last change of starting with the computer was not done, on the Notifications page.
     login_note: Option<String>,
+    /// The page under the section shown, if one is.
+    under: Option<Under>,
+    /// The Templates page's state.
+    templates: crate::templates::Templates,
+    /// The Scheduled page's state.
+    scheduled: crate::scheduled::Scheduled,
+    /// The Privacy page's state.
+    privacy: crate::privacy::Privacy,
+    /// The keyboard goes to the shown section's row of the settings' own column when it is drawn next.
+    nav_hand: bool,
+    /// In one pane (a window narrower than Mail's breakpoint), the list of sections stands in the body, not the page.
+    listed: bool,
+    /// The keyboard goes to the page's way back to the list (`← Settings`) when it is drawn next.
+    back_hand: bool,
 }
 
-/// `colour` as `#rrggbb`.
-pub(crate) fn hex(colour: Color32) -> String {
-    Rgb(colour.r(), colour.g(), colour.b()).hex()
+/// A page under a section, reached from a row of the section's page, with a link back to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Under {
+    /// The templates of every account, under Sending.
+    Templates,
+    /// Everything that waits for its time, under Sending.
+    Scheduled,
 }
 
-/// The colour `text` names: `#rrggbb` or `rrggbb`, space around it dropped.
-#[must_use]
-pub fn colour(text: &str) -> Option<Color32> {
-    crate::theme::typed(text)
+impl Under {
+    /// The section it is under.
+    #[must_use]
+    pub fn section(self) -> Section {
+        match self {
+            Self::Templates | Self::Scheduled => Section::Sending,
+        }
+    }
+
+    /// Its id, as a page of the settings is named from outside.
+    #[must_use]
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Templates => "templates",
+            Self::Scheduled => "scheduled",
+        }
+    }
+
+    /// The page whose [`Self::id`] is `name`.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        [Self::Templates, Self::Scheduled].into_iter().find(|under| under.id() == name)
+    }
 }
 
 impl Settings {
-    /// Whether the page is open.
+    /// Whether the settings are the place shown.
     #[must_use]
     pub fn is_open(&self) -> bool {
         self.open
@@ -90,31 +189,32 @@ impl Settings {
         self.section
     }
 
-    /// Opens the sheet on Appearance with the colours of `appearance` in the custom accent's fields.
-    pub fn open(&mut self, appearance: &Appearance) {
-        self.open_at(Section::Appearance, appearance);
-    }
-
-    /// Opens the sheet on `section`, with the colours of `appearance` in the custom accent's fields.
-    pub fn open_at(&mut self, section: Section, appearance: &Appearance) {
-        self.forget();
+    /// Shows the settings on the page last shown (Appearance the first time).
+    pub fn open(&mut self) {
         self.open = true;
-        self.section = section;
-        self.fill(appearance);
     }
 
-    /// Forgets what the open sheet held: the notes, the text on the Shortcuts page, the action waiting for a key and
-    /// the signatures typed and not saved.
-    fn forget(&mut self) {
-        self.note = None;
-        self.capturing = None;
-        self.find.clear();
-        self.keys_note = None;
-        self.signatures.clear();
-        self.login_note = None;
+    /// Shows the settings on `section`; an action waiting for a key stops waiting.
+    pub fn open_at(&mut self, section: Section) {
+        self.open = true;
+        self.show(section);
     }
 
-    /// Why the last change of starting with the computer was not done, while the sheet is open.
+    /// Shows the settings on the section whose id ([`Section::id`]) is `page`; a page that is no section's id (outside
+    /// data: the control channel's, a script's) shows the page last shown.
+    pub fn open_page(&mut self, page: Option<&str>) {
+        if let Some(under) = page.and_then(Under::named) {
+            self.open = true;
+            self.show_under(under);
+            return;
+        }
+        match page.and_then(Section::named) {
+            Some(section) => self.open_at(section),
+            None => self.open(),
+        }
+    }
+
+    /// Why the last change of starting with the computer was not done, while the settings show.
     #[must_use]
     pub fn login_note(&self) -> Option<&str> {
         self.login_note.as_deref()
@@ -126,11 +226,9 @@ impl Settings {
     }
 
     /// The signature of `account` as typed on the Sending page, to type in: `kept`, the one it has, until it is
-    /// changed. It is cut to what the engine keeps.
+    /// changed. It is never cut: one longer than the field holds opens whole, under the field's opening-size limit.
     pub fn signature_mut(&mut self, account: u64, kept: &str) -> &mut String {
-        let typed = self.signatures.entry(account).or_insert_with(|| kept.to_owned());
-        crate::compose::cut(typed, MAX_SIGNATURE_BYTES);
-        typed
+        self.signatures.entry(account).or_insert_with(|| kept.to_owned())
     }
 
     /// The signature of `account` as typed, if it was typed since the page opened.
@@ -144,16 +242,132 @@ impl Settings {
         self.signatures.remove(&account);
     }
 
-    /// Shows `section` on the open sheet; an action waiting for a key stops waiting.
+    /// Shows `section`; an action waiting for a key stops waiting and a page under a section closes.
     pub fn show(&mut self, section: Section) {
         self.section = section;
+        self.listed = false;
         self.capturing = None;
+        self.under = None;
+        self.templates.leave();
+        self.scheduled.leave();
+        self.privacy.leave();
     }
 
-    /// Closes the sheet and forgets what it held.
-    pub fn close(&mut self) {
+    /// Shows the page `under` its section.
+    pub fn show_under(&mut self, under: Under) {
+        self.show(under.section());
+        self.under = Some(under);
+    }
+
+    /// The page under the section shown, if one is.
+    #[must_use]
+    pub fn under(&self) -> Option<Under> {
+        self.under
+    }
+
+    /// Whether the page shown asks a confirmation in its dialog over the dimmed window: a template's delete, an entry's
+    /// cancel, or, on Accounts, the account's removal (`removing`: the account's form asks it).
+    #[must_use]
+    pub fn confirms(&self, removing: bool) -> bool {
+        self.confirm_keep(removing).is_some()
+    }
+
+    /// The word of the safe answer of the confirmation the page shown asks ([`Settings::confirms`]), as the status
+    /// line's `Esc` hint says it, untranslated: "keep it" for an entry's cancel, "cancel" for the others.
+    #[must_use]
+    pub fn confirm_keep(&self, removing: bool) -> Option<&'static str> {
+        if !self.open {
+            return None;
+        }
+        match self.under {
+            Some(Under::Templates) => (self.templates.form().is_none() && self.templates.confirming().is_some()).then_some("cancel"),
+            Some(Under::Scheduled) => self.scheduled.confirming().is_some().then_some("keep it"),
+            None => (self.section == Section::Accounts && removing).then_some("cancel"),
+        }
+    }
+
+    /// The Templates page's state.
+    #[must_use]
+    pub fn templates(&self) -> &crate::templates::Templates {
+        &self.templates
+    }
+
+    /// The Templates page's state, to change.
+    pub fn templates_mut(&mut self) -> &mut crate::templates::Templates {
+        &mut self.templates
+    }
+
+    /// The Scheduled page's state.
+    #[must_use]
+    pub fn scheduled(&self) -> &crate::scheduled::Scheduled {
+        &self.scheduled
+    }
+
+    /// The Scheduled page's state, to change.
+    pub fn scheduled_mut(&mut self) -> &mut crate::scheduled::Scheduled {
+        &mut self.scheduled
+    }
+
+    /// The Privacy page's state.
+    #[must_use]
+    pub fn privacy(&self) -> &crate::privacy::Privacy {
+        &self.privacy
+    }
+
+    /// The Privacy page's state, to change.
+    pub fn privacy_mut(&mut self) -> &mut crate::privacy::Privacy {
+        &mut self.privacy
+    }
+
+    /// Asks that the keyboard go to the shown section's row of the settings' own column when it is drawn next: where
+    /// a page's last control went.
+    pub fn hand_to_nav(&mut self) {
+        self.nav_hand = true;
+    }
+
+    /// Whether, in one pane, the list of sections stands in the body in place of the page shown.
+    #[must_use]
+    pub fn listed(&self) -> bool {
+        self.listed
+    }
+
+    /// In one pane, the list of sections in place of the page (`← Settings`, `Esc`): an action waiting for a key stops
+    /// waiting and, when `hand` (a key took it there), the keyboard goes to the row of the section left. The section
+    /// stays the one shown next.
+    pub fn to_list(&mut self, hand: bool) {
+        self.listed = true;
+        self.capturing = None;
+        self.back_hand = false;
+        self.nav_hand |= hand;
+    }
+
+    /// Asks that the keyboard go to the page's way back to the list when it is drawn next.
+    pub fn hand_to_back(&mut self) {
+        self.back_hand = true;
+    }
+
+    /// Whether the keyboard was asked to go to the page's way back to the list, taken.
+    pub fn take_back_hand(&mut self) -> bool {
+        std::mem::take(&mut self.back_hand)
+    }
+
+    /// Whether the keyboard was asked to go to the shown section's row, taken.
+    pub fn take_nav_hand(&mut self) -> bool {
+        std::mem::take(&mut self.nav_hand)
+    }
+
+    /// Another place is shown: an action waiting for a key stops waiting and the notes on what the last change did go;
+    /// the page, the text that narrows the Shortcuts page and a signature typed stay.
+    pub fn leave(&mut self) {
         self.open = false;
-        self.forget();
+        self.capturing = None;
+        self.keys_note = None;
+        self.login_note = None;
+        self.templates.leave();
+        self.scheduled.leave();
+        self.privacy.leave();
+        self.nav_hand = false;
+        self.back_hand = false;
     }
 
     /// The action waiting for a key, if one is.
@@ -190,70 +404,7 @@ impl Settings {
     pub fn keys_note(&self) -> Option<&str> {
         self.keys_note.as_deref()
     }
-
-    /// The fields take the colours of `appearance`, after a preset was chosen: no draft is left to show.
-    pub fn follow(&mut self, appearance: &Appearance) {
-        self.fill(appearance);
-        self.note = None;
-    }
-
-    /// Puts the colours of `appearance` in the fields.
-    fn fill(&mut self, appearance: &Appearance) {
-        let preset = Preset::of(&appearance.accent);
-        let [first, middle, last] = preset.gradient;
-        self.colours = [hex(first), hex(middle), hex(last), hex(preset.accent)];
-    }
-
-    /// The four fields as typed: the gradient's three stops and the accent.
-    #[must_use]
-    pub fn colours(&self) -> &[String; 4] {
-        &self.colours
-    }
-
-    /// The four fields, to type in.
-    pub fn colours_mut(&mut self) -> &mut [String; 4] {
-        &mut self.colours
-    }
-
-    /// The colours the fields name, as a preset called `custom`; `None` while one of them is not a colour.
-    #[must_use]
-    pub fn draft(&self) -> Option<Preset> {
-        let [first, middle, last, accent] = &self.colours;
-        Some(Preset { id: "custom", gradient: [colour(first)?, colour(middle)?, colour(last)?], accent: colour(accent)? })
-    }
-
-    /// The draft as the parameters of `ui.accent.set`: four `#rrggbb` colours, the accent last.
-    #[must_use]
-    pub fn custom(&self) -> Option<[String; 4]> {
-        let draft = self.draft()?;
-        let [first, middle, last] = draft.gradient;
-        Some([hex(first), hex(middle), hex(last), hex(draft.accent)])
-    }
-
-    /// What the engine said about the colours it took last, when it changed one.
-    #[must_use]
-    pub fn note(&self) -> Option<&str> {
-        self.note.as_deref()
-    }
-
-    /// Takes `answer`, the engine's answer to `ui.accent.set`, and `appearance` after it: the fields show the colours
-    /// in use, and a note says so when the engine made the accent lighter.
-    pub fn took(&mut self, answer: &Value, appearance: &Appearance) {
-        self.fill(appearance);
-        let requested = answer.get("requested").and_then(Value::as_str);
-        self.note = match (answer.get("nudged").and_then(Value::as_bool), requested, appearance.accent) {
-            (Some(true), Some(requested), Accent::Custom(custom)) => Some(tr!(
-                "The accent {requested} is hard to read as text on dark surfaces, so {accent} is used instead.",
-                requested = requested,
-                accent = custom.accent.hex()
-            )),
-            _ => None,
-        };
-    }
 }
-
-/// The longest signature, in bytes, as the engine keeps it.
-pub const MAX_SIGNATURE_BYTES: usize = 16 * 1024;
 
 #[cfg(test)]
 #[path = "settings_tests.rs"]

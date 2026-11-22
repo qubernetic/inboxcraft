@@ -28,7 +28,7 @@ fn build(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
 }
 
 fn harness(theme: egui::Theme) -> Harness<'static, InboxApp> {
-    build(InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())), theme)
+    build(InboxApp::at_mail(Mailbox::new(sample::session(clock()).unwrap(), clock())), theme)
 }
 
 /// The sample window on the calendar screen.
@@ -40,11 +40,13 @@ fn on_calendar(theme: egui::Theme) -> Harness<'static, InboxApp> {
 }
 
 fn toggled(harness: &Harness<'static, InboxApp>, name: &str) -> Option<Toggled> {
-    harness.get_by_role_and_label(Role::Button, name).accesskit_node().toggled()
+    let node = harness.query_by_role_and_label(Role::RadioButton, name).unwrap_or_else(|| harness.get_by_role_and_label(Role::Button, name));
+    node.accesskit_node().toggled()
 }
 
 fn press(harness: &mut Harness<'static, InboxApp>, name: &str) {
-    harness.get_by_role_and_label(Role::Button, name).click();
+    // A button, or a segmented control's option.
+    harness.query_by_role_and_label(Role::RadioButton, name).unwrap_or_else(|| harness.get_by_role_and_label(Role::Button, name)).click();
     harness.run();
 }
 
@@ -60,6 +62,11 @@ fn selected(harness: &Harness<'static, InboxApp>, name: &str) -> bool {
 
 fn shows(harness: &Harness<'static, InboxApp>, text: &str) -> bool {
     harness.query_all_by_label_contains(text).next().is_some()
+}
+
+/// Whether the details show each of `words` as a tag.
+fn tags(harness: &Harness<'static, InboxApp>, words: &[&str]) -> bool {
+    words.iter().all(|word| harness.query_all_by_label(word).next().is_some())
 }
 
 fn day(month: u8, date: u8) -> Day {
@@ -91,13 +98,38 @@ fn the_rail_s_calendar_opens_this_week_and_mail_comes_back() {
 fn without_calendars_the_screen_says_there_are_none_yet() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let store = Memory::new(StoreConfig::default());
-        let app = InboxApp::new(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()));
+        let app = InboxApp::at_mail(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()));
         let mut harness = build(app, theme);
         press(&mut harness, "Calendar");
         assert!(harness.state().calendar().is_empty());
-        harness.get_by_label("No calendars yet");
+        harness.get_by_label("No calendars yet.");
         assert!(harness.query_by_label("Week").is_none(), "no views without calendars");
         harness.check_accessibility();
+    }
+}
+
+#[test]
+fn without_calendars_the_words_stand_on_the_whole_card_where_the_frame_has_them() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let p = crate::theme::Palette::of(if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light });
+        let store = Memory::new(StoreConfig::default());
+        let app = InboxApp::at_mail(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()));
+        let mut harness = build(app, theme);
+        press(&mut harness, "Calendar");
+        let block = harness.get_by_role_and_label(Role::Label, "No calendars yet.").rect();
+        // The frame: the calendar's card over the whole body in `surface`, no box of its own round the words; the
+        // block 440 wide in its middle, 304 under its top and 336 over its bottom (room for a button 32 high).
+        let card = flat_rects(&harness)
+            .into_iter()
+            .filter(|(rect, fill)| *fill == p.surface && rect.contains_rect(block))
+            .map(|(rect, _)| rect)
+            .max_by(|a, b| a.area().total_cmp(&b.area()))
+            .unwrap();
+        assert!(card.width() > 900.0, "the card is the screen's, not a box round the words: {card:?}");
+        assert_eq!(block.width(), 440.0, "{block:?}");
+        assert!((block.center().x - card.center().x).abs() <= 0.5, "{block:?} in {card:?}");
+        let (over, under) = (block.top() - card.top(), card.bottom() - block.bottom());
+        assert!((under - over - 32.0).abs() <= 1.0, "over {over}, under {under}");
     }
 }
 
@@ -147,13 +179,14 @@ fn the_segmented_control_switches_between_day_week_month_and_agenda() {
         press(&mut harness, "Agenda");
         assert_eq!(harness.state().calendar().view(), View::Agenda);
         harness.get_by_label("From today");
-        harness.get_by_label("Today · Thursday 5 November");
+        assert!(shows(&harness, "Thursday 5 November, today"), "today's head says so");
         assert!(shows(&harness, "Ferry to the island, Sunday 8 November"));
         harness.check_accessibility();
 
         press(&mut harness, "Day");
         assert_eq!(harness.state().calendar().view(), View::Day);
-        assert_eq!(harness.get_all_by_label("Thursday 5 November 2026").count(), 2, "the title and the mini month's today");
+        assert_eq!(harness.get_all_by_label("Thursday 5 November 2026").count(), 1, "the title");
+        assert_eq!(harness.get_all_by_label("Thursday 5 November 2026, today").count(), 2, "the day's head and the mini month's today");
         assert!(shows(&harness, "Dentist, Thursday 5 November, 10:00 – 11:30"));
         assert!(!shows(&harness, "Ferry to the island"), "the day shows its own events only");
         harness.check_accessibility();
@@ -197,32 +230,30 @@ fn a_day_of_the_month_or_the_mini_month_opens_its_days() {
     harness.get_all_by_label("Monday 16 November 2026").next().unwrap().click();
     harness.run();
     harness.get_by_label("16 – 22 November 2026");
-    harness.get_all_by_label("Wednesday 18 November 2026").last().unwrap().click();
+    // The week's head comes first, the mini month's day after it.
+    harness.get_all_by_label("Wednesday 18 November 2026").next().unwrap().click();
     harness.run();
     assert_eq!(harness.state().calendar().view(), View::Day, "a day's name in the week opens the day");
-    assert_eq!(harness.get_all_by_label("Wednesday 18 November 2026").count(), 2, "the title and the mini month's day");
+    assert_eq!(harness.get_all_by_label("Wednesday 18 November 2026").count(), 3, "the title, the day's head and the mini month's day");
     let (calendar, mailbox) = harness.state_mut().calendar_mut();
     calendar.set_view(mailbox, View::Month);
     harness.run();
-    harness.get_all_by_label("Tuesday 17 November 2026").last().unwrap().click();
+    harness.get_all_by_label("Tuesday 17 November 2026").next().unwrap().click();
     harness.run();
     assert_eq!(harness.state().calendar().focus(), day(11, 17));
     assert_eq!(harness.state().calendar().view(), View::Day);
 }
 
 #[test]
-fn an_event_is_a_tint_of_the_token_with_its_colour_at_full_strength_on_the_edge() {
-    use super::colours;
-    use crate::theme::{Mode, Preset, Theme};
-
-    let theme = Theme::new(Mode::Light, &Preset::default());
-    let p = &theme.palette;
-    assert_eq!(colours(&theme, None, 1), (p.events[1], p.accounts[1]), "without a colour from the server, the tokens of the place");
-    assert_eq!(colours(&theme, None, 7), (p.events[1], p.accounts[1]), "the places go round");
-    let [r, g, b] = [200, 40, 120];
-    let (fill, edge) = colours(&theme, Some([r, g, b]), 0);
-    assert_eq!(edge, egui::Color32::from_rgb(r, g, b), "the server's colour at full strength");
-    assert!((i32::from(fill.a()) - i32::from(p.events[0].a())).abs() <= 1, "the fill as strong as the token: {fill:?}");
+fn an_event_is_coloured_by_its_account_s_bar_only() {
+    let harness = on_calendar(egui::Theme::Light);
+    let calendar = harness.state().calendar();
+    let theme = crate::theme::Theme::new(crate::theme::Mode::Light, crate::theme::TextScale::default());
+    for row in calendar.calendars() {
+        let place = calendar.account_index(row.account);
+        assert_eq!(calendar.account_place(row.id), place, "{}: its account's place", row.name);
+        assert_eq!(super::bar_colour(&theme, calendar, row.id), theme.account_colour(place), "{}: the account's colour", row.name);
+    }
 }
 
 #[test]
@@ -249,33 +280,36 @@ fn a_picked_event_shows_both_dates_and_its_own_zone_labelled() {
         harness.get_by_label("Event zone Atlantic/Azores: 07:00 – 10:00");
         harness.get_by_label("Sunday 8 November, 08:00 – 11:00");
         harness.get_by_label("Grey Gull Ferries · Booking GG-2291");
-        harness.get_by_label("Personal · busy");
+        assert!(tags(&harness, &["Personal", "busy"]));
         harness.check_accessibility();
 
         pick(&mut harness, "Call with Petra about the logo");
         assert!(!shows(&harness, "Event zone"), "an event on the computer's clock has no zone line");
-        harness.get_by_label("Studio · busy");
-        harness.get_by_label("Petra Lindqvist · going");
+        assert!(tags(&harness, &["Studio", "busy"]));
+        harness.get_by_label("Petra Lindqvist, going");
 
         press(&mut harness, "Close the details");
         assert!(harness.state().calendar().picked().is_none());
-        assert!(harness.query_by_label("Petra Lindqvist · going").is_none());
+        assert!(harness.query_by_label("Petra Lindqvist, going").is_none());
     }
 }
 
 #[test]
 fn a_block_over_several_days_shows_both_dates_and_a_second_press_lets_it_go() {
     let mut harness = on_calendar(egui::Theme::Light);
+    // A month's days as high as an 820 window gave them before the command and status lines took their 74.
+    harness.set_size(vec2(1200.0, 894.0));
+    harness.run();
     press(&mut harness, "Month");
     pick(&mut harness, "Coast trip");
     harness.get_by_label("Monday 16 November – Wednesday 18 November");
-    harness.get_by_label("Personal · busy");
+    assert!(tags(&harness, &["Personal", "busy"]));
     pick(&mut harness, "Coast trip");
     assert!(harness.state().calendar().picked().is_none());
     pick(&mut harness, "Studio stand-up");
-    harness.get_by_label("Studio · busy · repeats weekly");
+    assert!(tags(&harness, &["Studio", "busy", "repeats weekly"]));
     pick(&mut harness, "Dentist");
-    harness.get_by_label("Personal · busy · private");
+    assert!(tags(&harness, &["Personal", "busy", "private"]));
 }
 
 #[test]
@@ -293,4 +327,221 @@ fn a_click_on_an_alert_opens_the_calendar_on_the_event_with_its_details() {
     assert_eq!(harness.state().screen(), Screen::Calendar);
     assert_eq!(harness.state().calendar().focus(), Day::new(2026, 11, 9).unwrap());
     assert_eq!(harness.state().calendar().picked().map(|event| event.id), Some(id));
+}
+
+#[test]
+fn today_is_a_cyan_edge_box_and_the_picked_day_the_cyan_fill_with_on_cyan() {
+    let p = crate::theme::Palette::of(crate::theme::Mode::Light);
+    let mut harness = on_calendar(egui::Theme::Light);
+    press(&mut harness, "Month");
+    let rects = |harness: &Harness<'static, InboxApp>| flat_rects(harness).into_iter().map(|(_, fill)| fill).collect::<Vec<_>>();
+    let cyan = |harness: &Harness<'static, InboxApp>, colour| rects(harness).into_iter().filter(|fill| *fill == colour).count();
+    assert!(cyan(&harness, p.cyan_edge) >= 8, "today in the month and the mini month in a cyan_edge box, four lines each");
+    let before = cyan(&harness, p.cyan);
+    harness.key_press(Key::ArrowRight);
+    harness.run();
+    assert_eq!(harness.state().calendar().picked_day(), Some(day(11, 6)));
+    assert_eq!(cyan(&harness, p.cyan), before + 2, "the picked day on cyan, in the month and the mini month");
+    assert!(texts(&harness, "6").contains(&p.on_cyan), "its number in on_cyan");
+    assert!(crate::theme::contrast(p.on_cyan, p.cyan) >= 4.5);
+}
+
+/// Every filled rect painted in the last frame, with its fill.
+fn flat_rects(harness: &Harness<'static, InboxApp>) -> Vec<(egui::Rect, egui::Color32)> {
+    fn open(shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Color32)>) {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, out)),
+            egui::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, &mut out));
+    out
+}
+
+/// The colours the texts `text` were painted in, in the last frame.
+fn texts(harness: &Harness<'static, InboxApp>, text: &str) -> Vec<egui::Color32> {
+    fn open(shape: &egui::Shape, text: &str, out: &mut Vec<egui::Color32>) {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, text, out)),
+            egui::Shape::Text(shape) if shape.galley.text() == text => {
+                out.extend(shape.galley.rows.iter().flat_map(|row| row.visuals.mesh.vertices.iter()).map(|vertex| vertex.color).next());
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, text, &mut out));
+    out
+}
+
+#[test]
+fn a_long_title_in_the_details_pushes_the_times_down_and_the_day_s_times_stand_under_the_day() {
+    let mut harness = on_calendar(egui::Theme::Dark);
+    pick(&mut harness, "Call with Petra about the logo");
+    let title = harness.get_by_label("Call with Petra about the logo").rect();
+    let when = harness.get_by_label("Thursday 5 November, 09:30 – 10:30").rect();
+    assert!(when.top() >= title.bottom(), "the times under the title: {title:?} {when:?}");
+    assert!(when.height() >= 2.0 * 22.0 - 0.5, "the times on a line of their own: {when:?}");
+}
+
+#[test]
+fn the_week_drawn_follows_the_rule_set_in_the_session_with_today_in_it() {
+    for (rule, title, note, heads) in [
+        (r#"{"first_day": "monday"}"#, "2 – 8 November 2026", "week 45", ["Monday 2 November 2026", "Sunday 8 November 2026"]),
+        (r#"{"first_day": "sunday"}"#, "1 – 7 November 2026", "week 44", ["Sunday 1 November 2026", "Saturday 7 November 2026"]),
+        (
+            r#"{"first_day": "saturday", "first_week": "week_of_1_january"}"#,
+            "31 October – 6 November 2026",
+            "week 45",
+            ["Saturday 31 October 2026", "Friday 6 November 2026"],
+        ),
+    ] {
+        let mut harness = on_calendar(egui::Theme::Light);
+        // The frame's 1440: beside the index, at 1200 the toolbar has no room for the week's note.
+        harness.set_size(vec2(1440.0, 900.0));
+        {
+            let (calendar, mailbox) = harness.state_mut().calendar_mut();
+            mailbox.run("week.set", &serde_json::from_str(rule).unwrap()).unwrap();
+            // What the window does once a frame.
+            calendar.follow_week(mailbox);
+        }
+        harness.run();
+        harness.get_by_label(title);
+        harness.get_by_label(note);
+        assert_eq!(harness.get_all_by_label("Thursday 5 November 2026, today").count(), 2, "{rule}: today's head and the mini month's");
+        // A day's head is the widest of the buttons named after it (the mini month's are 28 wide).
+        let head = |name: &str| harness.get_all_by_label(name).map(|node| node.rect()).max_by(|a, b| a.width().total_cmp(&b.width())).unwrap();
+        let [first, last] = heads.map(head);
+        assert!(first.width() > 60.0 && last.width() > 60.0, "{rule}: the heads over the hours");
+        assert!(first.left() < last.left(), "{rule}: the week's first day at the left");
+    }
+}
+
+#[test]
+fn with_sunday_first_the_heads_and_the_mini_month_are_drawn_and_walked_from_sunday() {
+    let mut harness = on_calendar(egui::Theme::Light);
+    {
+        let (calendar, mailbox) = harness.state_mut().calendar_mut();
+        mailbox.run("week.set", &serde_json::json!({ "first_day": "sunday" })).unwrap();
+        calendar.follow_week(mailbox);
+    }
+    harness.run();
+    let week = [
+        "Sunday 1 November 2026",
+        "Monday 2 November 2026",
+        "Tuesday 3 November 2026",
+        "Wednesday 4 November 2026",
+        "Thursday 5 November 2026, today",
+        "Friday 6 November 2026",
+        "Saturday 7 November 2026",
+    ];
+    let focused = |harness: &Harness<'static, InboxApp>| {
+        harness
+            .root()
+            .children_recursive()
+            .find(|node| node.accesskit_node().is_focused())
+            .map(|node| (node.accesskit_node().label().unwrap_or_default(), node.rect()))
+    };
+    // The day heads (the widest of the buttons of each name; the mini month's are 28 wide) and the mini month's days,
+    // the first row of each: drawn left to right from Sunday, and Tab walks them in that order.
+    for (head, wide) in [(true, "the heads"), (false, "the mini month")] {
+        let pick = |harness: &Harness<'static, InboxApp>, name: &str| {
+            let rects = harness.get_all_by_label(name).map(|node| node.rect());
+            if head { rects.max_by(|a, b| a.width().total_cmp(&b.width())) } else { rects.min_by(|a, b| a.width().total_cmp(&b.width())) }.unwrap()
+        };
+        let rects: Vec<egui::Rect> = week.iter().map(|name| pick(&harness, name)).collect();
+        assert!(rects.windows(2).all(|pair| pair[0].left() < pair[1].left() && pair[0].top() == pair[1].top()), "{wide}: {rects:?}");
+        let first = harness.get_all_by_label(week[0]).find(|node| node.rect() == rects[0]).unwrap();
+        first.focus();
+        harness.run();
+        assert_eq!(focused(&harness).map(|(_, rect)| rect), Some(rects[0]), "{wide}");
+        for (name, rect) in week.iter().zip(&rects).skip(1) {
+            harness.key_press(Key::Tab);
+            harness.run();
+            assert_eq!(focused(&harness), Some(((*name).to_owned(), *rect)), "{wide}: Tab onto {name}");
+        }
+    }
+}
+
+/// The calendar of a store with no account: its empty state.
+fn empty_calendar(theme: egui::Theme) -> Harness<'static, InboxApp> {
+    let store = Memory::new(StoreConfig::default());
+    let app = InboxApp::new(Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock()));
+    let mut harness = build(app, theme);
+    press(&mut harness, "Calendar");
+    assert!(harness.state().calendar().is_empty());
+    harness
+}
+
+#[test]
+fn the_empty_calendar_s_open_accounts_stands_under_the_words_and_shows_the_accounts() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = empty_calendar(theme);
+        let block = harness.get_by_role_and_label(Role::Label, "No calendars yet.").rect();
+        let button = harness.get_by_role_and_label(Role::Button, "Open accounts");
+        let at = button.rect();
+        assert!(!button.accesskit_node().is_disabled());
+        // Right under the block, in its middle, a secondary button 32 high.
+        assert_eq!(at.top(), block.bottom(), "{at:?} under {block:?}");
+        assert!((at.center().x - block.center().x).abs() <= 0.5, "{at:?} in the middle of {block:?}");
+        assert_eq!(at.height(), 32.0);
+        harness.check_accessibility();
+        button.click();
+        harness.run();
+        let app = harness.state();
+        assert!(app.settings().is_open(), "the settings show");
+        assert_eq!(app.settings().section(), crate::settings::Section::Accounts);
+        assert_eq!(app.mailbox().last_run(), Some(crate::keymap::SETTINGS), "through ui.settings.open with its page");
+    }
+}
+
+#[test]
+fn tab_reaches_open_accounts() {
+    let mut harness = empty_calendar(egui::Theme::Light);
+    let focused = |harness: &Harness<'static, InboxApp>| {
+        harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
+    };
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        let now = focused(&harness);
+        if now.as_deref() == Some("Open accounts") {
+            harness.key_press(Key::Enter);
+            harness.run();
+            assert_eq!(harness.state().settings().section(), crate::settings::Section::Accounts, "Enter on it shows the accounts");
+            assert!(harness.state().settings().is_open());
+            return;
+        }
+        seen.push(now);
+    }
+    panic!("Tab never reached Open accounts: {seen:?}");
+}
+
+#[test]
+fn open_accounts_shows_only_while_there_is_no_calendar() {
+    let harness = on_calendar(egui::Theme::Light);
+    assert!(!harness.state().calendar().is_empty());
+    assert!(harness.query_by_label("Open accounts").is_none());
+}
+
+#[test]
+fn shift_tab_reaches_open_accounts_too() {
+    let mut harness = empty_calendar(egui::Theme::Light);
+    let focused = |harness: &Harness<'static, InboxApp>| {
+        harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
+    };
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+        harness.run();
+        let now = focused(&harness);
+        if now.as_deref() == Some("Open accounts") {
+            return;
+        }
+        seen.push(now);
+    }
+    panic!("Shift Tab never reached Open accounts: {seen:?}");
 }

@@ -263,13 +263,42 @@ fn the_manifest_installs_files_that_exist_under_the_app_id() {
     let manifest = repo_file(MANIFEST);
     assert!(manifest.starts_with("# ") && manifest.contains(&format!("\napp-id: {APP_ID}\n")), "{manifest}");
     assert!(manifest.contains("\n      - cargo-sources.json\n"), "the crates come from {SOURCES}");
-    let installs: Vec<(&str, &str)> =
-        manifest.lines().filter_map(|line| line.trim_start().strip_prefix("- install -Dm644 ")).filter_map(|rest| rest.split_once(' ')).collect();
-    assert_eq!(installs.len(), 3, "{manifest}");
+    let installs: Vec<(&str, &str)> = manifest
+        .lines()
+        .filter_map(|line| line.trim_start().strip_prefix("- install -Dm644 "))
+        .filter(|rest| !rest.starts_with("-t "))
+        .filter_map(|rest| rest.split_once(' '))
+        .collect();
+    assert_eq!(installs.len(), 2, "{manifest}");
     for (from, to) in installs {
         assert!(crate::default_root().join(from).is_file(), "{from} is missing");
         assert!(to.rsplit('/').next().is_some_and(|name| name.starts_with(APP_ID)), "{to} is not named after the app id");
     }
+}
+
+#[test]
+fn the_manifest_installs_the_notice_and_every_licence_text_under_the_app_id() {
+    let manifest = repo_file(MANIFEST);
+    let prefix = format!("- install -Dm644 -t /app/share/licenses/{APP_ID} ");
+    let files: Vec<&str> =
+        manifest.lines().filter_map(|line| line.trim_start().strip_prefix(prefix.as_str())).flat_map(str::split_whitespace).collect();
+    assert_eq!(files, ["NOTICE", "LICENSE-MIT", "LICENSE-APACHE", "LICENSES/CC-BY-ND-4.0.txt"], "{manifest}");
+    for file in files {
+        assert!(crate::default_root().join(file).is_file(), "{file} is missing");
+    }
+}
+
+#[test]
+fn the_manifest_installs_the_brand_s_icon_tree_named_after_the_app_id() {
+    let manifest = repo_file(MANIFEST);
+    let tree = "assets/brand/inboxcraft/linux/hicolor";
+    assert!(manifest.contains(&format!("\n      - cp -r {tree}/. /app/share/icons/hicolor/\n")), "{manifest}");
+    let sizes = ["16x16", "22x22", "24x24", "32x32", "48x48", "64x64", "128x128", "256x256", "512x512"];
+    for size in sizes {
+        let icon = crate::default_root().join(tree).join(size).join("apps").join(format!("{APP_ID}.png"));
+        assert!(icon.is_file(), "{} is missing", icon.display());
+    }
+    assert!(crate::default_root().join(tree).join("scalable/apps").join(format!("{APP_ID}.svg")).is_file());
 }
 
 #[test]
@@ -289,5 +318,7 @@ fn the_desktop_file_opens_the_app_and_its_actions_the_sample_and_quit() {
 
 #[test]
 fn the_window_carries_the_app_id_so_the_desktop_finds_its_entry() {
-    assert!(repo_file("apps/inboxcraft/src/main.rs").contains(&format!(".with_app_id(\"{APP_ID}\")")));
+    // The window's builder lives in the app's library (`viewport`), which `main` opens.
+    assert!(repo_file("apps/inboxcraft/src/lib.rs").contains(&format!(".with_app_id(\"{APP_ID}\")")));
+    assert!(repo_file("apps/inboxcraft/src/main.rs").contains("inboxcraft::viewport("));
 }

@@ -34,7 +34,7 @@ pub(crate) struct Tool {
 }
 
 /// Every tool, in the order `tools/list` gives them.
-pub(crate) const TOOLS: [Tool; 5] = [
+pub(crate) const TOOLS: [Tool; 8] = [
     Tool {
         name: "mail_list",
         command: "mail.list",
@@ -75,6 +75,17 @@ line a message.",
         render: render::thread,
     },
     Tool {
+        name: "mail_why",
+        command: "mail.why",
+        description: "Say why a message stands where it does, at most four reasons, most specific first: a snooze, the grouped \
+inbox's rule, the owner's choice for the sender, the screener, the thread, else the folder. Each reason is a kind, a text id \
+and its values. Changes nothing.",
+        schema: id_schema,
+        read_only: true,
+        paged: false,
+        render: render::why,
+    },
+    Tool {
         name: "account_check",
         command: "account.check",
         description: "Ask for a check of an account, step by step (DNS, TCP, TLS, certificate, sign-in), and give the steps as \
@@ -83,6 +94,27 @@ they stand.",
         read_only: true,
         paged: false,
         render: render::check,
+    },
+    Tool {
+        name: "week_settings",
+        command: "week.settings",
+        description: "Show how weeks are counted: the first day of the week, the first week of the year, the names each can \
+take, and the week of today.",
+        schema: no_schema,
+        read_only: true,
+        paged: false,
+        render: render::week,
+    },
+    Tool {
+        name: "sync_status",
+        command: "sync.status",
+        description: "Show how syncing stands over every account: synced, syncing, offline or failing, the folder syncs done \
+of all, the last sync and how many accounts fail. Run on a store with an account, without the app, it reads offline: no \
+worker runs there.",
+        schema: no_schema,
+        read_only: true,
+        paged: false,
+        render: render::sync,
     },
 ];
 
@@ -113,6 +145,10 @@ fn list_schema() -> Value {
 
 fn id_schema() -> Value {
     json!({ "type": "object", "properties": { "id": id("The message.") }, "required": ["id"], "additionalProperties": false })
+}
+
+fn no_schema() -> Value {
+    json!({ "type": "object", "properties": {}, "additionalProperties": false })
 }
 
 fn search_schema() -> Value {
@@ -157,8 +193,9 @@ pub(crate) fn list() -> Vec<Value> {
 /// names no tool is a protocol error.
 pub(crate) fn call(commands: &mut dyn Commands, params: &Value) -> Result<Value, RpcError> {
     let name = params.get("name").and_then(Value::as_str).ok_or_else(|| RpcError::new(code::INVALID_PARAMS, "tools/call names no tool"))?;
-    let tool =
-        TOOLS.iter().find(|tool| tool.name == name).ok_or_else(|| RpcError::new(code::INVALID_PARAMS, format!("there is no tool {}", echo(name))))?;
+    let Some(tool) = TOOLS.iter().find(|tool| tool.name == name) else {
+        return Err(RpcError::new(code::INVALID_PARAMS, format!("there is no tool {}", echo(name))));
+    };
     let mut arguments = match params.get("arguments") {
         None | Some(Value::Null) => json!({}),
         Some(arguments @ Value::Object(_)) => arguments.clone(),

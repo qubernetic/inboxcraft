@@ -7,7 +7,7 @@ InboxCraft is owned and maintained by Qubernetic. In this file, "the project own
 or "the person" means whoever the mailbox belongs to. This file is for people as much as for agents. `CLAUDE.md` is a
 link to this file.
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 ## Start every session here
 1. Read `plan/STATUS.md` (current milestone, next task), then the task in `plan/execution-plan.md`. `plan/` is
@@ -43,7 +43,7 @@ A crash can lose a message the person was writing. **This outranks feature work.
 ## Assets: no vendor iconography or images
 **Non-negotiable.** Never copy, trace, crop or recreate icons, images, sounds, fonts, themes or text from Spark,
 Mailspring, Outlook, Gmail or any other product. Every asset is original (drawn in code is preferred:
-`crates/ui-egui/src/icons.rs`), CC0, OSI open source or a redistributable Creative Commons licence, and every asset
+`crates/ui-egui/src/sample.rs`), CC0, OSI open source or a redistributable Creative Commons licence, and every asset
 file has a row in `ATTRIBUTION.md` in the same commit (`cargo xtask assets` enforces it). Sample mail and people are
 invented.
 
@@ -81,8 +81,9 @@ invented.
 ## Quality gates
 - Before every commit: `just ci` (= `cargo xtask ci` in the container, natively with `AGENT_HORDE=1`; see
   `docs/development.md`): fmt, clippy `-D warnings`, tests, doctests, assets, changes, spdx, test-files,
-  layers, flatpak-sources-check, wasm, deny, and the coverage floors in `.config/coverage.toml`
-  (`cargo xtask cov --check`).
+  layers, flatpak-sources-check, wasm, deny, shots (every committed picture of `shots.jsonl` is what the code
+  draws, byte for byte; `cargo xtask shots --fix` writes them), and the coverage floors in
+  `.config/coverage.toml` (`cargo xtask cov --check`).
 - The dev Flatpak keeps building: a `Cargo.lock` change commits the output of `just flatpak-sources` with it, and a
   new permission goes into the manifest's `finish-args` with its reason in a comment above it
   (`contrib/flatpak/`).
@@ -144,3 +145,5 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
 | 2026-11-08 | minor | The headless CLI (#140) |
 | 2026-11-08 | minor | `inboxcraft-cli mcp` (#141) |
 | 2026-11-08 | minor | The control channel is a socket in `$XDG_RUNTIME_DIR`; the CLI and MCP run in the app without `--store` (#142) |
+| 2026-11-21 | minor | Art drawn in code points at the sample, no longer at the app icon (#232) |
+| 2026-11-21 | minor | `shots` joins the gates of `just ci` (#248) |

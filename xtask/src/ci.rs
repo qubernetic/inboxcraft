@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::{Context, Error, assets, changes, cov, flatpak, layers, spdx, stats, test_files, wasm};
+use crate::{Context, Error, assets, changes, cov, flatpak, layers, shots, spdx, stats, test_files, wasm};
 
 /// Runs an external tool.
 pub trait Runner {
@@ -85,6 +85,8 @@ pub(crate) enum Gate {
     /// `flatpak-sources-check`.
     FlatpakSources,
     Layers,
+    /// `shots --check`.
+    Shots,
     Spdx,
     Stats,
     TestFiles,
@@ -106,6 +108,7 @@ pub(crate) const GATES: &[(&str, Gate)] = &[
     ("cov", Gate::Cov),
     ("wasm", Gate::Wasm),
     ("deny", Gate::Cargo(&["deny", "check"])),
+    ("shots", Gate::Shots),
     ("stats", Gate::Stats),
 ];
 
@@ -122,6 +125,7 @@ pub(crate) fn gate(ctx: &mut Context, out: &mut dyn Write) -> Result<bool, Error
             Gate::Cov => cov::gate(ctx, true, out),
             Gate::FlatpakSources => flatpak::gate(&ctx.root, true, out),
             Gate::Layers => layers::gate(&ctx.root, out),
+            Gate::Shots => shots::gate(ctx, false, out),
             Gate::Spdx => spdx::gate(&ctx.root, false, out),
             Gate::Stats => stats::gate(&ctx.root, out),
             Gate::TestFiles => test_files::gate(&ctx.root, out),

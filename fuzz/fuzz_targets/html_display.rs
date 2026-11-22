@@ -2,15 +2,20 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Safe HTML display on any text, with and without consent for remote pictures: it never panics, stays within its
-//! caps, keeps every link index in range, shows no remote picture without consent, and its text holds no control
-//! character but the line break and tab and no invisible format character but the joiners. A link text that reads as
-//! `bank.example` once invisible characters are dropped and full-stop look-alikes are read as dots is flagged when
-//! the link goes to another host, and not flagged when it goes to `bank.example`.
+//! caps, keeps every link index in range, shows no remote picture without consent, gives a picture's size only when
+//! both sides are above nought and within `MAX_SIDE`, and its text holds no control character but the line break and
+//! tab and no invisible format character but the joiners. Every background it keeps carries an ink that reaches
+//! 4.5:1 on it, every width is a share of 1 to 100 per cent or at most `MAX_SIDE` pixels, and a `javascript:` button
+//! is a link that goes nowhere. A link text that reads as `bank.example` once invisible
+//! characters are dropped and full-stop look-alikes are read as dots is flagged when the link goes to another host,
+//! and not flagged when it goes to `bank.example`.
 
 #![no_main]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use inboxcraft_html::{Block, Document, ImageSource, MAX_BLOCKS, MAX_LINKS, Options, RemoteContent, display};
+use inboxcraft_html::{
+    Block, Document, ImageSource, LEAST_CONTRAST, LinkTarget, Look, MAX_BLOCKS, MAX_LINKS, MAX_SIDE, Options, Paint, RemoteContent, Width, display, page,
+};
 use libfuzzer_sys::fuzz_target;
 
 /// A character display text must not hold: a control character other than the line break and the tab, a bidi
@@ -48,8 +53,43 @@ fn disguised(data: &[u8]) -> String {
     text
 }
 
+/// `text` as HTML's characters, not its markup: no tag and no way out of an attribute's quotes.
+fn escaped(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// A kept background is readable: its ink reaches the contrast the app asks of text.
+fn readable(paint: Option<Paint>) {
+    assert!(paint.is_none_or(|paint| paint.fill.contrast(paint.ink) >= LEAST_CONTRAST), "{paint:?}");
+}
+
+/// A width within its caps.
+fn bounded(width: Option<Width>) {
+    assert!(
+        width.is_none_or(|width| match width {
+            Width::Pixels(pixels) => pixels > 0 && pixels <= MAX_SIDE,
+            Width::Share(share) => share > 0 && share <= 100,
+        }),
+        "{width:?}"
+    );
+}
+
 fn check(blocks: &[Block], doc: &Document, consent: bool) {
     for block in blocks {
+        if let Block::Text { look: Look { background, .. }, .. } | Block::Image { look: Look { background, .. }, .. } | Block::Table { look: Look { background, .. }, .. } = block {
+            readable(*background);
+        }
         match block {
             Block::Text { spans, .. } => {
                 for span in spans {
@@ -60,9 +100,54 @@ fn check(blocks: &[Block], doc: &Document, consent: bool) {
             Block::Image { image, .. } => {
                 assert!(image.link.is_none_or(|i| i < doc.links.len()));
                 assert!(consent || !matches!(image.source, ImageSource::Remote(_)));
+                assert!(image.size.is_none_or(|(w, h)| w > 0 && h > 0 && w <= MAX_SIDE && h <= MAX_SIDE), "{:?}", image.size);
             }
-            Block::Table { rows, .. } => rows.iter().flatten().for_each(|cell| check(&cell.blocks, doc, consent)),
+            Block::Table { rows, width, .. } => {
+                bounded(*width);
+                for cell in rows.iter().flatten() {
+                    readable(cell.background);
+                    bounded(cell.width);
+                    check(&cell.blocks, doc, consent);
+                }
+            }
             Block::Rule { .. } => {}
+        }
+    }
+}
+
+/// The elements [`page`] writes.
+const PAGE_TAGS: [&str; 27] = [
+    "!DOCTYPE", "html", "head", "meta", "style", "title", "body", "p", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "hr", "br", "b", "i", "u",
+    "s", "code", "span", "table", "tr", "td", "th",
+];
+
+/// Checks the markup of a written page: no attribute that loads or runs (`href`, `src`, `srcset`, `on…`), and no
+/// address (`://`) or CSS `url(` in any attribute's value or in the `<style>`. The words between the tags are the
+/// message's text, escaped, and inert whatever they say, so they are not looked at.
+fn inert(written: &str) {
+    let mut rest = written;
+    while let Some(open) = rest.find('<') {
+        let after = rest.get(open + 1..).unwrap_or_default();
+        let close = after.find('>').unwrap_or(after.len());
+        let tag = after.get(..close).unwrap_or_default();
+        rest = after.get(close..).unwrap_or_default();
+        if tag == "style" {
+            let body = rest.get(..rest.find("</style>").unwrap_or(rest.len())).unwrap_or_default();
+            assert!(!body.contains("url(") && !body.contains("://") && !body.contains("@import"), "<style>{body}");
+        }
+        // The tag's name, then its attributes: `name="value"`, the value with no `"` in it (escaped as `&quot;`).
+        let mut attributes = tag.split_once(' ').map_or("", |(_, attributes)| attributes);
+        while let Some(equals) = attributes.find('=') {
+            let name = attributes.get(..equals).unwrap_or_default().trim().to_ascii_lowercase();
+            assert!(!matches!(name.as_str(), "href" | "src" | "srcset" | "action" | "formaction" | "background" | "poster" | "data"), "{name}= in <{tag}>");
+            assert!(!name.starts_with("on"), "{name}= in <{tag}>");
+            let value_and_rest = attributes.get(equals + 1..).unwrap_or_default();
+            assert!(value_and_rest.starts_with('"'), "an unquoted value in <{tag}>");
+            let value_and_rest = value_and_rest.get(1..).unwrap_or_default();
+            let end = value_and_rest.find('"').unwrap_or(value_and_rest.len());
+            let value = value_and_rest.get(..end).unwrap_or_default().to_ascii_lowercase();
+            assert!(!value.contains("://") && !value.contains("url("), "{name}=\"{value}\" in <{tag}>");
+            attributes = value_and_rest.get(end + 1..).unwrap_or_default();
         }
     }
 }
@@ -74,7 +159,20 @@ fuzz_target!(|data: &[u8]| {
         let doc = display(&html, &Options { remote_content });
         assert!(doc.blocks.len() <= MAX_BLOCKS && doc.links.len() <= MAX_LINKS);
         check(&doc.blocks, &doc, consent);
+        doc.links.iter().for_each(|link| readable(link.fill));
+        // The page written for the browser: every element in it is one the page writes itself, none that runs or loads.
+        let written = page(&doc, &html);
+        for tag in written.split('<').skip(1) {
+            let name: String = tag.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '!' || *c == '/').collect();
+            assert!(PAGE_TAGS.contains(&name.trim_start_matches('/')), "<{name}");
+        }
+        inert(&written);
     }
+    // The input, escaped, as a button's action, script and words: the link the button itself makes (the first) goes
+    // nowhere. A link inside the input may be a button that goes somewhere; escaped, it cannot be made here.
+    let escaped = escaped(&html);
+    let doc = display(&format!("<button formaction=\"javascript:{escaped}\" onclick=\"{escaped}\">{escaped}</button>"), &Options::default());
+    assert!(doc.links.first().is_some_and(|link| link.button && link.target == LinkTarget::Refused), "{:?}", doc.links);
     let text = disguised(data);
     for (href, mismatch) in [("https://evil.example/", true), ("https://bank.example/", false)] {
         let doc = display(&format!("<a href=\"{href}\">{text}</a>"), &Options::default());

@@ -32,7 +32,7 @@ fn harness(theme: egui::Theme) -> Harness<'static, InboxApp> {
         .with_size(vec2(1300.0, 820.0))
         .with_theme(theme)
         .with_max_steps(12)
-        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::at_mail(mailbox));
     harness.run();
     harness
 }
@@ -92,11 +92,14 @@ fn reply_all_and_forward_open_theirs_and_forward_asks_whom() {
 #[test]
 fn a_reply_keeps_the_draft_that_was_being_written() {
     let mut harness = harness(egui::Theme::Light);
-    press(&mut harness, "New message");
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
     let first = harness.state().composer().unwrap().draft();
     harness.query_all_by_label_contains(ROTA).next().unwrap().click();
     harness.run();
     assert!(harness.state().composer().unwrap().floating());
+    // The floating panel stands over the reader's foot: folded, it leaves Reply in sight.
+    press(&mut harness, "Fold the draft New message");
     press(&mut harness, "Reply");
     let reply = harness.state().composer().unwrap();
     assert_ne!(reply.draft(), first);
@@ -108,7 +111,8 @@ fn a_reply_keeps_the_draft_that_was_being_written() {
 #[test]
 fn without_templates_the_menu_says_there_are_none() {
     let mut harness = harness(egui::Theme::Light);
-    press(&mut harness, "New message");
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
     let button = harness.get_by_role_and_label(Role::Button, "Templates");
     assert!(button.accesskit_node().is_disabled());
 }
@@ -118,7 +122,8 @@ fn a_template_with_a_blank_blocks_send_until_it_is_filled_in() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let mut harness = harness(theme);
         template(&mut harness, "Work party", "We meet at the plot at {?time} and finish by noon.");
-        press(&mut harness, "New message");
+        crate::draw::tests::new_message(&mut harness);
+        harness.run();
         harness.get_by_role_and_label(Role::TextInput, "To").type_text("odile@example.org,");
         harness.run();
         press(&mut harness, "Templates");
@@ -144,7 +149,8 @@ fn a_template_with_a_blank_blocks_send_until_it_is_filled_in() {
 fn the_fill_in_button_takes_what_is_typed_and_asks_for_the_next_blank() {
     let mut harness = harness(egui::Theme::Light);
     template(&mut harness, "Plot", "At {?time} by {?place}.");
-    press(&mut harness, "New message");
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
     press(&mut harness, "Templates");
     harness.get_by_label("Plot").click();
     harness.run();
@@ -155,4 +161,233 @@ fn the_fill_in_button_takes_what_is_typed_and_asks_for_the_next_blank() {
     press(&mut harness, "Fill in");
     harness.get_by_role_and_label(Role::TextInput, "Fill in \"place\"");
     assert!(harness.state().composer().unwrap().text().starts_with("At ten by [[place]]."));
+}
+
+#[test]
+fn the_template_menu_opens_by_the_pointer_enter_and_space_and_keeps_tab_inside() {
+    for key in [None, Some(Key::Enter), Some(Key::Space)] {
+        let mut harness = harness(egui::Theme::Light);
+        template(&mut harness, "Thanks", "Thank you, [name].");
+        template(&mut harness, "Later", "I will answer on [day].");
+        crate::draw::tests::new_message(&mut harness);
+        harness.run();
+        crate::component::popup::tests::walk_a_menu(&mut harness, (Role::Button, "Templates"), key);
+    }
+}
+
+/// The floating panel's rect, as it was drawn.
+fn panel(harness: &Harness<'static, InboxApp>) -> egui::Rect {
+    super::compose::drawn_rect(&harness.ctx).unwrap()
+}
+
+/// The reader's three answers' rects.
+fn answers(harness: &Harness<'static, InboxApp>) -> Vec<egui::Rect> {
+    ["Reply", "Reply all", "Forward"].iter().map(|name| harness.get_by_role_and_label(Role::Button, name).rect()).collect()
+}
+
+/// New message, then a message opened by a press: the composer floats beside the open message; `folded` folds it.
+fn floating_over_a_message(folded: bool) -> Harness<'static, InboxApp> {
+    let mut harness = harness(egui::Theme::Light);
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
+    harness.query_all_by_label_contains(ROTA).next().unwrap().click();
+    harness.run();
+    assert!(harness.state().composer().unwrap().floating());
+    if folded {
+        press(&mut harness, "Fold the draft New message");
+        assert!(harness.state().composer().unwrap().folded());
+    }
+    harness
+}
+
+#[test]
+fn the_floating_panel_folded_or_open_never_covers_the_reader_s_answers_and_a_press_on_reply_answers() {
+    for folded in [true, false] {
+        let mut harness = floating_over_a_message(folded);
+        let panel = panel(&harness);
+        for answer in answers(&harness) {
+            assert!(!answer.intersects(panel), "folded {folded}: the answer {answer:?} under the panel {panel:?}");
+        }
+        // 16 over the answers' row, its right edge where it stood.
+        let top = answers(&harness).iter().map(|rect| rect.top()).fold(f32::INFINITY, f32::min);
+        assert_eq!(panel.bottom(), (top - 16.0).floor(), "folded {folded}: the panel's foot 16 over the answers");
+        let body = super::shell::laid(&harness.ctx).unwrap().body;
+        assert_eq!(panel.right(), body.right() - 16.0, "folded {folded}: its right edge as before, 16 in from the body's");
+        let first = harness.state().composer().unwrap().draft();
+        // A pointer press on Reply, at its middle.
+        let at = harness.get_by_role_and_label(Role::Button, "Reply").rect().center();
+        harness.hover_at(at);
+        harness.run();
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        harness.step();
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        harness.run();
+        assert_ne!(harness.state().composer().unwrap().draft(), first, "folded {folded}: Reply pressed by the pointer answers");
+    }
+}
+
+#[test]
+fn the_floating_panel_s_shadow_falls_whole_under_its_foot() {
+    for folded in [true, false] {
+        let harness = floating_over_a_message(folded);
+        let panel = panel(&harness);
+        // The shadow reaches 12 + 3 × 16 under the box: painted, not cut, at least 40 of it.
+        let reach = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Mesh(mesh) if panel.x_range().contains(mesh.calc_bounds().center().x) => {
+                    Some(mesh.calc_bounds().bottom().min(clipped.clip_rect.bottom()))
+                }
+                _ => None,
+            })
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(reach >= panel.bottom() + 40.0, "folded {folded}: the shadow painted down to {reach}, the panel's foot {}", panel.bottom());
+    }
+}
+
+#[test]
+fn with_no_message_open_the_floating_panel_stands_where_it_did() {
+    let mut harness = harness(egui::Theme::Light);
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
+    harness.state_mut().composer_mut().0.unwrap().set_floating(true);
+    harness.run();
+    assert!(harness.state().reader().open_id().is_none(), "nothing open");
+    // 520 × 560, 16 in from the body's right and bottom edges.
+    let body = super::shell::laid(&harness.ctx).unwrap().body;
+    let corner = egui::pos2(body.right() - 16.0, (body.bottom() - 16.0).floor());
+    assert_eq!(panel(&harness), egui::Rect::from_min_max(corner - egui::vec2(520.0, 560.0), corner));
+}
+
+/// The reply to Odile's rota, open in the composer, its text with the keys.
+fn replying(theme: egui::Theme) -> Harness<'static, InboxApp> {
+    let mut harness = reading(theme);
+    press(&mut harness, "Reply");
+    harness.run();
+    harness
+}
+
+/// The composer's text now.
+fn written(harness: &Harness<'static, InboxApp>) -> String {
+    harness.state().composer().unwrap().text().to_owned()
+}
+
+/// Puts the caret of the composer's text before the character at byte `at` of `text`.
+fn caret_at(harness: &mut Harness<'static, InboxApp>, text: &str, at: usize) {
+    let id = super::compose::text_id();
+    let mut state = egui::text_edit::TextEditState::load(&harness.ctx, id).unwrap_or_default();
+    let chars = text[..at].chars().count();
+    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(chars))));
+    state.store(&harness.ctx, id);
+    harness.run();
+}
+
+/// `text` with `put` in place of the bytes `range`.
+fn spliced(text: &str, range: std::ops::Range<usize>, put: &str) -> String {
+    format!("{}{put}{}", &text[..range.start], &text[range.end..])
+}
+
+/// The text the engine keeps for the open draft: what Send sends.
+fn kept(harness: &mut Harness<'static, InboxApp>) -> String {
+    let id = harness.state().composer().unwrap().draft();
+    let shown = harness.state_mut().mailbox_mut().run("compose.show", &json!({ "id": id })).unwrap();
+    shown["text"].as_str().unwrap().to_owned()
+}
+
+#[test]
+fn a_reply_draws_its_quote_as_the_block_in_light_and_dark() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let harness = replying(theme);
+        let text = written(&harness);
+        assert!(text.contains(" wrote on ") && text.contains("\n> Hi all"), "{text:?}");
+        let field = harness.get_by_label("Message text").rect();
+        let bars = super::compose::quote_bars(&harness.ctx);
+        assert_eq!(bars.len(), 1, "one block for the one quote");
+        let bar = bars[0];
+        assert_eq!(bar.width(), super::compose::quote::BAR);
+        assert!(bar.height() >= 22.0 * 3.0, "from the line over it to its last line: {bar:?}");
+        assert!((bar.left() - field.left()).abs() < 8.0 && bar.top() > field.top(), "at the text's left edge: {bar:?} in {field:?}");
+    }
+}
+
+#[test]
+fn a_new_message_draws_no_block() {
+    let mut harness = harness(egui::Theme::Light);
+    crate::draw::tests::new_message(&mut harness);
+    harness.run();
+    assert!(super::compose::quote_bars(&harness.ctx).is_empty());
+}
+
+#[test]
+fn typing_and_deleting_at_the_block_s_edges_keeps_the_text_exact() {
+    let mut harness = replying(egui::Theme::Light);
+    let start = written(&harness);
+    assert_eq!(kept(&mut harness), start, "the draft holds the text the composer shows");
+    // At the end of the quote's last line.
+    let last = start.rfind("\n> ").unwrap() + 1;
+    let end = last + start[last..].find('\n').unwrap_or(start.len() - last);
+    caret_at(&mut harness, &start, end);
+    harness.event(egui::Event::Text("!".to_owned()));
+    harness.run();
+    let after_end = spliced(&start, end..end, "!");
+    assert_eq!(written(&harness), after_end, "typed at the end of the quote's last line");
+    // Before the `>` of the quote's first line: the line is the owner's now, the rest is untouched.
+    let first = start.find("\n> Hi all").unwrap() + 1;
+    caret_at(&mut harness, &after_end, first);
+    harness.event(egui::Event::Text("Yes. ".to_owned()));
+    harness.run();
+    let before_mark = spliced(&after_end, first..first, "Yes. ");
+    assert_eq!(written(&harness), before_mark, "typed before the quote mark");
+    // Inside the quote, after its hidden `> `.
+    let inside = before_mark.find("> Hi all").unwrap() + 2;
+    caret_at(&mut harness, &before_mark, inside);
+    harness.event(egui::Event::Text("Dear ".to_owned()));
+    harness.run();
+    let in_quote = spliced(&before_mark, inside..inside, "Dear ");
+    assert_eq!(written(&harness), in_quote, "typed after the hidden quote mark");
+    // Backspace at the start of the quote's first line deletes into the line over it.
+    let line = in_quote.find("Yes. > Dear").unwrap();
+    caret_at(&mut harness, &in_quote, line);
+    harness.key_press(Key::Backspace);
+    harness.run();
+    let deleted = spliced(&in_quote, line - 1..line, "");
+    assert_eq!(written(&harness), deleted, "one line break deleted, nothing else");
+    // The draft kept is the text, byte for byte.
+    press(&mut harness, "Close; the draft is kept");
+    let id = {
+        let drafts = harness.state_mut().mailbox_mut().run("compose.list", &json!({})).unwrap();
+        drafts["drafts"][0]["id"].as_u64().unwrap()
+    };
+    let ctx = harness.ctx.clone();
+    harness.state_mut().open_draft(&ctx, id);
+    harness.run();
+    assert_eq!(written(&harness), deleted, "reopened as it was");
+    assert_eq!(kept(&mut harness), deleted, "kept, and so sent, as it was");
+    assert_eq!(super::compose::quote_bars(&harness.ctx).len(), 1, "the block is drawn again");
+}
+
+#[test]
+fn undo_in_the_quote_brings_the_text_back_exactly() {
+    let mut harness = replying(egui::Theme::Light);
+    let start = written(&harness);
+    let inside = start.find("> Hi all").unwrap() + 2;
+    caret_at(&mut harness, &start, inside);
+    harness.event(egui::Event::Text("x".to_owned()));
+    harness.run();
+    let typed = spliced(&start, inside..inside, "x");
+    assert_eq!(written(&harness), typed);
+    assert_eq!(drawn(&harness), typed, "the block shows what was typed");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(written(&harness), start);
+    assert_eq!(drawn(&harness), start, "and what Undo brought back");
+    harness.run();
+    assert_eq!(kept(&mut harness), start, "the draft is the text from before");
+}
+
+/// The text the composer's last layout with a quote block holds.
+fn drawn(harness: &Harness<'static, InboxApp>) -> String {
+    super::compose::quote::last_laid(&harness.ctx).unwrap().text().to_owned()
 }

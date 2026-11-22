@@ -34,8 +34,10 @@
 //! - [`envelope`] reads the [`inboxcraft_model::Envelope`] of a message from its header block.
 //! - [`autoconfig`] reads Mozilla's autoconfig file: the encrypted IMAP and submission servers a provider publishes.
 //! - [`detect`] proposes settings from an address: MX ([`dns`]), autoconfig at the domain over HTTPS ([`web`]), the
-//!   ISPDB only when switched on, SRV, and common host names as a hint. A proposal is detected settings: no password
-//!   goes to them before the owner has seen them and TLS has verified.
+//!   ISPDB only when switched on, SRV, the provider domains of the MX hosts (their autoconfig, `mail.`, `imap.`,
+//!   `smtp.`), and `mail.`, `imap.`, `smtp.` of the domain. The [`candidates`] are a pure function of what the lookups
+//!   returned; each is [`probe`]d (greeting, TLS, a sign-in offered; no credentials) within a cap of tries and time. A
+//!   proposal is detected settings: no password goes to them before the owner has seen them and TLS has verified.
 //! - [`picture`] fetches a remote picture the owner allowed, so that the request tells the server nothing but the
 //!   URL: HTTPS only, a fixed user agent, no cookies, referrer or proxy, public addresses only, capped.
 
@@ -43,17 +45,20 @@
 
 pub mod autoconfig;
 mod backoff;
+pub mod candidates;
 pub mod certificate;
 mod check;
 mod compress;
 mod connect;
 mod dav;
+mod deadline;
 pub mod detect;
 pub mod dns;
 pub mod envelope;
 mod error;
 mod imap;
 pub mod picture;
+pub mod probe;
 mod smtp;
 mod sync;
 mod tls;
@@ -64,7 +69,8 @@ pub(crate) mod write;
 
 pub use backoff::Backoff;
 pub use check::{CheckTarget, HTTPS_PORT, MAIL_PORTS, check_account};
-pub use connect::{Connector, Dialer, SystemDialer, Timeouts};
+pub use connect::{Connector, Dialer, Resolve, SystemDialer, Timeouts};
+pub use deadline::{Deadline, Stop};
 pub use error::NetError;
 pub use imap::{ImapConnection, Password};
 pub use smtp::SmtpConnection;

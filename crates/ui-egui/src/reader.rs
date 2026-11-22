@@ -6,7 +6,8 @@
 //! pictures.
 //!
 //! Everything comes through the engine's commands (`mail.thread`, `mail.open` for the message opened, which marks it
-//! read, `mail.read` for the rest of the thread, `mail.attachment`, `remote.allow`).
+//! read, `mail.read` for the rest of the thread, `mail.attachment`, `remote.allow`, and `mail.why` once for the
+//! message opened and again only when its place changes, see [`crate::why`]).
 //! The text of a message is data: it is shown and never acted on. Remote pictures stay blocked until the owner
 //! allows them for this message once ([`Reader::allow_once`]) or for the sender always ([`Reader::allow_always`]);
 //! only then does the document name their addresses and only then does the reader ask its [`Fetch`]. Pictures inside
@@ -25,7 +26,7 @@ use serde_json::{Value, json};
 
 use crate::fetch::Fetch;
 use crate::invite::{Invite, Rsvp};
-use crate::mailbox::{Mailbox, parse_date, sender, shown};
+use crate::mailbox::{Mailbox, MessageRow, parse_date, plainly_named, sender, shown};
 use crate::picture::{Decoded, decode_within};
 use crate::quote::{MAX_TEXT, Segment, split};
 use crate::save::Save;
@@ -58,10 +59,11 @@ pub struct Person {
 }
 
 impl Person {
-    /// The name, or the address without one.
+    /// The name, or the address where there is none or where the name could be taken for another address (it holds
+    /// an at sign) or shows nothing.
     #[must_use]
     pub fn shown(&self) -> &str {
-        if self.name.is_empty() { &self.address } else { &self.name }
+        if plainly_named(&self.name) { &self.name } else { &self.address }
     }
 
     /// `Name <address>`, or the address alone.
@@ -135,8 +137,28 @@ pub struct Opened {
     pub sender_allowed: bool,
     /// The invitation it carries, as its card shows it.
     pub invite: Option<Invite>,
+    /// The text of an HTML message as a text-only program shows it: its own text part, or the text of its blocks.
+    pub plain: Vec<Segment>,
     html: Option<String>,
     inline: BTreeSet<String>,
+    generation: u64,
+}
+
+/// The last generation given to a message's content: each read or new layout of a message's content takes the next.
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A generation no content had before.
+fn next_generation() -> u64 {
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed).wrapping_add(1)
+}
+
+impl Opened {
+    /// Which content this is: it changes whenever the message is read again or its content is laid out again (with
+    /// pictures allowed, say), so what was drawn from the old content is not drawn from the new.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
 }
 
 /// A message of the thread: what the folded row shows, and the message once read.
@@ -174,17 +196,35 @@ pub fn inline_key(id: u64, content_id: &str) -> String {
 }
 
 /// What the line under the reader says while the pointer is on `link`: where it goes, and a warning when its text
-/// names another place.
+/// names another place. The target and its host are drawn left to right ([`target`]).
 #[must_use]
 pub fn link_status(link: &Link) -> String {
     match &link.target {
         LinkTarget::Web { url, host } if link.mismatch => {
-            tr!("Careful: the text says “{text}”, but the link goes to {host}: {url}", text = shown(&link.text), host = shown(host), url = shown(url))
+            tr!(
+                "Careful: the text says “{text}”, but the link goes to {host}: {url}",
+                text = shown(&link.text),
+                host = target(host),
+                url = target(url)
+            )
         }
-        LinkTarget::Web { url, .. } => shown(url),
-        LinkTarget::Mail { address, .. } => tr!("Write to {address}", address = shown(address)),
+        LinkTarget::Web { url, .. } => target(url),
+        LinkTarget::Mail { address, .. } => tr!("Write to {address}", address = target(address)),
         LinkTarget::Refused => tr!("This link is not followed: it does not go to a web page or a mail address.").to_owned(),
     }
+}
+
+/// What the reader's notice says once a click copied the link `url`, the link as [`target`] draws it.
+#[must_use]
+pub fn link_copied(url: &str) -> String {
+    tr!("Link copied: {url}", url = target(url))
+}
+
+/// A link's target, host or mail address as it is drawn: made fit for one line ([`shown`]) and left to right, its
+/// parts in the order a click copies them ([`crate::bidi::address`]). Only marks of no width are added: what is copied
+/// or opened is the link itself, never this.
+fn target(text: &str) -> String {
+    crate::bidi::address(&shown(text)).into_owned()
 }
 
 /// A size as the attachment tile shows it.
@@ -248,6 +288,20 @@ fn people(value: &Value) -> Vec<Person> {
         .unwrap_or_default()
 }
 
+/// The pictures a message asks for: its inline parts `held` names (each once, up to the cap: a `cid:` naming nothing
+/// costs nothing) and its remote addresses up to the cap.
+fn asked_for(held: &BTreeSet<String>, document: &Document) -> (Vec<String>, Vec<String>) {
+    let mut inline: Vec<String> = Vec::new();
+    for content_id in &document.inline_images {
+        if inline.len() < MAX_INLINE && held.contains(content_id) && !inline.contains(content_id) {
+            inline.push(content_id.clone());
+        }
+    }
+    let mut remote = Vec::new();
+    remote_pictures(&document.blocks, &mut remote);
+    (inline, remote.into_iter().take(MAX_REMOTE).map(str::to_owned).collect())
+}
+
 /// The remote addresses of the pictures in `blocks`, tables included.
 fn remote_pictures<'a>(blocks: &'a [Block], out: &mut Vec<&'a str>) {
     for block in blocks {
@@ -263,9 +317,10 @@ fn remote_pictures<'a>(blocks: &'a [Block], out: &mut Vec<&'a str>) {
     }
 }
 
-/// The card of the invitation message `id` carries; none when it carries none, or the engine cannot tell.
-fn invite(mailbox: &mut Mailbox, id: u64) -> Option<Invite> {
-    mailbox.run("invite.show", &json!({ "id": id })).ok().and_then(|answer| Invite::read(id, &answer))
+/// The card of the invitation message `id` (sent `from`) carries; none when it carries none, or the engine cannot tell.
+fn invite(mailbox: &mut Mailbox, id: u64, from: &[Person]) -> Option<Invite> {
+    let sender = from.first().map(|person| person.address.as_str());
+    mailbox.run("invite.show", &json!({ "id": id })).ok().and_then(|answer| Invite::read(id, &answer)).map(|invite| invite.sent_by(sender))
 }
 
 /// The reader's state.
@@ -275,15 +330,32 @@ pub struct Reader {
     expanded: BTreeSet<u64>,
     details: BTreeSet<u64>,
     quotes: BTreeSet<u64>,
+    plain: BTreeSet<u64>,
     once: BTreeSet<u64>,
     full_width: bool,
     fetch: Box<dyn Fetch>,
     save: Box<dyn Save>,
+    /// Where the original goes to the browser; none in a window that cannot open one.
+    original: Option<crate::original::Shared>,
+    /// The open of an original this reader started, until its answer is in the notice.
+    opening: Option<crate::original::Opening>,
     pictures: BTreeMap<String, PictureState>,
     owners: BTreeMap<String, u64>,
     notice: Option<String>,
+    /// Whether the notice says something failed.
+    failed: bool,
+    /// How the attachments saved since the message opened went, by message and index.
+    saves: BTreeMap<(u64, u64), Result<String, String>>,
     /// The invitations whose answer the owner is changing: their card offers the three answers again.
     changing: BTreeSet<u64>,
+    /// Why the open message is here, in the window's words, and where it stood when the engine was asked.
+    why: (Vec<String>, Option<crate::why::Place>),
+    /// The open message's row as a reader in a window of its own last read it: what its head shows once the list the
+    /// message was opened from has moved on (another place, a search). The pane's reader keeps none.
+    kept_row: Option<MessageRow>,
+    /// How many times the engine was asked why.
+    #[cfg(test)]
+    pub(crate) asked_why: u64,
 }
 
 impl std::fmt::Debug for Reader {
@@ -306,14 +378,23 @@ impl Reader {
             expanded: BTreeSet::new(),
             details: BTreeSet::new(),
             quotes: BTreeSet::new(),
+            plain: BTreeSet::new(),
             once: BTreeSet::new(),
             full_width: false,
             fetch,
             save,
+            original: None,
+            opening: None,
             pictures: BTreeMap::new(),
             owners: BTreeMap::new(),
             notice: None,
+            failed: false,
+            saves: BTreeMap::new(),
             changing: BTreeSet::new(),
+            why: (Vec::new(), None),
+            kept_row: None,
+            #[cfg(test)]
+            asked_why: 0,
         }
     }
 
@@ -327,7 +408,10 @@ impl Reader {
         self.quotes.clear();
         self.once.clear();
         self.changing.clear();
+        self.saves.clear();
         self.notice = None;
+        self.why = (Vec::new(), None);
+        self.kept_row = None;
         let Some(id) = id else {
             self.full_width = false;
             return;
@@ -353,12 +437,42 @@ impl Reader {
                     })
                     .collect();
             }
-            Err(error) => self.notice = Some(error.to_string()),
+            Err(error) => self.fail(error.to_string()),
         }
         if self.thread.iter().all(|row| row.id != id) {
             self.thread.push(ThreadRow { id, sender: String::new(), address: String::new(), preview: String::new(), date: None, opened: None });
         }
+        self.ask_why(mailbox, id);
         self.expand(mailbox, id);
+    }
+
+    /// Asks the engine once why open message `id` is here, and keeps the answer with where the message stood.
+    fn ask_why(&mut self, mailbox: &mut Mailbox, id: u64) {
+        #[cfg(test)]
+        {
+            self.asked_why = self.asked_why.saturating_add(1);
+        }
+        self.why = (crate::why::ask(mailbox, id), crate::why::place(mailbox, id));
+    }
+
+    /// Why the open message is here, in the window's words, most specific first; empty when the engine cannot say.
+    #[must_use]
+    pub fn why(&self) -> &[String] {
+        &self.why.0
+    }
+
+    /// Whether the open message no longer stands where it stood when the engine said why it is here: its folder, its
+    /// group, its sender's screening, done or its snooze changed in the list (one row of the list read, no command).
+    /// The head asks for the reasons again then, by unfolding the open message ([`Reader::expand`]).
+    #[must_use]
+    pub fn why_moved(&self, mailbox: &Mailbox) -> bool {
+        self.open.is_some_and(|id| crate::why::place(mailbox, id) != self.why.1)
+    }
+
+    /// Says the open message is here for `why`, as if the engine had said so.
+    #[cfg(test)]
+    pub(crate) fn set_why(&mut self, why: Vec<String>) {
+        self.why.0 = why;
     }
 
     /// Unfolds message `id` of the thread (reading it the first time), or folds it again. The open message stays
@@ -367,6 +481,9 @@ impl Reader {
         if self.expanded.contains(&id) {
             if Some(id) != self.open {
                 self.expanded.remove(&id);
+            } else if self.why_moved(mailbox) {
+                // The open message stays unfolded; asked for, the reader looks again at why it is here.
+                self.ask_why(mailbox, id);
             }
             return;
         }
@@ -382,7 +499,7 @@ impl Reader {
                     }
                     self.load_pictures(mailbox, id);
                 }
-                Err(error) => self.notice = Some(error.to_string()),
+                Err(error) => self.fail(error.to_string()),
             }
         }
     }
@@ -408,15 +525,30 @@ impl Reader {
             .and_then(Value::as_array)
             .map(|parts| parts.iter().filter_map(|part| part.get("content_id").and_then(Value::as_str)).map(str::to_owned).collect())
             .unwrap_or_default();
-        let mut opened =
-            Opened { id, header, content: Content::NotKept, files: Vec::new(), cut: false, sender_allowed, invite: None, html: None, inline };
+        let mut opened = Opened {
+            id,
+            header,
+            content: Content::NotKept,
+            files: Vec::new(),
+            cut: false,
+            sender_allowed,
+            invite: None,
+            plain: Vec::new(),
+            html: None,
+            inline,
+            generation: next_generation(),
+        };
         opened.content = match body {
             None if answer.get("fetching").and_then(Value::as_bool) == Some(true) => Content::Loading,
             None if answer.get("body_error").and_then(Value::as_str) == Some("too_large") => Content::TooLarge,
             None => Content::NotKept,
             Some(body) if body.get("readable").and_then(Value::as_bool) != Some(true) => Content::Unreadable,
             Some(_) => match (&html, text) {
-                (Some(_), _) => Content::Html(Document::default()),
+                (Some(_), text) => {
+                    // The plain-text view shows the message's own text part where it has one.
+                    opened.plain = text.filter(|text| !text.trim().is_empty()).map(split).unwrap_or_default();
+                    Content::Html(Document::default())
+                }
                 (None, Some(text)) => {
                     opened.cut = text.len() > MAX_TEXT;
                     Content::Text(split(text))
@@ -441,7 +573,7 @@ impl Reader {
             })
             .unwrap_or_default();
         if body.is_some() && message.get("invitation").and_then(Value::as_bool) == Some(true) {
-            opened.invite = invite(mailbox, id);
+            opened.invite = invite(mailbox, id, &opened.header.from);
             // Its calendar part is the card, not a file.
             if opened.invite.is_some() {
                 opened.files.retain(|file| !file.media_type.eq_ignore_ascii_case("text/calendar"));
@@ -456,11 +588,11 @@ impl Reader {
         match mailbox.run("invite.answer", &json!({ "id": id, "answer": answer.id() })) {
             Ok(_) => {
                 self.changing.remove(&id);
-                self.notice = Some(tr!("Your answer is on its way.").to_owned());
+                self.set_notice(tr!("Your answer is on its way.").to_owned());
                 mailbox.refresh();
-                self.refresh_invites(mailbox);
+                self.refresh_cards_and_why(mailbox);
             }
-            Err(error) => self.notice = Some(error.to_string()),
+            Err(error) => self.fail(error.to_string()),
         }
     }
 
@@ -481,16 +613,31 @@ impl Reader {
     /// and Undo, and reads the cards of the thread again.
     pub fn remove_invite(&mut self, mailbox: &mut Mailbox, id: u64) {
         match mailbox.event_act("invite.remove", &json!({ "id": id }), tr!("Removed from your calendar")) {
-            Ok(_) => self.refresh_invites(mailbox),
-            Err(error) => self.notice = Some(error.to_string()),
+            Ok(_) => self.refresh_cards_and_why(mailbox),
+            Err(error) => self.fail(error.to_string()),
         }
     }
 
-    /// Reads the cards of the thread's messages again: an answer, a new version or an undo changes them.
-    pub fn refresh_invites(&mut self, mailbox: &mut Mailbox) {
+    /// Reads the cards of the thread's messages again (an answer, a new version or an undo changes them) and asks again
+    /// why the open message is here when its place changed.
+    pub fn refresh_cards_and_why(&mut self, mailbox: &mut Mailbox) {
         for opened in self.thread.iter_mut().filter_map(|row| row.opened.as_mut()).filter(|opened| opened.invite.is_some()) {
-            opened.invite = invite(mailbox, opened.id);
+            opened.invite = invite(mailbox, opened.id, &opened.header.from);
         }
+
+        // Why the open message is here changes only with its place: moved, snoozed, its sender let in or blocked.
+        if let Some(id) = self.open.filter(|_| self.why_moved(mailbox)) {
+            self.ask_why(mailbox, id);
+        }
+    }
+
+    /// Whether open message `id`'s document asks for the picture `key`, as [`Reader::load_pictures`] asks for them: any
+    /// open message that shows a picture may ask for it again, not only the one that last loaded it.
+    fn names(&self, id: u64, key: &str) -> bool {
+        let Some(opened) = self.opened(id) else { return false };
+        let Content::Html(document) = &opened.content else { return false };
+        let (inline, remote) = asked_for(&opened.inline, document);
+        remote.iter().any(|url| url == key) || inline.iter().any(|content_id| inline_key(id, content_id) == key)
     }
 
     /// Lays out the HTML of message `id` with the consent that now holds, and asks for the pictures it names: the
@@ -501,17 +648,12 @@ impl Reader {
         let Some(html) = opened.html.as_deref() else { return };
         let remote_content = if allowed { RemoteContent::Allowed } else { RemoteContent::Blocked };
         let document = display(html, &Options { remote_content });
-        // Only the parts the message has, each once, up to the cap: a `cid:` naming nothing costs nothing.
-        let mut inline: Vec<String> = Vec::new();
-        for content_id in &document.inline_images {
-            if inline.len() < MAX_INLINE && opened.inline.contains(content_id) && !inline.contains(content_id) {
-                inline.push(content_id.clone());
-            }
+        let (inline, remote) = asked_for(&opened.inline, &document);
+        if opened.plain.is_empty() {
+            opened.plain = split(&crate::fitted_text::plain(&document));
         }
-        let mut remote = Vec::new();
-        remote_pictures(&document.blocks, &mut remote);
-        let remote: Vec<String> = remote.into_iter().take(MAX_REMOTE).map(str::to_owned).collect();
         opened.content = Content::Html(document);
+        opened.generation = next_generation();
         for content_id in inline {
             let key = inline_key(id, &content_id);
             if self.pictures.contains_key(&key) {
@@ -552,12 +694,21 @@ impl Reader {
         }
     }
 
+    /// Asks for picture `key` of message `id` once more, when it failed: the owner's `try again`. A picture that did
+    /// not fail, or one the message does not hold, is left as it is.
+    pub fn retry(&mut self, mailbox: &mut Mailbox, id: u64, key: &str) {
+        if matches!(self.pictures.get(key), Some(PictureState::Failed(_))) && self.names(id, key) {
+            self.pictures.remove(key);
+            self.load_pictures(mailbox, id);
+        }
+    }
+
     /// Lets the remote pictures of the sender of message `id` load always (`remote.allow`), and loads them in every
     /// message of the thread from that sender.
     pub fn allow_always(&mut self, mailbox: &mut Mailbox, id: u64) {
         let Some(address) = self.opened(id).and_then(|opened| opened.header.from.first()).map(|person| person.address.clone()) else { return };
         if let Err(error) = mailbox.run("remote.allow", &json!({ "address": address })) {
-            self.notice = Some(error.to_string());
+            self.fail(error.to_string());
             return;
         }
         let same: Vec<u64> = self
@@ -575,23 +726,87 @@ impl Reader {
         }
     }
 
-    /// Saves attachment `index` of message `id` through the save the app handed in; the result shows as a notice.
+    /// Saves attachment `index` of message `id` through the save the app handed in; the attachment's box says where it
+    /// went or why not.
     pub fn save(&mut self, mailbox: &mut Mailbox, id: u64, index: u64) {
         let saved = mailbox.run("mail.attachment", &json!({ "id": id, "index": index })).map_err(|error| error.to_string()).and_then(|answer| {
             let name = answer.get("name").and_then(Value::as_str).unwrap_or(tr!("attachment")).to_owned();
             let bytes =
                 answer.get("data").and_then(Value::as_str).and_then(unbase64).ok_or_else(|| tr!("The attachment could not be read.").to_owned())?;
-            self.save.save(&name, &bytes).map(|place| tr!("Saved {name} to {place}", name = shown(&name), place = shown(&place)))
+            self.save.save(&name, &bytes)
         });
-        self.notice = Some(match saved {
-            Ok(text) | Err(text) => text,
+        let said = match saved {
+            Ok(place) => Ok(tr!("saved to {place}", place = shown(&place))),
+            Err(why) => Err(tr!("not saved: {why}", why = shown(&why))),
+        };
+        self.saves.insert((id, index), said);
+    }
+
+    /// Opens the originals through `original` from now on.
+    pub(crate) fn set_original(&mut self, original: crate::original::Shared) {
+        self.original = Some(original);
+    }
+
+    /// Whether the original of message `id` can go to the browser: the window can open one, and the message is open
+    /// here as HTML.
+    #[must_use]
+    pub fn offers_original(&self, id: u64) -> bool {
+        self.original.is_some() && self.opened(id).is_some_and(|opened| matches!(opened.content, Content::Html(_)))
+    }
+
+    /// Opens a cleaned copy of message `id` in the browser: the document the reader shows, written out again with no
+    /// script and no address in it ([`inboxcraft_html::page`]). The page is made here; writing and handing it on run on
+    /// a thread of their own, which draws `ctx` again when it is done, and [`Reader::poll`] puts the answer in the
+    /// notice: that it went, or why not. A press while an open still runs is ignored, and the notice says so.
+    pub fn open_original(&mut self, id: u64, ctx: &egui::Context) {
+        let page = self.opened(id).and_then(|opened| match &opened.content {
+            Content::Html(document) => Some(inboxcraft_html::page(document, &opened.header.subject)),
+            _ => None,
         });
+        let started = match (&self.original, page) {
+            (Some(original), Some(page)) => {
+                let ctx = ctx.clone();
+                original.start(id, page, move || ctx.request_repaint_of(egui::ViewportId::ROOT))
+            }
+            (None, _) => crate::original::Started::Failed(tr!("This window cannot open the browser.").to_owned()),
+            (_, None) => crate::original::Started::Failed(tr!("Only an HTML message has an original to open.").to_owned()),
+        };
+        match started {
+            crate::original::Started::Running(opening) => {
+                self.opening = Some(opening);
+                self.set_notice(tr!("Opening a cleaned copy in the browser…").to_owned());
+            }
+            crate::original::Started::Busy => self.set_notice(tr!("An original is still being opened; wait for it.").to_owned()),
+            crate::original::Started::Failed(why) => self.opened_original(Err(why)),
+        }
+    }
+
+    /// Puts how opening an original went into the notice.
+    fn opened_original(&mut self, opened: Result<(), String>) {
+        match opened {
+            Ok(()) => self.set_notice(tr!("Opened a cleaned copy in the browser").to_owned()),
+            Err(why) => self.fail(tr!("The original could not be opened: {why}", why = shown(&why))),
+        }
+    }
+
+    /// Whether an open of an original this reader started still runs.
+    #[must_use]
+    pub fn opening_original(&self) -> bool {
+        self.opening.is_some()
+    }
+
+    /// How saving attachment `index` of message `id` went, as its box says it: where it went, or why not; `None`
+    /// before it was saved.
+    #[must_use]
+    pub fn saved(&self, id: u64, index: u64) -> Option<Result<&str, &str>> {
+        self.saves.get(&(id, index)).map(|said| said.as_ref().map(String::as_str).map_err(String::as_str))
     }
 
     /// Takes in the pictures the fetch brought since the last call; `true` when there were any.
     pub fn poll(&mut self) -> bool {
+        let opened = self.poll_original();
         let done = self.fetch.finished();
-        let any = !done.is_empty();
+        let any = opened | !done.is_empty();
         for (url, answer) in done {
             // An answer for a picture nobody asked for (any more) is dropped.
             let Some(owner) = self.owners.get(&url).copied().filter(|_| self.pictures.contains_key(&url)) else { continue };
@@ -605,6 +820,19 @@ impl Reader {
             }
         }
         any
+    }
+
+    /// Takes in the answer of the open of an original this reader started, when it came; `true` then.
+    fn poll_original(&mut self) -> bool {
+        let Some(opening) = &self.opening else { return false };
+        let answer = match opening.try_recv() {
+            Ok(answer) => answer,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(tr!("the hand-off to the desktop stopped").to_owned()),
+        };
+        self.opening = None;
+        self.opened_original(answer);
+        true
     }
 
     /// The bytes of the decoded pictures kept: those of message `owner`, or all of them.
@@ -643,6 +871,17 @@ impl Reader {
         self.open
     }
 
+    /// The open message's row kept for a window of its own ([`Reader::keep_row`]).
+    #[must_use]
+    pub(crate) fn kept_row(&self) -> Option<&MessageRow> {
+        self.kept_row.as_ref().filter(|row| Some(row.id) == self.open)
+    }
+
+    /// Keeps `row` as the open message's row, for a reader in a window of its own; a row of another message keeps none.
+    pub(crate) fn keep_row(&mut self, row: Option<MessageRow>) {
+        self.kept_row = row.filter(|row| Some(row.id) == self.open);
+    }
+
     /// The thread, oldest first.
     #[must_use]
     pub fn thread(&self) -> &[ThreadRow] {
@@ -666,6 +905,26 @@ impl Reader {
     #[must_use]
     pub fn opened(&self, id: u64) -> Option<&Opened> {
         self.thread.iter().find(|row| row.id == id).and_then(|row| row.opened.as_ref())
+    }
+
+    /// The picture `key` as it would stand in `state` (the tests' pictures that are here but cannot be drawn). The
+    /// open messages take a new generation, as a picture that comes does: what was laid out with the old one is not
+    /// drawn again.
+    #[cfg(test)]
+    pub(crate) fn put_picture(&mut self, key: &str, state: PictureState) {
+        self.pictures.insert(key.to_owned(), state);
+        for opened in self.thread.iter_mut().filter_map(|row| row.opened.as_mut()) {
+            opened.generation = next_generation();
+        }
+    }
+
+    /// Message `id` of the thread as it would stand with `content` and `cut` (the tests' states without text).
+    #[cfg(test)]
+    pub(crate) fn show_as(&mut self, id: u64, content: Content, cut: bool) {
+        if let Some(opened) = self.thread.iter_mut().find(|row| row.id == id).and_then(|row| row.opened.as_mut()) {
+            opened.content = content;
+            opened.cut = cut;
+        }
     }
 
     /// Whether message `id` is unfolded.
@@ -694,6 +953,30 @@ impl Reader {
         }
     }
 
+    /// Shows HTML message `id` as plain text, or fitted.
+    pub fn set_plain(&mut self, id: u64, plain: bool) {
+        if plain {
+            self.plain.insert(id);
+        } else {
+            self.plain.remove(&id);
+        }
+    }
+
+    /// Whether HTML message `id` shows as plain text.
+    #[must_use]
+    pub fn shows_plain(&self, id: u64) -> bool {
+        self.plain.contains(&id)
+    }
+
+    /// How many pictures are asked for, here and failed: it changes whenever one comes, fails or is forgotten, so a
+    /// message laid out with the pictures as they were is laid out again.
+    #[must_use]
+    pub fn pictures_state(&self) -> (usize, usize, usize) {
+        let ready = self.pictures.values().filter(|state| matches!(state, PictureState::Ready(_))).count();
+        let failed = self.pictures.values().filter(|state| matches!(state, PictureState::Failed(_))).count();
+        (self.pictures.len(), ready, failed)
+    }
+
     /// Whether the quotes of message `id` show.
     #[must_use]
     pub fn shows_quotes(&self, id: u64) -> bool {
@@ -717,9 +1000,22 @@ impl Reader {
         self.notice.as_deref()
     }
 
+    /// Whether the notice says something failed (an error), rather than what was done.
+    #[must_use]
+    pub fn notice_failed(&self) -> bool {
+        self.notice.is_some() && self.failed
+    }
+
     /// Shows `text` as the notice.
     pub fn set_notice(&mut self, text: String) {
         self.notice = Some(text);
+        self.failed = false;
+    }
+
+    /// Shows `text` as the notice of something that failed.
+    fn fail(&mut self, text: String) {
+        self.notice = Some(text);
+        self.failed = true;
     }
 
     /// Hides the notice.

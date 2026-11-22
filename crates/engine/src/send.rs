@@ -98,7 +98,7 @@ pub(crate) fn ready(context: &Context<'_>, draft: &Draft) -> Result<Result<Ready
     let Ok(raw) = draft::built(&account, draft, date, Some(&message_id), &attachments) else {
         return Ok(Err("the draft cannot be made into a message"));
     };
-    let outgoing = Outgoing { message: raw.clone(), ..Outgoing::new(draft.id, OutboxState::Sending) };
+    let outgoing = Outgoing { message: raw.clone(), ..Outgoing::of(draft, OutboxState::Sending) };
     let job = JobKind::Send { draft: draft.id, from: account.address().clone(), recipients: envelope(draft), raw };
     Ok(Ok(Ready { account: account.id(), outgoing, job }))
 }

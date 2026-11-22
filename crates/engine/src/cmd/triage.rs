@@ -31,7 +31,8 @@
 //! by UID EXPUNGE: on a server that has not said it can (`EventKind::Abilities`), and for a message whose body is not
 //! kept yet, the message is moved there without the field (`written` in the answer). At the time [`crate::Session::tick`]
 //! brings it back to the inbox unread, marked as returned and listed as if it arrived then; `mail.unsnooze` (`safe`)
-//! brings it back at once. A snoozed message the owner moves on from the snoozed folder stays where it was put.
+//! brings it back at once. A snoozed message the owner moves on from the snoozed folder stays where it was put, at
+//! its time and on `mail.unsnooze` alike: only its time and schedule entry go.
 //! `history.undo` takes a snooze back: the message where it was, its time as it was.
 //!
 //! `mail.follow_up` (`safe`) sets a follow-up reminder on a message the owner sent (in a Sent folder, or from one of
@@ -65,12 +66,12 @@ use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
 pub(crate) const COMMANDS: &[CommandSpec] =
-    &[ACCEPT, BLOCK, LIST, MODE, GROUP_SET, GROUP_ACCOUNT, GROUP_LIST, DONE, PARK, PIN, PARK_LIST, PIN_LIST, PIN_SET, SNOOZE, UNSNOOZE, FOLLOW_UP, CANCEL_FOLLOW_UP];
+    &[ACCEPT, BLOCK, LIST, MODE, GROUP_SET, GROUP_ACCOUNT, GROUP_LIST, DONE, PARK, PIN, PARK_LIST, PIN_LIST, PIN_SET, AFTER_SET, SNOOZE, UNSNOOZE, FOLLOW_UP, CANCEL_FOLLOW_UP];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
 pub(crate) const FIELDS: &[&str] =
-    &["address", "group", "then", "mode", "account", "grouped", "id", "done", "parked", "pinned", "limit", "offset", "keep_on_done", "until", "preset"];
+    &["address", "group", "then", "mode", "account", "grouped", "id", "done", "parked", "pinned", "limit", "offset", "keep_on_done", "until", "preset", "after"];
 
 /// `screener.mode`: what the screener does with the first mail of a sender the owner does not know.
 pub(crate) const MODE: CommandSpec = CommandSpec {
@@ -583,6 +584,28 @@ pub(crate) const PIN_LIST: CommandSpec =
 pub(crate) const PIN_SET: CommandSpec =
     CommandSpec { id: "pin.set", class: Some(AgentClass::Owner), summary: "Keep a pin when its message is done, or take it off", run: pin_set };
 
+/// `after.set`: what follows an act that takes the open message out of the list.
+pub(crate) const AFTER_SET: CommandSpec = CommandSpec {
+    id: "after.set",
+    class: Some(AgentClass::Owner),
+    summary: "Choose what follows an act on the open message: the next, the previous, the list, or stay",
+    run: after_set,
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AfterParams {
+    /// `next`, `previous`, `list` or `stay`.
+    after: String,
+}
+
+fn after_set(_: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: AfterParams = decode(AFTER_SET.id, params)?;
+    let after =
+        crate::after::After::named(&params.after).ok_or_else(|| EngineError::bad_params(AFTER_SET.id, "after is next, previous, list or stay"))?;
+    Ok(Outcome::new(json!({ "after": after.name() })).with_after(after))
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DoneParams {
@@ -796,7 +819,7 @@ struct SnoozeParams {
     id: u64,
     /// The time it comes back: `2026-11-05T18:00:00Z`, with an offset, or a date (midnight UTC).
     until: Option<String>,
-    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`.
+    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`, `this_weekend`, `next_week`.
     preset: Option<String>,
 }
 
@@ -814,7 +837,7 @@ fn until(context: &Context<'_>, command: &'static str, until: Option<&str>, pres
         (Some(text), None) => {
             parse_date(text.trim()).ok_or_else(|| EngineError::bad_params(command, "until is a time such as 2026-11-05T18:00:00Z"))?
         }
-        (None, Some(name)) => presets(now, context.offsets())
+        (None, Some(name)) => presets(now, context.offsets(), context.state().week)
             .into_iter()
             .find(|(preset, _)| preset.name() == name)
             .map(|(_, at)| at)
@@ -877,14 +900,22 @@ fn unsnooze(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineErro
     let (store, state) = (context.store(), context.state());
     let was = store.message_state(message.id())?;
     if was.snoozed_until.is_none() && !snoozing::is_snoozed(state, &message) {
-        return Ok(Outcome::new(json!({ "id": params.id, "folder": message.folder().get(), "changed": false })));
+        return Ok(Outcome::new(json!({ "id": params.id, "folder": message.folder().get(), "changed": false, "back": false })));
     }
     let mut effects = Effects::default();
-    let inbox = snoozing::back(store, state, &message, &mut Mover::default(), &mut effects)?;
-    let folder = inbox.map_or(message.folder(), |inbox| inbox.id());
-    effects.change(Change::SetMessageState(message.id(), MessageState { snoozed_until: None, returned: Some(context.now()), ..was }));
+    // Only a message still in Snoozed comes back; one the owner moved, archived or deleted meanwhile stays where it
+    // is, read as it is, and loses only its snooze time and entry, as when its time comes.
+    let (folder, returned) = if snoozing::is_snoozed(state, &message) {
+        let inbox = snoozing::back(store, state, &message, &mut Mover::default(), &mut effects)?;
+        (inbox.map_or(message.folder(), |inbox| inbox.id()), Some(context.now()))
+    } else {
+        (message.folder(), was.returned)
+    };
+    effects.change(Change::SetMessageState(message.id(), MessageState { snoozed_until: None, returned, ..was }));
     effects.changes.extend(schedule::reschedule(store, Due::Unsnooze(message.id()), None, context.next_schedule_id())?);
-    Ok(Outcome::new(json!({ "id": params.id, "folder": folder.get(), "changed": true })).with_effects(effects))
+    // `back`: the message is in the inbox again, not left where it was.
+    let back = folder != message.folder();
+    Ok(Outcome::new(json!({ "id": params.id, "folder": folder.get(), "changed": true, "back": back })).with_effects(effects))
 }
 
 /// `mail.follow_up`: remind the owner if a sent message gets no reply by a time.
@@ -910,7 +941,7 @@ struct FollowUpParams {
     id: u64,
     /// The time to remind at: `2026-11-05T18:00:00Z`, with an offset, or a date (midnight UTC).
     until: Option<String>,
-    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`.
+    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`, `this_weekend`, `next_week`.
     preset: Option<String>,
 }
 

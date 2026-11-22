@@ -46,16 +46,23 @@ pub use body::{Body, MAX_SOURCE_BYTES, MAX_TEXT_BYTES};
 pub use change::{Batch, Change};
 pub use config::StoreConfig;
 pub use entry::Entry;
-pub use error::StoreError;
+pub use error::{MAX_ERROR_DETAIL, StoreError};
 use inboxcraft_model::{
     Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId,
-    FolderState, Job, MessageId, MessageState, Outgoing, Scheduled, Sender,
+    FolderState, Job, MessageId, MessageRef, MessageState, Outgoing, Scheduled, Sender,
 };
 use inboxcraft_time::Timestamp;
 pub use memory::Memory;
 pub use search::{MAX_QUERY_CHARS, MAX_QUERY_WORDS, MAX_RESULTS, Search};
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
 pub use sqlite::{DATABASE_FILE, SCHEMA_VERSION, SOURCES_DIR, Sqlite};
+#[cfg(all(feature = "sqlite", feature = "test-hooks", not(target_arch = "wasm32")))]
+pub use sqlite::{KeepHold, KeeperHooks};
+use std::collections::BTreeSet;
+
+/// What a store that writes drafts behind calls after each such write, landed or failed: a window's redraw, so that a
+/// failure is said without waiting for the person to touch the window.
+pub type KeepWake = std::sync::Arc<dyn Fn() + Send + Sync>;
 
 /// The local-first store. Reads give accounts, folders and messages in id order, messages of a folder in UID order.
 pub trait Storage {
@@ -105,6 +112,17 @@ pub trait Storage {
     /// As [`Storage::accounts`].
     fn message(&self, id: MessageId) -> Result<Option<Entry>, StoreError>;
 
+    /// The messages that name `link` as their `Message-ID`, in `In-Reply-To` or in `References`, by our id, leaving
+    /// out those in `known`: what links one message of a thread to the next. The backends find them by an index of
+    /// the links and read the record of a message only when it is not in `known`, so a walk that puts every message
+    /// it finds into `known` reads each record once, however many links name it. There is no default: a backend
+    /// that read every message here would make one thread cost the whole store once per link.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn linked(&self, link: &MessageRef, known: &BTreeSet<MessageId>) -> Result<Vec<Entry>, StoreError>;
+
     /// The kept body of a message.
     ///
     /// # Errors
@@ -147,12 +165,56 @@ pub trait Storage {
     /// As [`Storage::accounts`].
     fn drafts(&self, account: AccountId) -> Result<Vec<Draft>, StoreError>;
 
+    /// How many drafts `account` has, and the newest `limit` of them: by `saved`, latest first, then by id, highest
+    /// first. Reads only what it answers, not every draft of the account.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn newest_drafts(&self, account: AccountId, limit: usize) -> Result<(u64, Vec<Draft>), StoreError>;
+
     /// One draft.
     ///
     /// # Errors
     ///
     /// As [`Storage::accounts`].
     fn draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError>;
+
+    /// Gives every draft written behind (a native store's draft keeper) whose write failed one more try now, and waits
+    /// at most `within` until every draft written behind is written, landed or failed: the end of a window. A store
+    /// that writes everything at once has nothing to wait for. What failed is in [`Storage::unkept`].
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::DatabaseBusy`] when it is not written in that time.
+    fn settle(&self, within: core::time::Duration) -> Result<(), StoreError> {
+        let _ = within;
+        Ok(())
+    }
+
+    /// A draft written behind whose write started failing, with why, each once until a write of it lands: the store
+    /// keeps its newest text and tries again, 1 s, 2 s, 4 s … at most 30 s apart.
+    fn failed_keep(&self) -> Option<(DraftId, StoreError)> {
+        None
+    }
+
+    /// Every draft written behind whose last write failed and none landed since, with why: the disk holds such a
+    /// draft as it was before, the store's reads its newest text.
+    fn unkept(&self) -> Vec<(DraftId, StoreError)> {
+        Vec::new()
+    }
+
+    /// A count of the drafts handed to be written behind so far: a newer keep since a moment shows as another
+    /// number. A store that writes everything at once has none.
+    fn keeps(&self) -> u64 {
+        0
+    }
+
+    /// Calls `wake` after each draft written behind, landed or failed, from now on. A store that writes everything at
+    /// once never calls it.
+    fn wake_on_keep(&self, wake: KeepWake) {
+        let _ = wake;
+    }
 
     /// The outbox, in draft id order.
     ///

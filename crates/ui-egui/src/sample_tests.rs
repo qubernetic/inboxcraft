@@ -5,9 +5,8 @@ use inboxcraft_store::Storage;
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
-use super::{FOLDERS, INVITATIONS, MESSAGES, invitations, mailbox, people, session, session_over};
+use super::{FOLDERS, INVITATIONS, MESSAGES, grown, invitations, mailbox, people, right_to_left, session, session_over};
 use crate::component::avatar;
-use crate::theme::{AVATARS, Mode, PRESETS, Theme};
 
 /// 2026-11-05T09:00:00Z.
 fn now() -> Timestamp {
@@ -174,20 +173,15 @@ fn the_sample_draws_its_remote_pictures_and_asks_nobody() {
 }
 
 #[test]
-fn everyone_who_writes_or_is_written_to_has_an_avatar_from_the_avatar_palette() {
+fn everyone_who_writes_or_is_written_to_has_initials_for_an_avatar() {
     let people = people();
     for sample in MESSAGES {
         for person in [sample.from, sample.to] {
             assert!(people.contains(&(person.name, person.address)), "{} is in people()", person.address);
         }
     }
-    for preset in &PRESETS {
-        for mode in [Mode::Light, Mode::Dark] {
-            let theme = Theme::new(mode, preset);
-            for (name, address) in &people {
-                assert!(AVATARS.contains(&avatar::colour(&theme, address)), "{name}");
-            }
-        }
+    for (name, address) in &people {
+        assert_ne!(avatar::initials(name, address), "?", "{name}: initials for the avatar");
     }
 }
 
@@ -266,4 +260,69 @@ fn the_sample_invitations_are_two_versions_of_one_lunch() {
     let listed = session.run("mail.list", &json!({ "account": 1, "group": "invitations" })).unwrap();
     assert_eq!(listed["messages"].as_array().unwrap().len(), 2);
     assert!(session.take_jobs().is_empty(), "the sample fetches nothing");
+}
+
+#[test]
+fn the_grown_mailbox_holds_as_many_messages_as_asked_all_invented_and_readable() {
+    let store = grown(now(), 400).unwrap();
+    let mut count = 0;
+    for account in store.accounts().unwrap() {
+        for folder in store.folders(account.id()).unwrap() {
+            for entry in store.messages(folder.id()).unwrap() {
+                count += 1;
+                let envelope = entry.message().summary().envelope();
+                for address in envelope.from().iter().chain(envelope.to()) {
+                    assert!(address.email().as_str().ends_with("@example.org"), "{}", address.email());
+                }
+            }
+        }
+    }
+    assert_eq!(count, 400);
+    let mut session = session_over(store, Box::new(FakeClock::new(now()))).unwrap();
+    for id in [MESSAGES.len() + 1, 400] {
+        let answer = session.run("mail.read", &json!({ "id": id })).unwrap();
+        assert_eq!(answer["message"]["body"]["readable"], json!(true), "message {id}");
+    }
+    assert_eq!(grown(now(), 3).unwrap().accounts().unwrap().len(), 2, "never fewer than the sample's own");
+}
+
+/// The right-to-left pictures' mail: a Hebrew and an Arabic message, the newest two in Mira's inbox, from invented
+/// people on `example.org`, their subjects as written.
+#[test]
+fn the_right_to_left_mail_is_the_inbox_s_newest_two() {
+    let mut store = mailbox(now()).unwrap();
+    let mut batch = inboxcraft_store::Batch::new();
+    for change in right_to_left(now()).unwrap() {
+        batch.push(change);
+    }
+    store.apply(&batch).unwrap();
+    let mut session = session_over(store, Box::new(FakeClock::new(now()))).unwrap();
+    let listed = session.run("mail.list", &json!({ "role": "inbox" })).unwrap();
+    let messages = listed["messages"].as_array().unwrap();
+    let subjects: Vec<&str> = messages.iter().take(2).map(|message| message["subject"].as_str().unwrap()).collect();
+    assert_eq!(subjects, ["סיור בגינה ביום שלישי", "موعد ورشة الفخار يوم السبت"]);
+    for message in messages.iter().take(2) {
+        assert!(message["from"].to_string().contains("@example.org"), "{message}");
+    }
+}
+
+/// FNV-1a over `bytes`, on from `hash`.
+fn fnv(hash: u64, bytes: &[u8]) -> u64 {
+    bytes.iter().fold(hash, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3))
+}
+
+#[test]
+fn the_why_and_the_thread_of_every_sample_message_are_as_before() {
+    // Pinned as they stood before #406 found one thread without grouping the store: the answers hash to this.
+    let mut session = session(Box::new(FakeClock::new(now()))).unwrap();
+    let mut hash = 0xcbf2_9ce4_8422_2325;
+    for id in 1..=u64::try_from(MESSAGES.len()).unwrap() {
+        for command in ["mail.why", "mail.thread", "mail.open"] {
+            let answer = session.run(command, &json!({ "id": id })).unwrap();
+            hash = fnv(hash, format!("{command} {id} {answer}\n").as_bytes());
+        }
+    }
+    let answer = session.run("mail.list", &json!({ "limit": 1000 })).unwrap();
+    hash = fnv(hash, answer.to_string().as_bytes());
+    assert_eq!(hash, 17_009_599_241_181_191_699);
 }

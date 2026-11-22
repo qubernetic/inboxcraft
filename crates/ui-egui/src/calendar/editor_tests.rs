@@ -170,20 +170,20 @@ fn editing_an_event_without_guests_never_asks_to_tell_anyone() {
 #[test]
 fn editing_an_event_with_guests_asks_to_tell_them_and_the_default_is_not_to() {
     let (_, mut calendar) = loaded();
-    editing(&mut calendar, "Allotment work party");
+    editing(&mut calendar, "Call with Petra about the logo");
     let editor = calendar.editor_mut().unwrap();
-    assert_eq!(editor.form().guests, "mira@example.org");
+    assert_eq!(editor.form().guests, "petra@example.org");
     assert!(editor.asks_notify());
     assert_eq!(editor.notify_question(), "Tell the 1 guest about this change?");
     assert!(!editor.notify(), "the default is not to tell them");
-    editor.form_mut().summary = "Allotment party".to_owned();
+    editor.form_mut().summary = "Logo call".to_owned();
     let (command, params) = editor.changes(Offset::UTC).unwrap().unwrap();
     assert_eq!(command, "event.update");
-    assert_eq!(params, json!({ "id": editor.id().unwrap(), "summary": "Allotment party" }));
+    assert_eq!(params, json!({ "id": editor.id().unwrap(), "summary": "Logo call" }));
     editor.set_notify(true);
     let (_, params) = editor.changes(Offset::UTC).unwrap().unwrap();
     assert_eq!(params.get("notify"), Some(&json!(true)));
-    editor.form_mut().guests = "mira@example.org, kai@example.org".to_owned();
+    editor.form_mut().guests = "petra@example.org, kai@example.org".to_owned();
     assert_eq!(editor.notify_question(), "Tell the 2 guests about this change?");
     editor.form_mut().guests = " ".to_owned();
     assert!(!editor.asks_notify(), "without guests left there is nobody to tell");
@@ -195,7 +195,7 @@ fn editing_an_event_with_guests_asks_to_tell_them_and_the_default_is_not_to() {
 #[test]
 fn telling_the_guests_is_said_in_the_toast() {
     let (mut mailbox, mut calendar) = loaded();
-    editing(&mut calendar, "Allotment work party");
+    editing(&mut calendar, "Call with Petra about the logo");
     let editor = calendar.editor_mut().unwrap();
     editor.form_mut().start = "2026-11-06 14:00".to_owned();
     editor.form_mut().end = "2026-11-06 16:00".to_owned();
@@ -203,14 +203,14 @@ fn telling_the_guests_is_said_in_the_toast() {
     calendar.save(&mut mailbox);
     assert!(mailbox.error().is_none(), "{:?}", mailbox.error());
     assert_eq!(toast(&mailbox), Some((Act::Event, "Event saved; the guests are told", true)));
-    let event = named(&calendar, "Allotment work party").unwrap();
+    let event = named(&calendar, "Call with Petra about the logo").unwrap();
     assert_eq!((event.start.minute, event.end.minute), (14 * 60, 16 * 60));
 }
 
 #[test]
 fn an_edit_sends_only_what_changed_and_nothing_changed_runs_nothing() {
     let (mut mailbox, mut calendar) = loaded();
-    editing(&mut calendar, "Allotment work party");
+    editing(&mut calendar, "Call with Petra about the logo");
     let editor = calendar.editor_mut().unwrap();
     assert_eq!(editor.changes(Offset::UTC), Ok(None));
     let before = mailbox.last_run();
@@ -218,7 +218,7 @@ fn an_edit_sends_only_what_changed_and_nothing_changed_runs_nothing() {
     assert!(calendar.editor().is_none(), "nothing to save closes the editor");
     assert_eq!(mailbox.last_run(), before, "and runs nothing");
     assert!(mailbox.undoable().is_none());
-    editing(&mut calendar, "Allotment work party");
+    editing(&mut calendar, "Call with Petra about the logo");
     let editor = calendar.editor_mut().unwrap();
     let id = editor.id().unwrap();
     editor.form_mut().all_day = true;

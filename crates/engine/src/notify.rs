@@ -31,6 +31,7 @@ use inboxcraft_time::{Offsets, Timestamp};
 use serde_json::{Value, json};
 
 use crate::EngineError;
+use crate::all_day_alert::AllDayAlert;
 use crate::arrive::screener::sender_of;
 use crate::arrive::{Arrival, group};
 use crate::calendar::{alert, calendar_by_id, read};
@@ -378,13 +379,14 @@ fn mark(message: &Message) -> String {
 }
 
 /// The notices for the schedule entries that fired at `now`, as the owner's [`Settings`] want them; a send that went
-/// late, one of `sent`, is told whatever they are. `local` is the computer's clock.
+/// late, one of `sent`, is told whatever they are. `local` is the computer's clock, with when an all-day event without
+/// alarms rings.
 pub(crate) fn fired(
     store: &dyn Storage,
     settings: &Settings,
     fired: &[Fired],
     sent: &[DraftId],
-    local: &dyn Offsets,
+    local: (&dyn Offsets, AllDayAlert),
     now: Timestamp,
 ) -> Result<Vec<Notice>, EngineError> {
     let mut notices = Vec::new();
@@ -410,14 +412,20 @@ pub(crate) fn fired(
 
 /// The notice of alert `id`, which went off at `now` (late when `missed`): about the occurrence it is for, if the store
 /// still holds the alert and its event; nothing for a late alert of an event that is over.
-fn alerted(store: &dyn Storage, id: AlertId, local: &dyn Offsets, now: Timestamp, missed: bool) -> Result<Option<Notice>, EngineError> {
+fn alerted(
+    store: &dyn Storage,
+    id: AlertId,
+    (local, all_day): (&dyn Offsets, AllDayAlert),
+    now: Timestamp,
+    missed: bool,
+) -> Result<Option<Notice>, EngineError> {
     let Some(held) = store.alert(id)? else { return Ok(None) };
     let Some(event) = store.calendar_event(held.event)? else { return Ok(None) };
     let Some(calendar) = calendar_by_id(store, event.calendar)? else { return Ok(None) };
     let Some(object) = read(&event) else { return Ok(None) };
     let owner = store.accounts()?.into_iter().find(|account| account.id() == calendar.account).map(|account| account.address().as_str().to_owned());
     let before = held.at.checked_sub(std::time::Duration::from_secs(1)).unwrap_or(held.at);
-    let ring = alert::rings(&object, before, held.at, local, owner.as_deref()).into_iter().find(|ring| ring.at == held.at);
+    let ring = alert::rings(&object, before, held.at, local, owner.as_deref(), all_day).into_iter().find(|ring| ring.at == held.at);
     let Some(ring) = ring.filter(|ring| !(missed && ring.end < now)) else { return Ok(None) };
     let Some(source) = object.events.get(ring.event) else { return Ok(None) };
     let about = EventAbout {
@@ -431,6 +439,26 @@ fn alerted(store: &dyn Storage, id: AlertId, local: &dyn Offsets, now: Timestamp
         all_day: source.all_day(),
     };
     Ok(Some(Notice::Alert { about, missed }))
+}
+
+/// The occurrence alert `id` is for, as `schedule.list` names it: nothing when the store no longer holds the alert,
+/// its event or its calendar.
+pub(crate) fn alert_about(
+    store: &dyn Storage,
+    id: AlertId,
+    local: (&dyn Offsets, AllDayAlert),
+    now: Timestamp,
+) -> Result<Option<EventAbout>, EngineError> {
+    Ok(match alerted(store, id, local, now, false)? {
+        Some(Notice::Alert { about, .. }) => Some(about),
+        _ => None,
+    })
+}
+
+/// Who a schedule entry about `message` names: for a snooze who it is from, for a follow-up whom it went to; one short
+/// clean line.
+pub(crate) fn whom(message: &Message, from: bool) -> String {
+    about(message, if from { from_whom(message) } else { to_whom(message) }).who
 }
 
 /// The message `id`, if the store still holds it.

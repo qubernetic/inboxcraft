@@ -1,6 +1,6 @@
 # The control channel
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** major
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 The running app takes commands from the CLI and the MCP server through a local socket: `inboxcraft-cli mail.list`
 without `--store` runs in the app ([cli.md](cli.md)), and so do the tools of `inboxcraft-cli mcp` ([mcp.md](mcp.md)).
@@ -92,12 +92,58 @@ act back in place of the owner's.
 Every `safe` command runs over the channel; `inboxcraft-cli commands` lists them with their class. Besides reading,
 that is:
 
-- the reader's own changes: read and unread (`mail.open`, `mail.seen`), flags, and `history.undo`;
+- the reader's own changes: read and unread (`mail.open`, `mail.seen`), flags, and `history.undo`, which takes back
+  only an act an agent may make (`not_allowed` otherwise) and, while the owner has an event open in the window's
+  editor, nothing: it is refused with `editing`, "an event is being edited", until the editor is saved, cancelled or
+  left, or the window closes. The owner's own Undo is not held back;
 - drafts: `compose.new`, `compose.update`, `compose.reply`, `compose.reply_all`, `compose.forward`,
   `compose.template` and `compose.discard`, which deletes a draft here and on the server;
 - `account.check`, which connects to the account's servers and signs in to them;
-- the appearance (`ui.*.set`) and, in the sample mailbox, `sample.mail.set`;
-- snooze, park and pin, as they land.
+- the appearance (`ui.*.set`, but not `ui.layout.set`, which is the owner's and refused with `not_allowed`) and, in
+  the sample mailbox, `sample.mail.set`; `ui.motion.set` takes `level` (`full`, `reduced` or `off`), and for one
+  release still the older `reduce` (`on`, `off` or `system`, which hands the choice back to the computer); its answer
+  has `motion_level` and `motion_chosen` beside the older `motion`. Every answer's appearance has `layout`, where the
+  reader (`docked` or `window`) and the composer (`docked`, `floating` or `window`) show, and where the event editor
+  opens (`event_editor`: `small`, `full`, the default, or `window`);
+- `ui.settings.open`, which shows the settings in the window: on the page its optional `page` names (`appearance`,
+  `accounts`, `notifications`, `triage`, `sending`, `calendar`, `shortcuts`, `privacy` or `about`), also while they
+  show; without `page`, or with one that names none (another case, a planned page, junk), on the page last shown.
+  An agent's call opens the settings and never takes the owner off them, and it is passed over while the owner holds
+  the keys: the command line's results, a dialog or a key being given on the Shortcuts page stand in front, a menu or
+  a list is open, the composer has the keyboard (docked or floating), the event editor is open (also under the
+  settings), or the owner has typed into the account form; at most its newest call acts in a frame,
+  and the owner's own key or press in that frame wins. The answer is the page asked for (or `null`) and `window`,
+  `true` in the app; it is the same whether the window acted or passed over the call;
+- `ui.home.open`, which shows Home in the window; it takes no parameters. An agent's call is passed over as an agent's
+  `ui.settings.open` is, while the owner holds the keys; the owner's own
+  key or press in that frame wins, and of an agent's calls of the two only the newest acts in a frame. The answer is
+  `window`, `true` in the app, the same whether the window acted or passed over the call;
+- `ui.list.unread`, which lists the unread messages of the place the window shows alone (`on: true`), every message
+  again (`on: false`), or the other of the two (no `on`); it changes nothing in the store. An agent's call is passed
+  over as an agent's `ui.home.open` is, and the owner's own turn of the filter in that frame wins. It changes nothing
+  where the list does not show a place that has the filter: while a search shows, on the settings, Home or the
+  calendar, with the list hidden, and in New senders, Later, Drafts and the outbox. The answer is `on` as given
+  (`null` for the other of the two) and `window`; it is the same whether the window turned the filter or not, so it
+  does not say the state: an agent that needs one names it with `on`. The same list is `mail.list` with `unread` (and
+  `keep`, one message kept in its place read or not);
+- putting mail aside: `mail.snooze`, `mail.unsnooze`, `mail.park`, `mail.pin`, `mail.follow_up` and
+  `mail.cancel_follow_up`. `mail.done`, the screener's and the groups' choices (`screener.accept`, `screener.block`,
+  `screener.mode`, `group.set`, `group.account`), `pin.set` and `after.set` are the owner's and refused with
+  `not_allowed`; `screener.list` reads the queue and runs as `safe`.
+
+`sync.status` reads how syncing stands in the app, from what its workers told: the state, the folder syncs done of
+all in the rounds under way, the last sync and the number of failing accounts. The state is the first that holds:
+
+- `failing` when an account is stopped until the owner acts: a refused or unanswered sign-in, no password, no login
+  method, a certificate or encryption refused, whether or not any account is connected;
+- `offline` when no account is signed in (connecting counts as not yet), and the failures are of the network or
+  the server: no route, a timeout, a refused or dropped connection;
+- `failing` when a signed-in account's connection or a job (not a body fetch) failed, until the account signs in
+  again after being offline or its worker tells that it is current: a round that ended with nothing failed in it,
+  or a resync of the watched folder with nothing failed since the resync before it;
+- `syncing` while a round has folders left, or a signed-in account has not ended a round yet; a round's folders
+  stop counting when its connection goes offline, and count again at the next sign-in;
+- `synced` otherwise, and always with no account.
 
 Everything a client sends is hostile. `cargo +nightly fuzz run control_lines` runs the fuzz target on both lines.
 
@@ -117,3 +163,11 @@ Everything a client sends is hostile. `cargo +nightly fuzz run control_lines` ru
 | 2026-11-08 | patch | `account.check` signs in to the servers (#119) |
 | 2026-11-08 | patch | The reply, forward and template commands over the channel (#120) |
 | 2026-11-08 | major | First version: the socket, the token and its revocation, the lines and their codes (#142) |
+| 2026-11-21 | minor | `sync.status` over the channel and what its states mean (#255) |
+| 2026-11-21 | minor | `ui.motion.set` takes a level (#258) |
+| 2026-11-21 | minor | `ui.settings.open` and its `page` over the channel; what an agent's call does not do (#284) |
+| 2026-11-21 | minor | `history.undo` is refused with `editing` while the owner edits an event (#367) |
+| 2026-11-21 | minor | `ui.layout.set` names where the event editor opens (#370) |
+| 2026-11-21 | minor | `ui.layout.set` is the owner's; the appearance answers have `layout` (#374) |
+| 2026-11-21 | minor | `ui.home.open` over the control channel; an agent's call waits while the owner holds the keys (#399) |
+| 2026-11-21 | minor | Putting mail aside over the channel: the snooze, park, pin and follow-up commands that run and the triage choices that are the owner's (#425) |

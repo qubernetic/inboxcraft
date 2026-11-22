@@ -323,3 +323,52 @@ fn an_alert_says_when_its_occurrence_is() {
     assert_eq!(super::alert_when(true, at(-9 * 3600), at(2 * 86_400 - 9 * 3600), utc), "Thursday 5 November – Friday 6 November");
     assert_eq!(super::alert_when(false, at(3600), at(0), utc), "Thursday 5 November, 10:00 – 10:00", "an end before the start");
 }
+
+#[test]
+fn a_description_keeps_its_lines_and_its_length_up_to_its_cap() {
+    let long = "Agenda point. ".repeat(100);
+    let read = super::paragraphs(&format!("Dial in\r\n{long}\u{202E}evil\u{0007}\n end"));
+    assert!(read.starts_with("Dial in\n"), "a line break stays one");
+    assert!(read.contains(&long), "far past a line's 300 characters");
+    assert!(read.ends_with("evil \n end"), "bidi controls go, other controls are spaces: {:?}", &read[read.len() - 12..]);
+    assert_eq!(super::paragraphs(&"x".repeat(super::MAX_DESCRIPTION + 50)).chars().count(), super::MAX_DESCRIPTION);
+}
+
+#[test]
+fn an_edit_of_a_long_title_never_shortens_what_it_did_not_change() {
+    let (mut mailbox, mut calendar) = loaded();
+    let long: String = (0..400).map(|i| char::from(b'a' + u8::try_from(i % 26).unwrap())).collect();
+    let place = "r".repeat(400);
+    let first = calendar.calendars().first().unwrap().id;
+    let made = mailbox.run(
+        "event.create",
+        &json!({ "calendar": first, "summary": long, "location": place, "start": "2026-11-05T14:00:00Z", "end": "2026-11-05T15:00:00Z" }),
+    );
+    assert!(made.is_ok(), "{made:?}");
+    calendar.refresh(&mut mailbox);
+    let event = calendar.events().find(|event| event.summary.starts_with("abcdefgh")).unwrap();
+    assert_eq!(event.summary, long, "the title is read whole, past 300");
+    assert_eq!(event.location, place, "and the place");
+    let key = event.key();
+    // An Edit that changes nothing sends nothing.
+    calendar.pick(Some(key));
+    calendar.edit_picked();
+    let editor = calendar.editor().unwrap();
+    assert_eq!(editor.form().summary, long, "the editor opens on the whole title");
+    assert_eq!(editor.changes(mailbox.offset()), Ok(None), "an edit that changed nothing sends no summary");
+    // One that adds to it sends all of it.
+    calendar.editor_mut().unwrap().form_mut().summary.push_str(" (moved)");
+    let (_, params) = calendar.editor().unwrap().changes(mailbox.offset()).unwrap().unwrap();
+    assert_eq!(params.get("summary").and_then(Value::as_str), Some(format!("{long} (moved)").as_str()));
+    calendar.save(&mut mailbox);
+    assert!(calendar.editor().is_none(), "saved");
+    let saved = calendar.events().find(|event| event.summary.starts_with("abcdefgh")).unwrap();
+    assert_eq!(saved.summary.chars().count(), 408, "the store holds the whole title and the typing");
+}
+
+#[test]
+fn a_title_or_place_is_one_line_up_to_the_engine_s_cap() {
+    let read = super::line(&format!("Kiln\tand\nglaze\u{202E}evil\u{0000}{}", "x".repeat(2000)));
+    assert!(read.starts_with("Kiln and glazeevil x"), "controls are spaces, bidi controls go: {:?}", read.get(..24));
+    assert_eq!(read.chars().count(), crate::calendar::editor::MAX_FIELD, "cut at the engine's own 1 000");
+}

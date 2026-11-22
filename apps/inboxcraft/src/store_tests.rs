@@ -65,6 +65,7 @@ fn a_store_that_does_not_open_is_reported() {
     std::fs::write(dir.path().join(inboxcraft_store::DATABASE_FILE), b"not a database, written by something else").unwrap();
     let error = open_store(dir.path()).err().unwrap();
     assert!(error.contains("could not be opened") && error.contains(&dir.path().display().to_string()), "{error}");
+    assert!(error.ends_with(": the store is damaged (the database said: file is not a database)"), "the owner's log keeps the words: {error}");
 }
 
 /// Set in the child run of [`child_opens_the_owner_s_mail`]; without it that test does nothing.

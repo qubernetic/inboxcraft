@@ -2,7 +2,7 @@
 
 # InboxCraft
 
-<img src="assets/app-icon/inboxcraft.svg" width="96" alt="The InboxCraft mark: two cards entering a notched tray, in the Electric gradient from blue through violet to pink, on a white rounded tile">
+<img src="assets/brand/inboxcraft/linux/hicolor/scalable/apps/io.github.qubernetic.inboxcraft.svg" width="96" alt="The InboxCraft mark, a trademark of Qubernetic">
 
 **A local-first mail and calendar program for IMAP, SMTP and CalDAV, written from scratch in Rust.**
 
@@ -37,7 +37,7 @@ of other open-source Rust mail clients; see [NOTICE](NOTICE).
   system's credential store; folders with their roles, a unified inbox, threads, attachments. Read and unread, flag,
   done, archive, move and delete from the hover actions, the toolbar or the keys, each undoable, also offline (the
   server catches up after the reconnect).
-- **Writing:** a composer with recipient suggestions, a signature per account and drafts kept at every change and
+- **Writing:** a composer with recipient suggestions, a signature per account and drafts kept as they are typed and
   copied to the Drafts folder; reply, reply all, forward and templates; sending over SMTP with implicit TLS or
   STARTTLS, a Sent copy, an outbox with retry, and bounces marked on the sent message.
 - **Triage:** the screener for new senders (accept into a group, or block), the grouped inbox (People, Updates,
@@ -49,7 +49,8 @@ of other open-source Rust mail clients; see [NOTICE](NOTICE).
 - **Reading mail safely:** nothing in a message runs; pictures from the web load only when you ask.
 - **Background (Linux):** keeps running with the window closed, a tray icon with the unread count, start at login,
   new mail through IMAP IDLE on the inbox, desktop notifications with Done and Mark read buttons.
-- **Keys:** a command palette (Ctrl+K) and a key for every action, changed on the Shortcuts page.
+- **Keys:** a command line (Ctrl+K or /) for search, commands, people and mailboxes, and a key for every action,
+  changed on the Shortcuts page.
 - **Agents:** `inboxcraft-cli` runs any `safe` command by id, in the running app over a local control channel or
   on a store; `inboxcraft-cli mcp` is a read-only MCP server.
 
@@ -57,16 +58,12 @@ What is missing or rough is listed, ranked, in [docs/gaps.md](docs/gaps.md).
 
 ## What it looks like
 
-The message list with the reader and a thread in the full-width reader, in the three accent presets, light and dark.
+The message list with the reader and a thread in the full-width reader, light and dark.
 
-| Preset | Light | Dark |
-|---|---|---|
-| Electric | ![The message list of the sample mailbox with a message open in the reader, Electric accent, light](docs/images/list-light.png) | ![The message list of the sample mailbox with a message open in the reader, Electric accent, dark](docs/images/list-dark.png) |
-| | ![A thread with three attachments in the full-width reader, Electric accent, light](docs/images/reader-full-light.png) | ![A thread with three attachments in the full-width reader, Electric accent, dark](docs/images/reader-full-dark.png) |
-| Aurora | ![The message list of the sample mailbox with a message open in the reader, Aurora accent, light](docs/images/list-aurora-light.png) | ![The message list of the sample mailbox with a message open in the reader, Aurora accent, dark](docs/images/list-aurora-dark.png) |
-| | ![A thread with three attachments in the full-width reader, Aurora accent, light](docs/images/reader-full-aurora-light.png) | ![A thread with three attachments in the full-width reader, Aurora accent, dark](docs/images/reader-full-aurora-dark.png) |
-| Citrus | ![The message list of the sample mailbox with a message open in the reader, Citrus accent, light](docs/images/list-citrus-light.png) | ![The message list of the sample mailbox with a message open in the reader, Citrus accent, dark](docs/images/list-citrus-dark.png) |
-| | ![A thread with three attachments in the full-width reader, Citrus accent, light](docs/images/reader-full-citrus-light.png) | ![A thread with three attachments in the full-width reader, Citrus accent, dark](docs/images/reader-full-citrus-dark.png) |
+| Light | Dark |
+|---|---|
+| ![The message list of the sample mailbox with a message open in the reader, light](docs/images/list-light.png) | ![The message list of the sample mailbox with a message open in the reader, dark](docs/images/list-dark.png) |
+| ![A thread with three attachments in the full-width reader, light](docs/images/reader-full-light.png) | ![A thread with three attachments in the full-width reader, dark](docs/images/reader-full-dark.png) |
 
 The pictures show the sample mailbox (`--sample`): invented people and invented mail. They are made with
 `just shot` (`cargo run -p inboxcraft-ui-egui --example ui_shot -- crates/ui-egui/shots.jsonl`).

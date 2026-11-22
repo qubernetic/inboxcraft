@@ -47,6 +47,8 @@ pub enum Block {
         kind: TextKind,
         /// How many quotes (`blockquote`) it sits in.
         quote: u8,
+        /// Its alignment and the background it stands on.
+        look: Look,
         /// The text, in runs of one look; a line break is `\n` inside a span.
         spans: Vec<Span>,
     },
@@ -59,6 +61,8 @@ pub enum Block {
     Image {
         /// How many quotes it sits in.
         quote: u8,
+        /// Its alignment and the background it stands on.
+        look: Look,
         /// The picture.
         image: Image,
     },
@@ -66,6 +70,10 @@ pub enum Block {
     Table {
         /// How many quotes it sits in.
         quote: u8,
+        /// Where it stands (`align`, `margin: 0 auto`) and the background it stands on.
+        look: Look,
+        /// The width it asks for (`width`), if any.
+        width: Option<Width>,
         /// The rows, each with its cells; rows may differ in length.
         rows: Vec<Vec<Cell>>,
     },
@@ -137,6 +145,9 @@ pub struct Image {
     pub source: ImageSource,
     /// The link it belongs to, an index into [`Document::links`].
     pub link: Option<usize>,
+    /// Its width and height in pixels as its tag gives them (both whole numbers, each at most
+    /// [`crate::MAX_SIDE`]), so a picture not loaded keeps its place; `None` when the tag does not give both.
+    pub size: Option<(u32, u32)>,
 }
 
 /// Where a picture comes from.
@@ -165,6 +176,11 @@ pub struct Link {
     /// compared as a reader sees it: invisible format characters ignored, the ideographic,
     /// fullwidth and halfwidth full stops read as dots.
     pub mismatch: bool,
+    /// The link is styled as a button (`role="button"`, a background with padding, a `<button>`): its words stand
+    /// in a block of their own, which a front end draws as a button that still only says where it goes.
+    pub button: bool,
+    /// The button's own background, when kept.
+    pub fill: Option<Paint>,
 }
 
 /// Where a link goes.
@@ -188,6 +204,77 @@ pub enum LinkTarget {
     Refused,
 }
 
+/// A colour in sRGB.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Rgb {
+    /// Red.
+    pub r: u8,
+    /// Green.
+    pub g: u8,
+    /// Blue.
+    pub b: u8,
+}
+
+impl Rgb {
+    /// The WCAG 2 contrast ratio of two colours, from 1 to 21.
+    #[must_use]
+    pub fn contrast(self, other: Rgb) -> f32 {
+        let (a, b) = (self.luminance(), other.luminance());
+        let (light, dark) = if a >= b { (a, b) } else { (b, a) };
+        (light + 0.05) / (dark + 0.05)
+    }
+
+    /// The relative luminance (WCAG 2).
+    fn luminance(self) -> f32 {
+        let channel = |value: u8| {
+            let c = f32::from(value) / 255.0;
+            if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * channel(self.r) + 0.7152 * channel(self.g) + 0.0722 * channel(self.b)
+    }
+}
+
+/// A background the message sets that the fitted view keeps: a coloured one, with the ink its text is set in, which
+/// reaches at least 4.5:1 on it ([`crate::look::kept`]). A white, grey or black background, or one no ink can be
+/// read on, is never kept: the text stands on the app's own ground.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Paint {
+    /// The background.
+    pub fill: Rgb,
+    /// The text's colour on it: a near black or white.
+    pub ink: Rgb,
+}
+
+/// How a block's lines stand across its room.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum Align {
+    /// From the left edge.
+    #[default]
+    Left,
+    /// In the middle.
+    Centre,
+    /// To the right edge.
+    Right,
+}
+
+/// What a block keeps of the message's look.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Look {
+    /// Its alignment (`text-align`, `align`, `center`).
+    pub align: Align,
+    /// The background it stands on, when kept.
+    pub background: Option<Paint>,
+}
+
+/// The width a table or cell asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Width {
+    /// Whole pixels, at most [`crate::MAX_SIDE`]; a front end gives it no more than its room.
+    Pixels(u32),
+    /// A share of the room around it, from 1 to 100 per cent.
+    Share(u8),
+}
+
 /// A table cell.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Cell {
@@ -195,4 +282,8 @@ pub struct Cell {
     pub header: bool,
     /// Its content.
     pub blocks: Vec<Block>,
+    /// Its background (its own, its row's or its table's), when kept; its blocks do not repeat it.
+    pub background: Option<Paint>,
+    /// The width it asks for, if any.
+    pub width: Option<Width>,
 }

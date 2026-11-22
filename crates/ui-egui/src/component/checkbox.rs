@@ -1,98 +1,180 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Check boxes and radio buttons: a box or a ring before its name. A ticked box is filled in the accent with the tick
-//! on it, a chosen ring carries a dot of the accent; off they are the field's colour with a quiet edge. The whole row
-//! answers a press.
+//! Check boxes and radio buttons: a 16 px square before its name in mono 13, 12 between them, no round shapes. An
+//! empty box has a `muted` edge (an edge that carries meaning is never the hairline colour). A ticked box is the
+//! `cyan` fill with a `cyan_edge` edge and `×` in `on_cyan`; a chosen radio button keeps its square empty and carries
+//! a solid 8 px `cyan_edge` square inside. Hovered, the empty box takes the `stage` fill and an `ink` edge and the
+//! full one turns to `ink`; pressed, either is the accent wash with the accent edge. Focus is the ring round the box;
+//! disabled is a dashed `muted` edge, the name and the cross in `muted`, the chosen square in `dim`. The whole row answers a press; none
+//! of it moves (the design gives these no transition).
 
-use egui::{Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use std::sync::Arc;
 
-use crate::motion;
-use crate::theme::Theme;
+use egui::text::LayoutJob;
+use egui::{Color32, Galley, Rect, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
-use super::{cut, line_height, tick};
+use crate::draw::paint::{self, Ring};
+use crate::theme::{Font, Theme};
 
-/// The side of the box or the ring, in points.
-const BOX: f32 = 18.0;
+use super::{Hover, Shown, cut, lit, solid, soon};
 
-/// The corner of the box, in points.
-const CORNER: f32 = 5.0;
+/// Between the box and its name, in points.
+const GAP: f32 = 12.0;
 
-/// The side of the tick, in points.
-const TICK: f32 = 12.0;
+/// From a radio button's box to its chosen square, in points.
+const DOT_INSET: f32 = 4.0;
 
-/// The diameter of a chosen ring's dot, in points.
-const DOT: f32 = 8.0;
-
-/// Between the box or ring and its name, in points.
-const GAP: f32 = 8.0;
-
-/// The box or ring and `name` after it, in the room there is; the response is clicked when it was pressed.
-fn row(ui: &mut Ui, theme: &Theme, role: Role, name: &str, on: bool) -> (Response, egui::Rect) {
-    let p = &theme.palette;
-    let high = line_height(ui, theme.fonts.body).max(BOX);
-    let text = cut(ui, name, theme.fonts.body, p.text, f32::INFINITY);
-    let wanted = BOX + GAP + text.size().x;
-    let wide = wanted.min(ui.available_width().max(BOX));
-    let (rect, response) = ui.allocate_exact_size(vec2(wide, high), Sense::click());
-    response.widget_info(|| WidgetInfo::selected(role, ui.is_enabled(), on, name));
-    let mark = egui::Rect::from_min_size(pos2(rect.left(), rect.center().y - BOX / 2.0), vec2(BOX, BOX));
-    if ui.is_rect_visible(rect) {
-        let room = rect.right() - mark.right() - GAP;
-        let text = if wide < wanted { cut(ui, name, theme.fonts.body, p.text, room) } else { text };
-        ui.painter().galley(pos2(mark.right() + GAP, rect.center().y - text.size().y / 2.0), text, p.text);
-    }
-    (response, mark)
+/// A check box or a radio button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Check,
+    Radio,
 }
 
-/// Lays the hover fade over `mark` as `round` as it should be.
-fn hover(ui: &Ui, theme: &Theme, response: &Response, mark: egui::Rect, round: f32) {
-    let shown = motion::toggle(ui.ctx(), response.id.with("hover"), response.hovered(), theme.motion.hover_fade);
-    if shown > 0.0 {
-        ui.painter().rect_filled(mark, round, theme.palette.hover.gamma_multiply(shown));
+/// How the box is drawn: its fill, its edge (dashed or not) and the colour of its mark when it is on.
+struct Look {
+    fill: Color32,
+    edge: Option<(Color32, bool)>,
+    mark: Color32,
+}
+
+/// The box's look for `kind`, `on` or not, `enabled` or not, under what the pointer and the keyboard do (`lit`).
+fn look(theme: &Theme, kind: Kind, on: bool, enabled: bool, lit: super::Lit) -> Look {
+    let p = &theme.palette;
+    let none = Color32::TRANSPARENT;
+    if !enabled {
+        // The cross is text a person reads, never `dim`; the radio button's square is a mark, `dim` as the switch's knob.
+        let mark = if kind == Kind::Check { p.muted } else { p.dim };
+        return Look { fill: none, edge: Some((p.muted, true)), mark };
     }
+    if lit.pressed {
+        let mark = if kind == Kind::Check { p.cyan_text } else { p.cyan_edge };
+        return Look { fill: p.cyan_muted, edge: Some((p.cyan_edge, false)), mark };
+    }
+    match (kind, on, lit.hover) {
+        // Hovered, a full box turns to `ink` (the check box's sheet; the radio button's says "hover as the checkbox").
+        (Kind::Check, true, true) => Look { fill: p.ink, edge: None, mark: p.bg },
+        (Kind::Check, true, false) => Look { fill: p.cyan, edge: Some((p.cyan_edge, false)), mark: p.on_cyan },
+        (Kind::Radio, true, true) => Look { fill: p.ink, edge: None, mark: p.bg },
+        (Kind::Radio, true, false) => Look { fill: none, edge: Some((p.cyan_edge, false)), mark: p.cyan_edge },
+        (_, _, true) => Look { fill: p.stage, edge: Some((p.ink, false)), mark: p.ink },
+        (_, false, false) => Look { fill: none, edge: Some((p.muted, false)), mark: p.muted },
+    }
+}
+
+/// What a name too long for its room does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fit {
+    /// It is cut with an ellipsis on its one line (a calendar's name in a narrow panel).
+    Cut,
+    /// It wraps onto the lines under its first, the box beside the first: a sentence that must be read whole.
+    Wrap,
+}
+
+/// `text` in `font` and `colour`, wrapped at `width`.
+fn wrapped(ui: &Ui, text: &str, font: Font, colour: Color32, width: f32) -> Arc<Galley> {
+    let mut job = LayoutJob::single_section(font.text(text), font.format(colour));
+    job.wrap.max_width = width.max(1.0);
+    ui.painter().layout_job(job)
+}
+
+/// The box and `name` after it, in the room there is, the name cut or wrapped as `fit` says, drawn in `shown` when a
+/// board asks; clicked when it was pressed.
+fn toggle(ui: &mut Ui, theme: &Theme, kind: Kind, name: &str, on: bool, shown: Option<Shown>, fit: Fit) -> Response {
+    let p = &theme.palette;
+    let enabled = ui.is_enabled() && !soon::is_soon(ui);
+    let side = theme.boxes().check;
+    let font = theme.fonts.mono;
+    let line = font.line.max(side);
+    let ink = if enabled { p.ink } else { p.muted };
+    let text = cut(ui, name, font, ink, f32::INFINITY);
+    let wanted = side + GAP + text.size().x.ceil();
+    let room = ui.available_width().max(side);
+    let wide = wanted.min(room);
+    let lines = (fit == Fit::Wrap && wanted > room).then(|| wrapped(ui, name, font, ink, room - side - GAP));
+    let high = lines.as_ref().map_or(line, |lines| lines.size().y.max(line));
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(vec2(wide, high), sense);
+    let role = if kind == Kind::Check { Role::CheckBox } else { Role::RadioButton };
+    response.widget_info(|| WidgetInfo::selected(role, enabled, on, name));
+    let lit = lit(ui, theme, &response, enabled, shown, Hover::AtOnce);
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let painter = solid(ui);
+    // The box stands beside the name's first line.
+    let mark = Rect::from_min_size(pos2(rect.left(), rect.top() + (line - side) / 2.0), vec2(side, side));
+    let (text, top) = match lines {
+        Some(lines) => (lines, rect.top()),
+        None if wide < wanted => {
+            let text = cut(ui, name, font, ink, rect.right() - mark.right() - GAP);
+            let top = rect.top() + (line - text.size().y) / 2.0;
+            (text, top)
+        }
+        None => {
+            let top = rect.top() + (line - text.size().y) / 2.0;
+            (text, top)
+        }
+    };
+    painter.galley(pos2(mark.right() + GAP, top), text, ink);
+    let look = look(theme, kind, on, enabled, lit);
+    // The box on whole pixels, its edge a whole number of them.
+    let mark = paint::on_pixels(&painter, mark);
+    match look.edge {
+        Some((colour, true)) => {
+            painter.rect_filled(mark, 0.0, look.fill);
+            paint::dashed(&painter, mark, colour);
+        }
+        Some((colour, false)) => {
+            painter.rect_filled(mark, 0.0, look.fill);
+            paint::edge(&painter, mark, 0.0, 1.0, colour);
+        }
+        None => {
+            painter.rect_filled(mark, 0.0, look.fill);
+        }
+    }
+    if on {
+        match kind {
+            Kind::Check => {
+                let cross = super::galley(ui, "×", theme.fonts.check_mark(), look.mark);
+                paint::run_centred(&painter, mark, cross, look.mark);
+            }
+            Kind::Radio => {
+                painter.rect_filled(mark.shrink(DOT_INSET), 0.0, look.mark);
+            }
+        }
+    }
+    if lit.focus {
+        paint::focus_ring(&painter, theme, mark, Ring::Outside);
+    }
+    response
 }
 
 /// A check box named `name`; clicked when it was pressed.
 pub fn checkbox(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
-    let (response, mark) = row(ui, theme, Role::CheckBox, name, on);
-    if ui.is_rect_visible(mark) {
-        let p = &theme.palette;
-        let painter = ui.painter();
-        if on {
-            painter.rect_filled(mark, CORNER, p.accent);
-            tick(painter, egui::Rect::from_center_size(mark.center(), vec2(TICK, TICK)), p.on_accent);
-        } else {
-            painter.rect_filled(mark, CORNER, p.field);
-            painter.rect_stroke(mark, CORNER, Stroke::new(1.0, p.field_border), StrokeKind::Inside);
-        }
-        hover(ui, theme, &response, mark, CORNER);
-        if response.has_focus() {
-            painter.rect_stroke(mark.expand(2.0), CORNER + 2.0, Stroke::new(2.0, p.focus), StrokeKind::Outside);
-        }
-    }
-    response
+    toggle(ui, theme, Kind::Check, name, on, None, Fit::Cut)
+}
+
+/// A check box like [`checkbox`] whose name, when it is too long for its room, wraps onto more lines instead of being
+/// cut: a sentence that must be read whole, such as what ticking it tells someone else.
+pub fn checkbox_wrapping(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
+    toggle(ui, theme, Kind::Check, name, on, None, Fit::Wrap)
+}
+
+/// [`checkbox`] drawn in `shown` whatever the pointer and the keyboard do: a board of the gallery.
+pub(crate) fn checkbox_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool, shown: Option<Shown>) -> Response {
+    toggle(ui, theme, Kind::Check, name, on, shown, Fit::Cut)
 }
 
 /// A radio button named `name`, the chosen one of its row or not; clicked when it was pressed.
 pub fn radio(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
-    let (response, mark) = row(ui, theme, Role::RadioButton, name, on);
-    if ui.is_rect_visible(mark) {
-        let p = &theme.palette;
-        let painter = ui.painter();
-        let round = BOX / 2.0;
-        painter.rect_filled(mark, round, p.field);
-        let edge = if on { Stroke::new(2.0, p.accent) } else { Stroke::new(1.0, p.field_border) };
-        painter.rect_stroke(mark, round, edge, StrokeKind::Inside);
-        if on {
-            painter.circle_filled(mark.center(), DOT / 2.0, p.accent);
-        }
-        hover(ui, theme, &response, mark, round);
-        if response.has_focus() {
-            painter.rect_stroke(mark.expand(2.0), round + 2.0, Stroke::new(2.0, p.focus), StrokeKind::Outside);
-        }
-    }
-    response
+    toggle(ui, theme, Kind::Radio, name, on, None, Fit::Cut)
+}
+
+/// [`radio`] drawn in `shown` whatever the pointer and the keyboard do: a board of the gallery.
+pub(crate) fn radio_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool, shown: Option<Shown>) -> Response {
+    toggle(ui, theme, Kind::Radio, name, on, shown, Fit::Cut)
 }
 
 #[cfg(test)]

@@ -8,9 +8,10 @@
 //! (`docs/control-protocol.md`), or with `--store <dir>` headless on a local store. It runs its tools on
 //! [`Commands`]: an engine [`Session`] or the CLI's client of the channel. The tools are read-only and map to `safe`
 //! commands, run as an agent (`Session::run_as`, and the app does the same): `mail_list`, `mail_read`,
-//! `mail_search`, `thread_read` and `account_check`. A result is compact text, one status line first and one line a
-//! message; everything a message brings (names, addresses, subjects, bodies, file names) is written as a quoted JSON
-//! string under a line that marks it untrusted, so no message text can pose as the server's own words.
+//! `mail_search`, `thread_read`, `account_check`, `week_settings` and `sync_status`. A result is compact
+//! text, one status line first and one line a message; everything a message brings (names, addresses, subjects,
+//! bodies, file names) is written as a quoted JSON string under a line that marks it untrusted, so no message text
+//! can pose as the server's own words.
 //!
 //! Headless, the server does no network I/O: a job a command asks for (fetching a body, checking an account) is not
 //! run. Bridged, the app runs it as it runs the window's.
@@ -243,8 +244,12 @@ mod bridge_tests;
 #[cfg(test)]
 mod hostile_tests;
 #[cfg(test)]
+mod store_failure_tests;
+#[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod untrusted_tests;
+#[cfg(test)]
+mod why_tests;

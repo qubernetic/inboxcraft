@@ -7,7 +7,7 @@ use inboxcraft_store::{Batch, Change, Storage as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
-use super::{Answer, Chip, Composer, Line, MAX_RECIPIENT_BYTES, MAX_RECIPIENTS, MAX_SUBJECT_BYTES, MAX_SUGGESTIONS, Suggestion};
+use super::{Answer, Chip, Composer, Line, MAX_RECIPIENTS, MAX_SUBJECT_BYTES, MAX_SUGGESTIONS, Suggestion};
 use crate::mailbox::Mailbox;
 use crate::sample;
 
@@ -319,18 +319,15 @@ fn discard_removes_the_draft() {
 }
 
 #[test]
-fn what_does_not_fit_is_cut_to_what_the_engine_keeps() {
+fn an_edit_is_never_cut_and_control_characters_leave_a_recipient() {
     let mut mailbox = mailbox();
     let mut composer = Composer::start(&mut mailbox).unwrap();
-    *composer.subject_mut() = format!("a{}", "ő".repeat(MAX_SUBJECT_BYTES));
+    // The subject's field refuses whole what would pass what the engine keeps: an edit is never cut after it.
+    let long = format!("a{}", "ő".repeat(MAX_SUBJECT_BYTES));
+    *composer.subject_mut() = long.clone();
     composer.edited();
-    assert!(composer.subject().len() <= MAX_SUBJECT_BYTES);
-    assert!(composer.subject().chars().skip(1).all(|c| c == 'ő'), "cut at a character's start");
-    let long = format!("{}@example.org", "a".repeat(MAX_RECIPIENT_BYTES * 2));
-    let many: Vec<String> = (0..MAX_RECIPIENTS + 5).map(|n| format!("p{n}@example.org")).collect();
-    type_in(&mut composer, &mut mailbox, Line::To, &format!("{long},{},", many.join(",")));
-    assert_eq!(composer.chips(Line::To).len(), MAX_RECIPIENTS);
-    assert!(composer.chips(Line::To).iter().all(|chip| chip.text.len() <= MAX_RECIPIENT_BYTES));
+    assert_eq!(composer.subject(), long);
+    *composer.subject_mut() = "a".to_owned();
     type_in(&mut composer, &mut mailbox, Line::Cc, "x\u{0}y\r@example.org;");
     assert_eq!(texts(&composer, Line::Cc), ["xy", "@example.org"], "control characters go; a line break ends a recipient");
 }
@@ -352,6 +349,61 @@ fn chips_show_the_name_or_the_address_fit_for_one_line() {
     assert_eq!(chip("Odile\u{202E} <odile@example.org>").shown(), "Odile");
     assert_eq!(Line::Bcc.name(), "Bcc");
     assert_eq!(Line::Cc.key(), "cc");
+}
+
+/// Nothing goes to a recipient the owner was not shown: a chip never shows a name that could be taken for another
+/// address, nor one that shows nothing. It shows the address instead; a plain name keeps its address in the
+/// tooltip and in what a screen reader hears.
+#[test]
+fn a_chip_never_shows_a_name_that_could_be_taken_for_another_address() {
+    let chip = |text: &str| Chip { text: text.to_owned(), ok: true };
+    let spoof = chip("\"odile@example.org\" <eve@example.net>");
+    assert_eq!(spoof.shown(), "eve@example.net");
+    assert_eq!(spoof.spoken(), "eve@example.net");
+    assert_eq!(spoof.tip(), None, "the chip already shows the address");
+    for name in ["odile\u{FF20}example.org", "odile\u{FE6B}example.org", "\u{202E}", "\u{202E}\u{2066}", "\u{7}\u{1}", "\u{200B}\u{FEFF}", "\t"] {
+        let hidden = chip(&format!("\"{name}\" <eve@example.net>"));
+        assert_eq!(hidden.shown(), "eve@example.net", "{name:?}");
+        assert_eq!(hidden.spoken(), "eve@example.net", "{name:?}");
+    }
+    let plain = chip("Odile <odile@example.org>");
+    assert_eq!(plain.shown(), "Odile");
+    assert_eq!(plain.spoken(), "Odile, odile@example.org");
+    assert_eq!(plain.tip().as_deref(), Some("odile@example.org"));
+    assert_eq!(chip("odile@example.org").tip(), None);
+}
+
+/// A name of characters that look blank (fillers, the Braille blank, tag characters, the musical format marks, every
+/// other default-ignorable code point) shows nothing: the chip shows the address, never an empty-looking name.
+#[test]
+fn a_chip_never_shows_a_name_that_only_looks_blank() {
+    let chip = |text: &str| Chip { text: text.to_owned(), ok: true };
+    let blanks = [
+        "\u{3164}",
+        "\u{2800}",
+        "\u{115F}",
+        "\u{1160}",
+        "\u{FFA0}",
+        "\u{E0000}",
+        "\u{E0041}\u{E0042}",
+        "\u{E007F}",
+        "\u{1D173}",
+        "\u{1D17A}",
+        "\u{17B4}\u{17B5}",
+        "\u{180B}\u{180F}",
+        "\u{FE00}\u{FE0F}",
+        "\u{FFF0}\u{FFF8}",
+        "\u{1BCA0}\u{1BCA3}",
+        "\u{E0100}\u{E0FFF}",
+        "\u{3164} \u{2800}\u{200B}",
+    ];
+    for name in blanks {
+        let hidden = chip(&format!("\"{name}\" <eve@example.net>"));
+        assert_eq!(hidden.shown(), "eve@example.net", "{name:?}");
+        assert_eq!(hidden.tip(), None, "{name:?}");
+    }
+    // A name with something that shows beside them still shows.
+    assert_eq!(chip("\"Odile\u{3164}\" <odile@example.org>").shown(), "Odile\u{3164}");
 }
 
 #[test]
@@ -509,4 +561,123 @@ fn the_problems_of_a_draft_are_said_in_order() {
     assert_eq!(blocked(json!(["no_recipient", "blank"]), json!(["[[day]]"])).as_deref(), Some("Add a recipient to send"));
     assert_eq!(blocked(json!(["blank"]), json!(["[[day]]", 4])).as_deref(), Some("Fill in \"day\" to send"));
     assert_eq!(blocked(json!(["other"]), json!([])).as_deref(), Some("This draft cannot be sent yet"));
+}
+
+#[test]
+fn addresses_past_a_line_s_500_stay_typed_and_the_line_says_how_many() {
+    let mut mailbox = mailbox();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    let many: Vec<String> = (0..MAX_RECIPIENTS).map(|n| format!("p{n}@example.org")).collect();
+    type_in(&mut composer, &mut mailbox, Line::To, &format!("{},", many.join(",")));
+    assert_eq!(composer.chips(Line::To).len(), MAX_RECIPIENTS);
+    assert_eq!(composer.refusal(Line::To), None);
+    type_in(&mut composer, &mut mailbox, Line::To, "q1@example.org, q2@example.org; q3@example.org,");
+    assert_eq!(composer.chips(Line::To).len(), MAX_RECIPIENTS, "the chips made stay");
+    assert_eq!(composer.typing(Line::To), "q1@example.org, q2@example.org; q3@example.org,", "kept exactly as typed");
+    assert_eq!(composer.refusal(Line::To).as_deref(), Some("3 addresses not added: a line holds at most 500."));
+    assert!(!composer.sendable(), "no send while typed addresses wait");
+    assert_eq!(composer.problem(), composer.refusal(Line::To));
+    // A chip taken off lets the next one in.
+    composer.remove(&mut mailbox, Line::To, 0).unwrap();
+    composer.take(&mut mailbox, Line::To).unwrap();
+    assert_eq!(texts(&composer, Line::To).last().copied(), Some("q1@example.org"));
+    assert_eq!(composer.typing(Line::To), "q2@example.org; q3@example.org,");
+    assert_eq!(composer.refusal(Line::To).as_deref(), Some("2 addresses not added: a line holds at most 500."));
+    // Closing keeps them typed too.
+    composer.close(&mut mailbox).unwrap();
+    assert_eq!(composer.typing(Line::To), "q2@example.org; q3@example.org,");
+}
+
+#[test]
+fn an_address_past_998_bytes_stays_typed_whole_and_the_line_says_so() {
+    let mut mailbox = mailbox();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    type_in(&mut composer, &mut mailbox, Line::To, "mira@example.org,");
+    for long in [format!("{}@example.org", "a".repeat(1_200)), format!("{}@example.org", "ő".repeat(600))] {
+        type_in(&mut composer, &mut mailbox, Line::Cc, &format!("{long}, ok@example.org,"));
+        assert_eq!(texts(&composer, Line::Cc), ["ok@example.org"], "the one that fits is taken");
+        assert_eq!(composer.typing(Line::Cc), format!("{long},"), "the long one stays whole, with its comma");
+        assert_eq!(composer.refusal(Line::Cc).as_deref(), Some("An address is too long: it holds at most 998 bytes, and it was not added."));
+        composer.close(&mut mailbox).unwrap();
+        assert_eq!(composer.typing(Line::Cc), format!("{long},"), "closing keeps it typed");
+        assert!(!composer.sendable());
+        // Deleted by the person: the line says nothing more.
+        composer.typing_mut(Line::Cc).unwrap().clear();
+        composer.remove(&mut mailbox, Line::Cc, 0).unwrap();
+        assert_eq!(composer.refusal(Line::Cc), None);
+    }
+}
+
+#[test]
+fn a_fill_that_would_pass_the_subject_s_998_bytes_is_refused_and_loses_nothing() {
+    let mut mailbox = mailbox();
+    template(&mut mailbox, "Plot", "At {?time}", "We meet at {?time}.");
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    composer.use_template(&mut mailbox, "Plot").unwrap();
+    let long = "ő".repeat(500);
+    long.clone_into(composer.filling_mut());
+    assert!(composer.fill(&mut mailbox).is_ok(), "no raw refusal of the engine");
+    assert_eq!(composer.subject(), "At [[time]]", "the blank stays");
+    assert_eq!(composer.filling(), long, "what was typed stays");
+    assert_eq!(composer.fill_refused(), Some("Too long: this text holds at most 998 bytes, and nothing was added."));
+    // What fits is filled in, and the line goes.
+    "ten".clone_into(composer.filling_mut());
+    composer.fill(&mut mailbox).unwrap();
+    assert_eq!(composer.subject(), "At ten");
+    assert_eq!(composer.fill_refused(), None);
+}
+
+#[test]
+fn refused_text_stays_exactly_as_typed_and_a_keystroke_after_it_keeps_its_separator() {
+    let mut mailbox = mailbox();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    let many: Vec<String> = (0..MAX_RECIPIENTS).map(|n| format!("p{n}@example.org")).collect();
+    type_in(&mut composer, &mut mailbox, Line::To, &format!("{},", many.join(",")));
+    // A quoted name with a comma and the person's own separators, then a keystroke after the last comma.
+    let refused = "\"Doe, Jane\" <jane@example.org> ;q2@example.org,";
+    type_in(&mut composer, &mut mailbox, Line::To, refused);
+    assert_eq!(composer.typing(Line::To), refused);
+    let more = format!("{refused}x");
+    type_in(&mut composer, &mut mailbox, Line::To, &more);
+    assert_eq!(composer.typing(Line::To), more, "the separator before the keystroke stays");
+    type_in(&mut composer, &mut mailbox, Line::To, &format!("{more}y,"));
+    assert_eq!(composer.typing(Line::To), format!("{more}y,"));
+    // At the field's 4 096 characters: kept as it is, never longer.
+    let full: String = std::iter::repeat_n("r@example.org,", 4096 / 14).collect::<String>() + &"s".repeat(4096 % 14);
+    assert_eq!(full.chars().count(), 4096);
+    type_in(&mut composer, &mut mailbox, Line::To, &full);
+    assert_eq!(composer.typing(Line::To), full);
+}
+
+#[test]
+fn a_line_s_refusal_follows_its_chips_and_its_text_at_once() {
+    let mut mailbox = mailbox();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    let many: Vec<String> = (0..MAX_RECIPIENTS).map(|n| format!("p{n}@example.org")).collect();
+    type_in(&mut composer, &mut mailbox, Line::To, &format!("{},", many.join(",")));
+    type_in(&mut composer, &mut mailbox, Line::To, "q1@example.org,");
+    assert_eq!(composer.refusal(Line::To).as_deref(), Some("1 address not added: a line holds at most 500."));
+    type_in(&mut composer, &mut mailbox, Line::To, "q1@example.org, q2@example.org, q3@example.org,");
+    // A chip taken off makes room for one: said at once, before the text is taken again.
+    composer.remove(&mut mailbox, Line::To, 0).unwrap();
+    assert_eq!(composer.refusal(Line::To).as_deref(), Some("2 addresses not added: a line holds at most 500."));
+    // An address edited down under 998 bytes is no longer too long.
+    let long = format!("{}@example.org", "a".repeat(1_000));
+    type_in(&mut composer, &mut mailbox, Line::Cc, &format!("{long},"));
+    assert!(composer.refusal(Line::Cc).is_some());
+    format!("{}@example.org,", "a".repeat(10)).clone_into(composer.typing_mut(Line::Cc).unwrap());
+    assert_eq!(composer.refusal(Line::Cc), None, "said no more once the text is edited down");
+}
+
+#[test]
+fn the_blank_s_too_long_line_goes_once_its_text_changes() {
+    let mut mailbox = mailbox();
+    template(&mut mailbox, "Plot", "At {?time}", "We meet at {?time}.");
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    composer.use_template(&mut mailbox, "Plot").unwrap();
+    "ő".repeat(500).clone_into(composer.filling_mut());
+    composer.fill(&mut mailbox).unwrap();
+    assert!(composer.fill_refused().is_some());
+    composer.filling_mut().pop();
+    assert_eq!(composer.fill_refused(), None, "the text changed: nothing to say until the next fill");
 }

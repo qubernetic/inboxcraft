@@ -28,3 +28,22 @@ fn every_error_reads_as_a_sentence_and_only_an_engine_error_has_a_source() {
     assert_eq!(engine.to_string(), EngineError::NotFound { what: "message", id: 7 }.to_string());
     assert!(engine.source().is_some());
 }
+
+#[test]
+fn a_store_failure_s_words_go_to_the_log_once_and_only_its_words() {
+    use inboxcraft_store::StoreError;
+
+    use super::store_log;
+    let mut logged = None;
+    let locked = EngineError::Store(StoreError::DatabaseBusy("database is locked".to_owned()));
+    assert_eq!(
+        store_log(&locked, &mut logged).as_deref(),
+        Some("inboxcraft: a command failed: the store is busy, try again (the database said: database is locked)")
+    );
+    assert_eq!(store_log(&locked, &mut logged), None, "the same words again are not written again");
+    let gone = EngineError::Store(StoreError::Database("no such table: body".to_owned()));
+    assert!(store_log(&gone, &mut logged).is_some_and(|line| line.ends_with("(the database said: no such table: body)")));
+    assert_eq!(store_log(&EngineError::Store(StoreError::Corrupt("a record")), &mut logged), None, "no words of the database");
+    assert_eq!(store_log(&EngineError::NothingToUndo, &mut logged), None);
+    assert_eq!(logged.as_deref(), Some("no such table: body"));
+}

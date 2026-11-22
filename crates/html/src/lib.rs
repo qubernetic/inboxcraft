@@ -10,14 +10,19 @@
 //!
 //! - nothing runs: scripts, style sheets, frames, objects, SVG and event attributes are dropped; the
 //!   only attributes read are a link's `href`, a picture's `src` and `alt`, an ordered list's
-//!   `start`, and `hidden` and `style` for whether an element is hidden (`display: none`,
-//!   `visibility: hidden`), which is all of the style that is read;
+//!   `start`, `hidden` and `style` for whether an element is hidden (`display: none`,
+//!   `visibility: hidden`), and the few that make a block's [`Look`]: `align`, `bgcolor`, `width`,
+//!   `role` and the inline `text-align`, `background`, `width`, `margin`, `padding` and `display`
+//!   (see `look.rs`), which is all of the style that is read;
+//! - a background is kept only when it is coloured and a near black or white ink reaches 4.5:1 on
+//!   it ([`Paint`]); a link styled as a button stays a link ([`Link::button`]);
 //! - forms keep their visible text and lose everything that could submit;
 //! - remote pictures are [`ImageSource::Blocked`] until the owner gives consent
 //!   ([`Options::remote_content`]); `cid:` pictures point at the message's own parts;
 //! - every link's target is exposed ([`Link`]), only `http`, `https` and `mailto` targets are kept,
 //!   and a link whose text names another place than its target is flagged ([`Link::mismatch`]),
 //!   invisible characters and full-stop look-alikes in the text making no difference;
+//! - [`page`] writes a document out again as a page a browser shows, with no address, script or load in it;
 //! - the work is bounded: input over [`MAX_INPUT`] bytes is cut, nesting over [`MAX_DEPTH`] is
 //!   flattened, tables are capped ([`MAX_TABLE_DEPTH`], [`MAX_TABLE_ROWS`], [`MAX_TABLE_COLUMNS`]),
 //!   and so are blocks, links and pictures.
@@ -40,9 +45,15 @@ mod build;
 mod document;
 mod entities;
 mod link;
+mod look;
+mod page;
 mod tokenizer;
 
-pub use document::{Block, Cell, Document, Image, ImageSource, Link, LinkTarget, Marker, Options, RemoteContent, Span, TextKind};
+pub use document::{
+    Align, Block, Cell, Document, Image, ImageSource, Link, LinkTarget, Look, Marker, Options, Paint, RemoteContent, Rgb, Span, TextKind, Width,
+};
+pub use look::{DARK_INK, LEAST_CONTRAST, LIGHT_INK, kept};
+pub use page::{MAX_NESTING, MAX_TITLE, page};
 
 /// Longest input [`display`] reads, in bytes; the rest is cut at a character boundary and
 /// [`Document::truncated`] is set.
@@ -60,6 +71,9 @@ pub const MAX_LINKS: usize = 10_000;
 
 /// Most pictures one document keeps; further pictures are dropped.
 pub const MAX_IMAGES: usize = 5_000;
+
+/// The widest or highest a picture's tag may say it is, in pixels; a larger size is taken as this.
+pub const MAX_SIDE: u32 = 4_096;
 
 /// Most tables inside one another; a deeper table's cells become plain paragraphs of the outer cell.
 pub const MAX_TABLE_DEPTH: usize = 8;

@@ -209,6 +209,20 @@ fn a_silent_server_times_out() {
 }
 
 #[test]
+fn a_silent_server_is_given_up_at_the_deadline() {
+    use inboxcraft_time::{Clock, SystemClock};
+    let fake = Fake::start(Box::new(|_| Vec::new()), None);
+    // The resolver's own timeout is 30 seconds; the deadline ends the wait after 300 ms.
+    let resolver = Resolver::new(vec![fake.addr], Duration::from_secs(30));
+    let clock = std::sync::Arc::new(SystemClock::new());
+    let start = clock.monotonic();
+    let deadline = crate::Deadline::new(clock.clone(), Duration::from_millis(300));
+    assert_eq!(resolver.mx_by(&Host::new("example.org").unwrap(), &deadline).unwrap_err().kind(), ErrorKind::TimedOut);
+    assert!(clock.monotonic().saturating_sub(start) < Duration::from_secs(5));
+    fake.finish();
+}
+
+#[test]
 fn a_truncated_answer_is_asked_again_over_tcp() {
     let truncated: Answer = Box::new(|query: &Message| {
         let mut answer = reply(query, ResponseCode::NoError, Vec::new());
@@ -244,4 +258,20 @@ fn the_system_configuration_is_read_where_there_is_one() {
         Ok(resolver) => assert!(format!("{resolver:?}").contains(":53")),
         Err(error) => assert_eq!(error.kind(), ErrorKind::HostNotFound),
     }
+}
+
+#[test]
+fn a_target_with_a_nul_or_a_line_break_is_no_host() {
+    let query = Message::query();
+    let bad = |label: &[u8]| Name::from_labels([label, b"example".as_slice(), b"org".as_slice()]).unwrap();
+    let records = vec![
+        Record::from_rdata(name("example.org."), 300, RData::MX(MX::new(10, bad(b"mx\0evil")))),
+        Record::from_rdata(name("example.org."), 300, RData::MX(MX::new(20, bad(b"mx\r\nevil")))),
+        Record::from_rdata(name("example.org."), 300, RData::MX(MX::new(30, bad(b"mx evil")))),
+        mx(40, "mx.example.org."),
+    ];
+    let bytes = reply(&query, ResponseCode::NoError, records).to_vec().unwrap();
+    assert_eq!(hosts(&read_mx(&bytes).unwrap()), ["mx.example.org"]);
+    let records = vec![Record::from_rdata(name("_imaps._tcp.example.org."), 300, RData::SRV(SRV::new(0, 0, 993, bad(b"imap\0"))))];
+    assert_eq!(read_srv(&reply(&query, ResponseCode::NoError, records).to_vec().unwrap()).unwrap(), []);
 }

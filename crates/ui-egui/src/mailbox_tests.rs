@@ -82,7 +82,7 @@ fn folders_come_by_account_roles_first_then_by_path_with_depth() {
         ]
     );
     let inbox = &mailbox.folders_of(2)[0];
-    assert_eq!((inbox.id, inbox.unread, inbox.messages), (10, 2, 4));
+    assert_eq!((inbox.id, inbox.unread, inbox.messages), (10, 2, Some(4)));
     assert!(mailbox.folders_of(9).is_empty());
 }
 
@@ -330,6 +330,7 @@ fn a_message_that_leaves_the_list_gives_way_by_the_next_message_rule() {
     assert_eq!(selected_subject(&removed_under(After::Next)).as_deref(), Some("Invoice 2026-031 is paid"));
     assert_eq!(selected_subject(&removed_under(After::Previous)).as_deref(), Some("Draft logo for the bakery"));
     assert_eq!(removed_under(After::List).selected(), None);
+    assert_eq!(removed_under(After::Stay).selected(), None, "stay selects nothing: the window rings the next row");
 }
 
 #[test]
@@ -406,7 +407,7 @@ fn the_sample_showcase_groups_people_and_updates_and_leaves_one_row_out() {
     let mailbox = mailbox();
     let showcase = sample::showcase(&mailbox);
     let names: Vec<&str> = showcase.groups.iter().map(|group| group.name.as_str()).collect();
-    assert_eq!(names, ["People", "Updates"]);
+    assert_eq!(names, ["People", "Notifications"]);
     let grouped: Vec<u64> = showcase.groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
     assert_eq!(grouped.len(), mailbox.messages().len() - 1);
     let left: Vec<&str> = mailbox.messages().iter().filter(|row| !grouped.contains(&row.id)).map(|row| row.sender.as_str()).collect();
@@ -540,7 +541,7 @@ fn delete_moves_the_row_to_the_trash_and_undo_brings_it_back() {
     let logo = id_of(&mailbox, LOGO);
     mailbox.act(logo, Act::Delete);
     assert_eq!(listed(&mailbox, logo), None);
-    assert_eq!(toast(&mailbox).map(|toast| (toast.3, toast.4)), Some(("Moved to Trash", true)));
+    assert_eq!(toast(&mailbox).map(|toast| (toast.3, toast.4)), Some(("Moved to Bin", true)));
     mailbox.narrow(Some(2));
     mailbox.open(Place::View(Role::Trash));
     assert_eq!(listed(&mailbox, logo), Some(false), "in the Studio Trash, still unread");
@@ -602,18 +603,21 @@ fn a_move_to_another_account_s_folder_is_refused_and_shown() {
 }
 
 #[test]
-fn acts_that_take_the_row_out_slide_first_and_a_new_act_finishes_the_sliding_one() {
+fn acts_that_take_the_row_out_act_at_once_and_keep_the_row_while_its_gap_closes() {
     assert!([Act::Done, Act::Archive, Act::Delete, Act::Move(7)].iter().all(|act| act.slides()));
     assert!(![Act::Read, Act::Unread, Act::Flag, Act::Unflag].iter().any(|act| act.slides()));
     let mut mailbox = mailbox();
     let (rota, photos) = (id_of(&mailbox, ROTA), id_of(&mailbox, PHOTOS));
+    let at = mailbox.messages().iter().position(|row| row.id == rota);
     mailbox.start(rota, Act::Done);
+    assert_eq!(listed(&mailbox, rota), None, "done at once");
+    assert!(mailbox.undoable().is_some(), "its toast at once");
     assert_eq!(mailbox.leaving(), Some((rota, Act::Done)));
-    assert_eq!(listed(&mailbox, rota), Some(false), "still in the list while it slides");
-    assert_eq!(mailbox.undoable(), None);
+    let left = mailbox.left_row().cloned().unwrap();
+    assert_eq!((left.row.subject.as_str(), Some(left.at)), (ROTA, at), "the row as it stood, where it stood");
     mailbox.start(photos, Act::Delete);
-    assert_eq!(listed(&mailbox, rota), None, "done before the next one starts");
-    assert_eq!(mailbox.leaving(), Some((photos, Act::Delete)));
+    assert_eq!(listed(&mailbox, photos), None);
+    assert_eq!(mailbox.leaving(), Some((photos, Act::Delete)), "the next one lets the first go");
     mailbox.left();
     assert_eq!(listed(&mailbox, photos), None);
     assert_eq!(mailbox.leaving(), None);
@@ -779,4 +783,88 @@ fn an_agents_read_keeps_the_windows_undo() {
     mailbox.run_for_agent("mail.list", &json!({})).unwrap();
     assert!(mailbox.undoable().is_some());
     assert!(mailbox.can_undo());
+}
+
+#[test]
+fn the_old_view_ids_read_as_the_new_views() {
+    use super::InboxView;
+    use crate::keep::Triage;
+
+    // Today's ids name today's views; Smart is the default.
+    let ids: Vec<&str> = InboxView::ALL.iter().map(|view| view.id()).collect();
+    assert_eq!(ids, ["grouped", "smart", "list"]);
+    assert_eq!(InboxView::default(), InboxView::Smart);
+    // The ids kept before: the cards are Smart, the list under headings Grouped, the simple list List.
+    assert_eq!(InboxView::named_before("cards"), Some(InboxView::Smart));
+    assert_eq!(InboxView::named_before("list"), Some(InboxView::Grouped));
+    assert_eq!(InboxView::named_before("simple"), Some(InboxView::List));
+    // A keep file of then, under its `view` key: each choice survives the rename.
+    for (old, now) in [("cards", InboxView::Smart), ("list", InboxView::Grouped), ("simple", InboxView::List)] {
+        let kept = Triage::from_value(&json!({ "screener": "off", "view": old }));
+        assert_eq!(kept.view, now, "{old}");
+        // Written again and read back, it stays; the earlier key keeps the earlier id for an earlier InboxCraft.
+        let written = kept.to_value();
+        assert_eq!(written["inbox_view"], json!(now.id()));
+        assert_eq!(written["view"], json!(old));
+        assert_eq!(Triage::from_value(&written).view, now);
+    }
+    // Today's key wins over the earlier one: today's `list` is List, never the old grouped list.
+    assert_eq!(Triage::from_value(&json!({ "inbox_view": "list", "view": "list" })).view, InboxView::List);
+    // Hostile and unknown ids: no view of theirs, the default one, no panic.
+    for hostile in [json!("tiles"), json!(""), json!("\u{0}"), json!("CARDS"), json!(7), json!(null), json!({ "x": [] }), json!("x".repeat(100_000))]
+    {
+        assert_eq!(Triage::from_value(&json!({ "inbox_view": hostile.clone() })).view, InboxView::Smart, "{hostile}");
+        assert_eq!(Triage::from_value(&json!({ "view": hostile.clone() })).view, InboxView::Smart, "{hostile}");
+        if let Some(text) = hostile.as_str() {
+            assert_eq!(InboxView::named(text), None);
+            assert_eq!(InboxView::named_before(text), None);
+        }
+    }
+}
+
+#[test]
+fn only_a_read_leaves_the_writes_count_as_it_was() {
+    for read in ["mail.list", "compose.list", "compose.show", "event.list", "calendar.list", "send.settings", "sync.status", "mail.attachment"] {
+        assert!(super::changes_nothing(read), "{read} reads");
+    }
+    for write in ["compose.update", "compose.discard", "event.create", "event.update", "mail.send", "history.undo", "calendar.server"] {
+        assert!(!super::changes_nothing(write), "{write} may change what the window shows");
+    }
+}
+
+#[test]
+fn outside_the_drafts_place_only_the_drafts_count_is_asked_for() {
+    // The index's Drafts count asks `compose.list` for one draft and reads its `total`: the store reads one row (#301).
+    let mut mailbox = mailbox();
+    let account = mailbox.accounts().first().map(|account| account.id).unwrap();
+    for subject in ["Kiln rota", "Glaze order", "Notes"] {
+        let id = mailbox.run("compose.new", &json!({ "account": account })).unwrap().get("id").and_then(Value::as_u64).unwrap();
+        mailbox.run("compose.update", &json!({ "id": id, "subject": subject })).unwrap();
+    }
+    let asked = super::draft_count_asked(None);
+    assert_eq!(asked.get("limit").and_then(Value::as_u64), Some(1), "{asked}");
+    let answer = mailbox.run("compose.list", &asked).unwrap();
+    assert_eq!(answer.get("drafts").and_then(Value::as_array).map(Vec::len), Some(1), "one draft read");
+    let total = answer.get("total").and_then(Value::as_u64).unwrap();
+    assert!(total >= 3, "the total counts every draft: {total}");
+    mailbox.keep_drafts_fresh();
+    assert_eq!(mailbox.drafts_total(), total);
+    assert!(mailbox.drafts().next().is_none(), "outside the drafts place no draft is listed");
+}
+
+/// A draft's row in the drafts place says whom it goes to by name only where the name could not be taken for another
+/// address: else by the address.
+#[test]
+fn a_draft_row_never_names_a_recipient_as_another_address() {
+    let mut mailbox = mailbox();
+    let account = mailbox.accounts().first().map(|account| account.id).unwrap();
+    for to in ["\"odile@example.org\" <eve@example.net>", "Odile <odile@example.org>"] {
+        let id = mailbox.run("compose.new", &json!({ "account": account })).unwrap().get("id").and_then(Value::as_u64).unwrap();
+        mailbox.run("compose.update", &json!({ "id": id, "to": [to] })).unwrap();
+    }
+    mailbox.open(Place::View(Role::Drafts));
+    let to: Vec<String> = mailbox.drafts().map(|draft| draft.to.clone()).collect();
+    assert!(to.iter().any(|to| to == "to eve@example.net"), "{to:?}");
+    assert!(to.iter().any(|to| to == "to Odile"), "{to:?}");
+    assert!(!to.iter().any(|to| to.contains("odile@")), "{to:?}");
 }

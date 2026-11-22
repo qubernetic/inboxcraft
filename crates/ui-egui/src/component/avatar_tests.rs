@@ -1,61 +1,25 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use crate::component::tests::builder;
+use crate::component::tests::{Own, builder, own, painted, staged};
 use egui::accesskit::Role;
 use egui::{Rect, pos2, vec2};
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::{avatar, colour, initials, paint};
-use crate::sample;
+use super::{AvatarSize, CORNER, avatar, initials, paint};
 use crate::shot;
-use crate::theme::{AVATARS, Mode, PRESETS, Preset, Theme, contrast, ink_on, install_fonts};
+use crate::theme::{Mode, TextScale, Theme, contrast, install_fonts};
 
 fn all() -> Vec<Theme> {
-    PRESETS.iter().flat_map(|preset| [Theme::new(Mode::Light, preset), Theme::new(Mode::Dark, preset)]).collect()
+    [Mode::Light, Mode::Dark].map(|mode| Theme::new(mode, TextScale::default())).to_vec()
 }
 
 #[test]
-fn the_same_address_always_gets_the_same_colour() {
-    let theme = Theme::new(Mode::Light, &Preset::default());
-    for (_, address) in sample::people() {
-        let first = colour(&theme, address);
-        for _ in 0..3 {
-            assert_eq!(colour(&theme, address), first, "{address}");
-        }
-        assert_eq!(colour(&theme, &address.to_uppercase()), first, "case does not matter");
-        assert_eq!(colour(&theme, &format!("  {address} ")), first, "spaces around do not matter");
-        for other in all() {
-            assert_eq!(colour(&other, address), first, "{address}: one colour in every mode and preset");
-        }
+fn an_avatar_is_quiet_and_not_quite_square() {
+    assert_eq!(CORNER, 2.0, "radius 2: one of the two shapes that are not square");
+    for theme in all() {
+        assert!(contrast(theme.palette.muted, theme.palette.stage) >= 4.5, "{:?}: the initials read", theme.mode);
     }
-}
-
-#[test]
-fn the_colour_is_one_of_the_avatar_palette_and_people_spread_over_it() {
-    let theme = Theme::new(Mode::Dark, &Preset::default());
-    let mut used: Vec<_> = sample::people().iter().map(|(_, address)| colour(&theme, address)).collect();
-    assert!(used.iter().all(|picked| AVATARS.contains(picked)));
-    used.sort_by_key(|picked| picked.to_array());
-    used.dedup();
-    assert!(used.len() >= 6, "the sample's people spread over the palette: {}", used.len());
-}
-
-#[test]
-fn a_known_address_keeps_its_colour_across_versions() {
-    // FNV-1a of "odile@example.org" picks this slot; a changed hash would recolour everyone.
-    let theme = Theme::new(Mode::Light, &Preset::default());
-    let slot = AVATARS.iter().position(|picked| *picked == colour(&theme, "odile@example.org"));
-    assert_eq!(slot, Some(fnv_slot("odile@example.org")));
-}
-
-fn fnv_slot(text: &str) -> usize {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    (hash % AVATARS.len() as u64) as usize
 }
 
 #[test]
@@ -75,27 +39,15 @@ fn initials_come_from_the_first_and_last_word_or_the_address() {
 #[test]
 fn hostile_names_and_addresses_never_panic() {
     let long = "a ".repeat(50_000);
-    let theme = Theme::new(Mode::Light, &Preset::default());
     for (name, address) in [("\0", "\0"), ("\u{202e}x", "\u{301}@\u{301}"), (long.as_str(), long.as_str()), ("e\u{301}", "")] {
         let _ = initials(name, address);
-        let _ = colour(&theme, address);
     }
     assert!(initials(&long, "").chars().count() <= 2);
 }
 
 #[test]
-fn every_avatar_s_initials_read_on_its_colour_in_every_theme() {
-    for theme in all() {
-        for (_, address) in sample::people() {
-            let fill = colour(&theme, address);
-            assert!(contrast(ink_on(fill), fill) >= 4.5, "{} {:?} {address}", theme.preset.id, theme.mode);
-        }
-    }
-}
-
-#[test]
 fn the_avatar_is_an_image_named_for_the_person() {
-    let theme = Theme::new(Mode::Light, &Preset::default());
+    let theme = Theme::new(Mode::Light, TextScale::default());
     let mut harness = builder().build_ui(move |ui| {
         avatar(ui, &theme, "Odile Brannock", "odile@example.org", 32.0);
         avatar(ui, &theme, "", "loans@example.org", 32.0);
@@ -107,7 +59,7 @@ fn the_avatar_is_an_image_named_for_the_person() {
 }
 
 #[test]
-fn the_avatar_paints_its_colour_with_the_initials_in_the_middle() {
+fn the_avatar_paints_the_stage_with_the_muted_initials_in_the_middle() {
     for theme in all() {
         let picture = shot::paint(vec2(40.0, 40.0), 1.0, theme.mode, |ui| {
             install_fonts(ui.ctx());
@@ -115,18 +67,126 @@ fn the_avatar_paints_its_colour_with_the_initials_in_the_middle() {
             paint(ui.painter(), &theme, Rect::NOTHING, "x", "x");
         })
         .unwrap();
-        let fill = colour(&theme, "odile@example.org");
+        let fill = theme.palette.stage;
         let near = |x, y| {
             let pixel = picture.pixel(x, y).unwrap();
             contrast(egui::Color32::from_rgb(pixel.r(), pixel.g(), pixel.b()), fill) < 1.05
         };
-        assert!(near(5, 20) && near(20, 3), "{} {:?}", theme.preset.id, theme.mode);
-        let ink = ink_on(fill);
+        assert!(near(5, 20) && near(20, 3), "{:?}", theme.mode);
+        let ink = theme.palette.muted;
         let inked = (12..28).flat_map(|x| (12..28).map(move |y| (x, y))).any(|(x, y)| {
             let pixel = picture.pixel(x, y).unwrap();
             contrast(egui::Color32::from_rgb(pixel.r(), pixel.g(), pixel.b()), ink) < 1.2
         });
         assert!(inked, "the initials are drawn in their ink");
-        assert_eq!(picture.pixel(0, 0).unwrap().a(), 0, "outside the circle nothing is painted");
+        assert!(near(3, 3) && near(36, 36), "{:?}: the square reaches its corners", theme.mode);
+    }
+}
+
+/// The states of the avatar's sheet, in its order: the name and address shown, the size, the side at 100 %, the
+/// initials and whether the person is unknown.
+const STATES: [(&str, &str, AvatarSize, f32, &str, bool); 4] = [
+    ("Tamsin Vale", "tamsin@example.org", AvatarSize::M, 32.0, "TV", false),
+    ("Odile Brannock", "odile@example.org", AvatarSize::S, 24.0, "OB", false),
+    ("Mira Solberg", "mira@example.org", AvatarSize::L, 40.0, "MS", false),
+    ("", "", AvatarSize::M, 32.0, "?", true),
+];
+
+/// The avatar of `name` and `address` at `size`, on a `surface` stage: its rect and its own look.
+fn avatar_in(mode: Mode, scale: TextScale, name: &'static str, address: &'static str, size: AvatarSize) -> (Rect, Own) {
+    let theme = Theme::new(mode, scale);
+    let harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(200.0, 120.0),
+        move |ui, theme| {
+            avatar(ui, theme, name, address, size.side(theme));
+        },
+    );
+    let label = if name.is_empty() { "Unknown sender" } else { name };
+    let rect = harness.get_by_label(label).rect();
+    (rect, own(&painted(&harness, label), rect))
+}
+
+#[test]
+fn an_avatar_looks_as_its_sheet_says_in_every_state() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        for (name, address, size, side, letters, unknown) in STATES {
+            let (rect, look) = avatar_in(mode, TextScale::default(), name, address, size);
+            let at = format!("{mode:?} {letters}: {look:#?}");
+            assert!((rect.width() - side).abs() < 0.01 && (rect.height() - side).abs() < 0.01, "{at} {rect:?}");
+            let font = if size == AvatarSize::L { theme.fonts.button.semibold() } else { theme.fonts.key };
+            assert_eq!(look.texts, vec![(letters.to_owned(), p.muted, font.id().family.to_string(), font.size)], "{at}");
+            if unknown {
+                assert_eq!(look.fill, None, "an unknown person has no square: {at}");
+                assert_eq!(look.edge, Some((1.0, p.line, true)), "a dashed line box: {at}");
+                assert_eq!(look.radius, CORNER, "the dashed box has the square's corners of 2: {at}");
+            } else {
+                assert_eq!(look.fill, Some(p.stage), "{at}");
+                assert_eq!(look.edge, None, "{at}");
+                assert_eq!(look.radius, CORNER, "{at}");
+            }
+            assert!(look.radius <= CORNER, "{at}");
+            assert_eq!(look.ring, None, "{at}");
+            assert!(!look.overflows, "{at}");
+        }
+    }
+}
+
+#[test]
+fn an_avatar_at_130_percent_is_the_scaled_side() {
+    let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
+    for (name, address, size, side, ..) in STATES {
+        let (rect, look) = avatar_in(Mode::Light, TextScale::ALL[4], name, address, size);
+        assert!((rect.width() - theme.size(side)).abs() < 0.01 && (rect.height() - theme.size(side)).abs() < 0.01, "{rect:?}");
+        assert!(!look.overflows, "{look:#?}");
+    }
+}
+
+/// The columns of `picture` in row `y` whose colour is `fill`: the first and the last.
+fn fill_span(picture: &shot::Picture, y: usize, fill: egui::Color32) -> Option<(usize, usize)> {
+    let same = |x: usize| picture.pixel(x, y).is_some_and(|pixel| pixel.r() == fill.r() && pixel.g() == fill.g() && pixel.b() == fill.b());
+    let columns: Vec<usize> = (0..picture.width()).filter(|x| same(*x)).collect();
+    Some((*columns.first()?, *columns.last()?))
+}
+
+#[test]
+fn a_small_avatar_s_initials_stand_in_its_square_wherever_the_square_falls() {
+    use crate::component::tests::ink_centre;
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let mut places = Vec::new();
+        for left in [2.0, 2.3, 2.5, 2.7] {
+            let picture = shot::paint(vec2(30.0, 30.0), 1.0, mode, |ui| {
+                install_fonts(ui.ctx());
+                paint(ui.painter(), &theme, Rect::from_min_size(pos2(left, 3.0), vec2(24.0, 24.0)), "Odile Brannock", "odile@example.org");
+            })
+            .unwrap();
+            let (first, last) = fill_span(&picture, 6, theme.palette.stage).unwrap();
+            assert_eq!(last - first, 23, "{mode:?} at {left}: a square of 24 whole pixels");
+            let (x, _) = ink_centre(&picture, first..last + 1, 3..27, theme.palette.stage, theme.palette.muted).unwrap();
+            places.push((left, x - first as f32));
+        }
+        let (_, at) = places[0];
+        assert!(places.iter().all(|(_, x)| (x - at).abs() < 0.05), "{mode:?}: the initials move with the square: {places:?}");
+    }
+}
+
+#[test]
+fn the_unknown_avatar_s_question_mark_is_in_the_middle_as_the_design_centres_its_text_box() {
+    use crate::component::tests::ink_centre;
+    // The sheet: `?` in a text box of 7 at 12.5 of 32; its ink centre on the design's board is 16.02.
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let picture = shot::paint(vec2(32.0, 32.0), 1.0, mode, |ui| {
+            install_fonts(ui.ctx());
+            paint(ui.painter(), &theme, Rect::from_min_size(pos2(0.0, 0.0), vec2(32.0, 32.0)), "", "");
+        })
+        .unwrap();
+        let ground = picture.pixel(16, 3).unwrap();
+        let (x, _) = ink_centre(&picture, 3..29, 3..29, ground, theme.palette.muted).unwrap();
+        assert!((x - 16.02).abs() <= 0.25, "{mode:?}: the ? at {x}");
     }
 }

@@ -63,3 +63,44 @@ fn kept_choices_come_back_without_a_command() {
     assert_eq!(mailbox.notify_settings(), &kept);
     assert_eq!(mailbox.notify_level(1), Level::People);
 }
+
+#[test]
+fn the_week_rule_is_kept_beside_and_comes_back_at_the_start() {
+    use inboxcraft_time::{FirstWeek, WeekRule, Weekday};
+    let mut mailbox = mailbox();
+    assert_eq!(mailbox.week_rule(), WeekRule::default());
+    assert_eq!(
+        mailbox.kept_week(),
+        serde_json::json!({ "first_day": "monday", "first_week": "first_four_day_week", "all_day_alert": "day_before_9" })
+    );
+    mailbox.run("week.set", &serde_json::json!({ "first_day": "sunday", "first_week": "week_of_1_january" })).unwrap();
+    let kept = mailbox.kept_week();
+    let mut next = self::mailbox();
+    next.restore_week(&kept);
+    assert_eq!(next.week_rule(), WeekRule { first_day: Weekday::Sunday, first_week: FirstWeek::WeekOf1January });
+}
+
+#[test]
+fn a_junk_kept_week_rule_is_the_default_never_an_error() {
+    use inboxcraft_time::{FirstWeek, WeekRule, Weekday};
+    let long = "x".repeat(10_000);
+    for junk in [
+        serde_json::json!(7),
+        serde_json::Value::Null,
+        serde_json::json!(long),
+        serde_json::json!({ "first_day": long, "first_week": long }),
+        serde_json::json!({ "first_day": "funday", "first_week": "week_of_the_moon" }),
+        serde_json::json!({ "first_day": 6, "first_week": null }),
+        serde_json::json!(["sunday"]),
+    ] {
+        let mut mailbox = mailbox();
+        mailbox.run("week.set", &serde_json::json!({ "first_day": "saturday", "first_week": "week_of_1_january" })).unwrap();
+        mailbox.restore_week(&junk);
+        assert_eq!(mailbox.week_rule(), WeekRule::default(), "{}", junk.to_string().chars().take(40).collect::<String>());
+        assert!(mailbox.error().is_none());
+    }
+    // A part that reads stands; the other is the default.
+    let mut mailbox = mailbox();
+    mailbox.restore_week(&serde_json::json!({ "first_day": "sunday", "first_week": "funday" }));
+    assert_eq!(mailbox.week_rule(), WeekRule { first_day: Weekday::Sunday, first_week: FirstWeek::FirstFourDayWeek });
+}

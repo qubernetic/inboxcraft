@@ -3,12 +3,14 @@
 
 //! The tools on the `testkit` fixture store.
 
-use inboxcraft_engine::{AgentClass, Registry};
+use inboxcraft_engine::{AgentClass, Registry, Session};
+use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_testkit::store;
+use inboxcraft_time::FakeClock;
 use serde_json::json;
 
 use super::{DEFAULT_LIMIT, ROLES, TOOLS};
-use crate::test_support::{call, fixture_server, text};
+use crate::test_support::{call, fixture_server, request, text};
 
 #[test]
 fn every_tool_runs_a_safe_command() {
@@ -129,4 +131,136 @@ fn a_failing_tool_answers_a_code_and_a_sentence() {
     }
     let (out, error) = text(&call(&mut server, "mail_list", json!(null)));
     assert!(!error, "no arguments are no arguments: {out}");
+}
+
+#[test]
+fn mail_why_says_why_a_message_stands_where_it_does() {
+    let (_dir, mut server) = fixture_server();
+    let (out, error) = text(&call(&mut server, "mail_why", json!({ "id": store::LUNCH })));
+    assert!(!error, "{out}");
+    assert_eq!(
+        out,
+        format!(
+            "mail_why: message {}, 1 reason, most specific first\n{}\nkind | text_id | args\nrule | why.rule.group | group \"people\"; rule \"other\"\n",
+            store::LUNCH,
+            crate::render::UNTRUSTED
+        )
+    );
+    let (out, error) = text(&call(&mut server, "mail_why", json!({ "id": store::RECEIPT })));
+    assert!(!error, "{out}");
+    assert!(out.ends_with(&format!("\ndefault | why.default | folder {}; role \"archive\"\n", store::ARCHIVE)), "{out}");
+}
+
+#[test]
+fn mail_why_refuses_a_junk_id_as_the_other_tools_do() {
+    let (_dir, mut server) = fixture_server();
+    for (arguments, says) in [
+        (json!({}), "error bad_params: "),
+        (json!({ "id": null }), "error bad_params: "),
+        (json!({ "id": -1 }), "error bad_params: "),
+        (json!({ "id": i64::MIN }), "error bad_params: "),
+        (json!({ "id": 1.5 }), "error bad_params: "),
+        (json!({ "id": 1e308 }), "error bad_params: "),
+        (json!({ "id": "1" }), "error bad_params: "),
+        (json!({ "id": [1] }), "error bad_params: "),
+        (json!({ "id": { "id": 1 } }), "error bad_params: "),
+        (json!({ "id": 1, "colour": "red" }), "error bad_params: "),
+        (json!({ "id": 999 }), "error not_found: "),
+        (json!({ "id": 0 }), "error not_found: "),
+        (json!([1]), "error bad_params: the arguments are one JSON object"),
+        (json!({ "id": "9".repeat(100_000) }), "error bad_params: "),
+        (json!({ "id": 1, "note": "x\n".repeat(100_000) }), "error bad_params: "),
+        (serde_json::Value::Object([("k".repeat(100_000), json!(1))].into_iter().collect()), "error bad_params: "),
+    ] {
+        let (out, error) = text(&call(&mut server, "mail_why", arguments.clone()));
+        assert!(error, "{out}");
+        assert!(out.starts_with(says), "{out}");
+        assert_eq!(out.lines().count(), 1, "{out}");
+        assert!(out.len() < 1000, "a huge argument is not echoed whole: {} bytes", out.len());
+    }
+    // An id past what the store keeps is the store's refusal, the same as `mail_read`'s.
+    let (why, error) = text(&call(&mut server, "mail_why", json!({ "id": u64::MAX })));
+    assert!(error && why.starts_with("error ") && why.lines().count() == 1, "{why}");
+    let (read, _) = text(&call(&mut server, "mail_read", json!({ "id": u64::MAX })));
+    assert_eq!(why.split(':').next(), read.split(':').next(), "{why} / {read}");
+}
+
+#[test]
+fn week_settings_says_how_weeks_are_counted() {
+    let (_dir, mut server) = fixture_server();
+    for arguments in [json!({}), json!(null)] {
+        let (out, error) = text(&call(&mut server, "week_settings", arguments));
+        assert!(!error, "{out}");
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "week_settings: weeks start on monday; the first week of the year: first_four_day_week", "{out}");
+        // The fixture's clock stands on 2026-11-02, a Monday: ISO week 45.
+        assert_eq!(lines[1], "this week: 45 of 2026, from 2026-11-02", "{out}");
+        assert_eq!(lines[2], "first days: monday, tuesday, wednesday, thursday, friday, saturday, sunday");
+        assert_eq!(lines[3], "first weeks: first_four_day_week, week_of_1_january");
+        assert_eq!(lines.len(), 4, "{out}");
+    }
+}
+
+#[test]
+fn week_settings_refuses_what_it_does_not_take() {
+    let (_dir, mut server) = fixture_server();
+    for (arguments, says) in [
+        (json!({ "first_day": "sunday" }), "error bad_params: "),
+        (json!({ "id": 1 }), "error bad_params: "),
+        (json!("x"), "error bad_params: the arguments are one JSON object"),
+    ] {
+        let (out, error) = text(&call(&mut server, "week_settings", arguments.clone()));
+        assert!(error, "{arguments}: {out}");
+        assert!(out.starts_with(says), "{arguments}: {out}");
+        assert_eq!(out.lines().count(), 1, "{out}");
+    }
+}
+
+#[test]
+fn sync_status_reads_offline_on_a_store_and_takes_nothing() {
+    let (_dir, mut server) = fixture_server();
+    for arguments in [json!({}), json!(null)] {
+        let (out, error) = text(&call(&mut server, "sync_status", arguments));
+        assert!(!error, "{out}");
+        // No worker runs on a store, so its account is not signed in.
+        assert_eq!(out, "sync_status: offline\nprogress: 0 of 0 folder syncs\nlast synced (UTC): never\nfailing accounts: 0\n");
+    }
+    for arguments in [json!({ "x": 1 }), json!({ "id": 1 }), json!([1])] {
+        let (out, error) = text(&call(&mut server, "sync_status", arguments.clone()));
+        assert!(error && out.starts_with("error bad_params: ") && out.lines().count() == 1, "{arguments}: {out}");
+    }
+}
+
+#[test]
+fn mail_why_is_offered_read_only() {
+    // What `mail_why` tells a client (the group and its rule, the owner's choice for the sender, the snooze times,
+    // whether the owner wrote in the thread) is the owner's to allow, and allowed: the same facts the window shows.
+    let why = TOOLS.iter().find(|tool| tool.command == "mail.why" && tool.name == "mail_why").unwrap();
+    // The message's id, required, a whole number; read-only.
+    let schema = (why.schema)();
+    assert_eq!(schema["required"], json!(["id"]), "{schema}");
+    assert_eq!(schema["properties"]["id"]["type"], "integer", "{schema}");
+    assert_eq!(schema["additionalProperties"], false, "{schema}");
+    assert!(why.read_only);
+    let (_dir, mut server) = fixture_server();
+    let answer = request(
+        &mut server,
+        json!({ "jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": { "name": "mail_why", "arguments": { "id": store::LUNCH } } }),
+    );
+    assert_eq!(answer["result"]["isError"], false, "{answer}");
+    let answer = request(&mut server, json!({ "jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": { "name": "mail_whom" } }));
+    assert_eq!(answer["error"]["code"], -32602, "{answer}");
+    assert_eq!(answer["error"]["message"], "there is no tool \"mail_whom\"", "{answer}");
+}
+
+#[test]
+fn sync_status_on_a_store_reads_synced_with_no_account_and_offline_with_one() {
+    let empty = Memory::new(StoreConfig::default());
+    let session = Session::new(Box::new(empty), Box::new(FakeClock::new(store::NOW))).unwrap();
+    let mut server = crate::Server::new(session);
+    let (out, error) = text(&call(&mut server, "sync_status", json!({})));
+    assert!(!error && out.starts_with("sync_status: synced\n"), "{out}");
+    let (_dir, mut server) = fixture_server();
+    let (out, error) = text(&call(&mut server, "sync_status", json!({})));
+    assert!(!error && out.starts_with("sync_status: offline\n"), "{out}");
 }

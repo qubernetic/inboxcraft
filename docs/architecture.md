@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-21 · **Change:** minor
 
 ## Layers
 <table L0–L6 + apps, the rule: a crate depends only on lower layers; enforced by `cargo xtask layers`>
@@ -91,9 +91,28 @@ fetches a remote picture: the front end asks its fetch for the pictures the owne
 fetch is `net::picture` on threads of its own (HTTPS only, a fixed user agent, no cookies or referrer, public
 addresses only), so the engine stays free of network I/O.
 
-The appearance commands (`ui.theme.set`, `ui.accent.set`, `ui.font.set`, `ui.icons.set`, `ui.text_scale.set`,
-`ui.motion.set`, all `safe`) change one choice each of the session's `Appearance` (`engine::appearance`) and
-answer the whole of it. The engine checks the values and makes a custom accent readable; it keeps nothing on disk.
+`mail.row` (`safe`, `id`) reads one message as a list shows it (`new_sender`, `group` and its triage state with it)
+by its id alone, wherever it is, and changes nothing. A reader in a window of its own reads it to keep its head
+fresh once the list has moved on, and learns from `not_found`, and only from that, that the message is gone.
+
+`mail.why` (`safe`, `id`) says why a message stands where it does, from what the triage already decided and keeps:
+at most four reasons, most specific first, each a `kind` (`snooze`, `rule`, `sender`, `screener`, `thread`,
+`default`), a `text_id` from a fixed set (`why.snooze.returned`, `why.snooze.until`, `why.rule.group`,
+`why.sender.group`, `why.sender.accepted`, `why.sender.blocked`, `why.screener.held`, `why.screener.blocked`,
+`why.screener.new`, `why.screener.known`, `why.thread.yours`, `why.thread.other`, `why.default`) that the front end
+words in its own language, and `args` with a fixed set of keys per `text_id`: times, a group or rule name, the
+sender's address, a count, a folder id and role. Every text in `args` is cleaned of control characters and invisible
+marks and cut at a character boundary: an address at 254 characters, a group, rule or role name at 64. No text of the message goes
+into the answer. `rule` names the grouped inbox classifier's rule (`calendar`, `automatic`, `list`, `junk`, `robot`,
+`other`), or `why.sender.group` the owner's choice of group for the sender, only for mail in the inbox of a grouped
+account; a return from a snooze counts while the message is in the inbox, as the store keeps
+when it came back but not where to. One decision gives one reason: a sender blocked leaves out `why.screener.blocked`,
+a group chosen for the sender leaves out `why.sender.accepted`, before the four are counted. `default` (the folder) comes only when nothing else does.
+
+The appearance commands (`ui.theme.set`, `ui.text_scale.set`, `ui.motion.set`, `ui.frame.set`, all `safe`) change
+one choice each of the session's `Appearance` (`engine::appearance`) and answer the whole of it. The colours, the
+typeface and the icons are fixed, so there is no command for them. The engine checks the values; it keeps nothing
+on disk.
 The front end installs a changed appearance in the frame it finds it and keeps it in a file of the config folder
 (`ui-egui::keep`), handing it back to the session with `Session::set_appearance` at the next start.
 
@@ -154,13 +173,25 @@ the store's message state table), which no server keeps. `mail.done` (`owner`) m
 archive like `mail.archive` and keeps the folder it came from; done `false` moves it back there and clears the mark.
 A done message out of the archive (the server refused the move) is filed again by the next done.
 "Show done" is `mail.list` with `done`: the done mail whose old place is in the view is listed among the mail there,
-by date, with `done` set. `mail.park` (`safe`) puts a message on the park pile: `mail.list` leaves the pile out and
+by date, with `done` set. "Unread only" is `mail.list` with `unread`: the read messages are left out before the page
+is cut, so `total` and `offset` count the unread ones, but the one `keep` names (the message open in the reader stays
+in its row once it is read); `ui.list.unread` (`safe`) asks the window to turn it for the place shown. `mail.park` (`safe`) puts a message on the park pile: `mail.list` leaves the pile out and
 counts it in `parked` (the window's pill), `parked` lists it too, and `park.list` (`safe`) lists the pile across the
 accounts. `mail.pin` (`safe`) pins a message: it stays in its lists, and `pin.list` (`safe`) is the pins view across
 the accounts. Done takes the pin off unless the owner keeps pins through done (`pin.set`, `owner`; the session keeps
 it and the front end hands it back at the start, `Session::pins_outlast_done`). Each list row says `done`, `parked`
 and `pinned`. `history.undo` takes each act back: the state as it was and, for done, the message back where it was
-when that folder still holds mail.
+when that folder still holds mail. What the window does after an act takes the open message out of the list is
+the owner's choice, `after.set` (`owner`): open the next or the previous message, go back to the list, or stay, the
+keyboard on the row that took its place and nothing opened (`after::After`; the session keeps it and the front end
+hands it back at the start). Which word of the sending name Home's headline greets the owner by is the owner's
+choice too, `greeting.set` (`owner`): the first word (the default), the last, the full name or none
+(`greet::GreetBy`; the same keeping). The first and the last word skip a short list of titles (Dr, Mr, Mrs, Ms,
+Prof, Sir, Dame, with or without a dot, any case); a comma reads as "last, first", the given name ending at the next
+comma and a part of suffixes only (Jr, Sr, II, III, PhD, MD, Esq) not one; quotes and brackets around a word and
+invisible format characters are not read, but for a zero-width joiner or non-joiner inside a word; no other order is
+guessed, so a family-name-first name is greeted by its family name with the first word. A name that is an address,
+empty or only titles gives no word.
 
 Snooze (`mail.snooze`, `safe`, in `engine::cmd::triage`; the stage and the return in `engine::arrive::snooze`) puts
 a message away until a time, given as `until` or a preset of `schedule.presets`. The message goes to the account's
@@ -179,7 +210,8 @@ snoozed folder, so a message another InboxCraft snoozed,
 or our own copy back without a UID, is snoozed until its time here too; elsewhere the field is ignored. When the
 entry fires, a message still in the snoozed folder comes back to the inbox unread, with `returned` set to the time
 (`mail.list` sorts it as if it arrived then and says `returned` and `snoozed_until` on each row); one the owner moved
-on stays where it was put. `mail.unsnooze` (`safe`) brings a message back at once; `history.undo` takes a snooze
+on stays where it was put. `mail.unsnooze` (`safe`) brings a message back at once, with the same care: one moved on
+loses only its time and schedule entry, where it is and read as it is; `history.undo` takes a snooze
 back, its time and schedule entry included.
 
 Follow-up reminders (`mail.follow_up`, `safe`, in `engine::cmd::triage`; the stage in `engine::arrive::followup`):
@@ -223,9 +255,11 @@ computer was asleep). `Session::next_due` tells the front end when to tick next.
 `Context::next_schedule_id`.
 
 Event alerts (`engine::calendar::alert`): an event's `DISPLAY` and `AUDIO` alarms, or without any alarm the defaults
-(ten minutes before a timed event, a day before an all-day one), go off at times the store holds as `Alert`s, each
-with a schedule entry. A trigger's days follow the wall clock of the event's zone (the computer's for a floating
-time or a whole day) and its hours do not, so a day before noon is noon the day before across a change of the clock.
+(ten minutes before a timed event; for an all-day one the hour the owner chose, `engine::all_day_alert`), go off at
+times the store holds as `Alert`s, each with a schedule entry. A trigger's days follow the wall clock of the event's
+zone (the computer's for a floating time or a whole day) and its hours do not, so a day before noon is noon the day
+before across a change of the clock. An all-day event's triggers follow the computer's wall clock whole, hours too:
+`-PT15H` is 09:00 the day before, and `PT9H` 09:00 on the day, also on the days the clock is put forward or back.
 A cancelled event, one the owner declined and an alarm further than a year from its event alert nothing. The store
 holds the alerts of the next two weeks, at most 64 an event: `Session::commit` works them out for every event a
 batch puts, in the same batch (an alert at its old time keeps its id and entry), `Session::start` and then a sweep a
@@ -234,11 +268,28 @@ into the horizon in time; an alert whose time came stays for the tick. A fired a
 entry.
 
 `schedule.presets` (`safe`) answers the presets still ahead: later today (three hours
-on, rounded to the nearest half hour of the wall clock, while still today), this evening (20:00) and tomorrow
-morning (08:00). They are in the computer's wall-clock time, from the `inboxcraft_time::Offsets` the front end
+on, rounded to the nearest half hour of the wall clock, while still today), this evening (20:00), tomorrow
+morning (08:00), this weekend (the coming Saturday at 09:00; from 09:00 on a Saturday, and on a Sunday, the next
+Saturday) and next week (09:00 on the first day of the next week, by the week rule below). Snooze, follow-up and
+send later take the same preset ids. They are in the computer's wall-clock time, from the `inboxcraft_time::Offsets` the front end
 hands over with `Session::set_offsets` (UTC until then); a wall-clock time the clock skips in spring lands after the
-change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries and `schedule.cancel`
-(`owner`) takes one off.
+change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries with what a row shows of each, read from the store
+(the account, the subject or an alert's event title, and who: a send's recipients, a snooze's sender, a follow-up's
+recipient; for an alert also its event, when the occurrence starts and the minutes before), each one short line
+without control characters or invisible marks; an entry whose target the store cannot read is left out and counted
+(`skipped`), so one bad row never refuses the list. `schedule.cancel` (`owner`) takes one off; no undo brings a
+cancelled entry back.
+
+Weeks are counted by the owner's week rule (`inboxcraft_time::WeekRule`): the first day of the week (Monday by
+default) and the year's first week, the first one with four days in the year (ISO 8601 with Monday, the default)
+or the one that holds 1 January. `WeekRule::week` gives a date's week: its first day, its number and the week-year
+it is counted in; a week that starts before year 0 has none. `week.settings` (`safe`) shows the rule and the week
+of today on the owner's wall clock, `week.set` (`owner`) changes it; the front end keeps it
+(`engine::week::to_value`) and hands it back at the start (`Session::set_week_rule`), and a kept value it cannot
+read falls back to the default part by part. The desktop app's default is its locale's (`engine::week::for_locale`
+on `LC_ALL`, `LC_TIME` or `LANG`): a short list of regions starts on Sunday and counts the week of 1 January, every
+other region and a locale without one Monday and ISO 8601. "Next week" counts by it; Settings, Calendar sets both
+parts.
 
 The calendars in the engine (`engine::calendar`, `cmd/calendar.rs`) keep each event as the iCalendar text the server
 sent and read it with `ical` whenever it is shown, so nothing of it is lost on the way back. The start, and
@@ -248,22 +299,46 @@ kept beside its calendar, an event without an entity tag is not named as known s
 conflict (412) starts the calendar afresh so the server's copy replaces ours. `event.list` (`safe`) expands every event
 in a span of at most 400 days on the computer's clock: each occurrence with its moments in UTC and on the wall clock,
 its first and last day, its repeat preset, and the event's own zone with its wall-clock times when that clock shows
-another time than the computer's. `event.create`, `event.update` and `event.delete` (`owner`) change the store at once
+another time than the computer's, its organiser, and whether it is the owner's own (it names no organiser, or the
+organiser is the account's own address; else it is someone else's, which the editor opens read-only). `event.create`, `event.update` and `event.delete` (`owner`) change the store at once
 and write to the server as kept jobs (`Put` new or over the copy seen, `Delete`); a new single event is written in UTC,
 a repeating one on the computer's wall clock (floating) so it keeps its time of day across a summer-time change, and an
-edit keeps the event's own form (its zone, the wall clock or UTC). A delete is a kept job the session holds back for
-the undo window (`Outcome::with_held_job`, six seconds, as long as the toast with Undo shows): `Session::tick` hands it
-to the worker once the window is over, `history.undo` before then withdraws it from the queue and puts the event back,
-and a restart hands it out at once. Writes to one event go out one at a time (`engine::writes`): a second write (an
-edit, an undo, a delete whose window is over) waits until the server has taken the first, then goes with the entity
-tag that one got, or, when the server sent none, the tag the next sync of its calendar brings; a sync meanwhile keeps
-the owner's copy. So the owner's changes never conflict with each other. Editing an event with guests counts its
-`SEQUENCE` on only when the owner asks to tell them (`notify`); every organiser and guest InboxCraft writes carries
-`SCHEDULE-AGENT=CLIENT` (RFC 6638) so a server does not mail them on its own, and the attendee parameters `ical` does
-not read go back as they came. Clearing an account's CalDAV address, or moving it to another origin (host or port),
-drops the account's calendars and every calendar write of it in the queue; a discovery carries the address it is for,
-the app starts a worker afresh when an account's servers change, and a `Found` from another origin, a `Found` for an
-account without an address and an event URL outside its calendar's collection are dropped.
+edit keeps the event's own form (its zone, the wall clock or UTC, a series in UTC too) and writes a time it does not
+change as it came. Their `alert` (`"none"` or the minutes before the
+start, at most a week) is set on every `VEVENT` of the object, the series and each changed instance: it moves the
+event's first timed display or sound alarm, dropping `X-APPLE-DEFAULT-ALARM` and `ACKNOWLEDGED`, or adds one `DISPLAY`
+alarm with a `UID` and the event's summary (control characters as spaces), and leaves every other alarm as it is; a
+location alarm (`PROXIMITY` or `X-APPLE-PROXIMITY`, or a trigger at a moment long past) is not the alert and stays.
+`"none"` takes the timed display and sound alarms off and, where no alarm is left, writes the `ACTION:NONE` alarm of
+RFC 9074 so the default lead does not ring. A new event without an `alert` gets the default lead as its alarm (ten
+minutes; for an all-day event a trigger from its midnight at the hour `event.all_day_alert.set` (`owner`) chose:
+`-PT15H`, `-PT12H` or `-PT6H` for 09:00, 12:00 or 18:00 the day before, the default being 09:00, or `PT9H` for 09:00
+on the day), so other devices ring too. The front end keeps that choice beside the week rule, under
+`all_day_alert`, and hands it back at the start (`Session::set_all_day_alert`); a file without it, or with anything
+else there, is the default. Events already written keep their alarms when it changes, and the alerts of all-day
+events without alarms are worked out again at the next tick (a choice handed back after the start's sweep too). The
+day an all-day alert counts from starts at 00:00 on the clock, also where the clock skips midnight. An `event.update`
+that makes a timed event all-day, without an `alert`, moves an alarm still at the timed default (`-PT10M`) to the
+chosen hour, and one that makes an all-day event timed moves an alarm at any of the four hours back to `-PT10M`; any
+other alarm stays, and only the series switches, not its changed instances. An `event.update` that changes only the alert
+rewrites only the moved or new `VALARM`: times, `DTSTAMP`, `SEQUENCE`, the scheduling parameters and the other alarms
+stay, and the guests are not told. What stays is byte-identical for text in canonical form; otherwise only its line
+form (the case of names, CRLF, folding) and parameter quoting change. A changed instance that cannot be read is kept
+as it came while the others take the alert. `event.list` says the alert back: `null` without any alarm, `"none"`, on
+an all-day event the name of the hour its alarm rings at (`"day_before_9"` … `"on_the_day_9"`), the minutes, or `"custom"` for what the field cannot show (a trigger it cannot name, or more than one timed display or
+sound alarm). A delete is a kept job the session holds back for the undo window
+(`Outcome::with_held_job`, six seconds, as long as the toast with Undo shows): `Session::tick` hands it to the worker
+once the window is over, `history.undo` before then withdraws it from the queue and puts the event back, and a restart
+hands it out at once. Writes to one event go out one at a time (`engine::writes`): a second write (an edit, an undo, a
+delete whose window is over) waits until the server has taken the first, then goes with the entity tag that one got,
+or, when the server sent none, the tag the next sync of its calendar brings; a sync meanwhile keeps the owner's copy.
+So the owner's changes never conflict with each other. Editing an event with guests counts its `SEQUENCE` on only when
+the owner asks to tell them (`notify`); every organiser and guest InboxCraft writes carries `SCHEDULE-AGENT=CLIENT`
+(RFC 6638) so a server does not mail them on its own, and the attendee parameters `ical` does not read go back as they
+came. Clearing an account's CalDAV address, or moving it to another origin (host or port), drops the account's
+calendars and every calendar write of it in the queue; a discovery carries the address it is for, the app starts a
+worker afresh when an account's servers change, and a `Found` from another origin, a `Found` for an account without an
+address and an event URL outside its calendar's collection are dropped.
 
 Invitations in mail (iTIP, RFC 5546, in mail, iMIP, RFC 6047) are read once a message's body is kept: the sync hands
 the body to `arrive::invite`, which reads its first `text/calendar` part of its own with `ical` and marks the message
@@ -272,7 +347,8 @@ times, repeat rule and place, and the owner's answer); mail in the Blocked folde
 is read when its card is first asked for. Marks with the same `UID` and `RECURRENCE-ID` in one account are versions of
 one event, the later one the higher `SEQUENCE`, then the later `DTSTAMP`. `invite.show` (`safe`) gives the card: the
 version before and what changed since, whether a later version made it out of date, the answer given, the event in
-the owner's calendars by its `UID`, and whether it can be answered. `invite.answer` (`owner`) builds the owner's
+the owner's calendars by its `UID`, and whether it can be answered (not while the screener holds its sender: an
+answer is mail to them). `invite.answer` (`owner`) builds the owner's
 `METHOD:REPLY` (only the owner among the attendees, with `PARTSTAT`) into a draft with the iTIP object as its
 `text/calendar; method=REPLY` part beside the text (`Draft::calendar`, `MessageBuilder::calendar`), sends it at once
 with the checks `mail.send` makes but without its hold (`cmd::send::sending`; the answer is taken back by changing
@@ -282,9 +358,28 @@ it, not by `mail.unsend`), and writes the event into the account's first calenda
 cancellation is about as `event.delete` does, with its undo window. Nothing in an invitation changes the calendar on
 its own.
 
-Drafts (`engine::draft`) are kept in the store at every change, so a kill loses nothing typed. `compose.new` starts
+Drafts (`engine::draft`) are kept in the store as they change: the composer runs `compose.update` at once for a chip,
+a template or a field left, and at most once a second while a field of it has the keys, so a kill loses at most the
+last second typed in its recipient lines, subject and text; closing, sending, the window's close and the end of the
+app keep it at once. The engine checks each keep on the window's thread; the owner's store
+(`Sqlite::keep_drafts_behind`) then writes a draft it already holds on its draft keeper, one thread with its own
+connection: in order, the newest of each draft, one write at a time, with the same `synchronous=FULL`, each waiting
+at most 2 s for a lock another program holds. Its reads see a keep before it is on the disk, and every other batch (a
+send, a discard, a sync) waits for the keeper first. A write that fails drops nothing: the keeper holds the draft's
+newest text, the reads see it, the status line says it once (the keeper wakes the window), and the keeper tries again
+1 s, 2 s, 4 s … at most 30 s apart until it lands or the draft is discarded; meanwhile a batch that names the draft
+first tries it again and is then refused ("not on the disk yet"), a discard excepted. Closing the composer waits at
+most 3 s for its draft and stays open, saying why, when it is not on the disk ("Draft saved" only once it is). The
+window's close waits at most 3 s too; when a draft is not on the disk it is taken back, the draft open in the
+composer and the failure in the status line with how many more drafts are not kept, and a second close in a row
+(within 10 s, nothing kept since) goes through, losing those drafts' newest text; a close after new typing is taken
+back again. A quit from the tray without a window says it in a notification. The end of the app waits once, about 3 s in all. If the
+keeper's thread ever ends, the store writes what it held and every later draft at once. A new draft, one moved to
+another account, and every store without a keeper (the sample, the browser, the CLI) are written at once.
+What is typed in the field that fills a template's blank is not part of the draft: it lives in the composer only, and closing it, answering, opening
+another draft or quitting drops it. `compose.new` starts
 one from the account that last sent (the newest message in a Sent folder, else the first account) with that
-account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft at once;
+account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft;
 `compose.show` and `compose.list` read them; `compose.discard` removes one here and its copy on the server where
 the server named it; all
 `safe`. A draft on its way (its outbox item waits for the worker's answer) is neither changed nor discarded, so the
@@ -299,6 +394,14 @@ before it is then removed for good (`Expunge`), and a copy of a draft discarded 
 goes too. An answer without a UID marks the draft (`Draft::unnamed`): that copy can be neither replaced nor taken
 back, so no further copy of the draft goes up to that account and it leaves at most one there. A draft with nothing
 typed, or of an account without a Drafts folder, stays here; a failed upload waits for the draft's next change.
+`compose.update` also takes `typed`: the text in the To, Cc and Bcc lines that is not a recipient yet, three lines of
+at most 4 096 characters (a shorter list empties the lines it leaves out; a stored line past the cap reads as empty).
+It is kept here and `compose.show` and `compose.list` answer it, but it never leaves the machine: it is in neither the
+sent message nor the Drafts copy, and a change of it alone uploads no copy. It becomes a recipient only from a line
+the composer lays out: the composer draws Cc and Bcc whenever either holds typed text, takes typed text as recipients
+only from the lines it draws, refuses Send while a line it does not draw holds some, and sends only once it has been
+painted since it opened or moved. A line laid out is not always in sight whole: past four rows of chips it scrolls,
+and typed text longer than the field's width runs past its right end.
 
 Replies and forwards (`engine::reply`) are drafts made from a message, from the account that holds it, all `safe`.
 `compose.reply` goes to the message's `Reply-To`, else its `From`, and a reply to the owner's own message to its `To`;
@@ -347,7 +450,14 @@ item holds the reply (`Refused`), and `mail.send` can send it again, held again.
 where it stands (`waiting`, `sending`, `refused`), a refusal with the server's reply, its enhanced status code
 (RFC 3463) and whether it is permanent (a `5.x.x` code, or a `5xx` reply without one); `outbox.retry` (`owner`)
 sends a refused draft again as `mail.send` does, and refuses an item that is not refused; a waiting item shows the
-time it goes (`at`).
+time it goes (`at`). Send again never sends a draft that changed since the owner sent it: an outbox item keeps the draft as it was
+sent (`SentAs`: the account, To, Cc, Bcc, subject, text, the forwarded message and an invitation's answer), and
+`outbox.list` gives each item's `to`, `cc` and `bcc`, and for a refused one what `changed` since it was sent. A
+refused draft can still be changed, by an agent too (`compose.update` is `safe`); `outbox.retry` sends again only one
+that did not change, so it goes to exactly what the owner already sent, and refuses one that changed or keeps no
+record of how it went (an item an older build kept). Such a draft goes from the composer's own Send (`mail.send`),
+once the owner has opened it there. The window's outbox row lists To, Cc and Bcc, each recipient with its address; for a
+refused send that changed it says what changed and offers only Edit, which opens the draft in the composer.
 
 Bounces (`engine::arrive::bounce`): a message whose header is a delivery report (`Signs::report`: `multipart/report`
 with `report-type=delivery-status` or `global-delivery-status`) from a sender of reports (local part `MAILER-DAEMON`
@@ -422,12 +532,30 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   the other mail ports of the same address (the network blocks mail, or the port is wrong, or the server is down).
   The certificate's issuer and dates come from our own small DER reader, fed by a verifier that keeps the
   certificate and asks the real one; the dates give the clock check where the platform's verifier gives none.
-- Detect (`net::detect`) only proposes: MX, autoconfig at the domain over HTTPS, the ISPDB when switched on (off by
-  default), SRV, and common host names as a hint. DNS is `hickory-proto` messages over our own blocking UDP and TCP
-  exchange with the resolver configuration of the system, HTTPS is `ureq` with `rustls` and the same trust as the
-  mail connections, following no redirect and sending nothing but the URL. A candidate is detected settings
-  (`CheckTarget::detected`): the check signs in to it only after the owner has seen it and its certificate
-  verified.
+- Detect (`net::detect`) only proposes. It asks in stages: MX; autoconfig at the domain over HTTPS, then the ISPDB
+  when switched on (off by default); SRV (RFC 6186); `mail.`, `imap.` and `smtp.` of the address's domain; and
+  last, as a guess about a third party, the provider domains of the MX hosts (their autoconfig over HTTPS, then
+  `mail.`, `imap.` and `smtp.` of them). After each
+  stage it probes the candidates it added, in that order: the list is a pure function of what the lookups returned
+  (`net::candidates`: de-duplicated, capped, hosts made up from a domain only on 993 and 143, or 465 and 587, never
+  without encryption, never port 25), and a candidate counts only when it greets and, encrypted, offers a sign-in
+  (`net::probe`, which sends no user name or password). A server the domain names (its autoconfig, the ISPDB, SRV)
+  that no probe reached is still proposed, marked unchecked. While the domain names servers of a kind, a
+  guess of that kind is tried only once every named one has failed for a definite reason (refused, no such name, a
+  certificate that does not hold, no STARTTLS, no sign-in); one that only timed out, dropped the connection or whose
+  certificate does not fit this computer's clock keeps the guesses away, and is proposed with the cause
+  (`Checked::NoAnswer`, `Refused`, `NoName`, `Clock`). A host is skipped on every port when its name is not found;
+  a guess of the domain's own that timed out skips the guesses on its host, not a server the domain names there; any
+  other host that timed out is skipped on that port only. It stops once it has an IMAP and a submission server, after
+  24 probes, or at its deadline of 120 seconds, which every lookup and probe is given (`net::Deadline`, with a stop
+  the app sets when a newer run starts); a probe has 12 seconds of its own and tries at most four addresses. The
+  connector ends every connect at the deadline, and the socket under TLS (`Timed` in `net::connect`) every read and
+  write, inside rustls' own loops too, however slowly a server sends or reads; the system's name lookup runs on a
+  thread waited for until the deadline, at most eight of them at once across runs. DNS is `hickory-proto` messages
+  over our own blocking UDP and TCP exchange with the resolver configuration of the system, HTTPS is `ureq` with
+  `rustls` and the same trust as the mail connections, following no redirect and sending nothing but the URL. A
+  candidate is detected settings (`CheckTarget::detected`): the check signs in to it only after the owner has seen
+  it and its certificate verified.
 - Code that needs the time takes an `inboxcraft_time::Clock`; tests hand it a `FakeClock`. `Instant::now` and
   `SystemTime::now` are banned in `clippy.toml` (they trap on wasm); `SystemClock` is the one place that reads them.
   Code that works in the owner's wall-clock time takes an `inboxcraft_time::Offsets` the same way: a fixed `Offset`,
@@ -435,22 +563,29 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 - Local-first: state that must follow the person between devices lives in the mailbox (hidden folders), because
   the reference server has no IMAP METADATA.
 - The store (`inboxcraft-store`, layer 1, the one crate allowed to depend on `model` inside its layer) is the
-  `Storage` trait with two backends. `Memory` is always built and is the store on wasm. `Sqlite` is native only
+  `Storage` trait with two backends. `Memory` is always built and is the store on wasm; it applies a batch to a
+  copy of its state whose tables stay shared with the old state until the batch writes to them, so a batch copies
+  only the tables it changes (a kept draft the drafts, not the messages), and each message is shared on its own, so
+  marking one read copies that message and the table of handles, not every message. `Sqlite` is native only
   (feature `sqlite`): `store.sqlite3` in WAL mode with `synchronous=FULL` and foreign keys on, its schema version in
   `PRAGMA user_version` with one migration per version, an FTS5 index of the body text, and each message source as
-  `sources/<body id>.eml` beside it. A source is written and synced before the row that names it commits and
+  `sources/<body id>.eml` beside it. Both backends index the links each message names (`Message-ID`, `In-Reply-To`,
+  `References`; in SQLite the `message_link` table of schema version 6), so `Storage::linked` gives the messages that
+  name one link, leaving out those already found, and `mail.thread` and `mail.why` find one message's thread link
+  by link: one index lookup per link and one record read per message of the thread, not of the store. A source is written and synced before the row that names it commits and
   removed only after that row is gone; opening the store removes the files a kill left behind. Removed mail is
   zeroed in the database (`secure_delete`, FTS5 `secure-delete`) and the write-ahead log is emptied after the batch
   that removed it. The store does no network I/O and parses no mail: the caller hands in each body's text.
-- Beside the mail the store keeps the local records (`model::local`, schema version 4): the job queue, drafts, the
-  outbox, the schedule, senders (known, the screener's decision, the group), each message's own state (done,
-  parked, pinned, snoozed, follow-up) and the calendars with their sync token, events (ETag and iCalendar text) and
-  alerts. Each row holds its record as JSON, so a new field needs no migration; removing an account, folder,
-  message, draft, alert, calendar or event removes what hangs below it. A schedule entry hangs below the draft,
-  message or alert it names, so it never acts on a later record that got the same id. Senders are kept across
-  accounts. The store has an id of its own, random and kept for good (`Sqlite::id`). The desktop app keeps its
-  store in `inboxcraft/store` in the owner's data folder (`%LOCALAPPDATA%` on Windows, else `XDG_DATA_HOME`,
-  `~/.var/app/<app id>/data` in the Flatpak); the sample stays in memory.
+- Beside the mail the store keeps the local records (`model::local`, schema versions 4 and 5): the job queue, drafts, the
+  outbox, the schedule, senders (known, the screener's decision, the group), each message's own state (done, parked,
+  pinned, snoozed, follow-up) and the calendars with their sync token, events (ETag and iCalendar text) and alerts.
+  Each row holds its record as JSON, so a new field needs no migration; a draft's save time is a column of its own
+  too, so the newest drafts of an account and their count are read through an index without reading every draft
+  (`Storage::newest_drafts`); removing an account, folder, message, draft, alert, calendar or event removes what hangs
+  below it. A schedule entry hangs below the draft, message or alert it names, so it never acts on a later record that
+  got the same id. Senders are kept across accounts. The store has an id of its own, random and kept for good
+  (`Sqlite::id`). The desktop app keeps its store in `inboxcraft/store` in the owner's data folder (`%LOCALAPPDATA%`
+  on Windows, else `XDG_DATA_HOME`, `~/.var/app/<app id>/data` in the Flatpak); the sample stays in memory.
 - Kept jobs: a command that queues a job with `Outcome::with_kept_job` (the acts on mail) writes it into the
   store's job queue in the same batch as its changes, so a kill keeps both or neither. The job leaves the queue with
   its last event (the answer, or `Failed`); `Session::start` hands the jobs an earlier run left over again, under
@@ -528,3 +663,23 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-08 | minor | Invitations: the mark, `invite.show`, `invite.answer` and `invite.remove` (#149) |
 | 2026-11-08 | minor | Event alerts: the store's alerts, the sweep, the notice and its click (#150) |
 | 2026-11-08 | minor | `account.update` and a new password (#214) |
+| 2026-11-21 | minor | The appearance commands without accent, typeface and icon set (#231) |
+| 2026-11-21 | minor | A draft's typed recipient text: kept here, never sent or uploaded, never a recipient unseen (#234) |
+| 2026-11-21 | minor | An invitation from a held sender cannot be answered (#237) |
+| 2026-11-21 | patch | What holds of typed recipient text: a line laid out, not always in sight whole (#238) |
+| 2026-11-21 | minor | A draft kept at most once a second while typing; a blank's text not kept (#238, #243) |
+| 2026-11-21 | minor | The in-memory store copies only the tables a batch changes (#243) |
+| 2026-11-21 | minor | Send again goes only for a refused send that did not change; Edit for the rest (#245) |
+| 2026-11-21 | minor | `mail.why`: the reasons, their kinds, keys and caps (#256) |
+| 2026-11-21 | minor | The this weekend and next week presets; the week rule and `week.settings` / `week.set` (#257) |
+| 2026-11-21 | minor | Detect's stages, its candidate list, its probe and its deadlines (#260) |
+| 2026-11-21 | minor | The store reads the newest drafts and their count through an index (#301) |
+| 2026-11-21 | minor | `schedule.list` says what each entry is about and skips one it cannot read; `after.set`, what follows an act; the week's default from the locale; `mail.unsnooze` leaves a message moved on where it is (#317) |
+| 2026-11-21 | minor | Drafts kept are written behind on the store's draft keeper (#338) |
+| 2026-11-21 | minor | The `alert` of the event commands and of `event.list`; location alarms stay (#343) |
+| 2026-11-21 | minor | `event.list` names the organiser and whether the event is the owner's own (#344) |
+| 2026-11-21 | minor | `greeting.set` and how a name's word is read (#349) |
+| 2026-11-21 | patch | An edit keeps a series in UTC and writes the times it does not change as they came (#351) |
+| 2026-11-21 | minor | The hour an all-day event's alert rings, `event.all_day_alert.set` (#353) |
+| 2026-11-21 | minor | `mail.row`: one message as a list shows it, by its id (#380) |
+| 2026-11-21 | minor | Both stores index the links of the messages; one thread is found link by link (#406) |

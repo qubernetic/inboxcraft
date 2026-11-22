@@ -210,9 +210,18 @@ pub struct Invite {
     pub why_not: Option<String>,
     /// The cancelled event can be taken out of the calendar.
     pub can_remove: bool,
-    /// The guests' answers, on a reply.
+    /// The guests' answers, on a reply: the first [`MOST_REPLIES`].
     pub replies: Vec<Reply>,
+    /// How many more guests answered than `replies` keeps.
+    pub more_replies: usize,
+    /// The organiser is not the message's sender ([`Invite::sent_by`]): the card names the organiser as whom the answer
+    /// goes to. False as read.
+    pub not_from_organiser: bool,
 }
+
+/// The most guests' answers a card keeps one by one; the rest are counted. A reply may name tens of thousands of
+/// guests, and the card is read again on every refresh.
+pub const MOST_REPLIES: usize = 20;
 
 impl Invite {
     /// The card `invite.show` answers for message `message`; `None` for a message without an invitation.
@@ -228,14 +237,19 @@ impl Invite {
         let rsvp = |name: &str| invite.get(name).and_then(Value::as_str).and_then(Rsvp::named);
         let flag = |name: &str| invite.get(name).and_then(Value::as_bool).unwrap_or(false);
         let organizer = invite.get("organizer").filter(|organizer| organizer.is_object());
-        let address = organizer.and_then(|organizer| organizer.get("address")).and_then(Value::as_str).map(shown);
+        // The address the engine's answer goes to (it trims spaces), capped and flat: outside data.
+        let address = organizer
+            .and_then(|organizer| organizer.get("address"))
+            .and_then(Value::as_str)
+            .map(|address| shown(address).trim_matches(' ').to_owned());
         let name = organizer.and_then(|organizer| organizer.get("name")).and_then(Value::as_str).map(shown).filter(|name| !name.is_empty());
-        let replies = invite
-            .get("replies")
-            .and_then(Value::as_array)
+        let all = invite.get("replies").and_then(Value::as_array);
+        let more_replies = all.map_or(0, |all| all.len().saturating_sub(MOST_REPLIES));
+        let replies = all
             .map(|replies| {
                 replies
                     .iter()
+                    .take(MOST_REPLIES)
                     .map(|reply| {
                         let address = reply.get("address").and_then(Value::as_str).unwrap_or_default();
                         let name = reply.get("name").and_then(Value::as_str).filter(|name| !name.is_empty()).unwrap_or(address);
@@ -265,6 +279,8 @@ impl Invite {
             why_not: invite.get("why_not").and_then(Value::as_str).map(shown),
             can_remove: flag("can_remove"),
             replies,
+            more_replies,
+            not_from_organiser: false,
         })
     }
 
@@ -272,6 +288,40 @@ impl Invite {
     #[must_use]
     pub fn month(&self) -> String {
         self.event.start.map(|start| month_name(start.day.month()).chars().take(3).collect::<String>().to_uppercase()).unwrap_or_default()
+    }
+
+    /// The tile's weekday, short and in capitals: `MON`.
+    #[must_use]
+    pub fn weekday(&self) -> String {
+        self.event
+            .start
+            .map(|start| crate::mailbox::weekday_text(start.day.weekday()).chars().take(3).collect::<String>().to_uppercase())
+            .unwrap_or_default()
+    }
+
+    /// When, as the card's WHEN says it: `14:00 – 15:00  ·  Mon 16 Nov`, `all day  ·  Mon 16 Nov`, or the days of a
+    /// longer one.
+    #[must_use]
+    pub fn card_when(&self) -> String {
+        let Some(start) = self.event.start else { return String::new() };
+        let short = |day: Day| {
+            let weekday: String = crate::mailbox::weekday_text(day.weekday()).chars().take(3).collect();
+            let month: String = month_name(day.month()).chars().take(3).collect();
+            tr!("{weekday} {day} {month}", weekday = weekday, day = day.date(), month = month)
+        };
+        if self.event.all_day {
+            return match self.event.last_day().filter(|last| *last != start.day) {
+                Some(last) => tr!("{first} – {last}", first = short(start.day), last = short(last)),
+                None => tr!("all day  ·  {day}", day = short(start.day)),
+            };
+        }
+        match self.event.end {
+            Some(end) if end.day == start.day => {
+                tr!("{start} – {end}  ·  {day}", start = start.clock(), end = end.clock(), day = short(start.day))
+            }
+            Some(end) => tr!("{day} {start} – {last} {end}", day = short(start.day), start = start.clock(), last = short(end.day), end = end.clock()),
+            None => tr!("{start}  ·  {day}", start = start.clock(), day = short(start.day)),
+        }
     }
 
     /// The tile's day of the month.
@@ -333,6 +383,18 @@ impl Invite {
             Some(answer) => tr!("{line} You answered {answer}.", line = line, answer = answer.text()),
             None => line,
         })
+    }
+
+    /// The card of a message sent `from` that address (its first sender's; `None` when it names none): whether the
+    /// organiser is someone else, whom the card then names as whom the answer goes to. The case of an address makes no
+    /// other person.
+    #[must_use]
+    pub fn sent_by(mut self, from: Option<&str>) -> Self {
+        self.not_from_organiser = self
+            .organizer_address
+            .as_deref()
+            .is_some_and(|organiser| from.is_none_or(|from| from.trim().to_lowercase() != organiser.trim().to_lowercase()));
+        self
     }
 
     /// Who the answer goes to: `Your answer goes to odile@example.org at once.`
