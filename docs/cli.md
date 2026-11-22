@@ -4,8 +4,8 @@
 
 `inboxcraft-cli` runs InboxCraft's commands by id: in the running app, through its control channel
 ([control-protocol.md](control-protocol.md)), or headless on a local store with `--store`. It is the way an agent or
-a script reads mail without the window. It runs as an agent: only `safe` commands run, and an `owner` command only
-when the owner allows it in the running app (`--ask-owner`).
+a script reads mail without the window. It runs as an agent: only `safe` commands run, and of the `owner` commands
+only `calendar.import`, when the owner allows it in the running app (`--ask-owner`).
 
 ## Running a command
 
@@ -29,8 +29,9 @@ inboxcraft-cli --help
   UTF-8, at most 8 MiB. Inline params beside it, the option twice, or a file that is missing, empty, too big, not
   UTF-8 or not one JSON object is `usage`.
 - `--ask-owner` asks the owner in the running app to allow an `owner` command once
-  ([control-protocol.md](control-protocol.md), "How the app runs a request"). The app shows the question in its
-  window; the answer is the command's own when the owner allows it, `denied` when they deny it, `timed_out` when
+  ([control-protocol.md](control-protocol.md), "How the app runs a request"). Only a command whose question the app
+  builds itself can be asked for, today `calendar.import`; any other `owner` command is `not_allowed` at once, and
+  nothing is asked. The app shows the question in its window; the answer is the command's own when the owner allows it, `denied` when they deny it, `timed_out` when
   nobody answers within two minutes of the question coming to the front, or `busy` when eight requests wait already.
   The CLI waits up to 17 minutes for it, since up to eight questions are asked one after another. A `safe` command
   runs at once as with no option. On a store (`--store`) nothing is asked: an `owner` command is refused as without
@@ -57,12 +58,12 @@ The commands and their parameters are the engine's (`crates/engine/src/cmd/`); `
 ## Agent classes
 
 Every command has an agent class. On a store nobody is there to approve anything; in the app the owner can allow
-one `owner` command at a time when the CLI asks (`--ask-owner`):
+`calendar.import`, one request at a time, when the CLI asks (`--ask-owner`):
 
 | Class | In the CLI |
 |---|---|
 | `safe` | runs: reading, listing, searching, the reader's own changes (a message opened is kept) |
-| `owner` | refused with a plain error and exit code 1, unless asked for with `--ask-owner` in the running app and allowed by the owner there: adding, changing or removing an account, sending (sending later, retrying, unsending, cancelling a scheduled send), moving, archiving, marking done, deleting, events, answers to invitations and removing them, the screener's and the groups' choices, templates and the signature, allowing or forgetting remote pictures, and the settings but the appearance's (`ui.*.set` other than `ui.layout.set`) |
+| `owner` | refused with a plain error and exit code 1; `calendar.import` runs when asked for with `--ask-owner` in the running app and allowed by the owner there. The class holds adding, changing or removing an account, sending (sending later, retrying, unsending, cancelling a scheduled send), moving, archiving, marking done, deleting, events, answers to invitations and removing them, the screener's and the groups' choices, templates and the signature, allowing or forgetting remote pictures, and the settings but the appearance's (`ui.*.set` other than `ui.layout.set`) |
 | `never` | refused the same way |
 
 A refused command changes nothing.

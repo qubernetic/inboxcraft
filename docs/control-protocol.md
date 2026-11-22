@@ -56,7 +56,9 @@ One JSON object a line each way, UTF-8, the line ended by `\n` (`\r\n` is read t
 ```
 
 `params` is one JSON object and may be left out. A line that asks the owner to allow an `owner` command once carries
-two more fields: `"ask_owner": true`, and `client`, the name the client gives itself (the CLI sends `inboxcraft-cli`):
+two more fields: `"ask_owner": true`, and `client`, the name the client gives itself (the CLI sends `inboxcraft-cli`).
+Only a command whose question InboxCraft builds itself can be asked for: today `calendar.import` alone. Any other
+`owner` command asked for is answered `not_allowed` at once, and nothing is asked or queued:
 
 ```json
 {"token":"<64 hex digits>","command":"calendar.import","params":{"calendar":2,"ics":"BEGIN:VCALENDAR..."},"ask_owner":true,"client":"inboxcraft-cli"}
@@ -104,28 +106,30 @@ The socket has a thread of its own and one thread a client. A request with the r
 call; the window runs it before its next frame, or, while InboxCraft runs without a window, at its next look for the
 workers' events, at most half a second later. It runs as an agent: only a `safe` command runs, and its jobs (fetching
 a body, checking an account) go to the workers as the window's own do. The list is read again afterwards. An act of the
-agent's (marking read, flagging) ends the window's Undo for the acts before it, so the window never takes the agent's
-act back in place of the owner's.
+agent's (marking read, flagging) ends the toast's Undo, which named the owner's act alone. The window's Undo (`Ctrl+Z`)
+still takes the owner's newest act back, and with it the agent's acts above it, the history being one stack; it never
+takes an agent's act back alone, in place of the owner's.
 
-A line that asks the owner for an `owner` command becomes a request in the window's queue instead; at most eight
+A line that asks the owner for `calendar.import` becomes a request in the window's queue instead; at most eight
 wait. The window asks about one at a time, the oldest first, in a dialog over the dimmed window, and in its own
-words: who asks ("A program that calls itself “inboxcraft-cli” asks, over the control channel."), what would run
-and, for `calendar.import`, the calendar, how many events are added, skipped, added once or left out, and the
-first five with their dates; for another command its id and its first six values. What came from the client stands only inside
-“…”, and only plain characters are drawn there: letters, numbers, punctuation and symbols; quote-like marks become
-one `'`, and format characters are left out. Each request has two minutes from the moment it comes to the front.
+words: who asks ("A program that calls itself “inboxcraft-cli” asks, over the control channel."), the calendar,
+how many events are added, skipped, added once or left out, and the first five with their dates. What came from the
+client stands only inside “…”, and only plain characters are drawn there: letters, numbers, punctuation and symbols;
+quote-like marks become one `'`, and format characters are left out. Each request has two minutes from the moment it comes to the front.
 The dialog opens with `Deny` holding the keyboard; `Esc` or a press on the dimmed window
 denies. Only the owner's own fresh press of "Allow once", from a second after that question showed, allows: keys
 on their way or held down never do. The allowed command runs for the owner, once, and its answer is the line's
 answer (or its error code); it is one step of the window's Undo, the status line says what the agent did with Undo
-beside it, and an agent cannot take it back (`history.undo` is refused with `not_allowed`). While the owner's own
-dialog shows, the question waits behind it. A request that cannot be shown (its parameters are wrong, say) is
+beside it, and an agent cannot take it back (`history.undo` is refused with `not_allowed`). The agent's next act does
+not take the owner's Undo away: `Ctrl+Z` still takes the import back, and the agent's acts above it with it. While
+the owner's own dialog shows, the question waits behind it. A request that cannot be shown (its parameters are wrong, say) is
 answered with its error when it comes to the front, without asking. While the window is not focused, is minimised
 or is closed when a request comes to the front, one desktop notification says the question; a click on it brings
 the window forward, or opens one. When the client hangs up (the app looks every quarter of a second) or the app gives up waiting, the
 request is withdrawn: it leaves the queue unanswered and runs nothing, also when the owner presses Allow on it
-meanwhile. A line that asks for a `safe` command runs at once, as the agent's, like any other; one that asks for a
-`never` command is refused with `not_allowed` and an unknown one with `unknown_command`, as without asking.
+meanwhile. A line that asks for a `safe` command runs at once, as the agent's, like any other; one that asks for an
+`owner` command other than `calendar.import`, or for a `never` command, is refused with `not_allowed`, and an unknown
+one with `unknown_command`, as without asking.
 
 Every `safe` command runs over the channel; `inboxcraft-cli commands` lists them with their class. Besides reading,
 that is:
@@ -185,8 +189,10 @@ Everything a client sends is hostile. `cargo +nightly fuzz run control_lines` ru
 - The client does not check who is listening once it is connected (the standard library cannot read the peer's user
   id yet); the owner and mode of the folders stand in for that check.
 - It does not check the client's process: any process of the owner's that can read the credential store can use it.
-- It keeps no standing grant: every `owner` command is asked about on its own, and an Allow counts for that one
-  request only.
+- It keeps no standing grant: every request is asked about on its own, and an Allow counts for that one request
+  only.
+- Only `calendar.import` can be asked for: another `owner` command waits for a question of its own that the app
+  builds, and until then is `not_allowed` over the channel, as in the CLI.
 - The client's name is what the client says, and the window shows it as such ("a program that calls itself").
 - Without a window the question shows only as the desktop notification; when nobody opens the window from it and
   answers, the request times out.
