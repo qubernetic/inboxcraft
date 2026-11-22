@@ -24,6 +24,8 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
@@ -56,6 +58,43 @@ impl Default for Limits {
 /// Eight questions of two minutes each, and the half minute of the default `patience`.
 const OWNER_PATIENCE: Duration = Duration::from_secs(990);
 
+/// Who has the last word on a call that asks the owner, shared by the server and the window: open while it waits,
+/// then taken by the window to run, or withdrawn by the server, whichever comes first. A withdrawn call never runs,
+/// and a taken one is never withdrawn, so the answer the asker gets is what happened.
+#[derive(Debug, Clone, Default)]
+pub struct Claim(Arc<AtomicU8>);
+
+/// The states of a [`Claim`].
+const OPEN: u8 = 0;
+const TAKEN: u8 = 1;
+const WITHDRAWN: u8 = 2;
+
+impl Claim {
+    /// Takes the call to run it now; false when it was withdrawn (the asker gave up or left), so it must not run.
+    #[must_use]
+    pub fn take(&self) -> bool {
+        match self.0.compare_exchange(OPEN, TAKEN, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => true,
+            Err(now) => now == TAKEN,
+        }
+    }
+
+    /// Withdraws the call; false when the window took it to run first, so its answer is still to come.
+    #[must_use]
+    pub fn withdraw(&self) -> bool {
+        match self.0.compare_exchange(OPEN, WITHDRAWN, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => true,
+            Err(now) => now == WITHDRAWN,
+        }
+    }
+
+    /// Whether the call was withdrawn.
+    #[must_use]
+    pub fn is_withdrawn(&self) -> bool {
+        self.0.load(Ordering::SeqCst) == WITHDRAWN
+    }
+}
+
 /// One request with the right token, for the window to run and answer.
 #[derive(Debug)]
 pub struct Call {
@@ -64,13 +103,14 @@ pub struct Call {
     answer: Sender<Result<Value, Failure>>,
     asks_owner: bool,
     client: Option<String>,
+    claim: Claim,
 }
 
 impl Call {
     /// The call of `command` with `params`, answered on `answer`.
     #[must_use]
     pub fn new(command: String, params: Value, answer: Sender<Result<Value, Failure>>) -> Self {
-        Self { command, params, answer, asks_owner: false, client: None }
+        Self { command, params, answer, asks_owner: false, client: None, claim: Claim::default() }
     }
 
     /// The call as one that asks the owner to allow an `owner` command once, from the client that named itself
@@ -92,6 +132,12 @@ impl Call {
     #[must_use]
     pub fn client(&self) -> Option<&str> {
         self.client.as_deref()
+    }
+
+    /// The call's [`Claim`]: a call that asks the owner runs only when the window could take it.
+    #[must_use]
+    pub fn claim(&self) -> Claim {
+        self.claim.clone()
     }
 
     /// The command id.
@@ -369,7 +415,7 @@ mod unix {
             if !read_line(&mut reader, &mut line, limits.idle) {
                 return;
             }
-            let (answer, goes_on) = answer(&line, entries, calls, wake, limits);
+            let (answer, goes_on) = answer(&line, &mut reader, entries, calls, wake, limits);
             if writer.write_all(answer_line(&answer).as_bytes()).is_err() || !goes_on {
                 return;
             }
@@ -404,7 +450,14 @@ mod unix {
     }
 
     /// The answer to one line, and whether the connection goes on after it.
-    fn answer(line: &[u8], entries: &dyn Entries, calls: &Sender<Call>, wake: &Wake, limits: Limits) -> (Result<Value, Failure>, bool) {
+    fn answer(
+        line: &[u8],
+        reader: &mut BufReader<UnixStream>,
+        entries: &dyn Entries,
+        calls: &Sender<Call>,
+        wake: &Wake,
+        limits: Limits,
+    ) -> (Result<Value, Failure>, bool) {
         let request = match read_request(line) {
             Ok(request) => request,
             Err(failure) => {
@@ -424,18 +477,69 @@ mod unix {
         if request.ask_owner {
             call = call.asking_owner(request.client);
         }
-        let asks_owner = call.asks_owner();
+        let (asks_owner, claim) = (call.asks_owner(), call.claim());
         if calls.send(call).is_err() {
             return closing();
         }
         wake();
-        let patience = if asks_owner { limits.owner_patience } else { limits.patience };
-        match answered.recv_timeout(patience) {
+        if asks_owner {
+            return wait_for_owner(&answered, &claim, reader, wake, limits.owner_patience);
+        }
+        match answered.recv_timeout(limits.patience) {
             Ok(answer) => (answer, true),
-            Err(RecvTimeoutError::Timeout) if asks_owner => (Err(Failure::new("timed_out", "the owner did not answer in time")), true),
-            Err(RecvTimeoutError::Timeout) => (Err(Failure::new("busy", "InboxCraft did not answer in time")), true),
-            Err(RecvTimeoutError::Disconnected) if asks_owner => closing(),
-            Err(RecvTimeoutError::Disconnected) => (Err(Failure::new("busy", "InboxCraft did not answer in time")), true),
+            Err(_) => (Err(Failure::new("busy", "InboxCraft did not answer in time")), true),
+        }
+    }
+
+    /// How often a wait for the owner looks whether its asker hung up.
+    const LOOK: Duration = Duration::from_millis(250);
+
+    /// Waits up to `patience` for the answer to a call that asks the owner, and whether the connection goes on. Every
+    /// [`LOOK`] it looks whether the asker hung up. When the asker is gone or the time is up, the call is withdrawn
+    /// through its `claim`, so a later Allow runs nothing, and the window is woken to take it out of its queue; the
+    /// asker is told `timed_out`. A call the window took to run first is waited for to the end: its answer is what
+    /// ran.
+    fn wait_for_owner(
+        answered: &mpsc::Receiver<Result<Value, Failure>>,
+        claim: &crate::control::Claim,
+        reader: &mut BufReader<UnixStream>,
+        wake: &Wake,
+        patience: Duration,
+    ) -> (Result<Value, Failure>, bool) {
+        let closing = || (Err(Failure::new("closing", "InboxCraft is closing")), false);
+        let clock = SystemClock::new();
+        loop {
+            let left = patience.saturating_sub(clock.monotonic());
+            match answered.recv_timeout(left.min(LOOK)) {
+                Ok(answer) => return (answer, true),
+                Err(RecvTimeoutError::Disconnected) => return closing(),
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+            let gone = hung_up(reader);
+            if !gone && clock.monotonic() < patience {
+                continue;
+            }
+            if claim.withdraw() {
+                wake();
+                return (Err(Failure::new("timed_out", "the owner did not answer in time")), !gone);
+            }
+            // Taken: the window runs it now and answers, or drops it when it closes.
+            return match answered.recv() {
+                Ok(answer) => (answer, !gone),
+                Err(_) => closing(),
+            };
+        }
+    }
+
+    /// Whether the client of `reader` hung up: its side reads as ended. A client that sent more is not taken for gone
+    /// (what it sent stays in `reader` for the next line); one that only closed its writing side is.
+    fn hung_up(reader: &mut BufReader<UnixStream>) -> bool {
+        if reader.get_ref().set_read_timeout(Some(Duration::from_millis(1))).is_err() {
+            return true;
+        }
+        match reader.fill_buf() {
+            Ok(buffer) => buffer.is_empty(),
+            Err(error) => !matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted),
         }
     }
 }

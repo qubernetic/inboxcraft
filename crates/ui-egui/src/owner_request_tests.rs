@@ -86,14 +86,32 @@ fn due_in_counts_down_the_front_s_two_minutes() {
 }
 
 #[test]
-fn a_clock_that_goes_back_starts_the_two_minutes_again_and_never_ends_them_early() {
+fn a_clock_that_goes_back_does_not_date_the_front_again_and_never_ends_it_early() {
     let mut requests = OwnerRequests::default();
     let ticket = requests.push(None, "event.create", json!({})).unwrap();
     requests.expire(at(100));
     requests.expire(at(-1000));
     assert!(requests.take_settled().is_empty());
-    requests.expire(at(-881));
-    assert!(requests.take_settled().is_empty());
+    assert_eq!(requests.due_in(at(-1000)), Some(PATIENCE), "a clock behind the date has waited nothing");
     requests.expire(at(-880));
+    assert!(requests.take_settled().is_empty(), "not dated again at the clock's step back");
+    requests.expire(at(219));
+    assert!(requests.take_settled().is_empty());
+    requests.expire(at(220));
     assert!(matches!(requests.take_settled().as_slice(), [(got, Settled::TimedOut)] if *got == ticket));
+}
+
+#[test]
+fn a_withdrawn_request_leaves_the_queue_unanswered() {
+    let mut requests = OwnerRequests::default();
+    let first = requests.push(None, "event.create", json!({})).unwrap();
+    let second = requests.push(None, "event.create", json!({})).unwrap();
+    requests.expire(at(0));
+    assert!(requests.withdraw(first));
+    assert!(!requests.withdraw(first), "only once");
+    assert_eq!(requests.front().map(|front| front.ticket), Some(second));
+    assert_eq!(requests.front().and_then(|front| front.since), None, "its two minutes start when it is next looked at");
+    assert!(requests.withdraw(second));
+    assert!(!requests.waiting());
+    assert!(requests.take_settled().is_empty());
 }

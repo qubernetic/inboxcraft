@@ -158,6 +158,66 @@ fn an_allowed_request_is_one_step_of_the_window_s_undo() {
 }
 
 #[test]
+fn an_allowed_request_is_one_step_of_the_window_s_undo_when_the_history_is_full() {
+    let (mut app, _clock) = window();
+    // An agent's acts fill the engine's history and end the window's undo for the acts before them.
+    for turn in 0..inboxcraft_engine::MAX_HISTORY {
+        app.mailbox_mut().run_for_agent("mail.flag", &json!({ "id": 1, "flagged": turn % 2 == 0 })).unwrap();
+    }
+    assert!(!app.mailbox().can_undo());
+    let held = events(&mut app);
+    asked(&mut app);
+    app.answer_owner_request(true);
+    assert_eq!(events(&mut app), held + 2);
+    assert!(app.mailbox().can_undo());
+    assert!(app.mailbox().undoable().unwrap().undoable);
+    app.mailbox_mut().undo();
+    assert_eq!(events(&mut app), held, "Undo in the window takes the import back");
+}
+
+#[test]
+fn a_withdrawn_request_leaves_the_queue_and_a_later_allow_runs_nothing() {
+    let (mut app, _clock) = window();
+    let held = events(&mut app);
+    let ticket = asked(&mut app);
+    app.expire_owner_requests();
+    app.withdraw_owner_request(ticket);
+    assert!(!app.asks_owner());
+    app.answer_owner_request(true);
+    assert_eq!(events(&mut app), held);
+    assert!(app.take_settled().is_empty(), "nobody is answered");
+}
+
+#[test]
+fn a_request_another_side_took_back_first_runs_nothing_on_allow() {
+    let (mut app, _clock) = window();
+    let held = events(&mut app);
+    let ticket = app.ask_owner_if(Some("inboxcraft-cli"), "calendar.import", &import_params(), Box::new(|| false)).unwrap();
+    app.answer_owner_request(true);
+    assert_eq!(events(&mut app), held);
+    assert!(!app.asks_owner());
+    assert!(app.take_settled().is_empty(), "nobody is answered for {ticket:?}");
+}
+
+#[test]
+fn withdrawing_the_front_starts_the_two_minutes_of_the_one_behind_it() {
+    let (mut app, clock) = window();
+    let first = asked(&mut app);
+    clock.advance(Duration::from_secs(60));
+    let second = asked(&mut app);
+    app.expire_owner_requests();
+    clock.advance(Duration::from_secs(100));
+    app.withdraw_owner_request(first);
+    app.expire_owner_requests();
+    clock.advance(Duration::from_secs(119));
+    app.expire_owner_requests();
+    assert!(app.take_settled().is_empty(), "the second waits its own two minutes");
+    clock.advance(Duration::from_secs(1));
+    app.expire_owner_requests();
+    assert!(matches!(app.take_settled().as_slice(), [(got, Settled::TimedOut)] if *got == second));
+}
+
+#[test]
 fn the_agent_cannot_take_the_owner_s_step_back() {
     let (mut app, _clock) = window();
     let held = events(&mut app);

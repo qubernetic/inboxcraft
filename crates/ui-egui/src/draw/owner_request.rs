@@ -13,7 +13,7 @@ use inboxcraft_engine::AgentClass;
 use serde_json::Value;
 
 use super::InboxApp;
-use crate::owner_request::{Settled, Ticket};
+use crate::owner_request::{MayRun, Settled, Ticket};
 use crate::tr;
 
 impl InboxApp {
@@ -22,11 +22,24 @@ impl InboxApp {
     /// wait already, or when `command` is no `owner` command (a `safe` one needs no asking, a `never` one is never
     /// offered, an unknown one is none).
     pub fn ask_owner(&mut self, client: Option<&str>, command: &str, params: &Value) -> Option<Ticket> {
+        self.ask_owner_if(client, command, params, Box::new(|| true))
+    }
+
+    /// As [`InboxApp::ask_owner`], for a request that runs on Allow only when `may_run` says so at that moment: the
+    /// asker can withdraw it (it left, or gave up waiting) up to the last moment, and the Allow then runs nothing and
+    /// answers nobody. `may_run` is asked once, right before the command would run.
+    pub fn ask_owner_if(&mut self, client: Option<&str>, command: &str, params: &Value, may_run: Box<dyn Fn() -> bool + Send>) -> Option<Ticket> {
         let (command, class) = self.mailbox.class_of(command)?;
         if class != AgentClass::Owner {
             return None;
         }
-        self.owner_requests.push(client, command, params.clone())
+        self.owner_requests.push_if(client, command, params.clone(), MayRun::new(may_run))
+    }
+
+    /// Takes the request `ticket` out of the queue unanswered and unrun, as when its asker left; nothing when it is
+    /// not waiting.
+    pub fn withdraw_owner_request(&mut self, ticket: Ticket) {
+        self.owner_requests.withdraw(ticket);
     }
 
     /// The owner's answer to the request in front: with `allow`, its command runs for the owner, one step of the
@@ -41,6 +54,11 @@ impl InboxApp {
         }
         if !allow {
             self.owner_requests.settle_front(Settled::Denied);
+            return;
+        }
+        if !self.owner_requests.front().is_some_and(|front| front.may_run.check()) {
+            // Withdrawn by its asker since it was drawn: the Allow runs nothing and answers nobody.
+            self.owner_requests.withdraw(asked);
             return;
         }
         let Some((command, params)) = self.owner_requests.front().map(|front| (front.command, front.params.clone())) else { return };

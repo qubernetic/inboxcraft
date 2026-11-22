@@ -605,6 +605,8 @@ fn an_asking_line_nobody_answers_is_timed_out() {
     assert_eq!(failure.message, "the owner did not answer in time");
     assert!(clock.monotonic() >= Duration::from_millis(100));
     let kept: Vec<Call> = calls.try_iter().collect();
+    assert!(kept.iter().all(|call| call.claim().is_withdrawn()), "the question it gave up on is withdrawn");
+    assert!(kept.iter().all(|call| !call.claim().take()), "and can no longer be run");
     drop(kept);
     drop(calls);
     assert_eq!(code(client.send(line.as_bytes())), "closing", "a window that is gone");
@@ -620,4 +622,68 @@ fn an_asking_call_the_window_drops_is_closing() {
     let mut client = Client::to(&socket);
     let line = owner_request_line(&token(1), "calendar.import", &json!({}), "a");
     assert_eq!(code(client.send(line.as_bytes())), "closing");
+}
+
+/// A server whose asking calls are handed to the test as they come, waiting `owner_patience` for the owner.
+fn handing_over(owner_patience: Duration) -> (tempfile::TempDir, PathBuf, Listening, Receiver<Call>, Arc<AtomicUsize>) {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("control.sock");
+    let (send, calls) = mpsc::channel::<Call>();
+    let (wake, woken) = counting();
+    let limits = Limits { patience: Duration::from_millis(50), owner_patience, ..Limits::default() };
+    let listening = listen_with(&socket, keeping(&token(1)), send, wake, limits).unwrap();
+    (dir, socket, listening, calls, woken)
+}
+
+#[test]
+fn an_asker_that_hangs_up_withdraws_its_question() {
+    let (_dir, socket, _listening, calls, woken) = handing_over(Duration::from_secs(60));
+    let mut stream = UnixStream::connect(&socket).unwrap();
+    stream.write_all(owner_request_line(&token(1), "calendar.import", &json!({}), "a").as_bytes()).unwrap();
+    let call = calls.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(!call.claim().is_withdrawn(), "it still asks");
+    let before = woken.load(Ordering::SeqCst);
+    drop(stream);
+    let clock = SystemClock::new();
+    while !call.claim().is_withdrawn() && clock.monotonic() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(call.claim().is_withdrawn(), "the hang-up was seen");
+    assert!(clock.monotonic() < Duration::from_secs(2), "soon, not at the end of its patience");
+    assert!(!call.claim().take());
+    let clock = SystemClock::new();
+    while woken.load(Ordering::SeqCst) == before && clock.monotonic() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(woken.load(Ordering::SeqCst) > before, "the window is woken to take it out of its queue");
+}
+
+#[test]
+fn a_question_the_window_took_to_run_is_answered_with_its_result_after_the_patience() {
+    let (_dir, socket, _listening, calls, _woken) = handing_over(Duration::from_millis(100));
+    std::thread::spawn(move || {
+        for call in calls {
+            assert!(call.claim().take());
+            std::thread::sleep(Duration::from_millis(300));
+            call.answer(Ok(json!({ "ran": true })));
+        }
+    });
+    let mut client = Client::to(&socket);
+    let answer = client.send(owner_request_line(&token(1), "calendar.import", &json!({}), "a").as_bytes());
+    assert_eq!(answer.unwrap().unwrap(), json!({ "ran": true }), "never timed_out for a command that runs");
+}
+
+#[test]
+fn an_asker_that_stays_is_not_taken_for_gone() {
+    let (_dir, socket, _listening, calls, _woken) = handing_over(Duration::from_secs(60));
+    std::thread::spawn(move || {
+        for call in calls {
+            std::thread::sleep(Duration::from_millis(600));
+            assert!(!call.claim().is_withdrawn());
+            call.answer(Ok(json!({ "ran": true })));
+        }
+    });
+    let mut client = Client::to(&socket);
+    let answer = client.send(owner_request_line(&token(1), "calendar.import", &json!({}), "a").as_bytes());
+    assert_eq!(answer.unwrap().unwrap(), json!({ "ran": true }));
 }

@@ -15,7 +15,8 @@
 //! ([`crate::control`]) for an agent, so only `safe` commands run; without a window a call waits for the next look,
 //! at most [`WINDOWLESS_TICK`]. A call that asks the owner for an `owner` command waits in the window's queue
 //! ([`InboxApp::ask_owner`]) and is answered once the owner allowed or denied it there, or its two minutes ran out:
-//! `denied`, `timed_out`, or `busy` when eight wait already. A click on a notification opens its message in the
+//! `denied`, `timed_out`, or `busy` when eight wait already. One its asker withdrew (it left, or the server stopped
+//! waiting) leaves the queue unanswered and never runs ([`crate::control::Claim`]). A click on a notification opens its message in the
 //! full-width reader, with the window brought forward or opened again; its buttons mark the message done or read, as
 //! the window's own acts do.
 
@@ -277,8 +278,18 @@ impl Desktop {
         show
     }
 
-    /// Lets the request in front run out of time, and answers the calls whose requests are settled.
+    /// Takes out of the queue the requests whose callers withdrew them (the asker left, or the server gave up
+    /// waiting and answered it), lets the request in front run out of time, and answers the calls whose requests are
+    /// settled.
     fn answer_asked(&mut self) {
+        let app = &mut self.app;
+        self.asked.retain(|(ticket, call)| {
+            let withdrawn = call.claim().is_withdrawn();
+            if withdrawn {
+                app.withdraw_owner_request(*ticket);
+            }
+            !withdrawn
+        });
         self.app.expire_owner_requests();
         for (ticket, settled) in self.app.take_settled() {
             let Some(at) = self.asked.iter().position(|(asked, _)| *asked == ticket) else { continue };
@@ -301,7 +312,12 @@ impl Desktop {
         for call in calls {
             let owner = self.app.mailbox().class_of(call.command()).is_some_and(|(_, class)| class == AgentClass::Owner);
             if call.asks_owner() && owner {
-                match self.app.ask_owner(call.client(), call.command(), call.params()) {
+                let claim = call.claim();
+                if claim.is_withdrawn() {
+                    // Its asker is gone or was answered already: there is nobody to ask for.
+                    continue;
+                }
+                match self.app.ask_owner_if(call.client(), call.command(), call.params(), Box::new(move || claim.take())) {
                     Some(ticket) => self.asked.push((ticket, call)),
                     None => call.answer(Err(Failure::new("busy", "eight requests wait for the owner already"))),
                 }

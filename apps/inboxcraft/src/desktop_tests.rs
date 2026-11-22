@@ -19,7 +19,7 @@ use inboxcraft_ui_egui::{InboxApp, Screen};
 use serde_json::json;
 
 use super::{Badge, Desktop, unread};
-use crate::control::Call;
+use crate::control::{Call, Claim};
 use crate::instance::Request;
 
 /// How long a windowless wait lasts in these tests when no request comes.
@@ -1007,4 +1007,69 @@ fn a_call_whose_asker_left_is_settled_quietly() {
     desktop.app_mut().answer_owner_request(false);
     tick(&mut desktop, &ctx, false);
     assert!(!desktop.app().asks_owner());
+}
+
+/// Sends a call of `command` with `params` that asks the owner; the receiver of its answer and the call's claim, as
+/// the control server keeps it.
+fn ask_claimed(calls: &Sender<Call>, command: &str, params: serde_json::Value) -> (mpsc::Receiver<Result<serde_json::Value, Failure>>, Claim) {
+    let (call, answer) = call(command, params);
+    let call = call.asking_owner(Some("test".into()));
+    let claim = call.claim();
+    calls.send(call).unwrap();
+    (answer, claim)
+}
+
+#[test]
+fn a_call_the_server_gave_up_on_leaves_the_queue_and_a_later_allow_runs_nothing() {
+    let (mut desktop, calls, _clock, _send) = asking();
+    let ctx = egui::Context::default();
+    let held = events(&mut desktop);
+    let (answer, claim) = ask_claimed(&calls, "calendar.import", import());
+    tick(&mut desktop, &ctx, false);
+    assert!(desktop.app().asks_owner());
+    // The server's patience ran out: it answered `timed_out` and withdrew the question.
+    assert!(claim.withdraw());
+    tick(&mut desktop, &ctx, false);
+    assert!(!desktop.app().asks_owner(), "the question left the queue");
+    desktop.app_mut().answer_owner_request(true);
+    tick(&mut desktop, &ctx, false);
+    assert_eq!(events(&mut desktop), held, "nothing ran");
+    assert!(answer.try_recv().is_err(), "the server answers it, not the window");
+}
+
+#[test]
+fn a_call_withdrawn_between_two_ticks_runs_nothing_on_allow() {
+    let (mut desktop, calls, _clock, _send) = asking();
+    let ctx = egui::Context::default();
+    let held = events(&mut desktop);
+    let (_answer, claim) = ask_claimed(&calls, "calendar.import", import());
+    tick(&mut desktop, &ctx, false);
+    assert!(claim.withdraw());
+    // The owner presses Allow before the next tick looks at the call.
+    desktop.app_mut().answer_owner_request(true);
+    assert_eq!(events(&mut desktop), held, "nothing ran");
+    tick(&mut desktop, &ctx, false);
+    assert!(!desktop.app().asks_owner());
+}
+
+#[test]
+fn a_call_withdrawn_before_the_window_saw_it_is_never_asked() {
+    let (mut desktop, calls, _clock, _send) = asking();
+    let ctx = egui::Context::default();
+    let (_answer, claim) = ask_claimed(&calls, "calendar.import", import());
+    assert!(claim.withdraw());
+    tick(&mut desktop, &ctx, false);
+    assert!(!desktop.app().asks_owner());
+}
+
+#[test]
+fn an_allowed_call_is_taken_so_the_server_can_no_longer_withdraw_it() {
+    let (mut desktop, calls, _clock, _send) = asking();
+    let ctx = egui::Context::default();
+    let (answer, claim) = ask_claimed(&calls, "calendar.import", import());
+    tick(&mut desktop, &ctx, false);
+    desktop.app_mut().answer_owner_request(true);
+    assert!(!claim.withdraw(), "the window took it to run");
+    tick(&mut desktop, &ctx, false);
+    assert_eq!(answer.try_recv().unwrap().unwrap()["added"], json!(2));
 }

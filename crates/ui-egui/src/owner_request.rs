@@ -51,9 +51,41 @@ pub(crate) struct OwnerRequest {
     pub(crate) params: Value,
     /// When it came to the front, so its two minutes run; `None` until [`OwnerRequests::expire`] first sees it there.
     pub(crate) since: Option<Timestamp>,
+    /// Asked right before an Allow runs it: false when the asker withdrew it meanwhile, so it runs not.
+    pub(crate) may_run: MayRun,
 }
 
 /// The requests waiting for the owner, in the order they came, and those settled but not yet answered.
+/// Whether a request may still run, asked of the side that put it (see [`crate::InboxApp::ask_owner_if`]).
+pub(crate) struct MayRun(Box<dyn Fn() -> bool + Send>);
+
+impl MayRun {
+    /// The request may run when `check` says so, at the moment it would.
+    #[must_use]
+    pub(crate) fn new(check: Box<dyn Fn() -> bool + Send>) -> Self {
+        Self(check)
+    }
+
+    /// Whether the request may run now.
+    #[must_use]
+    pub(crate) fn check(&self) -> bool {
+        (self.0)()
+    }
+}
+
+impl Default for MayRun {
+    /// Always.
+    fn default() -> Self {
+        Self(Box::new(|| true))
+    }
+}
+
+impl std::fmt::Debug for MayRun {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MayRun")
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct OwnerRequests {
     waiting: VecDeque<OwnerRequest>,
@@ -63,13 +95,20 @@ pub(crate) struct OwnerRequests {
 
 impl OwnerRequests {
     /// Queues the request of `client` for `command` with `params`; `None` when [`MOST_WAITING`] wait already.
+    #[cfg(test)]
     pub(crate) fn push(&mut self, client: Option<&str>, command: &'static str, params: Value) -> Option<Ticket> {
+        self.push_if(client, command, params, MayRun::default())
+    }
+
+    /// Queues the request of `client` for `command` with `params`, which runs on Allow only when `may_run` says so
+    /// then; `None` when [`MOST_WAITING`] wait already.
+    pub(crate) fn push_if(&mut self, client: Option<&str>, command: &'static str, params: Value, may_run: MayRun) -> Option<Ticket> {
         if self.waiting.len() >= MOST_WAITING {
             return None;
         }
         let ticket = Ticket(self.next);
         self.next = self.next.wrapping_add(1);
-        self.waiting.push_back(OwnerRequest { ticket, client: client.map(str::to_owned), command, params, since: None });
+        self.waiting.push_back(OwnerRequest { ticket, client: client.map(str::to_owned), command, params, since: None, may_run });
         Some(ticket)
     }
 
@@ -85,12 +124,30 @@ impl OwnerRequests {
         }
     }
 
-    /// Dates the request in front when it has no date yet (or a clock that went back left it in the future), and
+    /// Takes the request `ticket` out of the queue without settling it: its asker is gone, and nobody is answered. One
+    /// that comes to the front for it is dated on the next [`OwnerRequests::expire`]. Whether it was waiting.
+    pub(crate) fn withdraw(&mut self, ticket: Ticket) -> bool {
+        let Some(at) = self.waiting.iter().position(|request| request.ticket == ticket) else { return false };
+        self.waiting.remove(at);
+        if at == 0
+            && let Some(next) = self.waiting.front_mut()
+        {
+            next.since = None;
+        }
+        true
+    }
+
+    /// Dates the request in front when it has no date yet (a clock that went back since dates it not again: it has
+    /// waited nothing until the clock is past its date once more, so it never times out early), and
     /// settles it as [`Settled::TimedOut`] once [`PATIENCE`] has gone by since; the one behind it is dated `now`, so its
     /// two minutes run from then. One behind a request the owner answered is dated on the next call.
     pub(crate) fn expire(&mut self, now: Timestamp) {
         let Some(front) = self.waiting.front_mut() else { return };
-        match front.since.and_then(|since| now.duration_since(since)) {
+        let Some(since) = front.since else {
+            front.since = Some(now);
+            return;
+        };
+        match now.duration_since(since) {
             Some(waited) if waited >= PATIENCE => {
                 self.settle_front(Settled::TimedOut);
                 // The one behind it comes to the front now: its two minutes start.
@@ -98,8 +155,7 @@ impl OwnerRequests {
                     next.since = Some(now);
                 }
             }
-            Some(_) => {}
-            None => front.since = Some(now),
+            Some(_) | None => {}
         }
     }
 
@@ -107,7 +163,8 @@ impl OwnerRequests {
     /// waits.
     pub(crate) fn due_in(&self, now: Timestamp) -> Option<Duration> {
         let front = self.waiting.front()?;
-        let Some(waited) = front.since.and_then(|since| now.duration_since(since)) else { return Some(Duration::ZERO) };
+        let Some(since) = front.since else { return Some(Duration::ZERO) };
+        let waited = now.duration_since(since).unwrap_or_default();
         Some(PATIENCE.saturating_sub(waited))
     }
 
