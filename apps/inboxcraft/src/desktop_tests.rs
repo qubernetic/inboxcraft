@@ -1119,7 +1119,7 @@ fn a_question_while_the_window_is_not_focused_or_minimised_is_told_once() {
         let shown = questions(&told);
         assert_eq!(shown.len(), 1, "once per request: {focused:?} {minimized:?}");
         assert_eq!(shown[0].title, "An agent asks for permission");
-        assert!(shown[0].body.starts_with("Add 2 events to ") && shown[0].body.ends_with('?'), "the app's question: {:?}", shown[0].body);
+        assert!(shown[0].body.starts_with("Add 2 events to “") && shown[0].body.ends_with("”?"), "the app's question: {:?}", shown[0].body);
         // The next request in front is told of again.
         let _next = ask(&calls, "event.delete", json!({ "id": 1 }));
         desktop.app_mut().answer_owner_request(false);

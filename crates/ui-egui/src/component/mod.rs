@@ -449,6 +449,16 @@ pub(crate) fn fitted(ui: &Ui, text: &str, font: Font, colour: egui::Color32, roo
     galley(ui, &fit_capped(ui, &plain(text), font, room), font, colour)
 }
 
+/// Whether `c` is a format character never drawn from text that came from outside into a question the owner answers
+/// (the confirmation dialog's words, an agent's request): the bidi embeddings, overrides, isolates and marks (U+202A
+/// to U+202E, U+2066 to U+2069, U+200E, U+200F, U+061C), the zero-width characters and joiners (U+200B to U+200D,
+/// U+2060 to U+2065), the line and paragraph separators (U+2028, U+2029) and the byte order mark (U+FEFF): what
+/// could turn round, hide or break the words around it. `control-key` leaves the same out of a client's name.
+#[must_use]
+pub fn hidden(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}' | '\u{061C}')
+}
+
 /// Whether `c` is an explicit bidi embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069): what could turn
 /// round the words after it.
 fn bidi_override(c: char) -> bool {

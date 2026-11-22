@@ -687,3 +687,16 @@ fn an_asker_that_stays_is_not_taken_for_gone() {
     let answer = client.send(owner_request_line(&token(1), "calendar.import", &json!({}), "a").as_bytes());
     assert_eq!(answer.unwrap().unwrap(), json!({ "ran": true }));
 }
+
+#[test]
+fn the_wire_leaves_out_of_a_client_s_name_exactly_what_the_window_never_draws() {
+    // `control-key` stands alone and keeps its own copy of the list; it must be the window's
+    // (`inboxcraft_ui_egui::component::hidden`), character for character.
+    let wire_drops = |c: char| {
+        let line = owner_request_line(&token(1), "calendar.import", &json!({}), &format!("a{c}b"));
+        inboxcraft_control_key::line::read_request(line.as_bytes()).unwrap().client.as_deref() == Some("ab")
+    };
+    for c in (0..=0xFFFF_u32).chain(0xE_0000..=0xE_007F).filter_map(char::from_u32).filter(|c| !c.is_control()) {
+        assert_eq!(wire_drops(c), inboxcraft_ui_egui::component::hidden(c), "U+{:04X}", u32::from(c));
+    }
+}

@@ -196,8 +196,8 @@ fn an_alert_s_body_breaks_its_line_once_between_the_time_and_the_place() {
 
 #[test]
 fn an_agent_s_question_is_told_in_the_app_s_words_and_a_click_brings_the_window() {
-    let shown = super::owner_question("Add 7 events to Studio?");
-    assert_eq!((shown.title.as_str(), shown.body.as_str()), ("An agent asks for permission", "Add 7 events to Studio?"));
+    let shown = super::owner_question("Add 7 events to “Studio”?");
+    assert_eq!((shown.title.as_str(), shown.body.as_str()), ("An agent asks for permission", "Add 7 events to “Studio”?"));
     assert!(shown.buttons.is_empty() && !shown.mail);
     assert_eq!(shown.key, super::OWNER_QUESTION);
     for action in ["default", super::OPEN] {

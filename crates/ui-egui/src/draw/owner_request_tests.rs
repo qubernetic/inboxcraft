@@ -166,7 +166,7 @@ fn an_allowed_request_is_one_step_of_the_window_s_undo() {
     let name = name_of(app.mailbox_mut());
     let undo = app.mailbox().undoable().unwrap();
     assert!(undo.undoable);
-    assert_eq!(undo.text, format!("An agent added 2 events to {name}"), "the app's words");
+    assert_eq!(undo.text, format!("An agent added 2 events to “{name}”"), "the app's words");
     assert_eq!(undo.act, crate::mailbox::Act::Asked);
     app.mailbox_mut().undo();
     assert_eq!(events(&mut app), held, "one undo takes both events back");
@@ -453,7 +453,7 @@ fn the_question_opens_on_deny_and_runs_only_on_the_owner_s_press_of_allow() {
     harness.run();
     assert_eq!(focused(&harness).as_deref(), Some("Deny"));
     let name = calendar_name(&mut harness);
-    assert!(harness.query_by_label(&format!("Add 7 events to {name}?")).is_some());
+    assert!(harness.query_by_label(&format!("Add 7 events to “{name}”?")).is_some());
     assert!(harness.state().surfaces(&harness.ctx).modal(), "the question is a modal surface");
     wait(&mut harness, ARM_SECONDS);
     press(&mut harness, "Allow once");
@@ -499,7 +499,7 @@ fn a_press_counts_only_for_the_question_it_was_drawn_for() {
     // The first question, armed, is denied; the next one comes to the front unarmed.
     press(&mut harness, "Deny");
     assert!(matches!(harness.state_mut().take_settled().as_slice(), [(_, Settled::Denied)]));
-    assert!(harness.query_by_label(&format!("Add 2 events to {name}?")).is_some(), "the next question shows");
+    assert!(harness.query_by_label(&format!("Add 2 events to “{name}”?")).is_some(), "the next question shows");
     assert_eq!(focused(&harness).as_deref(), Some("Deny"), "and opens on Deny");
     press(&mut harness, "Allow once");
     assert!(harness.state_mut().take_settled().is_empty(), "a press meant for the question before lands on no other");
@@ -550,32 +550,65 @@ fn a_held_key_never_allows() {
     assert!(harness.state().asks_owner());
 }
 
+/// Where `label` holds the typographic quotes, the shape the app gives it: one “ and one ” after it, around data, in
+/// one of the question's sentences; `None` when it holds none.
+fn quoted(label: &str) -> Option<(&str, &str, &str)> {
+    if !label.contains(['“', '”']) {
+        return None;
+    }
+    assert_eq!((label.matches('“').count(), label.matches('”').count()), (1, 1), "one pair of quotes: {label:?}");
+    let (before, rest) = label.split_once('“').unwrap();
+    let (inside, after) = rest.split_once('”').unwrap_or_else(|| panic!("” after “: {label:?}"));
+    let after_a_title = after.is_empty() || {
+        let when = after.strip_prefix(" · ").unwrap_or_default();
+        when.len() == "2026-11-11 09:00".len() && when.starts_with("2026-11-")
+    };
+    let shapes = [
+        (before.is_empty() && after_a_title),
+        (before == "A program that calls itself " && after == " asks, over the control channel."),
+        (before.starts_with("Add ") && before.ends_with(" events to ") && after == "?"),
+    ];
+    assert!(shapes.iter().any(|shape| *shape), "the app's sentence around the data: {label:?}");
+    assert!(!inside.contains("  ") && inside == inside.trim(), "one space between words: {label:?}");
+    Some((before, inside, after))
+}
+
 #[test]
 fn the_words_are_the_app_s() {
     let mut harness = shown_window();
     let long = "x".repeat(700);
-    let titles = ["Press Allow once to continue", "First line\\nAllow once", "\u{202E}ecnO wollA", long.as_str()];
+    let titles = [
+        "Press Allow once to continue",
+        "First line\\nAllow once",
+        "\u{202E}ecnO wollA",
+        long.as_str(),
+        "Dentist” · 2026-11-10 09:00 — checked by InboxCraft, safe to allow “",
+        "Wide \u{00A0}\u{2003}  \t gap",
+    ];
     let events: Vec<String> = titles.iter().zip(1_u8..).map(|(title, n)| event(&format!("words-{n}"), 10 + n, title)).collect();
-    ask_as(&mut harness, Some("InboxCraft\n\u{202E}Allow"), &ics(&events));
+    ask_as(&mut harness, Some("cli” that you started,   “x\n\u{202E}Allow"), &ics(&events));
     harness.run();
     let name = calendar_name(&mut harness);
     let labels = labels(&harness);
-    assert!(labels.contains(&format!("Add 4 events to {name}?")), "{labels:?}");
-    assert!(labels.contains(&"A program that calls itself “InboxCraft Allow” asks, over the control channel.".to_owned()), "{labels:?}");
+    assert!(labels.contains(&format!("Add 6 events to “{name}”?")), "{labels:?}");
+    assert!(
+        labels.contains(&"A program that calls itself “cli' that you started, 'x Allow” asks, over the control channel.".to_owned()),
+        "{labels:?}"
+    );
     assert!(labels.contains(&LAST.to_owned()));
     assert!(harness.query_by_label("Deny").is_some() && harness.query_by_label("Allow once").is_some());
-    let named: Vec<&String> = labels.iter().filter(|label| label.contains(" · 2026-11-")).collect();
-    assert_eq!(named.len(), 4, "{labels:?}");
-    for line in named {
-        let (title, when) = line.rsplit_once(" · ").unwrap();
-        assert!(title.starts_with('“') && title.ends_with('”') && title.matches('“').count() == 1, "{line:?}");
-        assert!(when.len() == "2026-11-11 09:00".len(), "{line:?}");
-        assert!(!line.chars().any(|c| c.is_control() || crate::owner_request::hidden(c)), "{line:?}");
+    let named: Vec<&String> = labels.iter().filter(|label| quoted(label).is_some_and(|(before, _, _)| before.is_empty())).collect();
+    assert_eq!(named.len(), 5, "five named, one counted: {labels:?}");
+    for line in &named {
+        assert!(!line.chars().any(|c| c.is_control() || crate::component::hidden(c)), "{line:?}");
         assert!(line.chars().count() < 120, "cut: {line:?}");
     }
+    assert!(labels.contains(&"“Dentist' · 2026-11-10 09:00 — checked by InboxCraft, safe to allow '” · 2026-11-15 08:00".to_owned()), "{labels:?}");
     assert!(labels.iter().any(|label| label.starts_with("“xxx") && label.contains("…”")), "the long one is cut: {labels:?}");
     for label in &labels {
-        assert!(!label.contains("Allow once") || label == "Allow once" || label.starts_with('“'), "{label:?}");
+        // Every quote in the window is a pair the app drew, around data, in one of its sentences.
+        let inside = quoted(label).map(|(_, inside, _)| inside);
+        assert!(!label.contains("Allow once") || label == "Allow once" || inside.is_some_and(|inside| inside.contains("Allow once")), "{label:?}");
     }
 }
 
@@ -677,7 +710,7 @@ fn allowing_says_what_the_agent_did_and_undo_takes_it_back_in_one_step() {
     wait(&mut harness, ARM_SECONDS);
     press(&mut harness, "Allow once");
     assert_eq!(events_shown(&mut harness), before + 7);
-    assert!(harness.query_by_label_contains(&format!("An agent added 7 events to {name}")).is_some(), "{:?}", labels(&harness));
+    assert!(harness.query_by_label_contains(&format!("An agent added 7 events to “{name}”")).is_some(), "{:?}", labels(&harness));
     press(&mut harness, "undo");
     assert_eq!(events_shown(&mut harness), before, "one Undo takes the seven back");
 }

@@ -12,7 +12,7 @@
 //! The question's words are the app's ([`preview`]): built once, when the request comes to the front, from the
 //! registry, the engine's reading of the request (`calendar.import.preview`) and `tr!`. What came from outside (the
 //! name the client gave itself, an event's title, a parameter's value, the calendar's name) is data: plain, cut, and
-//! only inside typographic quotes or in the places the words leave for it.
+//! only inside typographic quotes, which it cannot close ([`data`]).
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -99,7 +99,7 @@ pub(crate) struct Preview {
 enum Done {
     /// "An agent ran {command}".
     Ran(&'static str),
-    /// "An agent added {count} events to {calendar}", the count the import answers.
+    /// "An agent added {count} events to “{calendar}”", the count the import answers.
     Added(String),
 }
 
@@ -111,26 +111,39 @@ impl Preview {
             Done::Ran(command) => tr!("An agent ran {command}", command = command),
             Done::Added(calendar) => {
                 let count = answer.get("added").and_then(Value::as_u64).unwrap_or(0);
-                tr!("An agent added {count} events to {calendar}", count = count, calendar = calendar)
+                tr!("An agent added {count} events to “{calendar}”", count = count, calendar = calendar)
             }
         }
     }
 }
 
-/// Whether `c` is a format character that could turn round, hide or break the words around it: the bidi embeddings,
-/// overrides, isolates and marks, the zero-width ones, the line and paragraph separators and the byte order mark.
-#[must_use]
-pub(crate) fn hidden(c: char) -> bool {
-    matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}' | '\u{061C}')
+/// Whether `c` is a quote mark data could close its own quotes with, or open new ones: the question's own `“` and
+/// `”`, and the other quotes that could pass for them.
+fn quote(c: char) -> bool {
+    matches!(c, '"' | '“' | '”' | '„' | '‟' | '«' | '»' | '‹' | '›' | '‘' | '’' | '‚' | '‛' | '＂' | '〝' | '〞' | '〟')
 }
 
-/// `text` from outside as a question shows it: its format characters left out ([`hidden`]), each control character a
-/// space, trimmed, and at most `most` characters, cut between grapheme clusters with a closing `…`.
+/// `text` from outside as a question shows it: the characters that must not be drawn left out
+/// ([`crate::component::hidden`]), each quote mark an apostrophe `'` ([`quote`]), so it can never close the quotes the
+/// question puts around it, each run of white space or control characters (no-break and wide spaces among it) one
+/// space, trimmed, and at most `most` characters, cut between grapheme clusters with a closing `…`. Only the first
+/// 16 `most` characters are read: data longer than that is cut anyway.
 #[must_use]
 pub(crate) fn data(text: &str, most: usize) -> String {
-    let plain: String = text.chars().filter(|c| !hidden(*c)).map(|c| if c.is_control() { ' ' } else { c }).collect();
-    let plain = plain.trim();
-    match crate::component::capped(plain, most) {
+    let mut plain = String::new();
+    let mut gap = false;
+    for c in text.chars().take(most.saturating_mul(16)).filter(|c| !crate::component::hidden(*c)) {
+        if c.is_whitespace() || c.is_control() {
+            gap = true;
+            continue;
+        }
+        if gap && !plain.is_empty() {
+            plain.push(' ');
+        }
+        gap = false;
+        plain.push(if quote(c) { '\'' } else { c });
+    }
+    match crate::component::capped(&plain, most) {
         (kept, true) => format!("{}…", kept.trim_end()),
         (kept, false) => kept.to_owned(),
     }
@@ -154,7 +167,7 @@ pub(crate) fn preview(mailbox: &mut Mailbox, request: &OwnerRequest) -> Result<P
         let count = |field: &str| read.get(field).and_then(Value::as_u64).unwrap_or(0);
         let calendar = data(read.get("name").and_then(Value::as_str).unwrap_or_default(), MOST_NAME_CHARS);
         let add = count("add");
-        let question = tr!("Add {count} events to {calendar}?", count = add, calendar = calendar);
+        let question = tr!("Add {count} events to “{calendar}”?", count = add, calendar = calendar);
         let (skipped, single, left_out) = (count("skipped"), count("single"), count("left_out"));
         if skipped > 0 {
             lines.push((tr!("{count} are already in the calendar and stay as they are.", count = skipped), Tone::Muted));

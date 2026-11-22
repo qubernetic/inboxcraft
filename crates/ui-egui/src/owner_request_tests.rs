@@ -9,7 +9,8 @@ use std::time::Duration;
 use inboxcraft_time::Timestamp;
 use serde_json::json;
 
-use super::{MOST_NAME_CHARS, MOST_WAITING, OwnerRequests, PATIENCE, Settled, data, hidden};
+use super::{MOST_NAME_CHARS, MOST_WAITING, OwnerRequests, PATIENCE, Settled, data};
+use crate::component::hidden;
 
 fn at(seconds: i64) -> Timestamp {
     Timestamp::from_unix(1_793_869_200 + seconds, 0).unwrap()
@@ -130,4 +131,16 @@ fn what_came_from_outside_is_drawn_plain_and_cut() {
     assert_eq!(cut.chars().count(), MOST_NAME_CHARS + 1);
     assert!(cut.ends_with('…'));
     assert_eq!(data("  \u{202E}\n ", MOST_NAME_CHARS), "");
+}
+
+#[test]
+fn data_cannot_close_its_own_quote_and_has_one_space_between_words() {
+    // The quotes the question puts around data stand for an apostrophe inside it.
+    assert_eq!(data("cli” that you started, “x", MOST_NAME_CHARS), "cli' that you started, 'x");
+    for quote in ['"', '“', '”', '„', '‟', '«', '»', '‹', '›', '‘', '’', '‚', '‛', '＂'] {
+        assert_eq!(data(&format!("a{quote}b"), MOST_NAME_CHARS), "a'b", "{quote:?}");
+    }
+    // Every run of white space, no-break and wide spaces among it, is one space.
+    assert_eq!(data("Wide \u{00A0}\u{2003}\u{3000}  \t\r\n gap", MOST_NAME_CHARS), "Wide gap");
+    assert_eq!(data("\u{00A0} edges \u{2003}", MOST_NAME_CHARS), "edges");
 }

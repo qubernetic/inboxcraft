@@ -21,7 +21,8 @@
 //! is the modal one).
 //!
 //! The words come from the caller with names in them (a template's, an account's, a recipient's) and are drawn as
-//! plain words: each control character a space, each bidi override left out, at most [`MOST_CHARS`] characters, the
+//! plain words: each control character a space, each format character left out ([`super::hidden`]: bidi overrides,
+//! isolates and marks, zero-width characters, separators), at most [`MOST_CHARS`] characters, the
 //! question on at most [`QUESTION_ROWS`] rows and each line on at most [`LINE_ROWS`], the last cut with an ellipsis.
 
 use std::sync::Arc;
@@ -128,10 +129,11 @@ fn width(cover: Rect) -> f32 {
     WIDTH.min((cover.width() - 2.0 * CLEAR).max(1.0)).round()
 }
 
-/// `text` as the dialog draws it: plain, at most [`MOST_CHARS`] characters.
+/// `text` as the dialog draws it: at most [`MOST_CHARS`] characters, each control character a space and each
+/// character that must not be drawn ([`super::hidden`]) left out.
 fn clean(text: &str) -> String {
     let (kept, _) = super::capped(text, MOST_CHARS);
-    super::plain(kept).into_owned()
+    kept.chars().filter(|c| !super::hidden(*c)).map(|c| if c.is_control() { ' ' } else { c }).collect()
 }
 
 /// The id of the dialog's layer: the modal one while it shows.
