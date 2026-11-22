@@ -337,7 +337,8 @@ kept and any other gives the default lead, and guests and the organiser are not 
 answer counts what was added, skipped, added once, left out and refused, each list naming its first hundred events by
 their place in the file with a reason word. The whole import is one step of `history.undo`, which deletes every event
 of it still held. `calendar.import.preview` (`safe`) reads the file the same way and changes nothing: the calendar's
-name, the counts and the first five events to add. A delete is a kept job the session holds back for the undo window
+name, the counts and the first five events to add. An agent runs the import only by asking the owner (below,
+the control channel); the window's question is built from the preview, run as the agent's. A delete is a kept job the session holds back for the undo window
 (`Outcome::with_held_job`, six seconds, as long as the toast with Undo shows): `Session::tick` hands it to the worker
 once the window is over, `history.undo` before then withdraws it from the queue and puts the event back, and a restart
 hands it out at once. Writes to one event go out one at a time (`engine::writes`): a second write (an edit, an undo, a
@@ -628,6 +629,15 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   opens the message in the full-width reader and brings the window forward (or opens one), the buttons run the same
   acts as the window. A calendar alert says when its occurrence takes place on the window's clock and where; a
   click on it opens the calendar on the occurrence's day with the event picked (`InboxApp::open_event`). A later notice with the same key (the count of an account) takes the place of the first.
+- Control channel (`control`, Linux; `docs/control-protocol.md`): a Unix socket in `$XDG_RUNTIME_DIR`, a thread for
+  it and one for each of at most eight clients; each line with the right token becomes a `Call` the window (or,
+  without one, `Desktop`'s wait) runs as an agent's. A line that asks the owner (`"ask_owner": true`) for an `owner`
+  command becomes an owner request instead (`ui_egui::owner_request`): a queue of at most eight, the front asked in
+  a dialog for two minutes, run for the owner (`Mailbox::run_for_owner_request`) only on the owner's press of
+  "Allow once" and answered with the command's answer, `denied` or `timed_out`. The client's thread waits up to 990
+  seconds and looks every 250 ms whether its client hung up; on time up or a hang-up it withdraws the request through
+  a shared `Claim`, which the window's Allow must take first, so exactly one side wins. `Desktop` tells of a question
+  that comes to the front with one desktop notification while the window is not focused, is minimised or is closed.
 
 ## Start-up
 

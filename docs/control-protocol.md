@@ -4,7 +4,8 @@
 
 The running app takes commands from the CLI and the MCP server through a local socket: `inboxcraft-cli mail.list`
 without `--store` runs in the app ([cli.md](cli.md)), and so do the tools of `inboxcraft-cli mcp` ([mcp.md](mcp.md)).
-Every request carries a token from the OS credential store. Only `safe` commands run; an `owner` or `never` command is
+Every request carries a token from the OS credential store. Only `safe` commands run for an agent; an `owner` command
+runs only when the request asks the owner and the owner allows it in the window, once, and a `never` command is
 refused, as on a store. The channel is the crate `inboxcraft-control-key` (the token and the lines, shared by both
 ends), `apps/inboxcraft/src/control.rs` (the server) and `apps/inboxcraft-cli/src/remote.rs` (the client).
 
@@ -54,7 +55,19 @@ One JSON object a line each way, UTF-8, the line ended by `\n` (`\r\n` is read t
 {"token":"<64 hex digits>","command":"mail.list","params":{"limit":5}}
 ```
 
-`params` is one JSON object and may be left out. The app answers each line with one line:
+`params` is one JSON object and may be left out. A line that asks the owner to allow an `owner` command once carries
+two more fields: `"ask_owner": true`, and `client`, the name the client gives itself (the CLI sends `inboxcraft-cli`):
+
+```json
+{"token":"<64 hex digits>","command":"calendar.import","params":{"calendar":2,"ics":"BEGIN:VCALENDAR..."},"ask_owner":true,"client":"inboxcraft-cli"}
+```
+
+`ask_owner` is `true` or `false` and `client` a string; both may be left out, and anything else (`null` too) is
+`bad_line`. The name loses its control and format characters, is trimmed and cut to 64 characters; when nothing is
+left, the window says only that a program asks. A line may be 1 MiB; a line that says `"ask_owner": true` may be
+8 MiB, whatever its command.
+
+The app answers each line with one line:
 
 ```json
 {"ok":{"messages":[...],"total":2}}
@@ -68,9 +81,11 @@ answer each, in order; the CLI opens one for each command.
 |---|---|---|
 | `unauthorized` | the token is missing, not 64 hex digits, wrong or revoked, or the credential store holds none; a line without a token is refused before the credential store is read | the connection is closed |
 | `bad_line` | the line is not UTF-8, not one JSON object, names no command (or one over 128 bytes), or its `params` are not an object | the connection goes on |
-| `too_long` | the line is over 1 MiB | the connection is closed |
-| `busy` | eight clients are connected already, or the window did not answer within 30 seconds | closed for the ninth client; goes on after a late answer, and the late call may still run, so a client that tries again can run it twice |
-| `closing` | the app is ending | the connection is closed |
+| `too_long` | the line is over 1 MiB, or over 8 MiB when it asks the owner | the connection is closed |
+| `busy` | eight clients are connected already, or the window did not answer within 30 seconds, or a line asks the owner while eight requests wait for the owner already | closed for the ninth client; goes on after a late answer, and the late call may still run, so a client that tries again can run it twice; goes on when eight requests wait, and nothing runs |
+| `denied` | the owner denied the request; nothing ran | the connection goes on |
+| `timed_out` | the owner did not answer within two minutes of the question coming to the front, or the app gave up waiting (after 990 seconds) or the client hung up; nothing ran | the connection goes on, unless the client hung up |
+| `closing` | the app is ending, also after the owner allowed a request and before its answer went out | the connection is closed |
 | an engine code | the command was refused or failed: `not_allowed`, `bad_params`, `not_found`, `unknown_command`, ... | the connection goes on |
 
 A client that does not finish a line within five minutes of the last answer (or of connecting) is let go, however
@@ -78,7 +93,10 @@ slowly it trickles its bytes; one that does not take its answer within 30 second
 connection fails (no file handles left, say), the app waits 50 ms before the next; after 100 failures in a row it
 closes the channel until its next start. A refusal never repeats the line it refuses. The CLI adds its
 own codes: `not_running` (no socket it trusts answers, or no `$XDG_RUNTIME_DIR`), `no_token` (none in the credential store),
-`bad_answer` (a line that is no answer) and `closed` (the connection failed); it waits a minute for an answer.
+`bad_answer` (a line that is no answer) and `closed` (the connection failed); it waits a minute for an answer, and 17
+minutes for the answer to a line that asks the owner. A client matches on the code only: the sentence for the same
+code is not always the same (`timed_out` from the window says "the owner did not answer within two minutes", from
+the server "the owner did not answer in time").
 
 ## How the app runs a request
 
@@ -88,6 +106,26 @@ workers' events, at most half a second later. It runs as an agent: only a `safe`
 a body, checking an account) go to the workers as the window's own do. The list is read again afterwards. An act of the
 agent's (marking read, flagging) ends the window's Undo for the acts before it, so the window never takes the agent's
 act back in place of the owner's.
+
+A line that asks the owner for an `owner` command becomes a request in the window's queue instead; at most eight
+wait. The window asks about one at a time, the oldest first, in a dialog over the dimmed window, and in its own
+words: who asks ("A program that calls itself “inboxcraft-cli” asks, over the control channel."), what would run
+and, for `calendar.import`, the calendar, how many events are added, skipped, added once or left out, and the
+first five with their dates; for another command its id and its first six values. What came from the client stands only inside
+“…”, and only plain characters are drawn there: letters, numbers, punctuation and symbols; quote-like marks become
+one `'`, and format characters are left out. Each request has two minutes from the moment it comes to the front.
+The dialog opens with `Deny` holding the keyboard; `Esc` or a press on the dimmed window
+denies. Only the owner's own fresh press of "Allow once", from a second after that question showed, allows: keys
+on their way or held down never do. The allowed command runs for the owner, once, and its answer is the line's
+answer (or its error code); it is one step of the window's Undo, the status line says what the agent did with Undo
+beside it, and an agent cannot take it back (`history.undo` is refused with `not_allowed`). While the owner's own
+dialog shows, the question waits behind it. A request that cannot be shown (its parameters are wrong, say) is
+answered with its error at once, without asking. While the window is not focused, is minimised or is closed when a
+request comes to the front, one desktop notification says the question; a click on it brings the window forward,
+or opens one. When the client hangs up (the app looks every quarter of a second) or the app gives up waiting, the
+request is withdrawn: it leaves the queue unanswered and runs nothing, also when the owner presses Allow on it
+meanwhile. A line that asks for a `safe` command runs at once, as the agent's, like any other; one that asks for a
+`never` command is refused with `not_allowed` and an unknown one with `unknown_command`, as without asking.
 
 Every `safe` command runs over the channel; `inboxcraft-cli commands` lists them with their class. Besides reading,
 that is:
@@ -147,7 +185,19 @@ Everything a client sends is hostile. `cargo +nightly fuzz run control_lines` ru
 - The client does not check who is listening once it is connected (the standard library cannot read the peer's user
   id yet); the owner and mode of the folders stand in for that check.
 - It does not check the client's process: any process of the owner's that can read the credential store can use it.
-- It has no approvals: an `owner` command (sending, moving, settings) cannot be asked for over the channel.
+- It keeps no standing grant: every `owner` command is asked about on its own, and an Allow counts for that one
+  request only.
+- The client's name is what the client says, and the window shows it as such ("a program that calls itself").
+- Without a window the question shows only as the desktop notification; when nobody opens the window from it and
+  answers, the request times out.
+- The eight places for clients and the eight places of the queue are the same number, so eight waiting requests hold
+  every client place: meanwhile other clients, safe ones and the MCP bridge too, are answered `busy` ("too many
+  clients are connected"), and a ninth asker gets that `busy` before the queue's own.
+- `"ask_owner": true` allows the 8 MiB line for any command, also a `safe` one, which then runs at once as the
+  agent's.
+- A client that only closes its writing side is taken for gone, and its request is withdrawn. Once the owner has
+  pressed Allow, the command runs even if the client leaves meanwhile; when InboxCraft ends between the press and
+  the answer, the client is told `closing`, and the command may have run.
 
 ## Revision history
 | Date | Change | Summary |

@@ -4,12 +4,13 @@
 
 `inboxcraft-cli` runs InboxCraft's commands by id: in the running app, through its control channel
 ([control-protocol.md](control-protocol.md)), or headless on a local store with `--store`. It is the way an agent or
-a script reads mail without the window. It runs as an agent: only `safe` commands run.
+a script reads mail without the window. It runs as an agent: only `safe` commands run, and an `owner` command only
+when the owner allows it in the running app (`--ask-owner`).
 
 ## Running a command
 
 ```sh
-inboxcraft-cli [--store <dir>] [--json] <command> [<params>]
+inboxcraft-cli [--store <dir>] [--json] [--ask-owner] <command> [<params> | --params-file <path>]
 inboxcraft-cli [--json] commands
 inboxcraft-cli [--store <dir>] mcp
 inboxcraft-cli --version
@@ -24,6 +25,17 @@ inboxcraft-cli --help
 - `<command>` is a command id from the engine's registry, such as `mail.list`. `commands` lists every command with
   its agent class and a one-line summary; it needs no store.
 - `<params>` is one JSON object, `{}` when it is left out. Unknown fields are refused, as everywhere.
+- `--params-file <path>` (or `--params-file=<path>`) reads `<params>` from a file instead: one JSON object in
+  UTF-8, at most 8 MiB. Inline params beside it, the option twice, or a file that is missing, empty, too big, not
+  UTF-8 or not one JSON object is `usage`.
+- `--ask-owner` asks the owner in the running app to allow an `owner` command once
+  ([control-protocol.md](control-protocol.md), "How the app runs a request"). The app shows the question in its
+  window; the answer is the command's own when the owner allows it, `denied` when they deny it, `timed_out` when
+  nobody answers within two minutes of the question coming to the front, or `busy` when eight requests wait already.
+  The CLI waits up to 17 minutes for it, since up to eight questions are asked one after another. A `safe` command
+  runs at once as with no option. On a store (`--store`) nothing is asked: an `owner` command is refused as without
+  the option; with no app running it is `not_running`. `--ask-owner` and `--params-file` go with a command id only,
+  not with `commands` or `mcp`.
 - `--json` writes the answer as one JSON object on one line. Without it the answer is text, one field a line.
 - Options and words can come in any order; `--` ends the options.
 - `mcp` runs the read-only MCP server over stdin and stdout until stdin ends ([mcp.md](mcp.md)), in the running
@@ -37,18 +49,20 @@ inboxcraft-cli --json mail.list '{"role":"inbox","limit":20}'
 inboxcraft-cli --store ~/mail-store --json mail.list '{"role":"inbox","limit":20}'
 inboxcraft-cli --store ~/mail-store mail.read '{"id":42}'
 inboxcraft-cli --store ~/mail-store --json mail.search '{"from":"ada@example.org","since":"2026-11-01"}'
+inboxcraft-cli --ask-owner --json --params-file import.json calendar.import
 ```
 
 The commands and their parameters are the engine's (`crates/engine/src/cmd/`); `commands` lists them.
 
 ## Agent classes
 
-Every command has an agent class. Nobody is there to approve anything, in the app or on a store:
+Every command has an agent class. On a store nobody is there to approve anything; in the app the owner can allow
+one `owner` command at a time when the CLI asks (`--ask-owner`):
 
 | Class | In the CLI |
 |---|---|
 | `safe` | runs: reading, listing, searching, the reader's own changes (a message opened is kept) |
-| `owner` | refused with a plain error and exit code 1: adding, changing or removing an account, sending (sending later, retrying, unsending, cancelling a scheduled send), moving, archiving, marking done, deleting, events, answers to invitations and removing them, the screener's and the groups' choices, templates and the signature, allowing or forgetting remote pictures, and the settings but the appearance's (`ui.*.set` other than `ui.layout.set`) |
+| `owner` | refused with a plain error and exit code 1, unless asked for with `--ask-owner` in the running app and allowed by the owner there: adding, changing or removing an account, sending (sending later, retrying, unsending, cancelling a scheduled send), moving, archiving, marking done, deleting, events, answers to invitations and removing them, the screener's and the groups' choices, templates and the signature, allowing or forgetting remote pictures, and the settings but the appearance's (`ui.*.set` other than `ui.layout.set`) |
 | `never` | refused the same way |
 
 A refused command changes nothing.
@@ -81,7 +95,7 @@ one object on one line:
 | Exit code | Meaning | Codes |
 |---|---|---|
 | 0 | done | |
-| 1 | the command, the store or the app failed | `not_allowed`, `bad_params`, `not_found`, `unknown_command`, `sample_only`, `store`, `panicked`, `editing` (`history.undo` while the owner edits an event in the app), `output`, `io` (`mcp`); from the app also `not_running`, `no_token`, `unauthorized`, `busy`, `closing`, `bad_line`, `bad_answer`, `closed` ([control-protocol.md](control-protocol.md)) |
+| 1 | the command, the store or the app failed | `not_allowed`, `bad_params`, `not_found`, `unknown_command`, `sample_only`, `store`, `panicked`, `editing` (`history.undo` while the owner edits an event in the app), `output`, `io` (`mcp`); from the app also `not_running`, `no_token`, `unauthorized`, `busy`, `denied`, `timed_out`, `closing`, `bad_line`, `bad_answer`, `closed` ([control-protocol.md](control-protocol.md)) |
 | 2 | wrong arguments, or no store in the directory | `usage`, `no_store` |
 
 The codes are stable snake_case; new ones may be added.
@@ -95,7 +109,8 @@ database's words only to its own standard error, when the owner's store does not
 
 ## What it does not do
 
-- It never prompts, and only `mcp` reads stdin.
+- It never prompts, and only `mcp` reads stdin. With `--ask-owner` the app's window asks the owner, not the CLI.
+- On a store (`--store`) it never asks the owner: an `owner` command is refused there, with `--ask-owner` too.
 - It does no network I/O itself. On a store, a job a command asks for, such as fetching a body that is not kept yet
   or checking an account, is not run; `mail.read` answers with what the store holds. In the app, the app runs it.
 - The appearance commands (`ui.*.set`) change the session, not the store, so headless they last for the one command
