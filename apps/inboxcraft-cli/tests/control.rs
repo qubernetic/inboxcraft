@@ -413,7 +413,23 @@ fn a_not_allowed_answer_points_at_ask_owner() {
 }
 
 #[test]
+fn an_owner_command_the_owner_cannot_be_asked_about_is_not_allowed_without_pointing_at_ask_owner() {
+    let (runtime, _seen) = app(token(1), false, |command, _| {
+        Err(Failure::new("not_allowed", format!("the owner can be asked only for calendar.import: the command {command} is owner")))
+    });
+    let (code, out, err) = cli_in(&reach(Some(runtime.path()), Some(token(1))), &["--ask-owner", "--json", "mail.send", r#"{"id":7}"#], "");
+    assert_eq!((code, out.as_str()), (1, ""));
+    let error: Value = serde_json::from_str(&err).unwrap();
+    assert_eq!(error["error"]["code"], "not_allowed", "{err}");
+    let message = error["error"]["message"].as_str().unwrap();
+    assert!(message.contains("calendar.import"), "the app's reason: {message}");
+    assert!(!message.contains("--ask-owner"), "it was asked with --ask-owner already: {message}");
+}
+
+#[test]
 fn the_cli_waits_longer_for_the_owner_than_the_app_does() {
+    // The app waits 990 s (`OWNER_PATIENCE`, held to eight questions of two minutes and its half minute by the app's
+    // own test); the app is no dependency of the CLI.
     assert_eq!(inboxcraft_cli::ASK_PATIENCE, std::time::Duration::from_secs(1020));
     assert!(inboxcraft_cli::ASK_PATIENCE > std::time::Duration::from_secs(990));
 }

@@ -9,10 +9,11 @@
 //! only by the owner's answer or by its time running out, which is a refusal: nothing here runs a command, and
 //! nothing but [`OwnerRequests::settle_front`] takes a request out of the queue.
 //!
-//! The question's words are the app's ([`preview`]): built once, when the request comes to the front, from the
-//! registry, the engine's reading of the request (`calendar.import.preview`) and `tr!`. What came from outside (the
-//! name the client gave itself, an event's title, a parameter's value, the calendar's name) is data: plain, cut, and
-//! only inside typographic quotes, which it cannot close ([`data`]).
+//! Only a command whose question the app builds is asked ([`asks_with_own_question`]): today `calendar.import`. The
+//! question's words are the app's ([`preview`]): built once, when the request comes to the front, from the engine's
+//! reading of the request (`calendar.import.preview`) and `tr!`. What came from outside (the name the client gave
+//! itself, an event's title, the calendar's name) is data: plain, cut, and only inside typographic quotes, which it
+//! cannot close ([`data`]).
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -39,14 +40,17 @@ pub(crate) const ARM_SECONDS: f64 = 1.0;
 /// The most events of an import named in its question; the rest are counted.
 pub(crate) const FIRST: usize = 5;
 
-/// The most parameters of another command shown in its question; the rest are counted.
-pub(crate) const MOST_VALUES: usize = 6;
-
-/// The most characters of a parameter's value as its question shows it.
-pub(crate) const MOST_VALUE_CHARS: usize = 120;
-
-/// The most characters of an event's title, a calendar's or a parameter's name in a question.
+/// The most characters of an event's title or a calendar's name in a question.
 pub(crate) const MOST_NAME_CHARS: usize = 80;
+
+/// Whether the owner can be asked to allow `command` once: only an `owner` command whose question the app builds
+/// itself, from its own reading of the request, is asked ([`preview`]). Today that is `calendar.import` alone; a
+/// later command is asked once it has a preview of its own. Any other `owner` command asked for is refused at once,
+/// unqueued and unasked: a question of its bare parameters could leave out the one that matters.
+#[must_use]
+pub fn asks_with_own_question(command: &str) -> bool {
+    command == "calendar.import"
+}
 
 /// Which request a settlement answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -91,8 +95,8 @@ pub(crate) struct Preview {
     pub(crate) question: Said,
     /// The lines under it.
     pub(crate) lines: Vec<Said>,
-    /// What the status line says once it ran.
-    done: Done,
+    /// The calendar's name as the question quotes it, for the status line's sentence once it ran.
+    calendar: String,
     /// The words as last fitted to the card ([`Fitted`]).
     pub(crate) fitted: Option<Fitted>,
 }
@@ -141,26 +145,13 @@ pub(crate) struct Fitted {
     pub(crate) lines: Vec<(String, Tone)>,
 }
 
-/// What the status line says once an allowed request ran.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Done {
-    /// "An agent ran {command}".
-    Ran(&'static str),
-    /// "An agent added {count} events to “{calendar}”", the count the import answers.
-    Added(String),
-}
-
 impl Preview {
-    /// The status line's sentence for the request that ran and gave `answer`.
+    /// The status line's sentence for the import that ran and gave `answer`: "An agent added {count} events to
+    /// “{calendar}”", the count the import answers.
     #[must_use]
     pub(crate) fn done(&self, answer: &Value) -> String {
-        match &self.done {
-            Done::Ran(command) => tr!("An agent ran {command}", command = command),
-            Done::Added(calendar) => {
-                let count = answer.get("added").and_then(Value::as_u64).unwrap_or(0);
-                tr!("An agent added {count} events to “{calendar}”", count = count, calendar = calendar)
-            }
-        }
+        let count = answer.get("added").and_then(Value::as_u64).unwrap_or(0);
+        tr!("An agent added {count} events to “{calendar}”", count = count, calendar = self.calendar)
     }
 }
 
@@ -302,12 +293,16 @@ pub(crate) fn data(text: &str, most: usize) -> String {
 
 /// The words of the question for `request`, or the engine's refusal of a request that cannot be previewed (an import
 /// whose file or calendar the engine refuses). An import is read once by `calendar.import.preview`, which is `safe`
-/// and changes nothing; any other `owner` command is asked with the values it was given, quoted.
+/// and changes nothing.
 ///
 /// # Errors
 ///
-/// The engine's refusal of `calendar.import.preview`.
+/// The engine's refusal of `calendar.import.preview`; [`EngineError::NotAllowed`] for a command whose question the
+/// app does not build ([`asks_with_own_question`]), which is never queued.
 pub(crate) fn preview(mailbox: &mut Mailbox, request: &OwnerRequest) -> Result<Preview, EngineError> {
+    if !asks_with_own_question(request.command) {
+        return Err(EngineError::NotAllowed { command: request.command, class: inboxcraft_engine::AgentClass::Owner });
+    }
     let who = match request.client.as_deref().map(|client| data(client, MOST_NAME_CHARS)).filter(|client| !client.is_empty()) {
         Some(client) => {
             Said::quoting(tr!("A program that calls itself “{client}” asks, over the control channel.", client = client), Tone::Muted, Quoted::Run)
@@ -315,47 +310,32 @@ pub(crate) fn preview(mailbox: &mut Mailbox, request: &OwnerRequest) -> Result<P
         None => Said::plain(tr!("A program asks, over the control channel.").to_owned(), Tone::Muted),
     };
     let mut lines = vec![who];
-    if request.command == "calendar.import" {
-        let read = mailbox.read_as_agent("calendar.import.preview", &request.params)?;
-        let count = |field: &str| read.get(field).and_then(Value::as_u64).unwrap_or(0);
-        let calendar = data(read.get("name").and_then(Value::as_str).unwrap_or_default(), MOST_NAME_CHARS);
-        let add = count("add");
-        let question = Said::quoting(tr!("Add {count} events to “{calendar}”?", count = add, calendar = calendar), Tone::Ink, Quoted::Run);
-        let (skipped, single, left_out) = (count("skipped"), count("single"), count("left_out"));
-        if skipped > 0 {
-            lines.push(Said::plain(tr!("{count} are already in the calendar and stay as they are.", count = skipped), Tone::Muted));
-        }
-        if single > 0 {
-            lines.push(Said::plain(tr!("{count} repeat in a way InboxCraft cannot write and are added once.", count = single), Tone::Ink));
-        }
-        if left_out > 0 {
-            lines.push(Said::plain(tr!("{count} cannot be read and are left out.", count = left_out), Tone::Ink));
-        }
-        let first = read.get("first").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
-        let offset = mailbox.offset();
-        for event in first.iter().take(FIRST) {
-            lines.push(named(event, offset));
-        }
-        let named_count = u64::try_from(first.len().min(FIRST)).unwrap_or(u64::MAX);
-        if add > named_count {
-            lines.push(Said::plain(tr!("and {count} more", count = add.saturating_sub(named_count)), Tone::Muted));
-        }
-        lines.push(Said::plain(tr!("Nothing already in the calendar is changed or removed. Undo takes the events back.").to_owned(), Tone::Muted));
-        return Ok(Preview { question, lines, done: Done::Added(calendar), fitted: None });
+    let read = mailbox.read_as_agent("calendar.import.preview", &request.params)?;
+    let count = |field: &str| read.get(field).and_then(Value::as_u64).unwrap_or(0);
+    let calendar = data(read.get("name").and_then(Value::as_str).unwrap_or_default(), MOST_NAME_CHARS);
+    let add = count("add");
+    let question = Said::quoting(tr!("Add {count} events to “{calendar}”?", count = add, calendar = calendar), Tone::Ink, Quoted::Run);
+    let (skipped, single, left_out) = (count("skipped"), count("single"), count("left_out"));
+    if skipped > 0 {
+        lines.push(Said::plain(tr!("{count} are already in the calendar and stay as they are.", count = skipped), Tone::Muted));
     }
-    let question = Said::plain(tr!("Let a program run {command}?", command = request.command), Tone::Ink);
-    lines.push(Said::plain(tr!("It gave these values, shown as it wrote them:").to_owned(), Tone::Muted));
-    let values = request.params.as_object();
-    for (name, value) in values.into_iter().flatten().take(MOST_VALUES) {
-        let written = serde_json::to_string(value).unwrap_or_default();
-        let value = tr!("“{name}: {value}”", name = data(name, MOST_NAME_CHARS), value = data(&written, MOST_VALUE_CHARS));
-        lines.push(Said::quoting(value, Tone::Ink, Quoted::Row));
+    if single > 0 {
+        lines.push(Said::plain(tr!("{count} repeat in a way InboxCraft cannot write and are added once.", count = single), Tone::Ink));
     }
-    let more = values.map_or(0, serde_json::Map::len).saturating_sub(MOST_VALUES);
-    if more > 0 {
-        lines.push(Said::plain(tr!("and {count} more", count = more), Tone::Muted));
+    if left_out > 0 {
+        lines.push(Said::plain(tr!("{count} cannot be read and are left out.", count = left_out), Tone::Ink));
     }
-    Ok(Preview { question, lines, done: Done::Ran(request.command), fitted: None })
+    let first = read.get("first").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let offset = mailbox.offset();
+    for event in first.iter().take(FIRST) {
+        lines.push(named(event, offset));
+    }
+    let named_count = u64::try_from(first.len().min(FIRST)).unwrap_or(u64::MAX);
+    if add > named_count {
+        lines.push(Said::plain(tr!("and {count} more", count = add.saturating_sub(named_count)), Tone::Muted));
+    }
+    lines.push(Said::plain(tr!("Nothing already in the calendar is changed or removed. Undo takes the events back.").to_owned(), Tone::Muted));
+    Ok(Preview { question, lines, calendar, fitted: None })
 }
 
 /// The line of one event of an import's preview: its title, quoted, and when it starts, on the clock of `offset`.
@@ -377,7 +357,6 @@ fn named(event: &Value, offset: inboxcraft_time::Offset) -> Said {
     }
 }
 
-/// The requests waiting for the owner, in the order they came, and those settled but not yet answered.
 /// Whether a request may still run, asked of the side that put it (see [`crate::InboxApp::ask_owner_if`]).
 pub(crate) struct MayRun(Box<dyn Fn() -> bool + Send>);
 
@@ -408,6 +387,7 @@ impl std::fmt::Debug for MayRun {
     }
 }
 
+/// The requests waiting for the owner, in the order they came, and those settled but not yet answered.
 #[derive(Debug, Default)]
 pub(crate) struct OwnerRequests {
     waiting: VecDeque<OwnerRequest>,

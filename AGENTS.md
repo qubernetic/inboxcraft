@@ -102,8 +102,8 @@ invented.
   `just run` (the owner's mailbox) serves the control channel on a socket in `$XDG_RUNTIME_DIR`, which
   `inboxcraft-cli` without `--store` drives with JSON-line requests (`docs/control-protocol.md`).
 - `inboxcraft-cli [--store <dir>] --json <command> [<params>]` runs a `safe` command by id, in the running app or with
-  `--store` headless on a local store, and refuses `owner` and `never` commands, unless the owner allows an `owner`
-  one in the app (`--ask-owner`) (`docs/cli.md`);
+  `--store` headless on a local store, and refuses `owner` and `never` commands, unless the owner allows `calendar.import`,
+  the one `owner` command that can be asked for, in the app (`--ask-owner`) (`docs/cli.md`);
   `inboxcraft-cli [--store <dir>] mcp` serves the read-only MCP tools over stdio (`docs/mcp.md`).
 - Headless screenshots: `just shot` runs `cargo run -p inboxcraft-ui-egui --example ui_shot -- <script.jsonl>`
   (default script `crates/ui-egui/shots.jsonl`, pictures in `docs/images/`).

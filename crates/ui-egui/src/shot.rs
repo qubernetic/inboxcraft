@@ -2279,7 +2279,7 @@ fn ask_owner(app: &mut InboxApp, out: &str, asked: &serde_json::Value) -> Result
     };
     let params = fields.get("params").cloned().unwrap_or_else(|| serde_json::json!({}));
     if app.ask_owner(client, command, &params).is_none() {
-        return Err(bad(format!("{out}: {command:?} is no owner command to ask the owner about")));
+        return Err(bad(format!("{out}: {command:?} is no command the owner can be asked about (only calendar.import is)")));
     }
     if !app.prepare_owner_question() {
         return Err(bad(format!("{out}: the owner's question for {command:?} cannot be drawn: its request is refused")));

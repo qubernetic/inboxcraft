@@ -699,6 +699,9 @@ pub struct Mailbox {
     /// How many acts the engine's history holds, as counted from the answers: each act that changed something adds
     /// one, `history.undo` takes one off.
     history: usize,
+    /// Where in [`Mailbox::history`] an agent's acts stand (the count just after each, lowest first, at most
+    /// [`MAX_HISTORY`]): the window's Undo walks through them to the owner's act below, never stopping on one.
+    agent_steps: Vec<usize>,
     /// The message an undo brought back, which opens without being marked read.
     restored: Option<u64>,
     /// The message selected because its row took the focus (`Tab`, assistive technology): it opens as a preview,
@@ -1045,6 +1048,7 @@ impl Mailbox {
             undo: None,
             acts: 0,
             history: 0,
+            agent_steps: Vec::new(),
             restored: None,
             focused_in: None,
             previewed: None,
@@ -1631,22 +1635,37 @@ impl Mailbox {
         self.undo.as_ref()
     }
 
-    /// Whether the engine's history holds an act to take back.
+    /// Whether the engine's history holds an act of the owner's to take back: an agent's alone is not the window's to
+    /// undo.
     #[must_use]
     pub fn can_undo(&self) -> bool {
-        self.history > 0
+        self.owner_step().is_some()
+    }
+
+    /// Where in [`Mailbox::history`] the owner's newest act stands (the count just after it), below the agent's acts on
+    /// top of it; `None` when the history holds none of the owner's.
+    fn owner_step(&self) -> Option<usize> {
+        let mut at = self.history;
+        while at > 0 && self.agent_steps.contains(&at) {
+            at = at.saturating_sub(1);
+        }
+        (at > 0).then_some(at)
     }
 
     /// Takes the toast's act back through `history.undo`, with every act after it (the next message marked read when
     /// it opened), so its message is back where it was, read or unread as it was, and selected again when it was.
-    /// Without a toast that can be undone it takes the newest act of the history back: again and again, it walks back
-    /// through the session.
+    /// Without a toast that can be undone it takes the owner's newest act of the history back: again and again, it
+    /// walks back through the session. An agent's acts above the owner's act are taken back with it (the history is
+    /// one stack); an agent's act is never taken back alone.
     pub fn undo(&mut self) {
         self.left();
         let toast = self.undo.take();
         let floor = match &toast {
             Some(undo) if undo.undoable => undo.depth,
-            _ => self.history.saturating_sub(1),
+            _ => match self.owner_step() {
+                Some(at) => at.saturating_sub(1),
+                None => self.history,
+            },
         };
         let before = self.history;
         let mut result = Ok(());
@@ -1661,6 +1680,8 @@ impl Mailbox {
                 }
             }
         }
+        let history = self.history;
+        self.agent_steps.retain(|at| *at <= history);
         if self.history != before {
             self.refresh();
             if let Some(undo) = toast.filter(|undo| undo.undoable && undo.selected && self.history <= undo.depth)
@@ -1992,17 +2013,33 @@ impl Mailbox {
     }
 
     /// Runs the command `id` with `params` for an agent (the control channel): only a `safe` command runs. The list is
-    /// read again. An act of the agent's (an answer that `changed` or `undone` something) ends the window's undo for
-    /// the acts before it, so the window's Undo never takes the agent's act back in place of the owner's.
+    /// read again. An act of the agent's (an answer that `changed` or `undone` something) ends the toast, which said
+    /// the owner's act alone; an act it put in the engine's history is counted as the agent's, so the window's Undo
+    /// takes it back only with the owner's act below it ([`Mailbox::undo`]), and the agent's own undo takes one off.
     ///
     /// # Errors
     ///
     /// As [`Session::run_as`]: [`EngineError::NotAllowed`] for an `owner` or `never` command.
     pub fn run_for_agent(&mut self, id: &str, params: &Value) -> Result<Value, EngineError> {
+        let pushes = self.session.history_pushes();
         let answer = self.session.run_as(Caller::Agent, id, params)?;
-        if ["changed", "undone"].iter().any(|field| answer.get(field).and_then(Value::as_bool) == Some(true)) {
+        // `history.undo` takes the engine's newest act off whatever it says it brought back.
+        let popped = id == "history.undo";
+        if popped || ["changed", "undone"].iter().any(|field| answer.get(field).and_then(Value::as_bool) == Some(true)) {
             self.undo = None;
-            self.history = 0;
+        }
+        for _ in 0..self.session.history_pushes().saturating_sub(pushes).min(u64::try_from(MAX_HISTORY).unwrap_or(u64::MAX)) {
+            self.history = self.history.saturating_add(1);
+            self.agent_steps.push(self.history);
+        }
+        if popped {
+            // The engine's newest act went: the agent's own, or a `safe` one of the owner's.
+            let top = self.history;
+            self.agent_steps.retain(|at| *at != top);
+            self.history = self.history.saturating_sub(1);
+        }
+        if let Some(over) = self.agent_steps.len().checked_sub(MAX_HISTORY) {
+            self.agent_steps.drain(..over);
         }
         self.refresh();
         Ok(answer)
@@ -2045,6 +2082,8 @@ impl Mailbox {
                 return Err(error);
             }
         };
+        // Read again where it shows: the calendar by the window, Home by this count.
+        self.writes = self.writes.wrapping_add(1);
         // Counted in pushes, not in length: a full history stays as long when the step goes on top.
         let grew = self.session.history_pushes() > before;
         let depth = self.history;

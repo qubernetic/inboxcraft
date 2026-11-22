@@ -15,7 +15,8 @@
 //! ([`crate::control`]) for an agent, so only `safe` commands run; without a window a call waits for the next look,
 //! at most [`WINDOWLESS_TICK`]. A call that asks the owner for an `owner` command waits in the window's queue
 //! ([`InboxApp::ask_owner`]) and is answered once the owner allowed or denied it there, or its two minutes ran out:
-//! `denied`, `timed_out`, or `busy` when eight wait already. One its asker withdrew (it left, or the server stopped
+//! `denied`, `timed_out`, or `busy` when eight wait already; one whose question the app does not build
+//! ([`asks_with_own_question`]) is answered `not_allowed` at once. One its asker withdrew (it left, or the server stopped
 //! waiting) leaves the queue unanswered and never runs ([`crate::control::Claim`]). When a request comes to the front
 //! of the queue while the window is not focused, is minimised or is closed, one notification says its question
 //! ([`crate::notify::owner_question`]); a click on it brings the window forward, or opens it, where the question
@@ -33,6 +34,7 @@ use inboxcraft_control_key::Failure;
 use inboxcraft_engine::AgentClass;
 use inboxcraft_model::Role;
 use inboxcraft_ui_egui::mailbox::{Act, Mailbox};
+use inboxcraft_ui_egui::owner_request::asks_with_own_question;
 use inboxcraft_ui_egui::{InboxApp, Settled, Ticket, store_log};
 
 use crate::control::Call;
@@ -339,6 +341,15 @@ impl Desktop {
         self.app.tell_editing(self.window);
         for call in calls {
             let owner = self.app.mailbox().class_of(call.command()).is_some_and(|(_, class)| class == AgentClass::Owner);
+            if call.asks_owner() && owner && !asks_with_own_question(call.command()) {
+                // Only a command whose question the app builds is asked: any other is refused at once, unasked.
+                let refused = format!(
+                    "the command {} is owner: the owner can be asked only for a command whose question InboxCraft builds itself (today calendar.import)",
+                    call.command()
+                );
+                call.answer(Err(Failure::new("not_allowed", refused)));
+                continue;
+            }
             if call.asks_owner() && owner {
                 let claim = call.claim();
                 if claim.is_withdrawn() {

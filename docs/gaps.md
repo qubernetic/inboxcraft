@@ -677,11 +677,12 @@ time from the code as it is, not measured.
   CLI does not check the user id of the app it connects to (the standard library cannot read it yet, and the channel
   adds no crate for it); the owner and mode of the folders stand in for that check. It does not check the client's
   process, so any process of the owner's that can read the credential
-  store can use it. An `owner` command runs over it only when the line asks the owner and the owner allows it in the
-  window; there is no standing grant. Without a window a call
+  store can use it. Of the `owner` commands only `calendar.import` runs over it, and only when the line asks the owner
+  and the owner allows it in the window; there is no standing grant. Without a window a call
   waits up to half a second for the app's next look (#142).
-- An agent's act over the control channel ends the window's Undo for the owner's acts before it, rather than keeping
-  both apart (#142).
+- The window's Undo of an owner's act takes back with it the acts an agent did after it over the control channel,
+  the engine's history being one stack, rather than keeping both apart; it never takes an agent's act back alone
+  (#142, #457).
 - `ical` has no IANA zone data: a `TZID` without a `VTIMEZONE` in the same calendar object is read on the owner's
   own wall clock (UTC's own names excepted), and `ical` cannot write a `VTIMEZONE` for a zone it has not read. A
   UTC offset's seconds are dropped (#143).

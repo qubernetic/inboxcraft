@@ -95,6 +95,12 @@ impl Failure {
         Self { code: refused.code, message, exit: FAILED }
     }
 
+    /// The app's refusal of a request that asked the owner: its reason stands as it is (a `not_allowed` there is an
+    /// `owner` command the owner cannot be asked about, so `--ask-owner` is no way out).
+    fn asked(refused: Refused) -> Self {
+        Self { code: refused.code, message: refused.message, exit: FAILED }
+    }
+
     /// Why a request that asks the owner could not reach the running app.
     fn unreached(refused: Refused) -> Self {
         if refused.code != "not_running" {
@@ -289,7 +295,7 @@ fn answer(request: Request, json: bool, input: &mut dyn BufRead, out: &mut dyn W
         }
         Request::Run { store: None, id, params, ask: false } => Remote::find(reach).and_then(|app| app.run(&id, &params)).map_err(Failure::remote)?,
         Request::Run { store: None, id, params, ask: true } => {
-            Remote::find(reach).map_err(Failure::unreached)?.ask(&id, &params).map_err(Failure::remote)?
+            Remote::find(reach).map_err(Failure::unreached)?.ask(&id, &params).map_err(Failure::asked)?
         }
         Request::Mcp { store } => {
             let mut server = match store {

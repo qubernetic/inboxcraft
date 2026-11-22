@@ -561,6 +561,16 @@ fn slow_window(after: Duration) -> (Limits, tempfile::TempDir, PathBuf, Listenin
 }
 
 #[test]
+fn the_app_waits_out_every_question_that_can_wait_and_the_cli_waits_longer() {
+    use inboxcraft_ui_egui::owner_request::{MOST_WAITING, PATIENCE};
+    let limits = Limits::default();
+    let questions = PATIENCE.saturating_mul(u32::try_from(MOST_WAITING).unwrap());
+    assert!(questions + limits.patience <= limits.owner_patience, "{questions:?} + {:?} > {:?}", limits.patience, limits.owner_patience);
+    // `inboxcraft_cli::ASK_PATIENCE`: the CLI is no dependency of the app; its own test holds it to this number.
+    assert!(limits.owner_patience < Duration::from_secs(1020));
+}
+
+#[test]
 fn the_owner_is_waited_for_longer_than_the_window_by_default() {
     let limits = Limits::default();
     assert_eq!(limits.owner_patience, Duration::from_secs(990));

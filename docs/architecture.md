@@ -632,7 +632,8 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 - Control channel (`control`, Linux; `docs/control-protocol.md`): a Unix socket in `$XDG_RUNTIME_DIR`, a thread for
   it and one for each of at most eight clients; each line with the right token becomes a `Call` the window (or,
   without one, `Desktop`'s wait) runs as an agent's. A line that asks the owner (`"ask_owner": true`) for an `owner`
-  command becomes an owner request instead (`ui_egui::owner_request`): a queue of at most eight, the front asked in
+  command whose question the app builds (`owner_request::asks_with_own_question`: `calendar.import` alone; any other
+  is `not_allowed` at once) becomes an owner request instead (`ui_egui::owner_request`): a queue of at most eight, the front asked in
   a dialog for two minutes, run for the owner (`Mailbox::run_for_owner_request`) only on the owner's press of
   "Allow once" and answered with the command's answer, `denied` or `timed_out`. The client's thread waits up to 990
   seconds and looks every 250 ms whether its client hung up; on time up or a hang-up it withdraws the request through

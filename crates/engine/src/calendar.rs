@@ -505,7 +505,8 @@ pub(crate) fn imported(
         description: source.description.clone(),
         repeat: Some(repeat.unwrap_or(Repeat::None)),
         busy: Some(!source.free),
-        private: None,
+        // `CONFIDENTIAL` shows no more than `PRIVATE` does; the app writes either as `PRIVATE`.
+        private: Some(matches!(source.class, Some(Class::Private | Class::Confidential))),
         guests: None,
         alert: Some(lead),
     };
