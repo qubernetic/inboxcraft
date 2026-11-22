@@ -1935,6 +1935,17 @@ impl Mailbox {
         answer
     }
 
+    /// Runs the `safe` command `id` with `params` as an agent would, so it can never be one that changes the owner's
+    /// mail: the window's own reading of what a request would do ([`crate::owner_request::preview`]). It counts in none
+    /// of the window's tallies, and the engine's refusal comes as it is.
+    ///
+    /// # Errors
+    ///
+    /// The engine's refusal: the command is not `safe`, or its parameters do not fit.
+    pub(crate) fn read_as_agent(&mut self, id: &str, params: &Value) -> Result<Value, EngineError> {
+        self.quietly(|mailbox| mailbox.session.run_as(Caller::Agent, id, params))
+    }
+
     /// Runs `command` for the window's caller; a command that may change something counts in [`Mailbox::writes`].
     pub(crate) fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
         self.runs = self.runs.saturating_add(1);
@@ -2007,12 +2018,18 @@ impl Mailbox {
     /// Runs the `owner` command `command` with `params` an agent asked for, for the owner, who has just allowed it in
     /// the window: whatever the window's caller is (a picture's script steps run as an agent), it runs as the owner's.
     /// The list is read again. When it went into the engine's history, it is one step of the window's undo, as if
-    /// the owner had run it, and its toast says `text`; `history.undo` is still refused to the agent.
+    /// the owner had run it, and its toast says what `text` makes of the answer; `history.undo` is still refused to
+    /// the agent.
     ///
     /// # Errors
     ///
     /// The command's refusal, as [`Session::run_as`]; no toast then, and the history as it was.
-    pub(crate) fn run_for_owner_request(&mut self, command: &'static str, params: &Value, text: &str) -> Result<Value, EngineError> {
+    pub(crate) fn run_for_owner_request(
+        &mut self,
+        command: &'static str,
+        params: &Value,
+        text: impl FnOnce(&Value) -> String,
+    ) -> Result<Value, EngineError> {
         let before = self.session.history_pushes();
         let answer = self.session.run_as(Caller::Owner, command, params);
         let answer = match answer {
@@ -2035,7 +2052,7 @@ impl Mailbox {
             self.history = self.history.saturating_add(1);
         }
         self.acts = self.acts.saturating_add(1);
-        self.undo = Some(Undo { act: Act::Asked, id: 0, serial: self.acts, text: text.to_owned(), undoable: grew, depth, selected: false });
+        self.undo = Some(Undo { act: Act::Asked, id: 0, serial: self.acts, text: text(&answer), undoable: grew, depth, selected: false });
         self.refresh();
         Ok(answer)
     }

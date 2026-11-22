@@ -228,13 +228,13 @@ fn a_hover_on_the_danger_button_does_nothing_and_its_press_acts_once() {
 #[test]
 fn hostile_words_are_plain_and_bounded() {
     let long = "N".repeat(10_000);
-    let question = format!("Delete the template “a\r\nb\0c\u{202E}d{long}”?");
+    let question = format!("Delete the template “a\r\nb\0c\u{202E}\u{200B}\u{FEFF}\u{2028}d{long}”?");
     let line = format!("It goes from x\r\ny\u{2067}z{long}.");
     let harness = harness_with(&question, &[(&line, Tone::Ink)]);
     let heading = harness.get_by_role(Role::Heading);
     let said = heading.accesskit_node().label().unwrap_or_default();
     assert!(said.starts_with("Delete the template “a  b cdNNN"), "{:?}", said.get(..40));
-    assert!(!said.chars().any(|c| c.is_control() || c == '\u{202E}'), "plain");
+    assert!(!said.chars().any(|c| c.is_control() || super::super::hidden(c)), "plain");
     assert!(said.chars().count() <= MOST_CHARS);
     let card = card(&harness);
     assert_eq!(card.width(), 480.0, "the card keeps its width");

@@ -6,14 +6,23 @@
 //!
 //! Nothing here runs a command but [`InboxApp::answer_owner_request`] with `allow`, which the window's Allow button
 //! calls: no time out, no second request and no headless store is an approval.
+//!
+//! The request in front is asked in a dialog over the dimmed window ([`crate::component::dialog`]), in the app's
+//! words ([`crate::owner_request::preview`]): it opens on Deny, `Esc` and a press on the dimmed window deny, and only
+//! the owner's press of Allow once allows, and only from [`ARM_SECONDS`] after that question showed: a key or a press
+//! on its way when it opened, or meant for the question before it, is no answer. It waits while the owner's own
+//! dialog or a key's capture stands, and the keyboard goes back where it was when no question is left.
 
 use std::time::Duration;
 
+use egui::{Id, Ui};
 use inboxcraft_engine::AgentClass;
 use serde_json::Value;
 
 use super::InboxApp;
-use crate::owner_request::{MayRun, Settled, Ticket};
+use crate::component::dialog::{self, Answer, Dialog, Tone};
+use crate::owner_request::{ARM_SECONDS, Fitted, MOST_WAITING, MayRun, Quoted, Said, Settled, Ticket};
+use crate::theme::Theme;
 use crate::tr;
 
 impl InboxApp {
@@ -56,15 +65,143 @@ impl InboxApp {
             self.owner_requests.settle_front(Settled::Denied);
             return;
         }
+        // The app's words for it, if it has none yet (it was never drawn): one that cannot be previewed is answered
+        // with the engine's refusal, and the Allow goes to no other request.
+        self.prepare_owner_question();
+        if self.owner_requests.front().map(|front| front.ticket) != Some(asked) {
+            return;
+        }
         if !self.owner_requests.front().is_some_and(|front| front.may_run.check()) {
             // Withdrawn by its asker since it was drawn: the Allow runs nothing and answers nobody.
             self.owner_requests.withdraw(asked);
             return;
         }
-        let Some((command, params)) = self.owner_requests.front().map(|front| (front.command, front.params.clone())) else { return };
-        let text = tr!("An agent ran {command}", command = command);
-        let ran = self.mailbox.run_for_owner_request(command, &params, &text);
+        let Some((command, params, preview)) = self.owner_requests.front().map(|front| (front.command, front.params.clone(), front.preview.clone()))
+        else {
+            return;
+        };
+        let ran = self.mailbox.run_for_owner_request(command, &params, |answer| match &preview {
+            Some(preview) => preview.done(answer),
+            None => tr!("An agent ran {command}", command = command),
+        });
         self.owner_requests.settle_front(Settled::Ran(ran));
+    }
+
+    /// Builds the app's words for the request in front when it has none yet ([`crate::owner_request::preview`]); one
+    /// the engine refuses to preview is settled with that refusal, and the next one is tried. Whether one waits, with
+    /// its words.
+    pub(crate) fn prepare_owner_question(&mut self) -> bool {
+        for _ in 0..=MOST_WAITING {
+            let Some(front) = self.owner_requests.front() else { return false };
+            if front.preview.is_some() {
+                return true;
+            }
+            match crate::owner_request::preview(&mut self.mailbox, front) {
+                Ok(preview) => {
+                    if let Some(front) = self.owner_requests.front_mut() {
+                        front.preview = Some(preview);
+                    }
+                }
+                Err(error) => self.owner_requests.settle_front(Settled::Ran(Err(error))),
+            }
+        }
+        self.owner_requests.front().is_some_and(|front| front.preview.is_some())
+    }
+
+    /// The request the owner is asked about and its question, in the app's words, for a notification while the
+    /// window is not in front; `None` when none waits.
+    pub fn owner_question_text(&mut self) -> Option<(Ticket, String)> {
+        if !self.prepare_owner_question() {
+            return None;
+        }
+        let front = self.owner_requests.front()?;
+        Some((front.ticket, front.preview.as_ref()?.question.text.clone()))
+    }
+
+    /// Whether the question of the request in front shows this frame: one waits, and neither the owner's own dialog
+    /// nor a key's capture stands.
+    pub(super) fn owner_question_shows(&self) -> bool {
+        self.owner_requests.waiting() && !self.settings.confirms(self.onboarding.asking_remove()) && self.settings.capturing().is_none()
+    }
+
+    /// Draws the question of the request in front, as the module says, and takes the owner's answer to it.
+    pub(super) fn owner_question(&mut self, ui: &Ui, theme: &Theme) {
+        if !self.owner_question_shows() {
+            if !self.owner_requests.waiting() {
+                self.give_back_keyboard(ui.ctx());
+            }
+            return;
+        }
+        if !self.prepare_owner_question() {
+            self.give_back_keyboard(ui.ctx());
+            return;
+        }
+        let now = ui.input(|input| input.time);
+        if self.owner_keyboard.is_none() {
+            self.owner_keyboard = Some(ui.ctx().memory(|memory| memory.focused()));
+        }
+        let Some(front) = self.owner_requests.front_mut() else { return };
+        // A clock that went back (a window opened again) starts the arming second again; it never shortens it.
+        let shown_at = *front.shown_at.insert(front.shown_at.filter(|at| *at <= now).unwrap_or(now));
+        let Some(preview) = front.preview.as_mut() else { return };
+        // Fitted to the card once for its width and its type: no quoted data stands on a row apart from its quote.
+        let key = (dialog::text_width(ui.ctx(), theme), ui.ctx().pixels_per_point(), theme.fonts.body, theme.fonts.heading);
+        if preview.fitted.as_ref().is_none_or(|fitted| fitted.key != key) {
+            let (width, f) = (key.0, &theme.fonts);
+            preview.fitted = Some(Fitted {
+                key,
+                question: fitted(ui, theme, &preview.question, f.heading, dialog::QUESTION_ROWS, width),
+                lines: preview.lines.iter().map(|said| (fitted(ui, theme, said, f.body, dialog::LINE_ROWS, width), said.tone)).collect(),
+            });
+        }
+        let Some(words) = preview.fitted.as_ref() else { return };
+        let lines: Vec<(&str, Tone)> = words.lines.iter().map(|(text, tone)| (text.as_str(), *tone)).collect();
+        let shown = Dialog {
+            id: Id::unique("owner-request").with(front.ticket),
+            question: &words.question,
+            lines: &lines,
+            keep: tr!("Deny"),
+            act: tr!("Allow once"),
+            near: None,
+        };
+        let answer = dialog::show(ui, theme, &self.keymap, &shown);
+        let shown_for = now - shown_at;
+        let armed = shown_for >= ARM_SECONDS;
+        // The arming second and the two minutes pass without input.
+        if !armed {
+            ui.ctx().request_repaint_after(Duration::from_secs_f64((ARM_SECONDS - shown_for).clamp(0.0, ARM_SECONDS)));
+        }
+        // (One not dated yet is dated by the desktop's next look, which asks for its own frame.)
+        if let Some(left) = self.owner_request_due_in().filter(|left| !left.is_zero()) {
+            ui.ctx().request_repaint_after(left);
+        }
+        match answer {
+            Some(Answer::Keep) => self.answer_owner_request(false),
+            Some(Answer::Act) if armed => self.answer_owner_request(true),
+            Some(Answer::Act) | None => {}
+        }
+        // The keyboard goes back on the next frame, the dialog's modal layer gone.
+        if answer.is_some() {
+            ui.ctx().request_repaint();
+        }
+    }
+
+    /// Gives the keyboard back to where it was when the first question showed, once none is left: once the press that
+    /// answered it is let go, so the press on the dimmed window takes nothing away.
+    fn give_back_keyboard(&mut self, ctx: &egui::Context) {
+        let (down, released) = ctx.input(|input| (input.pointer.any_down(), input.pointer.any_released()));
+        if self.owner_keyboard.is_some() && (down || released) {
+            // A release draws a frame of its own, and the one after it gives the keyboard back.
+            if released {
+                ctx.request_repaint();
+            }
+            return;
+        }
+        if let Some(had) = self.owner_keyboard.take()
+            && let Some(id) = had
+        {
+            ctx.memory_mut(|memory| memory.request_focus(id));
+        }
     }
 
     /// Settles the request in front as [`Settled::TimedOut`] once the owner has not answered it for two minutes, by
@@ -91,6 +228,48 @@ impl InboxApp {
     pub fn asks_owner(&self) -> bool {
         self.owner_requests.waiting()
     }
+}
+
+/// `said` as the card draws it in `font`, on at most `rows` rows of `width`: its quoted data with no-break spaces, cut
+/// with `…` where it must be, so that no row of the data stands apart from its opening quote. A [`Quoted::Row`] line
+/// stands on one row whole (an event's title is cut so its date still fits); a [`Quoted::Run`] keeps the quoted run
+/// on one row with both its quotes. The longest data that fits is found by halving, a few layouts once per width.
+pub(super) fn fitted(ui: &Ui, theme: &Theme, said: &Said, font: crate::theme::Font, rows: usize, width: f32) -> String {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let Some(quoted) = said.data else { return said.text.clone() };
+    let text = said.text.as_str();
+    let (Some(open), Some(close)) = (text.find('“'), text.rfind('”')) else { return said.text.clone() };
+    let start = open.saturating_add('“'.len_utf8());
+    let (Some(head), Some(data), Some(tail)) = (text.get(..start), text.get(start..close), text.get(close..)) else { return said.text.clone() };
+    let data = data.replace(' ', "\u{a0}");
+    let parts: Vec<&str> = data.graphemes(true).collect();
+    let make = |kept: usize| match parts.get(..kept).filter(|_| kept < parts.len()) {
+        Some(kept) => format!("{head}{}…{tail}", kept.concat().trim_end_matches('\u{a0}')),
+        None => format!("{head}{data}{tail}"),
+    };
+    let fits = |words: &str| {
+        let galley = crate::component::wrapped(ui, words, font, theme.palette.ink, width, rows, egui::Align::Min);
+        let row_of = |mark: char| galley.rows.iter().position(|row| row.glyphs.iter().any(|glyph| glyph.chr == mark));
+        !galley.elided
+            && match quoted {
+                Quoted::Row => galley.rows.len() == 1,
+                Quoted::Run => row_of('“').is_some() && row_of('“') == row_of('”'),
+            }
+    };
+    if fits(&make(parts.len())) {
+        return make(parts.len());
+    }
+    // The most of the data that fits, by halving: none of it (`“…”`) when nothing does.
+    let (mut fit, mut over) = (0_usize, parts.len());
+    while fit.saturating_add(1) < over {
+        let mid = fit.saturating_add(over.saturating_sub(fit) / 2);
+        if fits(&make(mid)) {
+            fit = mid;
+        } else {
+            over = mid;
+        }
+    }
+    make(fit)
 }
 
 #[cfg(test)]

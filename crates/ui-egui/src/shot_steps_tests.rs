@@ -318,3 +318,26 @@ fn a_click_runs_safe_commands_only() {
     let error = refusal(r#"{"out": "a.png", "mode": "light", "select": "Photos from the coast walk", "click": [943, 78]}"#);
     assert!(error.contains("the click reached mail.done, which only the owner runs"), "{error}");
 }
+
+#[test]
+fn a_shot_can_ask_the_owner_and_shows_the_question() {
+    let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Example//Export//EN\r\nBEGIN:VEVENT\r\nUID:shot-1@example.org\r\nDTSTART:20261110T080000Z\r\nDTEND:20261110T090000Z\r\nSUMMARY:Dentist\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    let asked = |command: &str, params: serde_json::Value| {
+        let request = serde_json::json!({ "command": command, "client": "inboxcraft-cli", "params": params });
+        format!(r#"{{"out": "a.png", "mode": "light", "calendar": true, "owner_request": {request}}}"#)
+    };
+    let shown = picture(&asked("calendar.import", serde_json::json!({ "calendar": 2, "ics": ics })));
+    assert_eq!(shown, picture(&asked("calendar.import", serde_json::json!({ "calendar": 2, "ics": ics }))), "the same bytes every time");
+    assert_ne!(shown, picture(r#"{"out": "a.png", "mode": "light", "calendar": true}"#), "the question shows");
+    // A safe command needs no asking, an unknown one is none, and a request the engine refuses is no question.
+    for (command, params) in [
+        ("calendar.list", serde_json::json!({})),
+        ("no.such", serde_json::json!({})),
+        ("calendar.import", serde_json::json!({ "calendar": 2, "ics": "BEGIN:VCARD" })),
+    ] {
+        let error = refusal(&asked(command, params));
+        assert!(error.contains("owner"), "{command}: {error}");
+    }
+    let error = refusal(r#"{"out": "a.png", "mode": "light", "owner_request": {"command": "calendar.import", "say": "allow"}}"#);
+    assert!(error.contains("say"), "{error}");
+}

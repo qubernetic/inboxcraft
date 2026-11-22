@@ -74,6 +74,7 @@ mod status;
 mod surface;
 pub mod templates;
 pub mod theme;
+mod unicode_class;
 mod why;
 pub mod workers;
 

@@ -16,7 +16,10 @@
 //! at most [`WINDOWLESS_TICK`]. A call that asks the owner for an `owner` command waits in the window's queue
 //! ([`InboxApp::ask_owner`]) and is answered once the owner allowed or denied it there, or its two minutes ran out:
 //! `denied`, `timed_out`, or `busy` when eight wait already. One its asker withdrew (it left, or the server stopped
-//! waiting) leaves the queue unanswered and never runs ([`crate::control::Claim`]). A click on a notification opens its message in the
+//! waiting) leaves the queue unanswered and never runs ([`crate::control::Claim`]). When a request comes to the front
+//! of the queue while the window is not focused, is minimised or is closed, one notification says its question
+//! ([`crate::notify::owner_question`]); a click on it brings the window forward, or opens it, where the question
+//! waits. A click on a notification opens its message in the
 //! full-width reader, with the window brought forward or opened again; its buttons mark the message done or read, as
 //! the window's own acts do.
 
@@ -34,7 +37,7 @@ use inboxcraft_ui_egui::{InboxApp, Settled, Ticket, store_log};
 
 use crate::control::Call;
 use crate::instance::Request;
-use crate::notify::{Click, Deliver, shown};
+use crate::notify::{Click, Deliver, owner_question, shown};
 
 /// What the settings show: whether, which page, and the action waiting for a key; and the place the window shows.
 fn settings_now(app: &InboxApp) -> (bool, inboxcraft_ui_egui::settings::Section, Option<&'static str>, inboxcraft_ui_egui::Screen) {
@@ -66,6 +69,8 @@ pub struct Desktop {
     calls: Option<Receiver<Call>>,
     /// The calls that ask the owner, waiting in the window's queue for the owner's answer.
     asked: Vec<(Ticket, Call)>,
+    /// The request in front whose notification was decided last: one notification per request.
+    told: Option<Ticket>,
     /// A notification failed; the next failures are not reported again.
     failed: bool,
     /// The last store failure's detail written to standard error, so a caller that repeats a failing command does not
@@ -99,6 +104,7 @@ impl Desktop {
             clicks: None,
             calls: None,
             asked: Vec::new(),
+            told: None,
             failed: false,
             logged: None,
         }
@@ -193,7 +199,9 @@ impl Desktop {
             self.window = false;
             self.quitting |= !self.stays.load(Ordering::SeqCst);
         }
-        self.keep_in_step();
+        // The owner is in front of the window only while it is shown, not minimised and focused.
+        let in_front = self.window && ctx.input(|input| input.viewport().focused == Some(true) && input.viewport().minimized != Some(true));
+        self.keep_in_step(in_front);
         self.app.wake_when_due(ctx);
         // The question in front runs out of time even while nothing else moves.
         if let Some(left) = self.app.owner_request_due_in() {
@@ -235,7 +243,7 @@ impl Desktop {
         if self.answer_clicks() {
             self.window = true;
         }
-        self.keep_in_step();
+        self.keep_in_step(false);
     }
 
     /// The end of InboxCraft without a window: waits for the drafts kept to reach the disk, and says one that did not
@@ -303,9 +311,29 @@ impl Desktop {
         }
     }
 
+    /// When the request in front is new there and the owner is not `in_front` of the window, tells of its question in
+    /// a notification, once: the app's question, as the window asks it.
+    fn tell_of_question(&mut self, in_front: bool) {
+        let Some((ticket, question)) = self.app.owner_question_text() else { return };
+        if self.told == Some(ticket) {
+            return;
+        }
+        self.told = Some(ticket);
+        if in_front {
+            return;
+        }
+        if let Some(deliver) = self.deliver.as_mut()
+            && let Err(error) = deliver.deliver(&owner_question(&question))
+            && !self.failed
+        {
+            eprintln!("inboxcraft: {error}");
+            self.failed = true;
+        }
+    }
+
     /// Hands the jobs on, applies the events, shows the unread count when it changed and the notices as
-    /// notifications.
-    fn keep_in_step(&mut self) {
+    /// notifications; tells of a question that has come to the front while the owner is not `in_front` of the window.
+    fn keep_in_step(&mut self, in_front: bool) {
         let calls: Vec<Call> = self.calls.as_ref().map(|calls| calls.try_iter().collect()).unwrap_or_default();
         // An agent's undo waits while the owner edits an event in a window; a closed window edits nothing.
         self.app.tell_editing(self.window);
@@ -331,6 +359,9 @@ impl Desktop {
             }
             call.answer(answer.map_err(|error| Failure::new(error.code(), error.to_string())));
         }
+        self.answer_asked();
+        self.tell_of_question(in_front);
+        // A request whose question could not be built was answered with its refusal: its caller hears it now.
         self.answer_asked();
         // `ui.settings.open` and `ui.home.open` ask the window to show the settings or Home: the owner's at once, an
         // agent's newest at the end of the next frame ([`Desktop::frame`]), or at once without a window, where the owner

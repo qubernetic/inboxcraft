@@ -449,6 +449,24 @@ pub(crate) fn fitted(ui: &Ui, text: &str, font: Font, colour: egui::Color32, roo
     galley(ui, &fit_capped(ui, &plain(text), font, room), font, colour)
 }
 
+/// Whether `c` is a character never drawn from text that came from outside into a question the owner answers (the
+/// confirmation dialog's words, an agent's request): every format character (general category `Cf` of Unicode 15.1:
+/// the bidi embeddings, overrides, isolates and marks, the zero-width characters and joiners, the soft hyphen, the
+/// invisible operators and deprecated format characters U+206A to U+206F, the interlinear annotation marks, the tag
+/// characters U+E0000 to U+E007F and the rest of the category), the unassigned U+2065 among them, and the line and
+/// paragraph separators (U+2028, U+2029): what could turn round, hide or break the words around it, or stand unseen
+/// between two marks. `control-key` leaves the same out of a client's name.
+#[must_use]
+pub fn hidden(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}' | '\u{0600}'..='\u{0605}' | '\u{061C}' | '\u{06DD}' | '\u{070F}' | '\u{0890}'..='\u{0891}' | '\u{08E2}' | '\u{180E}'
+            | '\u{200B}'..='\u{200F}' | '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}' | '\u{110BD}' | '\u{110CD}' | '\u{13430}'..='\u{1343F}' | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}' | '\u{E0001}' | '\u{E0020}'..='\u{E007F}'
+    )
+}
+
 /// Whether `c` is an explicit bidi embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069): what could turn
 /// round the words after it.
 fn bidi_override(c: char) -> bool {

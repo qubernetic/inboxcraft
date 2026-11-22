@@ -551,6 +551,7 @@ fn tr_word(word: &str) -> &'static str {
         "send" => tr!("send"),
         "cancel" => tr!("cancel"),
         "keep it" => tr!("keep it"),
+        "deny" => tr!("deny"),
         "mail" => tr!("mail"),
         "calendar" => tr!("calendar"),
         "back" => tr!("back"),

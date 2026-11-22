@@ -193,3 +193,16 @@ fn an_alert_s_body_breaks_its_line_once_between_the_time_and_the_place() {
     assert_eq!(alert.body.matches('\n').count(), 1);
     assert_eq!(alert.body.split_once('\n'), Some(("Thursday 5 November, 12:00 – 13:00", "Main Street 1, second floor")));
 }
+
+#[test]
+fn an_agent_s_question_is_told_in_the_app_s_words_and_a_click_brings_the_window() {
+    let shown = super::owner_question("Add 7 events to “Studio”?");
+    assert_eq!((shown.title.as_str(), shown.body.as_str()), ("An agent asks for permission", "Add 7 events to “Studio”?"));
+    assert!(shown.buttons.is_empty() && !shown.mail);
+    assert_eq!(shown.key, super::OWNER_QUESTION);
+    for action in ["default", super::OPEN] {
+        assert_eq!(super::clicked(&shown.key, action), Some(Click::Show), "{action}");
+    }
+    assert_eq!(super::clicked(&shown.key, "done"), None);
+    assert_eq!(super::clicked("owner-request-1", "default"), None, "only the key as written");
+}

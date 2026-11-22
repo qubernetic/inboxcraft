@@ -1073,3 +1073,99 @@ fn an_allowed_call_is_taken_so_the_server_can_no_longer_withdraw_it() {
     tick(&mut desktop, &ctx, false);
     assert_eq!(answer.try_recv().unwrap().unwrap()["added"], json!(2));
 }
+
+/// One tick of a window whose state the desktop reports as `focused` and `minimised`.
+fn tick_seen(desktop: &mut Desktop, ctx: &egui::Context, focused: Option<bool>, minimized: Option<bool>) {
+    let info = ViewportInfo { focused, minimized, ..ViewportInfo::default() };
+    let mut raw = RawInput::default();
+    raw.viewports.insert(ViewportId::ROOT, info);
+    let _ = ctx.run_logic(&raw, |ctx| desktop.tick(ctx));
+}
+
+/// The asking desktop, telling `told`, with the sender of its clicks.
+fn asking_told(told: &Told) -> (Desktop, Sender<Call>, Sender<crate::notify::Click>, Sender<Request>) {
+    let (desktop, calls, _clock, send) = asking();
+    let (click, clicks) = mpsc::channel();
+    (desktop.with_notices(Box::new(told.clone()), clicks), calls, click, send)
+}
+
+/// The notifications of the owner's questions `told` showed.
+fn questions(told: &Told) -> Vec<crate::notify::Shown> {
+    told.shown.lock().unwrap().iter().filter(|shown| shown.key == crate::notify::OWNER_QUESTION).cloned().collect()
+}
+
+#[test]
+fn a_question_while_the_window_is_focused_is_not_told_in_a_notification() {
+    let told = Told::default();
+    let (mut desktop, calls, _click, _send) = asking_told(&told);
+    let ctx = egui::Context::default();
+    let _answer = ask(&calls, "calendar.import", import());
+    tick_seen(&mut desktop, &ctx, Some(true), Some(false));
+    tick_seen(&mut desktop, &ctx, Some(false), Some(false));
+    assert!(desktop.app().asks_owner());
+    assert!(questions(&told).is_empty(), "the owner saw it in the window: no notification, then or later");
+}
+
+#[test]
+fn a_question_while_the_window_is_not_focused_or_minimised_is_told_once() {
+    for (focused, minimized) in [(Some(false), Some(false)), (Some(true), Some(true)), (None, None)] {
+        let told = Told::default();
+        let (mut desktop, calls, _click, _send) = asking_told(&told);
+        let ctx = egui::Context::default();
+        let _answer = ask(&calls, "calendar.import", import());
+        for _ in 0..3 {
+            tick_seen(&mut desktop, &ctx, focused, minimized);
+        }
+        let shown = questions(&told);
+        assert_eq!(shown.len(), 1, "once per request: {focused:?} {minimized:?}");
+        assert_eq!(shown[0].title, "An agent asks for permission");
+        assert!(shown[0].body.starts_with("Add 2 events to “") && shown[0].body.ends_with("”?"), "the app's question: {:?}", shown[0].body);
+        // The next request in front is told of again.
+        let _next = ask(&calls, "event.delete", json!({ "id": 1 }));
+        desktop.app_mut().answer_owner_request(false);
+        tick_seen(&mut desktop, &ctx, focused, minimized);
+        tick_seen(&mut desktop, &ctx, focused, minimized);
+        let shown = questions(&told);
+        assert_eq!(shown.len(), 2, "{focused:?} {minimized:?}");
+        assert_eq!(shown[1].body, "Let a program run event.delete?");
+    }
+}
+
+#[test]
+fn a_question_without_a_window_is_told_and_a_click_opens_the_window() {
+    let told = Told::default();
+    let (desktop, calls, click, _send) = asking_told(&told);
+    let mut desktop = desktop.without_window();
+    let _answer = ask(&calls, "calendar.import", import());
+    desktop.wait(SHORT);
+    desktop.wait(SHORT);
+    assert_eq!(questions(&told).len(), 1, "told once");
+    assert!(!desktop.has_window());
+    click.send(crate::notify::clicked(crate::notify::OWNER_QUESTION, "default").unwrap()).unwrap();
+    desktop.wait(SHORT);
+    assert!(desktop.has_window(), "the click opens the window where the question waits");
+    assert!(desktop.app().asks_owner());
+}
+
+#[test]
+fn a_click_on_the_question_s_notification_brings_the_window_forward() {
+    let told = Told::default();
+    let (mut desktop, calls, click, _send) = asking_told(&told);
+    let ctx = egui::Context::default();
+    let _answer = ask(&calls, "calendar.import", import());
+    tick_seen(&mut desktop, &ctx, Some(false), Some(true));
+    click.send(crate::notify::clicked(crate::notify::OWNER_QUESTION, "default").unwrap()).unwrap();
+    let commands = tick(&mut desktop, &ctx, false);
+    assert!(commands.contains(&ViewportCommand::Minimized(false)) && commands.contains(&ViewportCommand::Focus), "{commands:?}");
+}
+
+#[test]
+fn a_question_that_cannot_be_built_is_answered_with_its_refusal_and_not_told() {
+    let told = Told::default();
+    let (mut desktop, calls, _click, _send) = asking_told(&told);
+    let ctx = egui::Context::default();
+    let answer = ask(&calls, "calendar.import", json!({ "calendar": 2, "ics": "BEGIN:VCARD" }));
+    tick_seen(&mut desktop, &ctx, Some(false), Some(false));
+    assert_eq!(failure(&answer).code, "bad_params");
+    assert!(questions(&told).is_empty());
+}

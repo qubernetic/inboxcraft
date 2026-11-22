@@ -687,3 +687,20 @@ fn an_asker_that_stays_is_not_taken_for_gone() {
     let answer = client.send(owner_request_line(&token(1), "calendar.import", &json!({}), "a").as_bytes());
     assert_eq!(answer.unwrap().unwrap(), json!({ "ran": true }));
 }
+
+#[test]
+fn the_wire_leaves_out_of_a_client_s_name_exactly_what_the_window_never_draws() {
+    // `control-key` stands alone and keeps its own copy of the list; it must be the window's
+    // (`inboxcraft_ui_egui::component::hidden`), character for character.
+    // Every character but the control ones, 30 to a name between `a` and `b`: the wire keeps exactly those the window
+    // would draw, in their order.
+    let all: Vec<char> = (0..=0x10_FFFF_u32).filter_map(char::from_u32).filter(|c| !c.is_control()).collect();
+    for chunk in all.chunks(30) {
+        let name: String = std::iter::once('a').chain(chunk.iter().copied()).chain(std::iter::once('b')).collect();
+        let line = owner_request_line(&token(1), "calendar.import", &json!({}), &name);
+        let kept = inboxcraft_control_key::line::read_request(line.as_bytes()).unwrap().client.unwrap_or_default();
+        let drawn: String = name.chars().filter(|c| !inboxcraft_ui_egui::component::hidden(*c)).collect();
+        let first = chunk.first().map_or(0, |c| u32::from(*c));
+        assert_eq!(kept, drawn, "from U+{first:04X}");
+    }
+}
