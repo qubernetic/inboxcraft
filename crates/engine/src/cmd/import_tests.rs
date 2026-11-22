@@ -188,6 +188,31 @@ fn an_imported_event_is_what_event_create_writes() {
 }
 
 #[test]
+fn a_private_or_confidential_event_is_private_as_event_create_writes_it() {
+    use inboxcraft_ical::Class;
+    let (mut session, _) = session();
+    let event =
+        |uid: &str, class: &str| format!("UID:{uid}@example.org\r\nDTSTART:20261112T080000Z\r\nDTEND:20261112T090000Z\r\nSUMMARY:Dentist{class}");
+    let (private, confidential, public, other, none) = (
+        event("private", "\r\nCLASS:PRIVATE"),
+        event("confidential", "\r\nCLASS:CONFIDENTIAL"),
+        event("public", "\r\nCLASS:PUBLIC"),
+        event("other", "\r\nCLASS:X-TEAM"),
+        event("none", ""),
+    );
+    import(&mut session, &[&private, &confidential, &public, &other, &none]);
+    let (mut made, _) = self::session();
+    let id =
+        made.run("event.create", &json!({ "calendar": 1, "summary": "Dentist", "start": "2026-11-12T08:00:00Z", "private": true })).unwrap()["id"]
+            .as_u64()
+            .unwrap();
+    let written = object(&made, id).events[0].class.clone();
+    assert_eq!(written, Some(Class::Private));
+    let classes: Vec<Option<Class>> = (FIRST..FIRST + 5).map(|id| object(&session, id).events[0].class.clone()).collect();
+    assert_eq!(classes, [written.clone(), written, None, None, None], "private and confidential are private; the rest are not");
+}
+
+#[test]
 fn times_without_an_end_follow_the_duration_or_last_an_hour_or_a_day() {
     let (mut session, _) = session();
     let answer = import(
