@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use inboxcraft_ical::{Attendee, Calendar, Class, Date, Event, Frequency, Occurrence, PartStat, Rule, WeekdayNum, When};
+use inboxcraft_ical::{Attendee, Calendar, Class, Date, Event, Frequency, Occurrence, PartStat, Rule, WeekdayNum, When, Zones};
 use inboxcraft_model::{
     AccountId, Calendar as Held, CalendarEvent, CalendarEventId, CalendarId, CalendarJob, CalendarListing, CalendarReport, EmailAddress,
     FetchedEvent, JobKind, KnownEvent,
@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 use crate::EngineError;
 use crate::all_day_alert::AllDayAlert;
 use crate::arrive::invite::Owner;
+use crate::cmd::{MAX_DESCRIPTION, MAX_LINE};
 use crate::sync::Plan;
 
 pub(crate) mod alert;
@@ -438,6 +439,11 @@ impl Details {
 /// dates, a single event's moments in UTC, a repeating event's on the computer's wall clock `local` so it keeps its
 /// time of day across a summer-time change.
 pub(crate) fn create(uid: &str, times: Times, details: Details, organizer: &EmailAddress, now: Timestamp, local: &dyn Offsets) -> Option<String> {
+    object(created(uid, times, details, organizer, now, local)?)
+}
+
+/// The event [`create`] writes.
+fn created(uid: &str, times: Times, details: Details, organizer: &EmailAddress, now: Timestamp, local: &dyn Offsets) -> Option<Event> {
     let repeating = details.repeat.is_some_and(|repeat| repeat != Repeat::None);
     let (start, end) = placed(times, if repeating { &Form::Floating } else { &Form::Utc }, local, local)?;
     let mut event = Event::new(uid, start);
@@ -445,9 +451,144 @@ pub(crate) fn create(uid: &str, times: Times, details: Details, organizer: &Emai
     event.stamp = Some(now);
     details.apply(&mut event, organizer);
     unscheduled(&mut event);
+    Some(event)
+}
+
+/// A calendar object of InboxCraft's holding `event` alone, as text.
+fn object(event: Event) -> Option<String> {
     let mut calendar = Calendar::new(PRODUCT);
     calendar.events.push(event);
     calendar.write().ok()
+}
+
+/// What one event of an imported file becomes.
+pub(crate) struct Imported {
+    /// The calendar object, as `create` writes one.
+    pub(crate) ical: String,
+    /// Its repeat was not one the app writes: it stands once.
+    pub(crate) single: bool,
+}
+
+/// `source` as `event.create` would write it under the same UID: its times placed through `zones`, its summary,
+/// location, description and busy state, `lead` as its alert; a preset repeat (`Repeat::of`) kept with its end and
+/// its exceptions, any other repeat dropped. Guests and the organiser are not carried, so nobody is mailed. The error
+/// is the reason word of `calendar.import`.
+pub(crate) fn imported(
+    source: &Event,
+    zones: &Zones,
+    lead: alert::Lead,
+    organizer: &EmailAddress,
+    now: Timestamp,
+    local: &dyn Offsets,
+) -> Result<Imported, &'static str> {
+    let times = imported_times(source, zones, local).ok_or("times")?.checked().map_err(|_| "times")?;
+    // Checked and trimmed as `event.create` checks and trims them.
+    let line = |text: &str, reason: &'static str| if text.chars().count() > MAX_LINE { Err(reason) } else { Ok(text.trim().to_owned()) };
+    let summary = line(source.summary.as_deref().unwrap_or_default(), "summary")?;
+    let location = source.location.as_deref().map(|text| line(text, "location")).transpose()?;
+    if source.description.as_ref().is_some_and(|text| text.chars().count() > MAX_DESCRIPTION) {
+        return Err("description");
+    }
+    let mut repeat = Repeat::of(source);
+    let series = match (&source.start, repeat) {
+        (When::Date(_), _) | (_, None | Some(Repeat::None)) => None,
+        _ => Some(Series::of(source, zones, local).ok_or("times")?),
+    };
+    // Monday to Friday on the source's days is another set of weekdays once the start moves to another day here: no
+    // preset writes that, so the series stands once.
+    if repeat == Some(Repeat::Weekdays) && series.as_ref().is_some_and(|series| series.shift != 0) {
+        repeat = None;
+    }
+    let details = Details {
+        summary: Some(summary),
+        location,
+        description: source.description.clone(),
+        repeat: Some(repeat.unwrap_or(Repeat::None)),
+        busy: Some(!source.free),
+        private: None,
+        guests: None,
+        alert: Some(lead),
+    };
+    let mut event = created(&source.uid, times, details, organizer, now, local).ok_or("write")?;
+    if let (Some(rule), Some(written)) = (source.rules.first(), event.rules.first_mut()) {
+        // The written start is a day for an all-day series and the computer's wall clock for a timed one: the end
+        // and the exceptions take the same form. A timed series' occurrences fall at the written start's time of day,
+        // so an exception or an end goes there too, on the day of the source's occurrence it names.
+        let form = |when: &When, until: bool| match &series {
+            Some(series) => series.place(when, until, zones, local),
+            None => Some(When::Date(Date::of(local.civil(zones.resolve(when, local)?)?))),
+        };
+        written.end = match &rule.end {
+            inboxcraft_ical::End::Until(until) => inboxcraft_ical::End::Until(form(until, true).ok_or("times")?),
+            other => other.clone(),
+        };
+        event.exceptions = source.exceptions.iter().map(|when| form(when, false)).collect::<Option<Vec<When>>>().ok_or("times")?;
+    }
+    let ical = object(event).ok_or("write")?;
+    Ok(Imported { ical, single: repeat.is_none() })
+}
+
+/// A timed series of an imported file and where it is written: its start on its own clock (UTC, its zone, or the
+/// computer's), the written start on the computer's wall clock, and the days between the two dates.
+struct Series {
+    /// The source's start.
+    start: When,
+    /// The start as the source's clock shows it.
+    origin: CivilDateTime,
+    /// The written start, on the computer's wall clock.
+    first: CivilDateTime,
+    /// Days from the source's start date to the written one (the start can fall on another day here).
+    shift: i64,
+}
+
+impl Series {
+    /// The series `source` starts.
+    fn of(source: &Event, zones: &Zones, local: &dyn Offsets) -> Option<Self> {
+        let at = zones.resolve(&source.start, local)?;
+        let origin = zones.offsets(&source.start, local).civil(at)?;
+        let first = local.civil(at)?;
+        let shift = days_between(Date::of(origin), Date::of(first))?;
+        Some(Self { start: source.start.clone(), origin, first, shift })
+    }
+
+    /// `when` of the source (an `EXDATE`, or the `UNTIL` when `until`) as the written series names the same
+    /// occurrence: its day on the source's clock, moved by [`Series::shift`], at the written start's time of day. An
+    /// `UNTIL` earlier in its day than the start ends the series the day before.
+    fn place(&self, when: &When, until: bool, zones: &Zones, local: &dyn Offsets) -> Option<When> {
+        let day = match when {
+            When::Date(day) => *day,
+            _ => {
+                // On the clock of the source's start, where each occurrence has its day.
+                let civil = zones.offsets(&self.start, local).civil(zones.resolve(when, local)?)?;
+                let time = |civil: CivilDateTime| (civil.hour(), civil.minute(), civil.second());
+                if until && time(civil) < time(self.origin) { Date::of(civil).add_days(-1)? } else { Date::of(civil) }
+            }
+        };
+        let day = day.add_days(self.shift)?;
+        CivilDateTime::new(day.year(), day.month(), day.day(), self.first.hour(), self.first.minute(), self.first.second()).map(When::Floating)
+    }
+}
+
+/// The times of an imported `source`: whole days from its first day to the day before its `DTEND` date (or its first
+/// day alone, or as many days as its `DURATION`), or moments placed through `zones` (`DTEND`, else the start and its
+/// `DURATION`, else an hour, as `event.create`); `None` when a time cannot be placed.
+fn imported_times(source: &Event, zones: &Zones, local: &dyn Offsets) -> Option<Times> {
+    if let When::Date(first) = source.start {
+        let last = match (&source.end, source.duration) {
+            (Some(When::Date(end)), _) => end.add_days(-1)?,
+            (Some(_), _) => return None,
+            (None, Some(span)) => first.add_days(span.days().checked_add(span.seconds() / 86_400)?.checked_sub(1)?)?,
+            (None, None) => first,
+        };
+        return Some(Times::Days(first, last));
+    }
+    let start = zones.resolve(&source.start, local)?;
+    let end = match (&source.end, source.duration) {
+        (Some(end), _) => zones.resolve(end, local)?,
+        (None, Some(span)) => after(start, span)?,
+        (None, None) => start.checked_add(std::time::Duration::from_secs(3600))?,
+    };
+    Some(Times::Moments(start, end))
 }
 
 /// How an edited event's times were given.

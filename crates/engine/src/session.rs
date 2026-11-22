@@ -591,6 +591,13 @@ impl Session {
         &self.registry
     }
 
+    /// How many acts the undo history holds: what `history.undo` can still take back, at most
+    /// [`MAX_HISTORY`](crate::undo::MAX_HISTORY).
+    #[must_use]
+    pub fn history_len(&self) -> usize {
+        self.state.history.len()
+    }
+
     /// The store.
     #[must_use]
     pub fn store(&self) -> &dyn Storage {

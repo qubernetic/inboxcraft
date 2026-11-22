@@ -85,7 +85,7 @@ mod value;
 mod zone;
 
 pub use calendar::{Calendar, Expansion, MAX_OCCURRENCES, MAX_STEPS, Occurrence};
-pub use content::{Component, MAX_BYTES, MAX_DEPTH, MAX_ITEMS, Param, Property, parse};
+pub use content::{Component, Limits, MAX_BYTES, MAX_DEPTH, MAX_ITEMS, Param, Property, parse, parse_within};
 pub use error::{IcalError, MAX_NAME_IN_ERROR};
 pub use event::{Alarm, Attendee, Class, Event, PartStat, Status, Trigger};
 pub use rule::{End, Frequency, MAX_PER_PERIOD, MAX_PERIODS, MAX_RULE_VALUES, Recurrence, Rule, WeekdayNum};
