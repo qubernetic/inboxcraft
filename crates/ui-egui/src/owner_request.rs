@@ -24,6 +24,7 @@ use serde_json::Value;
 use crate::component::dialog::Tone;
 use crate::mailbox::Mailbox;
 use crate::tr;
+use crate::unicode_class::{Class, class};
 
 /// The most requests that wait for the owner at a time.
 pub const MOST_WAITING: usize = 8;
@@ -163,10 +164,13 @@ impl Preview {
     }
 }
 
-/// Whether `c` is a mark data could close its own quotes with, or open new ones: the question's own `“` and `”`, the
-/// other quotes, and the marks drawn like a double quote (double primes, the double acute and the combining double
-/// acute wherever it stands, the diaeresis, the modifier letters, the Hebrew gershayim, the ditto mark) or like an
-/// apostrophe (two of which read as one double quote: the turned comma, the tonos, primes, accents).
+/// Whether `c` is a mark data could close its own quotes with, or open new ones, whatever kind of character it is:
+/// the question's own `“` and `”`, the other quotes, and the marks drawn like a double quote (double primes, the
+/// double acute, the diaeresis, the modifier letters, the Hebrew gershayim, the ditto mark, the quote ornaments) or
+/// like an apostrophe (two of which read as one double quote: the turned comma, the tonos, primes, accents, the
+/// saltillo, the Armenian apostrophe), and the combining marks drawn like either wherever they stand (the double
+/// acute, the double grave, the double vertical line and the commas above). [`data`] counts every initial and final
+/// quote, modifier letter and modifier symbol among them too ([`Class::QuoteLike`]).
 pub(crate) fn quote(c: char) -> bool {
     matches!(
         c,
@@ -205,6 +209,11 @@ pub(crate) fn quote(c: char) -> bool {
             | '¨'
             | '΄'
             | '\u{030B}'
+            | '\u{030E}'
+            | '\u{030F}'
+            | '\u{0312}'..='\u{0315}'
+            | '\u{0343}'
+            | '\u{055A}'
             | '״'
             | '׳'
             | '〃'
@@ -212,41 +221,75 @@ pub(crate) fn quote(c: char) -> bool {
             | '❜'
             | '❝'
             | '❞'
+            | '\u{275F}'
+            | '\u{2760}'
+            | '\u{276E}'
+            | '\u{276F}'
+            | '\u{2E42}'
+            | '\u{A78B}'
+            | '\u{A78C}'
+            | '\u{1F676}'..='\u{1F678}'
     )
 }
 
-/// Whether `c` is a combining mark (general categories `Mn` and `Me` in the blocks of combining marks): one set on
-/// an apostrophe could make it read as a double quote, so there it is left out.
-pub(crate) fn combining(c: char) -> bool {
-    matches!(c, '\u{0300}'..='\u{036F}' | '\u{0483}'..='\u{0489}' | '\u{1AB0}'..='\u{1AFF}' | '\u{1DC0}'..='\u{1DFF}' | '\u{20D0}'..='\u{20FF}' | '\u{FE00}'..='\u{FE0F}' | '\u{FE20}'..='\u{FE2F}')
+/// The letter that `letter` with a double acute on it is, where Unicode has it as one character (Hungarian ő and ű):
+/// the one place the combining double acute, a quote mark anywhere else, is kept.
+fn double_acute(letter: char) -> Option<char> {
+    match letter {
+        'o' => Some('ő'),
+        'O' => Some('Ő'),
+        'u' => Some('ű'),
+        'U' => Some('Ű'),
+        _ => None,
+    }
 }
 
-/// `text` from outside as a question shows it: the characters that must not be drawn left out
-/// ([`crate::component::hidden`]), each run of quote marks one apostrophe `'` ([`quote`]) and a combining mark on that
-/// apostrophe left out ([`combining`]), so it can never close the quotes the question puts around it nor draw one of
-/// its own, each run of white space or control characters
-/// (no-break and wide spaces among it) one space, trimmed, and at most `most` characters, cut between grapheme
-/// clusters with a closing `…`. Only the first 16 `most` characters that are drawn are read: longer data is cut anyway.
+/// `text` from outside as a question shows it. The characters that must not be drawn are left out
+/// ([`crate::component::hidden`]). Of the rest only these stand, an allow list by kind ([`class`], Unicode 15.1):
+/// letters, numbers, punctuation and symbols (emoji among them) as they are; a combining mark only directly on a
+/// letter or a number, or on a mark kept there; every quote mark ([`quote`]) and every initial or final quote, modifier
+/// letter and modifier symbol as one apostrophe `'`, a run of them as one, so data can never close the quotes the
+/// question puts around it nor draw one of its own; anything else (private use, unassigned) not at all. Each run of
+/// white space or control characters (no-break and wide spaces among it) is one space, trimmed, and at most `most`
+/// characters stand, cut between grapheme clusters with a closing `…`. Only the first 16 `most` characters that are
+/// drawn are read: longer data is cut anyway.
 #[must_use]
 pub(crate) fn data(text: &str, most: usize) -> String {
     let mut plain = String::new();
     let mut gap = false;
+    // Whether a combining mark may stand on the character kept last: a letter, a number, or a mark kept on one.
+    let mut base = false;
     for c in text.chars().filter(|c| !crate::component::hidden(*c)).take(most.saturating_mul(16)) {
         if c.is_whitespace() || c.is_control() {
             gap = true;
             continue;
         }
+        if c == '\u{030B}'
+            && !gap
+            && let Some(composed) = plain.chars().next_back().and_then(double_acute)
+        {
+            plain.pop();
+            plain.push(composed);
+            continue;
+        }
+        let kind = if quote(c) { Class::QuoteLike } else { class(c) };
+        match kind {
+            Class::Letter | Class::Number | Class::Punctuation | Class::Symbol | Class::QuoteLike => {}
+            // A mark with nothing to stand on (at the start, after a space, punctuation, a symbol or an apostrophe)
+            // would draw as a mark of its own; the space before it is still to come.
+            Class::Mark if base && !gap => {}
+            Class::Mark | Class::Other => continue,
+        }
         if gap && !plain.is_empty() {
             plain.push(' ');
         }
         gap = false;
-        if quote(c) {
+        base = matches!(kind, Class::Letter | Class::Number | Class::Mark);
+        if kind == Class::QuoteLike {
             // A run of marks, or two with only what is not drawn or a dropped mark between them, is one apostrophe.
             if !plain.ends_with('\'') {
                 plain.push('\'');
             }
-        } else if combining(c) && plain.ends_with('\'') {
-            // A mark on an apostrophe could make it read as a double quote: left out.
         } else {
             plain.push(c);
         }
@@ -474,4 +517,4 @@ impl OwnerRequests {
 
 #[cfg(test)]
 #[path = "owner_request_tests.rs"]
-mod tests;
+pub(crate) mod tests;

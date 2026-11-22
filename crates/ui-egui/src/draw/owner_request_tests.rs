@@ -581,13 +581,10 @@ fn quoted(label: &str) -> Option<(&str, &str, &str)> {
         assert!(!inside.contains(mark), "no mark in the data that could pass for a quote: {label:?}");
     }
     assert!(!inside.contains("''"), "no two apostrophes in a row: {label:?}");
-    let chars: Vec<char> = inside.chars().collect();
-    for pair in chars.windows(2) {
-        if let [first, then] = pair {
-            assert!(!(*first == '\'' && crate::owner_request::combining(*then)), "no mark on an apostrophe: {label:?}");
-            assert!(!crate::owner_request::quote(*then) || *then == '\'', "no quote mark but the apostrophe: {label:?}");
-        }
-    }
+    // Nothing in the data but what a question keeps: no quote mark but the apostrophe, no combining mark but on a
+    // letter or a number (the fitted words may end in the `…` of a cut).
+    let whole = inside.strip_suffix('…').unwrap_or(inside).trim_end();
+    assert_eq!(crate::owner_request::tests::fault(whole), None, "{label:?}");
     Some((before, inside, after))
 }
 
@@ -863,5 +860,25 @@ fn a_mark_between_two_apostrophes_draws_no_double_quote() {
     assert_eq!(named.len(), 5, "{labels:?}");
     for line in named {
         assert!(line.starts_with("“Dentist'” · 2026-11-1"), "{line:?}");
+    }
+}
+
+#[test]
+fn a_mark_with_no_letter_under_it_draws_no_quote() {
+    // Combining marks after a space draw as their spacing twins (two acutes as a double acute, a diaeresis), and a
+    // comma above next to an apostrophe as two: none of them is in the client's name or in a title.
+    let mut harness = shown_window();
+    let titles =
+        ["Dentist \u{0301} \u{0301} · safe", "Dentist \u{0308} x", "Dentist\u{0315}' x", "\u{0301}Dentist -\u{0308} x", "Gyo\u{030B}r \u{030B}"];
+    let events: Vec<String> = titles.iter().zip(1_u8..).map(|(title, n)| event(&format!("bare-{n}"), 10 + n, title)).collect();
+    ask_as(&mut harness, Some("cli \u{0301} \u{0301} that you started"), &ics(&events));
+    harness.run();
+    let labels = labels(&harness);
+    let said: Vec<&str> = labels.iter().filter_map(|label| quoted(label)).map(|(_, inside, _)| inside).collect();
+    for wanted in ["cli that you started", "Dentist · safe", "Dentist x", "Dentist' x", "Dentist - x", "Győr '"] {
+        assert!(said.contains(&wanted), "{wanted:?} among {said:?}");
+    }
+    for inside in said {
+        assert!(!inside.chars().any(|c| crate::unicode_class::class(c) == crate::unicode_class::Class::Mark), "no mark is left: {inside:?}");
     }
 }
