@@ -761,18 +761,31 @@ fn an_agent_is_refused_every_command_that_is_not_safe_and_nothing_changes() {
 }
 
 #[test]
-fn an_agents_act_shows_in_the_list_and_ends_the_windows_undo() {
+fn an_agents_act_shows_in_the_list_and_the_windows_undo_walks_through_it() {
     let mut mailbox = mailbox();
     let (rota, photos) = (id_of(&mailbox, ROTA), id_of(&mailbox, PHOTOS));
+    let (rota_was, photos_was) = (listed(&mailbox, rota), listed(&mailbox, photos));
     mailbox.act(photos, Act::Unread);
     assert!(mailbox.can_undo());
     let answer = mailbox.run_for_agent("mail.seen", &json!({ "id": rota, "seen": true })).unwrap();
     assert_eq!(answer["changed"], json!(true));
     assert_eq!(listed(&mailbox, rota), Some(true), "the list is read again");
-    assert_eq!(mailbox.undoable(), None, "the toast would take the agent's act back");
+    assert_eq!(mailbox.undoable(), None, "the toast said the owner's act alone");
+    assert!(mailbox.can_undo(), "the owner's act is still the window's to undo");
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, photos), photos_was, "the window's undo takes the owner's act back");
+    assert_eq!(listed(&mailbox, rota), rota_was, "and the agent's act above it, the history being one stack");
+    assert!(!mailbox.can_undo());
+}
+
+#[test]
+fn the_windows_undo_never_takes_only_an_agents_act_back() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    mailbox.run_for_agent("mail.seen", &json!({ "id": rota, "seen": true })).unwrap();
     assert!(!mailbox.can_undo());
     mailbox.undo();
-    assert_eq!(listed(&mailbox, rota), Some(true), "the window's undo never takes the agent's act back");
+    assert_eq!(listed(&mailbox, rota), Some(true), "the window's undo never takes the agent's act back in place of the owner's");
 }
 
 #[test]
